@@ -40,7 +40,6 @@ use super::{
     ValidationProblemCode, ValidationReport, validate,
 };
 use crate::markdown::Markdown;
-use crate::markdown::compose::{RequestSnapshot, build_resolution_context};
 
 /// The baseline-schema choice for a clean run (decision D7).
 ///
@@ -68,37 +67,29 @@ pub enum CleanBaselineSchema {
 /// trigger-discovery opt-out. Resolution is lazy — nothing here touches the
 /// filesystem until [`Self::resolve`] is called, and callers resolve only
 /// after a non-empty frontmatter block exists (the performance contract).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct CleanSchemaConfig {
     baseline: CleanBaselineSchema,
     schema_override: Option<Value>,
     trigger_schemas: bool,
-    file_resolution_context: Option<biscuit_file::FileResolutionContext>,
+    file_resolution_context: biscuit_file::FileResolutionContext,
 }
 
 impl CleanSchemaConfig {
     /// The default configuration: Darkmatter baseline on, trigger discovery
     /// on (for file-backed documents).
+    ///
+    /// The document's schema references resolve, and its trigger boundary is
+    /// found, through `context`: the document's context, built by the
+    /// caller's request.
     #[must_use]
-    pub fn new() -> Self {
+    pub fn new(context: biscuit_file::FileResolutionContext) -> Self {
         Self {
             baseline: CleanBaselineSchema::Default,
             schema_override: None,
             trigger_schemas: true,
-            file_resolution_context: None,
+            file_resolution_context: context,
         }
-    }
-
-    /// Resolves the document's schema references, and finds its trigger
-    /// boundary, through `context` (the document's context, built by the
-    /// caller's request) instead of building one at the document's directory.
-    #[must_use]
-    pub fn with_file_resolution_context(
-        mut self,
-        context: biscuit_file::FileResolutionContext,
-    ) -> Self {
-        self.file_resolution_context = Some(context);
-        self
     }
 
     /// Replaces the default baseline with a caller-parsed SimplifiedSchema
@@ -149,37 +140,25 @@ impl CleanSchemaConfig {
     /// `document_path` is the resolved Markdown file path when the input is
     /// file-backed; trigger discovery is silently inert without it (stdin
     /// parity with compose's non-file sources). Discovery walks from the
-    /// document to the repository root of the context supplied with
-    /// [`with_file_resolution_context`](Self::with_file_resolution_context),
-    /// or else of one built at the document's directory. At most one context
-    /// is built per clean invocation.
+    /// document to the repository root of the configuration's context.
     ///
     /// ## Errors
     ///
     /// Propagates [`SchemaError`] from baseline loading/validation and
     /// trigger-envelope scanning.
     pub fn resolve(&self, document_path: Option<&Path>) -> Result<CleanSchemaContext, SchemaError> {
-        let mut builder = DarkmatterSchemas::new();
+        let mut builder = DarkmatterSchemas::new(self.file_resolution_context.clone());
         builder = match &self.baseline {
             CleanBaselineSchema::Default => builder.with_darkmatter_baseline_json_schema()?,
             CleanBaselineSchema::Disabled => builder,
             CleanBaselineSchema::Schema(schema) => builder.with_baseline(schema.clone())?,
             CleanBaselineSchema::File(path) => builder.with_baseline_from_file(path)?,
         };
-        if let Some(context) = &self.file_resolution_context {
-            builder = builder.with_file_resolution_context(context.clone());
-        }
         if self.trigger_schemas
             && let Some(path) = document_path
+            && let Some(boundary) = self.file_resolution_context.repository_root()
         {
-            let context = match &self.file_resolution_context {
-                Some(context) => context.clone(),
-                None => build_resolution_context(&RequestSnapshot::new(path.parent().unwrap_or(path)))
-                    .map_err(|error| SchemaError::TriggerMatch { message: error.to_string() })?,
-            };
-            if let Some(boundary) = context.repository_root() {
-                builder = builder.with_trigger_discovery(path, boundary)?;
-            }
+            builder = builder.with_trigger_discovery(path, boundary)?;
         }
         Ok(CleanSchemaContext {
             schemas: builder,

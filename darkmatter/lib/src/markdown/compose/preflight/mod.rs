@@ -30,7 +30,7 @@ pub use lifecycle::{ComposePreflightApprovals, PreflightApprovalStats};
 use crate::markdown::Markdown;
 use crate::markdown::compose::transclusion;
 use crate::markdown::compose::icmp::PlannedIcmpProbe;
-use crate::markdown::compose::{ComposeOptions, ComposeWarning, DeferredCapabilities};
+use crate::markdown::compose::{ComposeWarning, DeferredCapabilities};
 use crate::markdown::compose::shell_expansion::types::{ShellCommandEntry, ShellExpansionError};
 use crate::markdown::types::MarkdownResult;
 use std::path::{Path, PathBuf};
@@ -262,7 +262,7 @@ impl ComposePreflightReport {
 /// projection exists to leave unread.
 pub(crate) fn validate_pre_approved(
     markdown: &Markdown,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
 ) -> MarkdownResult<()> {
     let Some(ref approved) = options.pre_approved_commands else {
         return Ok(());
@@ -318,7 +318,7 @@ impl Markdown {
         request: &crate::markdown::compose::ComposeRequest,
     ) -> MarkdownResult<ComposePreflightReport> {
         let (entries, icmp_probes, deferred_context, preflight_graph) =
-            collect::collect_effects(self, &request.root_options())?;
+            collect::collect_effects(self, request)?;
         Ok(ComposePreflightReport {
             entries,
             warnings: Vec::new(),

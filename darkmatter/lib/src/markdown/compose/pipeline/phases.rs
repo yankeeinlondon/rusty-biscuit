@@ -10,7 +10,7 @@ use super::super::super::cleanup;
 use super::super::super::normalize::NormalizationError;
 use super::super::super::types::{MarkdownError, MarkdownResult};
 use super::super::{
-    ComposeOperation, ComposeOptions, ComposeReport, ComposeWarning, EffectiveState, SourceRange,
+    ComposeOperation, ComposeReport, ComposeWarning, EffectiveState, SourceRange,
 };
 use super::super::{
     file_links, inline, link_normalization, link_resolve, perf, shell_blocks, shell_expansion,
@@ -33,7 +33,7 @@ impl Markdown {
         &mut self,
         operation: ComposeOperation,
         state: &EffectiveState,
-        options: &ComposeOptions,
+        options: &crate::markdown::compose::ComposeRequest,
         runtime: &mut shell_expansion::types::PipelineRuntime,
         report: &mut ComposeReport,
         perf: &mut perf::PerfCollector,
@@ -100,7 +100,7 @@ impl Markdown {
     pub(crate) fn run_inline_post_operation(
         &mut self,
         operation: ComposeOperation,
-        options: &ComposeOptions,
+        options: &crate::markdown::compose::ComposeRequest,
         report: &mut ComposeReport,
     ) -> MarkdownResult<()> {
         match operation {
@@ -184,7 +184,7 @@ impl Markdown {
     pub(crate) fn run_finalization_operation(
         &mut self,
         operation: ComposeOperation,
-        options: &ComposeOptions,
+        options: &crate::markdown::compose::ComposeRequest,
         report: &mut ComposeReport,
     ) -> MarkdownResult<()> {
         match operation {
@@ -205,7 +205,7 @@ impl Markdown {
         &mut self,
         operations: &[ComposeOperation],
         state: &EffectiveState,
-        options: &ComposeOptions,
+        options: &crate::markdown::compose::ComposeRequest,
         runtime: &mut shell_expansion::types::PipelineRuntime,
         report: &mut ComposeReport,
         perf_collector: &mut perf::PerfCollector,

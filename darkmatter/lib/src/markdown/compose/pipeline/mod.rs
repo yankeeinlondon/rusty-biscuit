@@ -14,7 +14,7 @@ pub mod phases;
 use super::super::Markdown;
 use super::super::types::MarkdownResult;
 use super::{
-    ComposeOperation, ComposeOptions, ComposePhase, ComposeReport, ComposeSource, ComposeWarning,
+    ComposeOperation, ComposePhase, ComposeReport, ComposeSource, ComposeWarning,
     EffectiveStateBuilder, abbreviate_path, prepare_frontmatter_for_compose,
 };
 use super::{
@@ -29,13 +29,13 @@ use tracing::{info, instrument, trace};
 impl Markdown {
     /// Internal pipeline runner.
     pub(crate) fn run_compose_pipeline(&mut self, request: &super::ComposeRequest) -> MarkdownResult<ComposeReport> {
-        self.run_root_pipeline(request.root_options())
+        self.run_root_pipeline(request.clone())
     }
 
-    /// Runs the pipeline as a root over options a root already holds: a
-    /// request's root options, or options derived from them for an inline
-    /// pass (pre-flight discovery, reference-graph content preparation).
-    pub(crate) fn run_root_pipeline(&mut self, mut options: ComposeOptions) -> MarkdownResult<ComposeReport> {
+    /// Runs the pipeline as a root over a request a root already holds: the
+    /// caller's request, or one derived from it for an inline pass
+    /// (pre-flight discovery, reference-graph content preparation).
+    pub(crate) fn run_root_pipeline(&mut self, mut options: crate::markdown::compose::ComposeRequest) -> MarkdownResult<ComposeReport> {
         // A constructor has no document, so `ComposeOptions::new` captures no
         // discovered `ctx.*` group. This is the first point that has both: an
         // extendable context grows to the groups this document names, and the
@@ -137,7 +137,7 @@ impl Markdown {
     #[instrument(skip_all, fields(source = ?options.source))]
     pub(crate) fn run_compose_pipeline_internal(
         &mut self,
-        options: ComposeOptions,
+        options: crate::markdown::compose::ComposeRequest,
         runtime: &mut shell_expansion::types::PipelineRuntime,
     ) -> MarkdownResult<ComposeReport> {
         let node = match &options.source {
@@ -164,7 +164,7 @@ impl Markdown {
     /// without reporting the root as a cycle.
     pub(crate) fn run_compose_pipeline_node(
         &mut self,
-        mut options: ComposeOptions,
+        mut options: crate::markdown::compose::ComposeRequest,
         runtime: &mut shell_expansion::types::PipelineRuntime,
         node: Option<(String, std::path::PathBuf)>,
     ) -> MarkdownResult<ComposeReport> {
@@ -609,7 +609,7 @@ impl Markdown {
 /// key is anchored to its authored span in the document.
 fn attribute_frontmatter_failure(
     failure: frontmatter_interpolation::LocatedFrontmatterError,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
     authored: Option<biscuit_terminal::errors::SourceContext>,
     on_disk: &biscuit_terminal::errors::SourceContext,
 ) -> crate::markdown::types::MarkdownError {
@@ -643,7 +643,7 @@ fn add_frontmatter_candidates(
 /// Whether this pipeline owns the up-front pre-approved command gate: the
 /// request root, with a pre-approved set and a shell-executing stage enabled.
 pub(crate) fn preflight_gate_applies(
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
     runtime: &shell_expansion::types::PipelineRuntime,
 ) -> bool {
     options.pre_approved_commands.is_some()
@@ -663,7 +663,7 @@ pub(crate) fn preflight_gate_applies(
 /// before building.
 pub(crate) fn document_state_builder(
     markdown: &Markdown,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
 ) -> EffectiveStateBuilder {
     EffectiveStateBuilder::new()
         .with_frontmatter(

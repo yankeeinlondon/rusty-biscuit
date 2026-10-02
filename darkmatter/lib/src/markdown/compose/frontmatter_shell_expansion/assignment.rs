@@ -196,9 +196,9 @@ pub fn execute_resolved_shell_values(
     state: HashMap<String, Value>,
     request: &crate::markdown::compose::ComposeRequest,
 ) -> Result<Vec<(String, Value)>, ShellExpansionError> {
-    let options = &request.root_options();
+    let options = request;
     let shell_opts = options.shell_options();
-    let policy_paths = resolve_policy_paths(&shell_opts, &options.source)?;
+    let policy_paths = resolve_policy_paths(&shell_opts, &options.source, options.resolution_context())?;
     let mut shell = ShellExpansionRuntime::new();
     shell.ensure_loaded(&policy_paths)?;
     let resolution = options.frontmatter_resolution_context();

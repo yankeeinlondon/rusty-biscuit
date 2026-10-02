@@ -6,11 +6,14 @@
 //! ## Examples
 //!
 //! ```no_run
+//! use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest, RequestSnapshot};
 //! use darkmatter::markdown::reference::file_tree::FileTree;
 //! use biscuit_terminal::components::renderable::TerminalRenderable;
 //! use biscuit_terminal::terminal::Terminal;
 //!
-//! let mut tree = FileTree::new("doc.md").unwrap();
+//! let snapshot = RequestSnapshot::new(std::env::temp_dir());
+//! let request = ComposeRequest::prepare(ComposeOptions::new(), &snapshot).unwrap();
+//! let mut tree = FileTree::new("doc.md", &request).unwrap();
 //! tree.ensure_built().unwrap();
 //! let term = Terminal::default();
 //! println!("{}", tree.render(&term));
@@ -28,7 +31,7 @@ use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::{Layout, LayoutTerminalExt};
 
 use crate::markdown::Markdown;
-use crate::markdown::compose::{ComposeContext, ComposeOptions};
+use crate::markdown::compose::ComposeRequest;
 use crate::markdown::reference::ReferenceError;
 use crate::markdown::reference::types::{ReferenceGraph, ReferenceGraphOptions};
 use crate::markdown::reference::validate::{
@@ -116,9 +119,12 @@ impl biscuit_terminal::errors::BlockError for FileTreeError {
 /// ## Examples
 ///
 /// ```no_run
+/// use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest, RequestSnapshot};
 /// use darkmatter::markdown::reference::file_tree::FileTree;
 ///
-/// let tree = FileTree::new("doc.md")
+/// let snapshot = RequestSnapshot::new(std::env::temp_dir());
+/// let request = ComposeRequest::prepare(ComposeOptions::new(), &snapshot).unwrap();
+/// let tree = FileTree::new("doc.md", &request)
 ///     .unwrap()
 ///     .follow_transclusions()
 ///     .validate();
@@ -155,7 +161,7 @@ impl FileTree {
     ///
     /// Returns [`FileTreeError::PathNotFound`] if the path does not exist,
     /// [`FileTreeError::NotAFile`] if the path is not a file.
-    pub fn new(path: impl AsRef<Path>) -> Result<Self, FileTreeError> {
+    pub fn new(path: impl AsRef<Path>, request: &ComposeRequest) -> Result<Self, FileTreeError> {
         let path = path.as_ref();
         if !path.exists() {
             return Err(FileTreeError::PathNotFound(path.to_path_buf()));
@@ -164,23 +170,22 @@ impl FileTree {
             return Err(FileTreeError::NotAFile(path.to_path_buf()));
         }
         let md = Markdown::try_from(path).map_err(FileTreeError::Markdown)?;
-        Ok(Self::from_markdown(md))
+        Ok(Self::from_markdown(md, request))
     }
 
-    /// Creates a FileTree from an already-loaded Markdown document.
+    /// Creates a FileTree from an already-loaded Markdown document, resolving
+    /// its references through `request`.
     ///
     /// ## Notes
     ///
-    /// The graph and validation options share one runtime context, captured
-    /// from `md` rather than eagerly. Taking `ReferenceGraphOptions::default()`
-    /// and `ReferenceValidationOptions::default()` instead would run the
-    /// repo-wide sniff scan (git, repo, file changes, languages, docs, OS,
-    /// hardware, GPU) *twice* — 2.8s measured on this working tree — before the
-    /// tree knows whether the document reads any `ctx.*` at all.
-    pub fn from_markdown(md: Markdown) -> Self {
-        let base_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let compose =
-            ComposeOptions::new_with_context(ComposeContext::capture_for_document(&base_dir, &md));
+    /// The graph and validation options share the request's runtime context,
+    /// extended for the groups `md` names rather than captured eagerly: a full
+    /// capture would run the repo-wide sniff scan (git, repo, file changes,
+    /// languages, docs, OS, hardware, GPU) before the tree knows whether the
+    /// document reads any `ctx.*` at all.
+    pub fn from_markdown(md: Markdown, request: &ComposeRequest) -> Self {
+        let mut compose = request.clone();
+        compose.extend_context_for(&md);
         let graph_options = ReferenceGraphOptions::from_compose_options(compose);
         let validation_options = ReferenceValidationOptions::with_graph(graph_options.clone());
         Self {
@@ -342,23 +347,27 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    fn request() -> ComposeRequest {
+        crate::markdown::compose::test_request(crate::markdown::compose::ComposeOptions::new())
+    }
+
     #[test]
     fn new_validates_path_exists() {
-        let err = FileTree::new("/nonexistent/file.md").unwrap_err();
+        let err = FileTree::new("/nonexistent/file.md", &request()).unwrap_err();
         assert!(matches!(err, FileTreeError::PathNotFound(_)));
     }
 
     #[test]
     fn new_validates_is_file() {
         let dir = TempDir::new().unwrap();
-        let err = FileTree::new(dir.path()).unwrap_err();
+        let err = FileTree::new(dir.path(), &request()).unwrap_err();
         assert!(matches!(err, FileTreeError::NotAFile(_)));
     }
 
     #[test]
     fn from_markdown_builds_and_renders() {
         let md = Markdown::new("# Hello\n\n[link](https://example.com)");
-        let mut tree = FileTree::from_markdown(md);
+        let mut tree = FileTree::from_markdown(md, &request());
         tree.ensure_built().unwrap();
 
         let output = tree.render_optimistic(Some(120));
@@ -368,7 +377,7 @@ mod tests {
     #[test]
     fn ensure_built_is_idempotent() {
         let md = Markdown::new("# Hello");
-        let mut tree = FileTree::from_markdown(md);
+        let mut tree = FileTree::from_markdown(md, &request());
         tree.ensure_built().unwrap();
         tree.ensure_built().unwrap(); // second call should be no-op
         assert!(tree.graph().is_some());
@@ -377,7 +386,7 @@ mod tests {
     #[test]
     fn follow_transclusions_invalidates_model() {
         let md = Markdown::new("# Hello");
-        let mut tree = FileTree::from_markdown(md);
+        let mut tree = FileTree::from_markdown(md, &request());
         tree.ensure_built().unwrap();
         assert!(tree.model.is_some());
         tree = tree.follow_transclusions();
@@ -387,7 +396,7 @@ mod tests {
     #[test]
     fn validation_report_none_when_not_enabled() {
         let md = Markdown::new("# Hello");
-        let mut tree = FileTree::from_markdown(md);
+        let mut tree = FileTree::from_markdown(md, &request());
         tree.ensure_built().unwrap();
         assert!(tree.validation_report().is_none());
     }
@@ -402,7 +411,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut tree = FileTree::new(&file_path).unwrap();
+        let mut tree = FileTree::new(&file_path, &request()).unwrap();
         tree.ensure_built().unwrap();
 
         let output = tree.render_optimistic(Some(120));

@@ -69,19 +69,21 @@ pub const DEFAULT_CACHE_SIZE: usize = 64;
 /// [`Self::validator_for`] because it varies per document. It participates in
 /// the cache key alongside the schema JSON so validators preserve the
 /// document-first, then repository-relative candidate plan of their document.
-/// The request's file-resolution context is part of cache identity too, since
-/// it supplies the repository tier of that plan.
-/// [`Self::file_ref_fallback_dir`] is also part of cache identity for
-/// diagnostic parity, but is not a resolution candidate for document-authored
+/// The request's file-resolution context, passed per call, is part of cache
+/// identity too, since it supplies the repository tier of that plan.
+/// [`Self::file_ref_fallback_dir`] is also part of cache identity: it anchors
+/// `match()` globs, but is not a resolution candidate for document-authored
 /// references.
+///
+/// [`Self::structural_validator_for`] serves validators that judge file values
+/// by syntax alone, for callers with no request (coercion probes, examples).
 #[derive(Clone)]
 pub struct ValidatorCache {
     inner: Arc<Mutex<CacheInner>>,
-    /// Launch-area metadata retained for file-reference diagnostics.
+    /// Launch-area metadata: a `match()` glob anchor and diagnostic facet.
     ///
     /// This is not a resolution candidate for document-authored references.
     file_ref_fallback_dir: Option<PathBuf>,
-    file_resolution_context: Option<biscuit_file::FileResolutionContext>,
 }
 
 impl Default for ValidatorCache {
@@ -98,11 +100,20 @@ struct CacheInner {
 
 struct CacheEntry {
     validator: Arc<Validator>,
-    /// The request context the validator's `file` formats captured. A hit must
+    /// What the validator's `file` formats were judged against. A hit must
     /// match it exactly: a validator compiled without a repository root would
     /// otherwise drop the repository tier for every later request.
-    context: Option<biscuit_file::FileResolutionContext>,
+    judged_in: JudgedIn,
     last_used: u64,
+}
+
+/// What a cached validator judges file values against.
+#[derive(Clone, PartialEq)]
+enum JudgedIn {
+    /// Syntax alone (a structural validator).
+    Syntax,
+    /// A request's context.
+    Context(Box<biscuit_file::FileResolutionContext>),
 }
 
 impl ValidatorCache {
@@ -124,30 +135,18 @@ impl ValidatorCache {
                 capacity: cap,
             })),
             file_ref_fallback_dir: None,
-            file_resolution_context: None,
         }
     }
 
-    /// Records the launch-area anchor for `format: darkmatter-file` diagnostics.
+    /// Records the launch-area anchor for `match()` globs and
+    /// `format: darkmatter-file` diagnostics.
     ///
     /// Per D2 the launch area is not a resolution input for a document-authored
     /// `file` value — those resolve against the document first, then the repository
-    /// `base_dir`. This anchor is retained for structural parity with the
-    /// validator-cache identity and is not consulted during resolution.
+    /// `base_dir`.
     #[must_use]
     pub fn with_file_ref_fallback_dir(mut self, dir: impl Into<PathBuf>) -> Self {
         self.file_ref_fallback_dir = Some(dir.into());
-        self
-    }
-
-    /// Supplies the request-scoped file-resolution snapshot used by custom
-    /// `file` format validators.
-    #[must_use]
-    pub fn with_file_resolution_context(
-        mut self,
-        context: biscuit_file::FileResolutionContext,
-    ) -> Self {
-        self.file_resolution_context = Some(context);
         self
     }
 
@@ -155,9 +154,10 @@ impl ValidatorCache {
     /// first use and reusing the cached one thereafter.
     ///
     /// `base_dir`, when `Some`, is the prompt document directory used to build
-    /// the request-scoped candidate plan for `format: darkmatter-file` values.
-    /// It is folded into the cache key so two documents that share a schema
-    /// but live in different directories do not share a validator.
+    /// the request-scoped candidate plan for `format: darkmatter-file` values;
+    /// otherwise `context`'s `cwd` is. It is folded into the cache key so two
+    /// documents that share a schema but live in different directories do not
+    /// share a validator.
     ///
     /// ## Errors
     ///
@@ -167,15 +167,12 @@ impl ValidatorCache {
         &self,
         schema: &Value,
         base_dir: Option<&Path>,
+        context: &biscuit_file::FileResolutionContext,
     ) -> Result<Arc<Validator>, SchemaError> {
-        let key = canonical_hash(
-            schema,
-            base_dir,
-            self.file_ref_fallback_dir.as_deref(),
-            self.file_resolution_context.as_ref(),
-        );
+        let judged_in = JudgedIn::Context(Box::new(context.clone()));
+        let key = canonical_hash(schema, base_dir, self.file_ref_fallback_dir.as_deref(), &judged_in);
         // Fast path: hit.
-        if let Some(hit) = self.lookup(&key, self.file_resolution_context.as_ref()) {
+        if let Some(hit) = self.lookup(&key, &judged_in) {
             return Ok(hit);
         }
         // Miss: build outside the lock to keep contention low.
@@ -183,34 +180,43 @@ impl ValidatorCache {
             schema,
             base_dir,
             self.file_ref_fallback_dir.as_deref(),
-            self.file_resolution_context.as_ref(),
+            context,
         )?);
-        self.insert(key, validator.clone(), self.file_resolution_context.clone());
+        self.insert(key, validator.clone(), judged_in);
         Ok(validator)
     }
 
-    fn lookup(
-        &self,
-        key: &u64,
-        context: Option<&biscuit_file::FileResolutionContext>,
-    ) -> Option<Arc<Validator>> {
+    /// Returns a cached structural validator for `schema`: file values that
+    /// need a context are judged by syntax alone (see
+    /// [`build_structural_validator`]).
+    ///
+    /// ## Errors
+    ///
+    /// Propagates [`SchemaError::BuildValidator`] when `jsonschema` rejects
+    /// the schema.
+    pub fn structural_validator_for(&self, schema: &Value) -> Result<Arc<Validator>, SchemaError> {
+        let key = canonical_hash(schema, None, None, &JudgedIn::Syntax);
+        if let Some(hit) = self.lookup(&key, &JudgedIn::Syntax) {
+            return Ok(hit);
+        }
+        let validator = Arc::new(build_structural_validator(schema)?);
+        self.insert(key, validator.clone(), JudgedIn::Syntax);
+        Ok(validator)
+    }
+
+    fn lookup(&self, key: &u64, judged_in: &JudgedIn) -> Option<Arc<Validator>> {
         let mut guard = self.inner.lock().expect("validator cache lock poisoned");
         guard.tick = guard.tick.wrapping_add(1);
         let tick = guard.tick;
         let entry = guard.entries.get_mut(key)?;
-        if entry.context.as_ref() != context {
+        if &entry.judged_in != judged_in {
             return None;
         }
         entry.last_used = tick;
         Some(entry.validator.clone())
     }
 
-    fn insert(
-        &self,
-        key: u64,
-        validator: Arc<Validator>,
-        context: Option<biscuit_file::FileResolutionContext>,
-    ) {
+    fn insert(&self, key: u64, validator: Arc<Validator>, judged_in: JudgedIn) {
         let mut guard = self.inner.lock().expect("validator cache lock poisoned");
         guard.tick = guard.tick.wrapping_add(1);
         let tick = guard.tick;
@@ -219,7 +225,7 @@ impl ValidatorCache {
             key,
             CacheEntry {
                 validator,
-                context,
+                judged_in,
                 last_used: tick,
             },
         );
@@ -279,31 +285,61 @@ fn schema_uses_lookaround(schema: &Value) -> bool {
     }
 }
 
-/// Builds a `Validator` configured with darkmatter's custom formats and
-/// keywords.
+/// Builds a structural `Validator`: darkmatter's custom formats and keywords,
+/// for callers with no request (coercion probes, example checks, lint).
 ///
-/// `base_dir` (the prompt document directory) anchors `format: darkmatter-file`
-/// value resolution: implicit bare references resolve document-first then repository-root
-/// the document directory, explicit `./`/`../` from the document directory only.
-/// When `None`, the bare validator API resolves against the ambient CWD.
-/// `file_ref_fallback_dir` (the launch area) is threaded for structural parity
-/// with the cache anchors but is **not** a resolution input (D2). Threading
-/// `base_dir` lets schema validation agree with expression-side
-/// `file_exists`/`frontmatter` resolution on the same `file` value.
-pub(super) fn build_validator(
-    schema: &Value,
-    base_dir: Option<&Path>,
-    file_ref_fallback_dir: Option<&Path>,
-) -> Result<Validator, SchemaError> {
-    build_validator_in_context(schema, base_dir, file_ref_fallback_dir, None)
+/// A file value whose meaning needs a context (a relative, `&`, `^`, `@`, `~`,
+/// vault, or `{{VAR}}` reference) is judged by its syntax alone and admitted by
+/// `match()`. An absolute path needs none, so it is judged as a context-bound
+/// validator judges it: it must exist, and `match()` judges its full path.
+/// Nothing reads the process's directory, home, or environment.
+pub(super) fn build_structural_validator(schema: &Value) -> Result<Validator, SchemaError> {
+    build_validator_with(schema, &FileValues::Syntax)
 }
 
+/// Builds a `Validator` configured with darkmatter's custom formats and
+/// keywords, resolving file values through `file_resolution_context`.
+///
+/// `base_dir` (the prompt document directory, else the context's `cwd`)
+/// anchors `format: darkmatter-file` value resolution: implicit bare
+/// references resolve document-first then repository-root, explicit
+/// `./`/`../` from the document directory only. `file_ref_fallback_dir` (the
+/// launch area) anchors `match()` globs but is **not** a resolution input
+/// (D2). Threading `base_dir` lets schema validation agree with
+/// expression-side `file_exists`/`frontmatter` resolution on the same `file`
+/// value.
 pub(crate) fn build_validator_in_context(
     schema: &Value,
     base_dir: Option<&Path>,
     file_ref_fallback_dir: Option<&Path>,
-    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
 ) -> Result<Validator, SchemaError> {
+    build_validator_with(
+        schema,
+        &FileValues::Resolved {
+            base_dir: base_dir.map(PathBuf::from),
+            fallback: file_ref_fallback_dir.map(PathBuf::from),
+            context: Box::new(file_resolution_context.clone()),
+        },
+    )
+}
+
+/// How a validator judges `format: darkmatter-file` values and `match()` globs.
+#[derive(Clone)]
+pub(crate) enum FileValues {
+    /// Without a context: absolute paths as resolved, everything else by
+    /// syntax (see [`build_structural_validator`]).
+    Syntax,
+    /// Resolved through a request's context from `base_dir`, else the
+    /// context's `cwd`.
+    Resolved {
+        base_dir: Option<PathBuf>,
+        fallback: Option<PathBuf>,
+        context: Box<biscuit_file::FileResolutionContext>,
+    },
+}
+
+fn build_validator_with(schema: &Value, file_values: &FileValues) -> Result<Validator, SchemaError> {
     // Feature C literal-precedence emits negative-lookahead `patternProperties`
     // keys, which the linear `regex` engine rejects. Opt such schemas into the
     // backtracking `fancy-regex` engine while keeping every lookaround-free
@@ -316,12 +352,7 @@ pub(crate) fn build_validator_in_context(
     } else {
         base.with_pattern_options(PatternOptions::regex())
     };
-    let opts = format::register_darkmatter_formats_in_context(
-        opts,
-        base_dir.map(PathBuf::from),
-        file_ref_fallback_dir.map(PathBuf::from),
-        file_resolution_context.cloned(),
-    )
+    let opts = format::register_darkmatter_formats_with(opts, file_values.clone())
         .should_validate_formats(true)
         .with_keyword(
             format::DARKMATTER_URL_SCHEME_KEYWORD,
@@ -337,11 +368,7 @@ pub(crate) fn build_validator_in_context(
         )
         .with_keyword(
             super::file_match::DARKMATTER_MATCH_KEYWORD,
-            super::file_match::match_keyword_factory(
-                base_dir.map(PathBuf::from),
-                file_ref_fallback_dir.map(PathBuf::from),
-                file_resolution_context.cloned(),
-            ),
+            super::file_match::match_keyword_factory(file_values.clone()),
         );
     opts.build(schema)
         .map_err(|err| SchemaError::BuildValidator {
@@ -358,7 +385,7 @@ pub fn collect_problems(
     instance: &Value,
     positions: &PositionMap,
 ) -> Vec<ValidationProblem> {
-    collect_problems_with_anchors(validator, instance, positions, FileRefAnchors::default())
+    collect_problems_with_anchors(validator, instance, positions, FileRefAnchors::Syntax)
 }
 
 /// Like [`collect_problems`] but carries the request-scoped document anchor and
@@ -391,7 +418,7 @@ pub fn collect_root_union_problems(
         arm_validators,
         instance,
         positions,
-        FileRefAnchors::default(),
+        FileRefAnchors::Syntax,
     )
 }
 
@@ -652,18 +679,36 @@ fn offending_property_of(kind: &ValidationErrorKind) -> Option<String> {
 /// Anchors used to re-resolve a `format: darkmatter-file` value when
 /// substituting a targeted diagnostic.
 ///
-/// Mirrors the anchors the compiled validator was built with so the
-/// re-resolution reproduces the same failure mode. `base_dir` is the document
-/// directory the value resolves against (document-first then repository for
-/// implicit references); `fallback` (the launch area) is carried for structural
-/// parity but is not a resolution input (D2).
-#[derive(Clone, Copy, Default)]
-pub(super) struct FileRefAnchors<'a> {
-    /// Prompt document directory the reference resolves against.
-    pub base_dir: Option<&'a Path>,
-    /// Captured launch-area anchor, retained for parity but not a resolution
-    /// input (D2).
-    pub fallback: Option<&'a Path>,
+/// Mirrors the [`FileValues`] the compiled validator was built with so the
+/// re-resolution reproduces the same failure mode.
+#[derive(Clone, Copy)]
+pub(super) enum FileRefAnchors<'a> {
+    /// A structural validator: only absolute paths were resolved.
+    Syntax,
+    /// A validator that resolved file values in a request's context.
+    Resolved {
+        /// Prompt document directory the reference resolves against
+        /// (document-first then repository for implicit references).
+        base_dir: Option<&'a Path>,
+        /// Captured launch-area anchor; not a resolution input (D2).
+        fallback: Option<&'a Path>,
+        /// The request context the validator resolved file values in, so the
+        /// re-resolution sees the same repository root.
+        context: &'a biscuit_file::FileResolutionContext,
+    },
+}
+
+impl FileRefAnchors<'_> {
+    fn file_values(&self) -> FileValues {
+        match *self {
+            Self::Syntax => FileValues::Syntax,
+            Self::Resolved { base_dir, fallback, context } => FileValues::Resolved {
+                base_dir: base_dir.map(PathBuf::from),
+                fallback: fallback.map(PathBuf::from),
+                context: Box::new(context.clone()),
+            },
+        }
+    }
 }
 
 /// Returns the substituted message *and* the structured
@@ -701,8 +746,10 @@ fn darkmatter_file_reference_outcome(
     let Value::String(value) = instance.as_ref() else {
         return None;
     };
-    if format == format::DARKMATTER_FILE_FORMAT {
-        return match format::resolve_file_reference(value, anchors.base_dir, anchors.fallback) {
+    if format == format::DARKMATTER_FILE_FORMAT
+        && let FileRefAnchors::Resolved { base_dir, fallback, context } = anchors
+    {
+        return match format::resolve_file_reference_in_context(value, base_dir, fallback, context) {
             Ok(_) => None,
             // The rendered `message` is preserved byte-for-byte from the
             // failure's `Display`; the structured classification rides
@@ -710,7 +757,13 @@ fn darkmatter_file_reference_outcome(
             Err(failure) => Some((failure.to_string(), file_reference_diagnostic(&failure))),
         };
     }
-    if format == format::DARKMATTER_FILE_REFERENCE_FORMAT {
+    // A structural validator resolved only an absolute eager value; it judged
+    // every other one as the lazy format does.
+    if format == format::DARKMATTER_FILE_FORMAT && format::context_free_path(value).is_some() {
+        let failure = format::FileReferenceFailure::NoMatch { raw: value.to_string(), resolved_from: None };
+        return Some((failure.to_string(), file_reference_diagnostic(&failure)));
+    }
+    if format == format::DARKMATTER_FILE_REFERENCE_FORMAT || format == format::DARKMATTER_FILE_FORMAT {
         // Lazy: the only way to reach here is a malformed reference. Report the
         // construction error verbatim, without resolving or touching the
         // filesystem.
@@ -734,8 +787,11 @@ fn file_reference_diagnostic(failure: &format::FileReferenceFailure) -> FileRefe
         format::FileReferenceFailure::InvalidSyntax { raw, .. } => {
             FileReferenceDiagnostic::InvalidSyntax { raw: raw.clone() }
         }
-        format::FileReferenceFailure::Resolution { raw, .. } => {
-            FileReferenceDiagnostic::ResolutionFailed { raw: raw.clone() }
+        format::FileReferenceFailure::Resolution { raw, err } => {
+            FileReferenceDiagnostic::ResolutionFailed {
+                raw: raw.clone(),
+                failure: err.resolution_failure(),
+            }
         }
         format::FileReferenceFailure::NoMatch { raw, resolved_from } => {
             FileReferenceDiagnostic::NoMatch {
@@ -1050,7 +1106,7 @@ pub(super) fn narrow_property_union_problems(
             "type": "object",
             "properties": { key: arms[arm_index] }
         });
-        let Ok(validator) = build_validator(&synthetic, anchors.base_dir, anchors.fallback) else {
+        let Ok(validator) = build_validator_with(&synthetic, &anchors.file_values()) else {
             continue;
         };
         let narrowed: Vec<ValidationProblem> = validator
@@ -1105,7 +1161,7 @@ fn canonical_hash(
     schema: &Value,
     base_dir: Option<&Path>,
     fallback: Option<&Path>,
-    context: Option<&biscuit_file::FileResolutionContext>,
+    judged_in: &JudgedIn,
 ) -> u64 {
     // `serde_json::to_vec` is stable per the active feature set; this is
     // sufficient for cache identity (false misses are tolerable, false hits
@@ -1124,7 +1180,15 @@ fn canonical_hash(
         bytes.extend_from_slice(dir.to_string_lossy().as_bytes());
     }
     // The repository anchors keep requests with and without a repository in
-    // separate slots; the full context is compared on lookup.
+    // separate slots, and structural validators apart from both; the full
+    // context is compared on lookup.
+    let context = match judged_in {
+        JudgedIn::Syntax => {
+            bytes.push(0xfe);
+            None
+        }
+        JudgedIn::Context(context) => Some(context.as_ref()),
+    };
     for anchor in [
         context.and_then(biscuit_file::FileResolutionContext::repository_root),
         context.and_then(biscuit_file::FileResolutionContext::package_area),
@@ -1156,8 +1220,8 @@ mod tests {
     fn cache_caches_validator_by_schema_identity() {
         let cache = ValidatorCache::with_capacity(4);
         let schema = trivial_schema();
-        let v1 = cache.validator_for(&schema, None).unwrap();
-        let v2 = cache.validator_for(&schema, None).unwrap();
+        let v1 = cache.structural_validator_for(&schema).unwrap();
+        let v2 = cache.structural_validator_for(&schema).unwrap();
         assert!(Arc::ptr_eq(&v1, &v2));
         assert_eq!(cache.len(), 1);
     }
@@ -1178,21 +1242,25 @@ mod tests {
         });
         let instance = json!({ "spec": "fixes/x/spec.md" });
 
-        let without_repository = ValidatorCache::with_capacity(4)
-            .with_file_resolution_context(biscuit_file::FileResolutionContext::new(&base_dir));
-        let with_repository = without_repository.clone().with_file_resolution_context(
-            biscuit_file::FileResolutionContext::new(&base_dir)
-                .with_repository_root(repo.path()),
-        );
+        let cache = ValidatorCache::with_capacity(4);
+        let without_repository = biscuit_file::FileResolutionContext::new(&base_dir);
+        let with_repository = biscuit_file::FileResolutionContext::new(&base_dir)
+            .with_repository_root(repo.path());
 
-        let first = without_repository.validator_for(&schema, Some(&base_dir)).unwrap();
+        let first = cache
+            .validator_for(&schema, Some(&base_dir), &without_repository)
+            .unwrap();
         assert!(!first.is_valid(&instance), "the document directory alone lacks the file");
-        let second = with_repository.validator_for(&schema, Some(&base_dir)).unwrap();
+        let second = cache
+            .validator_for(&schema, Some(&base_dir), &with_repository)
+            .unwrap();
         assert!(second.is_valid(&instance), "the repository tier finds the file");
-        let third = without_repository.validator_for(&schema, Some(&base_dir)).unwrap();
+        let third = cache
+            .validator_for(&schema, Some(&base_dir), &without_repository)
+            .unwrap();
         assert!(
             !third.is_valid(&instance),
-            "the context-free request still judges without the repository",
+            "the repository-less request still judges without the repository",
         );
     }
 
@@ -1205,7 +1273,7 @@ mod tests {
                 "type": "object",
                 "properties": { format!("p{i}"): { "type": "string" } }
             });
-            cache.validator_for(&schema, None).unwrap();
+            cache.structural_validator_for(&schema).unwrap();
         }
         assert!(cache.len() <= 2);
     }
@@ -1214,7 +1282,7 @@ mod tests {
     fn cache_zero_capacity_is_promoted_to_one() {
         let cache = ValidatorCache::with_capacity(0);
         let schema = trivial_schema();
-        cache.validator_for(&schema, None).unwrap();
+        cache.structural_validator_for(&schema).unwrap();
         assert_eq!(cache.len(), 1);
     }
 
@@ -1224,13 +1292,13 @@ mod tests {
         let s1 = json!({"type":"object","properties":{"a":{"type":"string"}}});
         let s2 = json!({"type":"object","properties":{"b":{"type":"string"}}});
         let s3 = json!({"type":"object","properties":{"c":{"type":"string"}}});
-        let v1 = cache.validator_for(&s1, None).unwrap();
-        cache.validator_for(&s2, None).unwrap();
+        let v1 = cache.structural_validator_for(&s1).unwrap();
+        cache.structural_validator_for(&s2).unwrap();
         // Touch s1 so it's the more recent of the two existing entries.
-        let v1_again = cache.validator_for(&s1, None).unwrap();
+        let v1_again = cache.structural_validator_for(&s1).unwrap();
         assert!(Arc::ptr_eq(&v1, &v1_again));
         // Add s3 — s2 should be evicted as least-recently-used.
-        cache.validator_for(&s3, None).unwrap();
+        cache.structural_validator_for(&s3).unwrap();
         assert_eq!(cache.len(), 2);
     }
 
@@ -1241,7 +1309,7 @@ mod tests {
             "properties": { "title": { "type": "string" } },
             "required": ["title"]
         });
-        let validator = build_validator(&schema, None, None).unwrap();
+        let validator = build_structural_validator(&schema).unwrap();
         let problems = collect_problems(&validator, &json!({}), &PositionMap::new());
         assert_eq!(problems.len(), 1, "expected one Required error: {problems:?}");
         assert_eq!(problems[0].kind, ValidationProblemKind::Missing);
@@ -1254,7 +1322,7 @@ mod tests {
             "type": "object",
             "properties": { "count": { "type": "number" } }
         });
-        let validator = build_validator(&schema, None, None).unwrap();
+        let validator = build_structural_validator(&schema).unwrap();
         let problems = collect_problems(
             &validator,
             &json!({ "count": "not-a-number" }),
@@ -1270,7 +1338,7 @@ mod tests {
             "type": "object",
             "properties": { "name": { "type": "string", "minLength": 5 } }
         });
-        let validator = build_validator(&schema, None, None).unwrap();
+        let validator = build_structural_validator(&schema).unwrap();
         let problems = collect_problems(
             &validator,
             &json!({ "name": "no" }),
@@ -1300,7 +1368,7 @@ mod tests {
                 ] }
             }
         });
-        let v = build_validator(&schema, None, None).unwrap();
+        let v = build_structural_validator(&schema).unwrap();
         let instance = json!({ "config": { "name": ["Ada", "Lovelace"] } });
         let problems = collect_problems(&v, &instance, &PositionMap::new());
         assert!(
@@ -1322,7 +1390,7 @@ mod tests {
                 "name": { "anyOf": [ { "type": "null" }, { "type": "string" } ] }
             }
         });
-        let v = build_validator(&schema, None, None).unwrap();
+        let v = build_structural_validator(&schema).unwrap();
         let instance = json!({ "name": 42 });
         let problems = collect_problems(&v, &instance, &PositionMap::new());
         assert_eq!(problems.len(), 1, "expected the wrapper problem: {problems:?}");
@@ -1348,7 +1416,7 @@ mod tests {
                 ] }
             }
         });
-        let v = build_validator(&schema, None, None).unwrap();
+        let v = build_structural_validator(&schema).unwrap();
         let instance = json!({ "created": "2026-07-10T15:05:34" });
         let problems = collect_problems(&v, &instance, &PositionMap::new());
         assert!(problems.is_empty(), "expected no problems, got {problems:?}");
@@ -1365,7 +1433,7 @@ mod tests {
                 ] }
             }
         });
-        let v = build_validator(&schema, None, None).unwrap();
+        let v = build_structural_validator(&schema).unwrap();
         let instance = json!({ "created": "2026-13-99T25:61:61" });
         let problems = collect_problems(&v, &instance, &PositionMap::new());
         assert_eq!(problems.len(), 1, "expected one problem: {problems:?}");
@@ -1393,7 +1461,7 @@ mod tests {
             },
             "required": ["title"]
         });
-        let v = build_validator(&schema, None, None).unwrap();
+        let v = build_structural_validator(&schema).unwrap();
         assert!(v.is_valid(&json!({ "title": "x" })));
         assert!(!v.is_valid(&json!({})));
     }
@@ -1401,7 +1469,7 @@ mod tests {
     #[test]
     fn build_validator_rejects_bad_schema() {
         let schema = json!({ "type": 42 });
-        let err = build_validator(&schema, None, None).unwrap_err();
+        let err = build_structural_validator(&schema).unwrap_err();
         let SchemaError::BuildValidator { message } = &err else {
             panic!("expected BuildValidator, got {err:?}");
         };
@@ -1416,7 +1484,7 @@ mod tests {
                 "n": { "type": "number" }
             }
         });
-        let v = build_validator(&schema, None, None).unwrap();
+        let v = build_structural_validator(&schema).unwrap();
         let instance = json!({ "n": "not-a-number" });
         let positions = PositionMap::new();
         let problems = collect_problems(&v, &instance, &positions);
@@ -1433,7 +1501,7 @@ mod tests {
                 "n": { "type": "number" }
             }
         });
-        let v = build_validator(&schema, None, None).unwrap();
+        let v = build_structural_validator(&schema).unwrap();
         let instance = json!({ "n": "nope" });
         let mut positions = PositionMap::new();
         positions.insert("n".into(), (3, 1));
@@ -1451,7 +1519,7 @@ mod tests {
             },
             "required": ["title"]
         });
-        let v = build_validator(&schema, None, None).unwrap();
+        let v = build_structural_validator(&schema).unwrap();
         let instance = json!({});
         let positions = PositionMap::new();
         let problems = collect_problems(&v, &instance, &positions);
@@ -1467,7 +1535,7 @@ mod tests {
                 "n": { "type": "number" }
             }
         });
-        let v = build_validator(&schema, None, None).unwrap();
+        let v = build_structural_validator(&schema).unwrap();
         let instance = json!({ "n": "not-a-number" });
         let positions = PositionMap::new();
         let problems = collect_problems(&v, &instance, &positions);
@@ -1483,7 +1551,7 @@ mod tests {
             },
             "required": ["title"]
         });
-        let v = build_validator(&schema, None, None).unwrap();
+        let v = build_structural_validator(&schema).unwrap();
         let instance = json!({});
         let mut positions = PositionMap::new();
         positions.insert("title".into(), (5, 1));
@@ -1529,8 +1597,8 @@ mod tests {
             "properties": {"c":{"type":"string"}},
             "required":["c"]
         });
-        let v0 = Arc::new(build_validator(&arm0, None, None).unwrap());
-        let v1 = Arc::new(build_validator(&arm1, None, None).unwrap());
+        let v0 = Arc::new(build_structural_validator(&arm0).unwrap());
+        let v1 = Arc::new(build_structural_validator(&arm1).unwrap());
         let instance = json!({"c": "x"});
         let problems = collect_root_union_problems(&[v0, v1], &instance, &PositionMap::new());
         assert!(problems.is_empty(), "expected match: {problems:?}");
@@ -1548,35 +1616,38 @@ mod tests {
             "properties": {"b":{"type":"string"}},
             "required":["b","c"]
         });
-        let v0 = Arc::new(build_validator(&arm0, None, None).unwrap());
-        let v1 = Arc::new(build_validator(&arm1, None, None).unwrap());
+        let v0 = Arc::new(build_structural_validator(&arm0).unwrap());
+        let v1 = Arc::new(build_structural_validator(&arm1).unwrap());
         let instance = json!({});
         let problems = collect_root_union_problems(&[v0, v1], &instance, &PositionMap::new());
         assert!(!problems.is_empty());
         assert!(problems.iter().all(|p| p.arm_index == Some(0)));
     }
 
-    // The `darkmatter-file` format tests below mutate the process CWD so the
-    // `FileReference` resolver sees a deterministic filesystem state. They are
-    // serialised with `serial_test::serial("darkmatter-file-cwd")` so this
-    // module and `format::tests` share the same process-global lock.
+    // The `darkmatter-file` format tests below resolve file values in a
+    // context whose `cwd` is a fresh temp directory, so relative references
+    // see a deterministic filesystem state.
 
-    struct FileFormatCwdGuard {
-        prior: std::path::PathBuf,
+    fn resolving_validator(
+        schema: &Value,
+        context: &biscuit_file::FileResolutionContext,
+    ) -> Validator {
+        build_validator_in_context(schema, None, None, context).unwrap()
     }
 
-    impl FileFormatCwdGuard {
-        fn enter(dir: &std::path::Path) -> Self {
-            let prior = std::env::current_dir().expect("read CWD");
-            std::env::set_current_dir(dir).expect("set CWD");
-            Self { prior }
-        }
-    }
-
-    impl Drop for FileFormatCwdGuard {
-        fn drop(&mut self) {
-            let _ = std::env::set_current_dir(&self.prior);
-        }
+    /// Problems with file-reference diagnostics re-resolved in `context`, the
+    /// context the validator was built in.
+    fn resolved_problems(
+        validator: &Validator,
+        instance: &Value,
+        context: &biscuit_file::FileResolutionContext,
+    ) -> Vec<ValidationProblem> {
+        collect_problems_with_anchors(
+            validator,
+            instance,
+            &PositionMap::new(),
+            FileRefAnchors::Resolved { base_dir: None, fallback: None, context },
+        )
     }
 
     fn darkmatter_file_schema() -> Value {
@@ -1589,13 +1660,12 @@ mod tests {
     }
 
     #[test]
-    #[serial_test::serial(darkmatter_file_cwd)]
     fn darkmatter_file_format_error_surfaces_no_match_message() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let _cwd = FileFormatCwdGuard::enter(dir.path());
-        let v = build_validator(&darkmatter_file_schema(), None, None).unwrap();
+        let context = biscuit_file::FileResolutionContext::new(dir.path());
+        let v = resolving_validator(&darkmatter_file_schema(), &context);
         let instance = json!({ "doc": "./does-not-exist.md" });
-        let problems = collect_problems(&v, &instance, &PositionMap::new());
+        let problems = resolved_problems(&v, &instance, &context);
         assert_eq!(problems.len(), 1, "expected one Format problem: {problems:?}");
         let problem = &problems[0];
         assert_eq!(problem.path, "/doc");
@@ -1618,14 +1688,13 @@ mod tests {
     }
 
     #[test]
-    #[serial_test::serial(darkmatter_file_cwd)]
     fn darkmatter_file_format_error_surfaces_invalid_syntax_message() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let _cwd = FileFormatCwdGuard::enter(dir.path());
-        let v = build_validator(&darkmatter_file_schema(), None, None).unwrap();
+        let context = biscuit_file::FileResolutionContext::new(dir.path());
+        let v = resolving_validator(&darkmatter_file_schema(), &context);
         // An empty string is rejected at parse time.
         let instance = json!({ "doc": "" });
-        let problems = collect_problems(&v, &instance, &PositionMap::new());
+        let problems = resolved_problems(&v, &instance, &context);
         assert_eq!(problems.len(), 1, "expected one Format problem: {problems:?}");
         let problem = &problems[0];
         assert_eq!(problem.path, "/doc");
@@ -1642,15 +1711,14 @@ mod tests {
     }
 
     #[test]
-    #[serial_test::serial(darkmatter_file_cwd)]
     fn darkmatter_file_format_succeeds_for_existing_file() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("exists.md");
         std::fs::write(&path, b"x").unwrap();
-        let _cwd = FileFormatCwdGuard::enter(dir.path());
-        let v = build_validator(&darkmatter_file_schema(), None, None).unwrap();
+        let context = biscuit_file::FileResolutionContext::new(dir.path());
+        let v = resolving_validator(&darkmatter_file_schema(), &context);
         let instance = json!({ "doc": "./exists.md" });
-        let problems = collect_problems(&v, &instance, &PositionMap::new());
+        let problems = resolved_problems(&v, &instance, &context);
         assert!(
             problems.is_empty(),
             "expected no problems for existing file, got: {problems:?}",
@@ -1658,22 +1726,21 @@ mod tests {
     }
 
     #[test]
-    #[serial_test::serial(darkmatter_file_cwd)]
     fn non_darkmatter_file_format_keeps_default_message() {
         // A `format` other than `darkmatter-file` should not be intercepted
         // by the substitution — the default `jsonschema` text must flow
         // through unchanged.
         let dir = tempfile::tempdir().expect("tempdir");
-        let _cwd = FileFormatCwdGuard::enter(dir.path());
+        let context = biscuit_file::FileResolutionContext::new(dir.path());
         let schema = json!({
             "type": "object",
             "properties": {
                 "v": { "type": "string", "format": "email" }
             }
         });
-        let v = build_validator(&schema, None, None).unwrap();
+        let v = resolving_validator(&schema, &context);
         let instance = json!({ "v": "not-an-email" });
-        let problems = collect_problems(&v, &instance, &PositionMap::new());
+        let problems = resolved_problems(&v, &instance, &context);
         assert_eq!(problems.len(), 1, "expected one Format problem: {problems:?}");
         let problem = &problems[0];
         assert!(
@@ -1698,13 +1765,12 @@ mod tests {
     }
 
     #[test]
-    #[serial_test::serial(darkmatter_file_cwd)]
     fn darkmatter_file_match_missing_file_produces_one_file_reference_diagnostic() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let _cwd = FileFormatCwdGuard::enter(dir.path());
-        let v = build_validator(&darkmatter_file_match_schema(), None, None).unwrap();
+        let context = biscuit_file::FileResolutionContext::new(dir.path());
+        let v = resolving_validator(&darkmatter_file_match_schema(), &context);
         let instance = json!({ "doc": "./does-not-exist.md" });
-        let problems = collect_problems(&v, &instance, &PositionMap::new());
+        let problems = resolved_problems(&v, &instance, &context);
         assert_eq!(
             problems.len(),
             1,
@@ -1726,21 +1792,20 @@ mod tests {
     }
 
     #[test]
-    #[serial_test::serial(darkmatter_file_cwd)]
     fn lazy_reference_format_missing_file_produces_no_diagnostic() {
         // The lazy `darkmatter-file-reference` is syntax-only: a syntactically
         // valid but not-yet-existing path validates, producing zero existence
         // diagnostics (the eager case above produces one).
         let dir = tempfile::tempdir().expect("tempdir");
-        let _cwd = FileFormatCwdGuard::enter(dir.path());
+        let context = biscuit_file::FileResolutionContext::new(dir.path());
         let schema = json!({
             "type": "object",
             "properties": {
                 "doc": { "type": "string", "format": "darkmatter-file-reference" }
             }
         });
-        let v = build_validator(&schema, None, None).unwrap();
-        let problems = collect_problems(&v, &json!({ "doc": "./does-not-exist.md" }), &PositionMap::new());
+        let v = resolving_validator(&schema, &context);
+        let problems = resolved_problems(&v, &json!({ "doc": "./does-not-exist.md" }), &context);
         assert!(
             problems.is_empty(),
             "lazy reference of a missing file must not produce a diagnostic, got: {problems:?}"
@@ -1759,7 +1824,7 @@ mod tests {
                 "doc": { "type": "string", "format": "darkmatter-file-reference" }
             }
         });
-        let v = build_validator(&schema, None, None).unwrap();
+        let v = build_structural_validator(&schema).unwrap();
         let problems = collect_problems(&v, &json!({ "doc": "" }), &PositionMap::new());
         assert_eq!(problems.len(), 1, "expected one Format problem: {problems:?}");
         let problem = &problems[0];
@@ -1777,10 +1842,9 @@ mod tests {
     }
 
     #[test]
-    #[serial_test::serial(darkmatter_file_cwd)]
     fn darkmatter_file_format_error_retains_nested_path() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let _cwd = FileFormatCwdGuard::enter(dir.path());
+        let context = biscuit_file::FileResolutionContext::new(dir.path());
         let schema = json!({
             "type": "object",
             "properties": {
@@ -1792,9 +1856,9 @@ mod tests {
                 }
             }
         });
-        let v = build_validator(&schema, None, None).unwrap();
+        let v = resolving_validator(&schema, &context);
         let instance = json!({ "doc": { "cover": "./missing.md" } });
-        let problems = collect_problems(&v, &instance, &PositionMap::new());
+        let problems = resolved_problems(&v, &instance, &context);
         assert_eq!(problems.len(), 1, "expected one Format problem: {problems:?}");
         assert_eq!(problems[0].path, "/doc/cover");
         assert!(
@@ -1805,10 +1869,9 @@ mod tests {
     }
 
     #[test]
-    #[serial_test::serial(darkmatter_file_cwd)]
     fn darkmatter_file_format_error_retains_array_path() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let _cwd = FileFormatCwdGuard::enter(dir.path());
+        let context = biscuit_file::FileResolutionContext::new(dir.path());
         let schema = json!({
             "type": "object",
             "properties": {
@@ -1818,9 +1881,9 @@ mod tests {
                 }
             }
         });
-        let v = build_validator(&schema, None, None).unwrap();
+        let v = resolving_validator(&schema, &context);
         let instance = json!({ "docs": ["./missing.md"] });
-        let problems = collect_problems(&v, &instance, &PositionMap::new());
+        let problems = resolved_problems(&v, &instance, &context);
         assert_eq!(problems.len(), 1, "expected one Format problem: {problems:?}");
         assert_eq!(problems[0].path, "/docs/0");
         assert!(
@@ -1831,10 +1894,9 @@ mod tests {
     }
 
     #[test]
-    #[serial_test::serial(darkmatter_file_cwd)]
     fn root_union_preserves_arm_index_for_file_format_message() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let _cwd = FileFormatCwdGuard::enter(dir.path());
+        let context = biscuit_file::FileResolutionContext::new(dir.path());
         let arm0 = wrap_arm_as_root_schema(&json!({
             "type": "object",
             "properties": {
@@ -1849,10 +1911,15 @@ mod tests {
             },
             "required": ["doc"]
         }));
-        let v0 = Arc::new(build_validator(&arm0, None, None).unwrap());
-        let v1 = Arc::new(build_validator(&arm1, None, None).unwrap());
+        let v0 = Arc::new(resolving_validator(&arm0, &context));
+        let v1 = Arc::new(resolving_validator(&arm1, &context));
         let instance = json!({ "doc": "./missing.md" });
-        let problems = collect_root_union_problems(&[v0, v1], &instance, &PositionMap::new());
+        let problems = collect_root_union_problems_with_anchors(
+            &[v0, v1],
+            &instance,
+            &PositionMap::new(),
+            FileRefAnchors::Resolved { base_dir: None, fallback: None, context: &context },
+        );
         assert_eq!(
             problems.len(),
             1,
@@ -2185,7 +2252,7 @@ mod tests {
             "type": "object",
             "properties": { "count": { "type": "number" } }
         });
-        let v = build_validator(&schema, None, None).unwrap();
+        let v = build_structural_validator(&schema).unwrap();
         let problems = collect_problems(&v, &json!({ "count": "nope" }), &PositionMap::new());
         assert_eq!(problems.len(), 1, "{problems:?}");
         let p = &problems[0];
@@ -2208,7 +2275,7 @@ mod tests {
                 }
             }
         });
-        let v = build_validator(&schema, None, None).unwrap();
+        let v = build_structural_validator(&schema).unwrap();
         let problems = collect_problems(&v, &json!({ "author": {} }), &PositionMap::new());
         let missing = problems
             .iter()
@@ -2226,7 +2293,7 @@ mod tests {
             "additionalProperties": false,
             "properties": { "known": { "type": "string" } }
         });
-        let v = build_validator(&schema, None, None).unwrap();
+        let v = build_structural_validator(&schema).unwrap();
         let problems = collect_problems(
             &v,
             &json!({ "known": "x", "bogus": 1 }),
@@ -2240,13 +2307,11 @@ mod tests {
     }
 
     #[test]
-    #[serial_test::serial(darkmatter_file_cwd)]
     fn file_reference_diagnostic_classifies_no_match() {
         let dir = tempfile::tempdir().unwrap();
-        let _cwd = FileFormatCwdGuard::enter(dir.path());
-        let v = build_validator(&darkmatter_file_schema(), None, None).unwrap();
-        let problems =
-            collect_problems(&v, &json!({ "doc": "./missing.md" }), &PositionMap::new());
+        let context = biscuit_file::FileResolutionContext::new(dir.path());
+        let v = resolving_validator(&darkmatter_file_schema(), &context);
+        let problems = resolved_problems(&v, &json!({ "doc": "./missing.md" }), &context);
         assert_eq!(problems.len(), 1, "{problems:?}");
         let p = &problems[0];
         assert_eq!(p.code, ValidationProblemCode::InvalidFileReference);
@@ -2261,12 +2326,11 @@ mod tests {
     }
 
     #[test]
-    #[serial_test::serial(darkmatter_file_cwd)]
     fn file_reference_diagnostic_classifies_invalid_syntax() {
         let dir = tempfile::tempdir().unwrap();
-        let _cwd = FileFormatCwdGuard::enter(dir.path());
-        let v = build_validator(&darkmatter_file_schema(), None, None).unwrap();
-        let problems = collect_problems(&v, &json!({ "doc": "" }), &PositionMap::new());
+        let context = biscuit_file::FileResolutionContext::new(dir.path());
+        let v = resolving_validator(&darkmatter_file_schema(), &context);
+        let problems = resolved_problems(&v, &json!({ "doc": "" }), &context);
         assert_eq!(problems.len(), 1, "{problems:?}");
         match &problems[0].file_reference {
             Some(FileReferenceDiagnostic::InvalidSyntax { raw }) => assert_eq!(raw, ""),

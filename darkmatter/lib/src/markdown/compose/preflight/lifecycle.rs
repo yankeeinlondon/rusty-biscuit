@@ -102,7 +102,7 @@ impl Markdown {
         })?;
 
         let shell_opts = options.shell_options();
-        let policy_paths = resolve_policy_paths(&shell_opts, &options.source)?;
+        let policy_paths = resolve_policy_paths(&shell_opts, &options.source, request.resolution_context())?;
         let whitelist = load_ruleset(&policy_paths.whitelist)?;
         let user_blacklist = load_ruleset(&policy_paths.blacklist)?;
 

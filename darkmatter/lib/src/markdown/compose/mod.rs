@@ -171,7 +171,7 @@ pub use context::request::{
     build_resolution_context_with_catalog,
 };
 #[cfg(test)]
-pub(crate) use context::request::test_support::request as test_request;
+pub(crate) use context::request::test_support::{request as test_request, request_in as test_request_in};
 pub use context::repository_scope_catalog;
 pub(crate) use context::options::ReferenceGraphOptionsIdentity;
 pub use context::report::{ComposeReport, ComposeWarning, SourceRange};
@@ -193,7 +193,7 @@ pub(crate) use context::options::TransclusionOptions;
 // Shared helpers, re-exported so in-crate callers reach them as `compose::<name>`.
 pub use util::find_git_root_from;
 pub(crate) use util::{
-    abbreviate_path, document_resolution_context, find_target_range, prepare_frontmatter_for_compose,
+    abbreviate_path, find_target_range, prepare_frontmatter_for_compose,
 };
 
 use super::Markdown;
@@ -237,11 +237,11 @@ impl Markdown {
         Ok((result, report))
     }
 
-    /// Composes the document over options derived from a request's root
-    /// options, for an inline pass inside an entry point.
+    /// Composes the document over a request derived from an entry point's
+    /// request, for an inline pass inside that entry point.
     pub(crate) fn compose_with_options(
         &self,
-        options: ComposeOptions,
+        options: ComposeRequest,
     ) -> MarkdownResult<(Markdown, ComposeReport)> {
         let mut result = self.clone();
         let report = result.run_root_pipeline(options)?;

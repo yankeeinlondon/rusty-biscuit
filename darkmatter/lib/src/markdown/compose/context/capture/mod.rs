@@ -52,7 +52,6 @@ pub(crate) use git::{fetch_recent_commits, render_recent_commits};
 pub use capabilities::DeferredCapabilities;
 pub use groups::{ContextGroup, ContextRequirements};
 pub use snapshot::ContextCaptureEvidence;
-pub(crate) use datetime::populate_datetime;
 #[cfg(test)]
 pub(crate) use snapshot::{GIT_DISCOVERY_COUNT, REPOSITORY_DISCOVERY_COUNT};
 

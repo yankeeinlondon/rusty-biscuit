@@ -32,11 +32,13 @@
 //! ## Example
 //!
 //! ```ignore
+//! use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
 //! use darkmatter::markdown::schemas::DarkmatterSchemas;
 //! use darkmatter::markdown::Markdown;
 //!
-//! let md = Markdown::try_from(std::path::Path::new("./post.md"))?;
-//! let api = DarkmatterSchemas::new();
+//! let context = build_resolution_context(&RequestSnapshot::new("/work/blog"))?;
+//! let md = Markdown::try_from(std::path::Path::new("/work/blog/post.md"))?;
+//! let api = DarkmatterSchemas::new(context);
 //! let report = api.validate(&md)?;
 //! assert!(report.valid);
 //! ```
@@ -96,7 +98,7 @@ pub use clean::{
 };
 pub use completion::{CompletionKind, CompletionSuggestion};
 pub use detect::{
-    DetectOptions, detect_from_document, detect_from_document_with_context, detect_schema,
+    DetectOptions, detect_from_document, detect_schema,
     detect_schema_with_contexts, schema_to_yaml,
 };
 pub use discriminant::select_literal_discriminant_arm;
@@ -222,11 +224,14 @@ pub fn darkmatter_base_json_schema_ref() -> &'static Value {
 
 /// Top-level entry point for the schemas subsystem.
 ///
-/// Holds optional baseline schema configuration, optional trigger-schema
-/// configuration, and the process-wide validator cache so repeated validations
-/// against the same effective schema reuse the compiled `jsonschema::Validator`.
+/// Holds the request's file-resolution context, optional baseline schema
+/// configuration, optional trigger-schema configuration, and the process-wide
+/// validator cache so repeated validations against the same effective schema
+/// reuse the compiled `jsonschema::Validator`.
 ///
-/// [`DarkmatterSchemas::new`] is deterministic and **never** scans disk.
+/// [`DarkmatterSchemas::new`] is deterministic and **never** scans disk. Its
+/// context resolves every file value and `$schema` reference; a document with
+/// no path of its own is anchored at the context's `cwd`.
 /// Trigger-schema discovery is opt-in via [`Self::with_trigger_discovery`] or
 /// [`Self::with_trigger_registry`]. Implicit CWD-based discovery is forbidden —
 /// validation behavior must never depend silently on the process working
@@ -236,7 +241,7 @@ pub struct DarkmatterSchemas {
     baseline: Option<BaselineSchema>,
     cache: ValidatorCache,
     triggers: Option<triggers::TriggerRegistry>,
-    file_resolution_context: Option<biscuit_file::FileResolutionContext>,
+    file_resolution_context: biscuit_file::FileResolutionContext,
 }
 
 /// The process-wide validator cache every [`DarkmatterSchemas`] shares (F8).
@@ -251,17 +256,6 @@ pub struct DarkmatterSchemas {
 /// different launch-area fallbacks share the map without cross-contamination.
 static SHARED_VALIDATOR_CACHE: std::sync::LazyLock<ValidatorCache> =
     std::sync::LazyLock::new(ValidatorCache::new);
-
-impl Default for DarkmatterSchemas {
-    fn default() -> Self {
-        Self {
-            baseline: None,
-            cache: SHARED_VALIDATOR_CACHE.clone(),
-            triggers: None,
-            file_resolution_context: None,
-        }
-    }
-}
 
 #[derive(Clone)]
 struct BaselineSchema {
@@ -285,9 +279,15 @@ struct TriggerLayer {
 }
 
 impl DarkmatterSchemas {
-    /// Creates a new [`DarkmatterSchemas`] with no baseline.
-    pub fn new() -> Self {
-        Self::default()
+    /// Creates a new [`DarkmatterSchemas`] with no baseline, resolving file
+    /// values through the request's `context`.
+    pub fn new(context: biscuit_file::FileResolutionContext) -> Self {
+        Self {
+            baseline: None,
+            cache: SHARED_VALIDATOR_CACHE.clone(),
+            triggers: None,
+            file_resolution_context: context,
+        }
     }
 
     /// Records the launch-area anchor (typically the captured launch area).
@@ -304,15 +304,15 @@ impl DarkmatterSchemas {
         self
     }
 
-    /// Supplies the immutable host request snapshot used by schema file
-    /// values. Nested document bases derive from this snapshot.
+    /// This instance resolving through `context` instead, keeping its
+    /// baseline and trigger registry: one configuration validating documents
+    /// that each carry their own context.
     #[must_use]
     pub fn with_file_resolution_context(
         mut self,
         context: biscuit_file::FileResolutionContext,
     ) -> Self {
-        self.cache = self.cache.with_file_resolution_context(context.clone());
-        self.file_resolution_context = Some(context);
+        self.file_resolution_context = context;
         self
     }
 
@@ -346,8 +346,8 @@ impl DarkmatterSchemas {
         // Drive resolution through the file-reference path so YAML/JSON
         // disambiguation matches `$schema` references.
         let yaml_value = serde_yaml_ng::Value::String(path.to_string_lossy().into_owned());
-        let resolved =
-            resolve::resolve_yaml_schema(&yaml_value, base).map_err(|err| match err {
+        let resolved = resolve::resolve_yaml_schema(&yaml_value, base, &self.file_resolution_context)
+            .map_err(|err| match err {
                 SchemaError::Io { .. } => err,
                 SchemaError::AmbiguousReferenced { .. } => err,
                 other => SchemaError::Baseline {
@@ -422,7 +422,11 @@ impl DarkmatterSchemas {
         document_path: impl AsRef<Path>,
         boundary: impl AsRef<Path>,
     ) -> Result<Self, SchemaError> {
-        let registry = triggers::scan(document_path.as_ref(), boundary.as_ref())?;
+        let registry = triggers::scan(
+            document_path.as_ref(),
+            boundary.as_ref(),
+            &self.file_resolution_context,
+        )?;
         Ok(self.with_trigger_registry(registry))
     }
 
@@ -486,7 +490,7 @@ impl DarkmatterSchemas {
         source: &Markdown,
         schema_override: Option<&Value>,
     ) -> Result<Option<EffectiveSchema>, SchemaError> {
-        let base_dir = base_dir_for(source);
+        let base_dir = base_dir_for(source, &self.file_resolution_context);
         let frontmatter = source.frontmatter().as_map();
         let schema_value = schema_override.or_else(|| frontmatter.get("$schema"));
 
@@ -501,11 +505,11 @@ impl DarkmatterSchemas {
         // Resolve the document $schema with schema-root context.
         let resolved = match schema_value {
             Some(value) => {
-                let r = resolve::resolve_schema_with_roots_in_context(
+                let r = resolve::resolve_schema_with_roots(
                     value,
                     &base_dir,
                     trigger_roots,
-                    self.file_resolution_context.as_ref(),
+                    &self.file_resolution_context,
                 )?;
                 // The document must not directly reference a trigger-schema
                 // file — triggers activate by placement and match, never by
@@ -575,8 +579,14 @@ impl DarkmatterSchemas {
 
         // Keep eager-file validation on the same request-scoped candidate plan
         // as expression-side `file_exists` and `frontmatter` resolution.
-        let validator = self.cache.validator_for(&merged_json, Some(&base_dir))?;
-        let arm_validators = build_arm_validators(&merged_json, &self.cache, &base_dir)?;
+        let validator =
+            self.cache.validator_for(&merged_json, Some(&base_dir), &self.file_resolution_context)?;
+        let arm_validators = build_arm_validators(
+            &merged_json,
+            &self.cache,
+            &base_dir,
+            &self.file_resolution_context,
+        )?;
         let origins = build_origin_map_with_triggers(
             resolved.as_ref(),
             &trigger_layers,
@@ -653,6 +663,7 @@ impl DarkmatterSchemas {
                 let payload = triggers::assemble::resolve_trigger_payload(
                     eval.trigger,
                     &registry.roots,
+                    &self.file_resolution_context,
                 )?;
                 (payload.json_schema, payload.dependencies, payload.advisories)
             };
@@ -730,10 +741,10 @@ impl DarkmatterSchemas {
         &self.cache
     }
 
-    /// Detects a [`SimplifiedSchema`] from one or more documents. See
-    /// [`detect::detect_schema`] for the algorithm.
+    /// Detects a [`SimplifiedSchema`] from one or more documents through this
+    /// instance's context. See [`detect::detect_schema`] for the algorithm.
     pub fn detect(&self, sources: &[&Markdown], opts: DetectOptions) -> SimplifiedSchema {
-        detect::detect_schema(sources, opts)
+        detect::detect_schema(sources, opts, &self.file_resolution_context)
     }
 }
 
@@ -805,8 +816,8 @@ pub struct EffectiveSchema {
     base_dir: Option<PathBuf>,
     /// Captured launch-area metadata retained for file-reference diagnostics.
     file_ref_fallback_dir: Option<PathBuf>,
-    /// Immutable host request snapshot used by eager-file normalization.
-    file_resolution_context: Option<biscuit_file::FileResolutionContext>,
+    /// The request's context, used by eager-file normalization.
+    file_resolution_context: biscuit_file::FileResolutionContext,
     /// Resolved paths of the files this schema depends on: the sorted,
     /// deduplicated union of the document `$schema`'s `Name@file`/`@this` imports
     /// (Feature B), its `example(...)` artifacts (Feature A), and the referenced
@@ -926,7 +937,7 @@ impl EffectiveSchema {
             &json_schema,
             self.base_dir.as_deref(),
             self.file_ref_fallback_dir.as_deref(),
-            self.file_resolution_context.as_ref(),
+            &self.file_resolution_context,
         )?);
         let arm_validators = json_schema
             .get("anyOf")
@@ -939,7 +950,7 @@ impl EffectiveSchema {
                             &root,
                             self.base_dir.as_deref(),
                             self.file_ref_fallback_dir.as_deref(),
-                            self.file_resolution_context.as_ref(),
+                            &self.file_resolution_context,
                         )
                         .map(Arc::new)
                     })
@@ -994,9 +1005,10 @@ impl EffectiveSchema {
     /// coerced working copy, the `validate_raw` pair passes the instance as
     /// parsed.
     fn validate_instance(&self, instance: &Value, positions: &PositionMap) -> ValidationReport {
-        let anchors = validate::FileRefAnchors {
+        let anchors = validate::FileRefAnchors::Resolved {
             base_dir: self.base_dir.as_deref(),
             fallback: self.file_ref_fallback_dir.as_deref(),
+            context: &self.file_resolution_context,
         };
         let mut problems = match &self.arm_validators {
             // Root `anyOf` union. When a shared literal discriminant selects a
@@ -1136,6 +1148,7 @@ impl EffectiveSchema {
     /// use std::collections::HashSet;
     ///
     /// use darkmatter::markdown::Markdown;
+    /// use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
     /// use darkmatter::markdown::schemas::DarkmatterSchemas;
     ///
     /// // `area/prompt.md` declares `$schema: { spec: file(eager; required) }`
@@ -1143,7 +1156,9 @@ impl EffectiveSchema {
     /// // first against the prompt's directory.
     /// let path = std::path::Path::new("area/prompt.md");
     /// let md = Markdown::try_from(path).unwrap();
-    /// let effective = DarkmatterSchemas::new()
+    /// let snapshot = RequestSnapshot::new(std::env::current_dir().unwrap());
+    /// let context = build_resolution_context(&snapshot).unwrap();
+    /// let effective = DarkmatterSchemas::new(context)
     ///     .effective_for(&md)
     ///     .unwrap()
     ///     .unwrap();
@@ -1177,13 +1192,13 @@ impl EffectiveSchema {
                 changed: false,
             };
         };
-        rewrite::rewrite_eager_file_values_in_context(
+        rewrite::rewrite_eager_file_values(
             &self.json_schema,
             frontmatter,
             base_dir,
             self.file_ref_fallback_dir.as_deref(),
             composition_pending,
-            self.file_resolution_context.as_ref(),
+            &self.file_resolution_context,
         )
     }
 }
@@ -1360,6 +1375,22 @@ impl JsonPointer {
     }
 }
 
+impl FileReferenceDiagnostic {
+    /// The failure class, as biscuit-file classifies file-reference errors:
+    /// malformed syntax is [`InvalidReference`], a missing file is
+    /// [`NoMatch`].
+    ///
+    /// [`InvalidReference`]: biscuit_file::ResolutionFailure::InvalidReference
+    /// [`NoMatch`]: biscuit_file::ResolutionFailure::NoMatch
+    pub fn resolution_failure(&self) -> biscuit_file::ResolutionFailure {
+        match self {
+            Self::InvalidSyntax { .. } => biscuit_file::ResolutionFailure::InvalidReference,
+            Self::ResolutionFailed { failure, .. } => *failure,
+            Self::NoMatch { .. } => biscuit_file::ResolutionFailure::NoMatch,
+        }
+    }
+}
+
 fn decode_pointer_segment(segment: &str) -> String {
     segment.replace("~1", "/").replace("~0", "~")
 }
@@ -1382,6 +1413,8 @@ pub enum FileReferenceDiagnostic {
     ResolutionFailed {
         /// The offending raw value.
         raw: String,
+        /// Why it could not be resolved.
+        failure: biscuit_file::ResolutionFailure,
     },
     /// The reference parsed and resolved, but no file exists at the resolved
     /// path.
@@ -1512,6 +1545,7 @@ fn build_arm_validators(
     schema: &Value,
     cache: &ValidatorCache,
     base_dir: &Path,
+    context: &biscuit_file::FileResolutionContext,
 ) -> Result<Option<Vec<Arc<Validator>>>, SchemaError> {
     let Some(arms) = schema.get("anyOf").and_then(Value::as_array) else {
         return Ok(None);
@@ -1519,7 +1553,7 @@ fn build_arm_validators(
     let mut out = Vec::with_capacity(arms.len());
     for arm in arms {
         let arm_schema = validate::wrap_arm_as_root_schema(arm);
-        out.push(cache.validator_for(&arm_schema, Some(base_dir))?);
+        out.push(cache.validator_for(&arm_schema, Some(base_dir), context)?);
     }
     Ok(Some(out))
 }
@@ -1743,13 +1777,15 @@ fn json_to_yaml_value(value: &Value) -> serde_yaml_ng::Value {
     }
 }
 
-fn base_dir_for(source: &Markdown) -> PathBuf {
+/// The directory a document's file values resolve from: its own, else the
+/// request context's `cwd`.
+fn base_dir_for(source: &Markdown, context: &biscuit_file::FileResolutionContext) -> PathBuf {
     match source.source() {
         Some(ComposeSource::File(path)) => path
             .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from(".")),
-        _ => std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .map_or_else(|| context.cwd().to_path_buf(), Path::to_path_buf),
+        _ => context.cwd().to_path_buf(),
     }
 }
 
@@ -1785,7 +1821,7 @@ mod claudine_compat_tests {
     #[test]
     fn validates_inline_schema_success() {
         let md = md_with_schema("$schema:\n  title: 'string(required)'\ntitle: Hello\n");
-        let api = DarkmatterSchemas::new();
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()));
         let report = api.validate(&md).unwrap();
         assert!(report.valid, "expected valid: {:?}", report.problems);
     }
@@ -1793,7 +1829,7 @@ mod claudine_compat_tests {
     #[test]
     fn validates_inline_schema_missing_required() {
         let md = md_with_schema("$schema:\n  title: 'string(required)'\nother: stuff\n");
-        let api = DarkmatterSchemas::new();
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()));
         let report = api.validate(&md).unwrap();
         assert!(!report.valid);
         assert!(!report.problems.is_empty());
@@ -1802,7 +1838,7 @@ mod claudine_compat_tests {
     #[test]
     fn no_schema_no_baseline_is_vacuously_valid() {
         let md = md_with_schema("name: alice\n");
-        let api = DarkmatterSchemas::new();
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()));
         let report = api.validate(&md).unwrap();
         assert!(report.valid);
         assert!(report.problems.is_empty());
@@ -1828,7 +1864,7 @@ mod claudine_compat_tests {
             },
             ..Default::default()
         });
-        let api = DarkmatterSchemas::new().with_baseline(baseline).unwrap();
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir())).with_baseline(baseline).unwrap();
         let report = api.validate(&md).unwrap();
         assert!(!report.valid);
         assert!(
@@ -1859,7 +1895,7 @@ mod claudine_compat_tests {
             },
             ..Default::default()
         });
-        let api = DarkmatterSchemas::new().with_baseline(baseline).unwrap();
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir())).with_baseline(baseline).unwrap();
         let report = api.validate(&md).unwrap();
         assert!(!report.valid);
         assert!(
@@ -1872,7 +1908,7 @@ mod claudine_compat_tests {
 
     #[test]
     fn validator_cache_reuses_across_documents() {
-        let api = DarkmatterSchemas::new();
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()));
         let md1 = md_with_schema("$schema:\n  x: number\nx: 1\n");
         let md2 = md_with_schema("$schema:\n  x: number\nx: 2\n");
         api.validate(&md1).unwrap();
@@ -1883,7 +1919,7 @@ mod claudine_compat_tests {
     #[test]
     fn coerces_boolish_string_against_inline_schema() {
         let md = md_with_schema("$schema:\n  flag: boolean\nflag: \"true\"\n");
-        let api = DarkmatterSchemas::new();
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()));
         let report = api.validate(&md).unwrap();
         assert!(report.valid, "expected valid: {:?}", report.problems);
     }
@@ -1891,7 +1927,7 @@ mod claudine_compat_tests {
     #[test]
     fn coerces_numeric_string_against_inline_schema() {
         let md = md_with_schema("$schema:\n  n: number\nn: \"42\"\n");
-        let api = DarkmatterSchemas::new();
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()));
         let report = api.validate(&md).unwrap();
         assert!(report.valid, "expected valid: {:?}", report.problems);
     }
@@ -1899,7 +1935,7 @@ mod claudine_compat_tests {
     #[test]
     fn ambiguous_string_still_reports_type_problem() {
         let md = md_with_schema("$schema:\n  flag: boolean(required)\nflag: \"yes\"\n");
-        let api = DarkmatterSchemas::new();
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()));
         let report = api.validate(&md).unwrap();
         assert!(!report.valid);
         assert!(
@@ -1935,7 +1971,7 @@ mod claudine_compat_tests {
             },
             ..Default::default()
         });
-        let api = DarkmatterSchemas::new().with_baseline(baseline).unwrap();
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir())).with_baseline(baseline).unwrap();
         let report = api.validate(&md).unwrap();
         assert!(report.valid, "expected valid: {:?}", report.problems);
     }
@@ -1950,7 +1986,7 @@ mod claudine_compat_tests {
             "type": "object",
             "properties": { "flag": {"type": "boolean"} }
         });
-        let api = DarkmatterSchemas::new()
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()))
             .with_baseline_json_schema(raw)
             .unwrap();
         let effective = api.effective_for(&md).unwrap().unwrap();
@@ -1969,7 +2005,7 @@ mod claudine_compat_tests {
         let md = md_with_schema(
             "$schema:\n  title: 'string(required) -> The headline shown in listings'\nother: x\n",
         );
-        let api = DarkmatterSchemas::new();
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()));
         let report = api.validate(&md).unwrap();
         assert!(!report.valid);
         assert!(
@@ -1995,7 +2031,7 @@ mod claudine_compat_tests {
             },
             "required": ["title"]
         });
-        let api = DarkmatterSchemas::new()
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()))
             .with_baseline_json_schema(raw)
             .unwrap();
         let report = api.validate(&md).unwrap();
@@ -2021,7 +2057,7 @@ mod claudine_compat_tests {
                 "title": { "type": "string", "description": "   " }
             }
         });
-        let api = DarkmatterSchemas::new()
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()))
             .with_baseline_json_schema(raw)
             .unwrap();
         let report = api.validate(&md).unwrap();
@@ -2038,45 +2074,20 @@ mod claudine_compat_tests {
 
     // ── file_ref_fallback_dir threading (Phase 2 Track B) ───────────────
 
-    /// RAII guard that restores the process CWD on drop, even on panic.
-    /// Tests that mutate CWD are annotated with
-    /// `#[serial_test::serial("darkmatter-file-cwd")]` to prevent races with
-    /// the ambient-CWD tests in `format::tests` and `validate::tests`.
-    struct CwdGuard {
-        prior: std::path::PathBuf,
-    }
-
-    impl CwdGuard {
-        fn enter(dir: &std::path::Path) -> Self {
-            let prior = std::env::current_dir().expect("read CWD");
-            std::env::set_current_dir(dir).expect("set CWD");
-            Self { prior }
-        }
-    }
-
-    impl Drop for CwdGuard {
-        fn drop(&mut self) {
-            let _ = std::env::set_current_dir(&self.prior);
-        }
-    }
-
     /// A `file`-typed schema property value is **not** resolved via the
     /// captured launch-area fallback (D2): the launch area is not a resolution
     /// input for a reference authored inside the document. A value present only
-    /// under the fallback (and not under the document base or ambient CWD) fails
-    /// validation.
+    /// under the fallback (and not under the context's `cwd`, which anchors this
+    /// sourceless document) fails validation.
     #[test]
-    #[serial_test::serial(darkmatter_file_cwd)]
     fn file_format_does_not_resolve_via_launch_area_fallback() {
         let launch_dir = tempfile::tempdir().expect("tempdir");
         std::fs::write(launch_dir.path().join("spec.md"), "# Spec\n").expect("write spec");
         let unrelated_dir = tempfile::tempdir().expect("tempdir");
 
         let md = md_with_schema("$schema:\n  spec: 'file(eager; required)'\nspec: spec.md\n");
-        let api = DarkmatterSchemas::new()
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(unrelated_dir.path()))
             .with_file_ref_fallback_dir(launch_dir.path().to_path_buf());
-
-        let _cwd = CwdGuard::enter(unrelated_dir.path());
         let report = api.validate(&md).expect("validate");
 
         assert!(
@@ -2086,25 +2097,22 @@ mod claudine_compat_tests {
         );
     }
 
-    /// A `file`-typed schema property value that exists under the ambient CWD
-    /// but NOT under the prompt directory fails validation — proving the
-    /// document base directory (not the ambient CWD, and not the inert
+    /// A `file`-typed schema property value that exists under the context's
+    /// `cwd` but NOT under the prompt directory fails validation — proving the
+    /// document base directory (not the context's `cwd`, and not the inert
     /// launch-area anchor) drives resolution. The prompt has a real file source
-    /// in a third directory so its `base_dir` is distinct from the CWD.
+    /// in a third directory so its `base_dir` is distinct from the `cwd`.
     #[test]
-    #[serial_test::serial(darkmatter_file_cwd)]
     fn file_format_rejects_when_not_under_document_base() {
         let prompt_dir = tempfile::tempdir().expect("tempdir");
         let fallback_dir = tempfile::tempdir().expect("tempdir");
         let cwd_dir = tempfile::tempdir().expect("tempdir");
-        // File exists under CWD but NOT under the prompt dir or the fallback dir.
+        // File exists under the context cwd but NOT under the prompt dir or the fallback dir.
         std::fs::write(cwd_dir.path().join("ambient.md"), "# Ambient\n").expect("write");
 
         let md = prompt_with_source(prompt_dir.path(), "$schema:\n  spec: 'file(eager; required)'\nspec: ambient.md\n");
-        let api = DarkmatterSchemas::new()
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(cwd_dir.path()))
             .with_file_ref_fallback_dir(fallback_dir.path().to_path_buf());
-
-        let _cwd = CwdGuard::enter(cwd_dir.path());
         let report = api.validate(&md).expect("validate");
 
         assert!(
@@ -2134,7 +2142,7 @@ mod claudine_compat_tests {
         .expect("write doc");
 
         let md = Markdown::try_from(doc_path.as_path()).expect("read doc");
-        let api = DarkmatterSchemas::new()
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(doc_dir.path()))
             .with_file_ref_fallback_dir(fallback_dir.path().to_path_buf());
         let report = api.validate(&md).expect("validate");
         assert!(
@@ -2163,7 +2171,7 @@ mod claudine_compat_tests {
         .expect("write doc");
 
         let md = Markdown::try_from(doc_path.as_path()).expect("read doc");
-        let api = DarkmatterSchemas::new()
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(doc_dir.path()))
             .with_file_ref_fallback_dir(fallback_dir.path().to_path_buf());
         let report = api.validate(&md).expect("validate");
         assert!(
@@ -2183,7 +2191,6 @@ mod claudine_compat_tests {
     /// Captured launch metadata does not displace a valid source-local
     /// candidate when no repository candidate exists.
     #[test]
-    #[serial_test::serial(darkmatter_file_cwd)]
     fn file_property_ignores_launch_copy_when_source_exists() {
         let prompt_dir = tempfile::tempdir().expect("tempdir");
         let fallback_dir = tempfile::tempdir().expect("tempdir");
@@ -2192,10 +2199,8 @@ mod claudine_compat_tests {
         std::fs::write(fallback_dir.path().join("spec.md"), "# fallback copy\n").expect("write fallback spec");
 
         let md = prompt_with_source(prompt_dir.path(), "$schema:\n  spec: 'file(eager; required)'\nspec: spec.md\n");
-        let api = DarkmatterSchemas::new()
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(unrelated.path()))
             .with_file_ref_fallback_dir(fallback_dir.path().to_path_buf());
-
-        let _cwd = CwdGuard::enter(unrelated.path());
         let report = api.validate(&md).expect("validate");
         assert!(
             report.valid,
@@ -2205,9 +2210,8 @@ mod claudine_compat_tests {
     }
 
     /// A source-local `file` value validates when no repository candidate
-    /// exists, independently of captured launch metadata and ambient CWD.
+    /// exists, independently of captured launch metadata and the context's `cwd`.
     #[test]
-    #[serial_test::serial(darkmatter_file_cwd)]
     fn file_property_present_only_in_prompt_dir_validates() {
         let prompt_dir = tempfile::tempdir().expect("tempdir");
         let fallback_dir = tempfile::tempdir().expect("tempdir");
@@ -2215,10 +2219,8 @@ mod claudine_compat_tests {
         std::fs::write(prompt_dir.path().join("local.md"), "# local\n").expect("write local");
 
         let md = prompt_with_source(prompt_dir.path(), "$schema:\n  spec: 'file(eager; required)'\nspec: ./local.md\n");
-        let api = DarkmatterSchemas::new()
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(unrelated.path()))
             .with_file_ref_fallback_dir(fallback_dir.path().to_path_buf());
-
-        let _cwd = CwdGuard::enter(unrelated.path());
         let report = api.validate(&md).expect("validate");
         assert!(
             report.valid,
@@ -2230,9 +2232,8 @@ mod claudine_compat_tests {
     /// A `file` value that exists ONLY under the launch-area fallback (not the
     /// prompt directory) does **not** validate: per D2 the launch area is not a
     /// resolution input for a document-authored reference. Independent of the
-    /// ambient CWD.
+    /// context's `cwd`.
     #[test]
-    #[serial_test::serial(darkmatter_file_cwd)]
     fn file_property_present_only_in_fallback_does_not_validate() {
         let prompt_dir = tempfile::tempdir().expect("tempdir");
         let fallback_dir = tempfile::tempdir().expect("tempdir");
@@ -2240,10 +2241,8 @@ mod claudine_compat_tests {
         std::fs::write(fallback_dir.path().join("caller.md"), "# caller\n").expect("write caller");
 
         let md = prompt_with_source(prompt_dir.path(), "$schema:\n  spec: 'file(eager; required)'\nspec: caller.md\n");
-        let api = DarkmatterSchemas::new()
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(unrelated.path()))
             .with_file_ref_fallback_dir(fallback_dir.path().to_path_buf());
-
-        let _cwd = CwdGuard::enter(unrelated.path());
         let report = api.validate(&md).expect("validate");
         assert!(
             !report.valid,
@@ -2253,11 +2252,10 @@ mod claudine_compat_tests {
     }
 
     /// Guard: with both a prompt-dir anchor and a fallback configured, a value
-    /// that exists ONLY under the process CWD (neither the prompt dir nor the
-    /// fallback) must NOT validate — there is no ambient-CWD rung on the
-    /// production path.
+    /// that exists ONLY under the context's `cwd` (neither the prompt dir nor
+    /// the fallback) must NOT validate — a sourced document never falls back to
+    /// the `cwd`.
     #[test]
-    #[serial_test::serial(darkmatter_file_cwd)]
     fn file_property_present_only_in_cwd_does_not_validate() {
         let prompt_dir = tempfile::tempdir().expect("tempdir");
         let fallback_dir = tempfile::tempdir().expect("tempdir");
@@ -2265,14 +2263,12 @@ mod claudine_compat_tests {
         std::fs::write(cwd_dir.path().join("ambient.md"), "# ambient\n").expect("write ambient");
 
         let md = prompt_with_source(prompt_dir.path(), "$schema:\n  spec: 'file(eager; required)'\nspec: ambient.md\n");
-        let api = DarkmatterSchemas::new()
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(cwd_dir.path()))
             .with_file_ref_fallback_dir(fallback_dir.path().to_path_buf());
-
-        let _cwd = CwdGuard::enter(cwd_dir.path());
         let report = api.validate(&md).expect("validate");
         assert!(
             !report.valid,
-            "a file value found only under the ambient CWD must NOT validate: {:?}",
+            "a file value found only under the context cwd must NOT validate: {:?}",
             report.problems,
         );
     }
@@ -2289,7 +2285,7 @@ mod claudine_compat_tests {
         let path = dir.join("prompt.md");
         std::fs::write(&path, format!("---\n{frontmatter}---\nbody\n")).expect("write prompt");
         let md = Markdown::try_from(path.as_path()).expect("read prompt");
-        DarkmatterSchemas::new()
+        DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(dir))
             .effective_for(&md)
             .expect("effective_for")
             .expect("schema present")
@@ -2421,7 +2417,7 @@ mod claudine_compat_tests {
         .expect("write prompt");
 
         let md = Markdown::try_from(prompt_path.as_path()).expect("read prompt");
-        let api = DarkmatterSchemas::new();
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(dir.path()));
         let report = api.validate(&md).expect("validate");
         assert!(report.valid, "expected valid: {:?}", report.problems);
         // The stored frontmatter still carries the raw reference — the
@@ -2444,7 +2440,7 @@ mod claudine_compat_tests {
         .expect("write prompt");
 
         let md = Markdown::try_from(prompt_path.as_path()).expect("read prompt");
-        let report = DarkmatterSchemas::new().validate(&md).expect("validate");
+        let report = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(dir.path())).validate(&md).expect("validate");
         assert!(report.valid, "expected valid: {:?}", report.problems);
         assert_eq!(
             md.frontmatter().as_map().get("spec"),
@@ -2494,7 +2490,7 @@ mod claudine_compat_tests {
         let baseline = baseline_from_yaml(
             "ctx:\n  today: \"date(generated; required) -> today's date, host-supplied\"",
         );
-        let api = DarkmatterSchemas::new()
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()))
             .with_baseline(baseline)
             .expect("baseline converts");
 
@@ -2513,7 +2509,7 @@ mod claudine_compat_tests {
         let baseline = baseline_from_yaml(
             "ctx:\n  today: \"date(generated; required) -> today's date, host-supplied\"",
         );
-        let api = DarkmatterSchemas::new()
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()))
             .with_baseline(baseline)
             .expect("baseline converts");
 
@@ -2544,7 +2540,7 @@ mod claudine_compat_tests {
         let baseline = baseline_from_yaml(
             "ctx:\n  today: \"date(generated; required) -> today's date, host-supplied\"",
         );
-        let api = DarkmatterSchemas::new()
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()))
             .with_baseline(baseline)
             .expect("baseline converts");
 
@@ -2642,7 +2638,7 @@ mod claudine_compat_tests {
     /// conflict (Non-Goal 5; spec testing requirement 6).
     #[test]
     fn document_schema_overrides_baseline_title() {
-        let api = DarkmatterSchemas::new()
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()))
             .with_baseline(super::darkmatter_base_schema())
             .expect("baseline converts");
 
@@ -2662,7 +2658,7 @@ mod claudine_compat_tests {
 
     fn effective_number_field() -> EffectiveSchema {
         let md = md_with_schema("$schema:\n  n: number\n");
-        DarkmatterSchemas::new()
+        DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()))
             .effective_for(&md)
             .expect("effective_for")
             .expect("schema present")
@@ -2757,7 +2753,7 @@ mod claudine_compat_tests {
     fn origins_attribute_document_and_baseline_properties() {
         let md = md_with_schema("$schema:\n  title: 'string(required)'\ntitle: hi\n");
         let baseline = baseline_from_yaml("owner: 'string(required)'");
-        let api = DarkmatterSchemas::new().with_baseline(baseline).unwrap();
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir())).with_baseline(baseline).unwrap();
         let effective = api.effective_for(&md).unwrap().unwrap();
         assert_eq!(
             effective.origins.get("title").map(|o| o.kind),
@@ -2784,7 +2780,7 @@ mod claudine_compat_tests {
         )
         .unwrap();
         let md = Markdown::try_from(doc_path.as_path()).unwrap();
-        let effective = DarkmatterSchemas::new()
+        let effective = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(dir.path()))
             .effective_for(&md)
             .unwrap()
             .unwrap();
@@ -2814,7 +2810,7 @@ mod claudine_compat_tests {
             dir.path(),
             "$schema:\n  value: type@./types.yaml\n  today: \"date(example(./today-example.yaml))\"\nvalue: a\n",
         );
-        let effective = DarkmatterSchemas::new()
+        let effective = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(dir.path()))
             .effective_for(&md)
             .unwrap()
             .unwrap();
@@ -2846,7 +2842,7 @@ mod claudine_compat_tests {
         )
         .expect("write schema");
         let md = prompt_with_source(dir.path(), "$schema: ./schema.yaml\ntitle: hi\n");
-        let effective = DarkmatterSchemas::new()
+        let effective = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(dir.path()))
             .effective_for(&md)
             .unwrap()
             .unwrap();
@@ -2882,8 +2878,7 @@ mod claudine_compat_tests {
 
         // SAFETY: this test is serialized while mutating process-global state.
         unsafe { std::env::set_var("DARKMATTER_SCHEMA_ROOT", ambient.path()) };
-        let effective = DarkmatterSchemas::new()
-            .with_file_resolution_context(snapshot)
+        let effective = DarkmatterSchemas::new(snapshot)
             .effective_for(&md);
         match prior {
             Some(value) => unsafe { std::env::set_var("DARKMATTER_SCHEMA_ROOT", value) },
@@ -2905,7 +2900,7 @@ mod claudine_compat_tests {
     fn dependencies_empty_without_imports_or_examples() {
         // The no-dependency fast path: a plain inline `$schema` records no edges.
         let md = md_with_schema("$schema:\n  title: 'string(required)'\ntitle: hi\n");
-        let effective = DarkmatterSchemas::new()
+        let effective = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()))
             .effective_for(&md)
             .unwrap()
             .unwrap();
@@ -3001,7 +2996,7 @@ mod phase4_trigger_assembly {
             },
             ..Default::default()
         });
-        let api = DarkmatterSchemas::new()
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(root))
             .with_baseline(baseline)
             .unwrap()
             .with_trigger_discovery(&doc_path, root)
@@ -3042,7 +3037,7 @@ mod phase4_trigger_assembly {
              ---\nbody\n",
         );
 
-        let api = DarkmatterSchemas::new()
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(root))
             .with_trigger_discovery(&doc_path, root)
             .unwrap();
 
@@ -3080,7 +3075,7 @@ mod phase4_trigger_assembly {
              ---\nbody\n",
         );
 
-        let api = DarkmatterSchemas::new()
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(root))
             .with_trigger_discovery(&doc_path, root)
             .unwrap();
 
@@ -3111,7 +3106,7 @@ mod phase4_trigger_assembly {
              ---\nbody\n",
         );
 
-        let api = DarkmatterSchemas::new()
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(root))
             .with_trigger_discovery(&doc_path, root)
             .unwrap();
 
@@ -3155,7 +3150,7 @@ mod phase4_trigger_assembly {
              ---\nbody\n",
         );
 
-        let api = DarkmatterSchemas::new()
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(root))
             .with_trigger_discovery(&doc_path, root)
             .unwrap();
 
@@ -3190,7 +3185,7 @@ mod phase4_trigger_assembly {
         let doc_path = root.join("doc.md");
         write(&doc_path, "---\nprompt: hello\n---\nbody\n");
 
-        let err = DarkmatterSchemas::new()
+        let err = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(root))
             .with_trigger_discovery(&doc_path, root)
             .err()
             .expect("non-mergeable payload must fail at scan time");
@@ -3220,7 +3215,7 @@ mod phase4_trigger_assembly {
              ---\nbody\n",
         );
 
-        let api = DarkmatterSchemas::new()
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(root))
             .with_trigger_discovery(&doc_path, root)
             .unwrap();
 
@@ -3249,7 +3244,7 @@ mod phase4_trigger_assembly {
         let doc_path = root.join("doc.md");
         write(&doc_path, "---\nprompt: hello\n---\nbody\n");
 
-        let err = DarkmatterSchemas::new()
+        let err = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(root))
             .with_trigger_discovery(&doc_path, root)
             .err()
             .expect("self-referencing payload must fail at scan time");
@@ -3281,7 +3276,7 @@ mod phase4_trigger_assembly {
         let doc_path = root.join("doc.md");
         write(&doc_path, "---\nprompt: hello\n---\nbody\n");
 
-        let err = DarkmatterSchemas::new()
+        let err = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(root))
             .with_trigger_discovery(&doc_path, root)
             .err()
             .expect("payload referencing a trigger must fail at scan time");
@@ -3311,7 +3306,7 @@ mod phase4_trigger_assembly {
              ---\nbody\n",
         );
 
-        let api = DarkmatterSchemas::new()
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(root))
             .with_trigger_discovery(&doc_path, root)
             .unwrap();
 
@@ -3347,7 +3342,7 @@ mod phase4_trigger_assembly {
              ---\nbody\n",
         );
 
-        let api = DarkmatterSchemas::new()
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(root))
             .with_trigger_discovery(&doc_path, root)
             .unwrap();
 
@@ -3401,7 +3396,7 @@ mod phase4_trigger_assembly {
             "$schema:\n  doc_prop: 'string(required)'\n",
         );
 
-        let api = DarkmatterSchemas::new()
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(root))
             .with_trigger_discovery(&doc_path, root)
             .unwrap();
 
@@ -3449,8 +3444,8 @@ mod phase4_trigger_assembly {
         );
 
         // Build the registry separately (simulating DMLS per-boundary caching).
-        let registry = triggers::scan(&doc_path, root).unwrap();
-        let api = DarkmatterSchemas::new().with_trigger_registry(registry);
+        let registry = triggers::scan(&doc_path, root, &biscuit_file::FileResolutionContext::new(root)).unwrap();
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(root)).with_trigger_registry(registry);
 
         let effective = api.effective_for(&md_from_file(&doc_path))
             .unwrap()
@@ -3482,7 +3477,7 @@ mod phase4_trigger_assembly {
              ---\nbody\n",
         );
 
-        let api = DarkmatterSchemas::new();
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(root));
         // No trigger discovery → no effective schema (no $schema, no baseline).
         let effective = api.effective_for(&md_from_file(&doc_path)).unwrap();
         assert!(
@@ -3511,7 +3506,7 @@ mod phase4_trigger_assembly {
              ---\nbody\n",
         );
 
-        let api = DarkmatterSchemas::new()
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(root))
             .with_trigger_discovery(&doc_path, root)
             .unwrap();
 
@@ -3566,7 +3561,7 @@ mod phase4_trigger_assembly {
             },
             ..Default::default()
         });
-        let api = DarkmatterSchemas::new()
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(root))
             .with_baseline(baseline)
             .unwrap()
             .with_trigger_discovery(&doc_path, root)

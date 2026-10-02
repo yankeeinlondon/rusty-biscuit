@@ -543,7 +543,6 @@ mod schema_validation_integration {
             .with_source_path(prompt);
         let options = ComposeOptions::new()
             .with_source_file(prompt)
-            .with_file_resolution_context(context)
             .with_file_ref_fallback_dir(launch_dir)
             .with_set_overrides(overrides)
             .with_exclude_keys(exclude_keys)
@@ -553,7 +552,7 @@ mod schema_validation_integration {
             ]);
         Markdown::try_from(prompt)
             .unwrap()
-            .compose_with(&crate::markdown::compose::test_request(options))
+            .compose_with(&crate::markdown::compose::test_request_in(options, context))
             .unwrap()
             .0
     }
@@ -693,9 +692,8 @@ mod schema_validation_integration {
         let composed = Markdown::try_from(prompt.as_path())
             .unwrap()
             .compose_with(
-                &crate::markdown::compose::test_request(ComposeOptions::new()
+                &crate::markdown::compose::test_request_in(ComposeOptions::new()
                     .with_source_file(&prompt)
-                    .with_file_resolution_context(context)
                     .with_set_overrides(serde_json::json!({
                         "spec": "fixes/stable/spec.md"
                     }))
@@ -705,7 +703,7 @@ mod schema_validation_integration {
                         ComposeOperation::FrontmatterInterpolation,
                         ComposeOperation::FrontmatterShellExpansion,
                         ComposeOperation::Interpolation,
-                    ])),
+                    ]), context),
             )
             .expect("post-shell validation should retain the caller projection")
             .0;
@@ -753,10 +751,12 @@ mod schema_validation_integration {
         let context = biscuit_file::FileResolutionContext::new(&launch)
             .with_repository_root(repo.path())
             .with_source_path(&prompt);
-        let options = ComposeOptions::new()
-            .with_source_file(&prompt)
-            .with_file_resolution_context(context)
-            .with_set_overrides(serde_json::json!({ "spec": "spec.md" }));
+        let options = crate::markdown::compose::test_request_in(
+            ComposeOptions::new()
+                .with_source_file(&prompt)
+                .with_set_overrides(serde_json::json!({ "spec": "spec.md" })),
+            context,
+        );
         let mut markdown = Markdown::try_from(prompt.as_path()).unwrap();
         markdown
             .frontmatter_mut()
@@ -837,9 +837,8 @@ mod schema_validation_integration {
         let composed = Markdown::try_from(prompt.as_path())
             .unwrap()
             .compose_with(
-                &crate::markdown::compose::test_request(ComposeOptions::new()
+                &crate::markdown::compose::test_request_in(ComposeOptions::new()
                     .with_source_file(&prompt)
-                    .with_file_resolution_context(context)
                     .with_baseline_schema(baseline)
                     .with_set_overrides(serde_json::json!({
                         "spec": "fixes/layered/spec.md"
@@ -847,7 +846,7 @@ mod schema_validation_integration {
                     .only(&[
                         ComposeOperation::FrontmatterInterpolation,
                         ComposeOperation::Interpolation,
-                    ])),
+                    ]), context),
             )
             .expect("baseline and document schemas should form one effective projection")
             .0;
@@ -895,16 +894,15 @@ mod schema_validation_integration {
         let composed = Markdown::try_from(prompt.as_path())
             .unwrap()
             .compose_with(
-                &crate::markdown::compose::test_request(ComposeOptions::new()
+                &crate::markdown::compose::test_request_in(ComposeOptions::new()
                     .with_source_file(&prompt)
-                    .with_file_resolution_context(context)
                     .with_set_overrides(serde_json::json!({
                         "spec": "fixes/context-only/spec.md"
                     }))
                     .only(&[
                         ComposeOperation::FrontmatterInterpolation,
                         ComposeOperation::Interpolation,
-                    ])),
+                    ]), context),
             )
             .expect("the request context should be sufficient caller provenance")
             .0;
@@ -960,15 +958,14 @@ mod schema_validation_integration {
             Markdown::try_from(prompt)
                 .unwrap()
                 .compose_with(
-                    &crate::markdown::compose::test_request(ComposeOptions::new()
+                    &crate::markdown::compose::test_request_in(ComposeOptions::new()
                         .with_source_file(prompt)
-                        .with_file_resolution_context(origin.for_source(prompt))
                         .with_set_overrides(serde_json::json!({ "spec": raw }))
                         .with_caller_input_records(records.clone())
                         .only(&[
                             ComposeOperation::FrontmatterInterpolation,
                             ComposeOperation::Interpolation,
-                        ])),
+                        ]), origin.for_source(prompt)),
                 )
                 .unwrap()
                 .0
@@ -1274,15 +1271,14 @@ mod schema_validation_integration {
         let composed = Markdown::try_from(prompt.as_path())
             .unwrap()
             .compose_with(
-                &crate::markdown::compose::test_request(ComposeOptions::new()
+                &crate::markdown::compose::test_request_in(ComposeOptions::new()
                     .with_source_file(&prompt)
-                    .with_file_resolution_context(origin.for_source(&prompt))
                     .with_set_overrides(serde_json::json!({ "spec": "spec.md" }))
                     .with_caller_input_records(records)
                     .only(&[
                         ComposeOperation::FrontmatterInterpolation,
                         ComposeOperation::Interpolation,
-                    ])),
+                    ]), origin.for_source(&prompt)),
             )
             .unwrap()
             .0;
@@ -1356,9 +1352,8 @@ mod schema_validation_integration {
         let composed = Markdown::try_from(prompt.as_path())
             .unwrap()
             .compose_with(
-                &crate::markdown::compose::test_request(ComposeOptions::new()
+                &crate::markdown::compose::test_request_in(ComposeOptions::new()
                     .with_source_file(&prompt)
-                    .with_file_resolution_context(document_context)
                     .with_set_overrides(serde_json::json!({
                         "first": "first.md",
                         "second": "second.md",
@@ -1367,7 +1362,7 @@ mod schema_validation_integration {
                     .only(&[
                         ComposeOperation::FrontmatterInterpolation,
                         ComposeOperation::Interpolation,
-                    ])),
+                    ]), document_context),
             )
             .unwrap()
             .0;
@@ -1506,15 +1501,14 @@ mod schema_validation_integration {
             let error = Markdown::try_from(prompt.as_path())
                 .unwrap()
                 .compose_with(
-                    &crate::markdown::compose::test_request(ComposeOptions::new()
+                    &crate::markdown::compose::test_request_in(ComposeOptions::new()
                         .with_source_file(&prompt)
-                        .with_file_resolution_context(context)
                         .with_file_ref_fallback_dir(&launch)
                         .with_set_overrides(serde_json::json!({ "spec": "spec.md" }))
                         .only(&[
                             ComposeOperation::FrontmatterInterpolation,
                             ComposeOperation::Interpolation,
-                        ])),
+                        ]), context),
                 )
                 .expect_err("a changed root-union file mode must fail closed");
             assert!(
@@ -1557,9 +1551,8 @@ mod schema_validation_integration {
         let error = Markdown::try_from(prompt.as_path())
             .unwrap()
             .compose_with(
-                &crate::markdown::compose::test_request(ComposeOptions::new()
+                &crate::markdown::compose::test_request_in(ComposeOptions::new()
                     .with_source_file(&prompt)
-                    .with_file_resolution_context(context)
                     .with_file_ref_fallback_dir(&launch)
                     .with_set_overrides(serde_json::json!({ "spec": "spec.md" }))
                     .with_pre_approved_commands(["echo text".to_string()].into_iter().collect())
@@ -1567,7 +1560,7 @@ mod schema_validation_integration {
                         ComposeOperation::FrontmatterInterpolation,
                         ComposeOperation::FrontmatterShellExpansion,
                         ComposeOperation::Interpolation,
-                    ])),
+                    ]), context),
             )
             .expect_err("post-shell root-union file-mode drift must fail closed");
         assert!(
@@ -1658,15 +1651,14 @@ mod schema_validation_integration {
             Markdown::try_from(self.prompt.as_path())
                 .unwrap()
                 .compose_with(
-                    &crate::markdown::compose::test_request(ComposeOptions::new()
+                    &crate::markdown::compose::test_request_in(ComposeOptions::new()
                         .with_source_file(&self.prompt)
-                        .with_file_resolution_context(context)
                         .with_file_ref_fallback_dir(&self.launch)
                         .with_set_overrides(overrides)
                         .only(&[
                             ComposeOperation::FrontmatterInterpolation,
                             ComposeOperation::Interpolation,
-                        ])),
+                        ]), context),
                 )
                 .map(|(composed, _)| composed)
         }
@@ -1841,15 +1833,14 @@ mod schema_validation_integration {
         let error = Markdown::try_from(prompt.as_path())
             .unwrap()
             .compose_with(
-                &crate::markdown::compose::test_request(ComposeOptions::new()
+                &crate::markdown::compose::test_request_in(ComposeOptions::new()
                     .with_source_file(&prompt)
-                    .with_file_resolution_context(context)
                     .with_file_ref_fallback_dir(&launch)
                     .with_set_overrides(serde_json::json!({ "spec": "spec.md" }))
                     .only(&[
                         ComposeOperation::FrontmatterInterpolation,
                         ComposeOperation::Interpolation,
-                    ])),
+                    ]), context),
             )
             .expect_err("normal validation must reject a zero-match root union");
         assert!(matches!(error, MarkdownError::SchemaValidationFailed { .. }));
@@ -1899,7 +1890,7 @@ mod schema_validation_integration {
         assert!(problems[0].message.contains("file(eager)"));
         assert!(matches!(
             problems[0].file_reference,
-            Some(FileReferenceDiagnostic::ResolutionFailed { ref raw }) if raw == "%spec.md"
+            Some(FileReferenceDiagnostic::ResolutionFailed { ref raw, .. }) if raw == "%spec.md"
         ));
     }
 
@@ -2267,13 +2258,12 @@ mod schema_validation_integration {
         let composed = Markdown::try_from(prompt.as_path())
             .unwrap()
             .compose_with(
-                &crate::markdown::compose::test_request(ComposeOptions::new()
+                &crate::markdown::compose::test_request_in(ComposeOptions::new()
                     .with_source_file(&prompt)
-                    .with_file_resolution_context(context)
                     .only(&[
                         ComposeOperation::FrontmatterInterpolation,
                         ComposeOperation::Interpolation,
-                    ])),
+                    ]), context),
             )
             .unwrap()
             .0;
@@ -2321,9 +2311,8 @@ mod schema_validation_integration {
             let err = Markdown::try_from(prompt.as_path())
                 .unwrap()
                 .compose_with(
-                    &crate::markdown::compose::test_request(ComposeOptions::new()
+                    &crate::markdown::compose::test_request_in(ComposeOptions::new()
                         .with_source_file(&prompt)
-                        .with_file_resolution_context(context)
                         .with_file_ref_fallback_dir(&package)
                         .with_set_overrides(serde_json::json!({ "spec": "spec.md" }))
                         .with_trigger_schemas(true)
@@ -2331,7 +2320,7 @@ mod schema_validation_integration {
                             ComposeOperation::FrontmatterInterpolation,
                             ComposeOperation::FrontmatterShellExpansion,
                             ComposeOperation::Interpolation,
-                        ])),
+                        ]), context),
                 )
                 .expect_err("phase-unstable caller file typing must fail closed");
             assert!(
@@ -2368,15 +2357,14 @@ mod schema_validation_integration {
             let err = Markdown::try_from(prompt.as_path())
                 .unwrap()
                 .compose_with(
-                    &crate::markdown::compose::test_request(ComposeOptions::new()
+                    &crate::markdown::compose::test_request_in(ComposeOptions::new()
                         .with_source_file(&prompt)
-                        .with_file_resolution_context(context)
                         .with_file_ref_fallback_dir(&package)
                         .with_set_overrides(serde_json::json!({ "spec": raw }))
                         .only(&[
                             ComposeOperation::FrontmatterInterpolation,
                             ComposeOperation::Interpolation,
-                        ])),
+                        ]), context),
                 )
                 .expect_err("invalid eager caller input must fail before interpolation");
             let MarkdownError::SchemaValidationFailed { problems, .. } = err else {

@@ -235,7 +235,7 @@ use super::pipeline::operations::COMPOSE_OPERATION_DESCRIPTORS;
 
     #[test]
     fn test_compose_context_capture() {
-        let ctx = ComposeContext::capture();
+        let ctx = ComposeContext::capture_for_dir(&std::env::current_dir().unwrap());
 
         // Should have reasonable values
         assert!(ctx.year().parse::<i32>().is_ok());

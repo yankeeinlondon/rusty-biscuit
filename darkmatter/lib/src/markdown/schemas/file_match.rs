@@ -162,19 +162,19 @@ pub(crate) fn file_match_patterns(definition: &PropertyDef) -> Option<&[String]>
 #[must_use]
 pub fn file_match_admits(value: &str, patterns: &[String], origin: &FileResolutionContext) -> bool {
     FileMatchGlobs::compile(patterns).is_none_or(|globs| {
-        admits(&globs, value, Some(origin.cwd()), None, Some(origin))
+        admits(&globs, value, Some(origin.cwd()), None, origin)
     })
 }
 
-/// Resolution matches the `darkmatter-file` format's: from `base_dir` when
-/// the validator has a document anchor, otherwise from the process directory,
-/// which then also anchors the glob.
+/// Resolution matches the `darkmatter-file` format's: from `base_dir`, else
+/// the context's `cwd`. Without `base_dir` the glob is still anchored at the
+/// process directory; glob references replace this function and that read.
 fn admits(
     globs: &FileMatchGlobs,
     value: &str,
     base_dir: Option<&Path>,
     fallback: Option<&Path>,
-    context: Option<&FileResolutionContext>,
+    context: &FileResolutionContext,
 ) -> bool {
     if crate::markdown::literal_token::holds_pending_syntax(value) {
         return true;
@@ -195,11 +195,9 @@ fn admits(
     if let Some(fallback) = fallback {
         push(fallback);
     }
-    if let Some(context) = context {
-        push(context.launch_magic_scope().request_dir());
-    }
+    push(context.launch_magic_scope().request_dir());
     push(base_dir);
-    if let Some(root) = context.and_then(FileResolutionContext::repository_root) {
+    if let Some(root) = context.repository_root() {
         push(root);
     }
     globs.admits_path(&path, &anchors)
@@ -208,11 +206,11 @@ fn admits(
 type KeywordResult<'a> = Result<Box<dyn for<'i> Keyword<'i>>, ValidationError<'a>>;
 
 /// Factory for [`DARKMATTER_MATCH_KEYWORD`], judging values from the
-/// validator's anchors (see [`admits`]).
+/// validator's anchors (see [`admits`]). A structural validator judges only
+/// an absolute path naming an existing file (by its full path) and admits
+/// every value whose meaning needs a context.
 pub(crate) fn match_keyword_factory(
-    base_dir: Option<PathBuf>,
-    fallback: Option<PathBuf>,
-    context: Option<FileResolutionContext>,
+    file_values: super::validate::FileValues,
 ) -> impl for<'a> Fn(&'a Map<String, Value>, &'a Value, Location) -> KeywordResult<'a>
 + Send
 + Sync
@@ -232,9 +230,7 @@ pub(crate) fn match_keyword_factory(
         Ok(Box::new(MatchKeyword {
             globs,
             patterns,
-            base_dir: base_dir.clone(),
-            fallback: fallback.clone(),
-            context: context.clone(),
+            file_values: file_values.clone(),
         }))
     }
 }
@@ -242,20 +238,20 @@ pub(crate) fn match_keyword_factory(
 struct MatchKeyword {
     globs: FileMatchGlobs,
     patterns: Vec<String>,
-    base_dir: Option<PathBuf>,
-    fallback: Option<PathBuf>,
-    context: Option<FileResolutionContext>,
+    file_values: super::validate::FileValues,
 }
 
 impl MatchKeyword {
     fn check(&self, value: &str) -> bool {
-        admits(
-            &self.globs,
-            value,
-            self.base_dir.as_deref(),
-            self.fallback.as_deref(),
-            self.context.as_ref(),
-        )
+        match &self.file_values {
+            // An absolute path needs no anchor: it is judged by its full path.
+            super::validate::FileValues::Syntax => super::format::context_free_path(value)
+                .filter(|path| path.exists())
+                .is_none_or(|path| self.globs.admits_path(&path, &[])),
+            super::validate::FileValues::Resolved { base_dir, fallback, context } => {
+                admits(&self.globs, value, base_dir.as_deref(), fallback.as_deref(), context)
+            }
+        }
     }
 }
 

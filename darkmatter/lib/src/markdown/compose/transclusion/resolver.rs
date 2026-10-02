@@ -1,7 +1,6 @@
 //! Path and URL resolution for transclusion references.
 
 use super::types::{DirectiveKind, ResolvedTarget, TransclusionError};
-use crate::markdown::compose::util::document_resolution_context;
 use crate::markdown::compose::{ComposeSource, TransclusionOptions};
 use crate::markdown::compose::context::options::{SourceOpening, source_file_context};
 use biscuit_file::{FileReference, FileReferenceError, FileReferenceKind};
@@ -72,7 +71,7 @@ fn resolve_url_target(
 /// Resolves a local filesystem path.
 ///
 /// Every non-URL target is parsed by [`FileReference`] and resolved through the
-/// shared document-backed context ([`document_resolution_context`]): explicit
+/// request's context derived for the source document: explicit
 /// `./`/`../` from the source document's directory only, implicit bare paths
 /// source directory first then the repository root, `~`/`~/…` against the user's
 /// home, `@` (magic), `&` (repository-root), `^` (repository-scoped), `vault:`,
@@ -152,36 +151,22 @@ fn resolve_file_reference(
         file_ref.class().kind,
         FileReferenceKind::Absolute | FileReferenceKind::Home | FileReferenceKind::Url
     );
-    let cwd = match source_file_dir(source) {
-        Some(dir) => dir,
-        None if needs_base => {
-            return Err(TransclusionError::MissingSourceContext {
-                reference: raw_target.to_string(),
-                line,
-            });
-        }
-        // Absolute/home references ignore the base; a neutral one anchors the
-        // context without reading the ambient CWD for candidate construction.
-        None => PathBuf::from("."),
-    };
-    let resolution_ctx = match options.file_resolution_context.as_ref() {
-        Some(snapshot) => match source_file_path(source) {
-            Some(path) => source_file_context(
-                snapshot,
-                &path,
-                options.source_derivation,
-                options.source_opening.as_ref(),
-            ),
-            // A pathless source lives in the request's `cwd`; the local `cwd`
-            // is only the neutral `.` placeholder here.
-            None => snapshot.clone(),
-        },
-        None => document_resolution_context(
-            &cwd,
-            source_file_path(source).as_deref(),
-            &[],
-            None,
+    if needs_base && source_file_dir(source).is_none() {
+        return Err(TransclusionError::MissingSourceContext {
+            reference: raw_target.to_string(),
+            line,
+        });
+    }
+    let snapshot = &options.file_resolution_context;
+    let resolution_ctx = match source_file_path(source) {
+        Some(path) => source_file_context(
+            snapshot,
+            &path,
+            options.source_derivation,
+            options.source_opening.as_ref(),
         ),
+        // A pathless source lives in the request's `cwd`.
+        None => snapshot.clone(),
     };
 
     let path = file_ref
@@ -356,9 +341,7 @@ mod tests {
             request.path().display().to_string(),
         );
         let mut options = default_options();
-        options.file_resolution_context = Some(
-            biscuit_file::FileResolutionContext::new(request.path()).with_env(env),
-        );
+        options.file_resolution_context = biscuit_file::FileResolutionContext::new(request.path()).with_env(env);
         // SAFETY: this test is serialized while mutating process-global state.
         unsafe { std::env::set_var("DARKMATTER_TRANSCLUSION_ROOT", ambient.path()) };
         let resolved = resolve_path(
@@ -404,12 +387,10 @@ mod tests {
         std::fs::write(&package_target, "# package").unwrap();
 
         let mut options = default_options();
-        options.file_resolution_context = Some(
-            crate::markdown::compose::build_resolution_context(
+        options.file_resolution_context = crate::markdown::compose::build_resolution_context(
                 &crate::markdown::compose::RequestSnapshot::new(source_path.parent().expect("source parent")),
             )
-            .unwrap(),
-        );
+            .unwrap();
         let resolved = resolve_path(
             "^shared.md",
             DirectiveKind::File,
@@ -459,12 +440,10 @@ mod tests {
         std::fs::write(&target_path, "# shared").unwrap();
 
         let mut options = default_options();
-        options.file_resolution_context = Some(
-            crate::markdown::compose::build_resolution_context(
+        options.file_resolution_context = crate::markdown::compose::build_resolution_context(
                 &crate::markdown::compose::RequestSnapshot::new(&nested),
             )
-            .unwrap(),
-        );
+            .unwrap();
 
         let resolved = resolve_path(
             "@/shared.md",
@@ -571,8 +550,7 @@ mod tests {
         let snapshot = crate::markdown::compose::RequestSnapshot::new(&root)
             .with_magic_root(&magic_dir, biscuit_file::PathPosition::Start);
         let mut opts = default_options();
-        opts.file_resolution_context =
-            Some(crate::markdown::compose::build_resolution_context(&snapshot).unwrap());
+        opts.file_resolution_context = crate::markdown::compose::build_resolution_context(&snapshot).unwrap();
 
         let resolved = resolve_path(
             "@/special.md",

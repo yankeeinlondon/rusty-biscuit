@@ -21,7 +21,6 @@ use serde_json::Value;
 
 use crate::markdown::Markdown;
 use crate::markdown::compose::ComposeOperation;
-use crate::markdown::compose::ComposeOptions;
 use crate::markdown::compose::ComposeRequest;
 use crate::markdown::compose::ComposeSource;
 use crate::markdown::compose::DeferredCapabilities;
@@ -155,7 +154,7 @@ pub fn collect_shell_commands_with_graph(
     markdown: &Markdown,
     request: &ComposeRequest,
 ) -> MarkdownResult<(Vec<ShellCommandEntry>, super::PreflightGraphNode)> {
-    let (entries, _icmp, _capabilities, graph) = collect_effects(markdown, &request.root_options())?;
+    let (entries, _icmp, _capabilities, graph) = collect_effects(markdown, request)?;
     Ok((entries, graph))
 }
 
@@ -172,7 +171,7 @@ pub fn collect_shell_commands_with_graph(
 /// reads the context the real pass will.
 pub(crate) fn collect_effects(
     markdown: &Markdown,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
 ) -> MarkdownResult<(
     Vec<ShellCommandEntry>,
     Vec<PlannedIcmpProbe>,
@@ -242,14 +241,14 @@ pub fn collect_frontmatter_shell_commands(
     markdown: &Markdown,
     request: &ComposeRequest,
 ) -> MarkdownResult<Vec<ShellCommandEntry>> {
-    frontmatter_shell_commands(markdown, &request.root_options())
+    frontmatter_shell_commands(markdown, request)
 }
 
 /// [`collect_frontmatter_shell_commands`] over a prepared request's root
 /// options, extended for the groups `markdown` names.
 pub(crate) fn frontmatter_shell_commands(
     markdown: &Markdown,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
 ) -> MarkdownResult<Vec<ShellCommandEntry>> {
     let extended = options.extended_for(markdown);
     let options = &*extended;
@@ -293,7 +292,7 @@ pub(crate) fn frontmatter_shell_commands(
 #[allow(clippy::too_many_arguments)]
 fn collect_recursive(
     markdown: &Markdown,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
     seen: &mut HashSet<String>,
     entries: &mut Vec<ShellCommandEntry>,
     icmp: &mut Vec<PlannedIcmpProbe>,
@@ -402,8 +401,7 @@ fn collect_recursive(
     inline_exclude_keys.insert("$schema".to_string());
     let mut inline_options = discovery
         .clone()
-        .only(&inline_ops)
-        .with_exclude_keys(inline_exclude_keys);
+        .derive(|options| options.only(&inline_ops).with_exclude_keys(inline_exclude_keys));
     inline_options.defer_shell_pending_schema_problems = true;
     inline_options.defer_missing_runtime_context = true;
     inline_options.defer_expression_failures = true;
@@ -783,7 +781,7 @@ fn fetch_remote_child_body(
 /// Collects the frontmatter `$(...)` commands for a single document.
 fn scan_one_frontmatter(
     markdown: &Markdown,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
     source_file: &std::path::Path,
     seen: &mut HashSet<String>,
     entries: &mut Vec<ShellCommandEntry>,
@@ -1014,7 +1012,7 @@ struct InheritedDiscovery {
 /// overridden key is observable.
 fn unobserved_keys(
     markdown: &Markdown,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
     inherited: &[String],
 ) -> Vec<String> {
     let frontmatter = markdown.frontmatter().as_map();
@@ -1160,7 +1158,7 @@ fn authored_as_markdown_literals(markdown: &Markdown) -> Vec<String> {
 ///
 /// A call whose arguments do not validate is left to the compose pass to
 /// reject: preflight reports effects, it does not diagnose authoring.
-fn authored_icmp_probes(markdown: &Markdown, options: &ComposeOptions) -> Vec<PlannedIcmpProbe> {
+fn authored_icmp_probes(markdown: &Markdown, options: &crate::markdown::compose::ComposeRequest) -> Vec<PlannedIcmpProbe> {
     let authority = options.icmp_authority().discovering();
     for expression in authored_expressions(markdown) {
         visit_calls(&expression, &mut |name, args| {
@@ -1169,7 +1167,10 @@ fn authored_icmp_probes(markdown: &Markdown, options: &ComposeOptions) -> Vec<Pl
             }
             let literals: Option<Vec<Value>> = args.iter().map(literal_value).collect();
             if let Some(literals) = literals {
-                let context = ResolutionContext { icmp: authority.clone(), ..Default::default() };
+                let context = ResolutionContext {
+                    icmp: authority.clone(),
+                    ..ResolutionContext::new(options.source_file_resolution_context())
+                };
                 let _ = super::super::expression::functions::dispatch_fs(name, &literals, &context);
             }
         });

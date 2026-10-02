@@ -186,7 +186,7 @@ fn classify(
 ) -> (Outcome, String) {
     let dir = tempfile::TempDir::new().unwrap();
     let state = empty_state(kind);
-    let ctx = ResolutionContext::new(dir.path().to_path_buf());
+    let ctx = ResolutionContext::at(dir.path().to_path_buf());
     let lookup = ResolvingLookup::new(&state, ctx);
     let evaluator = Evaluator::new(&lookup);
 

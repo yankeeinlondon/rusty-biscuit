@@ -51,7 +51,6 @@ pub use types::{
     ShellRuleSet, ShellTimeoutBehavior,
 };
 
-use crate::markdown::compose::ComposeOptions;
 use crate::markdown::compose::ComposeWarning;
 
 /// Owns the allow-once reservations taken for one directive's approval flow and
@@ -190,7 +189,7 @@ pub fn execute_directive(
     shell_runtime: &mut ShellExpansionRuntime,
 ) -> Result<String, ShellExpansionError> {
     Ok(
-        execute_directive_detailed(directive, &request.root_options(), policy_paths, shell_runtime)?
+        execute_directive_detailed(directive, request, policy_paths, shell_runtime)?
             .combined_output(),
     )
 }
@@ -199,7 +198,7 @@ pub fn execute_directive(
 /// stderr, and any non-fatal warnings.
 pub(crate) fn execute_directive_detailed(
     directive: &ShellDirective,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
     policy_paths: &ShellPolicyPaths,
     shell_runtime: &mut ShellExpansionRuntime,
 ) -> Result<DirectiveExecutionResult, ShellExpansionError> {
@@ -227,7 +226,7 @@ pub(crate) fn execute_directive_detailed(
 /// — releases whatever is still reserved and wakes any same-command waiter.
 pub(crate) fn prepare_directive(
     directive: &ShellDirective,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
     policy_paths: &ShellPolicyPaths,
     shell_runtime: &mut ShellExpansionRuntime,
 ) -> Result<PreparedShellDirective, ShellExpansionError> {
@@ -573,7 +572,7 @@ pub(crate) struct DirectiveOutcome {
 /// every time.
 pub(crate) fn execute_prepared_outcome(
     prepared: &PreparedShellDirective,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
     shell_runtime: &ShellExpansionRuntime,
 ) -> Result<DirectiveOutcome, ShellExpansionError> {
     let shell_opts = options.shell_options();
@@ -614,7 +613,7 @@ pub(crate) fn execute_prepared_outcome(
 /// warning.
 pub(crate) fn execute_prepared_directive(
     prepared: &PreparedShellDirective,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
     shell_runtime: &ShellExpansionRuntime,
 ) -> Result<DirectiveExecutionResult, ShellExpansionError> {
     let DirectiveOutcome {
@@ -2954,8 +2953,10 @@ name: world
                 .expect("fixture must parse to exactly one directive")
         }
 
-        fn options(decision: ShellApprovalDecision) -> ComposeOptions {
-            ComposeOptions::new().with_shell_approval_handler(Arc::new(FixedHandler(decision)))
+        fn options(decision: ShellApprovalDecision) -> crate::markdown::compose::ComposeRequest {
+            crate::markdown::compose::test_request(
+                ComposeOptions::new().with_shell_approval_handler(Arc::new(FixedHandler(decision))),
+            )
         }
 
         fn policy_paths(temp: &TempDir) -> ShellPolicyPaths {
@@ -3014,8 +3015,9 @@ name: world
             let paths = policy_paths(&temp);
             let mut runtime = ShellExpansionRuntime::new();
 
-            let failing =
-                ComposeOptions::new().with_shell_approval_handler(Arc::new(FailingHandler));
+            let failing = crate::markdown::compose::test_request(
+                ComposeOptions::new().with_shell_approval_handler(Arc::new(FailingHandler)),
+            );
             let err = prepare_directive(
                 &directive("echo alpha && echo beta"),
                 &failing,
@@ -3193,7 +3195,9 @@ name: world
                     entered: approver_entered,
                     probe: approver_probe,
                 });
-                let opts = ComposeOptions::new().with_shell_approval_handler(handler);
+                let opts = crate::markdown::compose::test_request(
+                    ComposeOptions::new().with_shell_approval_handler(handler),
+                );
                 prepare_directive(
                     &directive("echo shared"),
                     &opts,

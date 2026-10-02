@@ -15,7 +15,7 @@ use super::expression::EvaluationLookup;
 use super::schema_validation::PreparedSchemas;
 use super::shell_expansion::types::frontmatter_key_line;
 use super::util::abbreviate_path;
-use super::{ComposeOptions, ComposeReport, ComposeSource, ComposeWarning, EffectiveState};
+use super::{ComposeReport, ComposeSource, ComposeWarning, EffectiveState};
 use crate::markdown::Markdown;
 
 /// Reconciles `report`'s candidates for `markdown` into warnings.
@@ -30,7 +30,7 @@ use crate::markdown::Markdown;
 pub(crate) fn reconcile(
     report: &mut ComposeReport,
     markdown: &Markdown,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
     state: &EffectiveState,
     schemas: &PreparedSchemas,
 ) {

@@ -207,6 +207,7 @@ pub(crate) struct ResolvedPayload {
 pub(crate) fn resolve_trigger_payload(
     trigger: &LoadedTrigger,
     schema_roots: &[PathBuf],
+    context: &biscuit_file::FileResolutionContext,
 ) -> Result<ResolvedPayload, SchemaError> {
     let payload = trigger.envelope.payload.as_ref().ok_or_else(|| {
         SchemaError::TriggerPayloadNotMergeable {
@@ -220,7 +221,7 @@ pub(crate) fn resolve_trigger_payload(
         .source
         .parent()
         .unwrap_or_else(|| Path::new("."));
-    let resolved = resolve::resolve_yaml_schema_with_roots(payload, base_dir, schema_roots)?;
+    let resolved = resolve::resolve_yaml_schema_with_roots(payload, base_dir, schema_roots, context)?;
 
     // Cycle detection: the payload must not resolve to a trigger envelope.
     check_payload_cycles(trigger, &resolved)?;
@@ -438,7 +439,7 @@ mod tests {
         write(&root.join("schemas/other.yaml"), PAYLOAD);
 
         let doc = root.join("doc.md");
-        let registry = discovery::scan(&doc, root).unwrap();
+        let registry = discovery::scan(&doc, root, &biscuit_file::FileResolutionContext::new(root)).unwrap();
 
         // `prompt` present → a matches; b does not.
         let fm = frontmatter(&[("prompt", Value::String("x".into()))]);
@@ -459,7 +460,7 @@ mod tests {
         write(&root.join("schemas/claudine.yaml"), PAYLOAD);
 
         let doc = root.join("doc.md");
-        let registry = discovery::scan(&doc, root).unwrap();
+        let registry = discovery::scan(&doc, root, &biscuit_file::FileResolutionContext::new(root)).unwrap();
 
         let fm = frontmatter(&[]);
         let evals = evaluate_registry(&registry, &fm, "doc.md");
@@ -482,9 +483,9 @@ mod tests {
         write(&root.join("schemas/claudine.yaml"), PAYLOAD);
 
         let doc = root.join("doc.md");
-        let registry = discovery::scan(&doc, root).unwrap();
+        let registry = discovery::scan(&doc, root, &biscuit_file::FileResolutionContext::new(root)).unwrap();
         let trigger = &registry.triggers[0];
-        let resolved = resolve_trigger_payload(trigger, &registry.roots).unwrap();
+        let resolved = resolve_trigger_payload(trigger, &registry.roots, &biscuit_file::FileResolutionContext::new(root)).unwrap();
         assert_eq!(
             resolved.json_schema["type"], "object",
             "payload must resolve to an object schema"
@@ -512,7 +513,7 @@ mod tests {
              $schema:\n  - model: string(required)\n  - title: string(required)\n",
             &source,
         );
-        let err = resolve_trigger_payload(&trigger, &[root.join("schemas")]).unwrap_err();
+        let err = resolve_trigger_payload(&trigger, &[root.join("schemas")], &biscuit_file::FileResolutionContext::new(root)).unwrap_err();
         assert!(
             matches!(err, SchemaError::TriggerPayloadNotMergeable { .. }),
             "root union payload must be rejected: {err:?}"
@@ -529,7 +530,7 @@ mod tests {
             "kind: trigger-schema\nmatch:\n  prompt: string(required)\n",
             &source,
         );
-        let err = resolve_trigger_payload(&trigger, &[root.join("schemas")]).unwrap_err();
+        let err = resolve_trigger_payload(&trigger, &[root.join("schemas")], &biscuit_file::FileResolutionContext::new(root)).unwrap_err();
         assert!(
             matches!(err, SchemaError::TriggerPayloadNotMergeable { .. }),
             "missing payload must be rejected: {err:?}"
@@ -556,7 +557,7 @@ mod tests {
              $schema: self.trigger.yaml\n",
             &source,
         );
-        let err = resolve_trigger_payload(&trigger, &[root.join("schemas")]).unwrap_err();
+        let err = resolve_trigger_payload(&trigger, &[root.join("schemas")], &biscuit_file::FileResolutionContext::new(root)).unwrap_err();
         assert!(
             matches!(err, SchemaError::TriggerPayloadCycle { .. }),
             "self-referencing payload must be rejected: {err:?}"
@@ -585,7 +586,7 @@ mod tests {
              $schema: b.trigger.yaml\n",
             &a_source,
         );
-        let err = resolve_trigger_payload(&trigger, &[root.join("schemas")]).unwrap_err();
+        let err = resolve_trigger_payload(&trigger, &[root.join("schemas")], &biscuit_file::FileResolutionContext::new(root)).unwrap_err();
         assert!(
             matches!(err, SchemaError::TriggerPayloadCycle { .. }),
             "payload referencing another trigger must be rejected: {err:?}"

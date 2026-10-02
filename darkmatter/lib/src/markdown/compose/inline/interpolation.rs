@@ -9,7 +9,7 @@ use super::super::interpolation;
 use super::super::shell_expansion;
 use super::super::expression::{EvaluationLookup, ExpressionError, ResolutionContext};
 use super::super::context::report::CandidateLocus;
-use super::super::{ComposeOptions, ComposeReport, EffectiveState};
+use super::super::{ComposeReport, EffectiveState};
 use serde_json::Value;
 use tracing::debug;
 
@@ -35,7 +35,7 @@ use tracing::debug;
 pub(crate) fn run_stage(
     markdown: &mut Markdown,
     state: &EffectiveState,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
     runtime: &shell_expansion::types::PipelineRuntime,
     report: &mut ComposeReport,
     body: &mut BodyProvenance,
@@ -209,7 +209,7 @@ impl EvaluationLookup for DeferrableLookup<'_> {
 /// Checks (in priority order):
 /// 1. `ComposeOptions::interpolate_code_blocks`
 /// 2. Frontmatter `interpolate_code_blocks` key
-fn resolve_interpolate_code_blocks(markdown: &Markdown, options: &ComposeOptions) -> bool {
+fn resolve_interpolate_code_blocks(markdown: &Markdown, options: &crate::markdown::compose::ComposeRequest) -> bool {
     if options.interpolate_code_blocks {
         return true;
     }

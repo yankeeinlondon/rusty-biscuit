@@ -348,7 +348,9 @@ mod ambient_repository {
         let temp = tempfile::tempdir().unwrap();
         // Canonical so a File source under the anchor compares equal to the
         // discovered root on macOS, where the temp dir is a symlink.
-        let root = temp.path().canonicalize().unwrap().join("repo");
+        // `canonicalize_simplified`, not `canonicalize`: a verbatim `\\?\` spelling
+        // on Windows would never compare equal to the discovered root.
+        let root = biscuit_file::canonicalize_simplified(temp.path()).unwrap().join("repo");
         write(&root, "Cargo.toml", "[workspace]\nresolver = \"2\"\nmembers = [\"alpha/lib\", \"alpha/cli\"]\n");
         write(&root, "alpha/lib/Cargo.toml", "[package]\nname = \"alpha\"\nversion = \"0.1.0\"\nedition = \"2024\"\n");
         write(&root, "alpha/lib/src/lib.rs", "");

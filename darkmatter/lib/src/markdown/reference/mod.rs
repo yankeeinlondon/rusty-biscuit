@@ -21,62 +21,28 @@ pub use errors::{
 pub use types::*;
 
 use crate::markdown::Markdown;
-use crate::markdown::compose::{ComposeOptions, ComposeSource};
+use crate::markdown::compose::ComposeSource;
 use crate::markdown::compose::transclusion::{
     BlockOptions, DirectiveKind, parse_directives, parse_frontmatter_refs,
 };
 use crate::markdown::types::MarkdownResult;
 use std::path::PathBuf;
 
-/// Ensure compatibility callers capture fallback resolution state once.
-fn options_with_reference_resolution_context(
-    source: &ComposeSource,
-    options: &ComposeOptions,
-) -> ComposeOptions {
-    if options.file_resolution_context().is_some() {
-        return options.clone();
-    }
-    let ComposeSource::File(source_path) = source else {
-        return options.clone();
-    };
-    let Some(base_dir) = source_path.parent() else {
-        return options.clone();
-    };
-    let context = crate::markdown::compose::document_resolution_context(
-        base_dir,
-        Some(source_path),
-        &[],
-        None,
-    );
-    options.clone().with_file_resolution_context(context)
-}
-
 /// Resolve a local reference through the shared detailed resolver.
 fn resolve_transclusion_target(
     raw_target: &str,
     source: &ComposeSource,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
 ) -> Result<Option<PathBuf>, ReferenceError> {
     let ComposeSource::File(source_path) = source else {
         return Ok(None);
     };
-    let Some(base_dir) = source_path.parent() else {
-        return Ok(None);
-    };
-    let context = match options.file_resolution_context() {
-        Some(snapshot) => crate::markdown::compose::context::options::source_file_context(
-            snapshot,
-            source_path,
-            options.source_derivation,
-            options.source_opening.as_ref(),
-        ),
-        None => crate::markdown::compose::document_resolution_context(
-            base_dir,
-            Some(source_path),
-            &[],
-            None,
-        ),
-    };
+    let context = crate::markdown::compose::context::options::source_file_context(
+        options.resolution_context(),
+        source_path,
+        options.source_derivation,
+        options.source_opening.as_ref(),
+    );
     let reference = biscuit_file::FileReference::new(raw_target)?;
     Ok(reference.resolve_detailed(&context).into_convenience()?)
 }
@@ -179,20 +145,10 @@ impl Markdown {
         false
     }
 
-    /// Returns all transclusion references in this document with provenance.
+    /// Returns local transclusion references resolved through `request`.
     ///
     /// This is a local query that does not follow transclusions recursively.
     /// For recursive traversal, use [`transclusion_graph()`](Self::transclusion_graph).
-    ///
-    /// This compatibility facade captures ambient resolution state when called.
-    /// Request-scoped consumers should use [`transclusions_with_options`](Self::transclusions_with_options).
-    pub fn transclusions(&self) -> MarkdownResult<Vec<TransclusionRef>> {
-        let source = self.source().clone().unwrap_or(ComposeSource::Unknown);
-        let options = options_with_reference_resolution_context(&source, &ComposeOptions::default());
-        self.transclusions_in(&options)
-    }
-
-    /// Returns local transclusion references resolved through `request`.
     ///
     /// The request's context is reused for every target, so later CWD, HOME,
     /// or environment changes cannot alter the result. Invalid references and
@@ -202,10 +158,10 @@ impl Markdown {
         &self,
         request: &crate::markdown::compose::ComposeRequest,
     ) -> MarkdownResult<Vec<TransclusionRef>> {
-        self.transclusions_in(&request.root_options())
+        self.transclusions_in(request)
     }
 
-    fn transclusions_in(&self, options: &ComposeOptions) -> MarkdownResult<Vec<TransclusionRef>> {
+    fn transclusions_in(&self, options: &crate::markdown::compose::ComposeRequest) -> MarkdownResult<Vec<TransclusionRef>> {
         let source = self.source().clone().unwrap_or(ComposeSource::Unknown);
         let mut refs = Vec::new();
 

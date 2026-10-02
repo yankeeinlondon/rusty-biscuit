@@ -837,7 +837,7 @@ mod tests {
         data.insert("config".to_string(), serde_json::json!({"name": "dark"}));
         data.insert("empty_array".to_string(), serde_json::json!([]));
         data.insert("empty_object".to_string(), serde_json::json!({}));
-        let ctx = ResolutionContext::new(dir.path().to_path_buf());
+        let ctx = ResolutionContext::at(dir.path().to_path_buf());
         let lookup = FixtureLookup { ctx, data };
         (dir, lookup)
     }

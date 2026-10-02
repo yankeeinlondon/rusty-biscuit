@@ -7,9 +7,8 @@
 
 use super::Markdown;
 use super::context;
-use super::context::options::ComposeOptions;
 use super::value_origin::{DataPaths, FrontmatterProvenance, OverrideOrigin, ValuePathSegment};
-use biscuit_file::{FileResolutionContext, PathPosition};
+
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use tracing::trace;
@@ -58,50 +57,6 @@ pub fn find_git_root_from(start: &Path) -> Option<PathBuf> {
             return None;
         }
     }
-}
-
-/// Build an explicit, request-scoped [`FileResolutionContext`] for a
-/// document-backed reference.
-///
-/// `cwd` is the authoring document's directory (the base for the
-/// references it contains); `source_path`, when known, is the document file
-/// itself. Repository, package, and package-area scopes come only from the
-/// request snapshot and are recomputed for the authoring document.
-///
-/// [`ComposeOptions::expression_resolution_context`]: super::context::options::ComposeOptions::expression_resolution_context
-pub(crate) fn document_resolution_context(
-    cwd: &Path,
-    source_path: Option<&Path>,
-    magic_paths: &[(PathBuf, PathPosition)],
-    request_context: Option<&FileResolutionContext>,
-) -> FileResolutionContext {
-    let mut ctx = match (request_context, source_path) {
-        (Some(snapshot), Some(source)) => snapshot.for_source(source),
-        (Some(snapshot), None) => snapshot.for_cwd(cwd),
-        (None, _) => FileResolutionContext::new(cwd),
-    };
-    for (path, position) in magic_paths {
-        ctx = ctx.add_magic_path(path.clone(), *position);
-    }
-    ctx
-}
-
-/// The context a document's own links resolve and normalize in.
-///
-/// The request snapshot's derivation for the source when there is a snapshot;
-/// otherwise, for a file source, a context built at the source's directory.
-/// `None` for a source with neither a snapshot nor a path, or when that build
-/// fails.
-pub(crate) fn source_link_context(options: &ComposeOptions) -> Option<FileResolutionContext> {
-    if let Some(context) = options.source_file_resolution_context() {
-        return Some(context);
-    }
-    let super::ComposeSource::File(path) = &options.source else {
-        return None;
-    };
-    let dir = path.parent()?;
-    let snapshot = super::build_resolution_context(&super::RequestSnapshot::new(dir)).ok()?;
-    Some(document_resolution_context(dir, None, &[], Some(&snapshot)))
 }
 
 /// Helper to find target range within content.
@@ -238,7 +193,7 @@ fn get_attribute_name_for_syntax(
 /// only input to the whole-value `$( … )` shell decision (R1.2).
 pub(crate) fn prepare_frontmatter_for_compose(
     markdown: &mut Markdown,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
 ) -> FrontmatterProvenance {
     let mut data = options.inherited_origin.frontmatter_data.clone();
 
@@ -316,16 +271,16 @@ mod resolution_context_tests {
     //! Darkmatter surface routes through.
     //!
     //! Transclusion, expression `file(...)`, schema `file(...)`, and local link
-    //! resolution all build their [`FileResolutionContext`] from
-    //! [`document_resolution_context`] and resolve through
+    //! resolution all derive their [`FileResolutionContext`] from the request's
+    //! context for the authoring source and resolve through
     //! [`FileReference::resolve_in_context`]. Cross-surface parity is therefore a
-    //! property of this one helper: given the same base/source/repository inputs,
-    //! every surface produces the identical context and the identical resolution.
+    //! property of that one derivation: given the same base/source/repository
+    //! inputs, every surface produces the identical context and resolution.
     //! Proving the seam document-first on a real collision fixture proves the
     //! shared contract for all of them at Level 1, where the resolution semantics
     //! live; only the terminal *rendering* of a failure needs Level 2.
 
-    use super::{FileResolutionContext, document_resolution_context};
+    use biscuit_file::FileResolutionContext;
     use biscuit_file::FileReference;
     use std::fs;
 
@@ -345,12 +300,7 @@ mod resolution_context_tests {
         fs::write(base.join("notes.md"), b"source decoy").unwrap();
 
         let request = FileResolutionContext::new(&base).with_repository_root(root);
-        let ctx: FileResolutionContext = document_resolution_context(
-            &base,
-            Some(&base.join("router.md")),
-            &[],
-            Some(&request),
-        );
+        let ctx: FileResolutionContext = request.for_source(base.join("router.md"));
 
         // Implicit bare reference: the source candidate wins over the repository
         // twin. Canonicalize both sides so an explicit `.` path component or a
@@ -393,12 +343,7 @@ mod resolution_context_tests {
         let request = FileResolutionContext::new(&base)
             .with_repository_root(root)
             .with_package_area(&package_area);
-        let ctx = document_resolution_context(
-            &base,
-            Some(&base.join("guide.md")),
-            &[],
-            Some(&request),
-        );
+        let ctx = request.for_source(base.join("guide.md"));
         let resolved = FileReference::new("^shared.md")
             .unwrap()
             .resolve_in_context(&ctx)

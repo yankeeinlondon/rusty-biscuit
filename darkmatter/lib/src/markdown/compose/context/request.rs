@@ -342,10 +342,27 @@ pub fn build_resolution_context_with_catalog(
 /// ```
 ///
 /// [`Markdown::compose_with`]: crate::markdown::Markdown::compose_with
+///
+/// A request dereferences to its [`ComposeOptions`], so every stage reads
+/// settings through it while the type guarantees a context is present.
 #[derive(Clone)]
 pub struct ComposeRequest {
     options: ComposeOptions,
     context: FileResolutionContext,
+}
+
+impl std::ops::Deref for ComposeRequest {
+    type Target = ComposeOptions;
+
+    fn deref(&self) -> &ComposeOptions {
+        &self.options
+    }
+}
+
+impl std::ops::DerefMut for ComposeRequest {
+    fn deref_mut(&mut self) -> &mut ComposeOptions {
+        &mut self.options
+    }
 }
 
 impl std::fmt::Debug for ComposeRequest {
@@ -433,7 +450,10 @@ impl ComposeRequest {
     }
 
     /// The request's file-resolution context.
-    pub fn context(&self) -> &FileResolutionContext {
+    ///
+    /// Named apart from [`ComposeOptions::context`], the captured `ctx.*`
+    /// values, which a request also exposes through `Deref`.
+    pub fn resolution_context(&self) -> &FileResolutionContext {
         &self.context
     }
 
@@ -441,18 +461,95 @@ impl ComposeRequest {
     /// file references through the request's context.
     ///
     /// For hosts that evaluate document-authored expressions outside the
-    /// compose pipeline (Claudine's lifecycle and sequence expressions); see
-    /// [`ComposeOptions::local_expression_resolution_context`].
+    /// compose pipeline (Claudine's lifecycle and sequence expressions). It
+    /// keeps the request's source derivation and caller provenance.
     pub fn local_expression_resolution_context(
         &self,
     ) -> crate::markdown::compose::expression::ResolutionContext {
-        self.root_options().local_expression_resolution_context()
+        self.options.local_expression_resolution_context_in(&self.context)
     }
 
-    /// The options with the request's context attached, as a root phase runs
-    /// them.
-    pub(crate) fn root_options(&self) -> ComposeOptions {
-        self.options.clone().with_file_resolution_context(self.context.clone())
+    /// This request with its options changed by `change`, keeping its context
+    /// and the options' own `ctx.*` environment.
+    ///
+    /// For the pipeline's own derivations (a child source, an inline pass);
+    /// [`map_options`](Self::map_options) is the caller-facing form.
+    #[must_use]
+    pub(crate) fn derive(mut self, change: impl FnOnce(ComposeOptions) -> ComposeOptions) -> Self {
+        self.options = change(self.options);
+        self
+    }
+
+    /// This request composing the file at `path`; see
+    /// [`ComposeOptions::with_source_file`].
+    #[must_use]
+    pub(crate) fn with_source_file(self, path: impl Into<PathBuf>) -> Self {
+        self.derive(|options| options.with_source_file(path))
+    }
+
+    /// This request composing `url`; see [`ComposeOptions::with_source_url`].
+    #[must_use]
+    pub(crate) fn with_source_url(self, url: url::Url) -> Self {
+        self.derive(|options| options.with_source_url(url))
+    }
+
+    /// Sets a child source that has already passed file-reference resolution;
+    /// see [`ComposeOptions::with_accepted_source_file_in`].
+    #[must_use]
+    pub(crate) fn with_accepted_source_file(
+        self,
+        path: impl Into<PathBuf>,
+        opening: Option<super::options::SourceOpening>,
+    ) -> Self {
+        let context = self.context.clone();
+        self.derive(|options| options.with_accepted_source_file_in(path, opening, &context))
+    }
+
+    /// This request as the compose pass of `document` will see it, after
+    /// [`ComposeOptions::extend_context_for`].
+    ///
+    /// Pre-flight discovery evaluates a document before that pass runs, so it
+    /// must read the same context or it would observe groups the real pass has.
+    pub(crate) fn extended_for(
+        &self,
+        document: &crate::markdown::Markdown,
+    ) -> std::borrow::Cow<'_, Self> {
+        if !self.options.needs_extension_for(document) {
+            return std::borrow::Cow::Borrowed(self);
+        }
+        let mut extended = self.clone();
+        extended.options.extend_context_for(document);
+        std::borrow::Cow::Owned(extended)
+    }
+
+    /// The current source's context, derived from the request's context.
+    pub(crate) fn source_file_resolution_context(&self) -> FileResolutionContext {
+        self.options.source_file_resolution_context_in(&self.context)
+    }
+
+    /// The transclusion view of this request.
+    pub(crate) fn transclusion_options(&self) -> super::options::TransclusionOptions {
+        self.options.transclusion_options_in(&self.context)
+    }
+
+    /// The expression context body interpolation evaluates in.
+    pub(crate) fn expression_resolution_context(
+        &self,
+        remote_fetch: &crate::markdown::compose::remote_fetch::RemoteFetchRuntime,
+    ) -> crate::markdown::compose::expression::ResolutionContext {
+        self.options.expression_resolution_context_in(&self.context, remote_fetch)
+    }
+
+    /// The expression context frontmatter interpolation evaluates in.
+    pub(crate) fn frontmatter_resolution_context(
+        &self,
+    ) -> crate::markdown::compose::expression::ResolutionContext {
+        self.options.frontmatter_resolution_context_in(&self.context)
+    }
+
+    /// The compose-cache fingerprint of the options and the context.
+    pub(crate) fn compose_cache_fingerprint(&self) -> u64 {
+        self.options.compose_cache_fingerprint(&self.context)
     }
 }
 
@@ -545,18 +642,18 @@ pub(crate) mod test_support {
     /// the context's anchor, else the process directory. Home comes from the
     /// process and the environment from the options' own context, so `ctx.*`
     /// is unchanged.
-    ///
-    /// Options that already hold a context keep it, through
-    /// [`ComposeRequest::with_context`].
-    pub(crate) fn request(mut options: ComposeOptions) -> ComposeRequest {
-        if let Some(context) = options.file_resolution_context.take() {
-            return ComposeRequest::with_context(options, context).expect("test request context");
-        }
+    pub(crate) fn request(options: ComposeOptions) -> ComposeRequest {
         let dir = legacy_request_dir(&options);
         let snapshot = RequestSnapshot::new(dir)
             .with_home(biscuit_file::home_dir())
             .with_env(options.context().env().clone());
         ComposeRequest::prepare(options, &snapshot).expect("test request")
+    }
+
+    /// A request that resolves through `context`, as the options' old
+    /// context field did.
+    pub(crate) fn request_in(options: ComposeOptions, context: FileResolutionContext) -> ComposeRequest {
+        ComposeRequest::with_context(options, context).expect("test request context")
     }
 
     /// A file source's directory, else the context's anchor, else the
