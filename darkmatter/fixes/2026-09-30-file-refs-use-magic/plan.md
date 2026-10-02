@@ -28,6 +28,7 @@ packages:
     - claudine
     - claudine-gen
     - messenger
+    - messenger-cli
 source_files_during_phase_2:
     - biscuit-file/lib/src/file_reference/context.rs
     - biscuit-file/lib/src/file_reference/mod.rs
@@ -349,6 +350,110 @@ docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
     - .claude/skills/darkmatter/compose.md
     - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/os/windows.md
+source_files_during_phase_6:
+    - biscuit-file/lib/src/file_reference/mod.rs
+    - biscuit-file/lib/src/file_reference/resolve.rs
+    - biscuit-file/lib/tests/l1/resolution_context.rs
+    - claudine/gen/Cargo.toml
+    - claudine/gen/src/agent_errors_check.rs
+    - claudine/gen/src/agent_errors_check/review6_tests.rs
+    - claudine/gen/tests/l1/context_construction_guard.rs
+    - claudine/gen/tests/l1/main.rs
+    - darkmatter/cli/tests/common/context_guard.rs
+    - darkmatter/cli/tests/common/source_scan.rs
+    - darkmatter/cli/tests/l1/context_construction_guard.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/dmls/Cargo.toml
+    - darkmatter/dmls/src/context.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/graph/arena.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/providers/completion.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/providers/mod.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/tests/l1/context_construction_guard.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/lib/Cargo.toml
+    - darkmatter/lib/src/markdown/compose/conditions.rs
+    - darkmatter/lib/src/markdown/compose/context/capture/agent.rs
+    - darkmatter/lib/src/markdown/compose/context/capture/mod.rs
+    - darkmatter/lib/src/markdown/compose/context/capture/repo.rs
+    - darkmatter/lib/src/markdown/compose/context/current.rs
+    - darkmatter/lib/src/markdown/compose/context/request.rs
+    - darkmatter/lib/src/markdown/compose/expression/ctx.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+    - darkmatter/lib/src/markdown/compose/link_resolve.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/executor.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/mod.rs
+    - darkmatter/lib/src/markdown/compose/unknown_identifiers.rs
+    - darkmatter/lib/src/markdown/compose/util.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/tests/l1/context_construction_guard.rs
+    - darkmatter/lib/tests/l1/expression_regression.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/required_context.rs
+    - darkmatter/lib/tests/l1/semantic_results_never_persist.rs
+    - darkmatter/lib/tests/request_support/mod.rs
+    - messenger/cli/Cargo.toml
+    - messenger/cli/src/research.rs
+    - messenger/cli/tests/context_construction_guard.rs
+    - messenger/cli/tests/research_cli.rs
+    - messenger/lib/Cargo.toml
+    - messenger/lib/tests/context_construction_guard.rs
+    - messenger/lib/tests/research_corpus.rs
+docs_updated_during_phase_6:
+    - biscuit-file/docs/topics/file-references.md
+    - darkmatter/docs/inline/shell-expansion.md
+    - darkmatter/docs/topics/compose-requests.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/biscuit-file/references/file-references.md
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/compose.md
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/os/SKILL.md
+source_files_during_phase_7:
+    - darkmatter/lib/src/markdown/types.rs
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/src/markdown/compose/context/report.rs
+    - darkmatter/lib/src/markdown/compose/context/request.rs
+    - darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/phases.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/src/markdown/compose/toc_linking/mod.rs
+    - darkmatter/lib/src/markdown/compose/toc_linking/types.rs
+    - darkmatter/lib/src/markdown/compose/tests/transclusion.rs
+    - darkmatter/lib/src/markdown/errors/blocks.rs
+    - darkmatter/lib/tests/common/entry_point_parity/mod.rs
+    - darkmatter/lib/tests/l1/entry_point_parity.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/error_snapshots/toc_linking.rs
+    - darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__markdown_error__schema_validation_format_failure_renders_block.snap
+    - darkmatter/cli/Cargo.toml
+    - darkmatter/cli/src/commands/compose.rs
+    - darkmatter/cli/src/commands/schema/validate.rs
+    - darkmatter/cli/tests/l1/entry_point_parity.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/dmls/Cargo.toml
+    - darkmatter/dmls/src/diagnostics/codes.rs
+    - darkmatter/dmls/src/overlay/directives.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/tests/l1/entry_point_parity.rs
+    - darkmatter/dmls/tests/l1/main.rs
+docs_updated_during_phase_7:
+    - darkmatter/docs/inline/toc-linking.md
+    - darkmatter/docs/topics/compose-requests.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/dmls/docs/features.md
+    - darkmatter/dmls/docs/file-references.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
     - .claude/skills/darkmatter/SKILL.md
     - .claude/skills/os/windows.md
 ---
@@ -1121,7 +1226,7 @@ allowlists (Decisions 18 and 21). **May run concurrently with Phase 7.**
 
 ### Wave 13 (sequential)
 
-- [ ] **Shared guard engine**
+- [x] **Shared guard engine**
   - Create `darkmatter/cli/tests/common/context_guard.rs` on top of
     `source_scan.rs` (comments, strings, and `#[cfg(test)]` items blanked;
     identifier-boundary matching; `#[cfg(test)] mod x;` files excluded the
@@ -1140,7 +1245,7 @@ allowlists (Decisions 18 and 21). **May run concurrently with Phase 7.**
 
 ### Wave 14 (parallel; one subagent per group; depends on Wave 13)
 
-- [ ] **darkmatter group** (lib, cli, dmls)
+- [x] **darkmatter group** (lib, cli, dmls)
   - Add a `context_construction_guard.rs` per package.
   - Allowlists:
     - Construction: the builder only, plus `from_process` once in each of
@@ -1150,15 +1255,15 @@ allowlists (Decisions 18 and 21). **May run concurrently with Phase 7.**
       (`file_match.rs:185`), each with reason `handed off to
       2026-09-30-glob-reference`.
   - Declare the shared files in `source-inputs` for lib and dmls.
-- [ ] **Claudine group** (lib, cli, gen)
+- [ ] **Claudine group** (lib, cli, gen) (claudine-gen done; claudine lib and cli blocked: the `claudine` crate does not compile until Phase 3 Track B lands)
   - The same three guards.
   - Seed the ambient census for the roughly 200 Claudine reads, each with
     a one-line reason. Reads that feed resolution or `ctx.*` must already be
     gone (Phase 3); finding one here is a defect to fix, not to allowlist.
   - Declare `source-inputs`.
-- [ ] **messenger group** (lib, cli)
+- [x] **messenger group** (lib, cli)
   - The same three guards, the census, and `source-inputs`.
-- [ ] **Checkpoint**
+- [ ] **Checkpoint** (darkmatter, messenger, biscuit-file, and claudine-gen pass `test`/`lint`; `ci-local --plan` and `RealWorkspaceTestInputTests` accept every declaration; the `claudine/` area cannot run)
   - `just test` in each area.
   - `just ci-local --plan` shows the declared `source-inputs` accepted
     (S2).
@@ -1170,7 +1275,7 @@ every DMLS feature. Depends on Phases 4 and 5; may start alongside Phase 6.
 
 ### Wave 15 (sequential)
 
-- [ ] **Shared fixture and tables**
+- [x] **Shared fixture and tables**
   - Build the fixture in `darkmatter/lib/tests/common/entry_point_parity/`
     in a temporary directory:
     - a git monorepo with a package area and a package;
@@ -1196,16 +1301,16 @@ every DMLS feature. Depends on Phases 4 and 5; may start alongside Phase 6.
 
 ### Wave 16 (parallel; one runner per package; depends on Wave 15)
 
-- [ ] **darkmatter runner**
+- [x] **darkmatter runner**
   - Covers the compose pipeline, preflight, and schema validation, with
     the consumers `::file`, `::code`, `::toc-linking <filename>`, and
     schema `file` values. Uses `RequestSnapshot::new` with the fixture
     `HOME` and environment.
-- [ ] **darkmatter-cli runner**
+- [x] **darkmatter-cli runner**
   - Covers `md` routes through `CliProcessFixture` (fixture `HOME`), and
     Table 2 `md` arguments from both launch directories, including the
     quoted `'~/notes/doc.md'`. Failures are read from R5's `failure` row.
-- [ ] **dmls runner**
+- [x] **dmls runner**
   - Covers schema validation and diagnostics, document links, the link
     graph, go-to-definition, and code actions, through `LspFixture` with a
     fixture snapshot.

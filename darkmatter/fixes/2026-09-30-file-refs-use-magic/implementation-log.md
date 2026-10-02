@@ -25,6 +25,7 @@ packages:
     - claudine
     - claudine-gen
     - messenger
+    - messenger-cli
 source_files_during_phase_2:
     - biscuit-file/lib/src/file_reference/context.rs
     - biscuit-file/lib/src/file_reference/mod.rs
@@ -346,6 +347,110 @@ docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
     - .claude/skills/darkmatter/compose.md
     - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/os/windows.md
+source_files_during_phase_6:
+    - biscuit-file/lib/src/file_reference/mod.rs
+    - biscuit-file/lib/src/file_reference/resolve.rs
+    - biscuit-file/lib/tests/l1/resolution_context.rs
+    - claudine/gen/Cargo.toml
+    - claudine/gen/src/agent_errors_check.rs
+    - claudine/gen/src/agent_errors_check/review6_tests.rs
+    - claudine/gen/tests/l1/context_construction_guard.rs
+    - claudine/gen/tests/l1/main.rs
+    - darkmatter/cli/tests/common/context_guard.rs
+    - darkmatter/cli/tests/common/source_scan.rs
+    - darkmatter/cli/tests/l1/context_construction_guard.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/dmls/Cargo.toml
+    - darkmatter/dmls/src/context.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/graph/arena.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/providers/completion.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/providers/mod.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/tests/l1/context_construction_guard.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/lib/Cargo.toml
+    - darkmatter/lib/src/markdown/compose/conditions.rs
+    - darkmatter/lib/src/markdown/compose/context/capture/agent.rs
+    - darkmatter/lib/src/markdown/compose/context/capture/mod.rs
+    - darkmatter/lib/src/markdown/compose/context/capture/repo.rs
+    - darkmatter/lib/src/markdown/compose/context/current.rs
+    - darkmatter/lib/src/markdown/compose/context/request.rs
+    - darkmatter/lib/src/markdown/compose/expression/ctx.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+    - darkmatter/lib/src/markdown/compose/link_resolve.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/executor.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/mod.rs
+    - darkmatter/lib/src/markdown/compose/unknown_identifiers.rs
+    - darkmatter/lib/src/markdown/compose/util.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/tests/l1/context_construction_guard.rs
+    - darkmatter/lib/tests/l1/expression_regression.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/required_context.rs
+    - darkmatter/lib/tests/l1/semantic_results_never_persist.rs
+    - darkmatter/lib/tests/request_support/mod.rs
+    - messenger/cli/Cargo.toml
+    - messenger/cli/src/research.rs
+    - messenger/cli/tests/context_construction_guard.rs
+    - messenger/cli/tests/research_cli.rs
+    - messenger/lib/Cargo.toml
+    - messenger/lib/tests/context_construction_guard.rs
+    - messenger/lib/tests/research_corpus.rs
+docs_updated_during_phase_6:
+    - biscuit-file/docs/topics/file-references.md
+    - darkmatter/docs/inline/shell-expansion.md
+    - darkmatter/docs/topics/compose-requests.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/biscuit-file/references/file-references.md
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/compose.md
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/os/SKILL.md
+source_files_during_phase_7:
+    - darkmatter/lib/src/markdown/types.rs
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/src/markdown/compose/context/report.rs
+    - darkmatter/lib/src/markdown/compose/context/request.rs
+    - darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/phases.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/src/markdown/compose/toc_linking/mod.rs
+    - darkmatter/lib/src/markdown/compose/toc_linking/types.rs
+    - darkmatter/lib/src/markdown/compose/tests/transclusion.rs
+    - darkmatter/lib/src/markdown/errors/blocks.rs
+    - darkmatter/lib/tests/common/entry_point_parity/mod.rs
+    - darkmatter/lib/tests/l1/entry_point_parity.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/error_snapshots/toc_linking.rs
+    - darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__markdown_error__schema_validation_format_failure_renders_block.snap
+    - darkmatter/cli/Cargo.toml
+    - darkmatter/cli/src/commands/compose.rs
+    - darkmatter/cli/src/commands/schema/validate.rs
+    - darkmatter/cli/tests/l1/entry_point_parity.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/dmls/Cargo.toml
+    - darkmatter/dmls/src/diagnostics/codes.rs
+    - darkmatter/dmls/src/overlay/directives.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/tests/l1/entry_point_parity.rs
+    - darkmatter/dmls/tests/l1/main.rs
+docs_updated_during_phase_7:
+    - darkmatter/docs/inline/toc-linking.md
+    - darkmatter/docs/topics/compose-requests.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/dmls/docs/features.md
+    - darkmatter/dmls/docs/file-references.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
     - .claude/skills/darkmatter/SKILL.md
     - .claude/skills/os/windows.md
 ---
@@ -1248,3 +1353,315 @@ markers. The Input Robustness Matrix does not apply (R15).
     the real profile, above); after the `policy_root` fix **794 passed**.
 - Final `just test` in `darkmatter/` after those fixes: **8786 passed**,
   12 skipped; `just lint` passes.
+
+## Phase 6
+
+Phase 6 started on top of the uncommitted Phase 5 work. **Claudine (lib and
+cli) still does not compile** (20 errors; Phase 3 Track B was never done and
+the spec's `human_review` question is unanswered), so its two guards cannot
+run. Everything else in the phase is done: the shared engine, the darkmatter
+(lib, cli, dmls), messenger (lib, cli), and claudine-gen guards, and every
+`source-inputs` declaration.
+
+### Wave 13: the shared engine
+
+- `darkmatter/cli/tests/common/context_guard.rs` runs the three gates over a
+  crate's `src/`. Construction matches `FileResolutionContext :: new` /
+  `from_snapshot` (any spacing or path prefix) and any `<qualifier>::from_process`
+  call. Optional context matches `Option<FileResolutionContext>` and
+  `Option<&['a] [mut] FileResolutionContext>` with any path prefix, and the
+  gate **rejects any allowlist entry** (AC 2's empty allowlist is enforced by
+  the engine, not by convention). Ambient state matches
+  `env::{current_dir, var, vars, var_os, vars_os, home_dir}` (including a
+  `use std::env::{..}` group), `dirs::home_dir`, `home::home_dir`, a free
+  `home_dir()` / `capture_env()` call (biscuit-file's), the context-free
+  `FileReference` resolvers (`.resolve()`, `.resolve_from(..)`,
+  `.resolve_target()`), and a `PortablePath::from_path|from_reference` whose
+  expression has no `.with_ctx(..)`.
+- Allowlist entries are `Allowance { gate, path, identifier, count, reason }`.
+  An unlisted site, a moved count, an unused entry, a duplicate entry, and an
+  entry with an empty reason or zero count all fail. A failure for a new site
+  prints the `Allowance` literal to paste, so a reviewer sees exactly what is
+  being admitted.
+- **Scope rule moved, not copied.** The `#[cfg(test)]` blanking and test-module
+  exclusion lived privately in `lib/tests/l1/semantic_results_never_persist.rs`.
+  It moved into the shared `cli/tests/common/source_scan.rs`
+  (`production_sources`, `ident_offsets`, `matching_brace`), which that guard
+  now imports, so the two source-scan gates cannot drift apart. Its own
+  self-test still covers the scope rule. `source_scan.rs` gained
+  `#![allow(dead_code)]` because each including binary uses a subset.
+- Self-tests: `darkmatter-cli::l1
+  context_construction_guard::the_engine_rejects_planted_violations_and_stale_entries`
+  plants every gate's violation (plus comment, string, method, definition,
+  `#[cfg(test)]` item, and `#[cfg(test)] mod hidden;` file decoys) and every
+  kind of bad entry, and asserts the exact problem list.
+
+### Wave 14: the census and what it found
+
+Each guard was first run with an empty allowlist to produce the census. The
+plan said Reads that feed resolution or `ctx.*` are defects to fix, not to
+allowlist; eight were found and fixed:
+
+| Site | What it read | Fix |
+|---|---|---|
+| `compose/context/capture/mod.rs` | `std::env::vars()` seeded every ambient `ComposeContext` capture (`ctx.env`, `ctx.agent`, `ctx.model`) | the capture takes its environment from the caller: the public `capture_for_*` start empty (a request installs the snapshot's), `CtxLookup::new(dir, env)` takes the condition context's environment, and `AnchoredRefresh` keeps the request's |
+| `compose/shell_expansion/executor.rs` `resolve_working_directory` | `std::env::current_dir()` as the last fallback for a pathless source | takes `&FileResolutionContext` and falls back to `context.cwd()`; `execute_command` (public) and the internal chain take it too |
+| `compose/link_resolve.rs` `resolve_absolute` | `FileReference::resolve()` (ambient) for a source with no path | `resolve_in_context(request.resolution_context())` |
+| `compose/schema_validation.rs` caller lazy URL | `FileReference::resolve_target()` builds an ambient context, so a URL's `{{VAR}}` came from the **process** environment | new additive biscuit-file `FileReference::resolve_target_in_context(&ctx)` |
+| `compose/util.rs` `abbreviate_path` | `dirs::home_dir()` for `~/` in warning text | takes the request's `home_dir()` |
+| `schemas/resolve.rs` `try_bare_name_in_roots` | `FileResolutionContext::from_snapshot` per schema root (a construction outside the builder, AC 3) | the bare name is spelled `./name` and resolved in `request_context.for_trusted_external_cwd(root)`; an explicit relative reference has one candidate, so ordering is unchanged |
+| `messenger/cli` `research validate` | `std::env::current_dir()` for relative document arguments | uses the snapshot's request directory |
+| `claudine-gen` `agent_errors_check` fixture check | `FileReference::resolve_from(dir)` (reads live home/env) | `FixtureBase` holds the area context derived onto the topic directory; `resolve_in_context` |
+
+DMLS's eight `Option<…FileResolutionContext>` sites (Phase 5's message) became
+`Result<_, ContextFailure>`: `DocumentResolution::context()`,
+`DocumentContext::file_context()`, `DocumentContexts::context_for`,
+`WorkspaceGraph::diagnose_unresolved`, and the resolver's `by_folder` cache.
+`NoContexts` returns the new `ContextFailure::NotProvided`
+(`ResolutionFailure::MissingContext`).
+
+#### Classified allowlists
+
+- **darkmatter (lib)**: the builder's one `from_snapshot`; `from_process`'s
+  three reads; `current_env` (R7, live by design); the two handed-off reads
+  (`file_links/discovery.rs`, `schemas/file_match.rs`, reason "handed off to
+  2026-09-30-glob-reference"); and rendering, tuning, or tool-selection reads
+  (`EDITOR`, `PREFER_ITALICS`, `DARKMATTER_REMOTE_CONCURRENCY`, `SHELL` for
+  alias lookup, highlighting and code themes, image metadata policy,
+  `DARKMATTER_SCHEMA_CACHE_SIZE`).
+- **Two rendering-tier CWD reads are allowlisted, not fixed** (judgment call,
+  recorded for review): `output/terminal.rs` `ImageRenderer::new(None)` (no
+  production caller passes `None`) and `style/bespoke.rs`, where a
+  `style.page.stylesheet` of a document with no path (stdin) reads relative to
+  the launch directory. Neither is a `FileReference` nor `ctx.*`, and both run
+  after composition; fixing bespoke means threading a base directory through
+  `md`'s three render entry points.
+- **darkmatter-cli**: `from_process` once in `main.rs`; `RUST_LOG`,
+  `MD_DRY_RUN`, `DARKMATTER_NO_BASELINE_SCHEMA` (a switch, not a path),
+  `HASH_PROPERTY` / `HASH_IGNORE_PROPERTIES`, `TERMINAL_IMAGES`.
+- **dmls**: `from_process` once in `main.rs`; nothing else.
+- **messenger**: `%APPDATA%` (Windows shortcut). **messenger-cli**:
+  `from_process` once; `RUST_LOG` and a route secret's variable; its own
+  `~/.messenger.json` and `~/.messenger/receipts`; notification helpers;
+  `%APPDATA%`.
+- **claudine-gen**: `from_process` once; `FORCE_COLOR` / `CLICOLOR_FORCE` /
+  `NO_COLOR`.
+
+#### Placement and CI
+
+- darkmatter lib, darkmatter-cli, dmls, claudine-gen: `tests/l1/context_construction_guard.rs`,
+  declared in each `tests/l1/main.rs` (`autotests = false`). messenger lib and
+  cli have `autotests` on, so each guard is its own `tests/context_construction_guard.rs`
+  binary. No tier marker; all L1.
+- `source-inputs` names both shared files in darkmatter lib, dmls, messenger,
+  messenger-cli (which gained a `[package.metadata.ci.tests]` table; absent
+  keys keep their defaults), and claudine-gen. Each guard spells both files
+  with `include_str!` inside its test function (S2).
+  `python3 -m unittest test_affected_scope.RealWorkspaceTestInputTests` (from
+  `scripts/ci/`) passes with every declaration.
+
+#### Test fallout
+
+- `context/capture/agent.rs` and `expression/ctx.rs` agent tests mutated the
+  process `AGENT`/`MODEL`; they now pass the environment in (no
+  `serial_test`, no `unsafe`).
+- The unit and `l1` request helpers (`test_support::request`,
+  `request_support::request_at`) take the snapshot environment from the
+  options' own context, which used to be the process environment only because
+  capture read it. Their code is unchanged and their docs now say the
+  environment is empty unless the test put values there. A first attempt
+  overlaid the process environment (to imitate `md`); it let this session's
+  real `AGENT` into two `transclusion_tests` that need an empty environment,
+  so it was reverted: the helpers stay hermetic.
+- Tests whose premise was the leak were rewritten, never weakened:
+  `frontmatter_interpolation::seed_state_tests::env_resolves` puts `HOME` in
+  the context; `expression_regression::regression_ctx_agent_in_interpolation`
+  and `regression_page_block_with_has_skill` put `AGENT` on the options'
+  context (`options_with_agent`, Darkmatter-owned authority) instead of
+  mutating the process environment, so both lost `serial_test` and `unsafe`.
+- `executor.rs` tests pass a request context; `working_directory_resolution_priority`
+  and the renamed `bare_filename_source_falls_through_to_the_request_directory`
+  assert the request directory instead of "not empty".
+
+### Departures
+
+- **Behavior change: a standalone `ComposeContext::capture_for_*` has an empty
+  `env`.** `ctx.env`, `ctx.agent`, and `ctx.model` on a request always came
+  from the snapshot (Phase 5's `align_context_environment`); now nothing else
+  can leak the process environment into them. `current.agent` (the `current`
+  mirror) reads the request's environment instead of re-reading the process.
+  `current_env.NAME` stays live (R7). Documented in
+  `docs/topics/compose-requests.md`.
+- **Public API**: `execute_command` and `resolve_working_directory` take a
+  `&FileResolutionContext`; `CtxLookup::new` takes the environment. Claudine
+  does not call any of them.
+- **biscuit-file gained `FileReference::resolve_target_in_context`**
+  (additive, like Phase 2's `resolution_failure()`); `resolve_target()` is
+  unchanged.
+
+### Windows residue from Phase 5, fixed
+
+`messenger/lib/tests/research_corpus.rs` `schemas()` (Phase 5) built its
+context from the compile-time `env!("CARGO_MANIFEST_DIR")` at `messenger/lib`.
+In an archive run (the cross-check's native-Windows consumer, and CI's WSL2
+leg) the extracted workspace has no `.git`, so the request directory became
+the tree root and every fixture's `$schema: ../../…/messenger/docs/…` was
+refused as an escape (10 `research_corpus` failures on `build-win-native`).
+It now anchors at the run-time repository root (`messenger_dir().parent()`),
+as the same file's `research_loader` already did. Recorded in the `os` skill.
+
+### Requirement-to-test mapping
+
+| Requirement | Test |
+|---|---|
+| AC 2: no `Option<[&]FileResolutionContext>`, empty allowlist | the optional-context gate in every `context_construction_guard` (darkmatter, darkmatter-cli, dmls, messenger, messenger-cli, claudine-gen); engine rejects an allowlist entry for it (self-test) |
+| AC 3: one builder; `from_process` once per binary, zero in libraries | the construction gate in each guard (lib: only `build_resolution_context_with_catalog`'s `from_snapshot`; each binary: one `from_process` in `main.rs`) |
+| AC 5: no ambient process state except allowlisted, reasoned reads | the ambient-state gate in each guard |
+| Engine rejects each violation, ignores comments/strings/test code/methods/definitions, and rejects stale, moved, duplicate, and unreasoned entries | `darkmatter-cli::l1 context_construction_guard::the_engine_rejects_planted_violations_and_stale_entries` |
+| Shared scope rule still holds after the move | `darkmatter::l1 semantic_results_never_persist::the_guard_catches_planted_violations_and_honors_the_scope_rule` |
+| A pathless source's shell command runs in the request directory | `darkmatter::l1 required_context::a_string_documents_shell_command_runs_in_the_request_directory` (unix), unit `shell_expansion::executor::tests::working_directory_resolution_priority`, `bare_filename_source_falls_through_to_the_request_directory` |
+| A string document's relative link resolves from the request directory; a miss stays authored | `required_context::a_string_documents_relative_link_resolves_from_the_request_directory` |
+| A standalone capture reads no process environment; `ctx.agent` comes from the snapshot, `"unknown"` without one | `required_context::ctx_environment_comes_from_the_request_snapshot_only`, unit `capture::agent::tests::capture_runtime_context_includes_agent_group_from_the_supplied_environment`, `expression::ctx::tests::ctx_lookup_resolves_agent_and_model` |
+| A caller's lazy remote `file` value fills `{{VAR}}` from the request environment | unit `schema_validation::tests::caller_remote_file_value_interpolates_from_the_request_environment` |
+| `resolve_target_in_context` reads only the context (URL env, local dir, invalid context) | `biscuit-file::l1 resolution_context::resolve_target_in_context_reads_only_the_context` |
+| Schema-root bare names still resolve nearest-first without a construction | existing schema-root tests (`test(/bare|schema_root|roots/)`, all pass) |
+| messenger `research validate` takes relative documents from the launch directory; a document absent there fails | `messenger-cli::research_cli validate_takes_a_relative_document_from_the_launch_directory` |
+| claudine-gen fixtures resolve through the area context | existing `agent_errors_check::review6_tests` (now through `FixtureBase`) |
+| DMLS: a document with no supplied context resolves nothing and gets no link diagnostic | `graph::arena` test using `NoContexts` / `Err(&ContextFailure::NotProvided)` |
+
+Each new behavior test was confirmed red on the pre-phase code (the four
+`required_context`/`schema_validation` tests by temporarily restoring the old
+read; the biscuit-file test asserts the ambient twin's different result in the
+same body). The messenger CLI test pins behavior that already held (the
+process directory and the snapshot's request directory are the same for a
+binary). The Input Robustness Matrix does not apply (R15): no file-format
+reader changed.
+
+### Gates
+
+- `just test` in `darkmatter/`: **8794 passed**, 12 skipped. `just lint`:
+  passes (after `#[allow(clippy::duplicate_mod)]` on the engine's
+  `source_scan` include: the lib and cli `l1` binaries also load it directly).
+- `just test` in `messenger/`: **695 passed**, 2 skipped; `just lint` passes.
+- `just test` in `biscuit-file/`: **1017 passed**; `just lint` passes.
+- claudine-gen: `cargo nextest run -p claudine-gen` **195 passed**;
+  `cargo clippy -p claudine-gen --all-targets -D warnings` clean. The
+  `claudine/` area recipes cannot run (the `claudine` crate does not compile).
+- `just check-tier-coverage darkmatter` / `messenger`: nothing stranded.
+- `just ci-local --plan`: exit 0, no refused declaration;
+  `python3 -m unittest test_affected_scope.RealWorkspaceTestInputTests`
+  (from `scripts/ci/`): 6 passed with every new `source-inputs` entry.
+- Windows (`just cross-check <pkg> --os windows`, local tree):
+  darkmatter **7157 of 7158** (the one failure is the pre-existing
+  `schema_number_increment_survives_quoted_persistence_round_trips`, recorded
+  in Phase 5 and untouched here), darkmatter-cli 796, dmls 777,
+  messenger-cli 126, claudine-gen 195, biscuit-file 958 all pass; messenger
+  593 pass after the `research_corpus` fix above.
+- Linux (`just cross-check <pkg> --os linux`): darkmatter **7195 passed**,
+  messenger **598 passed**.
+
+## Phase 7
+
+Phase 7 started on the uncommitted Phase 5 and 6 work. **Claudine (lib, cli)
+still does not compile** (22 errors, `cargo check -p claudine`), so the
+claudine-cli runner was not written. Its two `EntryPoint` variants
+(`ClaudineComposition`, `ClaudineCompletion`) and their rows are in the shared
+tables, so the runner can be added later without editing them.
+
+### Wave 15: the shared fixture and tables
+
+`darkmatter/lib/tests/common/entry_point_parity/mod.rs` (`#![allow(dead_code)]`,
+included by `#[path]` from each runner):
+
+- **Fixture** (`ParityFixture::create(root)`): `repo/` is a hand-built git
+  repository (no `git` needed) and a Cargo workspace whose member
+  `area/pkg` makes `area` a package area. Depths are `area/pkg`,
+  `area/pkg/docs`, and `area/pkg/docs/guide`, each with its own `sibling.md`
+  and `beside.md`. `home/` (the fixture `HOME`) holds `magic-doc.md` and
+  `notes/beside.md`, and `outside.md` sits at the root, above `HOME` and
+  outside every repository. Every target's only content is
+  `## TARGET <id>` (its `/`-spelled path below the root), so `::file`,
+  `::code`, and `::toc-linking` output all name the file they resolved.
+- **One reference per document.** Each Table 1 cell writes its own document,
+  so a failing reference cannot mask another. A `SchemaFile` cell declares
+  `target: file(eager)` and renders `stored-value={{ target }}`; the stored
+  value is decoded back to a file (`~/` under `HOME`, absolute, or relative
+  to the document's tree root).
+- **`EntryPoint`** has 13 variants with exhaustive `owner()` and `rows()`
+  (no `_` arm); `every_entry_point_has_a_row` asserts each has a row.
+  `rows_for(owner)` feeds each runner, and `ParityReport` records every cell,
+  then fails naming every mismatch and every owned variant that ran no cell.
+- **Comparison**: files by `canonicalize_simplified` then `PathIdentity`,
+  reported with `to_portable_string`; failures by `ResolutionFailure` only.
+
+### Wave 16: runners
+
+| Runner | Entry points | Cells |
+|---|---|---|
+| `darkmatter::l1 entry_point_parity::darkmatter_entry_points_agree_on_every_reference` | `compose_with`, `compose_preflight`, `DarkmatterSchemas::validate` + `normalize_frontmatter` | 194 |
+| `darkmatter-cli::l1 entry_point_parity::md_entry_points_agree_on_every_reference` | `md compose <doc>`, `md schema validate <doc>`, `md compose <value>` from the repository root and the package | 154 |
+| `dmls::l1 entry_point_parity::dmls_entry_points_agree_on_every_reference` | diagnostics, document links, link graph, definition, code actions (one LSP session) | 312 |
+| claudine-cli | not written: Claudine does not compile | 0 |
+
+The darkmatter runner builds `RequestSnapshot::new(repo).with_home(fixture
+HOME)` and an empty environment. The `md` runner runs its spawns on eight
+threads (about 3 s) and reads a failure only from the `failure: <name>` row.
+The DMLS runner was written by a subagent; it opens, queries, and closes one
+document at a time (opening all 130 first made each open republish every
+document's diagnostics, 7.5 to 12.8 s).
+
+### Wave 17: failing cells, fixed at the entry point
+
+First runs: darkmatter 24 of 194 cells failed, `md` 11 of 154, DMLS 52 of 312.
+Each failure was fixed in the entry point:
+
+| Cells | Root cause | Fix |
+|---|---|---|
+| pipeline, pre-flight, schema validation: a document under `HOME` opened by absolute path from a request at the repository root (row (b)) gave `MissingContext` | the root source of `ComposeRequest::prepare` always used the ordinary `for_source` derivation, which is invalid outside the request's tree; only a transcluded child was admitted as trusted-external (`with_accepted_source_file_in`), and `md` worked around it in its own `document_context` | `source_derivation_for` (one rule) now also admits the root source, in `ComposeRequest::assemble` (`ComposeOptions::admit_source_in`) |
+| pipeline and pre-flight schema `file` values in a child opened through `~`, and standalone `DarkmatterSchemas` on a document outside the request's tree: `MissingContext` | (1) the schema stage built `DarkmatterSchemas` over the request's context, not the source's derived one; (2) `resolve_ctx::document_file_context` reused a derived context only when its `cwd` was spelled identically, and a `~`-opened child keeps the `/var` spelling while its canonical path is `/private/var`, so it re-derived with `for_cwd`, which drops the `~` tree root and falls outside it | the schema stage uses `source_file_resolution_context()`; `document_file_context` recognizes the derived context by canonical directory, and a `cwd` outside the tree derives trusted-external when only that is valid (the rule compose applies to sources) |
+| a tolerated failure (a nested child's `../../outside.md`, any failed `::toc-linking`) showed a notice with no class | the tolerated path turned the error into a message-only `ComposeWarning` | `ComposeWarning::resolution_failure` (new public field, `with_resolution_failure`), set from the new `MarkdownError::resolution_failure()`, which walks the cause chain (nested children, toc errors, schema `file` values) |
+| `::toc-linking` tree escape: no class at all | the chain discarded each target's error (`Err(_) => continue`) and raised `FileNotFound`, so an escape read as a miss | `TocLinkingError::FileNotFound` became `Unresolved { path, line, failure }` carrying the first (authored) target's class, with `resolution_failure()`; its block prints `failure:` |
+| `md`: schema `file` failure (compose block and `md schema validate`) and tolerated-failure warnings had no `failure:` row (R5) | the three renderers did not print the class | the compose schema block, `md schema validate`'s problem bullet, and `md compose`'s warning lines print `failure: <kebab-class>` |
+| DMLS: every `::toc-linking` cell for document links and definition (52) | the provider handled links, definition, broken-path diagnostics, and hover only for `is_transclusion` kinds (`::file`/`::code`), although the graph records `::toc-linking <file>` | `directives::has_file_target(kind)` (transclusions plus `TocLinking`) at those four places; a broken toc target now gets `dm.transclusion.broken_path` ("broken `::toc-linking` target: …") |
+
+The DMLS runner and its fix were written by a subagent and reviewed here.
+
+### Departures and decisions
+
+- **`@` target lives in the fixture `HOME`, not a configured magic root.**
+  `md` has no way to configure an extra `@` root (only snapshot callers do),
+  so a configured root could not give every entry point one answer. The
+  `@` row exercises the chain's home tier, which every entry point receives
+  through its snapshot. Configured snapshot roots stay covered by
+  `repository_contexts::repository_sigils_resolve_in_every_feature` and
+  `request_context_builder`.
+- **Pre-flight rows cover `::file` and schema `file` values only.**
+  Pre-flight resolves only targets that can hold shell commands
+  (`collect.rs` skips `::code` and `::toc-linking` by design) and reports no
+  value for a schema `file` (`Observed::Accepted`, which satisfies a file
+  cell; its failures still compare by class).
+- **Table 2's caller-supplied `../` is expected to resolve, not fail.** The
+  spec (AC 10) says the tree-escape row yields `InvalidReference` at every
+  entry point. `md compose ../outside.md` resolves: `resolve_file_path` opts
+  in with `allow_external_relative()` (added in Phase 2, documented as "the
+  caller's own path, not a document-authored one"), and the released `md`
+  (built from `main`) resolves it too. Enforcing the boundary would break
+  `md compose ../other/doc.md` from inside any repository. The table now
+  expects the file for a caller-supplied value; document-authored `../`
+  still expects `InvalidReference` everywhere. Raised for human review.
+- **`md` on Windows skips the 38 fixture-`HOME` rows.** `RequestSnapshot::from_process()`
+  reads the profile known folder, which ignores `USERPROFILE` (R2 keeps
+  that; `os` skill, Windows trap 2), so a test cannot give an `md` child the
+  fixture `HOME` there. The runner skips exactly the `@`, `~`, and
+  through-`~` rows on Windows (count asserted) and decodes a stored `~/…`
+  value against the real profile. The darkmatter and dmls runners cover
+  those forms on Windows.
+- **DMLS link graph reads the indexed workspace, not the disk.** The DMLS
+  runner uses the fixture root as the workspace folder so `home/` and
+  `outside.md` are indexed; with only `repo/` open, a Markdown link to an
+  `@`, `~`, or outside target would most likely be reported broken. Not
+  changed here; recorded for review.
+- **Test placement.** The shared module is at the plan's
+  `lib/tests/common/entry_point_parity/`; each runner includes it inside its
+  own file (`#[path] mod matrix;`) and spells it with `include_str!` inside
+  the test function. darkmatter-cli and dmls declare it in `source-inputs`.
