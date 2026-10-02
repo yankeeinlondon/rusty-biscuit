@@ -4087,7 +4087,8 @@ mod serial_groups {
     }
 
     /// The scope ends with the group: a later sequence step referencing
-    /// `group.*` gets the unknown-root refusal, not a stale value.
+    /// `group.*` gets the `claudine.outside-group` unavailable-global error, not a
+    /// stale value.
     #[test]
     fn group_variables_do_not_leak_to_a_later_step() {
         let dir = TempDir::new().unwrap();

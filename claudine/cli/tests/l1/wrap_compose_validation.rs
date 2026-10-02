@@ -349,7 +349,7 @@ fn compose_dry_run_quiet_and_silent_are_no_op() {
 
 /// Late-binding lifecycle evaluation error (process-level, non-interactive):
 /// an `initialize` stack whose `when:` guard calls an unknown function
-/// *raises* at event time. Under DM2 strict mode this is a crashed expression,
+/// *raises* at event time. Under DM2 this is a crashed expression,
 /// not a clean `false` guard, so the run must surface a styled
 /// `lifecycle evaluation error` to **stderr** and exit **non-zero** — never a
 /// silent success. This is the setup-phase end-to-end proof for the
