@@ -33,36 +33,33 @@ implemented_by: claude/opus
 review_note: the clarification process served as a review
 human_review: false
 message_to_agent: |-
-    Phase 3 (strict mode and the ctx fallback removed in Darkmatter) is done; read `## Phase 3`
-    of implementation-log.md first. What Phase 4 builds on:
-    (1) `LayeredLookup` no longer exists. Use `darkmatter::markdown::compose::subtree::layered_session(
-    &EffectiveState, HashMap<String, RuntimeBinding>, Option<Arc<BindingView>>,
-    Option<ResolutionContext>) -> Result<EvaluationSession, BindingError>` for direct `evaluate`, and
-    `SubtreeCompose::with_binding_view(view)` for subtree compose. Without a view each supplied
-    global is accepted as supplied; with your Wave 8 catalog view, association enforces it.
-    `InjectedGlobal` is now an alias of `RuntimeBinding<'static>`, so
-    `InjectedGlobal::unavailable(UnavailabilityReason::new("claudine.x"))` works. An association
-    failure arrives as `MarkdownError::Interpolation { cause: ExpressionError::Binding(..) }`.
-    (2) Bridge to replace: `lifecycle::context::outside_group_global()` registers `group` as
-    unavailable (`claudine.outside-group`) in `TaskExecution::resolve_value` (when the overlay
-    carries no `group` scope) and in the executor's `injected_globals` (when `self.group` is None).
-    It kept the group-leak tests green. Replace it with the catalog entry; do not keep both.
-    (3) Claudine's walkers (`first_undefined_stack_variable`, `validate_no_undefined_lifecycle_variables`,
-    `LifecycleUndefinedVariable`) are untouched and still guard `stack` entries only; top-level
-    lifecycle fields already render an absent property as `null`. Four old-contract tests were
-    rewritten to that contract (listed in the log). claudine/docs lifecycle.md marks the walker
-    removal **planned**; remove the marker when you land it.
-    (4) `interpolation_conformance.rs` only lost its strictness parameter; Wave 11 still owns the
-    matrix rewrite.
-    (5) Phase 5 note: the library now emits `dm.expression.undeclared_property`, but DMLS still emits
-    its own `dm.expression.unknown_identifier` (codes.rs/overlay/expressions.rs) until Phase 5.
-    `is_statically_known_root` is exactly the reserved roots now, so DMLS already reports bare
-    context names such as `repo` (one unit test and one lsp_session expectation were updated).
-    (6) Phase 6 note: `prompts/_reviews/performance-review.md` (`ctx.time`) and `prompts/brainstorm.md`
-    (`ctx.area`), plus their DMLS corpus copies, were already fixed here (group D of the Phase 1
-    audit). Group A (`|| false` guards) is untouched.
-    (7) Use absolute paths for `cd`: `cd claudine` from inside `claudine/` resolves through zsh
-    CDPATH to the main checkout (/Volumes/coding/personal/rusty-biscuit).
+    Phases 4 and 5 are done; read `## Phase 4` and `## Phase 5` of implementation-log.md.
+    What later phases build on:
+    (1) Claudine's lifecycle catalog is `claudine::composition::lifecycle::bindings`
+    (`LifecycleScope`, `binding_view`, `runtime_bindings`). An absent property is `null` on every
+    lifecycle surface, so the `|| false` legality guards can go (Phase 6). Bare `err` in
+    initialize/start/success/loop fails preparation; bare `group` outside a group fails at event time.
+    (2) DMLS now classifies through Darkmatter: `BindingView::baseline()` +
+    `names_document_property`, and reports unknown functions as the ERROR
+    `dm.expression.unknown_function` via the new public `expression::validate_expression`.
+    `dm.expression.unknown_identifier` no longer exists anywhere; the code is
+    `dm.expression.undeclared_property`. DMLS has no host descriptors, so a bare `err`/`timing`/`group`
+    in a lifecycle `when:` now shows one advisory in the editor (R7c would fix that; out of scope).
+    A guard test (`dmls/tests/l1/undeclared_property.rs`) fails on any root-name literal in DMLS `src/`.
+    (3) Phase 6 (prompts): the new unknown-function check found a real defect in the shipped
+    `prompts/_agent-skills.md`: `skill_description(i)` (body, line 25, inside `::loop`) and
+    `local_skill_description(...)` (frontmatter, lines 10-14) are not Darkmatter functions, so composing
+    either path fails. The DMLS corpus fixture copy and `baseline.json` record the body finding. If you
+    fix the prompt, update `darkmatter/dmls/tests/fixtures/mapping_only_corpus/_agent-skills.md` and
+    re-bless with `DMLS_BLESS_MAPPING_CORPUS=1` (the bless run fails on purpose; re-run without it).
+    (4) Phase 7: DMLS docs (`dmls/docs/diagnostics.md`, `docs/lsp/features.md`, grammar.md,
+    dmls-schema-support.md) and the darkmatter skill's `dmls.md` already describe the new contract.
+    The library still names its advisory module `compose/unknown_identifiers.rs` (and two test files
+    `unknown_identifier*`); renaming them is optional churn for the DRY/terminology audit. The DRY
+    follow-ups from Phase 4 (loop renderer ignores `{{{ … }}}`; `LifecycleShellResolution.source` is
+    always `Some`) still stand.
+    (5) Use absolute paths for `cd`: `cd claudine` from inside `claudine/` resolves through zsh CDPATH
+    to the main checkout (/Volumes/coding/personal/rusty-biscuit).
 ---
 
 # Remove Strict Mode and Centralize Expression Binding

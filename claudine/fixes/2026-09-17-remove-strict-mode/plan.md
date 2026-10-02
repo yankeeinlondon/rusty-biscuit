@@ -1,7 +1,7 @@
 ---
 total_phases: 7
 created: 2026-10-01
-phase: 3
+phase: 5
 agent: claude/opus
 yolo: "true"
 source_files_during_phase_1: []
@@ -94,6 +94,103 @@ skills_files_updated_during_phase_3:
     - .claude/skills/darkmatter/compose.md
     - .claude/skills/claudine/SKILL.md
     - .claude/skills/claudine/architecture.md
+source_files_during_phase_4:
+    - claudine/lib/src/composition/lifecycle/bindings.rs
+    - claudine/lib/src/composition/lifecycle/bindings/tests.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/binding_contract.rs
+    - claudine/lib/src/composition/lifecycle/action_shape.rs
+    - claudine/lib/src/composition/lifecycle/context.rs
+    - claudine/lib/src/composition/lifecycle/context/tests.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/action_dispatch.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/conditions_control.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/event_time_interpolation.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/filesystem_lookup.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/proxy_with_evaluation.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/runtime_set.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/tests/diagnostics.rs
+    - claudine/lib/src/composition/lifecycle/tests/guard_runtime.rs
+    - claudine/lib/src/composition/lifecycle/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/tests/nested_span.rs
+    - claudine/lib/src/composition/lifecycle/tests/validation.rs
+    - claudine/lib/src/composition/lifecycle/validate.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/lifecycle.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/lib/src/composition/interpolation_conformance.rs
+    - claudine/lib/src/composition/looping/actions.rs
+    - claudine/lib/src/composition/looping/engine.rs
+    - claudine/lib/src/composition/looping/engine/tests/lifecycle_control.rs
+    - claudine/lib/src/composition/looping/expression.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/preflight.rs
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/prepare/tests.rs
+    - claudine/lib/src/composition/reserved.rs
+    - claudine/lib/src/composition/sequence/expr.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/sequence/preflight/shape.rs
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - claudine/lib/src/diagnostics/snapshot/tests.rs
+    - claudine/lib/tests/l1/agent_errors_fleet.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/composition/preflight.rs
+    - claudine/cli/src/commands/wrap/composition/staged_boot.rs
+    - claudine/cli/src/commands/wrap/composition/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/lifecycle_events.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/lifecycle_ordering.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/terminal_evaluation.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/src/output/error_walker/tests.rs
+    - claudine/cli/tests/l1/compose_schema_cli.rs
+    - claudine/cli/tests/l1/handoff_owners.rs
+    - claudine/cli/tests/l1/wrap_compose_validation.rs
+docs_updated_during_phase_4:
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/flow-control/flow-control-reference.md
+    - claudine/docs/topics/flow-control/looping.md
+    - claudine/docs/topics/composition.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/claudine/SKILL.md
+source_files_during_phase_5:
+    - darkmatter/lib/src/markdown/compose/expression/binding.rs
+    - darkmatter/lib/src/markdown/compose/expression/absence.rs
+    - darkmatter/lib/src/markdown/compose/expression/prepared.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/context/current.rs
+    - darkmatter/lib/tests/l1/binding_contract.rs
+    - darkmatter/dmls/src/diagnostics/codes.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter/severity_tests.rs
+    - darkmatter/dmls/src/diagnostics/nested_span.rs
+    - darkmatter/dmls/src/diagnostics/nested_span/nested_span_tests.rs
+    - darkmatter/dmls/src/overlay/expressions.rs
+    - darkmatter/dmls/src/providers/code_actions.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/providers/frontmatter/sequence_tests.rs
+    - darkmatter/dmls/tests/fixtures/mapping_only_corpus/baseline.json
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/no_side_effects.rs
+    - darkmatter/dmls/tests/l1/undeclared_property.rs
+docs_updated_during_phase_5:
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/dmls/docs/features.md
+    - darkmatter/docs/lsp/features.md
+    - darkmatter/docs/topics/schemas/parsing/grammar.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/docs/topics/darkmatter-expressions.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/darkmatter/SKILL.md
 packages:
     - darkmatter
     - darkmatter-cli
@@ -550,7 +647,7 @@ Phase 3.
 
 ### Wave 8 — catalog and session construction (serial; the foundation)
 
-- [ ] **Lifecycle binding catalog**
+- [x] **Lifecycle binding catalog**
   - Add one Claudine-owned module (for example `lifecycle/bindings.rs`) that
     builds a `BindingView` declaring `err`, `timing`, and `group` (NR-3,
     NR-4). It covers every scope in C3's matrix:
@@ -566,7 +663,7 @@ Phase 3.
     membership means `execution-dependent` during passive checks.
   - `outputs` stays unavailable at sequence shell approval under its existing
     policy, expressed in the same catalog (C3).
-- [ ] **Complete runtime entries**
+- [x] **Complete runtime entries**
   - Replace `lifecycle_injected_globals` with a constructor that returns a
     complete runtime map per scope. For example, `err` is eager in
     `blocked`/`failure`, eager or explicit `null` in `finalize`/teardown, and
@@ -576,7 +673,7 @@ Phase 3.
 
 ### Wave 9 — consumer migration (parallel after Wave 8; each task owns its files)
 
-- [ ] **Event-time lifecycle** (`lifecycle/executor.rs`,
+- [x] **Event-time lifecycle** (`lifecycle/executor.rs`,
   `lifecycle/action_shape.rs`)
   - `when_matches`, `render_message`, `resolve_typed_value`, and
     `resolve_string_value` evaluate through the event's session.
@@ -586,7 +683,7 @@ Phase 3.
   - `proxy.with` and mapping-based `set` resolve the complete candidate before
     any write. A genuine error leaves nothing published, and an absent
     property is a successful `null`.
-- [ ] **Shell approval and byte parity** (`preflight.rs`,
+- [x] **Shell approval and byte parity** (`preflight.rs`,
   `sequence/preflight/mod.rs`, `sequence/task/` setup and teardown paths)
   - Lifecycle shell preflight uses the early-approval scope. Sequence-wide
     preflight uses the sequence-approval scope, in which `group` is
@@ -595,7 +692,7 @@ Phase 3.
   - Add the Claudine-private `ApprovedCommand { site, bytes }` (NR-9). Store it
     beside prepared task stacks, and execute setup and teardown from those
     approved bytes rather than re-evaluating the authored string.
-- [ ] **Sequence values and expressions** (`sequence/task/mod.rs`,
+- [x] **Sequence values and expressions** (`sequence/task/mod.rs`,
   `sequence/expr.rs`, `sequence/task/group.rs`)
   - Task value resolution uses the actual task scope.
   - `SourceExpressionLookup` treats the per-item overlay as the document layer
@@ -603,7 +700,7 @@ Phase 3.
     duplicate `evaluate_whole`/`render_interpolated` traversal with
     `prepare_value`/`evaluate_prepared`.
   - Group variables still evaluate before the new group's scope is entered.
-- [ ] **Loop and hook lookups** (`looping/expression.rs`, `looping/actions.rs`,
+- [x] **Loop and hook lookups** (`looping/expression.rs`, `looping/actions.rs`,
   `dispatch/expression.rs`)
   - Remove the `ctx` fallback. `SizedLookup` and `EventMetaConditionLookup`
     forward the full contract.
@@ -612,7 +709,7 @@ Phase 3.
 
 ### Wave 10 — remove validators and preserve typed causes (parallel after Wave 9)
 
-- [ ] **Prepare-time validation** (`lifecycle/validate.rs`, `prepare.rs`)
+- [x] **Prepare-time validation** (`lifecycle/validate.rs`, `prepare.rs`)
   - Delete `validate_no_undefined_lifecycle_variables`,
     `first_undefined_stack_variable`, and their root-inventory walkers.
   - Reduce `validate_no_err_in_no_error_events` to an adapter. It builds the
@@ -622,7 +719,7 @@ Phase 3.
     function.
   - The `initialize` shell prohibition (parser rejection plus
     `DisabledShellRunner`) is untouched.
-- [ ] **Typed cause preservation** (`lifecycle/` error types,
+- [x] **Typed cause preservation** (`lifecycle/` error types,
   `CompositionError`, proxy and recovery transport)
   - Delete `CompositionError::LifecycleUndefinedVariable` and its renderer
     branches in `claudine/cli`.
@@ -633,7 +730,7 @@ Phase 3.
 
 ### Wave 11 — Claudine Level 1 tests (parallel after Wave 10)
 
-- [ ] **Event-time behavior tests** (spec § Claudine Level 1)
+- [x] **Event-time behavior tests** (spec § Claudine Level 1)
   - An absent property in `when:` skips the action.
   - An absent property in a message renders as `null`.
   - An absent property in a typed value resolves to `null`.
@@ -642,23 +739,23 @@ Phase 3.
   - An unavailable global fails with its diagnostic and never reads a
     same-named document property.
   - Malformed expressions and unknown functions halt before side effects.
-- [ ] **Lifecycle binding matrix**
+- [x] **Lifecycle binding matrix**
   - One table-driven test crosses each catalog global (`err`, `timing`,
     `group`) with every scope in Wave 8. Each case goes through both
     `validate_prepared` and runtime resolution, with no Claudine walker.
   - Include an omitted entry compared with an explicit unavailable entry, and
     explicit `null` in `finalize`/teardown.
-- [ ] **Library typed-cause test**
+- [x] **Library typed-cause test**
   - A library-only test downcasts the original Darkmatter cause and reads the
     Claudine context after direct, proxy, lifecycle, and catch wrapping,
     without the CLI and without parsing rendered text (acceptance criterion 16).
-- [ ] **Validation boundary and initialize regressions**
+- [x] **Validation boundary and initialize regressions**
   - A required-schema failure stops before lifecycle actions or provider
     launch, and recovery routes still run under existing policy.
   - Prohibited shell expansion never runs, including on recovery routes and in
     inactive branches.
   - Keep the existing `initialize` regressions.
-- [ ] **Conformance and parity**
+- [x] **Conformance and parity**
   - Rewrite `interpolation_conformance.rs` as one shared missing-property
     semantics table, with no strict/lenient divergence.
   - Use the same escape, whole-value, and mixed-string fixtures as Darkmatter
@@ -681,20 +778,20 @@ files do not overlap Phase 4's.
 
 ### Wave 12 — DMLS migration (serial within the crate)
 
-- [ ] **Shared classification**
+- [x] **Shared classification**
   - Replace DMLS's own root decisions (`overlay/expressions.rs::is_unknown_root`,
     and the `"ctx"` special cases in `providers/frontmatter.rs` and
     `providers/dsl.rs`) with Darkmatter's classification:
     `reserved_root_descriptors()` and the binding model's baseline view.
   - No hardcoded root list remains in DMLS. Claudine descriptors are not
     supplied (R7c is out of scope).
-- [ ] **Advisory diagnostic**
+- [x] **Advisory diagnostic**
   - Apply NR-7 in `diagnostics/codes.rs`, `diagnostics/frontmatter.rs`, and
     `overlay/expressions.rs`. The code is `dm.expression.undeclared_property`,
     with advisory severity, at most one per source span, worded as a valid,
     currently undeclared, unknown-typed document property.
   - Unknown functions stay hard errors. Keep the dash-separated-key quick-fix.
-- [ ] **DMLS Level 1 tests** (spec § DMLS Level 1, in-scope items)
+- [x] **DMLS Level 1 tests** (spec § DMLS Level 1, in-scope items)
   - An undeclared property produces at most one advisory.
   - A schema-declared but unset property keeps its type in hover.
   - A runtime-supplied property is not a parser error.
