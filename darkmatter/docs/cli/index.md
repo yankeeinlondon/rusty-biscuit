@@ -75,6 +75,8 @@ A few things worth knowing before typing one of these at a shell prompt:
 - `@` is the one multi-homed introducer that can leave the repository, because `$HOME` is in its search list; reach for `^` when repository containment is the point
 - the `!` sigil has been removed from the grammar; a reference beginning with `!` is now a parse error that suggests `^`
 
+To search more directories for `@` references, pass `--magic-root <DIR>` before the subcommand (`md --magic-root shared compose '@notes.md'`); it is repeatable and applies to every route. See [Magic Paths](../topics/magic-paths.md#from-the-md-command-line).
+
 The canonical reference for the full grammar — including the error vocabulary and the `resolve_detailed()` diagnostics — is [File References in `biscuit-file`](../../../biscuit-file/docs/topics/file-references.md). For how darkmatter injects its own `@` search roots, see [Magic Paths](../topics/magic-paths.md).
 
 All subcommands can consume STDIN as their (first) file reference:

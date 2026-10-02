@@ -6,10 +6,10 @@
 //! Every spawn goes through `CliProcessFixture`, whose `home/` is the
 //! child's `HOME` (`USERPROFILE` on Windows) and the fixture `HOME` of the
 //! matrix; `md`'s process snapshot reads its home from that environment on
-//! every OS. `md` configures no extra `@` root, so the matrix gives it no
-//! configured-root cell. A failure's class is
-//! read only from the stable `failure: <name>` row `md` renders for a failed
-//! file reference, never from message text.
+//! every OS. Every run passes the matrix's configured extra `@` root as
+//! `--magic-root`, so `@configured-doc.md` resolves through the flag. A
+//! failure's class is read only from the stable `failure: <name>` row `md`
+//! renders for a failed file reference, never from message text.
 
 #[path = "../../../lib/tests/common/entry_point_parity/mod.rs"]
 mod matrix;
@@ -85,6 +85,8 @@ fn md_compose(cli: &CliProcessFixture, fixture: &ParityFixture, cell: &DocumentC
         .command_builder()
         .ambient_context(&fixture.repo())
         .build()
+        .arg("--magic-root")
+        .arg(fixture.configured_magic_root())
         .arg("compose")
         .arg(document_argument(fixture, &document))
         .output()
@@ -98,6 +100,8 @@ fn md_schema_validate(cli: &CliProcessFixture, fixture: &ParityFixture, cell: &D
         .command_builder()
         .ambient_context(&fixture.repo())
         .build()
+        .arg("--magic-root")
+        .arg(fixture.configured_magic_root())
         .args(["schema", "validate"])
         .arg(document_argument(fixture, &document))
         .output()
@@ -117,6 +121,8 @@ fn md_argument(cli: &CliProcessFixture, fixture: &ParityFixture, cell: &ValueCel
         .command_builder()
         .ambient_context(&fixture.launch_dir(cell.launch))
         .build()
+        .arg("--magic-root")
+        .arg(fixture.configured_magic_root())
         .arg("compose")
         .arg(&value)
         .output()
@@ -140,7 +146,9 @@ fn run(cli: &CliProcessFixture, fixture: &ParityFixture, row: &Row) -> (Expected
                 | EntryPoint::DmlsDefinition
                 | EntryPoint::DmlsCodeActions
                 | EntryPoint::ClaudineComposition
-                | EntryPoint::ClaudineCompletion => unreachable!("{row:?} is not a darkmatter-cli document row"),
+                | EntryPoint::ClaudineCompletion
+                | EntryPoint::ClaudinePromptArgument
+                | EntryPoint::ClaudineSuppliedValue => unreachable!("{row:?} is not a darkmatter-cli document row"),
             };
             (fixture.expected_document(cell), observed)
         }
@@ -158,7 +166,9 @@ fn run(cli: &CliProcessFixture, fixture: &ParityFixture, row: &Row) -> (Expected
                 | EntryPoint::DmlsDefinition
                 | EntryPoint::DmlsCodeActions
                 | EntryPoint::ClaudineComposition
-                | EntryPoint::ClaudineCompletion => unreachable!("{row:?} is not a darkmatter-cli value row"),
+                | EntryPoint::ClaudineCompletion
+                | EntryPoint::ClaudinePromptArgument
+                | EntryPoint::ClaudineSuppliedValue => unreachable!("{row:?} is not a darkmatter-cli value row"),
             };
             (fixture.expected_value(cell), observed)
         }

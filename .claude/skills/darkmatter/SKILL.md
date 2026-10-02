@@ -95,7 +95,8 @@ built_or_derived_context)`. Preparation fixes the repository observation and
 reuses it for the builder (one discovery per request), re-anchors a
 `ComposeOptions::new()` context on the request directory, and makes `ctx.env`
 the context's environment. Magic roots enter only through
-`RequestSnapshot::with_magic_root*`; `ComposeOptions` has no magic paths and no
+`RequestSnapshot::with_magic_root*` (for `md`, the top-level repeatable
+`--magic-root <DIR>`, applied in `main` by `request::with_magic_roots`); `ComposeOptions` has no magic paths and no
 public context setter. Only binaries call `RequestSnapshot::from_process()`. DMLS builds one
 context per repository (`dmls/src/context.rs`, see
 [dmls.md](dmls.md#file-resolution-contexts)).
@@ -408,7 +409,7 @@ their required targets; CI enables both features when constructing all-tier
 coverage.
 
 **Context guards.** `context_construction_guard.rs` in darkmatter lib, cli,
-dmls, messenger lib/cli, and claudine-gen (Claudine pending) runs the shared
+dmls, messenger lib/cli, claudine lib/cli, and claudine-gen runs the shared
 engine `cli/tests/common/context_guard.rs` over that crate's `src/`:
 construction (`FileResolutionContext::new|from_snapshot`, `::from_process`),
 optional context (`Option<[&]FileResolutionContext>`, no allowlist allowed),
@@ -420,23 +421,42 @@ feeds neither file resolution, `ctx.*`, nor `env.*`. A failing guard prints
 the `Allowance` to paste; fix the read instead when it resolves a path or
 seeds `ctx.*`. The production-scope rule (`#[cfg(test)]` blanking) lives in
 `source_scan::production_sources`, shared with
-`semantic_results_never_persist.rs`.
+`semantic_results_never_persist.rs`; files below an inline
+`#[cfg(test)] mod tests { .. }` (its `tests/` directory) are test-only too.
 
 **Entry-point parity matrix.** `lib/tests/common/entry_point_parity/mod.rs`
 holds the fixture (monorepo + fixture `HOME` + `outside.md`), the
 `EntryPoint` enum with exhaustive `owner()`/`rows()`, both tables, and
 `ParityReport`. Runners: `lib/tests/l1/entry_point_parity.rs` (pipeline,
 pre-flight, schema validation), `cli/tests/l1/entry_point_parity.rs` (`md`),
-`dmls/tests/l1/entry_point_parity.rs`; Claudine's is pending. A new entry
+`dmls/tests/l1/entry_point_parity.rs`, and
+`claudine/cli/tests/l1/entry_point_parity.rs` (`claudine compose --dry-run`
+for documents; for Table 2 values, `claudine __complete … compose <value>
+resolved=` (completion resolves only the committed prompt, so the value is
+that prompt and every target of that runner's second fixture declares
+`resolved: enum(t<N>)`; no suggestions is `Observed::Unresolved`), the same
+value composed as the prompt argument, and a `target=<value>` schema value).
+Each variant must invoke the feature it names: never stand one entry point in
+for another. A new entry
 point is an `EntryPoint` variant plus rows; a failing cell is an entry-point
-defect, never a table edit, except where a design decision says otherwise
-(caller-supplied `../` may leave the tree: `md`'s argument opts in with
-`allow_external_relative`). Compare failures only by `ResolutionFailure`:
+defect, never a table edit. A caller-supplied `../` that leaves the
+repository is `InvalidReference` at every entry point, `md`'s arguments
+included (no `allow_external_relative`). No runner skips cells by OS:
+`RequestSnapshot::from_process` reads the home env-first (`USERPROFILE` on
+Windows), so a `CliProcessFixture` home reaches `md` and `claudine`.
+`@configured-doc.md` lives only under `home/.claudine/prompts` (Claudine's
+user prompt root; the `md` runner passes it as `md --magic-root <DIR>`, and the
+library and DMLS runners register it on their snapshot; production DMLS has no
+extra-root setting). Every runner runs every form. DMLS runs every consumer at
+every editor surface (graph through `index_workspace`; code actions assert no
+create-file fix except for a broken Markdown link). Compare failures only by `ResolutionFailure`:
 `MarkdownError::resolution_failure()` walks the cause chain (nested children,
 `TocLinkingError::Unresolved`, schema `file` values), a tolerated failure's
 `ComposeWarning::resolution_failure` carries it, and `md` renders it as a
 `failure: <kebab-class>` row on every block and warning
-(`darkmatter/docs/errors/file-reference-failures.md` is its user contract).
+(`darkmatter/docs/errors/file-reference-failures.md` is its user contract);
+Claudine's prompt-argument errors carry the same row
+(`CompositionError::resolution_failure`).
 
 Do not run workspace-wide Cargo gates for a Darkmatter-only change. Use Sniff
 and GitNexus first to include actual downstream consumers such as Claudine when

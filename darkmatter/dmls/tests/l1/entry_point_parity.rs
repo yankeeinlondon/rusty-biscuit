@@ -373,7 +373,9 @@ fn dmls_entry_points_agree_on_every_reference() {
                 | EntryPoint::MdSchemaValidate
                 | EntryPoint::MdArgument
                 | EntryPoint::ClaudineComposition
-                | EntryPoint::ClaudineCompletion => unreachable!("{:?} is not DMLS's", cell.entry),
+                | EntryPoint::ClaudineCompletion
+                | EntryPoint::ClaudinePromptArgument
+                | EntryPoint::ClaudineSuppliedValue => unreachable!("{:?} is not DMLS's", cell.entry),
             };
             report.record(&fixture, row, &fixture.expected_document(cell), &observed);
         }

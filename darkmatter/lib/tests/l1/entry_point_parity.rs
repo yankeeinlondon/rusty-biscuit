@@ -146,7 +146,9 @@ fn darkmatter_entry_points_agree_on_every_reference() {
             | EntryPoint::DmlsDefinition
             | EntryPoint::DmlsCodeActions
             | EntryPoint::ClaudineComposition
-            | EntryPoint::ClaudineCompletion => unreachable!("{:?} is not darkmatter's", cell.entry),
+            | EntryPoint::ClaudineCompletion
+            | EntryPoint::ClaudinePromptArgument
+            | EntryPoint::ClaudineSuppliedValue => unreachable!("{:?} is not darkmatter's", cell.entry),
         };
         report.record(&fixture, &row, &fixture.expected_document(&cell), &observed);
     }

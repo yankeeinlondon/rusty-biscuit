@@ -51,6 +51,7 @@ mod hash_directory;
 mod hash_kind_save_diff;
 mod help;
 mod layout_alignment;
+mod magic_root;
 mod layout_fill;
 mod layout_flags;
 mod layout_style_frontmatter;

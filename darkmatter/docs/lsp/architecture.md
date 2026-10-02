@@ -32,8 +32,11 @@ covers how the server produces and maintains the contexts. The code is in
 ### One snapshot, fixed at startup
 
 `main.rs` calls `RequestSnapshot::from_process()` once and passes it to the
-server in `RunOptions`. The snapshot carries `HOME`, the environment, and
-any extra `@` roots. Nothing else in DMLS reads the process for resolution,
+server in `RunOptions`. The snapshot carries `HOME` and the environment.
+DMLS has no setting for an extra `@` root, so the production snapshot has
+none; the snapshot is still where one would enter, and an embedder (or a
+test) that starts the server with its own snapshot supplies it there.
+Nothing else in DMLS reads the process for resolution,
 so every context the server builds sees the same `HOME` and environment
 until the server restarts. The snapshot's own request directory is never
 used: each build re-anchors it with `snapshot.at_request_dir(key)`. See

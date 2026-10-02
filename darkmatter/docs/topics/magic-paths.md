@@ -17,6 +17,20 @@ These anchors come from the request's **launch `@` scope**, not from the documen
 
 ## Adding Custom Search Roots
 
+### From the `md` command line
+
+Give `md` a `--magic-root <DIR>` before the subcommand to add a root for that one run. Repeat it to add several; they are searched in the order given, each ahead of its tier's intrinsic roots (`PathPosition::Start`, tier inferred from the path):
+
+```bash
+# @prompts/review.md now also finds ./shared/prompts/review.md
+# and ~/.claudine/prompts/prompts/review.md
+md --magic-root shared --magic-root ~/.claudine/prompts compose '@prompts/review.md'
+```
+
+The root applies to every route, so `md compose`, `md render`, `md schema validate`, `md validate refs`, `md hash`, `md graph`, and the frontmatter commands all search it, both for the document argument and for the references inside the document and its transclusions. A relative `DIR` is relative to the directory you ran `md` in. A `DIR` that does not exist or is not a directory stops `md` with an error naming it, rather than being skipped. `md` reads no environment variable or configuration file for extra roots.
+
+### From the library
+
 Add directories to the search order on the request snapshot. The context builder applies them, and it is the only place magic roots enter a context:
 
 ```rust

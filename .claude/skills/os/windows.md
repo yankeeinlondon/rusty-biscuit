@@ -45,19 +45,15 @@ helper that resolves it is named so it is not re-derived.
    Windows launch test names its roots instead: the provider selector (e.g.
    `CODEX_HOME`) for the source and `CLAUDINE_OVERLAY_DIR` for overlay
    storage (`level2_provider_overlay_capture.rs`, 2026-09-16).
-   The same holds for a request context: `RequestSnapshot::from_process()`
-   takes its home from `biscuit_file::home_dir()` (the known folder), so in
-   an `md` `CliProcessFixture` on Windows the context's home is the real
-   profile, not the fixture's `USERPROFILE`. Any default that falls back to
-   the context's home (shell policy files for a stdin document did, until
-   `md` pinned `policy_root` to the launch directory) reaches the real
-   profile there only (2026-10-01, 11 CLI tests red on build-win-native).
-   The `md` entry-point parity runner (`cli/tests/l1/entry_point_parity.rs`)
-   therefore skips, on Windows only, the 38 rows whose answer needs the
-   fixture `HOME` as `md`'s home (`@` home tier, `~`, documents reached
-   through `~`), and decodes a stored `~/…` value against the real profile;
-   the darkmatter and dmls runners pass `HOME` in the snapshot and cover
-   those forms on Windows.
+   A request context does not have this trap: `RequestSnapshot::from_process()`
+   takes its home from `std::env::home_dir()` (since 2026-10-01; it used
+   `biscuit_file::home_dir()`, the known folder), so an `md` or `claudine`
+   `CliProcessFixture` child's `USERPROFILE` is its `~` and its `@` home
+   tier, and the entry-point parity runners run every cell on Windows.
+   `biscuit_file::home_dir()` itself still asks the known folder, so any
+   other default that reads it reaches the real profile on Windows only
+   (2026-10-01, 11 CLI tests red on build-win-native before `md` pinned
+   `policy_root` to the launch directory).
    `dirs::cache_dir()` is the same (`%LOCALAPPDATA%` from the known folder),
    so a Windows test that seeds a cache file writes to the real per-user
    path, keyed by its temporary repository, and deletes what it seeded

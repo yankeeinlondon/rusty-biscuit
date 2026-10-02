@@ -158,6 +158,9 @@ md compose iteration=1 README.md
 # Include frontmatter in output
 md compose README.md --fm
 
+# Search another directory for @ references (repeatable, before the subcommand)
+md --magic-root shared compose '@prompts/feature.md'
+
 # Compose from stdin
 echo "# Hello {{ name }}" | md compose - --state '{"name":"Alice"}'
 

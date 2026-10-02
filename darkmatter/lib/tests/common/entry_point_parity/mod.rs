@@ -37,11 +37,12 @@
 //! new entry point without rows does not compile, and each runner matches the
 //! same enum, so it does not compile in any runner either.
 //!
-//! `home/.claudine/prompts/` is Claudine's user prompt root, the one extra `@`
-//! root a shipped binary configures. The darkmatter and dmls runners register
-//! the same directory on their request snapshot
-//! ([`ParityFixture::configured_magic_root`]), so `@configured-doc.md` is
-//! reachable only through a configured root at every entry point that has one.
+//! `home/.claudine/prompts/` is the configured extra `@` root
+//! ([`ParityFixture::configured_magic_root`]). Claudine registers it as its
+//! user prompt root, `md` receives it as `--magic-root`, and the darkmatter and
+//! dmls runners register it on their request snapshot, so
+//! `@configured-doc.md` is reachable only through a configured root, at every
+//! entry point.
 //!
 //! Shared by `#[path]` with the darkmatter-cli, dmls, and claudine-cli
 //! runners; each declares this file in `[package.metadata.ci.tests]
@@ -91,12 +92,25 @@ pub enum EntryPoint {
     DmlsCodeActions,
     /// Claudine composition of a prompt.
     ClaudineComposition,
-    /// Claudine completion of a schema `file` value (Table 2).
+    /// Claudine completion (`claudine __complete … compose <value>
+    /// <property>=`), Table 2. Completion resolves a caller's reference in one
+    /// place, the committed prompt argument whose `$schema` supplies the
+    /// setter suggestions, so the value is that argument and the suggestions
+    /// name the file it resolved to. A `file` property's own value
+    /// suggestions are a directory walk, not a resolution. Completion reports
+    /// no failure class: no suggestions is [`Observed::Unresolved`].
     ClaudineCompletion,
+    /// `claudine compose --dry-run <value>`: the prompt argument completion
+    /// resolves, composed (Table 2), so a completion cell and its execution
+    /// are compared against the same expectation.
+    ClaudinePromptArgument,
+    /// `claudine compose --dry-run <document> target=<value>`: a
+    /// caller-supplied schema `file` property value (Table 2).
+    ClaudineSuppliedValue,
 }
 
 impl EntryPoint {
-    pub const ALL: [EntryPoint; 13] = [
+    pub const ALL: [EntryPoint; 15] = [
         Self::ComposePipeline,
         Self::Preflight,
         Self::SchemaValidation,
@@ -110,6 +124,8 @@ impl EntryPoint {
         Self::DmlsCodeActions,
         Self::ClaudineComposition,
         Self::ClaudineCompletion,
+        Self::ClaudinePromptArgument,
+        Self::ClaudineSuppliedValue,
     ];
 
     pub fn owner(self) -> Owner {
@@ -121,7 +137,10 @@ impl EntryPoint {
             | Self::DmlsLinkGraph
             | Self::DmlsDefinition
             | Self::DmlsCodeActions => Owner::Dmls,
-            Self::ClaudineComposition | Self::ClaudineCompletion => Owner::ClaudineCli,
+            Self::ClaudineComposition
+            | Self::ClaudineCompletion
+            | Self::ClaudinePromptArgument
+            | Self::ClaudineSuppliedValue => Owner::ClaudineCli,
         }
     }
 
@@ -134,20 +153,21 @@ impl EntryPoint {
             Self::ComposePipeline => document_rows(self, &[File, Code, TocLinking, SchemaFile], &Form::ALL, true),
             Self::Preflight => document_rows(self, &[File, Code, TocLinking, SchemaFile], &Form::ALL, true),
             Self::SchemaValidation => document_rows(self, &[SchemaFile], &Form::ALL, false),
-            // `md` configures no extra `@` root: its snapshot is the process's
-            // directory, home, and environment, so it has no
-            // `Form::ConfiguredMagic` cell.
-            Self::MdCompose => document_rows(self, &[File, Code, TocLinking, SchemaFile], &UNCONFIGURED, false),
-            Self::MdSchemaValidate => document_rows(self, &[SchemaFile], &UNCONFIGURED, false),
+            Self::MdCompose => document_rows(self, &[File, Code, TocLinking, SchemaFile], &Form::ALL, false),
+            Self::MdSchemaValidate => document_rows(self, &[SchemaFile], &Form::ALL, false),
             // A quoted `'~/…'` argument is the only `~` spelling `md` sees.
-            Self::MdArgument => value_rows(self, &UNCONFIGURED, true),
+            Self::MdArgument => value_rows(self, &Form::ALL, true),
             Self::DmlsDiagnostics => document_rows(self, &[SchemaFile], &Form::ALL, false),
             Self::DmlsDocumentLinks => document_rows(self, EDITOR, &Form::ALL, false),
             Self::DmlsLinkGraph => document_rows(self, EDITOR, &Form::ALL, false),
             Self::DmlsDefinition => document_rows(self, EDITOR, &Form::ALL, false),
             Self::DmlsCodeActions => document_rows(self, EDITOR, &Form::ALL, false),
             Self::ClaudineComposition => document_rows(self, &[File, Code, TocLinking, SchemaFile], &Form::ALL, false),
+            // The value is the prompt itself, so the notes documents' own
+            // references (rows (a) and (b)) are composition's, not completion's.
             Self::ClaudineCompletion => value_rows(self, &Form::ALL, false),
+            Self::ClaudinePromptArgument => value_rows(self, &Form::ALL, true),
+            Self::ClaudineSuppliedValue => value_rows(self, &Form::ALL, false),
         }
     }
 }
@@ -268,19 +288,6 @@ impl Form {
         }
     }
 }
-
-/// Every form except [`Form::ConfiguredMagic`], for an entry point that
-/// configures no extra `@` root.
-const UNCONFIGURED: [Form; 8] = [
-    Form::ExplicitRelative,
-    Form::BareBeside,
-    Form::BareRootOnly,
-    Form::RepositoryRoot,
-    Form::RepositoryScoped,
-    Form::Magic,
-    Form::Home,
-    Form::TreeEscape,
-];
 
 /// A document's directory in the package.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -475,6 +482,11 @@ pub enum Observed {
     /// whose success carries no path (pre-flight's schema validation)
     /// reports this; it satisfies an `Expected::File` cell.
     Accepted,
+    /// The reference resolved to nothing and the entry point names no class.
+    /// Only completion reports this (it offers no suggestions); it satisfies
+    /// an `Expected::Failure` cell of any class, and the class is compared at
+    /// the same value's execution ([`EntryPoint::ClaudinePromptArgument`]).
+    Unresolved,
     /// Anything else, described for the report (several files, a failure
     /// with no class, an unexpected success).
     Unexpected(String),
@@ -504,23 +516,15 @@ impl ParityFixture {
         );
         write(&repo.join("area/pkg/src/lib.rs"), "");
 
-        let mut targets = vec![
-            "outside.md".to_string(),
-            "home/magic-doc.md".into(),
-            "home/.claudine/prompts/configured-doc.md".into(),
-            "home/notes/beside.md".into(),
-            "repo/root-only.md".into(),
-            "repo/area/area-doc.md".into(),
-            "repo/area/pkg/pkg-only.md".into(),
-        ];
-        for depth in Depth::ALL {
-            targets.push(format!("{}/sibling.md", depth.relative()));
-            targets.push(format!("{}/beside.md", depth.relative()));
-        }
-        for id in targets {
+        for id in target_ids() {
             write(&root.join(&id), &format!("## {TARGET_MARKER}{id}\n"));
         }
         fixture
+    }
+
+    /// Every target file, in a fixed order.
+    pub fn targets(&self) -> Vec<PathBuf> {
+        target_ids().into_iter().map(|id| self.root.join(id)).collect()
     }
 
     pub fn root(&self) -> &Path {
@@ -720,6 +724,7 @@ impl ParityFixture {
             }
             (Expected::File(_), Observed::Accepted) => Ok(()),
             (Expected::Failure(want), Observed::Failure(got)) if want == got => Ok(()),
+            (Expected::Failure(_), Observed::Unresolved) => Ok(()),
             (Expected::File(want), other) => Err(format!("expected {}, got {other:?}", self.show(want))),
             (Expected::Failure(want), Observed::File(got)) => {
                 Err(format!("expected {want:?}, got {}", self.show(got)))
@@ -784,6 +789,24 @@ impl ParityReport {
             self.mismatches.join("\n")
         );
     }
+}
+
+/// Every target's id: its `/`-spelled path below the fixture root.
+fn target_ids() -> Vec<String> {
+    let mut targets = vec![
+        "outside.md".to_string(),
+        "home/magic-doc.md".into(),
+        "home/.claudine/prompts/configured-doc.md".into(),
+        "home/notes/beside.md".into(),
+        "repo/root-only.md".into(),
+        "repo/area/area-doc.md".into(),
+        "repo/area/pkg/pkg-only.md".into(),
+    ];
+    for depth in Depth::ALL {
+        targets.push(format!("{}/sibling.md", depth.relative()));
+        targets.push(format!("{}/beside.md", depth.relative()));
+    }
+    targets
 }
 
 fn write(path: &Path, text: &str) {

@@ -61,8 +61,11 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   trigger payloads cannot resolve without one, and `DarkmatterSchemas::new`
   requires a context.
 - The graph takes `&dyn DocumentContexts` (`WorkspaceIndex::new(contexts)`):
-  edges resolve to the first `candidate_plan` path that is an indexed
-  document, with no disk probe. Tests use `context::test_support`
+  `arena::locate` takes the first planned candidate when it is indexed (no
+  probe), else asks `context::resolve_reference`, else a later indexed
+  candidate (an unsaved buffer). An existing unindexed file is
+  `EdgeTarget::File`, never a broken link; the index decides headings, never
+  existence, and anchors on unindexed files are not checked. Tests use `context::test_support`
   (`abs`, `workspace_contexts`, `resolution_for`) because a context rejects a
   rootless `/w` path on Windows; integration tests use `FixedContext` or a
   real `RepositoryContexts`; empty graphs use `NoContexts`

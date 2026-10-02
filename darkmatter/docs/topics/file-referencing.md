@@ -12,7 +12,7 @@ defines, and it resolves them all the same way. The common forms:
 | Bare | `intro.md` | the document's folder, then the repository root |
 | Repository root | `&/docs/intro.md` | the repository root |
 | Repository scoped | `^/intro.md` | the document's package, package area, then repository root |
-| Magic | `@/prompts/intro.md` | the request's package, package area, repository root, then `HOME` (see [magic paths](./magic-paths.md)) |
+| Magic | `@/prompts/intro.md` | the request's package, package area, repository root, then `HOME`, plus any configured roots (`md --magic-root <DIR>`, a library `RequestSnapshot::with_magic_root`; see [magic paths](./magic-paths.md)) |
 | Home | `~/notes/intro.md` | the home directory |
 | Variable | `{{NOTES}}/intro.md` | the value of `NOTES` in the request's environment |
 | Absolute | `/srv/docs/intro.md` | the path itself |
