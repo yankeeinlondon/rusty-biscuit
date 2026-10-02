@@ -14,6 +14,13 @@ packages:
     - dmls
     - claudine
     - claudine-cli
+source_files_during_phase_1:
+    - biscuit-file/lib/Cargo.toml
+    - Cargo.lock
+docs_updated_during_phase_1:
+    - biscuit-file/docs/dependencies.md
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
 ---
 
 # Plan: Glob References Share the File-Reference Grammar
@@ -175,7 +182,7 @@ ways the spec does not pin; the author may overturn them before Phase 2.**
 
 Each spike runs once, here, before the work it informs.
 
-- [ ] **Spike 1: `globset` semantic probe** (one host, ~15 minutes).
+- [x] **Spike 1: `globset` semantic probe** (one host, ~15 minutes).
   Write a throwaway test (not committed) that builds `globset` with
   `literal_separator(true)`, case-sensitive, and asserts: `*` vs `/`;
   `**/` matching zero directories (does `**/intro.md` match `intro.md`?);
@@ -185,7 +192,7 @@ Each spike runs once, here, before the work it informs.
   under "Spike 1". Informs R4 and the escape helper. If `**/x` does not match
   top-level `x`, the `%` rewrite and criterion 15 (`{pkg}/intro.md` is
   matched by `^**/intro.md`) need an explicit zero-depth alternative; record it.
-- [ ] **Spike 2: unfiltered-walk cost** (one host, one sample). Time a
+- [x] **Spike 2: unfiltered-walk cost** (one host, one sample). Time a
   `walkdir` pass under this repository's root with directory-symlink
   following off and no filters, listing `**/*.md`, with and without a
   warm `target/` present. Report wall-clock and entry count. Informs R7:
@@ -196,24 +203,24 @@ Each spike runs once, here, before the work it informs.
 
 ### Tasks
 
-- [ ] **Readiness check.** Confirm `git status` shows only the two
+- [x] **Readiness check.** Confirm `git status` shows only the two
   expected modified test files (`darkmatter/dmls/tests/l1/repository_contexts.rs`,
   `darkmatter/lib/tests/l1/entry_point_parity.rs`); report any others to the
   user before proceeding. Confirm `darkmatter/fixes/2026-09-30-file-refs-use-magic`
   is at "Phase 8 close" in its implementation log. Run `just test` in
   `biscuit-file` and `darkmatter` for a green baseline; record baseline
   failures, if any.
-- [ ] **Baseline inventory.** Using `grep` (and GitNexus `context` where it
+- [x] **Baseline inventory.** Using `grep` (and GitNexus `context` where it
   answers faster), list: every caller of `FileMatchGlobs`, `admits`,
   `admits_path`, `file_match_admits`, `find_files_fn`, `resolve_boundary`,
   `schema_roots`, and `resolve_recursive_core`; every test asserting current
   output of those. Save as an appendix to the implementation log. This list
   drives Phase 8's "changed outputs" record.
-- [ ] **Create the implementation log** at
+- [x] **Create the implementation log** at
   `biscuit-file/features/2026-09-30-glob-reference/implementation-log.md`
   with sections: Spikes, Changed Outputs, Departures from Spec, Windows
   Evidence, Handed-off Reads. Later phases append to it as they go.
-- [ ] **Dependency note.** Add `globset` to the `file-reference` feature of
+- [x] **Dependency note.** Add `globset` to the `file-reference` feature of
   `biscuit-file/lib/Cargo.toml` (already used by darkmatter; match its
   version) and update `biscuit-file/docs/dependencies.md`.
 

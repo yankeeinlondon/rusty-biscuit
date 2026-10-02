@@ -32,45 +32,41 @@ packages:
     - claudine-cli
 depends-on:
     - 2026-09-30-file-refs-use-magic
-human_review: true
+human_review: false
 clarified: true
 clarified_by: claude/opus
 reviewed: true
 review_note: the clarification process served as a review
 needs_rulings: false
 message_to_agent: |-
-    Finalized and ready for planning; no rulings remain. Builds on the
-    prepared, required context from 2026-09-30-file-refs-use-magic. Both
-    specs are implemented on the branch `fix/magic-globs`: the fix first,
-    this feature immediately after it, and one merge to `main` once both are
-    done (Decision 22). This feature owns removing the two
-    current-directory reads the fix handed off: `::file-links`'
-    `resolve_boundary` and the `match()` validator `admits`. The author
-    answered every open question (Decisions 14 to 20), ruled on the review
-    findings (Decisions 21 to 25), and closed the last points on 2026-10-01
-    (Decisions 26 to 28): the variable is `SCHEMAS_DIR`; it names the
-    schemas folder itself, which may be any folder the user chooses (not
-    necessarily named `schemas`, under `HOME`, or in the tree); shipped docs
-    that spell it `SCHEMA_DIR` are renamed; and
-    `darkmatter/example-docs/schemas/external.md` is rewritten to
-    `$schema: ./external.yaml`. `vault:` and `{{VAR}}` (anywhere in the
-    pattern) are trigger-definition errors in `$path`
-    patterns, alongside `@` and `%`; `~` stays allowed (Decisions 20 and 23).
-    Darkmatter and DMLS look for `schemas/` folders off exactly five roots,
-    most local first, replacing today's ancestor walk (Decision 24; a
-    behavior change). The rule throughout is "most local first": a list
-    returns the full match merged across all roots in local-first order
-    (root precedence, then shallowest, then component-wise), and a single
-    file is the most local match (`take_first`). `find_files()` and
-    `::file-links <glob>` use the merged list for every prefix; `%`
-    recursive search delegates to `take_first`; schema `$path` triggers
-    judge paths with `matches`. Every consumer honors biscuit-file's
-    relative boundary, and a bound glob skips file symlinks that leave the
-    tree (Decision 25). Completion candidates render through `PortablePath`.
-    Existing outputs can change; list each changed output in the
-    implementation log. Planning names any optional first-root list mode
-    (Darkmatter does not use one), the skipped-symlink warning code, and the
-    glob guard test. Meet the Definition of Done.
+    Phase 1 (rulings, spikes, readiness) is done; see the implementation
+    log's Spikes, Changed Outputs, Departures, and Phase 1 sections. Facts the
+    Phase 2 implementer needs:
+    - globset 0.4.18: `**/x` matches a top-level `x` (no zero-depth
+      alternative needed for the `%` rewrite). With `literal_separator(true)`
+      neither `*` nor `?` crosses `/`. Matching is case-sensitive, and `*`
+      matches dot-files.
+    - Windows trap: globset's `backslash_escape` defaults to true on Unix and
+      false on Windows. Set it explicitly on every `GlobBuilder`, and make
+      `GlobReference::escape` delegate to `globset::escape`, which emits
+      portable character classes (`[[]id[]].md`). Cover this in Phase 2
+      tests and on `just cross-check biscuit-file --os windows`.
+    - R4 stands, but it changes behavior: `FileMatchGlobs::compile` and the
+      trigger matcher use `Glob::new` defaults today, so `*` crosses `/`
+      there. One shipped prompt is affected
+      (`prompts/_reviews/review-implementation.md`, which declares
+      `file(match(prompts/*.md,...))`); this is logged under Changed Outputs.
+    - R6 stands: no test or shipped artifact uses an all-negation list.
+      Today `match()` admits all and triggers admit nothing.
+    - R3's code is `dm.glob.skipped_symlink`, not `compose.glob.…`. Every
+      existing code uses the `dm.` prefix; this departure is logged.
+    - `globset = "0.4"` (optional) is already added to biscuit-file's
+      `file-reference` feature; no code uses it yet.
+    - Pre-existing darkmatter L1 failure, unrelated to this feature:
+      `error_snapshots::link::unrecognized_format_mentions_html_and_markdown`
+      (a snapshot of prose rendering). Expect it to stay red until someone
+      fixes it separately; do not count it against this feature.
+
 ---
 
 # Glob References Share the File-Reference Grammar
