@@ -162,6 +162,7 @@ mod shipped_prompt_route_drift;
 mod shipped_prompts;
 mod skills_integration;
 mod spawn_site_guard;
+mod switch_catalog_guard;
 mod system_prompt_perf_bench;
 mod test_placement;
 mod test_seam_gate_guard;

@@ -45,6 +45,24 @@ pub struct CliSwitch {
     pub gap: Option<&'static str>,
 }
 
+impl CliSwitch {
+    /// The canonical spelling followed by every alias.
+    pub fn spellings(&self) -> impl Iterator<Item = &'static str> {
+        std::iter::once(self.flag).chain(self.aliases.iter().copied())
+    }
+
+    /// Whether the record applies at `path`, a native command path after the
+    /// executable (empty for the root entrypoint).
+    pub fn applies_at(&self, path: &[&str]) -> bool {
+        self.scopes.iter().any(|scope| scope.applies_at(path))
+    }
+
+    /// Whether the provider accepts the value written in `form`.
+    pub fn accepts(&self, form: SwitchAttachment) -> bool {
+        self.attachments.contains(&form)
+    }
+}
+
 /// How a switch takes its value.
 ///
 /// `VARIANTS` is the research `value_type` vocabulary.
@@ -111,6 +129,17 @@ pub enum SwitchScope {
     Command(&'static [&'static str]),
 }
 
+impl SwitchScope {
+    /// Whether a switch with this scope is accepted at `path`: a global
+    /// scope meets every path, a command scope only its identical path.
+    pub fn applies_at(&self, path: &[&str]) -> bool {
+        match self {
+            SwitchScope::Global => true,
+            SwitchScope::Command(command) => *command == path,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -129,6 +158,34 @@ mod tests {
             SwitchAttachment::VARIANTS,
             &["space", "equals", "short_attached"]
         );
+    }
+
+    /// A global scope meets every path; a command scope only its own, so an
+    /// `exec` switch does not apply at `exec resume` or at the root.
+    #[test]
+    fn a_scope_applies_at_global_or_its_identical_path() {
+        let exec = SwitchScope::Command(&["exec"]);
+        assert!(exec.applies_at(&["exec"]));
+        assert!(!exec.applies_at(&["exec", "resume"]));
+        assert!(!exec.applies_at(&[]));
+        assert!(SwitchScope::Command(&[]).applies_at(&[]));
+        assert!(!SwitchScope::Command(&[]).applies_at(&["exec"]));
+        assert!(SwitchScope::Global.applies_at(&["exec", "resume"]));
+
+        let image = CliSwitch {
+            flag: "--image",
+            aliases: &["-i"],
+            value: SwitchValue::Variadic { min: VariadicMin::AtLeast(1) },
+            attachments: &[SwitchAttachment::Space],
+            scopes: &[SwitchScope::Command(&[]), SwitchScope::Command(&["exec"])],
+            description: "Attach images.",
+            gap: None,
+        };
+        assert_eq!(image.spellings().collect::<Vec<_>>(), ["--image", "-i"]);
+        assert!(image.applies_at(&[]) && image.applies_at(&["exec"]));
+        assert!(!image.applies_at(&["review"]));
+        assert!(image.accepts(SwitchAttachment::Space));
+        assert!(!image.accepts(SwitchAttachment::ShortAttached));
     }
 
     /// The serde form is the catalog shape `catalog.json` and overrides use.

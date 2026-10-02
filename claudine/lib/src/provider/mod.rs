@@ -80,7 +80,8 @@ pub use billing_model::BillingModel;
 pub use cap_policy::CapPolicy;
 pub use cli_sensitivity::CliSensitiveAxes;
 pub use cli_switch::{
-    CliSwitch, CliSwitchCatalog, SwitchAttachment, SwitchScope, SwitchValue, VariadicMin,
+    CandidateSwitch, CliSwitch, CliSwitchCatalog, SwitchAttachment, SwitchLookup, SwitchScope,
+    SwitchToken, SwitchValue, VariadicMin, lookup_candidates, lookup_switch, match_switch_token,
 };
 pub use display_policy::{DisplayPolicy, EventClass, ToolResultSummary};
 pub use errors::{ConfigError, McpError};

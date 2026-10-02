@@ -180,9 +180,47 @@ describes every field. Generation fails, rather than skipping a record, when:
 Records are emitted sorted by canonical spelling and then by command path, so
 the order of the research document never changes `data.rs`.
 
-**Planned:** nothing reads `cli_switches` at run time yet. Looking a switch up
-by provider and command path, and using the type to decide which arguments go
-to the agent, are planned.
+#### Looking a switch up
+
+Every reader goes through one lookup in `claudine::provider`, keyed by provider
+and by the native command path the launch uses: the words after the executable,
+such as `["exec"]` for a non-interactive Codex run or `["exec", "resume"]` for
+its resume entrypoint, and `[]` for the root command. A record answers there
+when one of its scopes is global or names that exact path.
+
+```rust
+use claudine::provider::{Provider, SwitchLookup, lookup_switch, match_switch_token};
+
+// An exact spelling: canonical or alias.
+let SwitchLookup::Known(config) = lookup_switch(Provider::Codex, &["exec"], "-c") else { … };
+assert_eq!(config.flag, "--config");
+
+// A token with its value attached, split only in a researched form.
+let token = match_switch_token(Provider::Codex, &["exec"], "-cmodel=o3").unwrap();
+assert_eq!(token.spelling, "-c");
+```
+
+| Function | Answers |
+| --- | --- |
+| `lookup_switch(provider, path, spelling)` | `Known(&CliSwitch)`; `NotInCatalog` when the inventory is researched and nothing applies there; `CatalogGap { gap }` when the inventory is a gap |
+| `match_switch_token(provider, path, token)` | The record for a whole token: an exact spelling, `--name=value` for a switch that accepts `equals`, or `-xvalue` for one that accepts `short_attached`; `None` otherwise |
+| `lookup_candidates(candidates, spelling)` | One answer per `(provider, path)` candidate, in order; `agreed_value()` is the value every candidate shares, or `None` when two disagree |
+
+`SwitchLookup::value()` reads anything not established as
+`SwitchValue::Unknown`, never `None`, so an unresearched switch is never
+mistaken for one that takes no value, and a switch known to one candidate but
+not another disagrees.
+
+The forwarding notice uses the lookup today: it names `-csecret` as `-c` only
+because Codex's `-c` is researched as `short_attached`, and it explains each
+forwarded switch (see
+[CLI Pre-Parsing → Forwarding notice](argv-normalization.md#forwarding-notice-and-redaction)).
+**Planned:** using the value types to decide which arguments on a composition
+command line belong to the agent.
+
+A test in `claudine-cli` fails when switch metadata (a `CliSwitch` literal or a
+`SwitchValue` other than `Unknown`) is written anywhere but a generated
+`data.rs`, so no second, hand-kept table can drift from the research.
 
 #### Research written for an older contract
 
