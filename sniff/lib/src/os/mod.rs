@@ -30,6 +30,7 @@ mod package_manager;
 mod runtime;
 mod time;
 mod user;
+mod working_processes;
 #[cfg(any(target_os = "windows", test))]
 mod windows_timezone_map;
 
@@ -51,6 +52,7 @@ pub use time::{
     NtpStatus, TimeInfo, detect_ntp_status, detect_timezone, detect_timezone_with_options,
 };
 pub use user::{StableUserId, current_user_id};
+pub use working_processes::{WorkingProcess, processes_working_in};
 
 // ============================================================================
 // OS Type Detection
