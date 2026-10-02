@@ -34,34 +34,28 @@ reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-01
 human_review: false
 message_to_agent: |-
-    Phase 1 finding: the dependency 2026-07-13-cli-switches has fully landed R8
-    and R9 on this branch, so the headline defect is ALREADY FIXED. The spec's
-    reproduction renders "Phase 2" in both orderings and "Provider args" is only
-    `-c model_reasoning_effort="medium"`. Ruling 1's blocker is resolved; Phase 3
-    is not blocked. Read `## Phase 1` in implementation-log.md first.
-
-    Consequences for Phase 2 ("red regression suite"):
-    - Most ownership-table rows will be GREEN when written. Record which rows are
-      green-on-arrival versus red in the log rather than forcing reds. Expected
-      red: the missing-value error for `--codex -c phase=2` (declared `phase`)
-      does not name `phase`, and its guidance says "Name the provider" instead of
-      "supply a separate provider value" (TailMismatch has no setter-key field;
-      the shared ESCAPE suffix in lib/src/composition/ownership.rs).
-    - Controlled switch metadata (ruling 2) is only reachable inside the
-      `claudine` lib crate: the private `SwitchSource` trait + `own_in`/`check_in`,
-      with `struct Fixed` in lib/src/composition/ownership/tests.rs. Put the
-      table-driven controlled-metadata cases there; CLI partition tests in
-      cli/src/argv/partition/tests.rs can only use the real compiled catalog.
-    - Do not duplicate the dependency's existing cases; extend
-      lib/src/composition/ownership/tests.rs, cli/src/argv/partition/tests.rs and
-      cli/tests/l1/provider_tail_ownership.rs, which already cover several rows.
-    - The plan's guard `reported_command_forwards_config_switch` (and three other
-      named partition tests) no longer exist; the log maps each to its successor.
-    - Phase 3 must also de-duplicate the setter key grammar: lib
-      `composition::setter_key` and cli `parse_compose_setter` disagree on an
-      empty key (`=v`).
-    - The dependency is still in its own review cycle with uncommitted changes in
-      this worktree; avoid unrelated edits in its files.
+    Phase 3 is done; read `## Phase 3` in implementation-log.md.
+    - The routing was already the dependency's (2026-07-13-cli-switches).
+      Phase 3 added `SwitchAssignment::declared_setter` and
+      `TailMismatch::declared_setter`, so the missing-value error (at ownership
+      AND at every per-launch check) names the declared setter key, e.g.
+      "... none was forwarded with it: the `phase` setter after it is a
+      parameter the document declares ... Give `-c` a separate provider value,
+      or put intentional provider arguments after `--`." It never shows a
+      value. The substring "`-c` takes a value for Codex" is unchanged.
+    - One setter grammar now: `claudine::composition::{setter_key,
+      is_setter_name}`. `parse_compose_setter` still rejects an empty key
+      (`=v`) on its own; completion delegates.
+    - Already covered, so do not duplicate it in Phase 4:
+      `compose_caller_file_provenance::setters_after_a_provider_switch_keep_caller_file_provenance`
+      (post-switch setter as a file reference, direct and proxied, absent from
+      the Goose stub's argv), and the classify-once guard
+      `switch_catalog_guard::composition_arguments_are_classified_once_per_invocation`.
+    - For Phase 4 binary tests: argv-recording stubs are `stub()`/`launches()`
+      in `cli/tests/l1/provider_tail_ownership.rs` (unix only). A document with
+      no `agent` cannot resolve a provider without a terminal, so take a
+      candidate union from an `agent` list. New `Provider::X` references in
+      tests need `CLAUDINE_UPDATE_INVENTORY=1 just test-cli dispatch_inventory::`.
 ---
 
 # A shorthand setter after a provider switch is forwarded to the agent

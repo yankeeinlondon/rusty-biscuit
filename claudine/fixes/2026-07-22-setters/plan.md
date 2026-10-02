@@ -8,7 +8,37 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+source_files_during_phase_2:
+    - claudine/lib/src/composition/ownership/tests.rs
+    - claudine/lib/src/composition/ownership/tests/setters.rs
+    - claudine/cli/src/argv/partition/tests.rs
+    - claudine/cli/src/commands/compose/tests.rs
+    - claudine/cli/tests/l1/provider_tail_ownership.rs
+docs_updated_during_phase_2:
+    - claudine/docs/providers/dispatch-inventory.json
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+    - claudine/lib/src/composition/ownership.rs
+    - claudine/lib/src/composition/provider_tail.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/ownership/tests/setters.rs
+    - claudine/cli/src/commands/compose/setters.rs
+    - claudine/cli/src/commands/compose/tests.rs
+    - claudine/cli/src/completion/engine/tokens.rs
+    - claudine/cli/src/completion/engine/tests.rs
+    - claudine/cli/tests/l1/provider_tail_ownership.rs
+    - claudine/cli/tests/l1/compose_caller_file_provenance.rs
+    - claudine/cli/tests/l1/switch_catalog_guard.rs
+docs_updated_during_phase_3:
+    - claudine/docs/topics/argv-normalization.md
+    - claudine/docs/providers/dispatch-inventory.json
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/claudine/SKILL.md
+packages:
+    - claudine
+    - claudine-cli
 ---
 
 # Plan: A shorthand setter after a provider switch is applied, not forwarded
@@ -163,7 +193,7 @@ reason. Tasks in a wave are parallel; waves run in order.
 
 ### Wave 1: parallel
 
-- [ ] **Ownership table, unit.** Beside `argv/partition.rs`, add one
+- [x] **Ownership table, unit.** Beside `argv/partition.rs`, add one
   table-driven test over the spec's nine rows plus the acceptance extras. Each
   case asserts **both** the Claudine argv/caller setters and the exact forwarded
   token list (never only one). Use the controlled metadata of ruling 2, and a
@@ -190,14 +220,14 @@ reason. Tasks in a wave are parallel; waves run in order.
     - `--codex -- -c x=y phase=2` and the same with `phase` declared: both
       setter-shaped values forwarded untouched, neither a setter; no
       missing-value check on the opaque part.
-- [ ] **Schema-source matrix, unit.** For a declared `phase` directly after `-c`:
+- [x] **Schema-source matrix, unit.** For a declared `phase` directly after `-c`:
   inline `$schema`; a root schema union (declared in a non-first arm); a raw JSON
   Schema with statically declared properties; and a source-relative external
   schema resolved from the composition file's directory (assert resolution is
   relative to the file, not the cwd; use portable paths). Plus an unestablished
   schema (unreadable/dynamic) giving the dependency's contested-value error with
   the `--`/`--set` guidance, and no silent provider routing.
-- [ ] **Setter semantics, unit.** Beside `compose/setters.rs`: `count=3`,
+- [x] **Setter semantics, unit.** Beside `compose/setters.rs`: `count=3`,
   `enabled=true`, `phase=`, `label=a=b` keep their types after reclaim;
   duplicate shorthand keys are last-wins across a provider-switch boundary;
   shorthand beats `--set` regardless of placement; dotted key `foo.bar=baz`
@@ -206,7 +236,7 @@ reason. Tasks in a wave are parallel; waves run in order.
 
 ### Wave 2: depends on Wave 1 fixtures
 
-- [ ] **Resolved-provider failure fixture.** With no schema claiming `x`:
+- [x] **Resolved-provider failure fixture.** With no schema claiming `x`:
   `-c x=y phase=2` classified across candidates but resolved to Claude (where
   `-c` takes none) fails before spawn naming the switch, token, and provider,
   and does not reroute `x=y` into frontmatter. Controlled metadata and a fake
@@ -222,19 +252,19 @@ Depends on Phase 1 ruling 1 (R9 ownership function present). Waves in order.
 
 ### Wave 1
 
-- [ ] **Wire the classifier result into the partition.** Make
+- [x] **Wire the classifier result into the partition.** Make
   `partition_composition_tail` obtain ownership solely from R9's shared function;
   reclaimed setters are emitted into the Claudine argv at their original relative
   positions (ruling 3); provider tokens go to the typed tail descriptor with
   per-switch value assignments. No setter-specific branch, regex, or table in
   `partition.rs`. Delete the "first unowned switch forwards every later token"
   logic and rewrite the module docs "Ownership model" to match.
-- [ ] **Setter shape check shared, not copied.** Where R9 decides "key=value",
+- [x] **Setter shape check shared, not copied.** Where R9 decides "key=value",
   call the existing key grammar of `parse_compose_setter` (ASCII letter or `_`
   first, then letters, digits, `_`, `-`; split at first `=`). Remove or
   de-duplicate `looks_like_setter` if it becomes a second copy, and update its
   doc comment: shape no longer decides ownership by itself.
-- [ ] **Adjacency-preserving errors.** Ensure the missing-value error for
+- [x] **Adjacency-preserving errors.** Ensure the missing-value error for
   `-c phase=2` (declared) is produced from original adjacency, not from the
   filtered argv, so `x=y` cannot reattach. Error text: switch, conflicting setter
   key where applicable, provider; guidance to supply a separate provider value or
@@ -243,33 +273,33 @@ Depends on Phase 1 ruling 1 (R9 ownership function present). Waves in order.
 
 ### Wave 2: parallel
 
-- [ ] **Setter path preserved.** Confirm reclaimed setters reach
+- [x] **Setter path preserved.** Confirm reclaimed setters reach
   `parse_composition_positionals` (`commands/compose/setters.rs`) through clap's
   positionals and `merge_set_overrides`, with no new merge path. If the
   dependency's `argv` change touches that function, keep setter behavior
   byte-for-byte: key grammar, JSON5-then-string value, empty value is an empty
   string, shorthand wins over `--set`, last occurrence wins.
-- [ ] **Provenance and anchoring.** Verify reclaimed setters are recorded as
+- [x] **Provenance and anchoring.** Verify reclaimed setters are recorded as
   caller overrides, with file-reference anchoring, through the same call as
   pre-switch setters, never as document-authored values (extend
   `compose_caller_file_provenance.rs` with a post-switch setter that is a file
   reference).
-- [ ] **`inline-compose` and `sequence` plumbing.** Confirm reclaimed setters
+- [x] **`inline-compose` and `sequence` plumbing.** Confirm reclaimed setters
   flow through the existing caller-overlay path: `inline-compose` applies them as
   an invocation overlay without persisting them to the source file (agent edits
   keep existing behavior); `sequence` applies them to every step, with the
   reserved per-step overlay keys keeping their established precedence.
-- [ ] **Launch-path invariance.** Retry, resume, and proxy launches reuse the
+- [x] **Launch-path invariance.** Retry, resume, and proxy launches reuse the
   original ownership decision and caller inputs; add a guard test (no second
   classification call on those paths) rather than new code, unless Spike A shows
   a path that reclassifies.
 
 ### Wave 3: green the Phase 2 suite
 
-- [ ] Run the Phase 2 suites; fix defects at the source, not in the tests. Any
+- [x] Run the Phase 2 suites; fix defects at the source, not in the tests. Any
   row the shared classifier cannot express is a ruling for the author, not a
   local special case.
-- [ ] **Drift pass** on `partition.rs`, `argv/mod.rs`, `setters.rs` comments;
+- [x] **Drift pass** on `partition.rs`, `argv/mod.rs`, `setters.rs` comments;
   fix comments to match code and note each in the log.
 
 Checkpoint 3: `just test` and `just lint` green from `claudine/`;
