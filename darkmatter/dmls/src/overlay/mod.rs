@@ -28,6 +28,7 @@ use biscuit_hash::xx_hash_bytes;
 
 use crate::context::DocumentResolution;
 use biscuit_file::FileResolutionContext;
+use darkmatter::markdown::compose::file_resolution_context_identity;
 use darkmatter::markdown::schemas::{
     SchemaError, StandaloneSchemaDocument, StandaloneSchemaEnvelope,
     SuggestionLintProblem, parse_standalone_schema_document,
@@ -148,7 +149,8 @@ struct OverlayCache {
     trigger_load_errors: HashMap<(PathBuf, PathBuf), TriggerLoadError>,
     /// Diagnostic ownership changes waiting for the router to publish them.
     trigger_diagnostic_transitions: Vec<TriggerDiagnosticTransition>,
-    /// Cached effective schema per document URI, invalidated by content hash.
+    /// Cached effective schema per document URI, invalidated by content hash,
+    /// configuration, trigger registry, or the document's context.
     schema: HashMap<String, CachedSchema>,
 }
 
@@ -409,9 +411,13 @@ impl OverlayCache {
             .as_ref()
             .map(|registry| xx_hash_bytes(format!("{registry:?}").as_bytes()))
             .unwrap_or_default();
-        // A rebuilt context re-assembles: file values were validated against
-        // the old one.
-        let context_key = xx_hash_bytes(resolution.generation().to_string().as_bytes());
+        // File values, `$schema` references, schema roots, and `$path`
+        // verdicts all depend on the context, so the key carries its full
+        // identity (repository, `cwd`, tree root and origin, home,
+        // environment, `@` roots). The generation adds a rebuilt context
+        // whose package catalog changed.
+        let context_key = file_resolution_context_identity(context)
+            ^ xx_hash_bytes(resolution.generation().to_string().as_bytes());
         let key = schema_cache_key(text, config) ^ registry_key ^ context_key;
         if let Some(cached) = self.schema.get(uri_key)
             && cached.key == key
@@ -445,7 +451,9 @@ impl OverlayCache {
         let boundary = schema::trigger_boundary(path, workspace_roots)?;
         let document_dir = path.parent().unwrap_or(path).to_path_buf();
         let key = (boundary.clone(), document_dir);
-        match scan_triggers(path, &boundary, context) {
+        // The schema roots are the document's: its package, package area,
+        // and tree root.
+        match scan_triggers(&context.for_source(path)) {
             Ok(registry) => {
                 self.trigger_registries.insert(key.clone(), registry.clone());
                 if let Some(previous) = self.trigger_load_errors.remove(&key) {
@@ -621,6 +629,95 @@ mod tests {
             "`a` is no longer a valid enum(x, y): {:?}",
             report2.problems
         );
+    }
+
+    fn property_names(overlay: &DocumentOverlay) -> Vec<String> {
+        let bundle = ready_bundle(overlay);
+        let mut names: Vec<String> = bundle.effective.json_schema["properties"]
+            .as_object()
+            .map(|properties| properties.keys().cloned().collect())
+            .unwrap_or_default();
+        names.retain(|name| name.starts_with("from_"));
+        names.sort();
+        names
+    }
+
+    /// Criterion 22: the same document text under two contexts whose `^`
+    /// roots differ is assembled for each, not served from one cache entry.
+    /// Both resolutions share a generation, so only the context itself can
+    /// tell them apart. The document lies outside every workspace folder, so
+    /// no trigger registry enters the key either.
+    #[test]
+    fn schema_cache_keys_on_the_package_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = biscuit_file::canonicalize_simplified(dir.path()).unwrap();
+        let package = root.join("pkg");
+        std::fs::create_dir_all(&package).unwrap();
+        std::fs::write(root.join("shape.yaml"), "$schema:\n  from_repo: string\n").unwrap();
+        std::fs::write(package.join("shape.yaml"), "$schema:\n  from_pkg: string\n").unwrap();
+        let doc_path = package.join("doc.md");
+        let text = "---\n$schema: ^shape.yaml\n---\n\nbody\n";
+        let base = FileResolutionContext::from_snapshot(&root, None, HashMap::new())
+            .with_repository_root(&root);
+        let in_package = DocumentResolution::from_context(
+            base.clone().with_package_root(&package).for_source(&doc_path),
+        );
+        let in_repository = DocumentResolution::from_context(base.for_source(&doc_path));
+        let state = OverlayState::default();
+        let doc = uri("file:///w/pkg/doc.md");
+
+        let first = state
+            .for_document(&doc, text, &doc_path, &DmlsConfig::default(), &[], &in_package)
+            .unwrap();
+        assert_eq!(property_names(&first), ["from_pkg"]);
+        let second = state
+            .for_document(&doc, text, &doc_path, &DmlsConfig::default(), &[], &in_repository)
+            .unwrap();
+        assert_eq!(property_names(&second), ["from_repo"], "a stale cache hit served `^` from the package");
+        let third = state
+            .for_document(&doc, text, &doc_path, &DmlsConfig::default(), &[], &in_package)
+            .unwrap();
+        assert_eq!(property_names(&third), ["from_pkg"]);
+    }
+
+    /// Criterion 22: the same document text under two snapshots whose
+    /// `SCHEMAS_DIR` differs resolves its bare-name `$schema` in each.
+    #[test]
+    fn schema_cache_keys_on_the_snapshot_environment() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = biscuit_file::canonicalize_simplified(dir.path()).unwrap();
+        let repo = root.join("repo");
+        let (defs_a, defs_b) = (root.join("defs-a"), root.join("defs-b"));
+        for defs in [&repo, &defs_a, &defs_b] {
+            std::fs::create_dir_all(defs).unwrap();
+        }
+        std::fs::write(defs_a.join("user.yaml"), "$schema:\n  from_a: string\n").unwrap();
+        std::fs::write(defs_b.join("user.yaml"), "$schema:\n  from_b: string\n").unwrap();
+        let doc_path = repo.join("doc.md");
+        let text = "---\n$schema: user.yaml\n---\n\nbody\n";
+        let resolution = |defs: &Path| {
+            let env = HashMap::from([(
+                "SCHEMAS_DIR".to_string(),
+                defs.to_string_lossy().into_owned(),
+            )]);
+            DocumentResolution::from_context(
+                FileResolutionContext::from_snapshot(&repo, None, env)
+                    .with_repository_root(&repo)
+                    .for_source(&doc_path),
+            )
+        };
+        let state = OverlayState::default();
+        let doc = uri("file:///w/repo/doc.md");
+        let roots = [repo.clone()];
+
+        let first = state
+            .for_document(&doc, text, &doc_path, &DmlsConfig::default(), &roots, &resolution(&defs_a))
+            .unwrap();
+        assert_eq!(property_names(&first), ["from_a"]);
+        let second = state
+            .for_document(&doc, text, &doc_path, &DmlsConfig::default(), &roots, &resolution(&defs_b))
+            .unwrap();
+        assert_eq!(property_names(&second), ["from_b"], "a stale cache hit served the first SCHEMAS_DIR");
     }
 
     #[test]
@@ -1399,7 +1496,7 @@ mod tests {
             let text = std::fs::read_to_string(&path).unwrap();
             let doc: Uri = url::Url::from_file_path(&path).unwrap().as_str().parse().unwrap();
             let overlay = state
-                .for_document(&doc, &text, &path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_for(&path))
+                .for_document(&doc, &text, &path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_in_repository(root, &path))
                 .unwrap();
             let bundle = ready_bundle(&overlay);
             let report = bundle.effective.validate(&bundle.frontmatter_json);
@@ -1414,7 +1511,7 @@ mod tests {
         let text = std::fs::read_to_string(&path).unwrap();
         let doc: Uri = url::Url::from_file_path(&path).unwrap().as_str().parse().unwrap();
         let overlay = state
-            .for_document(&doc, &text, &path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_for(&path))
+            .for_document(&doc, &text, &path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_in_repository(root, &path))
             .unwrap();
         let bundle = ready_bundle(&overlay);
         assert!(bundle.effective.validate(&bundle.frontmatter_json).valid);
@@ -1441,7 +1538,7 @@ mod tests {
                 &path,
                 &DmlsConfig::default(),
                 &[root.to_path_buf()],
-                &crate::context::test_support::resolution_for(&path),
+                &crate::context::test_support::resolution_in_repository(root, &path),
             )
             .unwrap();
         let SchemaOutcome::Failed(error) = overlay.schema else {

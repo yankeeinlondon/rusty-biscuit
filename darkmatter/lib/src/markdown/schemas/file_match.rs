@@ -64,8 +64,16 @@ impl FileMatchGlobs {
         self.globs.matches(path, ctx)
     }
 
+    /// Whether a listing that reached the existing file `path` would offer it:
+    /// [`matches`](Self::matches), less a file symlink whose target leaves
+    /// the tree (see [`GlobReference::lists_file`]).
+    #[must_use]
+    pub fn lists_file(&self, path: &Path, ctx: &FileResolutionContext) -> bool {
+        self.globs.lists_file(path, ctx)
+    }
+
     /// The positive patterns' roots in precedence order, for a caller that
-    /// walks them and judges each file with [`matches`](Self::matches).
+    /// walks them and judges each file with [`lists_file`](Self::lists_file).
     #[must_use]
     pub fn roots(&self, ctx: &FileResolutionContext) -> Vec<PathBuf> {
         self.globs.roots(ctx)

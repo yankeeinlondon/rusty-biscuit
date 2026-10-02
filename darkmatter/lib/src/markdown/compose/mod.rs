@@ -169,6 +169,7 @@ pub use context::effective_state::{EffectiveState, EffectiveStateBuilder};
 pub(crate) use context::effective_state::ResolvingLookup;
 pub use context::options::{
     CallerInputRecord, CallerInputRecords, ComposeOptions, ComposeSource, caller_input_records_for_overrides,
+    file_resolution_context_identity,
 };
 pub use context::request::{
     ComposeRequest, ContextBuildError, RequestSnapshot, build_resolution_context,

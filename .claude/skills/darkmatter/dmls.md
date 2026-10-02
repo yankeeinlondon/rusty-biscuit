@@ -77,8 +77,21 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   are watched (`watch::context_input_globs`, from sniff's
   `PACKAGE_MANIFEST_FILE_NAMES`) but never indexed (`is_context_input`).
   Rescan mode diffs `scan_manifests` fingerprints; config reload clears all.
-- The overlay schema cache key includes the resolution's `generation()`, so a
-  rebuilt context re-validates file values.
+- The overlay schema cache key includes
+  `darkmatter::markdown::compose::file_resolution_context_identity(context)`
+  (the same exhaustive encoding the compose graph identity uses: source,
+  `cwd`, repository/package/area roots, home, launch `@` scope, sorted
+  environment, magic and vault roots, tree root and origin) plus the
+  resolution's `generation()`, so the same text under another context (a
+  different `^` root or `SCHEMAS_DIR`) re-assembles and a rebuilt context
+  re-validates file values. Never hand-roll a context hash in DMLS. A test
+  that needs a cache miss must vary the context with no trigger registry in
+  play (the registry's `Debug` also enters the key and masks the context
+  term), as `overlay::tests::schema_cache_keys_on_the_package_root` does.
+- `dmls/tests/l1/schema_roots_parity.rs` is the `md` vs DMLS parity gate for
+  schema roots, applied triggers, bare-name `$schema`, and `$path`
+  definition errors; DMLS shows missing required properties only with
+  `[schema] strict = true`.
 - `context_build_count()` is a process-wide work counter; L1 tests assert
   deltas (nextest runs one test per process).
 - Fixture traps: sniff recognizes a package only under a workspace manifest,

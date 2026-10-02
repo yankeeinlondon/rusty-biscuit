@@ -2156,6 +2156,25 @@ const CACHE_OPTIONS_DOMAIN: &str = "dm.compose-cache-options.v1";
 /// the two encodings can evolve independently.
 const GRAPH_CONTEXT_DOMAIN: &str = "dm.compose-graph-context.v1";
 
+/// Versioned domain marker for [`file_resolution_context_identity`].
+const FILE_RESOLUTION_CONTEXT_DOMAIN: &str = "dm.file-resolution-context.v1";
+
+/// A run-local identity of everything in `context` that can change how a
+/// reference, glob, schema root, or trigger resolves: source path, `cwd`,
+/// request directory, repository, package and area roots, home, launch `@`
+/// scope, environment, magic and vault roots, and the tree root with its
+/// origin.
+///
+/// Two contexts with the same identity resolve every reference alike, so a
+/// cache of context-dependent results (DMLS's effective schemas) may key on
+/// it. The value is an xxHash and is not stable across Darkmatter versions;
+/// never persist it.
+pub fn file_resolution_context_identity(context: &biscuit_file::FileResolutionContext) -> u64 {
+    let mut enc = GraphIdentityEncoder::new(FILE_RESOLUTION_CONTEXT_DOMAIN);
+    encode_file_resolution_context(&mut enc, context);
+    enc.finish()
+}
+
 /// Platform tags for [`GraphIdentityEncoder::path`]. Every path encode writes
 /// exactly one of these before its length-prefixed payload, so a Unix byte
 /// sequence and a Windows wide-unit sequence can never hash alike. The values
