@@ -84,10 +84,13 @@ Three Markdown forms are recognized in addition to bracketed tags, and inline co
 | `**text**`      | `<b>text</b>`                 | Only the doubled-asterisk form is bold  |
 | `_text_`        | `<i>text</i>`                 | Only the single-underscore form is italic |
 | `` `code` ``    | unchanged, backticks included | Nothing inside is interpreted           |
+| `` `[desc](ref)` `` | `` <a href="ref">`desc`</a> `` | A link whose text is code            |
 
 **Strict subset.** `__bold__` is not bold and `*italics*` is not italic — both pass through as literal text. This is intentional: the Prose+ spec keeps each emphasis style mapped to a single sigil so authored intent is unambiguous.
 
 **Code spans are opaque.** A backtick run opens a code span when a later run of the same length closes it. The backticks stay visible, and no emphasis, link, or tag syntax inside the span is interpreted, so `` See `_pr/_report.md`. `` renders exactly as written. A backtick run with no matching closer is literal text. Unlike CommonMark, a Prose backslash escape still applies inside a code span.
+
+**A code span holding exactly one link is a link with code text.** When a span's whole content is a single `[desc](ref)`, Prose renders it as the link `` [`desc`](ref) ``: an OSC8 hyperlink (or the Markdown fallback) whose visible text keeps its backticks and stays opaque. This lets a template wrap a generated link in backticks, as in `` The `{{link(plan)}}` plan ``. CommonMark would print such a span as literal text. Any other text in the span, such as `` `see [a](u)` ``, keeps the whole span opaque.
 
 ### Flanking Rules
 

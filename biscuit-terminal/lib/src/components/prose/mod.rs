@@ -648,6 +648,16 @@ mod tests {
     }
 
     #[test]
+    fn code_span_wrapping_a_link_emits_osc8_with_code_text() {
+        let term = Terminal::builder().osc_link_support(true).build();
+        let result = Prose::new("The `[plan.md](https://example.com/plan.md)` plan").render(&term);
+        assert!(
+            result.contains("\x1b]8;;https://example.com/plan.md\x1b\\`plan.md`\x1b]8;;\x1b\\"),
+            "got: {result:?}"
+        );
+    }
+
+    #[test]
     fn test_osc8_link_unsupported_emits_markdown_fallback() {
         let term = Terminal::builder().osc_link_support(false).build();
         let prose = Prose::new("<a href=\"https://example.com\">click here</a>");

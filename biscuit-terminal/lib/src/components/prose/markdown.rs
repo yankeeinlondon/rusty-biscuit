@@ -9,6 +9,7 @@
 //! | `**text**`        | `<b>text</b>`                     |
 //! | `_text_`          | `<i>text</i>`                     |
 //! | `` `code` ``      | `` `code` `` with its contents escaped |
+//! | `` `[desc](ref)` `` | `` [`desc`](ref) ``, then as a link |
 //!
 //! The conversion order is fixed: fenced code blocks → code spans → links →
 //! bold → italics. Each phase respects backslash escapes (`\*`, `\_`, `\[`,
@@ -20,6 +21,10 @@
 //! syntax inside it is ever interpreted. Unlike CommonMark, a Prose backslash
 //! escape still applies inside a code span, so escaped text never gains a
 //! second backslash.
+//!
+//! One exception, also unlike CommonMark: a code span whose entire content
+//! is a single `[desc](ref)` link becomes a link whose text is the code span,
+//! `` [`desc`](ref) ``, so a template can wrap a generated link in backticks.
 //!
 //! Emphasis delimiters follow the CommonMark left- and right-flanking rules
 //! (`_` additionally may not open or close inside a word, and `**` keeps the
@@ -233,7 +238,9 @@ pub(super) fn preprocess_markdown(input: &str) -> Preprocessed {
 ///
 /// A backtick run opens a span only when a later run of the same length
 /// closes it; an unmatched run is literal. Tag declarations outside a span
-/// and existing escapes anywhere are copied through untouched.
+/// and existing escapes anywhere are copied through untouched. A span that
+/// is exactly one link is turned inside out into `` [`desc`](ref) `` for the
+/// link phase.
 fn escape_code_spans(input: &str) -> String {
     let chars: Vec<char> = input.chars().collect();
     let mut output = String::with_capacity(input.len());
@@ -260,25 +267,21 @@ fn escape_code_spans(input: &str) -> String {
             let run = backtick_run_len(&chars, i);
             match closing_backtick_run(&chars, i + run, run) {
                 Some(close) => {
-                    output.extend(&chars[i..i + run]);
-                    let mut j = i + run;
-                    while j < close {
-                        let inner = chars[j];
-                        // An existing escape is kept as is, so text that
-                        // `Prose::escape_text` already escaped is not escaped twice.
-                        if inner == '\\' && j + 1 < close && is_escapable(chars[j + 1]) {
-                            output.push(inner);
-                            output.push(chars[j + 1]);
-                            j += 2;
-                            continue;
-                        }
-                        if is_escapable(inner) {
-                            output.push('\\');
-                        }
-                        output.push(inner);
-                        j += 1;
+                    let ticks = &chars[i..i + run];
+                    if let Some(desc_end) = whole_span_link(&chars, i + run, close) {
+                        // `` `[desc](ref)` `` is a link whose text is code:
+                        // rewrite it as `` [`desc`](ref) `` so the link phase
+                        // still sees the link and only its text stays opaque.
+                        output.push('[');
+                        output.extend(ticks);
+                        push_escaped_code(&chars[i + run + 1..desc_end], &mut output);
+                        output.extend(ticks);
+                        output.extend(&chars[desc_end..close]);
+                    } else {
+                        output.extend(ticks);
+                        push_escaped_code(&chars[i + run..close], &mut output);
+                        output.extend(ticks);
                     }
-                    output.extend(&chars[close..close + run]);
                     i = close + run;
                 }
                 None => {
@@ -294,6 +297,39 @@ fn escape_code_spans(input: &str) -> String {
     }
 
     output
+}
+
+/// Backslash-escapes every escapable character of a code span's contents.
+fn push_escaped_code(contents: &[char], output: &mut String) {
+    let mut j = 0;
+    while j < contents.len() {
+        let inner = contents[j];
+        // An existing escape is kept as is, so text that
+        // `Prose::escape_text` already escaped is not escaped twice.
+        if inner == '\\' && j + 1 < contents.len() && is_escapable(contents[j + 1]) {
+            output.push(inner);
+            output.push(contents[j + 1]);
+            j += 2;
+            continue;
+        }
+        if is_escapable(inner) {
+            output.push('\\');
+        }
+        output.push(inner);
+        j += 1;
+    }
+}
+
+/// When the code span contents `chars[start..end]` are exactly one
+/// `[desc](ref)` link, returns the index of the `]` closing `desc`.
+fn whole_span_link(chars: &[char], start: usize, end: usize) -> Option<usize> {
+    if chars.get(start) != Some(&'[') {
+        return None;
+    }
+    let (desc, _, link_end) = try_parse_link(&chars[..end], start)?;
+    // `try_parse_link` keeps escapes in `desc` verbatim, so its length is
+    // the length of the raw description.
+    (link_end == end).then(|| start + 1 + desc.chars().count())
 }
 
 /// Length of the backtick run starting at `start`.
@@ -1093,6 +1129,25 @@ mod tests {
     fn code_span_needs_matching_backtick_run() {
         assert_eq!(pp("``a`b``"), r"``a`b``");
         assert_eq!(pp("`unclosed _x_"), "`unclosed <i>x</i>");
+    }
+
+    #[test]
+    fn code_span_wrapping_a_whole_link_becomes_a_link_with_code_text() {
+        assert_eq!(
+            pp("The `[a_b.md](/x/a_b.md)` plan"),
+            "The <a href=\"/x/a_b.md\">`a\\_b.md`</a> plan"
+        );
+        assert_eq!(
+            pp("`[p.md](<file:///a b/p.md>)`"),
+            "<a href=\"<file:///a b/p.md>\">`p.md`</a>"
+        );
+        assert_eq!(pp(r"``[a\]b](u)``"), "<a href=\"u\">``a\\]b``</a>");
+    }
+
+    #[test]
+    fn code_span_with_text_beside_a_link_stays_opaque() {
+        assert_eq!(pp("`see [a](u)`"), r"`see \[a\]\(u\)`");
+        assert_eq!(pp("`[a](u) more`"), r"`\[a\]\(u\) more`");
     }
 
     #[test]
