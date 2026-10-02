@@ -99,6 +99,7 @@ mod level1_schema_prompt_pty;
 #[cfg(unix)]
 mod level1_structured_error_message;
 mod lifecycle_downgrade_outcome;
+mod lifecycle_literal_escapes;
 mod lifecycle_message_drain;
 #[cfg(windows)]
 mod lifecycle_message_drain_console_windows;

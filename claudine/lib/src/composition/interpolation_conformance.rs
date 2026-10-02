@@ -269,6 +269,12 @@ pub(crate) fn missing_property_cases() -> Vec<OverlapCase> {
         case("a context key is not a bare name", "[{{ repo }}]", json!({}), json!("[]")),
         case("triple-brace whole value", "{{{ ghost }}}", json!({}), json!("{{ ghost }}")),
         case("triple-brace in mixed text", "a {{{ ghost }}} b", json!({}), json!("a {{ ghost }} b")),
+        // A backslash escape is inert and kept as authored, as in Darkmatter's
+        // composed body; the Markdown renderer later drops the backslash.
+        case("single-backslash whole value", "\\{{ ghost }}", json!({}), json!("\\{{ ghost }}")),
+        case("single-backslash in mixed text", "a \\{{ ghost }} b", json!({}), json!("a \\{{ ghost }} b")),
+        case("double-backslash whole value", "\\{\\{ ghost }}", json!({}), json!("\\{\\{ ghost }}")),
+        case("double-backslash in mixed text", "a \\{\\{ ghost }} b", json!({}), json!("a \\{\\{ ghost }} b")),
         case(
             "inserted braces are data",
             "{{ body }}",
