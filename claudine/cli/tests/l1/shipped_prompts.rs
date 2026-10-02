@@ -2,10 +2,10 @@ use darkmatter::markdown::Markdown;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
-#[cfg(unix)]
 use crate::common;
+use common::{CliProcessFixture, write};
 #[cfg(unix)]
-use common::{CliProcessFixture, write, write_executable};
+use common::write_executable;
 
 fn workspace_root() -> PathBuf {
     biscuit_test_harness::manifest_dir!()
@@ -382,4 +382,76 @@ exit 0
         !delivered.contains("This prompt should never be reached"),
         "the router body must not reach the provider after proxy handoff:\n{delivered}"
     );
+}
+
+/// The shipped router, verbatim, reads its optional `plan`/`review` inputs
+/// without a fallback guard. With only `spec` supplied (already implemented,
+/// no pending review) every route is false and the run must reach the
+/// router's own authored `error`, not a lifecycle evaluation failure.
+#[test]
+fn shipped_implement_router_reads_absent_optional_inputs_unguarded() {
+    const ROUTER: &str = include_str!("../../../../prompts/implement.md");
+    for guarded in ["plan ? '- a plan file was identified: ' + plan : ''", "when: \"review\""] {
+        assert!(ROUTER.contains(guarded), "the shipped router must read `{guarded}` unguarded");
+    }
+    for input in ["spec", "plan", "review"] {
+        let guard = format!("{input} || false");
+        assert!(!ROUTER.contains(&guard), "the shipped router must not guard `{input}` with `{guard}`");
+    }
+
+    let fixture = CliProcessFixture::named("shipped-router-absent-inputs");
+    write(&fixture.cwd().join("prompts/implement.md"), ROUTER);
+    let spec = fixture.cwd().join("fixes/2026-09-17-router-fixture/spec.md");
+    write(&spec, "---\nimplemented: true\n---\n# Router fixture spec\n");
+
+    let launched = fixture.cwd().join("provider-launched");
+    #[cfg(unix)]
+    write_executable(
+        &fixture.bin_dir().join("claude"),
+        &format!("#!/bin/sh\ntouch '{}'\nexit 0\n", launched.display()),
+    );
+
+    let output = fixture
+        .command()
+        .args([
+            "compose",
+            "prompts/implement.md",
+            "spec=fixes/2026-09-17-router-fixture/spec.md",
+            "-y",
+            "--claude",
+        ])
+        .output()
+        .expect("run claudine compose");
+    let rendered = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    assert!(!output.status.success(), "the authored routing error must fail the run:\n{rendered}");
+    assert!(
+        rendered.contains("Unable to _route_ the implementation")
+            || rendered.contains("Unable to route the implementation"),
+        "the run must end at the router's authored error:\n{rendered}"
+    );
+    assert!(
+        rendered.contains("a specification file was identified:"),
+        "the spec line must render:\n{rendered}"
+    );
+    for absent in ["a plan file was identified", "a review file was identified", "no spec, plan, or review"] {
+        assert!(!rendered.contains(absent), "an absent input rendered `{absent}`:\n{rendered}");
+    }
+    for rejected in [
+        "unknown root",
+        "undefined variable",
+        "Undefined variable",
+        "|| false",
+        "fallback",
+        "LifecycleEvaluation",
+        "lifecycle evaluation",
+    ] {
+        assert!(!rendered.contains(rejected), "unexpected `{rejected}` in output:\n{rendered}");
+    }
+    assert!(!launched.exists(), "no provider may start:\n{rendered}");
+    assert!(!fixture.audio_spool().exists(), "no audio may be published");
 }
