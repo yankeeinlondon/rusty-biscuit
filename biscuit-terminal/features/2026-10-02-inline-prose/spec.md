@@ -41,8 +41,11 @@ packages:
     - homelab-cli
 human_review: false
 clarified: false
-reviewed: false
-needs_rulings: false
+reviewed: true
+reviewed_by: codex/gpt-6.1-sol
+reviewed_on: 2026-10-02
+review_iterations: 0
+needs_rulings: true
 ---
 
 # `Prose` Is a Block, `InlineProse` Is Inline, and Code Spans Are Code
@@ -139,7 +142,7 @@ Two components share one grammar.
 
 | | `InlineProse` | `Prose` |
 |---|---|---|
-| Content model | phrasing only | one or more blocks |
+| Content model | phrasing only | zero or more blocks |
 | Grammar | tags, `**`/`_`, links, code spans, escapes, soft and hard breaks | `InlineProse` paragraphs, separated by blank lines, plus fenced code blocks |
 | Render tree | phrasing nodes | `Paragraph` and `Code` blocks under a `Root` |
 | Markdown | inline text, no trailing paragraph break | paragraphs and fenced blocks |
@@ -160,6 +163,46 @@ Run <code>md hash</code> on <a href="plan.md">the plan</a>
 <p>Second paragraph, same block.</p>
 ```
 
+### Parsing order and boundaries
+
+**Reader's note:** this is a curated Markdown subset, not a full CommonMark
+parser. Ignoring trailing-space hard breaks is an intentional departure;
+resolving Prose escapes inside code spans is the current behavior, kept
+provisionally pending the Open Question below. Standard Markdown
+renderers may interpret those inputs differently; the compatibility question
+for generated code-link labels remains open below.
+
+The shared parser first recognizes opaque fenced blocks, then separates
+`Prose` paragraphs, then parses each paragraph's inline content. A blank line
+inside fenced code is code, not a paragraph boundary. Code-span matching must
+not cross a `Prose` paragraph boundary: unmatched backticks in separate
+paragraphs stay literal. Within a paragraph a span may contain a single
+newline, which becomes a space regardless of `LineBreaks` mode.
+
+Bracketed style tags may cross paragraph boundaries. Preserve their scope by
+reopening the same inline wrappers inside each paragraph, never by putting
+paragraphs inside a `Span` or `Link`. For example,
+`<red>one\n\ntwo</red>` produces two paragraphs with red text. Explicit
+`<a>` tags follow the same rule. Markdown emphasis and Markdown links are
+recognized within a paragraph only. Fenced blocks inside bracketed styles
+remain sibling blocks, as today; the surrounding style resumes after them.
+Newlines inside a quoted tag attribute belong to that attribute, not to the
+paragraph splitter. Do not split the raw input with a regular expression
+that loses tag scope or code opacity.
+
+Retain the existing fenced-block recognition rules for this feature, including
+language hints and an unclosed fence consuming the rest of the input. Expanding
+recognition to every CommonMark fence form is outside this feature. In
+`InlineProse`, discard the language hint and replace each body line ending with
+a space before constructing `InlineCode`; do not trim its other whitespace or
+apply code-span space stripping. Thus a body `a\nb` becomes `a b` on every
+target, including in `Hard` mode. An empty body contributes no inline node.
+
+Empty input and whitespace-only input produce no `Prose` blocks and empty
+output. `InlineProse` preserves ordinary spaces and tabs, including around a
+label, but empty input produces empty output. Both return a valid single
+render-tree node even when empty.
+
 ### Newlines follow Markdown
 
 | Input | Meaning |
@@ -174,7 +217,19 @@ how the shared renderers already treat `NodeKind::SoftBreak`. A hard break
 renders as a newline on the terminal, `<br>` in HTML, and a Markdown hard
 break.
 
-Leading and trailing blank lines produce no empty blocks.
+Leading and trailing blank lines produce no empty blocks. Normalize CRLF and
+lone CR to LF before applying prose newline rules, so text from Windows files
+has the same paragraph structure. Fenced `Prose` code bodies retain the existing
+parser's body handling; do not apply paragraph whitespace rules to them.
+
+Discard spaces and tabs immediately around prose soft breaks, so
+`"first  \nsecond"` becomes `first second`, not three spaces on the terminal.
+Preserve whitespace elsewhere. A backslash forms a hard break only when it is
+not itself escaped and is immediately followed by an in-paragraph newline.
+A literal pair of backslashes before a newline produces a literal backslash
+and the mode's ordinary break. A paragraph boundary takes precedence over a
+hard-break marker; a backslash before a blank-line boundary or at end of input
+remains literal.
 
 CommonMark's other hard-break form, two or more spaces at the end of a
 line, is not supported. Trailing spaces are ordinary whitespace, so
@@ -206,14 +261,21 @@ Prose::new(msg).with_line_breaks(LineBreaks::Hard)
 | `Hard` | hard break | block boundary |
 
 The default is the same for both components, so a string means the same
-thing in either one, and Markdown output reproduces the input. The mode is
+thing in either one. Markdown output preserves the resulting meaning, but
+may normalize the source spelling; it is not a byte-for-byte serializer. The mode is
 part of the shared grammar: a `Prose` passes its mode to the inline parser
 of each paragraph. This is the same switch as markdown-it's `breaks` option.
 
 ### `InlineProse`
 
-- Holds phrasing content only. Its `render_tree()` returns phrasing nodes,
-  which the render-tree validator already permits at the top level.
+- Holds phrasing content only. `to_render_nodes()` returns its inline node
+  sequence. `render_tree()` returns a single neutral `Span` containing that
+  sequence, including for empty content. This satisfies the existing
+  `TreeRenderable` single-node contract without block separators. The shared
+  browser renderer currently emits `<span>` for that node: the component's
+  browser fragment entry point instead folds and structurally concatenates
+  its children, without an outer element or string-based HTML rewriting.
+  Do not change unrelated `Span` rendering to achieve wrapper-free fragments.
 - Owns the inline projection that `Prose::to_render_nodes()` provides today.
 - Implements `TerminalRenderable`, `MarkdownRenderable`,
   `BrowserRenderable`, and `TreeRenderable`.
@@ -257,6 +319,34 @@ of each paragraph. This is the same switch as markdown-it's `breaks` option.
   only on `Paragraph`, which the browser renderer honors and the
   validator rejects elsewhere.
 
+### Public API and shared rendering
+
+Export `InlineProse`, `LineBreaks`, and `ProseTag` from the component module,
+the crate's normal public exports, and its prelude. Both components provide
+`new`, `content`, `with_line_breaks`, and the existing text/attribute escaping
+helpers. `InlineProse` deliberately has no margin, width, alignment, or
+word-wrap builders; its containing block controls wrapping. Existing inline
+call sites using those builders must move positioning to their container,
+rather than silently dropping it. Block callers retain the current `Prose`
+layout helpers.
+
+Share each component's projection between `TreeRenderable::render_tree` and
+`TerminalRenderable::render_tree_node`. Rendering a component directly and
+embedding it structurally must use the same parsed content and break mode.
+Do not keep a separate legacy terminal parser. Remove `Prose::to_render_nodes`
+and migrate callers to either `InlineProse::to_render_nodes` or the block
+children of `Prose`'s root. Containers must transfer the root's layout onto a
+valid enclosing block rather than inserting a nested `Root` or losing layout.
+
+The new paragraph-element attribute is optional; absent means `<p>`. Use a
+restricted typed enum for exactly the listed tags, with no arbitrary HTML tag
+string. Keep it distinct from `NodeKind::Section`, which carries document
+structure. Honor it in both the normal browser renderer and the streaming
+browser writer; terminal and both Markdown dialects ignore it. Preserve
+existing progress-widget paragraph rendering. Update attribute serialization,
+default omission, and validation together; existing serialized trees without
+the field retain their behavior.
+
 ### Code spans are inline code
 
 This applies to both components through the shared grammar.
@@ -298,7 +388,10 @@ resolves straight into an `InlineCode` node. The placeholder must survive
 the link, bold, and italics phases, including inside a link description, so
 `` [`x`](u) `` arrives as `<a href="u">PLACEHOLDER</a>` and the recursive
 parse of the link's inner text produces the `InlineCode` child. A
-placeholder is never re-expanded into string markup.
+placeholder is never re-expanded into string markup. Input containing a
+sentinel-like control sequence must remain user content, not impersonate a
+lifted node; distinguish parser-generated references from literal input and
+cover this alongside escaped tags and delimiters.
 
 #### Per-target output
 
@@ -359,9 +452,12 @@ which renders as a clickable link with a code-styled label.
   file's portable relative path as the text; `code_link(target, desc)`
   takes a local file reference or an HTTP(S) URL plus a string. Argument
   validation, null handling, destination spelling, and errors are
-  `link()`'s; share the implementation (`link_fn` in
-  `darkmatter/lib/src/markdown/compose/expression/functions/mod.rs`) rather
-  than copying it, and register `code_link` next to `link` in
+  `link()`'s; factor out resolution of the raw label and destination from
+  [`link_fn`](../../../darkmatter/lib/src/markdown/compose/expression/functions/mod.rs)
+  in the `darkmatter` package rather than parsing the Markdown string returned
+  by `link()` or escaping its label twice. Report errors under the function
+  the caller invoked while retaining the same underlying resolution failure.
+  Register `code_link` next to `link` in
   `functions/paths.rs`.
 - **Catalog entry.** Add a `code_link` function to
   `darkmatter/docs/schemas/expression-functions.yaml`, beside `link`, with
@@ -379,7 +475,10 @@ which renders as a clickable link with a code-styled label.
   with a backtick). Unlike `link()`, `[` and `]` in the text are **not**
   backslash-escaped: a code span takes precedence over link brackets in
   CommonMark, and a backslash inside a code span would show literally in
-  other Markdown renderers.
+  other Markdown renderers. Use the complete padding rule below, including
+  labels that begin and end with spaces. Resolve the Open Question about
+  literal backslashes and labels that cannot be represented faithfully
+  before implementing this formatter.
 - **Migrated call sites:** `prompts/plan.md:30`,
   `prompts/_reviews/review-spec-inline.md:18`, and the fixture copies
   `claudine/cli/tests/fixtures/nested_span_regression/review-spec-inline.md`
@@ -404,9 +503,20 @@ which breaks when `value` contains a backtick. It must follow CommonMark:
 | ``a`b`` | ```` ``a`b`` ```` |
 | `` `a` `` | ```` `` `a` `` ```` |
 
-The existing table-cell pipe escaping is kept. This change affects every
-render-tree producer, darkmatter included, and only alters output that is
-broken today.
+The existing table-cell pipe escaping is kept and applied to the value before
+fencing; table hard breaks remain `<br>` and soft breaks remain spaces. Factor
+fence selection and padding into one shared `renderable` helper used by the
+Markdown renderer, the terminal fallback, and `code_link()`, rather than three
+implementations that can disagree. Terminal fallback uses the raw value,
+without table-specific pipe escaping.
+
+The fence rules follow [CommonMark code spans](https://spec.commonmark.org/0.31.2/#code-spans).
+They preserve spaces at both edges by padding and preserve embedded backticks
+by using a longer delimiter. A newline in a code span becomes a space under
+CommonMark; empty content has no faithful code-span spelling. The helper must
+make these limits explicit, as discussed in Open Questions. This shared
+renderer change affects every producer, including darkmatter, so test it with
+directly constructed nodes as well as Prose inputs.
 
 ### Containers
 
@@ -420,6 +530,13 @@ Each container states which shape it accepts:
 | `BlockQuote` | `Prose` | holds blocks |
 | `TwoColumn` columns | `Prose` | each column is a block region |
 | `StatusBlock::body` / `body_line` | `Prose` | already joins items as paragraphs |
+
+This table describes the containers' Prose-specific entry points; it does not
+remove support for strings, numbers, or other components. Table header labels
+also use `InlineProse`. Update `From` conversions, helper traits, styled-cell
+variants, and downcasts alongside constructor signatures. Strings converted
+by a table or `InlineContent` use `InlineProse`; strings converted by a block
+container use `Prose`.
 
 The per-container folding and degrading (`fold_prose_nodes_into_blocks`,
 `degrade_code_nodes` on Prose content) is replaced by the components' own
@@ -498,6 +615,13 @@ grammar stays documented once, in `prose.md`.
 - The documentation changes listed under Documentation, the
   `biscuit-terminal` skill, and the `bt prose` CLI help text.
 
+The call-site counts are planning estimates, not evidence that migration is
+complete. Search the whole workspace, including examples, tests, benchmarks,
+macros, generated-source templates, and packages outside the frontmatter list.
+Compile any newly discovered consumers and update the implementation's scope
+record. Generated code is changed at its source template and regenerated by
+the existing workflow.
+
 **Out of scope**
 
 - Changing the browser element for inline code, adding a class, or adding
@@ -524,21 +648,24 @@ grammar stays documented once, in `prose.md`.
   output is never rewritten. (Ken, 2026-10-02)
 - **Browser output stays `<code>`**, the shared renderer's existing shape,
   with no class. (Ken, 2026-10-02)
-- **Prose backslash escapes still apply inside a span.** Keeps
-  `Prose::escape_text` output clean; unchanged from today.
+- **Prose backslash escapes still apply inside a span** (provisional).
+  Keeps `Prose::escape_text` output clean; unchanged from today. This was
+  the drafting default, not a ruling, and is reopened by the Open Question
+  on generated code-link labels.
 - **One shape per component on every target.** `Prose` is block,
   `InlineProse` is inline. (Ken, 2026-10-02)
 - **`Prose` has a configurable block tag**, default `<p>`, changeable to
   `<div>` and other block elements. (Ken, 2026-10-02)
 - **`Prose` applies `Layout`** on every target. (Ken, 2026-10-02)
 - **Markdown newline semantics.** A single `\n` does not break a block; a run
-  of two or more `\n` does. (Ken, 2026-10-02)
+  of two or more `\n` does outside opaque code and quoted tag attributes.
+  (Ken, 2026-10-02; parsing boundaries clarified during review.)
 - **Line breaks are an opt-in mode with the same default everywhere.**
   `LineBreaks::Soft` is the default for `Prose` and `InlineProse`;
   `LineBreaks::Hard` makes each single `\n` a hard break. Rejected: making
   `InlineProse` treat a single `\n` as a hard break by default while `Prose`
   does not, because the same string would then render differently by
-  component and Markdown output would no longer reproduce the input.
+  component and Markdown output would preserve different break meanings.
   `\` before a newline is a hard break in either mode. (Ken, 2026-10-02)
 - **Two or more `\n` in `InlineProse` in `Soft` mode are one soft break.**
   `InlineProse` has no blocks, and `Soft` mode never forces a line break.
@@ -566,10 +693,14 @@ grammar stays documented once, in `prose.md`.
   behavior until the last area migrates, which needs a temporary
   compatibility path built only to be deleted. (Ken, 2026-10-02)
 - **Inline code falls back to backticks on a terminal that cannot style.**
-  When the inline-code appearance produces no escape sequence (piped
-  output, `NO_COLOR`, `ColorDepth::None`), the shared terminal renderer
+  When the capability-aware inline-code appearance produces no styling
+  escape sequence, the shared terminal renderer
   emits the value inside a backtick fence chosen by the Markdown fence
-  rule, so code stays marked. This is in the shared renderer, so
+  rule, so code stays marked. Decide from the renderer's effective appearance,
+  not from `NO_COLOR` or color depth alone: inherited emphasis or underline
+  may still produce styling. OSC 8 link sequences alone are not code styling.
+  Styled output restores its enclosing appearance after code instead of
+  always clearing it, so a red sentence stays red after a code span. This is in the shared renderer, so
   darkmatter's terminal output gains it too. Rejected: leaving inline code
   unmarked. (Ken, 2026-10-02)
 - **Templates use a new `code_link()` function** for a link with code
@@ -583,7 +714,51 @@ grammar stays documented once, in `prose.md`.
 
 ## Open Questions
 
-None.
+### How should generated code-link labels preserve literal text?
+
+Prose resolves backslash escapes inside code spans today, and the draft kept
+that as a provisional default (not a ruling).
+Standard Markdown leaves those backslashes literal. As a result,
+`code_link(url, r"a\_b")` cannot preserve the same label in both parsers:
+Prose displays `a_b`, while darkmatter's Markdown parser displays `a\_b`.
+Doubling the backslash fixes Prose but changes the standard Markdown label.
+An empty label also has no code-span spelling, and label newlines normalize
+to spaces. This matters because `code_link()` accepts caller-provided text,
+not just portable paths.
+
+Choose before implementation.
+
+1. **Use literal code-span contents in both components (recommended).**
+   Keep backslashes unchanged inside code spans, matching CommonMark and
+   darkmatter. Normalize label line endings to spaces and document that
+   normalization; represent an empty label as an ordinary empty link without
+   an `InlineCode` child. An empty `InlineCode` value serializes to empty
+   text in the shared Markdown helper. **Pros:** generated links work
+   across targets, and code examples preserve literal syntax. **Cons:**
+   changes current Prose behavior; callers inserting `Prose::escape_text`
+   output into code spans need migration and documentation explaining that
+   code content is already opaque. At review time about a dozen lines interpolate
+   `Prose::escape_text(..)` inside backticks (for example
+   `claudine/lib/src/composition/error/render/lifecycle.rs:150`,
+   `darkmatter/cli/src/commands/schema/triggers.rs:116`); each would drop
+   the `escape_text` call inside the span.
+2. **Keep Prose escapes and restrict `code_link()` labels.** Reject labels
+   containing backslashes, line endings, or no characters, with a clear
+   expression error. **Pros:** preserves current Prose behavior and
+   avoids silently changing generated labels. **Cons:** excludes legitimate
+   descriptions and makes this helper less capable than `link()`; the shared
+   Markdown helper still needs a documented policy for empty and multiline
+   values from other producers.
+3. **Keep the grammar and document target-dependent labels.** Emit standard
+   Markdown code spans and accept Prose's existing escape interpretation;
+   specify empty and multiline normalization as in the first option.
+   **Pros:** smallest implementation and broad input acceptance.
+   **Cons:** breaks the stated cross-target goal and can alter code examples
+   or path-like labels without warning.
+
+The first option is recommended because literal code has the same meaning
+across producers and targets, and the repository is early enough to migrate
+callers.
 
 ## Acceptance Criteria
 
@@ -615,7 +790,8 @@ None.
    siblings, never `<pre>` inside an inline element.
 10. A `Prose` with a left margin renders that margin in terminal and HTML
    output; `bt prose --margin-left` output carries it exactly once.
-11. No output anywhere contains `class="prose"`.
+11. Neither component nor the `bt prose` wrapper generates `class="prose"`;
+    literal user content containing that string is unaffected.
 12. Each container in the Containers table accepts its stated type, and
    `fold_prose_nodes_into_blocks` / `degrade_code_nodes` no longer run on
    Prose content.
@@ -641,21 +817,53 @@ None.
     literally.
 20. On a `ColorDepth::None` terminal, `` See `md hash` `` renders as
     `` See `md hash` `` (backticks kept), and `` ``a`b`` `` keeps a
-    double-backtick fence; with color, no backtick is emitted.
-21. `code_link("plans/foo.md")` returns `` [`plans/foo.md`](<abs>) `` with
-    the same destination `link()` gives; `code_link(url, "a]b")` keeps `]`
+    double-backtick fence; when inline-code styling is emitted, no delimiter
+    backtick is added (literal backticks in the code value remain).
+21. After resolving the generated-label question, `code_link("plans/foo.md")`
+    returns a code-text link with label `plans/foo.md` and
+    the same destination spelling and quoting `link()` gives; `code_link(url, "a]b")` keeps `]`
     unescaped inside the code span; text containing a backtick gets a
     longer fence; the four migrated templates render a link with an
     inline-code label on every target.
 22. `claudine context --expressions` lists `code_link(file)` and
     `code_link(target, desc)` in the Filesystem group beside `link`, and
     DMLS offers `code_link` as a completion.
-23. `just test` and `just lint` pass in every package area listed in
-    `packages`.
+23. `just test` and `just lint` pass in every affected package area, including
+    consumers discovered during the migration audit. Use nextest through the
+    repository recipes; compile changed examples and benchmarks separately
+    where L1 does not cover them.
+24. Empty and whitespace-only `Prose` produce no blocks; empty `InlineProse`
+    produces no output. A multi-node `InlineProse` returns one valid neutral
+    `Span` and Markdown concatenates its children without block separators.
+25. CRLF and lone-CR prose inputs have the same break structure as LF inputs.
+    Cover escaped backslashes, trailing backslashes, and paragraph boundaries
+    next to a backslash; opaque code is unaffected by break mode.
+26. A bracketed style spanning paragraphs produces valid styled paragraphs;
+    a fenced block inside that style remains a sibling block. Blank lines
+    inside fenced code remain code, and code spans do not match across
+    paragraph boundaries.
+27. A multiline fence in `InlineProse` produces one inline-code value with
+    spaces in place of line endings, no language hint, and no embedded block
+    or forced line break. Test it directly and in a table cell.
+28. Nested code restores enclosing terminal styles and preserves a surrounding
+    hyperlink. Test styled and unstyled capabilities independently of OSC 8
+    support; the unstyled fallback also works in a darkmatter-produced tree.
+29. Shared hard-break output uses backslash-newline outside tables and `<br>`
+    inside tables for both Markdown dialects. Test safe code fences with
+    backticks, edge spaces, all-space values, and table pipes; add empty,
+    multiline, and backslash-label expectations once Open Questions is resolved.
+30. Browser fragments and streaming browser output agree on every `ProseTag`;
+    legacy serialized nodes retain the default tag, and invalid attribute
+    placements are rejected. Embedded `Prose` retains layout exactly once
+    without a nested `Root`. Inline callers with layout builders migrate the
+    positioning to their container.
 
 ## Definition of Done
 
-- All acceptance criteria are met.
+- The generated-label Open Question is resolved and its chosen behavior is
+  reflected in the grammar, helper contract, decisions, and tests.
+- All acceptance criteria are met. This document remains active and ready for
+  review; only the author moves the feature into the completed lifecycle.
 - Every row of the Documentation table is done, and no sentence in
   `docs/components/prose.md` describes the old behavior (inline-only
   Prose, `<span class="prose">`, newlines left uninterpreted, fenced code
@@ -663,6 +871,8 @@ None.
   `` `[desc](ref)` `` as a link); the interim-contract doc comments on
   `Prose::render_html_fragment` and the CLI's `render_html_with_layout` are
   removed with the code they describe.
+- The paragraph boundaries, fenced-to-inline normalization, empty inputs, and
+  chosen generated-label behavior are documented with compact examples.
 - The `markdown.rs` and `tree.rs` module docs, and any `renderable` docs
   that describe inline-code or hard-break Markdown output, match the new
   behavior.
