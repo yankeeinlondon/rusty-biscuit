@@ -1092,9 +1092,10 @@ functions:
       category: Filesystem
       order: 64
       description:
-          Returns every file a glob reference matches (`&dir/**/name.md`), as sorted
-          absolute paths; the path before the first wildcard is the directory searched,
-          its first candidate that exists (a file there matches nothing).
+          Returns every file a glob reference matches (`&dir/**/name.md`, `^docs/*.md`),
+          as absolute paths merged across every root of its prefix, most local first;
+          a bare pattern searches the document's folder, then the repository root. A file
+          symlink leaving the file tree is skipped with a `dm.glob.skipped_symlink` warning.
       overloads:
           - parameters:
                 - name: pattern

@@ -80,7 +80,7 @@ fn find_files_reports_every_match_of_a_glob_reference() {
         ("find_files('&area/fixes/**/2026-01-01-a/spec.md')", json!([spec_a])),
         // Relocated under a lifecycle directory: still found.
         ("find_files('&area/fixes/**/2026-01-02-b/spec.md')", json!([spec_b])),
-        // Two matches are both reported, sorted.
+        // Two matches are both reported, shallowest first.
         ("find_files('&area/fixes/**/spec.md')", json!([spec_a, spec_b])),
         // `**` matches zero directories as well as several.
         ("find_files('&area/**/2026-01-01-a/spec.md')", json!([portable(d, "area/fixes/2026-01-01-a/spec.md"), portable(d, "area/other/2026-01-01-a/spec.md")])),
@@ -114,27 +114,29 @@ fn find_files_input_matrix() {
     for (expression, fragment) in [
         ("find_files(3)", "find_files"),
         ("find_files()", "find_files"),
-        ("find_files('&area/[')", "invalid glob"),
-        ("find_files('%&spec.md')", "not a `%` recursive reference"),
-        ("find_files('https://example.com/*.md')", "cannot search"),
+        ("find_files('&area/[')", "`&area/[` is not a valid glob"),
+        ("find_files('%&spec.md')", "cannot use the `%` recursive modifier"),
+        ("find_files('https://example.com/*.md')", "cannot use a remote URL"),
     ] {
         let error = value(d, expression).expect_err(expression);
         assert!(error.contains(fragment), "{expression}: expected `{fragment}` in: {error}");
     }
 }
 
-/// The searched directory is the bare reference's first candidate that
-/// exists, as for a file reference: `docs/` (the probing document's
-/// directory) is planned before the repository root.
+/// A bare glob searches the document's folder (`docs/`), then the repository
+/// root, and lists the matches of both, the document's first. A root whose
+/// directory is missing or is a file contributes nothing.
 #[test]
-fn find_files_searches_the_first_existing_candidate_only() {
+fn find_files_merges_the_document_folder_and_the_repository_root() {
     let dir = repo();
     let d = dir.path();
     for (path, content) in [
         ("docs/near", "a file, not a directory\n"),
-        ("near/a.md", "# Later directory\n"),
+        ("near/a.md", "# Repository root\n"),
         ("later/a.md", "# Only directory\n"),
         ("loop/a.md", "# Behind a failed probe\n"),
+        ("docs/both/z.md", "# Document folder\n"),
+        ("both/a.md", "# Repository root\n"),
     ] {
         std::fs::create_dir_all(d.join(path).parent().expect("parent")).expect("mkdir");
         std::fs::write(d.join(path), content).expect("write fixture");
@@ -146,13 +148,20 @@ fn find_files_searches_the_first_existing_candidate_only() {
     std::os::windows::fs::symlink_file("loop", &looped)
         .expect("creating a file symlink needs Developer Mode or SeCreateSymbolicLinkPrivilege");
 
-    // Control: the only existing candidate is the repository root's directory.
-    let found = value(d, "find_files('later/*.md')").unwrap();
-    assert_eq!(canonical_list(found), json!([portable(d, "later/a.md")]));
-    // An earlier file decides: there is no directory to search.
-    assert_eq!(value(d, "find_files('near/*.md')").unwrap(), json!([]));
-    // An earlier candidate that cannot be probed fails the expression with
-    // the `Io` class.
+    for (expression, expected) in [
+        // Control: only the repository root has the directory.
+        ("find_files('later/*.md')", json!([portable(d, "later/a.md")])),
+        // Both roots match: the document folder's first, although `z` sorts last.
+        ("find_files('both/*.md')", json!([portable(d, "docs/both/z.md"), portable(d, "both/a.md")])),
+        // A file where the document folder's directory would be.
+        ("find_files('near/*.md')", json!([portable(d, "near/a.md")])),
+    ] {
+        let found = value(d, expression).unwrap_or_else(|error| panic!("{expression}: {error}"));
+        assert_eq!(canonical_list(found), expected, "{expression}");
+    }
+
+    // A root directory that cannot be probed (a symlink loop) fails the
+    // expression with the `Io` class rather than hiding the later root.
     let path = d.join("docs/probe.md");
     std::fs::write(&path, "---\nv: \"{{ find_files('loop/*.md') }}\"\n---\nBody\n").expect("write probe");
     let error = Markdown::try_from(path.as_path())
@@ -161,14 +170,15 @@ fn find_files_searches_the_first_existing_candidate_only() {
         .expect_err("a failed probe is not a directory miss");
     let class = match &error {
         darkmatter::markdown::MarkdownError::Interpolation { cause, .. } => match cause.as_ref() {
-            darkmatter::markdown::compose::expression::ExpressionError::FileReference(diagnostic) => {
-                diagnostic.source.as_ref().map(|source| source.resolution_failure())
+            darkmatter::markdown::compose::expression::ExpressionError::GlobReference { source, .. } => {
+                Some(source.resolution_failure())
             }
             _ => None,
         },
         _ => None,
     };
     assert_eq!(class, Some(biscuit_file::ResolutionFailure::Io), "{error:?}");
+    assert_eq!(error.resolution_failure(), Some(biscuit_file::ResolutionFailure::Io), "{error:?}");
 }
 
 #[test]

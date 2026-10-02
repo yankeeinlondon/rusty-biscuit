@@ -199,7 +199,12 @@ pub fn register_darkmatter_formats(
 ) -> ValidationOptions {
     register_darkmatter_formats_with(
         options,
-        super::validate::FileValues::Resolved { base_dir, fallback, context: Box::new(context) },
+        super::validate::FileValues::Resolved {
+            base_dir,
+            fallback,
+            context: Box::new(context),
+            callers: Default::default(),
+        },
     )
 }
 
@@ -215,7 +220,7 @@ pub(crate) fn register_darkmatter_formats_with(
                 Ok(_) => context_free_path(value).is_none_or(|path| path.exists()),
                 Err(_) => false,
             },
-            super::validate::FileValues::Resolved { base_dir, fallback, context } => {
+            super::validate::FileValues::Resolved { base_dir, fallback, context, .. } => {
                 resolve_file_reference_in_context(value, base_dir.as_deref(), fallback.as_deref(), context)
                     .is_ok()
             }

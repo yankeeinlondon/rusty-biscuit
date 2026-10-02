@@ -9,7 +9,8 @@
 //!
 //! Two source forms are accepted:
 //!
-//! - `::file-links <glob>` — a glob pattern resolved relative to the document.
+//! - `::file-links <glob>` — a [`GlobReference`](biscuit_file::GlobReference)
+//!   authored in the document, listed across every root of its prefix.
 //! - `::file-links --dir <path> [--depth <u32>]` — a directory scan with
 //!   optional recursion depth (default `0`).
 //!
@@ -17,9 +18,10 @@
 //!
 //! Only files with the allowed document extensions (`.md`, `.txt`, `.doc`,
 //! `.docx`, `.xls`, `.xlsx`, `.pdf`) are included, compared case-insensitively.
-//! The containing document is excluded. Candidates resolving outside the
-//! repository root (or current working directory when no repo is found) are
-//! ignored for security.
+//! The containing document is excluded, and symlinked directories are never
+//! descended. Both forms are bounded by the document context's tree root: a
+//! relative glob may not leave it, and a file symlink whose target does is
+//! left out (a glob reports it as a warning).
 
 mod discovery;
 mod parser;

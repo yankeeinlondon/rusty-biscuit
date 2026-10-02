@@ -173,6 +173,14 @@ Compare against that, never against `to_string_lossy()`.
     fails as `Malformed`. When a test passes only on Unix, print the value
     and assert the exact path. Found 2026-10-01 on `build-win-native`
     (`schema_number_increment_survives_quoted_persistence_round_trips`).
+16. **`metadata`/`symlink_metadata` on a name holding `*` or `?` fails with
+    `ErrorKind::InvalidFilename` (OS error 123), not `NotFound`.** Code that
+    treats only `NotFound` as "absent" turns a plain miss into an `Io`
+    failure on Windows alone. biscuit-file's candidate probe and
+    `deepest_existing_ancestor` treat `InvalidFilename` as absent, so
+    `FileReference::new("docs/*.md")` is a `NoMatch` on every OS. Found
+    2026-10-02 on `build-win-native`
+    (`glob_reference::literal::a_literal_miss_that_looks_like_a_glob_hints_at_glob_references`).
 
 ## WezTerm on `build-win`
 

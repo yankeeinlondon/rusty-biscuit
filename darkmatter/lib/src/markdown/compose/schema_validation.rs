@@ -157,6 +157,7 @@ pub(crate) fn prepare_schemas(
     if let Some(fallback) = options.file_ref_fallback_dir.clone() {
         schemas = schemas.with_file_ref_fallback_dir(fallback);
     }
+    schemas = schemas.with_caller_input_records(&caller_input_records(options));
     if let Some(baseline) = options.baseline_schema.clone() {
         schemas = schemas.with_baseline(baseline).map_err(|err| {
             prepare_error(format!("schema could not be prepared: {err}"), err)
@@ -759,27 +760,23 @@ fn caller_input_records(options: &crate::markdown::compose::ComposeRequest) -> c
     if !options.caller_input_records().is_empty() {
         return options.caller_input_records().clone();
     }
-    let overrides: Vec<(&String, &serde_json::Value)> = [&options.set_overrides, &options.data_overrides]
-        .into_iter()
-        .filter_map(|layer| layer.as_ref().and_then(serde_json::Value::as_object))
-        .flatten()
-        .collect();
-    if overrides.is_empty() {
-        return Default::default();
-    }
-    let context = options.resolution_context();
-    let origin = context.for_trusted_external_cwd(
-        options.file_ref_fallback_dir.as_deref().unwrap_or_else(|| context.request_cwd()),
-    );
-    overrides
-        .into_iter()
-        .map(|(key, value)| {
-            (
-                key.clone(),
-                crate::markdown::compose::CallerInputRecord::new(value.clone(), origin.clone()),
-            )
-        })
-        .collect()
+    crate::markdown::compose::caller_input_records_for_overrides(
+        [&options.set_overrides, &options.data_overrides].into_iter().flatten(),
+        options.resolution_context(),
+        options.file_ref_fallback_dir.as_deref(),
+    )
+}
+
+/// The context each caller-supplied property was authored in, for the
+/// `match()` judgment of its value.
+fn caller_origins(
+    records: &crate::markdown::compose::CallerInputRecords,
+) -> crate::markdown::schemas::validate::CallerOrigins {
+    crate::markdown::schemas::validate::CallerOrigins::new(
+        records
+            .iter()
+            .map(|(key, record)| (key.clone(), record.origin().clone())),
+    )
 }
 
 fn select_file_mode(
@@ -1016,11 +1013,12 @@ fn root_schema_arm_applies(
         return RootArmApplicability::None;
     }
     let wrapped = crate::markdown::schemas::validate::wrap_arm_as_root_schema(arm);
-    let Ok(validator) = crate::markdown::schemas::validate::build_validator_in_context(
+    let Ok(validator) = crate::markdown::schemas::validate::build_validator_with_callers(
         &wrapped,
         Some(&document_context.cwd),
         None,
         &document_context.file_resolution_context,
+        caller_origins(records),
     ) else {
         return RootArmApplicability::None;
     };

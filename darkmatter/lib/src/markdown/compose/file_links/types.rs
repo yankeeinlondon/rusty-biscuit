@@ -29,7 +29,9 @@ pub(crate) const DEFAULT_DIR_DEPTH: u32 = 0;
 /// The source form a `::file-links` directive takes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FileLinksMode {
-    /// `::file-links <glob>` — a glob pattern resolved relative to the document.
+    /// `::file-links <glob>` — a glob reference (`[!][prefix]glob`) authored in
+    /// the document; a bare glob searches the document's folder, then the
+    /// repository root.
     Glob(String),
     /// `::file-links --dir <path> [--depth <u32>]` — a directory scan.
     Dir {
@@ -87,6 +89,9 @@ pub struct FileLinksResult {
     pub directive: FileLinksDirective,
     /// Rendering metadata. `None` when no files matched.
     pub render: Option<FileLinksRender>,
+    /// File symlinks a glob matched but left out because their target lies
+    /// outside the file tree. Always empty for `--dir`.
+    pub skipped: Vec<biscuit_file::SkippedEntry>,
 }
 
 /// Errors that can occur during `::file-links` parsing or discovery.
@@ -108,12 +113,14 @@ pub enum FileLinksError {
     #[error("Target '{path}' is not a directory (line {line})")]
     TargetNotDirectory { path: String, line: usize },
 
-    /// A glob pattern failed to compile.
-    #[error("Invalid glob pattern '{pattern}' at line {line}: {message}")]
-    InvalidGlob {
-        pattern: String,
+    /// The glob reference could not be parsed or rooted: an invalid glob or
+    /// prefix, a relative glob leaving the file tree, or `&`/`^` outside a
+    /// repository.
+    #[error("{source} (line {line})")]
+    GlobReference {
         line: usize,
-        message: String,
+        #[source]
+        source: biscuit_file::GlobReferenceError,
     },
 
     /// I/O error during discovery.
@@ -180,19 +187,13 @@ impl biscuit_terminal::errors::BlockError for FileLinksError {
                 ))
                 .hint("<cyan>--dir</cyan> requires a directory; use a glob (e.g. <cyan>::file-links \"docs/*.md\"</cyan>) to match a file."),
 
-            FileLinksError::InvalidGlob {
-                pattern,
-                line,
-                message,
-            } => StatusBlock::new(StatusState::Error)
+            FileLinksError::GlobReference { line, source } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
                     "FileLinksError",
-                    "invalid glob pattern",
+                    "invalid glob reference",
                 ))
-                .body(format!(
-                    "<dim>Pattern:</dim> <cyan>{pattern}</cyan>\n<dim>Line:</dim> {line}\n<dim>Message:</dim> {message}"
-                ))
-                .hint("See the globset crate docs for supported pattern syntax."),
+                .body(format!("<dim>Line:</dim> {line}\n<dim>Message:</dim> {source}"))
+                .hint("A glob takes a file-reference prefix (<cyan>&</cyan>, <cyan>^</cyan>, <cyan>@</cyan>, <cyan>~/</cyan>, <cyan>./</cyan>) and stays inside the file tree unless it names its root."),
 
             FileLinksError::Io(source) => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("FileLinksError", "I/O error"))

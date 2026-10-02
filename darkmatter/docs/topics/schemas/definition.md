@@ -502,6 +502,35 @@ configured globs still validates. In a root union, it is also an arm constraint:
 an existing file outside an arm's declared glob rules that arm out. This holds
 when the other arms declare the same glob, a different glob, or no glob.
 
+Each glob is a **glob reference**: an optional `!` (exclude), an optional
+file-reference prefix, then the glob. The prefix says where the glob starts,
+so one schema can mean the same files from any launch directory:
+
+| Pattern | Judged from |
+|---|---|
+| `**/*spec*.md`, `*.md` (bare) | the value's directory, then the repository root |
+| `./docs/*.md` | the value's directory only |
+| `&fixes/**/spec.md` | the repository root |
+| `^**/*spec*.md` | the package, the package area, then the repository root |
+| `@prompts/*.md`, `~/notes/*.md`, `vault:notes/*.md`, `/abs/*.md` | those folders |
+
+- **The value's directory** is the launch directory for a value a caller
+  supplies (`md compose doc.md spec=…`, a completion, a chooser) and the
+  document's folder for a value written in the frontmatter. Use `&`, `^`, or
+  `@` when a pattern must mean one place for both.
+- **Nearest root.** A file is judged only relative to the first of a
+  pattern's folders that contains it, so `match(**/*spec*.md, !fixes/**)`
+  launched from `pkg/` rejects `pkg/fixes/x/spec.md` and the repository
+  root's `fixes/y/spec.md` alike.
+- **File-name view.** A pattern with no `/` after its prefix (`*.md`,
+  `^*.md`, `!_*.md`) also matches a file's bare name at any depth, so
+  `match(*.md, !_*.md)` rejects `docs/_draft.md`.
+- `*` stays within one path segment and `**` crosses segments; matching is
+  case-sensitive on every OS.
+- A pattern that is not a glob reference is a schema definition error naming
+  the property and pattern: `%…` (a glob already recurses), a URL, an
+  invalid glob, or a list of only `!` exclusions.
+
 ```yaml
 $schema:
     - kind: "literal(feature)"
@@ -531,12 +560,14 @@ The rules:
 - Only an **existing** file is judged. A value that names no file yet (a lazy
   output path, a partial a chooser is about to complete, a value still holding
   `{{ … }}` or `$(…)`) never rules an arm out; existence is `eager`'s job.
-- The path is compared in portable `/` spelling, relative to the launch
-  directory, which is where completion walks the glob; a file outside it is
-  compared relative to the document's directory, then the repository root.
-  What completion offers, the arm accepts.
-- Document-authored and caller-supplied values follow the same rule, each
-  resolved from its own origin. In a `file[]`, every item must match.
+- The path is judged from the value's directory, as above: a caller-supplied
+  value from the launch directory, which is where completion walks the glob,
+  so what completion offers, the arm accepts; a document-authored value from
+  the document's folder. Each is resolved from that same origin. In a
+  `file[]`, every item must match.
+- Coercion, which runs without a request, judges only an existing absolute
+  path against the bare and absolute patterns (by its full path), so a
+  `./`, `&`, `^`, or `@` pattern cannot steer how a sibling value is coerced.
 
 When a schema arm selects `file(eager)`, validation probes the candidate plan and
 materializes the winning **absolute native path**. A lazy `file` value materializes

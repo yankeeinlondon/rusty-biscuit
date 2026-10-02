@@ -380,6 +380,17 @@ impl MarkdownError {
             if let Some(reference) = error.downcast_ref::<biscuit_file::FileReferenceError>() {
                 return Some(reference.resolution_failure());
             }
+            // `ExpressionError::GlobReference` shares its cause through an `Arc`.
+            if let Some(glob) = error
+                .downcast_ref::<biscuit_file::GlobReferenceError>()
+                .or_else(|| {
+                    error
+                        .downcast_ref::<std::sync::Arc<biscuit_file::GlobReferenceError>>()
+                        .map(AsRef::as_ref)
+                })
+            {
+                return Some(glob.resolution_failure());
+            }
             current = error.source();
         }
         None

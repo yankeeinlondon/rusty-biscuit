@@ -304,6 +304,28 @@ impl DarkmatterSchemas {
         self
     }
 
+    /// Records the contexts caller-supplied properties were authored in, so
+    /// their `match()` globs are judged from there rather than from the
+    /// document's folder.
+    #[must_use]
+    pub(crate) fn with_caller_origins(mut self, origins: validate::CallerOrigins) -> Self {
+        self.cache = self.cache.with_caller_origins(origins);
+        self
+    }
+
+    /// Marks the top-level properties in `records` as caller-supplied: a
+    /// bare or `./` `match()` pattern on one of them is judged from the
+    /// record's origin (typically the launch directory) rather than from the
+    /// document's folder, as composition judges it.
+    #[must_use]
+    pub fn with_caller_input_records(self, records: &crate::markdown::compose::CallerInputRecords) -> Self {
+        self.with_caller_origins(validate::CallerOrigins::new(
+            records
+                .iter()
+                .map(|(property, record)| (property.clone(), record.origin().clone())),
+        ))
+    }
+
     /// This instance resolving through `context` instead, keeping its
     /// baseline and trigger registry: one configuration validating documents
     /// that each carry their own context.
@@ -608,6 +630,7 @@ impl DarkmatterSchemas {
             base_dir: Some(base_dir),
             file_ref_fallback_dir: self.cache.file_ref_fallback_dir().map(Path::to_path_buf),
             file_resolution_context: self.file_resolution_context.clone(),
+            caller_origins: self.cache.caller_origins().clone(),
             dependencies,
             advisories,
         }))
@@ -821,6 +844,9 @@ pub struct EffectiveSchema {
     file_ref_fallback_dir: Option<PathBuf>,
     /// The request's context, used by eager-file normalization.
     file_resolution_context: biscuit_file::FileResolutionContext,
+    /// Caller-supplied properties and their origins, for the `match()`
+    /// judgment of a phase's rebuilt validators.
+    caller_origins: validate::CallerOrigins,
     /// Resolved paths of the files this schema depends on: the sorted,
     /// deduplicated union of the document `$schema`'s `Name@file`/`@this` imports
     /// (Feature B), its `example(...)` artifacts (Feature A), and the referenced
@@ -936,11 +962,12 @@ impl EffectiveSchema {
             None => (None, self.json_schema.as_ref().clone()),
         };
         phase::make_passive(&mut json_schema);
-        let validator = Arc::new(validate::build_validator_in_context(
+        let validator = Arc::new(validate::build_validator_with_callers(
             &json_schema,
             self.base_dir.as_deref(),
             self.file_ref_fallback_dir.as_deref(),
             &self.file_resolution_context,
+            self.caller_origins.clone(),
         )?);
         let arm_validators = json_schema
             .get("anyOf")
@@ -949,11 +976,12 @@ impl EffectiveSchema {
                 arms.iter()
                     .map(|arm| {
                         let root = validate::wrap_arm_as_root_schema(arm);
-                        validate::build_validator_in_context(
+                        validate::build_validator_with_callers(
                             &root,
                             self.base_dir.as_deref(),
                             self.file_ref_fallback_dir.as_deref(),
                             &self.file_resolution_context,
+                            self.caller_origins.clone(),
                         )
                         .map(Arc::new)
                     })
@@ -969,6 +997,7 @@ impl EffectiveSchema {
             base_dir: self.base_dir.clone(),
             file_ref_fallback_dir: self.file_ref_fallback_dir.clone(),
             file_resolution_context: self.file_resolution_context.clone(),
+            caller_origins: self.caller_origins.clone(),
             dependencies: self.dependencies.clone(),
             advisories: self.advisories.clone(),
         };

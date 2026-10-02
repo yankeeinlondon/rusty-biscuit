@@ -526,7 +526,8 @@ pub fn build_schema_status_report_for_mode(
         return Ok(None);
     }
 
-    let effective = load_effective_schema(source, file_ref_fallback_dir, file_resolution_context)?;
+    let callers = override_records(set_overrides, file_resolution_context, file_ref_fallback_dir);
+    let effective = load_effective_schema(source, file_ref_fallback_dir, file_resolution_context, &callers)?;
     let Some(effective) = effective else {
         // Raw JSON Schema (no SimplifiedSchema projection): we can still
         // run validation, but without typed metadata for per-property

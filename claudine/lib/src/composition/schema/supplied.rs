@@ -39,7 +39,7 @@ pub fn unresolved_supplied_files(
         return Vec::new();
     }
     let Ok(Some(effective)) =
-        load_effective_schema(source, None, document_context)
+        load_effective_schema(source, None, document_context, records)
     else {
         return Vec::new();
     };

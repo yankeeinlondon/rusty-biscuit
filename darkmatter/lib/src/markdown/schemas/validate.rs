@@ -73,7 +73,8 @@ pub const DEFAULT_CACHE_SIZE: usize = 64;
 /// identity too, since it supplies the repository tier of that plan.
 /// [`Self::file_ref_fallback_dir`] is also part of cache identity: it anchors
 /// `match()` globs, but is not a resolution candidate for document-authored
-/// references.
+/// references. So are [`Self::with_caller_origins`]: a caller-supplied
+/// property's `match()` globs are judged from the caller's own context.
 ///
 /// [`Self::structural_validator_for`] serves validators that judge file values
 /// by syntax alone, for callers with no request (coercion probes, examples).
@@ -84,6 +85,8 @@ pub struct ValidatorCache {
     ///
     /// This is not a resolution candidate for document-authored references.
     file_ref_fallback_dir: Option<PathBuf>,
+    /// Where each caller-supplied top-level property was authored.
+    caller_origins: CallerOrigins,
 }
 
 impl Default for ValidatorCache {
@@ -112,8 +115,58 @@ struct CacheEntry {
 enum JudgedIn {
     /// Syntax alone (a structural validator).
     Syntax,
-    /// A request's context.
-    Context(Box<biscuit_file::FileResolutionContext>),
+    /// A request's context, and the contexts its caller-supplied properties
+    /// were authored in.
+    Context(Box<biscuit_file::FileResolutionContext>, CallerOrigins),
+}
+
+/// Where a top-level property's value came from (see [`CallerOrigins`]).
+pub(crate) enum ValueOrigin<'a> {
+    /// Authored in the document: judged from the document's folder.
+    Document,
+    /// Supplied by a caller, who authored it in this context.
+    Caller(&'a biscuit_file::FileResolutionContext),
+}
+
+/// The context each caller-supplied top-level property was authored in,
+/// keyed by property name.
+///
+/// A caller's value reaches validation projected from its own context (the
+/// launch directory), so its `match()` globs are judged there too: a bare or
+/// `./` pattern starts at the launch directory for a caller value and at the
+/// document's folder for a frontmatter value.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct CallerOrigins(Arc<std::collections::BTreeMap<String, biscuit_file::FileResolutionContext>>);
+
+impl CallerOrigins {
+    pub(crate) fn new(
+        origins: impl IntoIterator<Item = (String, biscuit_file::FileResolutionContext)>,
+    ) -> Self {
+        Self(Arc::new(origins.into_iter().collect()))
+    }
+
+    /// Where `property`'s value came from.
+    pub(crate) fn origin_of(&self, property: &str) -> ValueOrigin<'_> {
+        match self.0.get(property) {
+            Some(context) => ValueOrigin::Caller(context),
+            None => ValueOrigin::Document,
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Cache-key bytes: each property and the directories that root its
+    /// patterns. The full contexts are compared on lookup.
+    fn key_bytes(&self, bytes: &mut Vec<u8>) {
+        for (property, origin) in self.0.iter() {
+            bytes.push(0xfd);
+            bytes.extend_from_slice(property.as_bytes());
+            bytes.push(0xff);
+            bytes.extend_from_slice(origin.cwd().to_string_lossy().as_bytes());
+        }
+    }
 }
 
 impl ValidatorCache {
@@ -135,6 +188,7 @@ impl ValidatorCache {
                 capacity: cap,
             })),
             file_ref_fallback_dir: None,
+            caller_origins: CallerOrigins::default(),
         }
     }
 
@@ -147,6 +201,14 @@ impl ValidatorCache {
     #[must_use]
     pub fn with_file_ref_fallback_dir(mut self, dir: impl Into<PathBuf>) -> Self {
         self.file_ref_fallback_dir = Some(dir.into());
+        self
+    }
+
+    /// Records the contexts caller-supplied properties were authored in, so
+    /// their `match()` globs are judged from there (see [`CallerOrigins`]).
+    #[must_use]
+    pub(crate) fn with_caller_origins(mut self, origins: CallerOrigins) -> Self {
+        self.caller_origins = origins;
         self
     }
 
@@ -169,18 +231,21 @@ impl ValidatorCache {
         base_dir: Option<&Path>,
         context: &biscuit_file::FileResolutionContext,
     ) -> Result<Arc<Validator>, SchemaError> {
-        let judged_in = JudgedIn::Context(Box::new(context.clone()));
+        let judged_in = JudgedIn::Context(Box::new(context.clone()), self.caller_origins.clone());
         let key = canonical_hash(schema, base_dir, self.file_ref_fallback_dir.as_deref(), &judged_in);
         // Fast path: hit.
         if let Some(hit) = self.lookup(&key, &judged_in) {
             return Ok(hit);
         }
         // Miss: build outside the lock to keep contention low.
-        let validator = Arc::new(build_validator_in_context(
+        let validator = Arc::new(build_validator_with(
             schema,
-            base_dir,
-            self.file_ref_fallback_dir.as_deref(),
-            context,
+            &FileValues::Resolved {
+                base_dir: base_dir.map(PathBuf::from),
+                fallback: self.file_ref_fallback_dir.clone(),
+                context: Box::new(context.clone()),
+                callers: self.caller_origins.clone(),
+            },
         )?);
         self.insert(key, validator.clone(), judged_in);
         Ok(validator)
@@ -249,6 +314,10 @@ impl ValidatorCache {
         self.file_ref_fallback_dir.as_deref()
     }
 
+    pub(super) fn caller_origins(&self) -> &CallerOrigins {
+        &self.caller_origins
+    }
+
     /// Returns the current number of cached validators. Mainly a testing aid.
     pub fn len(&self) -> usize {
         self.inner
@@ -314,12 +383,31 @@ pub(crate) fn build_validator_in_context(
     file_ref_fallback_dir: Option<&Path>,
     file_resolution_context: &biscuit_file::FileResolutionContext,
 ) -> Result<Validator, SchemaError> {
+    build_validator_with_callers(
+        schema,
+        base_dir,
+        file_ref_fallback_dir,
+        file_resolution_context,
+        CallerOrigins::default(),
+    )
+}
+
+/// [`build_validator_in_context`] for a document some of whose top-level
+/// properties a caller supplied (see [`CallerOrigins`]).
+pub(crate) fn build_validator_with_callers(
+    schema: &Value,
+    base_dir: Option<&Path>,
+    file_ref_fallback_dir: Option<&Path>,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
+    callers: CallerOrigins,
+) -> Result<Validator, SchemaError> {
     build_validator_with(
         schema,
         &FileValues::Resolved {
             base_dir: base_dir.map(PathBuf::from),
             fallback: file_ref_fallback_dir.map(PathBuf::from),
             context: Box::new(file_resolution_context.clone()),
+            callers,
         },
     )
 }
@@ -331,11 +419,13 @@ pub(crate) enum FileValues {
     /// syntax (see [`build_structural_validator`]).
     Syntax,
     /// Resolved through a request's context from `base_dir`, else the
-    /// context's `cwd`.
+    /// context's `cwd`; a caller-supplied property's `match()` globs are
+    /// judged in its entry of `callers`.
     Resolved {
         base_dir: Option<PathBuf>,
         fallback: Option<PathBuf>,
         context: Box<biscuit_file::FileResolutionContext>,
+        callers: CallerOrigins,
     },
 }
 
@@ -706,6 +796,7 @@ impl FileRefAnchors<'_> {
                 base_dir: base_dir.map(PathBuf::from),
                 fallback: fallback.map(PathBuf::from),
                 context: Box::new(context.clone()),
+                callers: CallerOrigins::default(),
             },
         }
     }
@@ -1187,7 +1278,12 @@ fn canonical_hash(
             bytes.push(0xfe);
             None
         }
-        JudgedIn::Context(context) => Some(context.as_ref()),
+        JudgedIn::Context(context, callers) => {
+            if !callers.is_empty() {
+                callers.key_bytes(&mut bytes);
+            }
+            Some(context.as_ref())
+        }
     };
     for anchor in [
         context.and_then(biscuit_file::FileResolutionContext::repository_root),

@@ -127,7 +127,10 @@ fn file_candidates(
         return out;
     }
 
-    let Some(matcher) = MatchGlobs::compile(patterns) else {
+    let Ok(matcher) = MatchGlobs::new(patterns) else {
+        return Vec::new();
+    };
+    let Ok(resolution) = scopes::file_resolution_context(ctx) else {
         return Vec::new();
     };
 
@@ -146,11 +149,7 @@ fn file_candidates(
             continue;
         };
         let rel_text = to_portable_string(rel);
-        let file_name = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or(&rel_text);
-        if !matcher.is_match(&rel_text, file_name) {
+        if !matcher.matches(path, &resolution) {
             continue;
         }
         // Filter the typed partial against the repo-relative path, not the
@@ -194,7 +193,10 @@ pub(crate) fn file_candidate_paths(patterns: &[String], ctx: &ScopeContext) -> V
         return default_glob::default_markdown_candidates(ctx);
     }
 
-    let Some(matcher) = MatchGlobs::compile(patterns) else {
+    let Ok(matcher) = MatchGlobs::new(patterns) else {
+        return Vec::new();
+    };
+    let Ok(resolution) = scopes::file_resolution_context(ctx) else {
         return Vec::new();
     };
 
@@ -210,15 +212,7 @@ pub(crate) fn file_candidate_paths(patterns: &[String], ctx: &ScopeContext) -> V
         if !path.is_file() {
             continue;
         }
-        let Ok(rel) = path.strip_prefix(&base) else {
-            continue;
-        };
-        let rel_text = to_portable_string(rel);
-        let file_name = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or(&rel_text);
-        if !matcher.is_match(&rel_text, file_name) {
+        if !matcher.matches(path, &resolution) {
             continue;
         }
         out.push(path.to_path_buf());

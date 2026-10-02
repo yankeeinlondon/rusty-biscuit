@@ -129,9 +129,22 @@ captured `ctx.*` `ComposeContext`, so never name a new request method
 Validators are either context-bound (`ValidatorCache::validator_for(schema,
 base, &ctx)`) or structural (`structural_validator_for`, `build_structural_validator`) for
 callers with no request (coercion probes, examples, lint): an absolute path is
-judged as resolved (it must exist; `match()` judges its full path), and every
-value that needs a context is judged by syntax only. Root-union coercion relies
-on the absolute-path half to pick an arm by glob.
+judged as resolved (it must exist; `match()` judges its full path through
+`GlobReference::matches_without_context`, bare and absolute patterns only), and
+every value that needs a context is judged by syntax only. Root-union coercion
+relies on the absolute-path half to pick an arm by glob, so a `./`/`&`/`^`/`@`
+pattern cannot steer coercion.
+
+`match()` patterns are `GlobReference`s (`FileMatchGlobs` wraps one with the
+file-name view); the grammar rejects a non-glob-reference pattern at definition
+time (`file_match::definition_error`). A context-bound validator judges each
+value from its own `cwd`: the document's folder for frontmatter, the caller's
+origin for a caller-supplied top-level property (`validate::CallerOrigins`,
+from the schema stage's `caller_input_records`; the keyword finds its property
+in its schema location). Never judge `match()` from the process directory or
+from "any containing root". `find_files()` and `::file-links <glob>` call
+`list_files` in the document's context and report skipped out-of-tree file
+symlinks as `dm.glob.skipped_symlink` (`compose/glob_listing.rs`).
 
 Keep this order stable. Whole-value `{{ ... }}` and `$(...)` values are
 executable state: they must resolve or fail, never leak as literal syntax.
@@ -398,6 +411,10 @@ vector shrinks, but an element replaced in place is not seen.
 is reported once. A new coded family, such as
 `dm.expression.unknown_identifier`, adds a `WarningSubject` constructor
 rather than a message-based check.
+
+A fixture that needs a repository runs `git init`: a bare `.git` directory is
+not a repository to a prepared request context, so `&`/`^`, the `::file-links`
+repository icon, and the relative boundary would all see none.
 
 Deterministic `md` integration tests must launch through
 `cli/tests/common/fixture.rs`'s `CliProcessFixture`. Its builder pins

@@ -19,14 +19,36 @@ The keyword `::file-links` must be followed by ASCII whitespace or the end of
 the line; near-miss prose such as `::file-linksXYZ`, `::file-links-extra`, or
 `::file-links2` is left untouched and is **not** parsed as a directive.
 
-The glob is resolved relative to the containing document. Only files matching
-the glob **and** passing the extension filter are included.
+The glob is a **glob reference**: an optional `!`, an optional file-reference
+prefix, then the glob. The prefix picks the folders searched, exactly as it
+does for a single `::file` reference, and every folder's matches are listed.
+Only files matching the glob **and** passing the extension filter are
+included.
 
 ```md
 ::file-links "docs/**/*.md"
 ::file-links "*.pdf"
-::file-links "reports/*.xlsx"
+::file-links ^docs/*.md
+::file-links &fixes/**/spec.md
+::file-links ~/notes/*.md
 ```
+
+| Glob | Folders searched |
+|------|------------------|
+| `*.md` (bare) | The document's folder, then the repository root |
+| `./docs/*.md`, `../x/*.md` | The document's folder only |
+| `&fixes/**/spec.md` | The repository root |
+| `^docs/*.md` | The package, the package area, then the repository root |
+| `@prompts/*.md` | The `@` magic folders |
+| `~/notes/*.md` | The home directory |
+| `/abs/dir/*.md` | That folder |
+
+`*` and `?` stay within one path segment and `**` crosses segments, so a bare
+`*.md` in `area/pkg/guide/index.md` lists `area/pkg/guide/*.md` and the
+repository root's `*.md`, but not `*.md` at other depths. A file reached from
+two folders is listed once. The full pattern grammar is in biscuit-file's
+[file references](../../../biscuit-file/docs/topics/file-references.md)
+("Glob References").
 
 ### Directory Form
 
@@ -60,28 +82,34 @@ excluded.
 
 ## Source-Relative Resolution
 
-Both glob and directory paths are resolved relative to the directory containing
-the source document. If the document has no source file context (e.g. composed
-from stdin), the directive errors with a missing-source-context message.
+A bare or `./` glob starts at the directory containing the source document, and
+a `--dir` path is resolved relative to it. If the document has no source file
+context (e.g. composed from stdin), the directive errors with a
+missing-source-context message.
 
 ## Self-Exclusion
 
 The containing document itself is always excluded from the results, even when
 the glob or directory would otherwise match it.
 
-## Repository / CWD Boundary
+## File-Tree Boundary
 
-Discovery is bounded for security:
+Discovery is bounded by the document's **file tree**: the repository root when
+the document is in a repository, else the tree its compose request chose. The
+process's current directory never decides it.
 
-- When the source file is inside a git repository, the boundary is the
-  repository root.
-- Otherwise, the boundary is the current working directory.
+- A bare, `./`, or `../` glob may not climb out of the tree. `::file-links ../*`
+  in a document at the repository root fails with a `RelativeTreeEscape`
+  error (in permissive mode, the directive is removed with a warning).
+- `~`, `@`, absolute, and vault globs name their own folders and may lie
+  outside the tree, as a `::file` reference may. `&` and `^` need a repository.
+- Symlinked directories are never descended.
+- A file symlink a bare, `./`, or `../` glob matches whose target lies outside
+  the tree is left out, and the compose report gets one
+  `dm.glob.skipped_symlink` warning naming the link and its target.
+- `--dir` scans drop any file whose target resolves outside the tree.
 
-Any candidate file (after following symlinks) that resolves outside this
-boundary is ignored. This prevents `..` escapes and symlink-based traversal
-attacks.
-
-An **in-bound** symlink — one whose target also resolves within the boundary —
+An **in-bound** symlink — one whose target also resolves within the tree —
 is kept under the **path it was matched at**, not its canonical target. For
 example a matched `docs/alias.pdf -> ../assets/report.pdf` renders (and links)
 as `docs/alias.pdf`. The canonical target is used only for the boundary check
@@ -92,7 +120,7 @@ and for deduplication.
 The rendered tree uses the common ancestor of all matched files as its root.
 The root line shows:
 
-- A dimmed prefix with the path from the boundary to the target directory
+- A dimmed prefix with the path from the tree root to the target directory
   (e.g. `/docs/`)
 - A highlighted target directory name (e.g. `topics`)
 - A repository icon when the root is the repository root, or a folder icon
@@ -134,7 +162,8 @@ When no files match, the behavior depends on the compose strictness:
 ::file-links "docs/**/*.md"
 ```
 
-This renders a tree of all `.md` files under `docs/`, with links.
+This renders a tree of all `.md` files under the `docs/` folder next to the
+document and under the repository root's `docs/`, with links.
 
 ### Directory scan with depth
 
@@ -170,7 +199,8 @@ The tree is indented to preserve list placement.
 | `ParseDirective` | Invalid syntax, missing target, or unknown option |
 | `MissingSourceContext` | The directive requires a source file but none was provided |
 | `TargetNotFound` | The `--dir` path does not exist |
-| `InvalidGlob` | The glob pattern failed to compile |
+| `TargetNotDirectory` | The `--dir` path is a file |
+| `GlobReference` | The glob is not a valid glob reference, a relative glob leaves the file tree (`RelativeTreeEscape`), or `&`/`^` is used outside a repository |
 
 All errors render as line-aware `StatusBlock` diagnostics with hints showing
 valid syntax.

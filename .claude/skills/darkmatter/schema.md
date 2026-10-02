@@ -110,8 +110,11 @@ excluded keys without executing anything.
   each simplified arm's declared glob emits `x-darkmatter-match`, including
   beside a raw JSON Schema arm. An existing file outside that glob rules the
   arm out. Attachment happens per arm in `convert.rs` and both `resolve.rs`
-  union sites. `FileMatchGlobs` is the one comparison, shared with Claudine's
-  candidate walk.
+  union sites. `FileMatchGlobs` (a `GlobReference` with the file-name view)
+  is the one judgment, shared with Claudine's candidate walk; a caller
+  property is judged from its origin (`DarkmatterSchemas::with_caller_input_records`,
+  which every host that validates caller overrides itself must call, as
+  Claudine's pre-validation and launch schema do).
 - Pattern dictionary keys lower to `additionalProperties` or
   `patternProperties`; literal keys take precedence.
 - `min-keys` and `max-keys` constrain dictionaries.

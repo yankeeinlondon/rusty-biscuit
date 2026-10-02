@@ -1754,6 +1754,7 @@ fn schema_reference_stays_document_relative_through_claudine_load() {
         &source,
         Some(fallback_dir.path()),
         &crate::test_support::context_for(&source.resolved_path),
+        &Default::default(),
     ).unwrap();
     assert!(
         effective.is_some(),
@@ -1782,6 +1783,7 @@ fn root_union_schema_string_arm_stays_document_relative_through_claudine_load() 
         &source,
         Some(fallback_dir.path()),
         &crate::test_support::context_for(&source.resolved_path),
+        &Default::default(),
     ).unwrap();
     assert!(
         effective.is_some(),

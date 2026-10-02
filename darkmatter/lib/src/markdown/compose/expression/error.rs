@@ -243,6 +243,18 @@ pub enum ExpressionError {
     #[error("{}", display_file_reference(.0))]
     FileReference(FileReferenceDiagnostic),
 
+    /// A builtin that takes a glob reference (`find_files()`) could not
+    /// parse or resolve it. The typed cause carries the pattern and its
+    /// [`ResolutionFailure`](biscuit_file::ResolutionFailure) class.
+    #[error("{function}(): {source}")]
+    GlobReference {
+        /// The builtin's name.
+        function: &'static str,
+        /// Why the glob reference failed.
+        #[source]
+        source: Arc<biscuit_file::GlobReferenceError>,
+    },
+
     /// An unrecognized function name. The sole authoring-fatal variant in
     /// lenient mode — it can never resolve, so it is surfaced rather than left
     /// to leak its literal `{{ … }}` downstream.
@@ -459,6 +471,9 @@ impl ExpressionError {
     ///   resolution is attempted; a reference that is actually evaluated and
     ///   misses is surfaced rather than silently swallowed.
     ///
+    /// - [`GlobReference`] — a glob reference that cannot be parsed or rooted
+    ///   is an authoring mistake for the same reason.
+    ///
     /// - [`Provider`] — a focused provider failure (denied host, missing or
     ///   rejected credentials, rate limit, unsupported capability, incomplete
     ///   domain, transport failure, genuine not-found) is actionable state the
@@ -489,6 +504,7 @@ impl ExpressionError {
     ///
     /// [`UnknownFunction`]: ExpressionError::UnknownFunction
     /// [`FileReference`]: ExpressionError::FileReference
+    /// [`GlobReference`]: ExpressionError::GlobReference
     /// [`Provider`]: ExpressionError::Provider
     /// [`ContractViolation`]: ExpressionError::ContractViolation
     /// [`ContextNotCaptured`]: ExpressionError::ContextNotCaptured
@@ -504,6 +520,7 @@ impl ExpressionError {
     pub fn is_authoring_fatal(&self) -> bool {
         match self {
             ExpressionError::UnknownFunction { .. } => true,
+            ExpressionError::GlobReference { .. } => true,
             ExpressionError::Provider { .. } => true,
             ExpressionError::ContractViolation { .. } => true,
             ExpressionError::ReservedRootPathUnknown { .. } => true,

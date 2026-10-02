@@ -657,46 +657,56 @@ fn load_effective_schema_strips_surrounding_quotes() {
     assert!(load_effective_schema("\"p.md\"", &ctx).is_some());
 }
 
+/// A launch context the `match()` globs are judged from; the judgment is
+/// lexical, so no file needs to exist.
+fn launch_context() -> biscuit_file::FileResolutionContext {
+    biscuit_file::FileResolutionContext::new(std::env::temp_dir())
+}
+
 #[test]
 fn match_globs_basename_pattern_matches_anywhere_in_tree() {
-    let matcher = MatchGlobs::compile(&["*.png".to_string()]).unwrap();
-    assert!(matcher.is_match("cover.png", "cover.png"));
-    assert!(matcher.is_match("assets/cover.png", "cover.png"));
-    assert!(matcher.is_match("a/b/c/cover.png", "cover.png"));
-    assert!(!matcher.is_match("cover.jpg", "cover.jpg"));
+    let matcher = MatchGlobs::new(&["*.png".to_string()]).unwrap();
+    let context = launch_context();
+    assert!(matcher.matches(Path::new("cover.png"), &context));
+    assert!(matcher.matches(Path::new("assets/cover.png"), &context));
+    assert!(matcher.matches(Path::new("a/b/c/cover.png"), &context));
+    assert!(!matcher.matches(Path::new("cover.jpg"), &context));
 }
 
 #[test]
 fn match_globs_honors_negation_against_basename() {
     let matcher =
-        MatchGlobs::compile(&["*.md".to_string(), "!_*.md".to_string()]).unwrap();
-    assert!(matcher.is_match("plan.md", "plan.md"));
-    assert!(matcher.is_match("docs/plan.md", "plan.md"));
-    assert!(!matcher.is_match("_draft.md", "_draft.md"));
-    assert!(!matcher.is_match("docs/_draft.md", "_draft.md"));
-    assert!(!matcher.is_match("notes.txt", "notes.txt"));
+        MatchGlobs::new(&["*.md".to_string(), "!_*.md".to_string()]).unwrap();
+    let context = launch_context();
+    assert!(matcher.matches(Path::new("plan.md"), &context));
+    assert!(matcher.matches(Path::new("docs/plan.md"), &context));
+    assert!(!matcher.matches(Path::new("_draft.md"), &context));
+    assert!(!matcher.matches(Path::new("docs/_draft.md"), &context));
+    assert!(!matcher.matches(Path::new("notes.txt"), &context));
 }
 
 #[test]
 fn match_globs_path_qualified_glob_matches_relative_path() {
-    let matcher = MatchGlobs::compile(&["src/**/*.rs".to_string()]).unwrap();
-    assert!(matcher.is_match("src/lib.rs", "lib.rs"));
-    assert!(matcher.is_match("src/inner/mod.rs", "mod.rs"));
+    let matcher = MatchGlobs::new(&["src/**/*.rs".to_string()]).unwrap();
+    let context = launch_context();
+    assert!(matcher.matches(Path::new("src/lib.rs"), &context));
+    assert!(matcher.matches(Path::new("src/inner/mod.rs"), &context));
     // Files outside `src/` must NOT match a path-qualified pattern,
     // even when the basename would match `*.rs`.
-    assert!(!matcher.is_match("tests/integration.rs", "integration.rs"));
-    assert!(!matcher.is_match("benches/perf.rs", "perf.rs"));
+    assert!(!matcher.matches(Path::new("tests/integration.rs"), &context));
+    assert!(!matcher.matches(Path::new("benches/perf.rs"), &context));
 }
 
 #[test]
 fn match_globs_path_qualified_negation_filters_subset() {
-    let matcher = MatchGlobs::compile(&[
+    let matcher = MatchGlobs::new(&[
         "src/**/*.rs".to_string(),
         "!src/**/test_*.rs".to_string(),
     ])
     .unwrap();
-    assert!(matcher.is_match("src/lib.rs", "lib.rs"));
-    assert!(matcher.is_match("src/inner/mod.rs", "mod.rs"));
-    assert!(!matcher.is_match("src/test_helpers.rs", "test_helpers.rs"));
-    assert!(!matcher.is_match("src/inner/test_util.rs", "test_util.rs"));
+    let context = launch_context();
+    assert!(matcher.matches(Path::new("src/lib.rs"), &context));
+    assert!(matcher.matches(Path::new("src/inner/mod.rs"), &context));
+    assert!(!matcher.matches(Path::new("src/test_helpers.rs"), &context));
+    assert!(!matcher.matches(Path::new("src/inner/test_util.rs"), &context));
 }

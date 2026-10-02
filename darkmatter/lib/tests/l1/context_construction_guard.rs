@@ -14,8 +14,6 @@ const fn allow(gate: Gate, path: &'static str, identifier: &'static str, count: 
     Allowance { gate, path, identifier, count, reason }
 }
 
-const HANDED_OFF: &str = "handed off to 2026-09-30-glob-reference, which deletes this read";
-
 const ALLOWLIST: &[Allowance] = &[
     allow(
         Gate::Construction,
@@ -35,8 +33,6 @@ const ALLOWLIST: &[Allowance] = &[
         1,
         "`current_env.NAME` is the live process environment at reference time by design; it is neither `ctx.*` nor `env.*`",
     ),
-    allow(Gate::AmbientState, "markdown/compose/file_links/discovery.rs", "std::env::current_dir", 1, HANDED_OFF),
-    allow(Gate::AmbientState, "markdown/schemas/file_match.rs", "std::env::current_dir", 1, HANDED_OFF),
     allow(Gate::AmbientState, "editor/mod.rs", "std::env::var", 2, "`$EDITOR` / `$VISUAL` choose the program `md` opens a file in"),
     allow(Gate::AmbientState, "markdown/cleanup/emphasis.rs", "std::env::var", 1, "`PREFER_ITALICS` emphasis style for cleaned Markdown (rendering)"),
     allow(Gate::AmbientState, "markdown/compose/remote.rs", "std::env::var", 1, "`DARKMATTER_REMOTE_CONCURRENCY` fetch concurrency limit (tuning)"),

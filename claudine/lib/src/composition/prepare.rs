@@ -174,6 +174,20 @@ pub struct PrepareOptions {
 }
 
 impl PrepareOptions {
+    /// The caller records the schema stage judges `match()` globs by: the
+    /// captured records, else every override supplied in the launch area,
+    /// as composition derives them.
+    pub(crate) fn schema_caller_records(&self) -> darkmatter::markdown::compose::CallerInputRecords {
+        if !self.caller_input_records.is_empty() {
+            return self.caller_input_records.clone();
+        }
+        darkmatter::markdown::compose::caller_input_records_for_overrides(
+            self.set_overrides.as_ref(),
+            &self.file_resolution_context,
+            self.file_ref_fallback_dir.as_deref(),
+        )
+    }
+
     /// Options that prepare against `file_resolution_context`, with every
     /// other setting empty.
     pub fn new(file_resolution_context: biscuit_file::FileResolutionContext) -> Self {
@@ -395,6 +409,7 @@ fn resolve_launch_schema(
         source,
         options.file_ref_fallback_dir.as_deref(),
         &options.file_resolution_context,
+        &options.schema_caller_records(),
     ) {
         Ok(effective) => Ok(effective.map(|effective| LaunchSchema {
             effective,
