@@ -1,7 +1,7 @@
 ---
 total_phases: 7
 created: 2026-10-01
-phase: 5
+phase: 6
 agent: claude/opus
 yolo: "true"
 source_files_during_phase_1: []
@@ -191,6 +191,15 @@ docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
     - .claude/skills/darkmatter/dmls.md
     - .claude/skills/darkmatter/SKILL.md
+source_files_during_phase_6:
+    - prompts/implement.md
+    - prompts/review.md
+    - prompts/_prompt.md
+    - claudine/cli/tests/l1/shipped_prompts.rs
+    - claudine/cli/tests/fixtures/shipped_implement_route/shipped-hashes.json
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
 packages:
     - darkmatter
     - darkmatter-cli
@@ -814,7 +823,7 @@ rule, this sweep merges before `2026-09-21-lifecycle-ergonomics` touches
 
 ### Wave 13 — prompt restoration and regression (serial: the test before the pin)
 
-- [ ] **Restore plain expressions** (R8)
+- [x] **Restore plain expressions** (R8)
   - In `prompts/implement.md`, restore
     `{{ plan ? '- a plan file was identified: ' + plan : '' }}` and the
     sibling `spec`/`review` lines to plain ternaries. Remove the other
@@ -825,7 +834,7 @@ rule, this sweep merges before `2026-09-21-lifecycle-ergonomics` touches
     authors to guard optional inputs. A fallback is for choosing a default
     value.
   - Keep fallbacks classified as real defaults.
-- [ ] **CLI L1 regression** (`claudine/cli/tests/l1/`, a new file or an
+- [x] **CLI L1 regression** (`claudine/cli/tests/l1/`, a new file or an
   extension of `shipped_prompts.rs`)
   - Use `CliProcessFixture::command()` with its child-local `PLAYA_DRY_RUN=1`
     and private spool.
@@ -840,7 +849,7 @@ rule, this sweep merges before `2026-09-21-lifecycle-ergonomics` touches
       contain `unknown root`, `undefined variable`, or fallback advice;
     - no provider starts, and `fixture.audio_spool()` is absent.
   - No window gains focus.
-- [ ] **Refresh pins** (only after the regression passes)
+- [x] **Refresh pins** (only after the regression passes)
   - Re-derive the route-drift fixture under
     `claudine/cli/tests/fixtures/shipped_implement_route/_implement`.
   - Refresh `prompts/implement.md`'s hash in `shipped-hashes.json`.
