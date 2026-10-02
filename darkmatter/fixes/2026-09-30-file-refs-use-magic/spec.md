@@ -32,51 +32,106 @@ packages:
     - claudine-gen
     - messenger
     - messenger-cli
-human_review: false
+human_review: true
+human_review_items:
+    - |-
+      **Claudine's part of this fix has not been built yet, and the next phases depend on it.**
+
+      The plan splits the work into eight phases. Phase 3 was supposed to move
+      Claudine (the agent-orchestration tool in `claudine/`) onto the new
+      "one prepared request context" design. That Claudine work (Phase 3,
+      "Track B") was never done, so the `claudine` crate **does not compile**
+      on this branch. Phase 5 (this one) finished everything it could in
+      Darkmatter, the `md` CLI, the DMLS editor server, claudine-gen, and
+      messenger, but its Claudine task (make Claudine's 16 "optional context"
+      spots required) cannot even start. Phase 6 adds automated guard tests for
+      every package, including Claudine, and Phase 7 adds Claudine rows to a
+      cross-package test matrix. Both need Claudine to compile.
+
+      Why decide now: if Phase 6 starts without a decision, it either stalls on
+      Claudine or quietly leaves Claudine out of the guards, and the branch
+      cannot be merged with a non-compiling crate in any case.
+
+      Options:
+
+      - **A. Do Claudine's Phase 3 work next, then Claudine's Phase 5 task,
+        then continue with Phase 6.** Pros: keeps the plan's order and its
+        promise that every package is guarded; Claudine is the biggest
+        consumer, so this is where most real bugs would show up. Cons: it is a
+        large piece of work (about 15 call sites plus Claudine's own context
+        capture), so Phase 6 starts later.
+      - **B. Run Phase 6 and 7 for Darkmatter and messenger now, and add the
+        Claudine guards and matrix rows after Claudine is done.** Pros: no
+        waiting. Cons: the guard and matrix files would be edited twice, and
+        the branch still cannot merge until Claudine compiles, so nothing is
+        actually gained at the end.
+      - **C. Take Claudine out of this fix and give it its own follow-up fix.**
+        Pros: this fix can finish sooner. Cons: the branch would still contain
+        a Claudine that does not compile (it already depends on the new
+        Darkmatter API), so it could not merge without either the follow-up or
+        reverting Darkmatter's changes; it also breaks the spec's promise that
+        every entry point, Claudine's included, resolves the same way.
+
+      **Recommendation: A.** The branch cannot merge until Claudine compiles
+      no matter which option is chosen, so doing Claudine first costs nothing
+      extra and lets Phases 6 and 7 be written once, for every package.
 clarified: true
 clarified_by: claude/opus
 reviewed: true
 review_note: the clarification process served as a review
 needs_rulings: false
 message_to_agent: |-
-    Phase 2 is complete (implementation only; nothing is committed). Read the
-    "Phase 2" section of implementation-log.md first; the points that shape
-    Phase 3 are:
-    (1) Claudine does not compile against the new API (sites listed under
-    "Downstream compile errors"); messenger and claudine-gen still compile.
-    Per R16, Phases 2 and 3 must land as one commit.
-    (2) The public API: `RequestSnapshot` (new / from_process -> io::Result /
-    with_home / with_env / with_magic_root / with_magic_root_tier /
-    with_opening_reference / at_request_dir), `build_resolution_context`,
-    `ContextBuildError` (Discovery and Invalid, both `MissingContext`), and
-    `ComposeRequest::{prepare, with_context, options, context, map_options}`.
-    Every entry point (compose_with, compose_preflight*, collect_*,
-    transclusions_with_options, ReferenceGraphOptions::with_compose,
-    execute_directive, execute_resolved_shell_values) takes `&ComposeRequest`.
-    `ComposeOptions::with_file_resolution_context` is crate-private and
-    `with_magic_path` is gone: Claudine's prompt roots become snapshot roots
-    (`with_magic_root_tier(.., MagicPathTier::User)` for `~/.claudine`).
-    Use `map_options` to add pre-flight's approval set to a prepared request.
-    (3) `md compose` has only a compile bridge: `from_process()` is called in
-    compose.rs, `--set` uses `with_context` over the derived document context,
-    and other runs `prepare` at the document's directory (the old fallback).
-    Track A replaces this with the builder-built launch context, always
-    attached, and threads one snapshot from `main`. `schema validate` maps a
-    build error to its `ParseError` outcome for now.
-    (4) A reference graph whose request directory lies in another repository
-    than the document now fails with RepositoryRootNotContainingSource rather
-    than silently re-anchoring; `md graph` / FileTree::from_markdown must build
-    its request at the right directory.
-    (5) Residue for Phase 5: ComposeContext::capture/capture_minimal and the
-    capture env read still touch the process (overridden on request paths);
-    conditions.rs env.* is the standalone evaluate_condition_against API.
-    (6) Windows: `std::fs::canonicalize` gives `\\?\` spellings; use
-    biscuit_file::canonicalize_simplified and to_portable_string for `{{VAR}}`
-    values in tests. cfg(windows) test modules are not compiled on macOS
-    (declined_path_transclusion.rs bit this phase). `just cross-check` mangles
-    `-E '(...)'`; call ./scripts/cross-check.sh with substring filters.
-    R5 (the `md` failure row) and R7 (`current_env` stays live) are still open
-    for the author to overturn; nothing in Phase 2 depended on them.
+    PHASE 5 IS IMPLEMENTED for every package that compiles (nothing is
+    committed). Read the "Phase 5" section of implementation-log.md first.
+    (1) Claudine is still blocked: Phase 3 Track B was never done, so the
+    `claudine` crate does not compile, and Phase 5's Claudine task (its 16
+    `Option` contexts) is unchecked. See human_review_items. Whoever does
+    Track B now also faces Phase 5's API changes: `DarkmatterSchemas::new(ctx)`
+    (no Default), `ResolutionContext::new(ctx)` (tests: `::at(cwd)`),
+    `evaluate_condition_against(expr, data, &ctx)`,
+    `resolve_policy_paths(opts, source, &ctx)`, `CleanSchemaConfig::new(ctx)`,
+    `ComposeRequest::context()` renamed `resolution_context()`, and
+    `local_expression_resolution_context` exists only on `ComposeRequest`.
+    Claudine's `wrap/sequence/task_run.rs:77` builds an `EffectiveState` with
+    no context; `build()` now falls back to `capture_minimal()` (date/time
+    only) instead of a CWD full capture. Claudine prompt roots are snapshot
+    roots (`with_magic_root_tier(.., MagicPathTier::User)` for `~/.claudine`).
+    (2) The pipeline runs on `ComposeRequest`, which `Deref`s to
+    `ComposeOptions` (settings only, no context field). In-pipeline builder
+    chains use `request.derive(|o| ...)`. Never add a request method named
+    `context`: through Deref it would shadow `ComposeOptions::context()`.
+    (3) For Phase 6's guards: darkmatter lib/cli, messenger, and claudine-gen
+    have ZERO `Option<FileResolutionContext>`; DMLS still has 8 (context.rs
+    `DocumentResolution::context`, the two `context_for`, providers
+    `file_context`, graph `diagnose_unresolved`, `DocumentContexts::context_for`,
+    `NoContexts`, `ReferenceResolver::by_folder`). They model "this document's
+    context failed"; convert them to `Result<_, ContextFailure>` (add a
+    `NotProvided`-style failure for `NoContexts`) so the empty allowlist holds.
+    The only production construction outside the builder is
+    `schemas/resolve.rs:343` `try_bare_name_in_roots` (`from_snapshot` per
+    schema root, deliberately without repository anchors); either make it a
+    derivation (an explicit `./name` reference resolved through
+    `request_context.for_cwd(root)`) or allowlist it with that reason.
+    (4) Ambient residue for Phase 6's census: `context/capture/mod.rs:108`
+    `std::env::vars()` still seeds every `ComposeContext::capture_for_*` and
+    `CtxLookup` group capture. A request replaces that environment with the
+    snapshot's, but R7 does not allow it to be allowlisted (it feeds `ctx.*`
+    for non-request captures). The clean fix is for the capture API to take
+    the environment (or the request's context) from its caller. Also still
+    live by design: `file_match.rs:185` (`admits`, handed off to the glob
+    feature) and `file_links/discovery.rs:79` (`resolve_boundary`, handed off).
+    (5) `with_file_ref_fallback_dir` was NOT deleted (departure): the launch
+    area is a `match()` glob anchor in `admits`; the glob feature owns it.
+    (6) Structural validators (`build_structural_validator`,
+    `ValidatorCache::structural_validator_for`) serve callers with no request:
+    absolute paths are judged as resolved (must exist; `match()` judges the
+    full path), every other `file` value by syntax only.
+    (7) R5 residue: `DocumentArgumentError` docs link
+    `darkmatter/docs/errors/file-reference-failures.md`, which does not exist;
+    R5 requires the `failure:` row to be documented there (Phase 8 docs).
+    (8) Windows: `ResolutionContext::at(cwd)` / `FileResolutionContext::new`
+    with a rootless `/w` path is relative on Windows and fails validation; use
+    temp dirs or `dmls::context::test_support::abs`.
 ---
 
 # File References Resolve From One Prepared Context
