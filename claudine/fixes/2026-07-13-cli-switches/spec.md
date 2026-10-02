@@ -26,42 +26,30 @@ review_iterations: 0
 refreshed_on: 2026-10-01
 human_review: false
 message_to_agent: |-
-    Phase 6 is done; read "## Phase 6" in implementation-log.md. Facts Phase 7 needs:
-    - Ownership is ONE pure function: claudine::composition::own_arguments(&ArgumentsAfterFile,
-      &SchemaParameters, &[OwnershipCandidate]) -> Result<OwnedArguments, OwnershipError>
-      (lib/src/composition/ownership.rs). Completion (R4) must build an ArgumentsAfterFile from the
-      tokens before the cursor (CallerArgument::ClaudineOption where OwnedFlags::for_composition
-      removes a Claudine option) and call it; it must never prompt, so treat every Err
-      (Ambiguous, ContestedSetter, Mismatch, ReservedArgv) as "no suggestions".
-    - The CLI half to reuse or mirror is cli/src/commands/compose/ownership.rs: candidates() (CLI
-      provider, else literal frontmatter agent, a templated entry keeps all, else every provider,
-      each at SwitchContext::for_launch(profile, !interactive)) and
-      composition::authored_schema_parameters(source, fallback, ctx) for schema names. Completion
-      must swallow a schema read error (no suggestions), unlike execution. own_caller_arguments
-      itself is execution-only: it may prompt and it writes shared.provider_tail.
-    - "Unfinished value slot vs terminal missing-value": an open value run at the end of the
-      tokens yields Mismatch(MissingValue) only when EVERY candidate requires a value; with the
-      cursor right after a switch, completion should treat the slot as the provider's (offer
-      nothing) rather than run the final check. check_launch_tail is the per-launch check; do not
-      call it from completion.
-    - Docs were updated in Phase 6 (argv-normalization.md "Type-aware ownership" with a Mermaid
-      flow, composition.md positional arguments/argv and forwarding, cli-pre-parsing.md,
-      frontmatter-properties.md argv row) and the claudine skill (SKILL.md, cli-reference.md,
-      timeline.md). Phase 7 still owes docs/topics/completions/ and a polish pass.
-    - The spec acceptance table was refreshed: open are 12 (completion) and the completion halves
-      of 20 and 27.
-    - claudine::provider::{lookup_candidates, CandidateSwitch} (Phase 5) are unused outside their
-      own tests; ownership needed attachment-aware arms and uses match_switch_token per candidate.
-      Remove them or keep them deliberately.
-    - Windows (`just cross-check claudine --os windows`): 7 failures, all path spelling or home
-      resolution in modules Phase 6 did not touch (listed in the log); all ownership tests pass.
-    Gates after Phase 6 from claudine/: `just test` 8211 passed, 9 skipped; `just test-l2` 277
-    passed; `just lint` clean; `claudine-gen check` clean.
+    All seven phases are implemented; read "## Phase 7" in implementation-log.md. Every
+    acceptance criterion (1-29) is Done. Facts a reviewer or follow-up agent needs:
+    - Completion (R4) asks ownership through claudine::composition::owner_of_last_argument
+      with the cursor word as the last argument (cli/src/completion/engine/ownership.rs).
+      It offers nothing for the agent's word, on any OwnershipError, on an unreadable file or
+      $schema once a provider switch follows the file, and after an authored `--`
+      (CompletionTarget::Declined, which now also suppresses clap's fallback for wrappers).
+      It never prompts and reads the file only when a provider switch follows it.
+    - is_value_bearing_flag is gone; the classifier skips Claudine option values through
+      argv::OwnedFlags::for_composition().consumes_next. A Claudine option's value now
+      classifies as Other (clap) instead of the setter-name completer.
+    - provider::lookup_candidates / CandidateSwitch were removed (unused since Phase 6);
+      dispatch-inventory.json was regenerated (1784 -> 1780 sites).
+    - Native Windows cross-check of claudine-cli: 3 failures, all "batch file arguments are
+      invalid" from a .cmd provider stub given a multi-line prompt (loop_gate_ambient x2,
+      pr_flow_rehearsal x1); none carries a provider tail and Phase 7 touched no spawn
+      path. Not proven to predate the branch; fix forward on CI's Windows leg if they recur.
+    - Do not move this fix to _completed; the author does that after review.
+implemented: true
 ---
 
 # Composition forwards provider CLI switches to the agent
 
-## Status (2026-10-01)
+## Status (2026-10-02)
 
 The headline bug is fixed. Commit `2c7f98dcf` landed the ownership
 partition, the implicit and explicit (`--`) agent tail, the switch-before-file
@@ -78,7 +66,11 @@ Claudine and the agent is now decided by switch **types** researched for every
 provider, not by "everything after the first unknown switch". The revised rules
 are [Token ownership](#token-ownership) and the work is [researched switch metadata](#r8-research-backed-switch-types-not-started) and [type-aware ownership](#r9-type-aware-token-ownership). Status 2026-10-02: both have
 landed (Phases 5 and 6); [Current partition](#current-partition) describes
-the rule they replaced. What remains is completion (R4) and close-out.
+the rule they replaced. Completion (R4) landed on 2026-10-02 (Phase 7): shell
+completion reads the words after the file through the same ownership function
+and offers nothing where ownership gives the word to the agent or cannot
+decide. Every acceptance criterion is now Done; the implementation is ready
+for review.
 
 The rest of this spec states the contract and describes only the work that
 remains. [Remaining work](#remaining-work) lists the gaps, and
@@ -810,7 +802,7 @@ name the corresponding work in [Remaining work](#remaining-work).
 | 9 | INFO reveals no values. Debug, dry-run, metadata, and correlated surfaces reveal no unredacted secret | Done |
 | 10 | A fixture-backed native rejection produces one correlated error. Auth, timeout, interruption, API, and ambiguous failures are not misattributed | Done |
 | 11 | Direct wrappers share the tail descriptor, notice, classification, and reporting, with no child-argv change | Done |
-| 12 | Completion uses the shared ownership function, never fails (offering nothing when ownership cannot decide), stops Claudine suggestions after `--`, and keeps file/setter completion | Open ([shared completion ownership](#r4-completion-uses-the-owned-surface)) |
+| 12 | Completion uses the shared ownership function, never fails (offering nothing when ownership cannot decide), stops Claudine suggestions after `--`, and keeps file/setter completion | Done |
 | 13 | No synthetic separator can be mistaken for an authored boundary. Rule 3 is retired | Done |
 | 14 | Generated metadata recognizes Codex `-c` as `--config` with type `string`, enriches the message, and rejects alias/type drift | Done |
 | 15 | A non-UTF-8 tail token is refused with a targeted error, never rewritten | Done |
@@ -818,13 +810,13 @@ name the corresponding work in [Remaining work](#remaining-work).
 | 17 | `-c model_reasoning_effort=low phase=2` forwards `-c model_reasoning_effort=low` and applies `phase=2`, both with `--codex` and with no provider named | Done |
 | 18 | A variadic switch takes a contiguous run up to the next switch or setter, and never takes a `key=value` that is not its first value | Done |
 | 19 | The candidate set narrows to the CLI provider, then frontmatter `agent`, then all providers. A single candidate uses only its own types | Done |
-| 20 | Disagreement over bare-word consumption never silently chooses ownership. When eligible, Claudine asks which agent is intended and the answer decides ownership only; otherwise execution fails with guidance. Completion never prompts | Done for execution (prompt and error). Open: completion never prompting ([shared completion ownership](#r4-completion-uses-the-owned-surface)) |
+| 20 | Disagreement over bare-word consumption never silently chooses ownership. When eligible, Claudine asks which agent is intended and the answer decides ownership only; otherwise execution fails with guidance. Completion never prompts | Done |
 | 21 | A researched mismatch in an implicit switch's value count fails before spawn; explicit tails remain opaque. The check runs at ownership when it holds for every candidate, at preflight for every statically known launch and `sequence` step, and before each spawn otherwise | Done |
 | 22 | An unrecognized switch takes a following bare word, never a `key=value`, and the notice names it as unrecognized | Done |
 | 23 | Leftover bare words become the `argv` frontmatter array in order, excluding the file and anything after `--`. They override an authored `argv`. An `argv=…` setter or `--set` key before `--` is an error. A second bare word is no longer a multiple-file error | Done |
 | 24 | Exact names and aliases take precedence. Only researched value-bearing switches accept attached forms; unknown clusters are not split. Attached tokens remain unchanged | Done |
 | 25 | Mixed implicit and explicit tails preserve the authored boundary; only the implicit prefix receives ownership checks. Resume preserves repeated authored switches exactly once | Done |
 | 26 | Missing/unknown metadata does not mean a no-value switch. Optional values, variadic minimum counts, and different candidate consumption lengths follow the documented rules | Done |
-| 27 | Help needs no readable file. Ownership reads are side-effect free and use existing source-relative resolution; completion never prompts or launches a provider | Done for help and ownership reads. Open: completion ([shared completion ownership](#r4-completion-uses-the-owned-surface)) |
+| 27 | Help needs no readable file. Ownership reads are side-effect free and use existing source-relative resolution; completion never prompts or launches a provider | Done |
 | 28 | A rejection naming only an injected switch is not attributed to the tail; stdout rejection and operand-only explicit rejection are reported once, with echoed recognized secrets masked | Done |
 | 29 | Ownership uses the authored snapshot: a setter or `--set` that changes `agent` or `$schema` does not change ownership, raw JSON Schema contributes only top-level property names, unestablished names make a contested setter-shaped token an error, and final validation still uses the effective frontmatter | Done |

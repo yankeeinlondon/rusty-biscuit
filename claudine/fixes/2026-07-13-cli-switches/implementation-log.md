@@ -243,6 +243,181 @@ skills_files_updated_during_phase_6:
     - .claude/skills/claudine/SKILL.md
     - .claude/skills/claudine/cli-reference.md
     - .claude/skills/claudine/timeline.md
+source_files_during_phase_7:
+    - claudine/lib/src/composition/ownership.rs
+    - claudine/lib/src/composition/ownership/tests.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/provider/cli_switch.rs
+    - claudine/lib/src/provider/cli_switch/tests.rs
+    - claudine/lib/src/provider/mod.rs
+    - claudine/cli/src/argv/mod.rs
+    - claudine/cli/src/argv/partition.rs
+    - claudine/cli/src/commands/compose/ownership.rs
+    - claudine/cli/src/completion/engine/mod.rs
+    - claudine/cli/src/completion/engine/ownership.rs
+    - claudine/cli/src/completion/engine/tests.rs
+    - claudine/cli/src/completion/engine/tokens.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/completion_ownership.rs
+docs_updated_during_phase_7:
+    - claudine/docs/topics/completions/shell-completions.md
+    - claudine/docs/topics/argv-normalization.md
+    - claudine/docs/topics/provider-metadata.md
+    - claudine/docs/providers/dispatch-inventory.json
+    - claudine/fixes/2026-07-13-cli-switches/spec.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/cli-reference.md
+    - .claude/skills/claudine/timeline.md
+source_code:
+    - claudine/lib/src/composition/provider_tail.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/types.rs
+    - claudine/lib/src/composition/coordinator/invocation.rs
+    - claudine/cli/src/main.rs
+    - claudine/cli/src/argv/mod.rs
+    - claudine/cli/src/argv/partition.rs
+    - claudine/cli/src/commands/compose/mod.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/compose/prep/tests.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/mod.rs
+    - claudine/cli/src/commands/wrap/flags.rs
+    - claudine/cli/src/commands/wrap/flags/tests.rs
+    - claudine/cli/src/commands/wrap/profile/resolve.rs
+    - claudine/cli/src/commands/wrap/profile/tests/positional.rs
+    - claudine/cli/src/commands/wrap/provider_tail_report.rs
+    - claudine/cli/src/commands/wrap/provider_tail_report/tests.rs
+    - claudine/cli/src/commands/wrap/composition/mod.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/composition/dry_run.rs
+    - claudine/cli/src/commands/wrap/composition/provider_args.rs
+    - claudine/cli/src/commands/wrap/sequence/iterate.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/src/output/mod.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/provider_tail_notice.rs
+    - claudine/cli/tests/l1/snapshots/l1__wrap_basics__wrapper_reports_removed_sensitive_env_names.snap
+    - claudine/lib/src/secrets/mod.rs
+    - claudine/lib/src/secrets/tests.rs
+    - claudine/lib/src/signals/bespoke.rs
+    - claudine/lib/src/signals/mod.rs
+    - claudine/cli/src/commands/wrap/resume.rs
+    - claudine/cli/src/commands/wrap/profile/pi.rs
+    - claudine/cli/src/commands/wrap/launch_plan.rs
+    - claudine/cli/src/commands/wrap/launch_plan/tests.rs
+    - claudine/cli/src/commands/wrap/env/mod.rs
+    - claudine/cli/src/commands/wrap/env/sanitize.rs
+    - claudine/cli/src/commands/wrap/env/tests.rs
+    - claudine/cli/src/commands/wrap/exec/mod.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/semantic.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/captured.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/inherited.rs
+    - claudine/cli/src/commands/wrap/exec/wiring/session.rs
+    - claudine/cli/src/commands/wrap/wrapper_exec.rs
+    - claudine/cli/src/commands/wrap/wrapper_stages.rs
+    - claudine/cli/src/commands/wrap/harness_orch/attempt.rs
+    - claudine/cli/src/commands/wrap/harness_orch/launch.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/target_launch.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/target_launch/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/active_state_wiring.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs
+    - claudine/cli/src/commands/wrap/harness_orch/session_key.rs
+    - claudine/cli/src/commands/wrap/harness_orch/session_key/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/types.rs
+    - claudine/cli/src/output/native_exit.rs
+    - claudine/cli/src/output/error_report.rs
+    - claudine/cli/src/output/error_report/tests.rs
+    - claudine/cli/tests/l1/provider_tail_launch.rs
+    - claudine/catalog-types/src/cli_switch.rs
+    - claudine/catalog-types/src/lib.rs
+    - claudine/lib/src/provider/cli_switch.rs
+    - claudine/lib/src/provider/mod.rs
+    - claudine/lib/src/provider/tests.rs
+    - claudine/lib/src/provider/antigravity/data.rs
+    - claudine/lib/src/provider/claude/data.rs
+    - claudine/lib/src/provider/codex/data.rs
+    - claudine/lib/src/provider/gemini/data.rs
+    - claudine/lib/src/provider/goose/data.rs
+    - claudine/lib/src/provider/kilo/data.rs
+    - claudine/lib/src/provider/kimi/data.rs
+    - claudine/lib/src/provider/opencode/data.rs
+    - claudine/lib/src/provider/pi/data.rs
+    - claudine/lib/src/provider/qwen/data.rs
+    - claudine/gen/src/emit/cli_switches.rs
+    - claudine/gen/src/emit/mod.rs
+    - claudine/gen/src/errors.rs
+    - claudine/gen/src/generate.rs
+    - claudine/gen/src/generate/coerce/cli_switches.rs
+    - claudine/gen/src/generate/coerce/mod.rs
+    - claudine/gen/src/inputs.rs
+    - claudine/gen/src/registry.rs
+    - claudine/gen/src/registry/tests.rs
+    - claudine/gen/src/schema_compat.rs
+    - claudine/gen/src/vocabulary/tests.rs
+    - claudine/gen/tests/l1/cli_switches.rs
+    - claudine/gen/tests/l1/main.rs
+    - claudine/gen/tests/l1/pipeline.rs
+    - claudine/gen/tests/l1/registry_coverage.rs
+    - claudine/gen/tests/fixtures/agent-cli-r2/codex.md
+    - claudine/gen/tests/fixtures/generated-artifact-baseline.json
+    - claudine/lib/src/provider/cli_switch/tests.rs
+    - claudine/gen/src/main.rs
+    - claudine/gen/src/report.rs
+    - claudine/gen/tests/l1/generate_ux.rs
+    - claudine/gen/tests/fixtures/agent-cli-r1/codex.md
+    - claudine/gen/tests/fixtures/agent-cli-r1/_schema.r1.yaml
+    - claudine/cli/tests/l1/switch_catalog_guard.rs
+    - claudine/docs/research/agent-cli/_relations.py
+    - claudine/justfile
+    - claudine/lib/src/composition/ownership.rs
+    - claudine/lib/src/composition/ownership/tests.rs
+    - claudine/lib/src/composition/schema/mod.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - claudine/cli/src/argv/partition/tests.rs
+    - claudine/cli/src/argv/rule4_help_hoist.rs
+    - claudine/cli/src/commands/compose/ownership.rs
+    - claudine/cli/src/commands/compose/setters.rs
+    - claudine/cli/src/commands/compose/tests.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/tests/l1/provider_tail_ownership.rs
+    - claudine/cli/tests/l1/level1_ownership_prompt_pty.rs
+    - claudine/cli/tests/l1/wrap_compose_validation.rs
+    - claudine/cli/tests/l1/effective_diagnostic_render.rs
+    - claudine/cli/tests/level2/level2_typed_error_render_capture.rs
+    - claudine/cli/src/completion/engine/mod.rs
+    - claudine/cli/src/completion/engine/ownership.rs
+    - claudine/cli/src/completion/engine/tests.rs
+    - claudine/cli/src/completion/engine/tokens.rs
+    - claudine/cli/tests/l1/completion_ownership.rs
+documentation:
+    - claudine/docs/topics/argv-normalization.md
+    - claudine/docs/topics/cli-pre-parsing.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/providers/dispatch-inventory.json
+    - claudine/docs/topics/provider-metadata.md
+    - claudine/docs/research/agent-cli/_schema.yaml
+    - claudine/docs/providers/catalog.json
+    - claudine/docs/research/agent-cli/_types.yaml
+    - claudine/docs/research/agent-cli/_schema.r1.yaml
+    - claudine/docs/research/agent-cli/_fleet.md
+    - claudine/docs/research/agent-cli/antigravity.md
+    - claudine/docs/research/agent-cli/claude.md
+    - claudine/docs/research/agent-cli/codex.md
+    - claudine/docs/research/agent-cli/gemini.md
+    - claudine/docs/research/agent-cli/goose.md
+    - claudine/docs/research/agent-cli/kilo.md
+    - claudine/docs/research/agent-cli/kimi.md
+    - claudine/docs/research/agent-cli/opencode.md
+    - claudine/docs/research/agent-cli/pi.md
+    - claudine/docs/research/agent-cli/qwen.md
+    - claudine/docs/topics/frontmatter-properties.md
+    - claudine/docs/topics/completions/shell-completions.md
+    - claudine/fixes/2026-07-13-cli-switches/spec.md
+completed_phase: 7
+implemented: true
 ---
 
 # Implementation Log for 2026-07-13-cli-switches (7 phases)
@@ -1330,3 +1505,146 @@ CLI half was not cross-checked: it is string handling with no path or platform
 branch, and its new binary tests are `#[cfg(unix)]` like their siblings; the
 partition's non-UTF-8 test has a Windows (`from_wide`) fixture that CI's
 Windows leg compiles.
+
+## Phase 7
+
+Phase 7 made shell completion read the words after a composition file with
+the same type-aware ownership as a run (R4), removed the last hand-kept
+option list, and closed out docs, skill, and spec status. Implementation
+complete, ready for review.
+
+### What landed
+
+- **`claudine::composition::owner_of_last_argument`** (lib,
+  `composition/ownership.rs`, re-exported with `ArgumentOwner`). It runs the
+  same `own_in` as `own_arguments` (the loop now also records who took the
+  last argument) and returns `Ok(Some(Claudine | Provider))`, `Ok(None)` for
+  no arguments or a trailing Claudine-option marker, or the same
+  `OwnershipError`. Completion passes the word under the cursor as the last
+  argument, so an empty or partial word an open switch takes reads as the
+  provider's (the unfinished value slot), while a line with a terminal error
+  (for example `-c phase=2` with `phase` declared, which leaves `-c` without
+  a value) is an `Err`. No forwarded switch means the candidates are never
+  consulted, so they may be empty.
+- **Completion gate** (`cli/src/completion/engine/ownership.rs`,
+  `cursor_is_claudines`). For the setter-value, setter-name, and "other"
+  targets it rebuilds the line up to the cursor, runs
+  `argv::normalize_for_completion` (new; `normalize` without the `COMPLETE`
+  pass-through, which is set during shell completion) and
+  `partition_composition_tail`, then:
+  - partition error or an authored `--` → nothing;
+  - no argument after the file, or the cursor is a Claudine option or its
+    value → the existing classifier decides;
+  - otherwise ownership decides. With no provider switch after the file it
+    runs on `NoSchema` and reads no file (so `compose new.md spec=@<TAB>`
+    keeps working for a file that does not exist yet). With a switch it
+    parses the Claudine argv with clap (`Cli::try_parse_from`) for
+    `SharedComposeArgs`, reads the file with the setter completers' resolver,
+    takes candidates from `compose::ownership::candidates` (now
+    `pub(crate)`, shared with execution), and reads `$schema` names with
+    `authored_schema_parameters` only when a setter-shaped word exists, like
+    execution. Any read or ownership error → nothing. It never prompts.
+- **Classifier** (`completion/engine/mod.rs`):
+  `is_value_bearing_flag` and its stale comment
+  (`COMPOSITION_FLAGS_WITH_VALUE`, deleted in `2c7f98dcf`) are gone;
+  `scan_committed_positional` skips a Claudine option's value through
+  `OwnedFlags::for_composition().consumes_next` (new `pub(crate)` method on
+  the partition's surface) and returns a `PositionalScan`. A cursor that is a
+  Claudine option's value now classifies as `Other` (clap's completion)
+  instead of falling into the setter-name completer. A `--` before the cursor
+  is a new `CompletionTarget::Declined` (nothing, no clap fallback), for
+  composition and wrapper commands alike.
+- **Removed `provider::lookup_candidates` / `CandidateSwitch`** (Phase 5),
+  unused since Phase 6's ownership reads `match_switch_token` per candidate.
+  The resume-entrypoint assertions in `codex_resume_entrypoint_has_its_own_answers`
+  remain (per-path `lookup_switch`); only the candidate-union lines went. The
+  dispatch inventory was regenerated (sites 1784 → 1780, conditional 62 → 61:
+  all removed sites are in `lib/src/provider/cli_switch/tests.rs`).
+
+### Departures and decisions
+
+- **The "unfinished slot" is read by including the cursor word.** The Phase 6
+  hand-off suggested treating "cursor right after a switch" specially.
+  Including the (possibly empty) cursor word as the last argument gives the
+  same answer from the ownership rules themselves, with no second rule: `""`
+  is a valid string value, so `--codex -c <TAB>` is Codex's word, while a
+  number switch does not take `""`, so the line then fails its missing-value
+  check and offers nothing either way.
+- **A flag-shaped cursor is not gated.** It starts a new switch (dash values
+  must be attached), so it never sits in a provider's value slot; it keeps
+  offering the `--<provider>` switches and Claudine's flags. Gating it would
+  also make `compose --<TAB>` (no file yet) hit the partition's
+  separator-before-file error.
+- **The file-slot (`CompositionPositional`) target is not gated.** Before the
+  file there is nothing for ownership to decide; a provider switch there is a
+  partition error at execution, and completion still offers files as before.
+- **Unreadable `$schema` with a switch now offers nothing**, where before the
+  `@`-gated setter completer still ran; without a switch the old fallback is
+  unchanged. Documented in "When the schema is unavailable".
+- **The hand list had drifted**: it lacked `--step-timeout` and
+  `--budget-ledger`, so their values read as the composition file
+  (`scan_reads_value_options_from_the_clap_surface` covers both).
+
+### Drift found and resolved (code is right, comments fixed)
+
+- `completion/engine/tokens.rs`: the module doc listed a "value-bearing flag"
+  predicate and the removed list pointed at a deleted constant. Rewritten.
+- `completion/engine/mod.rs`: the `clap_dynamic_fallback` doc block sat on
+  `run_composition_provider_flag` (two doc comments merged); moved to its
+  function. The module doc now states the ownership gate.
+- `argv/mod.rs`: `COMPOSITION_SUBCOMMANDS` ("Rule 3 only fires on these")
+  and `normalize` ("then Rule 3 and Rule 4") still named the retired Rule 3.
+- `docs/topics/provider-metadata.md`: marked type-aware ownership as
+  **Planned** after Phase 6 landed it, and documented the removed
+  `lookup_candidates`. Rewritten to name both readers of the lookup.
+
+### Test mapping
+
+| Behavior (criterion) | Test (tier) |
+| --- | --- |
+| Owner of the last argument follows ownership: unfinished value slot, setter after a complete value, declared parameter, Claudine-option marker, no-switch with no candidates (12) | `claudine composition::ownership::tests::the_last_argument_owner_follows_the_same_rules_as_ownership` (L1) |
+| Every ownership error reaches completion: terminal missing value, ambiguity, contested setter, reserved `argv` (12, 20) | `claudine composition::ownership::tests::the_last_argument_owner_reports_every_ownership_error` (L1) |
+| Value options come from the clap surface (incl. `--step-timeout`, `--budget-ledger`, attached form) (12) | `claudine-cli completion::engine::tests::scan_reads_value_options_from_the_clap_surface` (L1) |
+| A Claudine option's value goes to clap, never a setter completer (12) | `completion::engine::tests::classifier_leaves_a_claudine_option_value_to_clap` (L1) |
+| Nothing after an authored `--`, composition and wrapper (12) | `completion::engine::tests::classifier_declines_when_cursor_crosses_double_dash_separator` (L1); binary `completion_ownership::nothing_is_offered_after_an_authored_separator` |
+| Control: setter name and enum value after a complete switch value; a Claudine option ends the run (12) | `completion_ownership::a_word_after_a_switch_value_is_claudines_and_completes_as_a_setter` (L1 binary) |
+| No suggestions while the cursor belongs to a provider (unfinished slot, variadic run) (12) | `completion_ownership::a_word_an_open_switch_takes_is_the_agents_and_offers_nothing` |
+| Terminal missing value offers nothing (12) | `completion_ownership::a_terminal_missing_value_offers_nothing` |
+| Ambiguity offers nothing and never prompts; file `agent` narrows; caller `agent=` does not (12, 20, 29) | `completion_ownership::candidates_that_disagree_offer_nothing_and_the_files_agent_decides` |
+| Unreadable schema / missing file offers nothing once a switch needs it; `@` completion unchanged without a switch (12) | `completion_ownership::an_unreadable_file_or_schema_offers_nothing_once_a_switch_needs_it` |
+| Same behavior for `compose`, `inline-compose`, `sequence` (12) | `completion_ownership::every_composition_command_reads_ownership_the_same_way` |
+| Completion writes nothing and launches nothing (27) | `completion_ownership::completion_reads_ownership_without_writing_anything` (whole-tree snapshot before/after) |
+| Existing file, setter, schema, and flag completion unchanged (12) | all pre-existing `completion_*` L1 files and `completion::engine::tests` (491 tests in the filtered run, all green) |
+
+`completion_ownership` is declared in `cli/tests/l1/main.rs` (not
+`#[cfg(unix)]`; it ran green on native Windows). No path segment carries a
+tier marker. `just check-tier-coverage claudine`: 0 stranded.
+
+Input robustness: no new parser or format reader. The completion gate reads
+the same load-bearing inputs (switch value, type metadata, schema names,
+`argv`) through the Phase 6 function whose matrix is recorded above; each
+outcome class reaches completion as "nothing" (errors) or the slot completer
+(Claudine's word), asserted by the two lib tests and the binary tests.
+
+### Gates
+
+| Gate | Result |
+| --- | --- |
+| `just test` (claudine/) | 8224 passed, 9 skipped, 0 failed |
+| `just test-l2` (claudine/) | 277 passed (+3 gen); tmux sessions in the background |
+| `just lint` (claudine/) | clean (only the pre-existing `__eh_frame` linker warning) |
+| `cargo run -p claudine-gen -- check` | clean |
+| `just check-tier-coverage claudine` | 0 stranded |
+| Guards `wrap_direct_argv`, `spawn_site_guard`, `dispatch_inventory`, `switch_catalog_guard` | green (inventory regenerated, see above) |
+| Native Windows (`just cross-check claudine-cli --os windows`) | 2656 passed, 3 failed, 11 skipped; all 8 `completion_ownership` and 55 `completion::engine` tests pass |
+
+The three Windows failures are not attributed to this fix: 
+`loop_gate_ambient::{loop_gate_info_renders_loop_count_on_every_pass,
+lifecycle_reference_loop_example_runs_as_written}` and
+`pr_flow_rehearsal::blocked_push_with_ask_triages_then_fixes_and_commits` all
+fail with Rust's `batch file arguments are invalid`: a `.cmd` provider stub
+is spawned with an argument std refuses to quote for `cmd.exe` (the composed
+prompt or system prompt, which carry newlines). None of these launches carries
+a provider tail and Phase 7 changed no spawn path. Phase 6 cross-checked only
+the library on Windows, so whether they predate this branch was not proven
+here; CI's push-to-`main` Windows leg is where they are fixed forward.
