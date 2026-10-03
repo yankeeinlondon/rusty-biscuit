@@ -34,7 +34,9 @@ jobs:
   biscuit-file:
     name: fuzz / biscuit-file / ubuntu
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Four targets at `-max_total_time=300` each are 20 minutes of fuzzing
+    # alone, on top of the cargo-fuzz install and a cold instrumented build.
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -50,6 +52,12 @@ jobs:
         with:
           workspaces: ". -> target"
           shared-key: fuzz-biscuit-file
+
+      # The fuzz crate is its own workspace with no committed lock. Seeding it
+      # from the root lock fuzzes the dependency versions that ship; cargo only
+      # adds the fuzz-only crates (libfuzzer-sys and its build deps).
+      - name: Seed the fuzz lockfile from the workspace lock
+        run: cp Cargo.lock biscuit-file/lib/fuzz/Cargo.lock
 
       # Replay committed crash fixtures before extending fuzzing. libFuzzer
       # treats positional paths as additional corpora; `-runs=0` makes it
@@ -201,6 +209,12 @@ jobs:
         with:
           workspaces: ". -> target"
           shared-key: fuzz-darkmatter
+
+      # The fuzz crate is its own workspace with no committed lock. Seeding it
+      # from the root lock fuzzes the dependency versions that ship; cargo only
+      # adds the fuzz-only crates (libfuzzer-sys and its build deps).
+      - name: Seed the fuzz lockfile from the workspace lock
+        run: cp Cargo.lock darkmatter/lib/fuzz/Cargo.lock
 
       # Replay committed crash fixtures before extending fuzzing. libFuzzer
       # treats positional paths as additional corpora; `-runs=0` makes it

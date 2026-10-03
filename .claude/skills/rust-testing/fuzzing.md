@@ -4,14 +4,24 @@ Fuzz testing feeds semi-random input to code to find crashes, panics, and securi
 
 ## In this repository
 
-Fuzz targets live in `<crate>/fuzz/` and require nightly Rust. Run locally:
+Fuzz targets live in `<crate>/fuzz/` and require nightly Rust. Run locally
+from the package area:
 
 ```bash
-cd biscuit-file/lib/fuzz
-cargo +nightly fuzz run pdf_extract -- -runs=1000
+cd biscuit-file
+just fuzz -- -runs=1000
 ```
 
-Fuzz is **not** part of `sanity`, `test`, or PR gates. It runs nightly in CI.
+Fuzz is **not** part of `sanity`, `test`, or PR gates. It runs nightly in CI
+(`fuzz-nightly`).
+
+Each `fuzz/` directory is its own Cargo workspace, and its `Cargo.lock` is
+**not committed**: `just fuzz` and `fuzz-nightly` copy the root `Cargo.lock`
+over it before building, so fuzzing uses the dependency versions that ship.
+Running `cargo fuzz` by hand without that copy resolves fresh versions. A
+committed fuzz lock was never refreshed along with the root lock, and in
+2026-09 it stopped resolving (a `zmij` version conflict), which failed every
+nightly fuzz run.
 
 ## Setup
 

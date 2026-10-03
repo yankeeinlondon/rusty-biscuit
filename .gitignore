@@ -82,6 +82,12 @@ trace/*
 # One lock per workspace root or excluded package. A lock inside a workspace
 # MEMBER is a stray artifact Cargo never consults — `research/{lib,cli}` each had
 # one, four months stale, from before they joined the workspace.
+#
+# Fuzz workspaces (`*/fuzz/`) are the exception. Their lock is SEEDED from the
+# root `Cargo.lock` by `just fuzz` and `fuzz-nightly` before every build, so
+# fuzzing exercises the dependency versions that ship. A committed fuzz lock
+# was never refreshed with the root one and eventually stopped resolving.
+**/fuzz/Cargo.lock
 
 # Insta pending snapshots (transient — should never be committed)
 **/*.snap.new
