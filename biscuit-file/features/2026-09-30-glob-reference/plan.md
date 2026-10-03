@@ -4,7 +4,7 @@ feature: 2026-09-30-glob-reference
 spec: biscuit-file/features/2026-09-30-glob-reference/spec.md
 total_phases: 8
 created: 2026-10-01
-phase: 5
+phase: 7
 agent: "claude/sonnet"
 yolo: "true"
 packages:
@@ -164,6 +164,29 @@ skills_files_updated_during_phase_5:
     - .claude/skills/darkmatter/schema.md
     - .claude/skills/biscuit-file/SKILL.md
     - .claude/skills/claudine/SKILL.md
+source_files_during_phase_6:
+    - darkmatter/lib/tests/l1/glob_implementation_guard.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/Cargo.toml
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/os/build-hosts.md
+source_files_during_phase_7:
+    - darkmatter/lib/src/markdown/errors/blocks.rs
+    - darkmatter/lib/tests/common/entry_point_parity/mod.rs
+    - darkmatter/lib/tests/l1/entry_point_parity.rs
+    - darkmatter/cli/tests/l1/entry_point_parity.rs
+    - darkmatter/dmls/tests/l1/entry_point_parity.rs
+    - claudine/cli/tests/l1/entry_point_parity.rs
+    - claudine/cli/src/completion/schema_completion/mod.rs
+    - claudine/cli/src/completion/schema_completion/parity_tests.rs
+docs_updated_during_phase_7:
+    - darkmatter/docs/errors/file-reference-failures.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+    - .claude/skills/darkmatter/SKILL.md
 ---
 
 # Plan: Glob References Share the File-Reference Grammar
@@ -739,7 +762,7 @@ Goal: no second glob implementation can creep back in.
 
 ### Wave 11 (sequential)
 
-- [ ] **Write `glob_implementation_guard.rs`** (R5). Sanitized source,
+- [x] **Write `glob_implementation_guard.rs`** (R5). Sanitized source,
   identifier-boundary matches, exact per-file counts, stale entries fail.
   Scans production source (not `tests/`, not `benches/`) of biscuit-file,
   darkmatter, darkmatter-cli, dmls, claudine, and claudine-cli for `Glob`,
@@ -750,19 +773,19 @@ Goal: no second glob implementation can creep back in.
   - `darkmatter/lib/src/markdown/compose/toc_linking/filter.rs`
   - `darkmatter/dmls/src/workspace/discover.rs`
   - `darkmatter/dmls/src/overlay/schema.rs`
-- [ ] **Resolve remaining hits.** Scan will flag
+- [x] **Resolve remaining hits.** Scan will flag
   `compose/toc_linking/types.rs`, `compose/file_links/types.rs`, and any other
   file that names a glob type. For each: delete the use if it moved to
   `GlobReference`, or add it to the allowlist only if it is genuinely
   heading-text or configuration glob (justify in the allowlist comment). The
   spec names four allowed entries; a fifth needs a log entry.
-- [ ] **Declare scanned paths** of other packages in `darkmatter/lib/Cargo.toml`
+- [x] **Declare scanned paths** of other packages in `darkmatter/lib/Cargo.toml`
   `[package.metadata.ci.tests] source-inputs`
   (`docs/cicd/test-inputs.md`; spell reads in the forms the `rust-testing`
   skill lists).
-- [ ] **Negative control.** The guard has a test proving it fails on a
+- [x] **Negative control.** The guard has a test proving it fails on a
   synthetic `GlobBuilder` use and on a stale allowlist entry.
-- [ ] **Dependency cleanup.** Remove `globset` from any crate whose production
+- [x] **Dependency cleanup.** Remove `globset` from any crate whose production
   source no longer uses it; update each affected `docs/dependencies.md`.
 
 **Checkpoint 6:** guard green in `darkmatter`; `just lint` green.
@@ -778,27 +801,27 @@ parallel matrix.
 
 ### Wave 12 (sequential; one subagent)
 
-- [ ] **Add the `GlobReference` form row** to the shared tables
+- [x] **Add the `GlobReference` form row** to the shared tables
   (`^**/*spec*.md`, `!&**/_completed/**`), and a glob cell expectation type
   (ordered file list in native order, or `ResolutionFailure`).
-- [ ] **Table 1 consumers** (document-authored, fixed launch directory):
+- [x] **Table 1 consumers** (document-authored, fixed launch directory):
   `::file-links <glob>`, `find_files()`, and `file(match(...))` validation of
   a frontmatter value.
-- [ ] **Table 2 consumers** (caller-supplied, two launch directories: repo
+- [x] **Table 2 consumers** (caller-supplied, two launch directories: repo
   root and nested package): `file(match(...))` completion (both Claudine
   walks) and validation of a caller-supplied value.
 
 ### Wave 13 (parallel; one runner per package; after Wave 12)
 
-- [ ] **`darkmatter` runner** (`darkmatter/lib/tests/l1/entry_point_parity.rs`,
+- [x] **`darkmatter` runner** (`darkmatter/lib/tests/l1/entry_point_parity.rs`,
   currently modified in the working tree; preserve those edits).
-- [ ] **`dmls` runner** (`darkmatter/dmls/tests/l1/`; `repository_contexts.rs`
+- [x] **`dmls` runner** (`darkmatter/dmls/tests/l1/`; `repository_contexts.rs`
   is modified in the working tree; preserve those edits).
-- [ ] **`claudine-cli` runner** for the completion cells.
+- [x] **`claudine-cli` runner** for the completion cells.
 
 ### Wave 14 (after Wave 13)
 
-- [ ] **Cross-entry comparison.** For each cell, assert every consumer that
+- [x] **Cross-entry comparison.** For each cell, assert every consumer that
   shares a table row returns the same ordered list or the same
   `ResolutionFailure`; any divergence is fixed in code, not excused in the test.
 

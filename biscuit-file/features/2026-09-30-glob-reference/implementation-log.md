@@ -160,6 +160,29 @@ skills_files_updated_during_phase_5:
     - .claude/skills/darkmatter/schema.md
     - .claude/skills/biscuit-file/SKILL.md
     - .claude/skills/claudine/SKILL.md
+source_files_during_phase_6:
+    - darkmatter/lib/tests/l1/glob_implementation_guard.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/Cargo.toml
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/os/build-hosts.md
+source_files_during_phase_7:
+    - darkmatter/lib/src/markdown/errors/blocks.rs
+    - darkmatter/lib/tests/common/entry_point_parity/mod.rs
+    - darkmatter/lib/tests/l1/entry_point_parity.rs
+    - darkmatter/cli/tests/l1/entry_point_parity.rs
+    - darkmatter/dmls/tests/l1/entry_point_parity.rs
+    - claudine/cli/tests/l1/entry_point_parity.rs
+    - claudine/cli/src/completion/schema_completion/mod.rs
+    - claudine/cli/src/completion/schema_completion/parity_tests.rs
+docs_updated_during_phase_7:
+    - darkmatter/docs/errors/file-reference-failures.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+    - .claude/skills/darkmatter/SKILL.md
 ---
 
 # Implementation Log for 2026-09-30-glob-reference (8 phases)
@@ -413,6 +436,14 @@ Recorded as they are found; Phase 8 consolidates them.
   provided-partial chooser no longer re-sort `match()` candidates by path;
   they list them in native order. The bare-`file` default glob keeps its
   sorted order.
+- **`find_files()` failure row (Phase 7).** A `find_files()` whose glob
+  reference fails (a tree escape, `&`/`^` outside a repository, a malformed
+  prefix) now ends its `MarkdownError: interpolation failed` block with
+  `failure: <class>`, in `md` and in `claudine compose`/`inline-compose`/
+  `sequence`. Before, the block had no row, although
+  `MarkdownError::resolution_failure()` already returned the class and
+  `::file-links` with the same glob printed it. Found by the parity matrix's
+  `md` cell `MdCompose × FindFiles × TreeEscape`.
 
 ## Departures from Spec
 
@@ -538,6 +569,60 @@ Recorded as they are found; Phase 8 consolidates them.
 - **Phase 5: one-way parity asserts `file_match_admits` and `matches`.**
   The `x-darkmatter-match` validator shares the same `FileMatchGlobs`
   judgment (Phase 3) and is not driven separately per candidate.
+- **Phase 6: the allowlist has five files, not the plan's four.** The plan
+  names `file_reference/glob/parse.rs` only; `file_reference/glob/roots.rs`
+  also names `globset` (it stores each prepared root's `GlobMatcher`). The
+  spec's entry is "biscuit-file's `GlobReference` module", which covers both
+  files, so `roots.rs` is listed rather than refactored (Rule 3).
+- **Phase 6: the guard adds a manifest check.** The spec asks the guard to
+  reject "any other glob crate". The `glob` crate cannot be found by a source
+  search, because `glob` is also biscuit-file's own `file_reference::glob`
+  module (`pub use glob::{..}`), so each scanned package's non-dev
+  dependencies are pinned to an exact glob-crate set instead.
+- **Phase 6: `Glob` is matched only as `Glob::`.** A bare `Glob` is an enum
+  variant in `FileLinksMode` and Claudine's `PathSegment`; globset's `Glob` is
+  reached through `Glob::new`, and any file that imports it already names
+  `globset`.
+- **Phase 7: `::file-links` and `match()` validation compare as sets.** The
+  spec compares glob cells "by native-order file list". A `::file-links`
+  tree is rendered by biscuit-terminal's `FileSystem` component, which
+  orders entries as a directory listing (folders first, by name), so its
+  order is presentation, not resolution; validation judges one value at a
+  time and has no order. Both report `Observed::FileSet`. `find_files()`
+  and both completion walks keep the ordered comparison.
+- **Phase 7: completion's expectation drops `_`-prefixed folders.** For the
+  same row, completion omits `_completed/` files that `match()` validation
+  admits. That is criterion 6's one-way parity (suggestion filters only), so
+  the shared expectation encodes it for `MatchCompletion` instead of
+  treating it as a divergence.
+- **Phase 7: the cross-entry comparison (Wave 14) is the shared
+  expectation.** Every entry point on a glob row is compared with the same
+  expected list or class, and every pair of observations that passes it
+  agrees, so a separate pairwise check could never fail on its own and was
+  not kept. Divergences the matrix found were fixed in code (the
+  `find_files()` failure row above).
+- **Phase 7: which entry points carry glob rows.** Table 1: the compose
+  pipeline, `md compose`, and Claudine composition run all three consumers;
+  pre-flight, schema validation, `md schema validate`, and DMLS diagnostics
+  run `match()` validation. DMLS evaluates no expression and does not list a
+  `::file-links` glob (its graph records the glob text as a file use), so it
+  has no listing row. Table 2: `match()` validation of a caller value through
+  the library (`--set`) and `claudine compose … spec=<value>`; completion
+  through `claudine __complete` (TAB walk) and a new
+  `EntryPoint::ClaudineChooser` for the ENTER walk (`file_candidate_paths`).
+  The chooser needs a terminal, so its runner is a unit test of the
+  claudine binary (`Owner::ClaudineCliChooser`), not a spawned process.
+- **Phase 7: the tree escape has no Table 2 failure class.** A
+  `match()` pattern whose root cannot be supplied admits nothing (passive
+  validation, documented on `GlobReference::matches`), so validation and
+  completion report `Observed::Unresolved` for it; `find_files()` and
+  `::file-links` carry the `InvalidReference` class for the same row in
+  Table 1.
+- **Phase 6: ruling on `ignore` (Phase 5 hand-off).** The guard admits the
+  `ignore` crate as a directory walker (`WalkBuilder`: DMLS discovery and
+  watch, Claudine's completion walkers) and forbids its glob matchers
+  (`OverrideBuilder`, `GitignoreBuilder`, `TypesBuilder`). No Claudine file
+  needs an allowlist entry.
 
 ## Windows Evidence
 
@@ -591,6 +676,23 @@ None in Phase 1 (no code paths changed). The `backslash_escape` default
   Unix-only (creating a symlink needs a privilege on Windows); the
   biscuit-file rule it rests on is covered on Windows by `boundary.rs`'s
   test where links can be made.
+
+- **Phase 6:** `just cross-check darkmatter --os windows
+  glob_implementation_guard`: **2 passed** (`cross-check-key:
+  e06665dcd83c95cd`). Linux: the archive leg failed twice before any test
+  ran (`libbiscuit_file-*.rmeta is not writeable`, the stale read-only kache
+  links in this worktree's standing clone that the `os` skill describes);
+  the native path (`--features effects-instrumentation`) passed **2 of 2**.
+  The guard's path keys are `/`-joined by `source_scan`, so separators do not
+  affect it.
+
+- **Phase 7:** no Windows run (the plan defers Windows to Phase 8's
+  cross-check). The Windows-sensitive pieces are in the shared test module:
+  `file_url_path` strips the leading `/` of a `file:///C:/…` link, candidate
+  values are written with `/` separators (`to_portable_string`), and every
+  path comparison goes through `PathIdentity` after canonicalization. Phase 8
+  should run `entry_point_parity` on Windows for darkmatter, darkmatter-cli,
+  dmls, and claudine-cli (plus the claudine-cli `parity_tests` unit test).
 
 ## Handed-off Reads
 
@@ -1263,6 +1365,217 @@ unit tests or existing L1 files).
   traps), `.claude/skills/darkmatter/schema.md` (`lists_file`),
   `.claude/skills/biscuit-file/SKILL.md` (`lists_file`),
   `.claude/skills/claudine/SKILL.md` (completion walks and rendering).
+
+## Phase 6
+
+The source-scan guard keeps `GlobReference` the one glob implementation
+(criterion 2). Package: `darkmatter` (one new L1 test file and its manifest
+metadata); no production code changed.
+
+### What was built
+
+- **`darkmatter/lib/tests/l1/glob_implementation_guard.rs`**, declared in
+  `tests/l1/main.rs`. It loads the shared sanitizer
+  (`cli/tests/common/source_scan.rs`, by `#[path]`, as
+  `semantic_results_never_persist.rs` does) and runs two checks over
+  biscuit-file, darkmatter, darkmatter-cli, dmls, claudine, and claudine-cli:
+  - **Source:** production files (comments, literals, and `#[cfg(test)]`
+    code blanked) are searched on identifier boundaries for `globset`, `wax`,
+    `globwalk`, `wildmatch`, `fast_glob`, `glob_match`, `GlobBuilder`,
+    `GlobSet`, `GlobSetBuilder`, `GlobMatcher`, `OverrideBuilder`,
+    `GitignoreBuilder`, `TypesBuilder`, and `Glob::`. Hits must match an exact
+    per-file allowlist (path, count, reason); an unlisted file, a moved count,
+    or a stale entry fails, and the message names each identifier and line.
+  - **Manifest:** each package's `[dependencies]`, `[build-dependencies]`, and
+    `[target.*.*]` tables (a `package = ".."` rename counts as the crate it
+    renames) may name crates from `globset`, `glob`, `wax`, `globwalk`,
+    `wildmatch`, `fast-glob`, `glob-match`, `ignore` only as pinned:
+    biscuit-file `globset`, darkmatter `globset`, dmls `globset` + `ignore`,
+    claudine-cli `ignore`, the rest none. Read with `biscuit_file::Toml`.
+- **Allowlist (observed counts):** `biscuit-file/lib/src/file_reference/glob/parse.rs`
+  6, `…/glob/roots.rs` 3, `darkmatter/lib/src/markdown/compose/toc_linking/filter.rs`
+  7, `darkmatter/dmls/src/workspace/discover.rs` 9,
+  `darkmatter/dmls/src/overlay/schema.rs` 4. The scan flagged no other file:
+  `toc_linking/types.rs` names globset only inside a string literal (a hint),
+  and `file_links/types.rs`'s `FileLinksMode::Glob` is an enum variant, so
+  neither needed a change or an entry.
+- **`source-inputs`** (`darkmatter/lib/Cargo.toml`): added the four
+  other-package allowlisted files (biscuit-file `parse.rs`, `roots.rs`; dmls
+  `overlay/schema.rs`, `workspace/discover.rs`). darkmatter's own `filter.rs`
+  is its own source and may not be declared. The planner's real-workspace
+  checks (`test_affected_scope.RealWorkspaceTestInputTests`, 6 tests) pass,
+  and a plan for a change to `parse.rs` alone or `overlay/schema.rs` alone now
+  adds `binary_id(darkmatter::l1)` on `ubuntu-latest`. The six manifests are
+  non-source and spelled as literals, so a manifest edit (for example
+  `claudine/cli/Cargo.toml`) schedules the guard without a declaration
+  (verified with `affected_scope.py --resolved-plan`).
+- **Dependency cleanup:** none needed. Every crate that declares `globset`
+  or `ignore` still uses it in production source, so no
+  `docs/dependencies.md` changed.
+
+### Requirement-to-test mapping
+
+| Requirement | Test |
+|---|---|
+| Criterion 2: no glob-library use outside the exact allowlist, exact counts, stale entries fail (real tree) | `darkmatter::l1 glob_implementation_guard::file_references_have_one_glob_implementation` |
+| Negative control: planted `GlobBuilder` in a production file; `Glob::new` counted; moved count; stale source entry; undeclared `wax` in a target table; stale manifest entry; and the scope rule (comment, string literal, `#[cfg(test)]` module, `Mode::Glob` variant, a local `glob` module, a renamed `ignore`, `glob` in dev-dependencies all ignored or counted correctly) | `glob_implementation_guard::the_guard_catches_planted_violations_and_honors_the_scope_rule` |
+| Mutation check on the real tree | Appending `globset::GlobBuilder::new("*.md")` to `compose/file_links/discovery.rs` turned the first test red (`glob library used in …/discovery.rs (globset@872, GlobBuilder@872)`); file restored, no diff |
+
+Both tests are L1 (no tier marker in any path segment) and compiled by the
+declared `l1` target. `test_layout` passed in the full run.
+
+The Input Robustness Matrix does not apply to production code (none
+changed). The test's own manifest reader covers the shapes that decide its
+result in the negative control: inline-string and inline-table dependency,
+`package` rename, target-specific table, and dev-dependencies excluded. A
+manifest that fails to parse, or a dependency table that is not a table,
+panics with the manifest's path rather than reading as empty.
+
+### Known limit of CI reach
+
+A new glob-library use in a *non-allowlisted* production file of a package
+that already depends on the crate (biscuit-file, dmls, claudine-cli) changes
+no declared input and no manifest, so a pull request touching only that
+file does not run this guard (it runs on every darkmatter package
+selection). `source-inputs` accepts files only, so whole `src/` trees cannot
+be declared; the spec's form (declare the scanned paths) is followed for the
+allowlisted files.
+
+### Gates (macOS unless noted)
+
+| Area | Command | Result |
+|---|---|---|
+| darkmatter (lib, cli, dmls, zed-dmls) | `just test --no-fail-fast` | 8858 passed (2 slow), 12 skipped |
+| darkmatter | `just lint` | pass (after replacing a duplicated `dead_code` allow with `clippy::duplicate_mod`, the established pattern for a second `source_scan.rs` include) |
+| scripts/ci | `python3 -m unittest test_affected_scope.RealWorkspaceTestInputTests` | 6 passed |
+| darkmatter, Windows | `just cross-check darkmatter --os windows glob_implementation_guard` | 2 passed |
+| darkmatter, Linux | `just cross-check darkmatter --os linux --features effects-instrumentation glob_implementation_guard` | 2 passed (archive leg blocked by host links; see Windows Evidence) |
+
+`just test-l2` was not re-run: this phase adds no L2 test and changes no
+production code. `just check-tier-coverage` does not exist in this checkout
+(as in Phases 2 to 5).
+
+### Docs and skills
+
+- No `docs/` page changed: the guard is a test, and no package behavior
+  changed.
+- `.claude/skills/darkmatter/SKILL.md`: a "Glob guard" paragraph next to the
+  context guards (what it scans, the allowlist, the `ignore` ruling, how to
+  extend it).
+- `.claude/skills/os/build-hosts.md`: the stale-link failure recurred in
+  `<host>--fix-magic-globs`, the native-path workaround for a session that may
+  not SSH, and that `--test l1` is rejected in archive mode.
+
+## Phase 7
+
+The glob reference joins both tables of the entry-point parity matrix
+(criterion 20). Packages touched: `darkmatter` (one production fix, the
+shared matrix, its runner), `darkmatter-cli`, `dmls`, and `claudine-cli`
+(runners).
+
+### What was built
+
+- **Shared matrix** (`darkmatter/lib/tests/common/entry_point_parity/mod.rs`):
+  - `GlobForm`: `Scoped` (`^**/*spec*.md`), `ScopedExcluding`
+    (`^**/*spec*.md`, `!&**/_completed/**`), and `TreeEscape`
+    (`../…/**/*spec*.md`, climbing to the fixture root). `::file-links` and
+    `find_files()` take one pattern, so they have no `ScopedExcluding` row
+    (`GlobForm::reaches`).
+  - `GlobConsumer`: `FileLinks`, `FindFiles`, `MatchValidation`,
+    `MatchCompletion`; `GlobDocumentCell` (Table 1, a document at
+    `repo/area/pkg/docs`) and `GlobValueCell` (Table 2, both launch
+    directories) as `Row::GlobDocument` / `Row::GlobValue`.
+  - Expectations: `Expected::Files` (native order) or a failure class;
+    observations `Observed::Files` (ordered) and `Observed::FileSet`
+    (unordered). The native orders are written out as `PACKAGE_ORDER` and
+    `REPOSITORY_ORDER` over nine `GLOB_FILES` (eight `*spec*.md` files across
+    package, area, and repository, two of them under `_completed/`, plus a
+    non-matching `plan.md` decoy), not computed by the code under test.
+  - `match()` cells use a root union: the first arm is
+    `file(eager; match(<patterns>))`, the second `enum(glob-rejected)`, so a
+    candidate is valid only through the glob, and every entry point names
+    `glob-rejected` when it rejects one (`validation_verdicts`).
+  - `EntryPoint::ClaudineChooser` (owner `ClaudineCliChooser`) for the ENTER
+    chooser's walk.
+- **Runners:** the darkmatter library (compose pipeline, pre-flight, schema
+  validation, and Table 2 `--set` values), `md` (`compose`, `schema
+  validate`), DMLS (published diagnostics), claudine-cli (composition,
+  `__complete`, supplied `spec=` values), and a new claudine-cli unit test,
+  `completion/schema_completion/parity_tests.rs`, for `file_candidate_paths`.
+- **Fix (Wave 14):** `darkmatter/lib/src/markdown/errors/blocks.rs`,
+  `interpolation_block` adds the `failure: <class>` row for an
+  `ExpressionError::GlobReference` cause (see Changed Outputs). The doc
+  comment says so, and `darkmatter/docs/errors/file-reference-failures.md`
+  shows the glob case.
+
+### Findings while building the matrix
+
+- `md compose` / `claudine compose` of `find_files('../../../../**/*spec*.md')`
+  printed an interpolation block with no `failure:` row (fixed above).
+  Reverting the fix turns `md_entry_points_agree_on_every_reference` red
+  with exactly that cell.
+- The first `match()` construction (second arm requiring a `severity`
+  property) could not reject in DMLS: DMLS reports a missing required
+  property only in strict mode (by design; `required` is a compose-time
+  contract). The second arm became `enum(glob-rejected)`, a constraint DMLS
+  checks statically. Not a defect.
+- A `find_files()` expression error naming a *single* file reference
+  (`markdown_title("&nope.md")`) also prints no `failure:` row; the library
+  attaches no class to that path (`FileReferenceDiagnostic` has none). It
+  is outside the glob scope and was left as is; see the message to the next
+  agent.
+
+### Requirement-to-test mapping
+
+| Requirement | Test |
+|---|---|
+| Criterion 20, Table 1, library: `::file-links`, `find_files()`, `match()` validation through compose; `match()` validation through pre-flight and `DarkmatterSchemas::validate` | `darkmatter::l1 entry_point_parity::darkmatter_entry_points_agree_on_every_reference` |
+| Criterion 20, Table 2, library: `match()` validation of a caller `--set` value from the repository root and from the package | same test (`Row::GlobValue`) |
+| Criterion 20, Table 1, `md compose` (all three consumers) and `md schema validate` | `darkmatter-cli::l1 entry_point_parity::md_entry_points_agree_on_every_reference` |
+| Criterion 20, Table 1, DMLS diagnostics for `match()` | `dmls::l1 entry_point_parity::dmls_entry_points_agree_on_every_reference` |
+| Criterion 20, Table 1 and Table 2, Claudine: composition (three consumers), TAB completion (`__complete`), supplied `spec=` validation | `claudine-cli::l1 entry_point_parity::claudine_entry_points_agree_on_every_reference` |
+| Criterion 20, Table 2, the ENTER chooser walk (`file_candidate_paths`) | `claudine-cli::bin/claudine completion::schema_completion::parity_tests::chooser_offers_every_glob_row_in_native_order` |
+| `find_files()` failure carries `failure: <class>` (regression) | unit: `darkmatter` `errors::blocks::tests::interpolation_block_glob_reference_cause_renders_the_failure_row`; end to end: the `MdCompose × FindFiles × TreeEscape` and `ClaudineComposition × FindFiles × TreeEscape` cells |
+| The order comparison is load-bearing | mutation: swapping two entries of `PACKAGE_ORDER` turned exactly `ComposePipeline × FindFiles × Scoped` red (set consumers unaffected, as designed); restored |
+
+All new tests are L1 (no tier marker in any path segment). The runners are
+existing, declared targets (`tests/l1/entry_point_parity.rs` in each
+package); the chooser test is a `#[cfg(test)]` module of the claudine binary,
+which `just test` runs. The shared file is already in each package's
+`[package.metadata.ci.tests] source-inputs`, and every includer names it in
+`include_str!`.
+
+The Input Robustness Matrix does not apply: no parser, reader, or
+configuration loader changed. Per-cell shapes covered instead: present
+match (each candidate), non-match (the `plan.md` decoy and the `_completed`
+files under the exclusion), a failing pattern (tree escape), and both launch
+directories.
+
+### Gates (macOS unless noted)
+
+| Area | Command | Result |
+|---|---|---|
+| darkmatter (lib, cli, dmls, zed-dmls) | `just test` | 8859 passed (3 slow), 12 skipped |
+| darkmatter | `just lint` | pass |
+| claudine (lib, cli, gen, …) | `just test` | 8094 passed (11 slow), 9 skipped |
+| claudine | `just lint` | pass (the `__eh_frame` linker notice is the existing macOS one) |
+| darkmatter, Linux | `./scripts/cross-check.sh darkmatter --os linux --features effects-instrumentation entry_point_parity` | 8 passed |
+| darkmatter-cli, Linux | `./scripts/cross-check.sh darkmatter-cli --os linux --features terminal-tests entry_point_parity` | 11 passed |
+| dmls, Linux | `./scripts/cross-check.sh dmls --os linux --features terminal-tests entry_point_parity` | 4 passed |
+| claudine-cli, Linux | `./scripts/cross-check.sh claudine-cli --os linux --features test-fixtures -E 'test(entry_point_parity) \| test(chooser_offers_every_glob_row)'` | 4 passed (the chooser unit test and the three `tests/l1` parity tests) |
+
+The archive leg on Linux still fails before any test with the stale
+read-only kache links (`libbiscuit_file-*.rmeta is not writeable`); every
+Linux row above took the native path through a declared `--features` flag,
+as the `os` skill describes. `just test-l2` was not re-run: this phase adds
+no L2 test, and the one production change is the text of an error block.
+
+### Docs and skills
+
+- `darkmatter/docs/errors/file-reference-failures.md`: the glob case under
+  "Where the row appears".
+- `.claude/skills/darkmatter/SKILL.md`: the parity-matrix paragraph names the
+  glob rows, the chooser runner, and the `glob-rejected` construction.
 
 ## Appendix: Baseline Inventory
 

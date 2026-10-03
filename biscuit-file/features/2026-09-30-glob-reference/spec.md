@@ -39,36 +39,33 @@ reviewed: true
 review_note: the clarification process served as a review
 needs_rulings: false
 message_to_agent: |-
-    Phase 5 (DMLS and Claudine) is done; see the implementation log's
-    "Phase 5" section and its Changed Outputs and Departures entries. What
-    Phase 6 (the source-scan guard) needs to know:
-    - Production glob-crate use today is exactly the planned allowlist:
-      `biscuit-file/lib/src/file_reference/glob/{parse.rs,roots.rs}` (the
-      `GlobReference` module), `darkmatter/lib/src/markdown/compose/toc_linking/filter.rs`,
-      `darkmatter/dmls/src/workspace/discover.rs`, and
-      `darkmatter/dmls/src/overlay/schema.rs`. Claudine's completion walk uses
-      the `ignore` crate (`WalkBuilder`) for its filtered walk; that is a
-      directory walker, not a glob matcher, and is the walk the spec keeps in
-      Claudine. Decide in Phase 6 whether the guard names `ignore` at all;
-      if it does, `claudine/cli/src/completion/` walkers need allowlisting.
-    - New public API from Phase 5: `GlobReference::lists_file(path, ctx)`
-      (biscuit-file) and `FileMatchGlobs::lists_file` (darkmatter): the
-      `list_files` verdict for one walked path, sharing the out-of-tree
-      file-symlink rule (`PreparedSet::escaping_target`). Claudine's walk
-      judges with it. Plus `darkmatter::markdown::compose::file_resolution_context_identity`,
-      which DMLS's effective-schema cache key uses.
-    - Behavior change to keep in mind for Phase 7's parity rows and Phase 8's
-      docs: a bare `match()` pattern in completion now offers repository-root
-      files after the launch directory's (criterion 5), so the shipped
-      `prompts/review.md` router launched from a package also offers matching
-      root specs. The PTY fixture in `claudine/cli/tests/common/review_router.rs`
-      was updated for it (decoy renamed `remote-decoy`).
-    - `PortablePath` compares spellings: render a candidate from the path
-      as walked under the context's roots, never from a canonicalized path,
-      or a `/var` launch directory shares no route with `/private/var`.
-    - Windows: `just cross-check claudine-cli --os windows` showed 3 failures
-      in `loop_gate_ambient` and `pr_flow_rehearsal`, which use none of the
-      changed code; see the log's Windows Evidence for the baseline run.
+    Phase 7 (the entry-point parity matrix's glob rows) is done; see the
+    implementation log's "Phase 7" section and its Departures entries. What
+    Phase 8 (docs, skills, evidence, hand-off) needs to know:
+    - Windows was not run in Phase 7. Run `entry_point_parity` on Windows
+      for darkmatter, darkmatter-cli, dmls, and claudine-cli, plus the
+      claudine-cli unit test `parity_tests::chooser_offers_every_glob_row_in_native_order`
+      (it is in the `claudine` binary's unit tests, not `tests/l1`). The
+      Windows-sensitive helper is `file_url_path` in the shared module
+      (`file:///C:/…` from `::file-links` links). Record results under
+      "Windows Evidence".
+    - The Linux standing clone still has the stale read-only kache links;
+      every Linux run in Phase 7 used the native path
+      (`./scripts/cross-check.sh <pkg> --os linux --features <declared feature> entry_point_parity`).
+    - One production change: `errors/blocks.rs` `interpolation_block` now
+      adds `failure: <class>` for a `find_files()` glob failure. It is in the
+      log's Changed Outputs and in
+      `darkmatter/docs/errors/file-reference-failures.md`. An expression
+      error for a *single* file reference (`markdown_title("&nope.md")`) still has no row, because
+      `FileReferenceDiagnostic` carries no class; that is outside this
+      feature and not a parity cell. Mention it, do not fix it, unless the
+      author asks.
+    - Criterion 20's row in the criterion-to-test table: the tests in the
+      Phase 7 requirement-to-test mapping.
+    - Docs for Wave 15 should say: `::file-links` shows a tree (directory
+      order) of the same files `find_files()` lists in native order, and
+      completion omits `_`-prefixed, hidden, and gitignored files that
+      validation admits.
 ---
 
 # Glob References Share the File-Reference Grammar
