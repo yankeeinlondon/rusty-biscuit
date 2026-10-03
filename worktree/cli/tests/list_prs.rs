@@ -31,12 +31,12 @@
 mod perf_support;
 
 use std::fs;
-use std::process::{Child, Command, ExitStatus, Output, Stdio};
+use std::process::{Command, Output};
 use std::time::{Duration, Instant};
 
 use perf_support::{
-    FakeGitea, GiteaReply, HoldingOrigin, MixedFixture, ProxyStub, RemoveOnDrop, refresh_workers,
-    wait_for_refresh_workers,
+    FakeGitea, GiteaReply, HoldingOrigin, KillOnDrop, MANUFACTURED_FAILURE, MixedFixture, ProxyStub, WorkerReaper,
+    assert_manufactured_failure, process_running, refresh_workers, wait_for_refresh_workers,
 };
 use serial_test::serial;
 use worktree::pull_requests::{CachedPrs, RefreshOutcome, pr_lock_path, select_cached, unix_now};
@@ -67,8 +67,9 @@ fn row<'a>(stderr: &'a str, needle: &str) -> &'a str {
         .unwrap_or_else(|| panic!("no table row with {needle:?}:\n{stderr}"))
 }
 
-/// Ends a worker blocked on `proxy` and waits until it exited and released
-/// both locks.
+/// Ends a worker blocked on `proxy` and asserts that it exited and released
+/// both locks. When an assertion fails first, dropping the proxy and then the
+/// fixture does the same.
 fn finish_worker(fixture: &MixedFixture, proxy: &ProxyStub) {
     assert!(
         fixture.wait_until_unlocked(WORKER_WAIT, || proxy.close_held()),
@@ -95,67 +96,14 @@ fn seed_fresh_head(fixture: &MixedFixture) {
 
 const HEAD_SHA: &str = "0123456789abcdef0123456789abcdef01234567";
 
-/// On drop, answers every request still held by `gitea` and waits until no
-/// worker for the fixture runs, so none outlives the fixture or its store.
-/// Declare it after the fixture, the server, and [`RemoveOnDrop`].
-struct Reaper<'a> {
-    fixture: &'a MixedFixture,
-    gitea: &'a FakeGitea,
-}
-
-impl Drop for Reaper<'_> {
-    fn drop(&mut self) {
-        self.gitea.release(GiteaReply::Status(503));
-        let left = wait_for_refresh_workers(self.fixture.main(), 0, WORKER_WAIT);
-        if !std::thread::panicking() {
-            assert!(left.is_empty(), "workers outlived the test: {left:?}");
-        }
-    }
-}
-
-/// A test-owned child that is killed and reaped if the test fails first.
-struct KillOnDrop(Child);
-
-impl KillOnDrop {
-    fn spawn(mut command: Command) -> Self {
-        let child = command
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("spawn wt");
-        Self(child)
-    }
-
-    /// Waits up to [`WORKER_WAIT`] for the child to exit.
-    fn wait(&mut self) -> ExitStatus {
-        let deadline = Instant::now() + WORKER_WAIT;
-        loop {
-            if let Some(status) = self.0.try_wait().expect("poll child") {
-                return status;
-            }
-            assert!(Instant::now() < deadline, "wt did not exit");
-            std::thread::sleep(Duration::from_millis(10));
-        }
-    }
-}
-
-impl Drop for KillOnDrop {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
-
 /// A fixture whose stored answer (PR #99 on `divergent-0`) is 12 minutes old,
 /// bound to [`FakeGitea::ORIGIN`].
-fn stale_gitea_fixture() -> (MixedFixture, RemoveOnDrop, Vec<u8>) {
+fn stale_gitea_fixture() -> (MixedFixture, Vec<u8>) {
     let fixture = MixedFixture::new().with_gitea_origin();
-    let cleanup = RemoveOnDrop(fixture.pr_store());
     fixture.seed_pr_store(Duration::from_secs(12 * 60 + 5), 99, "divergent-0");
     seed_fresh_head(&fixture);
     let stored = fs::read(fixture.pr_store()).expect("seeded store");
-    (fixture, cleanup, stored)
+    (fixture, stored)
 }
 
 fn stored(fixture: &MixedFixture) -> Vec<u8> {
@@ -179,7 +127,6 @@ fn assert_no_pr_item_or_hint(stderr: &str) {
 #[serial]
 fn a_fresh_pr_store_is_asked_again_and_a_failed_request_keeps_its_badges() {
     let fixture = MixedFixture::new().with_github_origin();
-    let _cleanup = RemoveOnDrop(fixture.pr_store());
     fixture.seed_pr_store(Duration::from_secs(10), 99, "divergent-0");
     seed_fresh_head(&fixture);
     let proxy = ProxyStub::hanging();
@@ -202,7 +149,6 @@ fn a_fresh_pr_store_is_asked_again_and_a_failed_request_keeps_its_badges() {
 #[serial]
 fn a_stale_store_shows_its_badges_and_its_workers_failed_request_stores_nothing() {
     let fixture = MixedFixture::new().with_github_origin();
-    let _cleanup = RemoveOnDrop(fixture.pr_store());
     fixture.seed_pr_store(Duration::from_secs(12 * 60 + 5), 99, "divergent-0");
     seed_fresh_head(&fixture);
     let stored = fs::read(fixture.pr_store()).expect("seeded store");
@@ -232,7 +178,6 @@ fn a_stale_store_shows_its_badges_and_its_workers_failed_request_stores_nothing(
 #[serial]
 fn a_changed_origin_hides_the_stored_badges_and_its_worker_stores_nothing() {
     let fixture = MixedFixture::new().with_github_origin();
-    let _cleanup = RemoveOnDrop(fixture.pr_store());
     fixture.seed_pr_store(Duration::from_secs(12 * 60 + 5), 99, "divergent-0");
     let stored = fs::read(fixture.pr_store()).expect("seeded store");
     let status = std::process::Command::new("git")
@@ -260,7 +205,6 @@ fn a_changed_origin_hides_the_stored_badges_and_its_worker_stores_nothing() {
 #[serial]
 fn the_worker_command_prints_nothing_and_ignores_anything_but_a_main_checkout() {
     let fixture = MixedFixture::new().with_github_origin();
-    let _cleanup = RemoveOnDrop(fixture.pr_store());
     fixture.seed_pr_store(Duration::from_secs(12 * 60 + 5), 99, "divergent-0");
     fixture.seed_remote_head_store(Duration::from_secs(12 * 60 + 5), Some(HEAD_SHA));
     let stored = fs::read(fixture.pr_store()).expect("seeded store");
@@ -318,7 +262,6 @@ fn the_worker_command_is_hidden_from_help_and_completion() {
 #[serial]
 fn with_the_network_down_the_table_shows_without_badges_and_nothing_is_stored() {
     let fixture = MixedFixture::new().with_github_origin();
-    let _cleanup = RemoveOnDrop(fixture.pr_store());
     seed_fresh_head(&fixture);
     let proxy = ProxyStub::refusing();
 
@@ -350,10 +293,10 @@ fn with_the_network_down_the_table_shows_without_badges_and_nothing_is_stored() 
 #[test]
 #[serial]
 fn a_detached_workers_answer_replaces_the_stale_one_on_the_next_list() {
-    let (fixture, _cleanup, seeded) = stale_gitea_fixture();
+    let (fixture, seeded) = stale_gitea_fixture();
     let gitea = FakeGitea::new(GiteaReply::Status(500));
     gitea.hold();
-    let _reaper = Reaper { fixture: &fixture, gitea: &gitea };
+    let _reaper = WorkerReaper::new(&fixture, &gitea);
 
     // From a linked worktree, as a user standing in one would run it.
     let linked = &fixture.worktrees()[0];
@@ -400,10 +343,10 @@ fn a_detached_workers_answer_replaces_the_stale_one_on_the_next_list() {
 #[test]
 #[serial]
 fn concurrent_lists_and_workers_make_one_request_and_the_next_worker_asks_again() {
-    let (fixture, _cleanup, seeded) = stale_gitea_fixture();
+    let (fixture, seeded) = stale_gitea_fixture();
     let gitea = FakeGitea::new(GiteaReply::Status(500));
     gitea.hold();
-    let _reaper = Reaper { fixture: &fixture, gitea: &gitea };
+    let _reaper = WorkerReaper::new(&fixture, &gitea);
 
     let mut lists: Vec<KillOnDrop> = (0..4)
         .map(|_| {
@@ -441,17 +384,17 @@ fn concurrent_lists_and_workers_make_one_request_and_the_next_worker_asks_again(
 #[test]
 #[serial]
 fn a_killed_worker_releases_its_lock_and_a_later_worker_refreshes() {
-    let (fixture, _cleanup, seeded) = stale_gitea_fixture();
+    let (fixture, seeded) = stale_gitea_fixture();
     let gitea = FakeGitea::new(GiteaReply::Status(500));
     gitea.hold();
-    let _reaper = Reaper { fixture: &fixture, gitea: &gitea };
+    let _reaper = WorkerReaper::new(&fixture, &gitea);
 
     let mut worker = KillOnDrop::spawn(fixture.refresh_worker_via_gitea(&gitea));
     assert!(gitea.wait_for_waiting(1, WORKER_WAIT), "the worker made its request");
     assert_eq!(fixture.probe_refresh(), RefreshOutcome::Contended);
 
-    worker.0.kill().expect("kill the worker");
-    worker.0.wait().expect("reap the worker");
+    worker.child().kill().expect("kill the worker");
+    worker.child().wait().expect("reap the worker");
     assert!(fixture.wait_until_unlocked(WORKER_WAIT, || {}), "the OS released the dead worker's lock");
     assert_eq!(stored(&fixture), seeded, "a crash stores nothing");
     assert!(pr_lock_path(&fixture.pr_store()).exists(), "the sidecar stays");
@@ -467,11 +410,11 @@ fn a_killed_worker_releases_its_lock_and_a_later_worker_refreshes() {
 #[test]
 #[serial]
 fn a_failed_or_unauthorized_refresh_keeps_the_stored_answer() {
-    let (fixture, _cleanup, seeded) = stale_gitea_fixture();
+    let (fixture, seeded) = stale_gitea_fixture();
 
     for status in [500, 401] {
         let gitea = FakeGitea::new(GiteaReply::Status(status));
-        let _reaper = Reaper { fixture: &fixture, gitea: &gitea };
+        let _reaper = WorkerReaper::new(&fixture, &gitea);
 
         assert!(KillOnDrop::spawn(fixture.refresh_worker_via_gitea(&gitea)).wait().success());
 
@@ -492,10 +435,10 @@ fn a_failed_or_unauthorized_refresh_keeps_the_stored_answer() {
 #[test]
 #[serial]
 fn an_origin_change_during_a_workers_request_discards_its_answer() {
-    let (fixture, _cleanup, seeded) = stale_gitea_fixture();
+    let (fixture, seeded) = stale_gitea_fixture();
     let gitea = FakeGitea::new(GiteaReply::Status(500));
     gitea.hold();
-    let _reaper = Reaper { fixture: &fixture, gitea: &gitea };
+    let _reaper = WorkerReaper::new(&fixture, &gitea);
 
     let mut worker = KillOnDrop::spawn(fixture.refresh_worker_via_gitea(&gitea));
     assert!(gitea.wait_for_waiting(1, WORKER_WAIT), "the worker made its request");
@@ -522,10 +465,9 @@ fn an_origin_change_during_a_workers_request_discards_its_answer() {
 #[serial]
 fn an_origin_change_during_the_wait_shows_no_badges_from_the_old_origin() {
     let fixture = MixedFixture::new().with_gitea_origin();
-    let _cleanup = RemoveOnDrop(fixture.pr_store());
     seed_fresh_head(&fixture);
     let gitea = FakeGitea::new(GiteaReply::Open(vec![(7, "divergent-1")]));
-    let _reaper = Reaper { fixture: &fixture, gitea: &gitea };
+    let _reaper = WorkerReaper::new(&fixture, &gitea);
 
     // Control: with no stored answer, the worker's answer arrives within the
     // wait and is shown, so the absence below is the discarded answer.
@@ -561,31 +503,12 @@ fn an_origin_change_during_the_wait_shows_no_badges_from_the_old_origin() {
     }
 }
 
-/// On drop, closes every request `origin` holds and waits until the fixture's
-/// worker exited and released both locks, so none outlives the fixture, even
-/// when an assertion failed first. Declare it after the fixture, `origin`, and
-/// [`RemoveOnDrop`].
-struct ReleaseOnDrop<'a> {
-    fixture: &'a MixedFixture,
-    origin: &'a HoldingOrigin,
-}
-
-impl Drop for ReleaseOnDrop<'_> {
-    fn drop(&mut self) {
-        let finished = self.fixture.wait_until_unlocked(WORKER_WAIT, || self.origin.close_held());
-        if !std::thread::panicking() {
-            assert!(finished, "the worker never exited or released its locks");
-        }
-    }
-}
-
 #[test]
 #[serial]
 fn a_held_live_head_check_holds_the_listing_only_until_its_deadline() {
     let origin = HoldingOrigin::new();
     let fixture = MixedFixture::new().with_origin(&origin.url());
-    let _cleanup = RemoveOnDrop(fixture.pr_store());
-    let _release = ReleaseOnDrop { fixture: &fixture, origin: &origin };
+    let _reaper = WorkerReaper::new(&fixture, &origin);
     fixture.seed_empty_pr_store(Duration::ZERO);
     let status = Command::new("git")
         .current_dir(fixture.main())
@@ -629,11 +552,10 @@ fn a_held_live_head_check_holds_the_listing_only_until_its_deadline() {
 #[serial]
 fn two_sequential_listings_each_make_one_pr_query_and_show_the_answer_they_waited_for() {
     let fixture = MixedFixture::new().with_gitea_origin();
-    let _cleanup = RemoveOnDrop(fixture.pr_store());
     fixture.seed_pr_store(Duration::from_secs(10), 99, "divergent-0");
     seed_fresh_head(&fixture);
     let gitea = FakeGitea::new(GiteaReply::Status(503));
-    let _reaper = Reaper { fixture: &fixture, gitea: &gitea };
+    let _reaper = WorkerReaper::new(&fixture, &gitea);
 
     // A one-page answer is one request; the second listing's store is the
     // first one's answer, seconds old.
@@ -653,10 +575,9 @@ fn two_sequential_listings_each_make_one_pr_query_and_show_the_answer_they_waite
 #[serial]
 fn a_failed_refresh_with_nothing_stored_says_it_couldnt_get_open_prs() {
     let fixture = MixedFixture::new().with_gitea_origin();
-    let _cleanup = RemoveOnDrop(fixture.pr_store());
     seed_fresh_head(&fixture);
     let gitea = FakeGitea::new(GiteaReply::Status(500));
-    let _reaper = Reaper { fixture: &fixture, gitea: &gitea };
+    let _reaper = WorkerReaper::new(&fixture, &gitea);
 
     let (_, stderr) = list_with(fixture.wt_command_via_gitea(&gitea));
     assert!(wait_for_refresh_workers(fixture.main(), 0, WORKER_WAIT).is_empty(), "the worker finished");
@@ -673,11 +594,10 @@ fn a_failed_refresh_with_nothing_stored_says_it_couldnt_get_open_prs() {
 #[serial]
 fn a_held_pr_request_with_nothing_stored_ends_at_the_budget_with_only_the_hint() {
     let fixture = MixedFixture::new().with_gitea_origin();
-    let _cleanup = RemoveOnDrop(fixture.pr_store());
     seed_fresh_head(&fixture);
     let gitea = FakeGitea::new(GiteaReply::Status(503));
     gitea.hold();
-    let _reaper = Reaper { fixture: &fixture, gitea: &gitea };
+    let _reaper = WorkerReaper::new(&fixture, &gitea);
 
     let started = Instant::now();
     let (_, stderr) = list_with(fixture.wt_command_via_gitea(&gitea));
@@ -697,9 +617,9 @@ fn a_held_pr_request_with_nothing_stored_ends_at_the_budget_with_only_the_hint()
 #[test]
 #[serial]
 fn an_empty_answer_clears_the_stored_badges_and_shows_no_item() {
-    let (fixture, _cleanup, _) = stale_gitea_fixture();
+    let (fixture, _) = stale_gitea_fixture();
     let gitea = FakeGitea::new(GiteaReply::Open(Vec::new()));
-    let _reaper = Reaper { fixture: &fixture, gitea: &gitea };
+    let _reaper = WorkerReaper::new(&fixture, &gitea);
 
     let (_, stderr) = list_with(fixture.wt_command_via_gitea(&gitea));
     assert!(wait_for_refresh_workers(fixture.main(), 0, WORKER_WAIT).is_empty(), "the worker finished");
@@ -734,7 +654,6 @@ fn local_path_and_unsupported_origins_keep_the_head_check_and_show_no_pr_badges_
     // A host no provider recognizes: its stored answer (left from when it
     // was supported, say) is not shown, and the head check still runs.
     let unsupported = MixedFixture::new().with_origin("https://git.example.invalid/o/r.git");
-    let _cleanup = RemoveOnDrop(unsupported.pr_store());
     unsupported.seed_pr_store(Duration::from_secs(12 * 60 + 5), 99, "divergent-0");
     let seeded = stored(&unsupported);
     let proxy = ProxyStub::closing_after(Duration::ZERO);
@@ -752,7 +671,6 @@ fn local_path_and_unsupported_origins_keep_the_head_check_and_show_no_pr_badges_
 
     // A local path: the head check answers through Git.
     let local = MixedFixture::new().with_local_origin();
-    let _cleanup = RemoveOnDrop(local.pr_store());
     let (_, stderr) = list_with(local.wt_command_direct());
     assert!(local.wait_until_unlocked(WORKER_WAIT, || {}), "the worker finished");
 
@@ -771,9 +689,9 @@ fn local_path_and_unsupported_origins_keep_the_head_check_and_show_no_pr_badges_
 #[serial]
 fn a_rejected_key_on_the_pr_request_shows_the_credentials_line_in_an_ordinary_listing() {
     const SECRET: &str = "secret-token-value";
-    let (fixture, _cleanup, seeded) = stale_gitea_fixture();
+    let (fixture, seeded) = stale_gitea_fixture();
     let gitea = FakeGitea::new(GiteaReply::Status(401));
-    let _reaper = Reaper { fixture: &fixture, gitea: &gitea };
+    let _reaper = WorkerReaper::new(&fixture, &gitea);
     let listing = || {
         let mut command = fixture.wt_command_via_gitea(&gitea);
         command.env("GITEA_TOKEN", SECRET);
@@ -814,10 +732,10 @@ fn a_rejected_key_on_the_pr_request_shows_the_credentials_line_in_an_ordinary_li
 #[test]
 #[serial]
 fn a_rejected_key_on_the_head_check_outranks_the_pr_requests_rate_limit() {
-    let (fixture, _cleanup, _) = stale_gitea_fixture();
+    let (fixture, _) = stale_gitea_fixture();
     let gitea = FakeGitea::new(GiteaReply::Status(429));
     gitea.answer_branch_heads_with(401);
-    let _reaper = Reaper { fixture: &fixture, gitea: &gitea };
+    let _reaper = WorkerReaper::new(&fixture, &gitea);
 
     let mut command = fixture.wt_command_via_gitea(&gitea);
     command.env("GITEA_TOKEN", "secret-token-value");
@@ -836,9 +754,8 @@ fn a_rejected_key_on_the_head_check_outranks_the_pr_requests_rate_limit() {
 #[serial]
 fn a_pr_failure_never_blocks_a_permitted_fast_forward() {
     let fixture = MixedFixture::new().with_gitea_origin();
-    let _cleanup = RemoveOnDrop(fixture.pr_store());
     let gitea = FakeGitea::new(GiteaReply::Status(500));
-    let _reaper = Reaper { fixture: &fixture, gitea: &gitea };
+    let _reaper = WorkerReaper::new(&fixture, &gitea);
     let pushed = fixture.serve_gitea_origin_one_commit_ahead(&gitea);
 
     let output = fixture.wt_command_via_gitea_git(&gitea).arg("--ff").env("NO_COLOR", "1").output().expect("wt --ff");
@@ -854,3 +771,94 @@ fn a_pr_failure_never_blocks_a_permitted_fast_forward() {
     assert!(!text.contains("running this command again"), "{stderr}");
     assert_eq!(gitea.requests(), 1);
 }
+
+// Teardown guards: a failed assertion while a worker is held still ends the
+// worker and frees both locks before the fixture's directories go, and the
+// failure reaches the test harness unchanged.
+
+/// The fixture's own `Drop`, after the server declared after it ends the
+/// held PR request.
+#[test]
+#[serial]
+fn a_failed_assertion_while_a_pr_request_is_held_still_reaps_the_worker_before_the_fixture_goes() {
+    let mut workers = Vec::new();
+    let mut leftovers = Vec::new();
+    let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let (fixture, _) = stale_gitea_fixture();
+        let gitea = FakeGitea::new(GiteaReply::Status(503));
+        gitea.hold();
+        list_with(fixture.wt_command_via_gitea(&gitea));
+        assert!(gitea.wait_for_waiting(1, WORKER_WAIT), "the worker's PR request is held");
+        workers = refresh_workers(fixture.main()).iter().map(|worker| worker.pid).collect();
+        let (pr_store, head_store) = (fixture.pr_store(), fixture.remote_head_store());
+        leftovers = vec![fixture.main().to_path_buf(), pr_lock_path(&pr_store), remote_head_lock_path(&head_store)];
+        leftovers.extend([pr_store, head_store]);
+        // The released request is answered only after this stall, so the
+        // worker is still running when teardown starts: only a teardown that
+        // waits for it can pass.
+        gitea.before_reply(|| std::thread::sleep(Duration::from_secs(2)));
+        panic!("{MANUFACTURED_FAILURE}");
+    }));
+
+    assert_manufactured_failure(unwound);
+    assert_eq!(workers.len(), 1, "the listing returned with its worker held");
+    for pid in workers {
+        assert!(!process_running(pid), "worker {pid} outlived the fixture");
+    }
+    for path in leftovers {
+        assert!(!path.exists(), "{path:?} outlived the fixture");
+    }
+}
+
+/// [`WorkerReaper`] for a stand-in declared before the fixture: the held
+/// live-head check is closed and the worker gone, with the fixture still
+/// alive to show both locks free.
+#[test]
+#[serial]
+fn a_failed_assertion_while_a_live_head_check_is_held_still_frees_both_locks() {
+    let origin = HoldingOrigin::new();
+    let fixture = MixedFixture::new().with_origin(&origin.url());
+    fixture.seed_empty_pr_store(Duration::ZERO);
+    let mut workers = Vec::new();
+    let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _reaper = WorkerReaper::new(&fixture, &origin);
+        list_with(fixture.wt_command_direct());
+        assert!(origin.wait_for_requests(1, WORKER_WAIT), "the worker's check reached origin");
+        assert!(fixture.head_lock_held(), "the check is held with its lock");
+        workers = refresh_workers(fixture.main()).iter().map(|worker| worker.pid).collect();
+        panic!("{MANUFACTURED_FAILURE}");
+    }));
+
+    assert_manufactured_failure(unwound);
+    assert_eq!(workers.len(), 1, "the listing returned with its worker held");
+    assert!(refresh_workers(fixture.main()).is_empty(), "the worker was reaped");
+    assert!(!fixture.head_lock_held(), "the live-head lock is free");
+    assert_ne!(fixture.probe_refresh(), RefreshOutcome::Contended, "the PR lock is free");
+}
+
+/// [`KillOnDrop`] and [`WorkerReaper`] together, as in a test that starts a
+/// worker itself: the child is killed and reaped, and the held request is
+/// ended, before the fixture goes.
+#[test]
+#[serial]
+fn a_failed_assertion_kills_a_test_owned_worker_and_frees_its_lock() {
+    let (fixture, _) = stale_gitea_fixture();
+    let gitea = FakeGitea::new(GiteaReply::Status(503));
+    gitea.hold();
+    let mut holder = None;
+    let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _reaper = WorkerReaper::new(&fixture, &gitea);
+        let mut worker = KillOnDrop::spawn(fixture.refresh_worker_via_gitea(&gitea));
+        assert!(gitea.wait_for_waiting(1, WORKER_WAIT), "the worker's PR request is held");
+        holder = Some(worker.child().id());
+        panic!("{MANUFACTURED_FAILURE}");
+    }));
+
+    assert_manufactured_failure(unwound);
+    let holder = holder.expect("the worker started");
+    assert!(!process_running(holder), "the test-owned worker was killed and reaped");
+    assert!(refresh_workers(fixture.main()).is_empty(), "no worker is left");
+    assert_ne!(fixture.probe_refresh(), RefreshOutcome::Contended, "the PR lock is free");
+    assert!(!fixture.head_lock_held(), "the live-head lock is free");
+}
+

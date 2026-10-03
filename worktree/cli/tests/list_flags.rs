@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use assert_cmd::cargo::cargo_bin;
 use clap::Parser as _;
-use perf_support::{FakeGitea, GiteaReply, MixedFixture, RemoveOnDrop, wait_for_refresh_workers};
+use perf_support::{FakeGitea, GiteaReply, KillOnDrop, MixedFixture, WorkerReaper, wait_for_refresh_workers};
 use remote_fixture::{Fixture, UploadPackGate, WORKER_WAIT, assert_no_spinner};
 use serial_test::serial;
 use worktree_cli::{Cli, Commands};
@@ -40,6 +40,39 @@ fn receipts_beside(store: &std::path::Path, suffix: &str) -> Vec<(std::path::Pat
             (entry.path(), document)
         })
         .collect()
+}
+
+/// What a successful listing left beside the PR store once its worker
+/// exited, swept afterwards as the next worker would sweep it.
+///
+/// The wait deletes each receipt it read, but it can end on a new PR
+/// publication and a finished head before its worker has written the
+/// receipt, and that receipt then survives the wait. So the only survivor
+/// allowed is a complete receipt of this listing's own attempt (the one the
+/// remote-head store records) whose PR half published; a worker's sweep
+/// keeps it while younger than `ATTEMPT_MAX_AGE` and removes it after.
+fn assert_at_most_a_late_success_receipt(fixture: &MixedFixture, context: &str) {
+    use worktree::remote_head::{ATTEMPT_MAX_AGE, Attempt, load_receipt, remove_stale_receipts};
+
+    let mut left = receipts_beside(&fixture.pr_store(), "prs.json");
+    assert!(left.len() <= 1, "{context}: one launch, so at most one late receipt: {left:?}");
+    let Some((path, receipt)) = left.pop() else {
+        return;
+    };
+    let store: serde_json::Value =
+        serde_json::from_slice(&fs::read(fixture.remote_head_store()).expect("remote-head store")).expect("json");
+    let ours = &store["attempt"];
+    assert_eq!(receipt["attempt_id"], ours["id"], "{context}: only this listing's own attempt");
+    assert_eq!(receipt["prs"], serde_json::json!({ "kind": "ok" }), "{context}: a receipt the wait needed is deleted");
+    let text = |value: &serde_json::Value| value.as_str().expect("a string").to_string();
+    let attempt = Attempt::begin(text(&ours["id"]), text(&ours["origin_digest"]), text(&ours["branch"]), 0);
+    assert!(load_receipt(&path, &attempt).is_some(), "{context}: a complete receipt: {receipt}");
+
+    let now = std::time::SystemTime::now();
+    remove_stale_receipts(&path, now);
+    assert!(path.exists(), "{context}: a young receipt is kept by the sweep");
+    remove_stale_receipts(&path, now + ATTEMPT_MAX_AGE + Duration::from_secs(1));
+    assert!(!path.exists(), "{context}: and removed once older than ATTEMPT_MAX_AGE");
 }
 
 /// Whitespace collapsed, so wrapped lines read as one.
@@ -126,10 +159,10 @@ fn completion_offers_every_listing_flag() {
 #[serial]
 fn refresh_waits_for_both_halves_and_asks_again_like_every_listing() {
     let fixture = MixedFixture::new().with_gitea_origin();
-    let _cleanup = RemoveOnDrop(fixture.pr_store());
     fixture.seed_pr_store(Duration::from_secs(10), 99, "divergent-0");
     fixture.seed_remote_head_store(Duration::ZERO, Some("0123456789abcdef0123456789abcdef01234567"));
     let gitea = FakeGitea::new(GiteaReply::Open(vec![(7, "divergent-1")]));
+    let _reaper = WorkerReaper::new(&fixture, &gitea);
 
     // An ordinary listing asks despite the young answer, too.
     let output = fixture.wt_command_via_gitea(&gitea).arg("list").env("NO_COLOR", "1").output().expect("wt list");
@@ -137,7 +170,7 @@ fn refresh_waits_for_both_halves_and_asks_again_like_every_listing() {
     assert!(wait_for_refresh_workers(fixture.main(), 0, WORKER_WAIT).is_empty());
     assert_eq!(gitea.requests(), 1, "a young answer is requested again");
     assert!(String::from_utf8_lossy(&output.stderr).contains("PR #7"), "and shown by the listing that waited for it");
-    assert_eq!(receipts_beside(&fixture.pr_store(), "prs.json"), [], "every attempt's receipt is deleted by its wait");
+    assert_at_most_a_late_success_receipt(&fixture, "wt list");
     let checks = gitea.branch_requests();
 
     let output = fixture.wt_command_via_gitea(&gitea).args(["-r"]).env("NO_COLOR", "1").output().expect("wt -r");
@@ -150,7 +183,7 @@ fn refresh_waits_for_both_halves_and_asks_again_like_every_listing() {
     assert!(!stderr.contains("PR #99"), "{stderr}");
     assert!(!collapsed(&stderr).contains("running this command again"), "nothing was left running: {stderr}");
     assert!(wait_for_refresh_workers(fixture.main(), 0, Duration::from_secs(2)).is_empty(), "both halves ended");
-    assert_eq!(receipts_beside(&fixture.pr_store(), "prs.json"), [], "wt -r deleted the receipt it read");
+    assert_at_most_a_late_success_receipt(&fixture, "wt -r");
 }
 
 /// How old the PR answer stored before `wt -r` launches is.
@@ -169,7 +202,6 @@ enum Seeded {
 /// the contention. Returns `wt -r`'s collapsed stderr and the PR requests made.
 fn refresh_against_a_holder(holder_reply: GiteaReply, seeded: Seeded) -> (String, usize) {
     let fixture = MixedFixture::new().with_gitea_origin();
-    let _cleanup = RemoveOnDrop(fixture.pr_store());
     for (stale, _) in receipts_beside(&fixture.pr_store(), "prs.json") {
         let _ = fs::remove_file(stale);
     }
@@ -179,25 +211,24 @@ fn refresh_against_a_holder(holder_reply: GiteaReply, seeded: Seeded) -> (String
     fixture.seed_remote_head_store(Duration::ZERO, Some("0123456789abcdef0123456789abcdef01234567"));
     let gitea = FakeGitea::new(GiteaReply::Status(503));
     gitea.hold();
-    let mut holder = fixture
-        .refresh_worker_via_gitea(&gitea)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("holder");
+    let _reaper = WorkerReaper::new(&fixture, &gitea);
+    // Both children are killed and reaped if a setup assertion fails before
+    // their waits; they drop before the reaper.
+    let mut holder = KillOnDrop::spawn(fixture.refresh_worker_via_gitea(&gitea));
     assert!(gitea.wait_for_waiting(1, WORKER_WAIT), "the holder's PR request is held with its lock");
     if let Seeded::Young = seeded {
         fixture.seed_pr_store(Duration::ZERO, 99, "divergent-0");
     }
 
-    let refresh = fixture
-        .wt_command_via_gitea(&gitea)
-        .arg("-r")
-        .env("NO_COLOR", "1")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("wt -r");
+    let refresh = KillOnDrop::spawn_with(
+        fixture
+            .wt_command_via_gitea(&gitea)
+            .arg("-r")
+            .env("NO_COLOR", "1")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped()),
+    );
     let deadline = Instant::now() + WORKER_WAIT;
     // wt -r keeps its receipt until its wait ends, which is after the
     // holder's lock opens.
@@ -211,8 +242,8 @@ fn refresh_against_a_holder(holder_reply: GiteaReply, seeded: Seeded) -> (String
         std::thread::sleep(Duration::from_millis(20));
     };
     gitea.release(holder_reply);
-    let _ = holder.wait();
-    let output = refresh.wait_with_output().expect("wt -r ends");
+    holder.wait();
+    let output = refresh.wait_with_output();
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
     assert!(contended, "wt -r's worker found the PR lock held:\n{stderr}");
     assert!(output.status.success(), "{stderr}");
@@ -306,7 +337,6 @@ mod ignore_api {
     #[serial]
     fn the_repository_is_recorded_before_the_run_and_no_provider_is_asked() {
         let fixture = MixedFixture::new().with_github_origin();
-        let _cleanup = RemoveOnDrop(fixture.pr_store());
         // A young stored answer, from before the repository was ignored.
         fixture.seed_pr_store(Duration::from_secs(10), 99, "divergent-0");
         let proxy = ProxyStub::closing_after(Duration::ZERO);
@@ -346,7 +376,6 @@ mod ignore_api {
     #[serial]
     fn a_corrupt_file_ignores_nothing_and_is_never_overwritten() {
         let fixture = MixedFixture::new().with_github_origin();
-        let _cleanup = RemoveOnDrop(fixture.pr_store());
         fs::write(preference(&fixture), b"{not json").expect("corrupt file");
         let proxy = ProxyStub::closing_after(Duration::ZERO);
 

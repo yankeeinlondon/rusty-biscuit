@@ -1,6 +1,17 @@
 //! Shared fixtures and `--perf` parsing for the cache SLA and PR integration
-//! tests, plus the local network stand-ins ([`ProxyStub`], [`FakeGitea`]) and
-//! refresh-worker helpers the PR tests use.
+//! tests, plus the local network stand-ins ([`ProxyStub`], [`FakeGitea`],
+//! [`HoldingOrigin`]) and refresh-worker helpers the PR tests use.
+//!
+//! A `wt list` against a fixture with an `origin` leaves a detached
+//! `wt internal-refresh` running, which nothing in the test owns. Teardown
+//! is guaranteed on every exit path, an assertion failure included:
+//! [`MixedFixture`]'s own `Drop` waits for its workers and both refresh
+//! locks (killing a worker still running at [`TEARDOWN_WAIT`]) before it
+//! removes the stores and its temporary directories, and every stand-in
+//! ends its held requests when dropped. A stand-in declared before the
+//! fixture, such as a [`HoldingOrigin`] whose URL the fixture needs, drops
+//! after it, so pair it with a [`WorkerReaper`] declared after the fixture.
+//! A directly spawned `wt` belongs in a [`KillOnDrop`].
 //!
 //! Both `cache_warm_path.rs` and `cache_cold_path.rs` build the same mixed
 //! multi-worktree repo and assert on the `list gather` stage timing parsed
@@ -20,9 +31,9 @@
 use std::fs;
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::io::{Read, Write};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
@@ -43,6 +54,10 @@ pub const BEHIND_BRANCHES: usize = 3;
 /// A throwaway repo with `main` plus a mix of divergent, fast-forward, and
 /// behind-only linked worktrees, isolated from the user's real cache via a
 /// temp `HOME` / `XDG_CACHE_HOME`.
+///
+/// Dropping it reaps its refresh workers ([`reap_workers`]) and then removes
+/// the PR and live-head stores and their locks, which on Windows live in the
+/// real user cache (see [`MixedFixture::pr_store`]).
 pub struct MixedFixture {
     _repo: tempfile::TempDir,
     home: tempfile::TempDir,
@@ -401,20 +416,20 @@ impl MixedFixture {
     /// refresh lock is held, calling `nudge` before each probe (to unblock the
     /// worker's request). A free PR lock alone is no proof: the worker's
     /// live-head half may still be running.
-    pub fn wait_until_unlocked(&self, limit: Duration, mut nudge: impl FnMut()) -> bool {
-        let deadline = Instant::now() + limit;
-        loop {
-            nudge();
-            if self.probe_refresh() != RefreshOutcome::Contended
-                && !self.head_lock_held()
-                && refresh_workers(&self.main).is_empty()
-            {
-                return true;
-            }
-            if Instant::now() >= deadline {
-                return false;
-            }
-            std::thread::sleep(Duration::from_millis(20));
+    pub fn wait_until_unlocked(&self, limit: Duration, nudge: impl FnMut()) -> bool {
+        wait_for_workers(&self.worker_paths(), limit, nudge)
+    }
+
+    /// The repository and stores a worker for this fixture uses, computed
+    /// without panicking so `Drop` can use it while unwinding.
+    fn worker_paths(&self) -> WorkerPaths {
+        let real_pr = worktree::pull_requests::pr_store_path(&self.main).ok();
+        let real_head = remote_head_store_path(&self.main).ok();
+        let (home, xdg) = (self.home.path(), self.xdg_cache.path());
+        WorkerPaths {
+            main: self.main.clone(),
+            pr_store: real_pr.map(|real| isolated_cache_file(home, xdg, &real)),
+            head_store: real_head.map(|real| isolated_cache_file(home, xdg, &real)),
         }
     }
 
@@ -452,6 +467,175 @@ impl Default for MixedFixture {
     }
 }
 
+impl Drop for MixedFixture {
+    fn drop(&mut self) {
+        let paths = self.worker_paths();
+        let finished = reap_workers(&paths, || {});
+        paths.remove_stores();
+        if !std::thread::panicking() {
+            assert!(finished, "a refresh worker outlived the test or kept a lock; release its request first");
+        }
+    }
+}
+
+/// How long teardown waits for a fixture's refresh workers before it kills
+/// the ones still running.
+pub const TEARDOWN_WAIT: Duration = Duration::from_secs(20);
+
+/// A repository's main checkout and the stores (as the spawned `wt` resolves
+/// them) whose locks its refresh workers hold. A store is `None` where the
+/// library could not name it.
+#[derive(Debug, Clone)]
+pub struct WorkerPaths {
+    pub main: PathBuf,
+    pub pr_store: Option<PathBuf>,
+    pub head_store: Option<PathBuf>,
+}
+
+impl WorkerPaths {
+    /// Whether no worker for `main` runs and neither lock is held. Probing
+    /// the PR lock takes it for an instant, so probe only at teardown or once
+    /// the worker under test is known to be running.
+    fn quiet(&self) -> bool {
+        let pr_free = self.pr_store.as_deref().is_none_or(|store| {
+            refresh(store, &self.main, unix_now, |_| Box::new(NoRequest)) != RefreshOutcome::Contended
+        });
+        let head_free = self.head_store.as_deref().is_none_or(|store| !refresh_lock_held(store));
+        pr_free && head_free && try_refresh_workers(&self.main).is_some_and(|workers| workers.is_empty())
+    }
+
+    /// Removes both stores and their lock sidecars.
+    pub fn remove_stores(&self) {
+        if let Some(store) = &self.pr_store {
+            let _ = fs::remove_file(pr_lock_path(store));
+            let _ = fs::remove_file(store);
+        }
+        if let Some(store) = &self.head_store {
+            let _ = fs::remove_file(remote_head_lock_path(store));
+            let _ = fs::remove_file(store);
+        }
+    }
+}
+
+/// Waits up to `limit` until no worker for `paths.main` runs and neither
+/// lock is held, calling `nudge` before each probe.
+pub fn wait_for_workers(paths: &WorkerPaths, limit: Duration, mut nudge: impl FnMut()) -> bool {
+    let deadline = Instant::now() + limit;
+    loop {
+        nudge();
+        if paths.quiet() {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// Teardown for a fixture's detached workers: [`wait_for_workers`] for
+/// [`TEARDOWN_WAIT`], then kills any worker still running and waits briefly
+/// for it to go, so teardown is bounded and no worker outlives the
+/// directories it works in. Returns whether the workers ended on their own.
+/// Never panics, so it is safe in `Drop` while a failed assertion unwinds.
+pub fn reap_workers(paths: &WorkerPaths, nudge: impl FnMut()) -> bool {
+    if wait_for_workers(paths, TEARDOWN_WAIT, nudge) {
+        return true;
+    }
+    kill_refresh_workers(&paths.main);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while try_refresh_workers(&paths.main).is_some_and(|workers| !workers.is_empty()) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    false
+}
+
+/// A stand-in that holds requests until the test lets them go.
+pub trait HeldRequests {
+    /// Ends every request held so far and every later one, at once.
+    fn release_held(&self);
+}
+
+/// Nothing held: for a [`WorkerReaper`] whose fixture has no stand-in.
+impl HeldRequests for () {
+    fn release_held(&self) {}
+}
+
+/// On drop, ends every request `held` holds and reaps the repository's
+/// refresh workers ([`reap_workers`]), so none outlives the test, even when an
+/// assertion failed first. Declare it after the fixture and the stand-in,
+/// so it drops before both. When the test is not already failing, a worker
+/// that had to be killed fails it.
+pub struct WorkerReaper<'a> {
+    paths: WorkerPaths,
+    held: &'a dyn HeldRequests,
+}
+
+impl<'a> WorkerReaper<'a> {
+    pub fn new(fixture: &MixedFixture, held: &'a dyn HeldRequests) -> Self {
+        Self::for_repository(fixture.worker_paths(), held)
+    }
+
+    pub fn for_repository(paths: WorkerPaths, held: &'a dyn HeldRequests) -> Self {
+        Self { paths, held }
+    }
+}
+
+impl Drop for WorkerReaper<'_> {
+    fn drop(&mut self) {
+        let finished = reap_workers(&self.paths, || self.held.release_held());
+        if !std::thread::panicking() {
+            assert!(finished, "a refresh worker outlived the test or kept a lock");
+        }
+    }
+}
+
+/// A test-owned `wt` child, killed and reaped on drop unless already waited
+/// for, so a failed assertion never leaves it running.
+pub struct KillOnDrop(Option<Child>);
+
+impl KillOnDrop {
+    /// Spawns `command` with null stdio.
+    pub fn spawn(mut command: Command) -> Self {
+        Self::spawn_with(command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()))
+    }
+
+    /// Spawns `command` with the stdio it was given.
+    pub fn spawn_with(command: &mut Command) -> Self {
+        Self(Some(command.spawn().expect("spawn wt")))
+    }
+
+    pub fn child(&mut self) -> &mut Child {
+        self.0.as_mut().expect("the child is owned until waited for")
+    }
+
+    /// Waits up to [`TEARDOWN_WAIT`] for the child to exit.
+    pub fn wait(&mut self) -> ExitStatus {
+        let deadline = Instant::now() + TEARDOWN_WAIT;
+        loop {
+            if let Some(status) = self.child().try_wait().expect("poll child") {
+                return status;
+            }
+            assert!(Instant::now() < deadline, "wt did not exit");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// [`Child::wait_with_output`]; the child is then no longer owned here.
+    pub fn wait_with_output(mut self) -> Output {
+        self.0.take().expect("the child is owned until waited for").wait_with_output().expect("wait for wt")
+    }
+}
+
+impl Drop for KillOnDrop {
+    fn drop(&mut self) {
+        if let Some(child) = self.0.as_mut() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
 /// Where a spawned `wt` with `HOME=home` and `XDG_CACHE_HOME=xdg_cache` keeps
 /// the cache file the library names `real`: under `home` on macOS, under
 /// `xdg_cache` on Linux, and at `real` itself on Windows, whose user cache
@@ -466,24 +650,6 @@ pub fn isolated_cache_file(home: &Path, xdg_cache: &Path, real: &Path) -> PathBu
         xdg_cache.to_path_buf()
     };
     root.join("worktree").join(real.file_name().expect("store file name"))
-}
-
-/// Removes a PR store, the live-head store beside it, and both lock sidecars,
-/// which on Windows live in the real user cache (see
-/// [`MixedFixture::pr_store`]).
-pub struct RemoveOnDrop(pub PathBuf);
-
-impl Drop for RemoveOnDrop {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.0);
-        let _ = fs::remove_file(pr_lock_path(&self.0));
-        // `<hash>.prs.json` → `<hash>.remote-head.json`.
-        if let Some(name) = self.0.file_name().and_then(|name| name.to_str()) {
-            let head = self.0.with_file_name(name.replace(".prs.json", ".remote-head.json"));
-            let _ = fs::remove_file(remote_head_lock_path(&head));
-            let _ = fs::remove_file(head);
-        }
-    }
 }
 
 /// A PR source that must never be asked.
@@ -509,9 +675,31 @@ pub struct RefreshWorker {
 /// The running refresh workers for the repository whose main checkout is
 /// `main`, whoever started them.
 pub fn refresh_workers(main: &Path) -> Vec<RefreshWorker> {
+    try_refresh_workers(main).expect("canonical main checkout")
+}
+
+/// [`refresh_workers`], or `None` when `main` cannot be canonicalized.
+fn try_refresh_workers(main: &Path) -> Option<Vec<RefreshWorker>> {
+    let main = fs::canonicalize(main).ok()?;
+    let system = worker_processes();
+    let workers = system
+        .processes()
+        .iter()
+        // On Linux every thread is listed too, with its process's argv; the
+        // worker runs two, so count processes only.
+        .filter(|(_, process)| process.thread_kind().is_none())
+        .filter(|(_, process)| is_worker_for(process, &main))
+        .map(|(pid, process)| RefreshWorker {
+            pid: pid.as_u32(),
+            cwd: process.cwd().map(Path::to_path_buf),
+        })
+        .collect();
+    Some(workers)
+}
+
+fn worker_processes() -> sysinfo::System {
     use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 
-    let main = fs::canonicalize(main).expect("canonical main checkout");
     let mut system = System::new();
     system.refresh_processes_specifics(
         ProcessesToUpdate::All,
@@ -519,24 +707,54 @@ pub fn refresh_workers(main: &Path) -> Vec<RefreshWorker> {
         ProcessRefreshKind::nothing().with_cmd(UpdateKind::Always).with_cwd(UpdateKind::Always),
     );
     system
-        .processes()
-        .iter()
-        // On Linux every thread is listed too, with its process's argv; the
-        // worker runs two, so count processes only.
-        .filter(|(_, process)| process.thread_kind().is_none())
-        .filter(|(_, process)| {
-            let cmd = process.cmd();
-            let position = cmd.iter().position(|arg| arg == "internal-refresh");
-            position
-                .and_then(|at| cmd.get(at + 1))
-                .and_then(|repo| fs::canonicalize(repo).ok())
-                .is_some_and(|repo| repo == main)
-        })
-        .map(|(pid, process)| RefreshWorker {
-            pid: pid.as_u32(),
-            cwd: process.cwd().map(Path::to_path_buf),
-        })
-        .collect()
+}
+
+fn is_worker_for(process: &sysinfo::Process, canonical_main: &Path) -> bool {
+    let cmd = process.cmd();
+    let position = cmd.iter().position(|arg| arg == "internal-refresh");
+    position
+        .and_then(|at| cmd.get(at + 1))
+        .and_then(|repo| fs::canonicalize(repo).ok())
+        .is_some_and(|repo| repo == canonical_main)
+}
+
+/// The panic message a teardown test raises in place of a failed assertion.
+pub const MANUFACTURED_FAILURE: &str = "manufactured assertion failure (expected by a teardown test)";
+
+/// `unwound` is the unwind of [`MANUFACTURED_FAILURE`]: teardown neither
+/// replaced the failure nor aborted, and nothing failed before it.
+pub fn assert_manufactured_failure(unwound: std::thread::Result<()>) {
+    let payload = unwound.expect_err("the test body panicked");
+    let message = payload
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| payload.downcast_ref::<&str>().copied())
+        .unwrap_or("<not a string>");
+    assert_eq!(message, MANUFACTURED_FAILURE, "the original failure reached the caller unchanged");
+}
+
+/// Whether process `pid` is still running (a zombie is not).
+pub fn process_running(pid: u32) -> bool {
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessStatus, ProcessesToUpdate, System};
+
+    let pid = Pid::from_u32(pid);
+    let mut system = System::new();
+    system.refresh_processes_specifics(ProcessesToUpdate::Some(&[pid]), true, ProcessRefreshKind::nothing());
+    system.process(pid).is_some_and(|process| process.status() != ProcessStatus::Zombie)
+}
+
+/// Kills every refresh worker for `main`. They are detached, so nothing here
+/// can reap them; [`reap_workers`] waits for them to disappear instead.
+fn kill_refresh_workers(main: &Path) {
+    let Ok(main) = fs::canonicalize(main) else {
+        return;
+    };
+    let system = worker_processes();
+    for process in system.processes().values() {
+        if process.thread_kind().is_none() && is_worker_for(process, &main) {
+            let _ = process.kill();
+        }
+    }
 }
 
 /// Waits up to `limit` until exactly `count` refresh workers run for `main`.
@@ -579,38 +797,39 @@ pub fn stage_from_perf(stderr: &str, stage: &str) -> Option<Duration> {
 }
 
 /// A local stand-in for an HTTPS proxy, so a PR request never leaves the host.
+/// Dropping it closes every held connection and every later one.
 pub struct ProxyStub {
     port: u16,
     connections: Arc<AtomicUsize>,
     held: Arc<Mutex<Vec<TcpStream>>>,
+    released: Arc<AtomicBool>,
 }
 
 impl ProxyStub {
     /// Accepts every connection and never answers, so each request runs into
     /// its deadline. Connections are held open until
-    /// [`ProxyStub::close_held`] or the test process ends.
+    /// [`ProxyStub::close_held`] or the stub is dropped.
     pub fn hanging() -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind proxy stub");
         let port = listener.local_addr().expect("proxy stub address").port();
         let connections = Arc::new(AtomicUsize::new(0));
         let counter = Arc::clone(&connections);
         let held: Arc<Mutex<Vec<TcpStream>>> = Arc::default();
-        let holder = Arc::clone(&held);
+        let released: Arc<AtomicBool> = Arc::default();
+        let (holder, gone) = (Arc::clone(&held), Arc::clone(&released));
         std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
-                holder.lock().expect("held connections").push(stream);
+                hold_unless_released(&holder, &gone, stream);
                 counter.fetch_add(1, Ordering::SeqCst);
             }
         });
-        Self { port, connections, held }
+        Self { port, connections, held, released }
     }
 
     /// Closes every connection held so far, so a request blocked on one
     /// fails at once instead of waiting for its deadline.
     pub fn close_held(&self) {
-        for stream in self.held.lock().expect("held connections").drain(..) {
-            let _ = stream.shutdown(std::net::Shutdown::Both);
-        }
+        close_all(&self.held);
     }
 
     /// Waits up to `limit` for at least `count` accepted connections.
@@ -643,7 +862,7 @@ impl ProxyStub {
                 });
             }
         });
-        Self { port, connections, held: Arc::default() }
+        Self { port, connections, held: Arc::default(), released: Arc::default() }
     }
 
     /// A port with nothing listening: every connection is refused at once,
@@ -658,6 +877,7 @@ impl ProxyStub {
             port,
             connections: Arc::default(),
             held: Arc::default(),
+            released: Arc::default(),
         }
     }
 
@@ -671,15 +891,54 @@ impl ProxyStub {
     }
 }
 
+impl HeldRequests for ProxyStub {
+    fn release_held(&self) {
+        self.close_held();
+    }
+}
+
+impl Drop for ProxyStub {
+    fn drop(&mut self) {
+        release_all(&self.held, &self.released);
+    }
+}
+
+/// Holds `stream` in `held`, or closes it at once once `released` is set.
+/// Both sides decide under `held`'s lock, so no connection is held after
+/// [`release_all`].
+fn hold_unless_released(held: &Mutex<Vec<TcpStream>>, released: &AtomicBool, stream: TcpStream) {
+    let mut held = held.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if released.load(Ordering::SeqCst) {
+        let _ = stream.shutdown(std::net::Shutdown::Both);
+    } else {
+        held.push(stream);
+    }
+}
+
+fn close_all(held: &Mutex<Vec<TcpStream>>) {
+    for stream in held.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).drain(..) {
+        let _ = stream.shutdown(std::net::Shutdown::Both);
+    }
+}
+
+/// Closes every held connection and makes every later one close at once.
+fn release_all(held: &Mutex<Vec<TcpStream>>, released: &AtomicBool) {
+    released.store(true, Ordering::SeqCst);
+    close_all(held);
+}
+
 /// A loopback `origin` for git's smart-HTTP transport that accepts every
 /// connection, records its request line, and never answers, so a live-head
 /// `ls-remote` stays blocked until [`HoldingOrigin::close_held`] or its
 /// deadline. Git reaches it directly: the caller clears the proxy variables
-/// and the user's git configuration.
+/// and the user's git configuration. Dropping it closes every held
+/// connection and every later one; it is usually declared before the
+/// fixture that names its URL, so pair it with a [`WorkerReaper`].
 pub struct HoldingOrigin {
     port: u16,
     requests: Arc<Mutex<Vec<String>>>,
     held: Arc<Mutex<Vec<TcpStream>>>,
+    released: Arc<AtomicBool>,
 }
 
 impl HoldingOrigin {
@@ -688,7 +947,8 @@ impl HoldingOrigin {
         let port = listener.local_addr().expect("holding origin address").port();
         let requests: Arc<Mutex<Vec<String>>> = Arc::default();
         let held: Arc<Mutex<Vec<TcpStream>>> = Arc::default();
-        let (recorder, holder) = (Arc::clone(&requests), Arc::clone(&held));
+        let released: Arc<AtomicBool> = Arc::default();
+        let (recorder, holder, gone) = (Arc::clone(&requests), Arc::clone(&held), Arc::clone(&released));
         std::thread::spawn(move || {
             for mut stream in listener.incoming().flatten() {
                 let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
@@ -701,11 +961,11 @@ impl HoldingOrigin {
                     }
                 }
                 let line = String::from_utf8_lossy(&head).lines().next().unwrap_or_default().to_string();
-                holder.lock().expect("held connections").push(stream);
+                hold_unless_released(&holder, &gone, stream);
                 recorder.lock().expect("recorded requests").push(line);
             }
         });
-        Self { port, requests, held }
+        Self { port, requests, held, released }
     }
 
     /// The URL to set as `origin`.
@@ -732,15 +992,25 @@ impl HoldingOrigin {
 
     /// Closes every held connection, so a blocked `ls-remote` fails at once.
     pub fn close_held(&self) {
-        for stream in self.held.lock().expect("held connections").drain(..) {
-            let _ = stream.shutdown(std::net::Shutdown::Both);
-        }
+        close_all(&self.held);
     }
 }
 
 impl Default for HoldingOrigin {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl HeldRequests for HoldingOrigin {
+    fn release_held(&self) {
+        self.close_held();
+    }
+}
+
+impl Drop for HoldingOrigin {
+    fn drop(&mut self) {
+        release_all(&self.held, &self.released);
     }
 }
 
@@ -785,7 +1055,8 @@ struct GiteaState {
 ///
 /// While [`FakeGitea::hold`] is in effect every PR request waits unanswered,
 /// which is how a test blocks a detached worker mid-request with its lock
-/// held. Dropping the server answers every waiting request with 503.
+/// held. Dropping the server answers every waiting and later request with
+/// 503 ([`HeldRequests::release_held`] does the same without dropping it).
 ///
 /// The worker's live-head half asks for the default branch's head
 /// (`/branches/`); that request is answered 404 (or the status given to
@@ -948,9 +1219,15 @@ impl FakeGitea {
     }
 }
 
+impl HeldRequests for FakeGitea {
+    fn release_held(&self) {
+        self.release(GiteaReply::Status(503));
+    }
+}
+
 impl Drop for FakeGitea {
     fn drop(&mut self) {
-        self.release(GiteaReply::Status(503));
+        self.release_held();
     }
 }
 

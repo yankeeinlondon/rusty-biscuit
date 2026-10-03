@@ -15,7 +15,7 @@ use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use perf_support::{
-    FakeGitea, GiteaReply, HoldingOrigin, MixedFixture, ProxyStub, RemoveOnDrop, list_gather_from_perf,
+    FakeGitea, GiteaReply, HoldingOrigin, MixedFixture, ProxyStub, WorkerReaper, list_gather_from_perf,
     refresh_workers, stage_from_perf, wait_for_refresh_workers,
 };
 use remote_fixture::{Fixture, UploadPackGate, assert_no_spinner};
@@ -78,7 +78,6 @@ fn best_full_command(fixture: &MixedFixture, proxy: &ProxyStub) -> Duration {
 #[serial]
 fn perf_list_meets_sla_with_the_network_down() {
     let fixture = MixedFixture::new().with_github_origin();
-    let _cleanup = RemoveOnDrop(fixture.pr_store());
     seed_fresh_head(&fixture);
     fixture.warm_untracked_cache();
     let proxy = ProxyStub::refusing();
@@ -145,7 +144,6 @@ fn pr_gather_with_store(fixture: &MixedFixture, proxy: &ProxyStub, age: Duration
 fn perf_list_meets_sla_with_a_stale_answer_and_a_failing_refresh() {
     const STALE: Duration = Duration::from_secs(12 * 60 + 5);
     let fixture = MixedFixture::new().with_github_origin();
-    let _cleanup = RemoveOnDrop(fixture.pr_store());
     seed_fresh_head(&fixture);
     fixture.warm_untracked_cache();
     // Every worker request is counted and fails at once.
@@ -196,12 +194,12 @@ fn perf_list_meets_sla_with_a_stale_answer_and_a_failing_refresh() {
 #[serial]
 fn perf_a_held_pr_request_costs_the_listing_only_its_wait() {
     let fixture = MixedFixture::new().with_gitea_origin();
-    let _cleanup = RemoveOnDrop(fixture.pr_store());
     fixture.seed_pr_store(Duration::from_secs(12 * 60 + 5), 99, "divergent-0");
     seed_fresh_head(&fixture);
     fixture.warm_untracked_cache();
     let gitea = FakeGitea::new(GiteaReply::Status(503));
     gitea.hold();
+    let _reaper = WorkerReaper::new(&fixture, &gitea);
 
     // The second listing's worker finds the first one's PR request holding
     // the lock, and waits within the same budget.
@@ -245,7 +243,7 @@ fn perf_a_held_pr_request_costs_the_listing_only_its_wait() {
 fn perf_a_held_live_head_check_costs_the_listing_only_its_wait() {
     let origin = HoldingOrigin::new();
     let fixture = MixedFixture::new().with_origin(&origin.url());
-    let _cleanup = RemoveOnDrop(fixture.pr_store());
+    let _reaper = WorkerReaper::new(&fixture, &origin);
     fixture.seed_empty_pr_store(Duration::ZERO);
     fixture.warm_untracked_cache();
 
@@ -319,7 +317,7 @@ fn perf_a_held_fetch_costs_the_listing_only_its_wait() {
 fn perf_refresh_against_a_held_check_reports_within_the_check_deadline() {
     let origin = HoldingOrigin::new();
     let fixture = MixedFixture::new().with_origin(&origin.url());
-    let _cleanup = RemoveOnDrop(fixture.pr_store());
+    let _reaper = WorkerReaper::new(&fixture, &origin);
     fixture.seed_empty_pr_store(Duration::ZERO);
     fixture.warm_untracked_cache();
 

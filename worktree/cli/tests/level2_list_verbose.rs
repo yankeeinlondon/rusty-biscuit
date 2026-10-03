@@ -17,7 +17,10 @@
 //! let the pane's git reach a bare repository through the stand-in and hold
 //! `wt list -r`'s worker in each spinner phase: the no-key fallback turning
 //! into the fetch on the same line, and the rate-limited fallback, each
-//! captured as one spinner line before it clears ahead of the caption. The
+//! captured as one spinner line before it clears ahead of the caption. A
+//! third holds the PR lock while `wt list -r` runs, then releases it with
+//! nothing published, and proves that once the retry's head finishes after
+//! showing the fallback, the spinner is back to one `updating` line. The
 //! caption suffix's dim italic is checked in the design test. The graph as an
 //! image-capable terminal draws it is tested in
 //! `level2_graph_in_kitty.rs`.
@@ -34,12 +37,12 @@ use assert_cmd::cargo::cargo_bin;
 use biscuit_test_harness::tmux::TmuxHarness;
 use biscuit_test_harness::CapturedFrame;
 use biscuit_test_harness::TerminalHarness;
-use perf_support::{FakeGitea, GitHold, GiteaReply, NoRequest, wait_for_refresh_workers};
+use perf_support::{FakeGitea, GitHold, GiteaReply, NoRequest, WorkerPaths, reap_workers, wait_for_refresh_workers};
 use serial_test::serial;
 use styled_capture::{Color, StyledScreen};
 use test_toolkit::{Backend, Level, require_level};
 use worktree::fork_origin::{ForkOrigin, ForkOriginStore, fork_origin_path};
-use worktree::pull_requests::{RefreshOutcome, pr_store_path, refresh, unix_now};
+use worktree::pull_requests::{RefreshOutcome, pr_lock_path, pr_store_path, refresh, unix_now};
 use worktree::remote_head::{refresh_lock_held, remote_head_store_path};
 
 fn run_git(repo: &std::path::Path, args: &[&str]) {
@@ -281,6 +284,11 @@ const GITHUB_ORIGIN: &str = "https://github.com/owner/repo.git";
 /// All three branches have fork-origin records naming `main`, so they hang
 /// from it in the Branch column. The stores live under `home`, which the pane
 /// passes to `wt` as `HOME` and `XDG_CACHE_HOME`'s parent.
+///
+/// Every listing in a pane leaves a detached worker. Dropping the fixture
+/// reaps it ([`reap_workers`]) before the temporary directory goes, so declare
+/// a [`FakeGitea`] after the fixture: it drops first and ends its held
+/// requests.
 struct DesignFixture {
     _parent: tempfile::TempDir,
     home: PathBuf,
@@ -615,6 +623,21 @@ impl DesignFixture {
     }
 }
 
+impl Drop for DesignFixture {
+    fn drop(&mut self) {
+        let in_cache = |real: PathBuf| real.file_name().map(|name| self.cache_dir().join("worktree").join(name));
+        let paths = WorkerPaths {
+            main: self.main.clone(),
+            pr_store: pr_store_path(&self.main).ok().and_then(in_cache),
+            head_store: remote_head_store_path(&self.main).ok().and_then(in_cache),
+        };
+        let finished = reap_workers(&paths, || {});
+        if !std::thread::panicking() {
+            assert!(finished, "a refresh worker outlived the test or kept a lock");
+        }
+    }
+}
+
 /// Polls the pane until `ready` holds for its visible text (15 s cap).
 fn wait_for_pane(harness: &mut TmuxHarness, ready: impl Fn(&str) -> bool) -> CapturedFrame {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
@@ -844,6 +867,41 @@ fn level2_list_stale_pr_answer_shows_a_dim_age_line_in_tmux() {
     assert_ne!(probe_refresh(&fixture), RefreshOutcome::Contended, "the PR lock is free");
     assert_eq!(gitea.requests(), 1, "one PR request, from the worker");
     assert_eq!(fs::read(fixture.pr_store()).expect("store"), seeded, "a failed refresh is never stored");
+}
+
+/// A failed assertion in a scene whose PR request is still held after the
+/// listing returned: the pane, then the server (ending the request), then
+/// the fixture (reaping the worker) drop, so no worker outlives the
+/// fixture's directory, and the failure reaches the harness unchanged.
+#[test]
+#[serial(level2_terminal)]
+fn level2_a_failed_assertion_in_a_held_pr_scene_still_reaps_the_worker() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+
+    let mut workers = Vec::new();
+    let mut directory = None;
+    let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let fixture = DesignFixture::with_gitea_pr_age(Duration::from_secs(12 * 60 + 5));
+        let gitea = FakeGitea::new(GiteaReply::Status(503));
+        gitea.hold();
+        let mut harness = fixture.start_in_pane(None, "list", "15;0", &gitea.url());
+        wait_for_pane(&mut harness, |plain| unwrapped(plain).contains("force refresh immediately"));
+        assert_eq!(gitea.waiting(), 1, "the PR request is still held");
+        workers = perf_support::refresh_workers(&fixture.main).iter().map(|worker| worker.pid).collect();
+        directory = Some(fixture.main.clone());
+        // Answered only after this stall: the worker outlives the release,
+        // so only a teardown that waits for it can pass.
+        gitea.before_reply(|| std::thread::sleep(Duration::from_secs(2)));
+        panic!("{}", perf_support::MANUFACTURED_FAILURE);
+    }));
+
+    perf_support::assert_manufactured_failure(unwound);
+    assert_eq!(workers.len(), 1, "the listing returned with its worker held");
+    for pid in workers {
+        assert!(!perf_support::process_running(pid), "worker {pid} outlived the fixture");
+    }
+    let directory = directory.expect("the fixture was built");
+    assert!(!directory.exists(), "{directory:?} outlived the fixture");
 }
 
 /// A PR request that fails inside the wait leaves the stored badge and dates
@@ -1167,6 +1225,65 @@ fn level2_list_spinner_shows_the_rate_limited_fallback_in_tmux() {
 
     gitea.release(GiteaReply::Open(Vec::new()));
     let screen = StyledScreen::parse(&wait_for_pane(&mut harness, |plain| plain.contains("parent deleted")).raw);
+    assert_spinner_cleared_before_caption(&screen, "main  is 2 commits behind");
+
+    assert_worker_gone(&fixture);
+}
+
+/// `wt list -r`'s PR retry, in a real pane. The test holds the PR lock, as
+/// a worker whose request is in flight would, so the listing's first worker
+/// finds the PRs contended while its head shows the no-key fallback (its
+/// `ls-remote` held), then fetches `origin`'s new commit, and the spinner
+/// says `updating` while the wait follows the lock. The lock is then released
+/// with nothing published, as when its holder fails, so the listing
+/// relaunches; the replacement's head shows the fallback again while its
+/// `ls-remote` is held, and once that head finishes with the replacement's
+/// PR request still held at the stand-in, the spinner must go back to one
+/// `updating` line rather than keep the finished fallback. Released, the
+/// spinner is gone before the caption.
+#[test]
+#[serial(level2_terminal)]
+fn level2_list_spinner_returns_to_updating_after_a_pr_retrys_head_finishes_in_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+
+    let fixture = DesignFixture::with_gitea_repository();
+    let gitea = FakeGitea::new(GiteaReply::Open(Vec::new()));
+    gitea.serve_repositories(fixture.git_root());
+    gitea.hold();
+    gitea.hold_git(GitHold::All);
+    // `std`'s file lock is the same `flock` the worker's sidecar lock takes.
+    let holder = fs::File::create(pr_lock_path(&fixture.pr_store())).expect("create the PR lock sidecar");
+    holder.try_lock().expect("the test holds the PR lock");
+
+    let mut harness = fixture.start_in_pane(None, "list -r", "15;0", &gitea.url());
+    assert!(gitea.wait_for_git_waiting(1, Duration::from_secs(15)), "the first head's ls-remote reached git");
+    let first = wait_for_pane(&mut harness, |plain| plain.contains("no API key, using fallback method"));
+    assert_one_spinner_line(&first.plain, "no API key, using fallback method");
+
+    // The first head fetches and finishes; the PRs are still contended.
+    gitea.hold_git(GitHold::None);
+    let waiting = wait_for_pane(&mut harness, |plain| plain.contains("updating"));
+    assert_one_spinner_line(&waiting.plain, "updating");
+    assert_eq!(gitea.requests(), 0, "the contended worker asked for no PRs");
+
+    // The holder gives up with nothing published: the listing retries both
+    // halves.
+    gitea.hold_git(GitHold::All);
+    drop(holder);
+    assert!(gitea.wait_for_git_waiting(1, Duration::from_secs(15)), "the replacement's ls-remote reached git");
+    let replacement = wait_for_pane(&mut harness, |plain| plain.contains("no API key, using fallback method"));
+    assert_one_spinner_line(&replacement.plain, "no API key, using fallback method");
+
+    // The replacement's head finishes; its PR request is still held.
+    gitea.hold_git(GitHold::None);
+    let pr_only = wait_for_pane(&mut harness, |plain| plain.contains("updating"));
+    assert_one_spinner_line(&pr_only.plain, "updating");
+    assert_eq!(gitea.requests(), 1, "the replacement asked for PRs");
+
+    gitea.release(GiteaReply::Open(Vec::new()));
+    let screen = StyledScreen::parse(&wait_for_pane(&mut harness, |plain| plain.contains("parent deleted")).raw);
+    // The first head's fetch put `main` two behind; the replacement found it
+    // current.
     assert_spinner_cleared_before_caption(&screen, "main  is 2 commits behind");
 
     assert_worker_gone(&fixture);
