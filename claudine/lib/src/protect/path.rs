@@ -56,10 +56,21 @@ pub struct SensitivePathChecker {
 }
 
 impl SensitivePathChecker {
+    /// A checker whose home-based prefixes and `~` expansion use the home
+    /// captured here, once, from [`biscuit_file::home_dir`].
+    ///
+    /// That home comes from the process environment, which is an input
+    /// chosen by whoever launched the process, not proof of a trusted
+    /// filesystem boundary.
     pub fn new() -> Self {
         Self {
-            home_dir: dirs::home_dir(),
+            home_dir: biscuit_file::home_dir(),
         }
+    }
+
+    /// The captured home every check of this checker uses.
+    pub fn home_dir(&self) -> Option<&Path> {
+        self.home_dir.as_deref()
     }
 
     #[cfg(test)]
@@ -71,7 +82,7 @@ impl SensitivePathChecker {
 
     /// Returns true if the path is under a sensitive prefix.
     pub fn is_sensitive(&self, path: &str) -> bool {
-        let normalized = normalize_path(path);
+        let normalized = normalize_path(path, self.home_dir());
         let normalized = canonicalize_native_spelling(&normalized);
         let path_str = normalized.to_string_lossy();
         let path_str = normalize(&path_str);
@@ -104,15 +115,16 @@ impl Default for SensitivePathChecker {
     }
 }
 
-/// Normalize a path: expand ~, resolve . and .. lexically.
-pub fn normalize_path(path: &str) -> PathBuf {
+/// Normalize a path: expand `~` against `home`, resolve `.` and `..`
+/// lexically. With no home, a `~` path is left unexpanded.
+pub fn normalize_path(path: &str, home: Option<&Path>) -> PathBuf {
     let expanded = if let Some(rest) = path.strip_prefix("~/") {
-        match dirs::home_dir() {
+        match home {
             Some(home) => home.join(rest),
             None => PathBuf::from(path),
         }
     } else if path == "~" {
-        dirs::home_dir().unwrap_or_else(|| PathBuf::from(path))
+        home.map_or_else(|| PathBuf::from(path), Path::to_path_buf)
     } else {
         PathBuf::from(path)
     };
@@ -241,7 +253,8 @@ pub fn is_path_allowed(target: &str, allow_paths: &[String]) -> bool {
 
 fn canonical_comparison(path: &str) -> String {
     if is_native_absolute_spelling(path) {
-        let canonical = canonicalize_existing_ancestor(&normalize_path(path));
+        // A native absolute spelling never starts with `~`, so no home is needed.
+        let canonical = canonicalize_existing_ancestor(&normalize_path(path, None));
         normalize(&canonical.to_string_lossy()).into_owned()
     } else {
         path.to_owned()
@@ -294,7 +307,7 @@ mod tests {
     #[test]
     fn home_relative_sensitive_paths_are_detected() {
         let checker = SensitivePathChecker::new();
-        let home = dirs::home_dir().unwrap();
+        let home = biscuit_file::home_dir().unwrap();
         let ssh_config = home.join(".ssh/config");
         assert!(checker.is_sensitive(ssh_config.to_str().unwrap()));
         let gnupg = home.join(".gnupg/pubring.kbx");
@@ -323,10 +336,22 @@ mod tests {
     }
 
     #[test]
-    fn tilde_path_is_expanded() {
-        let normalized = normalize_path("~/.ssh/config");
-        let home = dirs::home_dir().unwrap();
-        assert_eq!(normalized, home.join(".ssh/config"));
+    fn tilde_path_is_expanded_against_the_given_home() {
+        let home = PathBuf::from("/fixture/home");
+        assert_eq!(normalize_path("~/.ssh/config", Some(&home)), home.join(".ssh/config"));
+        assert_eq!(normalize_path("~", Some(&home)), home);
+        assert_eq!(normalize_path("~/.ssh/config", None), PathBuf::from("~/.ssh/config"));
+    }
+
+    #[test]
+    fn a_checker_expands_tilde_against_its_captured_home_only() {
+        let home = PathBuf::from(if cfg!(windows) { r"C:\fixture\home" } else { "/fixture/home" });
+        let fixture = SensitivePathChecker::with_home_dir(home.clone());
+        assert_eq!(fixture.home_dir(), Some(home.as_path()));
+        assert!(fixture.is_sensitive("~/.ssh/config"));
+        assert!(fixture.is_sensitive(home.join(".ssh").join("config").to_str().unwrap()));
+        let elsewhere = home.with_file_name("elsewhere").join(".ssh").join("config");
+        assert!(!fixture.is_sensitive(elsewhere.to_str().unwrap()));
     }
 
     #[test]
@@ -435,7 +460,7 @@ mod tests {
     #[test]
     fn exact_home_sensitive_directory_roots_are_detected() {
         let checker = SensitivePathChecker::new();
-        let home = dirs::home_dir().unwrap();
+        let home = biscuit_file::home_dir().unwrap();
         assert!(
             checker.is_sensitive(&format!("{}/.ssh", home.display())),
             "~/.ssh should be sensitive"
@@ -488,7 +513,7 @@ mod tests {
     #[test]
     fn home_credential_paths_are_sensitive() {
         let checker = SensitivePathChecker::new();
-        let home = dirs::home_dir().unwrap();
+        let home = biscuit_file::home_dir().unwrap();
         assert!(checker.is_sensitive(&format!("{}/.aws/credentials", home.display())));
         assert!(checker.is_sensitive(&format!("{}/.kube/config", home.display())));
         assert!(checker.is_sensitive(&format!("{}/.docker/config.json", home.display())));

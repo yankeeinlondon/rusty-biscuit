@@ -427,7 +427,7 @@ fn standard_discovery_repo_fallback() {
 
 #[test]
 fn standard_discovery_user_home_fallback() {
-    // Note: This test has limitations because we cannot easily mock dirs::home_dir().
+    // Note: This test has limitations because we cannot easily mock biscuit_file::home_dir().
     // We test the case where no local files exist, which should either:
     // 1. Return None if ~/.claudine/system-prompt.md doesn't exist (normal test env)
     // 2. Return Some with User scope if it does exist (real user environment)

@@ -72,7 +72,13 @@ pub(super) enum RequeueEnqueueError {
 /// 2. `<config_dir>/claudine/rendezvous/` via the `dirs` crate (per-user,
 ///    cross-platform: `~/Library/Application Support` on macOS,
 ///    `~/.config` on Linux, `%APPDATA%` on Windows).
-/// 3. `~/.claudine/rendezvous/` as a last-resort home-dir fallback.
+/// 3. `<home>/claudine/rendezvous/` (home from [`biscuit_file::home_dir`]) as
+///    a last resort when the platform reports no config directory.
+///
+/// Step 2 is an intentional OS-folder policy, not home-based: on native
+/// Windows `%APPDATA%` comes from the known-folder API, so a test that
+/// relocates `USERPROFILE` must also set step 1 to keep the file inside its
+/// fixture.
 #[allow(dead_code)] // retained for the future rendezvous deferred-execution backend
 pub(super) fn requeue_fallback_dir() -> Option<std::path::PathBuf> {
     if let Some(explicit) = std::env::var_os(REQUEUE_FALLBACK_DIR_ENV)
@@ -80,7 +86,7 @@ pub(super) fn requeue_fallback_dir() -> Option<std::path::PathBuf> {
     {
         return Some(std::path::PathBuf::from(explicit));
     }
-    let base = dirs::config_dir().or_else(dirs::home_dir)?;
+    let base = dirs::config_dir().or_else(biscuit_file::home_dir)?;
     Some(base.join("claudine").join("rendezvous"))
 }
 

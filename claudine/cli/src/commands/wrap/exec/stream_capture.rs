@@ -39,7 +39,7 @@ fn capture_dir_from_env() -> Option<PathBuf> {
         return None;
     }
     let expanded = if let Some(rest) = trimmed.strip_prefix("~/") {
-        dirs::home_dir().map(|h| h.join(rest))?
+        biscuit_file::home_dir().map(|h| h.join(rest))?
     } else {
         PathBuf::from(trimmed)
     };

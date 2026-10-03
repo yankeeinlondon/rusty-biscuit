@@ -53,7 +53,7 @@ fn bash_safe_command_is_allowed() {
 #[test]
 fn write_to_ssh_config_is_blocked() {
     let service = default_service();
-    let home = dirs::home_dir().unwrap();
+    let home = biscuit_file::home_dir().unwrap();
     let ssh_path = format!("{}/.ssh/config", home.display());
     let decision = service.evaluate(&ProtectRequest::WritePath {
         paths: vec![&ssh_path],
@@ -94,7 +94,7 @@ fn windows_sensitive_path_allow_rule_reaches_protect_service() {
 #[test]
 fn write_paths_array_blocks_when_any_path_is_sensitive() {
     let service = default_service();
-    let home = dirs::home_dir().unwrap();
+    let home = biscuit_file::home_dir().unwrap();
     let ssh_path = format!("{}/.ssh/config", home.display());
     // First entry is benign; the sensitive second entry must still block.
     let decision = service.evaluate(&ProtectRequest::WritePath {
@@ -226,7 +226,7 @@ fn rm_boot_blocked_even_with_boot_in_allow_paths() {
 #[test]
 fn relative_path_traversal_to_ssh_is_blocked() {
     let service = default_service();
-    let home = dirs::home_dir().unwrap();
+    let home = biscuit_file::home_dir().unwrap();
     let cwd = format!("{}/projects/myapp", home.display());
     let decision = service.evaluate(&ProtectRequest::WritePath {
         paths: vec!["../../.ssh/config"],
@@ -344,7 +344,7 @@ fn write_to_non_allowed_sensitive_path_is_still_blocked() {
 #[test]
 fn symlinked_cwd_to_home_blocks_write_to_ssh() {
     let tmp = tempfile::tempdir().unwrap();
-    let home = dirs::home_dir().unwrap();
+    let home = biscuit_file::home_dir().unwrap();
 
     // Create symlink: tmp/home-link -> $HOME
     let home_link = tmp.path().join("home-link");
