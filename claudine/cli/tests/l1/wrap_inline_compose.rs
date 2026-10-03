@@ -317,7 +317,9 @@ fn inline_compose_keeps_agent_frontmatter_and_refuses_a_malformed_document() {
         ),
         (
             "---\nprompt: [\n---\nReplacement body\n",
-            Err("could not reconcile the inline document"),
+            // Malformed YAML is refused before restoring, attributed to the
+            // agent's edit.
+            Err("agent frontmatter rejected"),
         ),
     ] {
         let fixture = CliProcessFixture::named("inline-compose-frontmatter-drift");

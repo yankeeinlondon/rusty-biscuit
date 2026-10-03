@@ -335,7 +335,9 @@ fn iter_with_value_expressions<'a>(
     surfaces: &mut Vec<LifecycleExpressionSurface<'a>>,
 ) {
     match value {
-        ProxyWithValue::Null => {}
+        // A shell value's `{{ … }}` spans are resolved, and late-binding roots
+        // refused, when preflight fixes its command bytes.
+        ProxyWithValue::Null | ProxyWithValue::Shell(_) => {}
         ProxyWithValue::Scalar(expr) => surfaces.push(LifecycleExpressionSurface {
             path: prefix.clone(),
             signal,
@@ -355,479 +357,80 @@ fn iter_with_value_expressions<'a>(
     }
 }
 
-/// Visit every `Expr::StringLiteral` reachable in the expression tree,
-/// depth-first, calling `visitor` with the literal's value.
+/// Validates that no lifecycle expression reads a global its event declares
+/// unavailable, in any branch.
 ///
-/// Used by the `err`-availability scan to find `{{ … }}` spans inside parsed
-/// expression literals (e.g. `say('failed: {{ err.msg }}')`).
+/// A thin adapter over Darkmatter's passive validation: each event's
+/// [`bindings::binding_view`] declares `err` unavailable in `initialize`,
+/// `start`, `success`, and `loop` (`claudine.event-has-no-error`), and every
+/// authored surface — top-level communication fields and the stack surfaces
+/// [`iter_stack_expression_surfaces`] yields — is prepared from its authored
+/// text and checked against that view. Group membership is not known yet, so
+/// `group` is deferred to runtime. `doc.err` reads the document everywhere.
+/// Nothing is evaluated and no provider runs.
 ///
-/// Object-literal *keys* are visited alongside the values. A key is authored
-/// text that reaches the dispatched value verbatim, so a `{{ err.msg }}` span
-/// in a key counts the same as one in the value position.
-fn visit_string_literals<F: FnMut(&str)>(expr: &Expr, visitor: &mut F) {
-    match expr {
-        Expr::StringLiteral(s) => visitor(s),
-        Expr::ArrayLiteral(elements) => {
-            for element in elements {
-                visit_string_literals(element, visitor);
-            }
-        }
-        Expr::ObjectLiteral(entries) => {
-            for (key, value) in entries {
-                visitor(key);
-                visit_string_literals(value, visitor);
-            }
-        }
-        Expr::Variable(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => {}
-        Expr::UnaryNot(inner) | Expr::UnaryMinus(inner) | Expr::Paren(inner) => {
-            visit_string_literals(inner, visitor);
-        }
-        Expr::Binary { left, right, .. } | Expr::Comparison { left, right, .. } => {
-            visit_string_literals(left, visitor);
-            visit_string_literals(right, visitor);
-        }
-        Expr::Index { base, index } => {
-            visit_string_literals(base, visitor);
-            visit_string_literals(index, visitor);
-        }
-        Expr::MemberAccess { base, .. } => visit_string_literals(base, visitor),
-        Expr::FunctionCall { args, .. } => {
-            for arg in args {
-                visit_string_literals(arg, visitor);
-            }
-        }
-        Expr::Fallback { primary, fallback } => {
-            visit_string_literals(primary, visitor);
-            visit_string_literals(fallback, visitor);
-        }
-        Expr::Ternary {
-            condition,
-            then_branch,
-            else_branch,
-        } => {
-            visit_string_literals(condition, visitor);
-            visit_string_literals(then_branch, visitor);
-            visit_string_literals(else_branch, visitor);
-        }
-    }
-}
-
-/// Validates that no raw lifecycle string references a bare variable that is
-/// undefined after composition, and that no lifecycle stack expression
-/// references an undefined bare variable.
+/// A surface whose authored text does not parse is left to the event-time
+/// failure that reports it; an unknown function is likewise reported when the
+/// event evaluates it.
 ///
-/// Darkmatter resolves an unknown bare variable to an empty string with no
-/// warning and no error — even in fail-fast mode (see
-/// `frontmatter_interpolation::missing_variable_resolves_to_empty`). So the
-/// event-time leak guard, which only scans the *rendered* string for surviving
-/// spans, never sees the collapsed reference. This guard closes that gap by inspecting the **raw**
-/// (pre-composition) lifecycle strings, where the `{{ … }}` span is still
-/// present, and resolving each bare variable against the composed frontmatter.
+/// ## Errors
 ///
-/// The stack-expression half walks the parsed `Expr` trees on
-/// [`LifecycleConfig::stacks`]. Bare names in stack expressions resolve
-/// against the composed frontmatter plus the late-binding roots
-/// (`err`, `timing`, `current`, `current_env`) and the runtime namespaces
-/// (`ctx`, `env`, `doc`); a bare name not in any of those is reported as
-/// undefined.
-///
-/// Every bare variable reachable in the parsed expression tree is checked, not
-/// just spans that are exactly `{{ variable }}`: a missing operand buried in a
-/// function argument (`{{ parent_dir(missing) }}`), comparison, or arithmetic
-/// node is rejected the same way a top-level `{{ missing }}` is. A ternary
-/// condition (`{{ missing ? 'a' : 'b' }}`) is descended because it is evaluated,
-/// but the ternary branch operands and fallback (`{{ x || 'y' }}`) subtrees
-/// intentionally tolerate undefined operands, so they are skipped. `ctx.*` /
-/// `env.*` / `doc` references resolve from outside the frontmatter and are
-/// skipped — a bare name resolves only against top-level frontmatter keys.
-///
-/// Iterates events in [`LifecycleSignal::ALL`] order and communication fields
-/// in [`LIFECYCLE_COMM_FIELDS`] order; the first undefined variable aborts
-/// with [`CompositionError::LifecycleUndefinedVariable`].
-///
-/// ## Arguments
-///
-/// * `raw_frontmatter` — the pre-composition frontmatter holding the original
-///   lifecycle strings (`{{ … }}` spans intact).
-/// * `effective_frontmatter` — the composed frontmatter object; a bare
-///   variable is "defined" when its root segment is one of these keys.
-/// * `lifecycle` — the parsed lifecycle configuration with typed stacks.
-/// * `source_path` — prompt file, used for the diagnostic.
-pub fn validate_no_undefined_lifecycle_variables(
-    raw_frontmatter: &darkmatter::markdown::Frontmatter,
-    effective_frontmatter: &serde_json::Value,
+/// [`CompositionError::LifecycleErrNotAvailable`] for the first surface, in
+/// [`LifecycleSignal::ALL`] order, that reads an unavailable global, carrying
+/// Darkmatter's typed unavailable-binding error as its source.
+pub fn validate_no_err_in_no_error_events(
+    frontmatter: &serde_json::Value,
     lifecycle: &LifecycleConfig,
     source_path: &Path,
 ) -> Result<(), CompositionError> {
-    let raw_map = raw_frontmatter.as_map();
-    let defined = effective_frontmatter.as_object();
-
-    // Top-level communication fields across all seven events.
+    let sources = LifecycleSourceMap::from_frontmatter(frontmatter);
+    let surfaces = iter_stack_expression_surfaces(lifecycle);
     for signal in LifecycleSignal::ALL {
-        let Some(serde_json::Value::Object(notification)) = raw_map.get(signal.property_name())
-        else {
-            continue;
-        };
-
-        for field in LIFECYCLE_COMM_FIELDS {
-            let Some(serde_json::Value::String(text)) = notification.get(*field) else {
-                continue;
-            };
-
-            for span in ExpressionFinder::find_all_plain(text) {
-                let Ok(expr) = parse(&span.expression) else {
-                    continue;
-                };
-                if let Some(variable) = find_undefined_top_level_variable(&expr, defined) {
-                    return Err(CompositionError::LifecycleUndefinedVariable {
-                        source_path: source_path.to_path_buf(),
-                        property: format!("{}.{}", signal.property_name(), field),
-                        variable: variable.to_string(),
-                    });
+        let view = bindings::binding_view(
+            bindings::LifecycleScope::Event(signal),
+            bindings::GroupMembership::Unknown,
+        );
+        let mut authored: Vec<(String, &str, AuthoredMode)> = Vec::new();
+        if let Some(notification) = lifecycle.get(signal) {
+            for (field, value) in notification_comm_fields(notification) {
+                if let Some(text) = value {
+                    authored.push((
+                        format!("{}.{field}", signal.property_name()),
+                        text,
+                        AuthoredMode::InterpolatedValue,
+                    ));
                 }
             }
         }
-    }
-
-    // Stack expression surfaces: walk parsed Expr trees for bare undefined
-    // references. The lifecycle globals (err, timing, current, current_env) and runtime
-    // namespaces (ctx, env, doc) are always considered defined here —
-    // bare `err` misuse in no-error events is caught separately by
-    // [`validate_no_err_in_no_error_events`].
-    for surface in iter_stack_expression_surfaces(lifecycle) {
-        if let Some(variable) = find_undefined_stack_variable(surface.expr, defined) {
-            return Err(CompositionError::LifecycleUndefinedVariable {
-                source_path: source_path.to_path_buf(),
-                property: surface.path.to_string(),
-                variable: variable.to_string(),
-            });
+        for surface in surfaces.iter().filter(|surface| surface.signal == signal) {
+            if let Some(AuthoredValue::Text(text)) = sources.get(&surface.path) {
+                let mode = if surface.predicate {
+                    AuthoredMode::Expression(ParseMode::Condition)
+                } else {
+                    AuthoredMode::InterpolatedValue
+                };
+                authored.push((surface.path.to_string(), text, mode));
+            }
         }
-    }
-
-    Ok(())
-}
-
-/// Recursively walks `expr`, returning the first frontmatter-scoped bare
-/// variable whose root key is undefined in the composed frontmatter.
-///
-/// Used for top-level communication fields. The runtime namespaces
-/// (`ctx`/`env`/`doc`) and the lifecycle late-binding globals
-/// ([`LATE_BINDING_ROOTS`]: `err`/`timing`/`current`/`current_env`) are known roots — they
-/// resolve at event-time, not against frontmatter — so a bare `err`/`timing`/
-/// `current` is not flagged. Only genuinely-unknown roots (typos) are reported.
-///
-/// A ternary condition is descended because it is evaluated during composition,
-/// but the ternary branch operands and fallback (`||`) subtrees are not: those
-/// forms exist precisely to tolerate an undefined operand, so a miss inside them
-/// is intentional, not a leak. Every other node — function-call arguments,
-/// comparisons, arithmetic, indexing, member access, unary, parens — is
-/// descended so an undefined variable buried in `parent_dir(missing)` is caught
-/// like a top-level `{{ missing }}`. The returned reference borrows from `expr`.
-fn find_undefined_top_level_variable<'a>(
-    expr: &'a Expr,
-    defined: Option<&serde_json::Map<String, serde_json::Value>>,
-) -> Option<&'a str> {
-    match expr {
-        Expr::Variable(path) => undefined_bare_variable(path, defined),
-        // Ternary conditions are evaluated, but the branches intentionally
-        // tolerate undefined operands by design.
-        Expr::Ternary { condition, .. } => {
-            find_undefined_top_level_variable(condition, defined)
-        }
-        Expr::Fallback { .. } => None,
-        Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => None,
-        Expr::UnaryNot(inner) | Expr::UnaryMinus(inner) | Expr::Paren(inner) => {
-            find_undefined_top_level_variable(inner, defined)
-        }
-        Expr::Binary { left, right, .. } | Expr::Comparison { left, right, .. } => {
-            find_undefined_top_level_variable(left, defined)
-                .or_else(|| find_undefined_top_level_variable(right, defined))
-        }
-        Expr::Index { base, index } => {
-            find_undefined_top_level_variable(base, defined)
-                .or_else(|| find_undefined_top_level_variable(index, defined))
-        }
-        Expr::MemberAccess { base, .. } => find_undefined_top_level_variable(base, defined),
-        Expr::FunctionCall { args, .. } => args
-            .iter()
-            .find_map(|arg| find_undefined_top_level_variable(arg, defined)),
-        // Every element of a container literal is evaluated, so an undefined
-        // operand inside `[missing]` is caught like a top-level `{{ missing }}`.
-        // Object keys are authored text and reference nothing.
-        Expr::ArrayLiteral(elements) => elements
-            .iter()
-            .find_map(|element| find_undefined_top_level_variable(element, defined)),
-        Expr::ObjectLiteral(entries) => entries
-            .iter()
-            .find_map(|(_, value)| find_undefined_top_level_variable(value, defined)),
-    }
-}
-
-/// Like [`find_undefined_top_level_variable`] but for stack expression
-/// surfaces, where the late-binding roots (`err`, `timing`, `current`,
-/// `current_env`) and the runtime namespaces (`ctx`, `env`, `doc`) are always
-/// defined.
-///
-/// Stack `when:` clauses are parsed in condition mode, so `||`/`&&` lower to
-/// `or(...)`/`and(...)` function calls rather than `Expr::Fallback`. Those two
-/// functions get the same skip-the-operands tolerance a `Fallback` does — they
-/// exist to guard an undefined operand.
-fn find_undefined_stack_variable<'a>(
-    expr: &'a Expr,
-    defined: Option<&serde_json::Map<String, serde_json::Value>>,
-) -> Option<&'a str> {
-    match expr {
-        Expr::Variable(path) => undefined_stack_variable(path, defined),
-        Expr::Ternary { condition, .. } => find_undefined_stack_variable(condition, defined),
-        Expr::Fallback { .. } => None,
-        Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => None,
-        Expr::UnaryNot(inner) | Expr::UnaryMinus(inner) | Expr::Paren(inner) => {
-            find_undefined_stack_variable(inner, defined)
-        }
-        Expr::Binary { left, right, .. } | Expr::Comparison { left, right, .. } => {
-            find_undefined_stack_variable(left, defined)
-                .or_else(|| find_undefined_stack_variable(right, defined))
-        }
-        Expr::Index { base, index } => {
-            find_undefined_stack_variable(base, defined)
-                .or_else(|| find_undefined_stack_variable(index, defined))
-        }
-        Expr::MemberAccess { base, .. } => find_undefined_stack_variable(base, defined),
-        // `or`/`and` are the condition-parse-mode (`parse_condition`) lowering of
-        // `||`/`&&`. Like an interpolation-mode `Expr::Fallback`, they exist to
-        // tolerate an undefined/falsy operand by design (`maybe_missing || false`
-        // is a guarded optional, not a typo), so their operands are not scanned.
-        Expr::FunctionCall { name, .. } if name == "or" || name == "and" => None,
-        Expr::FunctionCall { args, .. } => args
-            .iter()
-            .find_map(|arg| find_undefined_stack_variable(arg, defined)),
-        // Every element of a container literal is evaluated, so an undefined
-        // operand inside `[missing]` is caught like a bare `missing`. Object
-        // keys are authored text and reference nothing.
-        Expr::ArrayLiteral(elements) => elements
-            .iter()
-            .find_map(|element| find_undefined_stack_variable(element, defined)),
-        Expr::ObjectLiteral(entries) => entries
-            .iter()
-            .find_map(|(_, value)| find_undefined_stack_variable(value, defined)),
-    }
-}
-
-/// Returns the first frontmatter-scoped bare variable in `expr` whose root key
-/// is undefined, applying the lifecycle-stack tolerance (`ctx`/`env`/`doc` and
-/// the late-binding roots `err`/`timing`/`current`/`current_env` are known; `||`
-/// fallbacks are skipped and only a ternary's condition is descended).
-///
-/// Exposed for the executor's event-time `when:` guard, which fails closed on a
-/// genuinely-unknown root rather than silently treating the guard as false.
-/// Returns `None` when every root resolves. The reference borrows from `expr`.
-pub(crate) fn first_undefined_stack_variable<'a>(
-    expr: &'a Expr,
-    defined: Option<&serde_json::Map<String, serde_json::Value>>,
-) -> Option<&'a str> {
-    find_undefined_stack_variable(expr, defined)
-}
-
-/// Whether `path`'s root resolves outside top-level frontmatter — the runtime
-/// namespaces (`ctx.*` / `env.*` / `doc`) or a lifecycle late-binding global
-/// ([`LATE_BINDING_ROOTS`]: `err`/`timing`/`current`/`current_env`).
-///
-/// Such a reference is never an undefined *frontmatter* variable, so the
-/// undefined scan skips it. A bare `err` *misuse* in a no-error event is caught
-/// separately by [`validate_no_err_in_no_error_events`].
-fn resolves_outside_frontmatter(path: &str) -> bool {
-    if path.starts_with("ctx.")
-        || path.starts_with("env.")
-        || path == "doc"
-        || path.starts_with("doc.")
-    {
-        return true;
-    }
-    let root = path.split('.').next().unwrap_or(path);
-    LATE_BINDING_ROOTS.contains(&root)
-}
-
-/// Returns the bare variable name when `path` is a frontmatter-scoped reference
-/// whose root segment is absent from the composed frontmatter, or `None` when
-/// it resolves elsewhere ([`resolves_outside_frontmatter`]) or its root key
-/// exists.
-///
-/// Nested misses (`{{ a.b }}` where `a` exists but `b` does not) are treated as
-/// defined: only the bare-root contract the spec describes is enforced.
-pub(super) fn undefined_bare_variable<'a>(
-    path: &'a str,
-    defined: Option<&serde_json::Map<String, serde_json::Value>>,
-) -> Option<&'a str> {
-    if resolves_outside_frontmatter(path) {
-        return None;
-    }
-    let root = path.split('.').next().unwrap_or(path);
-    if root.is_empty() {
-        return None;
-    }
-    match defined {
-        Some(map) if map.contains_key(root) => None,
-        _ => Some(root),
-    }
-}
-
-/// Identical to [`undefined_bare_variable`]: stack expression surfaces and
-/// top-level fields now share one known-root contract (`ctx`/`env`/`doc` plus
-/// the late-binding globals are known; only typos are flagged).
-fn undefined_stack_variable<'a>(
-    path: &'a str,
-    defined: Option<&serde_json::Map<String, serde_json::Value>>,
-) -> Option<&'a str> {
-    undefined_bare_variable(path, defined)
-}
-
-/// Validates that the lifecycle-stack-only `err` global is not referenced
-/// in events that never carry an error.
-///
-/// Per the spec's `err` static-scan rule:
-/// - `initialize`, `start`, `success`, and `loop` never carry an error, so
-///   any reference to the bare `err` global (or `err.*` member access) in
-///   their stack surfaces is faulty logic.
-/// - `blocked` and `failure` always carry an error; `finalize` optionally
-///   carries one. References in those events are allowed.
-/// - The `doc.err` escape hatch is exempt everywhere — it reaches a literal
-///   frontmatter property named `err`, not the lifecycle global.
-///
-/// Two kinds of surface are scanned in events that cannot carry an error:
-///
-/// - **Communication/action strings** (top-level `say`/`message`/`stderr`/…
-///   fields and single-parameter action message bodies) are literal text whose
-///   only path to the `err` global is a `{{ … }}` interpolation span. Each span
-///   is parsed and rejected when it references bare `err`.
-/// - **Expression surfaces** (`when:` clauses, multi-argument expression-verb
-///   args, control-action operands) evaluate the whole expression, so a bare
-///   `err` reference anywhere in the tree is rejected.
-///
-/// `timing`/`current` are allowed everywhere; `doc.err` remains the escape hatch
-/// (it reaches a literal frontmatter `err` property, not the lifecycle global).
-/// The first violation aborts with [`CompositionError::LifecycleErrNotAvailable`].
-pub fn validate_no_err_in_no_error_events(
-    lifecycle: &LifecycleConfig,
-    source_path: &Path,
-) -> Result<(), CompositionError> {
-    // Top-level communication fields: `err` reaches them only through a
-    // `{{ … }}` span, so scan each span rather than the whole string.
-    for signal in LifecycleSignal::ALL {
-        if signal.can_carry_error() {
-            continue;
-        }
-        let Some(notification) = lifecycle.get(signal) else {
-            continue;
-        };
-        for (field_name, value) in notification_comm_fields(notification) {
-            let Some(text) = value else { continue };
-            if literal_spans_reference_err(text) {
+        for (property, text, mode) in authored {
+            let Ok(prepared) = prepare_value(&serde_json::Value::String(text.to_string()), mode)
+            else {
+                continue;
+            };
+            let unavailable = validate_prepared(&prepared, &view)
+                .into_iter()
+                .find(|diagnostic| bindings::unavailable_root(&diagnostic.error).is_some());
+            if let Some(diagnostic) = unavailable {
                 return Err(CompositionError::LifecycleErrNotAvailable {
                     source_path: source_path.to_path_buf(),
-                    property: format!("{}.{}", signal.property_name(), field_name),
+                    property,
                     event: signal.property_name().to_string(),
+                    source: Some(Box::new(diagnostic.error)),
                 });
             }
         }
     }
-
-    // Stack surfaces: an expression surface is rejected for a bare `err`
-    // anywhere in its tree; a string literal (a single-parameter message body)
-    // is rejected for a bare `err` inside any of its `{{ … }}` spans.
-    for surface in iter_stack_expression_surfaces(lifecycle) {
-        if surface.signal.can_carry_error() {
-            continue;
-        }
-        if surface_references_err(surface.expr) {
-            return Err(CompositionError::LifecycleErrNotAvailable {
-                source_path: source_path.to_path_buf(),
-                property: surface.path.to_string(),
-                event: surface.signal.property_name().to_string(),
-            });
-        }
-    }
     Ok(())
-}
-
-/// Whether an expression surface references the lifecycle `err` global, either
-/// as a bare expression reference or inside a `{{ … }}` span of a string literal
-/// embedded in the tree (a single-parameter action message body).
-fn surface_references_err(expr: &Expr) -> bool {
-    if references_bare_err(expr) {
-        return true;
-    }
-    let mut found = false;
-    visit_string_literals(expr, &mut |literal| {
-        if !found && literal_spans_reference_err(literal) {
-            found = true;
-        }
-    });
-    found
-}
-
-/// Whether any `{{ … }}` span inside a literal communication/action string
-/// references the bare lifecycle `err` global.
-fn literal_spans_reference_err(literal: &str) -> bool {
-    ExpressionFinder::find_all_plain(literal).iter().any(|span| {
-        parse(&span.expression)
-            .map(|expr| references_bare_err(&expr))
-            .unwrap_or(false)
-    })
-}
-
-/// Returns `true` when the expression tree references the lifecycle `err`
-/// global as a bare name or member-access base.
-///
-/// `doc.err` (and any `doc.*` path) is exempt: the `doc` namespace reaches
-/// literal frontmatter, so `doc.err` is a property lookup, not a lifecycle
-/// global reference.
-fn references_bare_err(expr: &Expr) -> bool {
-    match expr {
-        Expr::Variable(path) => {
-            let root = path.split('.').next().unwrap_or(path);
-            root == "err"
-        }
-        Expr::MemberAccess { base, .. } => {
-            // `doc.anything` (including `doc.err`) is not a bare err
-            // reference — it reaches the frontmatter.
-            if let Expr::Variable(base_path) = base.as_ref() {
-                let root = base_path.split('.').next().unwrap_or(base_path);
-                if root == "doc" {
-                    return false;
-                }
-            }
-            references_bare_err(base)
-        }
-        Expr::UnaryNot(inner) | Expr::UnaryMinus(inner) | Expr::Paren(inner) => {
-            references_bare_err(inner)
-        }
-        Expr::Binary { left, right, .. } | Expr::Comparison { left, right, .. } => {
-            references_bare_err(left) || references_bare_err(right)
-        }
-        Expr::Index { base, index } => references_bare_err(base) || references_bare_err(index),
-        Expr::FunctionCall { args, .. } => args.iter().any(references_bare_err),
-        // A container literal references `err` when any element does, so
-        // `[err.msg]` in a no-error event is rejected like a bare `err.msg`.
-        // Object keys are authored text; a `{{ err … }}` span hiding in a key
-        // is caught by the literal-span scan in `surface_references_err`.
-        Expr::ArrayLiteral(elements) => elements.iter().any(references_bare_err),
-        Expr::ObjectLiteral(entries) => {
-            entries.iter().any(|(_, value)| references_bare_err(value))
-        }
-        Expr::Fallback { primary, fallback } => {
-            references_bare_err(primary) || references_bare_err(fallback)
-        }
-        Expr::Ternary {
-            condition,
-            then_branch,
-            else_branch,
-        } => {
-            references_bare_err(condition)
-                || references_bare_err(then_branch)
-                || references_bare_err(else_branch)
-        }
-        Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => false,
-    }
 }
 
 /// Collects the shell commands reachable from every lifecycle stack, for
@@ -842,7 +445,8 @@ fn references_bare_err(expr: &Expr) -> bool {
 /// audit posture).
 ///
 /// `on_error` commands are also collected because they execute on
-/// non-zero exit. Each entry's property path names the source location
+/// non-zero exit, and so are the preflight-resolved commands of every `set`
+/// shell value. Each entry's property path names the source location
 /// (e.g. `start.stack[1].action.command`).
 pub fn collect_lifecycle_shell_commands(
     lifecycle: &LifecycleConfig,
@@ -853,6 +457,42 @@ pub fn collect_lifecycle_shell_commands(
             let property = surface.path.to_string();
             if property.ends_with(".command") || property.ends_with(".on_error") {
                 commands.push((literal, property));
+            }
+        }
+    }
+    commands.extend(collect_set_shell_commands(lifecycle));
+    commands
+}
+
+/// The commands every lifecycle `set` shell value can run, one entry per
+/// chained command of each reachable pipeline, named by the value's property
+/// (e.g. `start.stack[0].action[1].set.sha`).
+///
+/// Only a value preflight resolved has known bytes; an unresolved one
+/// contributes nothing and refuses to run.
+fn collect_set_shell_commands(lifecycle: &LifecycleConfig) -> Vec<(String, String)> {
+    let mut commands = Vec::new();
+    for signal in LifecycleSignal::ALL {
+        let Some(stack) = lifecycle.stack(signal) else {
+            continue;
+        };
+        for (index, item) in stack.iter().enumerate() {
+            for (action_index, action) in item.actions.iter().enumerate() {
+                let LifecycleActionKind::RuntimeSet(set) = &action.kind else {
+                    continue;
+                };
+                for (key, shell) in set.shell_values() {
+                    let Some(resolved) = shell.resolved.as_ref() else {
+                        continue;
+                    };
+                    let property = format!(
+                        "{}.stack[{index}].action[{action_index}].set.{key}",
+                        signal.property_name()
+                    );
+                    for command in resolved.commands() {
+                        commands.push((command, property.clone()));
+                    }
+                }
             }
         }
     }
@@ -900,5 +540,6 @@ use super::*;
 use super::actions::ProxyWithValue;
 use super::source_map::{AuthoredValue, LifecycleSourceMap, LifecycleSurfacePath};
 use darkmatter::markdown::compose::expression::{
-    ExpressionLintKind, ParseMode, is_whole_value_span, lint_expression,
+    AuthoredMode, ExpressionLintKind, ParseMode, is_whole_value_span, lint_expression,
+    prepare_value, validate_prepared,
 };

@@ -48,7 +48,7 @@ fn parse_boolish(s: &str) -> Result<bool, String> {
     }
 }
 
-/// Entry point for `claudine sequence`.
+/// Entry point for `claudine sequence`; returns the process exit code.
 ///
 /// Errors returned here bubble up to the top-level walker in `main.rs`,
 /// which renders darkmatter `BlockError` reports for typed Markdown
@@ -57,17 +57,16 @@ pub fn run_sequence(
     args: SequenceArgs,
     verbose: u8,
     startup_timings: Option<crate::perf::StartupTimings>,
-) -> Result<()> {
-    let code = match args.budget_ledger.clone() {
+) -> Result<i32> {
+    match args.budget_ledger.clone() {
         Some(ledger) => {
             let shared = args.shared.clone();
             crate::budget::run_with_ledger(&ledger, &shared, || {
                 run_sequence_inner(args, verbose, startup_timings)
-            })?
+            })
         }
-        None => run_sequence_inner(args, verbose, startup_timings)?,
-    };
-    std::process::exit(code);
+        None => run_sequence_inner(args, verbose, startup_timings),
+    }
 }
 
 #[allow(clippy::result_large_err)]
@@ -236,7 +235,7 @@ fn run_sequence_inner(
     startup_timings: Option<crate::perf::StartupTimings>,
 ) -> Result<i32> {
     let SequenceArgs {
-        shared,
+        mut shared,
         args,
         fail_fast,
         budget_ledger: _,
@@ -258,8 +257,9 @@ fn run_sequence_inner(
     shared.step_timeout_secs()?;
     shared.stall_timeout_secs()?;
 
-    let parsed = super::compose::parse_composition_positionals(&args)?;
-    let file = parsed.file_ref.ok_or_else(|| {
+    // The clap positionals hold the file and any setters before it; the
+    // arguments after the file are owned once the file is read, below.
+    let file = super::compose::parse_composition_positionals(&args)?.file_ref.ok_or_else(|| {
         eyre!("missing file reference: expected exactly one file reference plus optional key=value setters")
     })?;
     let stderr_is_tty = std::io::stderr().is_terminal()
@@ -305,9 +305,19 @@ fn run_sequence_inner(
     // Derive the definitive source bundle from the same owner so a
     // top-level document selected from a different repository keeps that
     // repository's nested references (D2/D10, AC12). Downstream sequence
-    // surfaces receive the source-derived file-resolution projection.
-    let source_context = invocation.derive_source(&source.resolved_path)?;
+    // surfaces receive the source-derived file-resolution projection. A
+    // `~`/`{{VAR}}` argument can supply its tree root.
+    let source_context = invocation.derive_composition_source(&source)?;
     let file_resolution_context = source_context.file_resolution_context().clone();
+    // Owned against the sequence document as authored (its own `$schema` and
+    // `agent`); per-step providers never narrow the candidates.
+    let owned_tokens = super::compose::ownership::own_caller_arguments(
+        &mut shared,
+        &source,
+        &file_resolution_context,
+        Some(invocation.launch_cwd()),
+    )?;
+    let parsed = super::compose::parse_composition_positionals(&[args, owned_tokens].concat())?;
 
     reject_sequence_interactive(&source)?;
     // A `kind: group`/`group-catalog`/`task` document is never directly
@@ -359,7 +369,11 @@ fn run_sequence_inner(
     }
 
     let set_overrides =
-        super::compose::merge_set_overrides(shared.set.as_deref(), parsed.shorthand_setters)?;
+        super::compose::merge_set_overrides(
+            shared.set.as_deref(),
+            parsed.shorthand_setters,
+            parsed.positionals,
+        )?;
     let caller_input_records =
         claudine::composition::CallerInputLayers::from_caller_overrides(
             set_overrides.clone(),
@@ -448,8 +462,9 @@ mod tests {
             perf: false,
             max_iterations: None,
             on_rate_limit: None,
-            provider_args: Vec::new(),
-            provider_args_explicit: false,
+            caller_arguments: Default::default(),
+            provider_tail: Default::default(),
+            provider_tail_notices: Default::default(),
         }
     }
 

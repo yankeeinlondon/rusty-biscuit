@@ -1,6 +1,6 @@
 //! The `wt list` output around the git work: the caption, the credentials
-//! line, the table, the legend, the PR age line, the refresh hint, and the
-//! closing notes, plus [`assemble`], which puts them and the graph and
+//! line, the table, the legend, the status list (this run's PR item and the
+//! refresh hint), and the closing notes, plus [`assemble`], which puts them and the graph and
 //! verbose sections in their order.
 //!
 //! Rendering is pure over the library's listing facts and an explicit `now`,
@@ -23,6 +23,7 @@ use biscuit_terminal::components::renderable::TerminalRenderable as _;
 use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
 use biscuit_terminal::discovery::detection::ColorMode;
 use biscuit_terminal::terminal::Terminal;
+use biscuit_terminal::utils::block_constraint::visible_width;
 use biscuit_terminal::utils::color::{BasicColor, Color, RgbColor};
 use biscuit_terminal::utils::wrap_policy::WordWrap;
 use worktree::default_target::DefaultTarget;
@@ -56,8 +57,11 @@ pub struct TableFacts<'a> {
     pub remote: Option<RemoteFacts<'a>>,
     /// The §5 line, only for a condition this run observed.
     pub credential_line: Option<CredentialLine>,
-    /// The listing rendered while the worker was still working (§6).
-    pub unfinished: bool,
+    /// This run's PR half; `None` without an `origin`, or when the answer it
+    /// would describe belongs to an `origin` that changed during the wait.
+    pub pr_outcome: Option<PrOutcome>,
+    /// The wait ran out before both halves had a result (§6 hint).
+    pub timed_out: bool,
     /// §9: set only after a completed check or fetch, with the default
     /// branch strictly behind.
     pub ff_suggestion: Option<FfSuggestion>,
@@ -65,6 +69,24 @@ pub struct TableFacts<'a> {
     pub ff_notice: Option<FfNotice>,
     /// §8: the variables that would let `wt` use the provider API.
     pub fallback_notice: Option<Vec<String>>,
+}
+
+/// What this run's PR half came to, for the badges and the status list. The
+/// stored answer ([`TableFacts::prs`]) tells a failure with an answer from
+/// one with nothing stored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrOutcome {
+    /// A successful publication was observed within the wait, this run's or
+    /// a shared one; an empty answer clears the badges.
+    Published,
+    /// The repository is in `~/.wt.json`: no badges.
+    Ignored,
+    /// `origin` has no provider to ask: no badges. Not a failure.
+    Unsupported,
+    /// Still running when the wait ended.
+    Pending,
+    /// The refresh failed, or its result could not be observed.
+    Failed,
 }
 
 /// What the caption can say about `origin`'s default branch.
@@ -159,7 +181,8 @@ impl<'a> TableFacts<'a> {
             prs,
             remote,
             credential_line: None,
-            unfinished: false,
+            pr_outcome: None,
+            timed_out: false,
             ff_suggestion: None,
             ff_notice: None,
             fallback_notice: None,
@@ -167,10 +190,10 @@ impl<'a> TableFacts<'a> {
     }
 }
 
-/// The caption, the §5 line, the table, the legend, and the PR age line,
-/// each separated as printed.
+/// The caption, the §5 line, the table, and the legend, each separated as
+/// printed.
 ///
-/// `now` is Unix seconds, for the PR and remote-observation ages.
+/// `now` is Unix seconds, for the remote-observation ages.
 pub fn render(facts: &TableFacts<'_>, terminal: &Terminal, now: u64) -> String {
     let prose = |markup: String| Prose::new(markup).render(terminal);
     let wrapped = |markup: String| {
@@ -194,15 +217,33 @@ pub fn render(facts: &TableFacts<'_>, terminal: &Terminal, now: u64) -> String {
     for line in legend_markup() {
         out.push_str(&format!(" {}\n", prose(line).trim_end()));
     }
-    if let Some(age) = pr_age_markup(facts.prs, now) {
-        out.push_str(&format!(" {}\n", prose(age).trim_end()));
-    }
     out
 }
 
-/// The §6 hint, when the listing rendered with work unfinished.
-pub fn render_hint(facts: &TableFacts<'_>, terminal: &Terminal) -> Option<String> {
-    facts.unfinished.then(|| notes_list([format!("<dim>{REFRESH_HINT}</dim>")], terminal))
+impl TableFacts<'_> {
+    /// The answer the badges show: none for an ignored repository or an
+    /// `origin` without a provider, whatever is stored.
+    pub fn badges(&self) -> &PrListing {
+        static NO_PRS: PrListing = PrListing { source_repo: None, pull_requests: Vec::new(), fetched_at: None };
+        match self.pr_outcome {
+            Some(PrOutcome::Ignored | PrOutcome::Unsupported) => &NO_PRS,
+            _ => self.prs,
+        }
+    }
+}
+
+/// The status list: this run's PR item ([`pr_status_markup`]), then the §6
+/// hint when the wait timed out; `None` when neither applies.
+///
+/// `now` is Unix seconds, for the PR age.
+pub fn render_status(facts: &TableFacts<'_>, terminal: &Terminal, now: u64) -> Option<String> {
+    let lines: Vec<String> = facts
+        .pr_outcome
+        .and_then(|outcome| pr_status_markup(outcome, facts.prs, now))
+        .into_iter()
+        .chain(facts.timed_out.then(|| format!("<dim>{REFRESH_HINT}</dim>")))
+        .collect();
+    (!lines.is_empty()).then(|| notes_list(lines, terminal))
 }
 
 /// The closing notes: the `--ff` result or the §9 suggestion, then the §8
@@ -250,17 +291,18 @@ pub struct Sections<'s> {
     /// [`render`]'s output.
     pub table: &'s str,
     pub graph: Option<&'s str>,
-    pub hint: Option<&'s str>,
+    /// [`render_status`]'s output.
+    pub status: Option<&'s str>,
     pub verbose: Option<&'s str>,
     pub notes: Option<&'s str>,
 }
 
-/// The whole listing: the table, the graph, the hint (so it follows the
-/// graph, or the PR age line without one), the verbose section, then a blank
+/// The whole listing: the table, the graph, the status list (so it follows
+/// the graph, or the legend without one), the verbose section, then a blank
 /// line and the notes.
 pub fn assemble(sections: Sections<'_>) -> String {
     let mut out = sections.table.to_string();
-    for part in [sections.graph, sections.hint, sections.verbose].into_iter().flatten() {
+    for part in [sections.graph, sections.status, sections.verbose].into_iter().flatten() {
         out.push_str(part);
     }
     if let Some(notes) = sections.notes {
@@ -422,6 +464,7 @@ pub fn age_text(seconds: u64) -> String {
 }
 
 /// The two legend lines, one each for the Worktree and Branch column glyphs.
+/// The `conflicts` sample sits in the column of the source-files dot above it.
 pub fn legend_markup() -> [String; 2] {
     [
         format!(
@@ -431,7 +474,7 @@ pub fn legend_markup() -> [String; 2] {
             dirty_dot(DirtyStatus::DirtySource),
         ),
         format!(
-            "Branch     {} <dim>merges cleanly into parent</dim>    {} <dim>conflicts with parent</dim>    {} <dim>parent deleted</dim>",
+            "Branch     {} <dim>merges cleanly into parent</dim>     {} <dim>conflicts with parent</dim>    {} <dim>parent deleted</dim>",
             connector_markup("└─", Some(MergeState::Clean), false),
             connector_markup("└─", Some(MergeState::Conflicts), false),
             connector_markup("└┄", None, true),
@@ -439,19 +482,32 @@ pub fn legend_markup() -> [String; 2] {
     ]
 }
 
-/// The PR age line, shown whenever the badges are older than the freshness
-/// window at `now`.
-pub fn pr_age_markup(prs: &PrListing, now: u64) -> Option<String> {
-    if !prs.is_stale_at(now) {
-        return None;
-    }
-    let minutes = prs.age_minutes(now)?;
-    Some(format!("<dim>PRs as of {} ago</dim>", age_text(minutes * 60)))
+/// The status item for this run's PR half, given the stored answer `prs`:
+///
+/// - none after a publication, for an ignored repository, or for an `origin`
+///   without a provider;
+/// - `PRs as of <age> ago` while still running, only once the answer is as
+///   old as the freshness window, and nothing with no answer stored;
+/// - `PRs as of <age> ago (couldn't refresh)` after a failure, at any age,
+///   or `couldn't get open PRs` with no answer stored.
+pub fn pr_status_markup(outcome: PrOutcome, prs: &PrListing, now: u64) -> Option<String> {
+    let as_of = |minutes: u64| format!("PRs as of {} ago", age_text(minutes * 60));
+    let text = match outcome {
+        PrOutcome::Published | PrOutcome::Ignored | PrOutcome::Unsupported => return None,
+        PrOutcome::Pending if prs.is_stale_at(now) => as_of(prs.age_minutes(now)?),
+        PrOutcome::Pending => return None,
+        PrOutcome::Failed => match prs.age_minutes(now) {
+            Some(minutes) => format!("{} (couldn't refresh)", as_of(minutes)),
+            None => "couldn't get open PRs".to_string(),
+        },
+    };
+    Some(format!("<dim>{text}</dim>"))
 }
 
 /// The table, one row per tree row, with the current worktree's row
-/// highlighted. The target columns carry ahead/behind counts only when
-/// `terminal` is at least [`METRICS_MIN_WIDTH`] columns wide.
+/// highlighted, and never narrower than the legend beneath it. The target
+/// columns carry ahead/behind counts only when `terminal` is at least
+/// [`METRICS_MIN_WIDTH`] columns wide.
 pub fn table(facts: &TableFacts<'_>, terminal: &Terminal) -> Table {
     let prose_cell = |markup: String| -> TableCellContent { Prose::new(markup).render(terminal).into() };
     let target_header = match facts.target {
@@ -465,7 +521,10 @@ pub fn table(facts: &TableFacts<'_>, terminal: &Terminal) -> Table {
         TableColumn::new(Prose::new(format!("-> {target_header}")).render(terminal)),
         TableColumn::new("-> parent"),
     ];
-    let mut table = Table::new().with_columns(columns).prefer_cursor_alignment();
+    let mut table = Table::new()
+        .with_columns(columns)
+        .with_min_width(legend_width(terminal))
+        .prefer_cursor_alignment();
 
     let show_metrics = terminal.width() >= METRICS_MIN_WIDTH;
     let mut current_row = None;
@@ -487,6 +546,15 @@ pub fn table(facts: &TableFacts<'_>, terminal: &Terminal) -> Table {
         Some(row) => table.highlight_row(row, row_emphasis(terminal)),
         None => table,
     }
+}
+
+/// The widest legend line as printed, with its one-cell indent.
+fn legend_width(terminal: &Terminal) -> u32 {
+    legend_markup()
+        .into_iter()
+        .map(|line| 1 + visible_width(Prose::new(line).render(terminal).trim_end()))
+        .max()
+        .unwrap_or(0)
 }
 
 /// A very subtle background for the current worktree's row.
@@ -519,7 +587,7 @@ impl<'f, 'a> RowCells<'f, 'a> {
         let prs = match (branch, status) {
             // Badges follow a worktree's branch; a parent row without a
             // worktree has empty target cells.
-            (Some(branch), Some(_)) => facts.prs.for_branch(branch).collect(),
+            (Some(branch), Some(_)) => facts.badges().for_branch(branch).collect(),
             _ => Vec::new(),
         };
         Self {

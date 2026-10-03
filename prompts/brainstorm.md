@@ -17,7 +17,7 @@ The user would like to brainstorm with you on a given topic (see Topic section b
 ## Task
 
 1. start by reviewing the **Topic** section and then doing research on it:
-    - look in this repo (and specifically the {{area}} package area) to better understand the topic
+    - look in this repo (and specifically the {{ctx.area}} package area) to better understand the topic
     - if there are elements to the topic which would benefit from online research then do that too
 2. if anything is unclear/ambiguous then you should ask the user for clarification up front (don't assume you understand what was met)
 3. propose an idea related to the topic at hand along with an alternative/variant idea

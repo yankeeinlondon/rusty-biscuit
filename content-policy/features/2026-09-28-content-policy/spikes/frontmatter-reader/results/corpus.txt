@@ -1,0 +1,94 @@
+markdown files: 5113  starting with ---: 3084
+
+   10  DM ok, spike fails [expression protection: {{ }}]
+         - prompts/_implement/implement-review-findings-plan.md: NotMapping("invalid type: map, expected a string key")
+         - prompts/_implement/implement-review.md: NotMapping("invalid type: map, expected a string key")
+         - prompts/_implement/implement-suggestions.md: NotMapping("invalid type: map, expected a string key")
+         - prompts/_implement/review-findings-plan.md: NotMapping("invalid type: map, expected a string key")
+         - prompts/_reviews/comprehensive-review.md: Yaml("did not find expected key at line 4 column 26, while parsing a block mapping")
+         - prompts/_reviews/cycles.md: Yaml("did not find expected key at line 5 column 23, while parsing a block mapping")
+         - prompts/blast-radius.md: NotMapping("invalid type: map, expected a string key")
+         - prompts/code-comment-quality.md: NotMapping("invalid type: map, expected a string key")
+         - prompts/format.md: NotMapping("invalid type: map, expected a string key")
+         - prompts/merge-conflicts.md: NotMapping("invalid type: map, expected a string key")
+   18  DM ok, spike fails [tab normalization]
+         - .claude/skills/lsp/lsp.md: Yaml("found a tab character where an indentation space is expected at line 2 column 1, while scanning a block scalar at line 1 column 9")
+         - .claude/skills/lsp/markdown-lsps.md: Yaml("found a tab character where an indentation space is expected at line 2 column 1, while scanning a block scalar at line 1 column 9")
+         - .claude/skills/lsp/rust-crates.md: Yaml("found a tab character where an indentation space is expected at line 2 column 1, while scanning a block scalar at line 1 column 9")
+         - .claude/skills/lsp/supporting-neovim.md: Yaml("found a tab character where an indentation space is expected at line 2 column 1, while scanning a block scalar at line 1 column 9")
+         - .claude/skills/lsp/supporting-vscode.md: Yaml("found a tab character where an indentation space is expected at line 2 column 1, while scanning a block scalar at line 1 column 9")
+         - .claude/skills/lsp/typescript-libraries.md: Yaml("found a tab character where an indentation space is expected at line 2 column 1, while scanning a block scalar at line 1 column 9")
+         - .claude/skills/playa/audio-programming/Android.md: Yaml("found a tab character where an indentation space is expected at line 2 column 1, while scanning a block scalar at line 1 column 9")
+         - .claude/skills/playa/audio-programming/IOS.md: Yaml("found a tab character where an indentation space is expected at line 2 column 1, while scanning a block scalar at line 1 column 9")
+         - .claude/skills/playa/audio-programming/linux.md: Yaml("found a tab character where an indentation space is expected at line 2 column 1, while scanning a block scalar at line 1 column 9")
+         - .claude/skills/playa/audio-programming/macOS.md: Yaml("found a tab character where an indentation space is expected at line 2 column 1, while scanning a block scalar at line 1 column 9")
+         - biscuit-visualized/docs/research/charting/charting-libraries.md: Yaml("found a tab character where an indentation space is expected at line 2 column 1, while scanning a block scalar at line 1 column 9")
+         - biscuit-visualized/docs/research/charting/types-of-chart-data.md: Yaml("found a tab character where an indentation space is expected at line 2 column 1, while scanning a block scalar at line 1 column 9")
+         - claudine/features/_completed/2026-04-16-leveraging-logs/research.md: Yaml("found a tab character where an indentation space is expected at line 2 column 1, while scanning a block scalar at line 1 column 9")
+         - claudine/features/_unscheduled/4-lsp/integration-with-darkmatter.md: Yaml("found a tab character where an indentation space is expected at line 2 column 1, while scanning a block scalar at line 1 column 9")
+         - sniff/docs/research/audio-programming/Android.md: Yaml("found a tab character where an indentation space is expected at line 2 column 1, while scanning a block scalar at line 1 column 9")
+         - sniff/docs/research/audio-programming/IOS.md: Yaml("found a tab character where an indentation space is expected at line 2 column 1, while scanning a block scalar at line 1 column 9")
+         - sniff/docs/research/audio-programming/linux.md: Yaml("found a tab character where an indentation space is expected at line 2 column 1, while scanning a block scalar at line 1 column 9")
+         - sniff/docs/research/audio-programming/macOS.md: Yaml("found a tab character where an indentation space is expected at line 2 column 1, while scanning a block scalar at line 1 column 9")
+   19  both fail (duplicate)
+         - claudine/features/_completed/2026-04-24-improved-shell-completions/review-plan-2.md: dm=Failed to parse frontmatter in unknown: duplicate entry with key "packages"
+         - claudine/features/_completed/2026-04-25-agent-selection/plan.md: dm=Failed to parse frontmatter in unknown: duplicate entry with key "packages"
+         - claudine/features/_completed/2026-04-26-centralized-providers/plan.md: dm=Failed to parse frontmatter in unknown: duplicate entry with key "packages"
+         - claudine/features/_completed/2026-05-12-lifecycle/plan.md: dm=Failed to parse frontmatter in unknown: duplicate entry with key "packages"
+         - claudine/features/_completed/2026-06-22-live-but-dead/plan.md: dm=Failed to parse frontmatter in unknown: duplicate entry with key "packages"
+         - claudine/features/_completed/2026-07-11-module-structure/nice-plan.md: dm=Failed to parse frontmatter in unknown: duplicate entry with key "packages"
+         - claudine/features/_completed/2026-07-13-error-propogation/plan.md: dm=Failed to parse frontmatter in unknown: duplicate entry with key "packages"
+         - claudine/features/_completed/2026-07-13-proxy-with/plan.md: dm=Failed to parse frontmatter in unknown: duplicate entry with key "packages"
+         - claudine/fixes/_completed/2026-05-10-system-prompt-approach/plan.md: dm=Failed to parse frontmatter in unknown: duplicate entry with key "packages"
+         - claudine/fixes/_completed/2026-08-01-cli-slow-tests/plan.md: dm=Failed to parse frontmatter in unknown: duplicate entry with key "packages"
+         - darkmatter/features/_completed/2026-06-07-file-links/plan.md: dm=Failed to parse frontmatter in unknown: duplicate entry with key "packages"
+         - darkmatter/features/_completed/2026-06-17-cli-atheist/plan.md: dm=Failed to parse frontmatter in unknown: duplicate entry with key "packages"
+         - darkmatter/features/_completed/2026-07-04-dmls/plan.md: dm=Failed to parse frontmatter in unknown: duplicate entry with key "packages"
+         - darkmatter/features/_completed/2026-07-08-schema-plus/plan.md: dm=Failed to parse frontmatter in unknown: duplicate entry with key "packages"
+         - features/2026-05-24-testing-best-practices/plan.md: dm=Failed to parse frontmatter in unknown: duplicate entry with key "packages"
+         - fixes/_completed/2026-09-12-single-os-compile/plan.md: dm=Failed to parse frontmatter in unknown: duplicate entry with key "packages"
+         - messenger/features/_completed/2026-04-20-os-notifications/plan.md: dm=Failed to parse frontmatter in unknown: duplicate entry with key "packages"
+         - renderable/features/_completed/2026-06-08-prose-cells/plan.md: dm=Failed to parse frontmatter in unknown: duplicate entry with key "packages"
+         - tree-hugger/reviews/2026-06-02-lint-review/plan.md: dm=Failed to parse frontmatter in unknown: duplicate entry with key "packages"
+    5  both fail (yaml)
+         - biscuit-clipboard/features/2026-05-02-kickoff/plan.md: dm=Failed to parse frontmatter in unknown: did not find expected key at line 35 column 3, while parsing a block mapping at line 1 column 2
+         - biscuit-terminal/docs/research/terminal-multiplexing/_fleet.md: dm=Failed to parse frontmatter in unknown: found character that cannot start any token at line 1 column 11, while scanning for the next token
+         - claudine/features/_completed/2026-04-17-perf-flag/review-1.md: dm=Failed to parse frontmatter in unknown: mapping values are not allowed in this context at line 3 column 6
+         - claudine/features/_completed/2026-05-02-flattened-bridge/plan.md: dm=Failed to parse frontmatter in unknown: did not find expected key at line 12 column 2, while parsing a block mapping
+         - darkmatter/features/_completed/2026-07-14-invalid-frontmatter/baselines/invalid-reserved.md: dm=Failed to parse frontmatter in unknown: found character that cannot start any token at line 1 column 8, while scanning for the next token
+    1  both ok, no block: first line not a fence (e.g. `---x`); dm frontmatter empty=true
+         - research/lib/tests/fixtures/skill/regression-llm-output.md
+    2  both ok, no block: unterminated (dot_close=false); dm frontmatter empty=true
+         - prompts/_reviews/review-plan.md
+         - research/lib/tests/fixtures/skill/invalid-unclosed-frontmatter.md
+ 3029  both ok, records equal
+         - .claude/agents/cli-developer.md
+         - .claude/agents/code-simplifier.md
+         - .claude/agents/documenter.md
+         - .claude/agents/feature-tester-rust.md
+         - .claude/agents/just-scripter.md
+         - .claude/agents/planner.md
+         - .claude/agents/rust-designer.md
+         - .claude/agents/rust-developer.md
+         - .claude/agents/spec-writer.md
+         - .claude/commands/all-justfiles.md
+         - .claude/commands/cli.md
+         - .claude/commands/code-review.md
+         - .claude/commands/create-integration.md
+         - .claude/commands/create-schematic-api.md
+         - .claude/commands/drift.md
+         - .claude/skills/biscuit-clipboard/SKILL.md
+         - .claude/skills/biscuit-contract/SKILL.md
+         - .claude/skills/biscuit-file/SKILL.md
+         - .claude/skills/biscuit-hash/SKILL.md
+         - .claude/skills/biscuit-icon/SKILL.md
+         - .claude/skills/biscuit-speaks/SKILL.md
+         - .claude/skills/biscuit-terminal/SKILL.md
+         - .claude/skills/biscuit-test-harness/SKILL.md
+         - .claude/skills/biscuit-tui/SKILL.md
+         - .claude/skills/biscuit-visualized/SKILL.md
+         - .claude/skills/claudine/SKILL.md
+         - .claude/skills/claudine/cli-reference.md
+         - .claude/skills/claudine/opencode-event-sources.md
+         - .claude/skills/claudine/research/cross-referencing/claude-code.md
+         - .claude/skills/claudine/research/cross-referencing/codex.md

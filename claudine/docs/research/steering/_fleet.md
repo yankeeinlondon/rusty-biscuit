@@ -23,7 +23,7 @@ success:
                 command: "claudine providers steering check '{{state.slug}}'"
               - stderr: "Steering schema and relationship checks completed for **{{state.name}}**; source review and live activation gates remain separate."
 failure:
-    warn: "Steering research failed for **{{state.name}}**: {{err.message}}"
+    warn: "Steering research failed for **{{state.name}}**: {{ err.msg }}"
 ---
 # Steering Research: {{state.name}}
 
@@ -31,7 +31,7 @@ You are the assigned provider researcher, already running inside the fleet.
 Perform the research yourself. Do not launch another agent, `claudine sequence`,
 or another research coordinator to carry out this assignment.
 
-Fleet research prompt using steering schema revision 3. The four pilots and
+Fleet research prompt using steering schema revision 4. The four pilots and
 completed ten-provider fleet informed this contract. On refresh, retain useful
 evidence and investigate specific gaps rather than repeating completed work.
 Use the Claudine skill. Research the CLI identified by roster slug
@@ -124,7 +124,7 @@ notices. None of these claims is established merely by appearing in this prompt.
 ## Metadata Contract
 
 Read `./_schema.yaml` and include `$schema: ./_schema.yaml` in the report.
-Use `schema_revision: 3`, the roster slug in `provider`, today's date
+Use `schema_revision: 4`, the roster slug in `provider`, today's date
 (`{{ctx.today}}`) in `last_updated`, and preserve `created` on refresh.
 Record the actual research agent, model, and low effort, with provenance in the
 body. Preserve useful prior findings on refresh, reverify claims, and describe
@@ -180,6 +180,11 @@ an explanation. Empty evidence lists must be identified as gaps, not verificatio
 Set `verification: []` when no disposable-session test record exists. Each actual
 test record identifies its mechanism, exact provider version, OS, launch mode,
 origin, session state, outcome, sanitized fixture, assertions, and limitations.
+Give each record a stable `id` and type every prose assertion in
+`assertion_kinds`. Use `expected_loss` whenever the record documents a loss or
+failure boundary; such a record is regression evidence and can never activate
+delivery. Typed assertions are evidence, not activation grants: activation is
+reviewed separately in `docs/providers/steering-activation.yaml`.
 An empty list leaves activation blocked; it is valid research. Do not fabricate
 test records or use source inspection as a substitute for a live test.
 When refreshing an existing report, preserve prior disposable-test records and

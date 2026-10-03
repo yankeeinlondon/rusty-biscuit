@@ -163,7 +163,7 @@ fn mapping_set_swaps_values_in_either_destination_order() {
 #[test]
 fn failed_expression_publishes_no_part_of_the_mapping_with_or_without_runtime() {
     let action = set_action(
-        vec![("valid", json!("resolved")), ("bad", json!("{{unknown_root}}"))],
+        vec![("valid", json!("resolved")), ("bad", json!("{{unknown_root()}}"))],
         false,
     );
     let base = map(json!({"stable": "kept"}));
@@ -213,7 +213,7 @@ fn event_set_failure_projects_its_source_rooted_nested_path_without_committing()
     use biscuit_terminal::errors::BlockError;
     use biscuit_terminal::utils::escape_codes::strip_escape_codes;
 
-    let source_text = "---\nsuccess:\n    stack:\n        - action:\n            - set:\n                stable: changed\n                metadata:\n                    files:\n                        - \"{{unknown_root}}\"\n---\nbody\n";
+    let source_text = "---\nsuccess:\n    stack:\n        - action:\n            - set:\n                stable: changed\n                metadata:\n                    files:\n                        - \"{{unknown_root()}}\"\n---\nbody\n";
     let config = config_from_markdown(source_text);
     let base = map(json!({"stable": "kept"}));
     let live = std::sync::Mutex::new(base.clone());
@@ -257,7 +257,7 @@ fn event_set_failure_projects_its_source_rooted_nested_path_without_committing()
     let appendix = strip_escape_codes(
         excerpt.render_appendix(&biscuit_terminal::terminal::Terminal::new_optimistic(120)),
     );
-    assert!(appendix.contains("{{unknown_root}}"), "{appendix}");
+    assert!(appendix.contains("{{unknown_root()}}"), "{appendix}");
     let rendered = strip_escape_codes(diagnostic.report_block_error_optimistic(Some(200)));
     assert!(rendered.contains(expected), "{rendered}");
     assert!(rendered.contains("t.md"), "{rendered}");
@@ -271,10 +271,10 @@ fn event_set_failure_projects_its_source_rooted_nested_path_without_committing()
 #[test]
 fn event_stack_items_keep_their_signal_rooted_stack_spelling() {
     let guard_config = config(json!({"success": {"stack": [
-        {"when": "unknown_guard", "action": {"set": {"unreached": "value"}}},
+        {"when": "unknown_guard()", "action": {"set": {"unreached": "value"}}},
     ]}}));
     let action_config = config(json!({"success": {"stack": [
-        {"action": {"set": {"stable": "{{ unknown_value }}"}}},
+        {"action": {"set": {"stable": "{{ unknown_value() }}"}}},
     ]}}));
     let base = map(json!({"stable": "kept"}));
     let live = std::sync::Mutex::new(base.clone());

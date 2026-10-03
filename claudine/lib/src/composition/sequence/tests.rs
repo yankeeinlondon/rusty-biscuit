@@ -1439,6 +1439,16 @@ mod grammar_tests {
         ));
     }
 
+    /// A frontmatter shell suffix never reads as a reference operator on a
+    /// sequence source.
+    #[test]
+    fn a_shell_source_with_a_suffix_is_refused_by_name() {
+        for value in ["$(ls -la)::ok", "$(ls -la)::result", "$(ls -la)::timeout:5"] {
+            let error = classify_source(&json!(value)).unwrap_err().to_string();
+            assert!(error.contains("takes no suffix"), "{value}: {error}");
+        }
+    }
+
     /// Two adjacent spans are not a *whole-value* span, so the value stays a
     /// file reference rather than becoming an expression source.
     #[test]
@@ -1919,6 +1929,52 @@ mod dynamic_sources {
         ])
         .unwrap();
         assert_eq!(names(&plan), vec!["1", "2"]);
+    }
+
+    /// An expression source reads a stored literal token as the text it
+    /// holds; the text itself is data, so its `{{ … }}` names a step verbatim.
+    #[test]
+    fn an_expression_source_reads_a_stored_token_as_its_text() {
+        let token = darkmatter::markdown::literal_token::encode("a, see {{ x }}");
+        let plan =
+            plan_from_frontmatter(&[("raw", json!(token)), ("sequence", json!("{{ raw }}"))])
+                .unwrap();
+        assert_eq!(names(&plan), vec!["a", "see {{ x }}"]);
+    }
+
+    /// A `sequence:` value that is a stored token is refused: read as
+    /// `{{ … }}` it would be an expression, and decoded it would be data
+    /// choosing the steps.
+    #[test]
+    fn a_stored_token_is_not_a_sequence_source() {
+        for raw in [
+            darkmatter::markdown::literal_token::encode("{{ items }}"),
+            darkmatter::markdown::literal_token::encode("./steps.yaml"),
+        ] {
+            let error = classify_source(&json!(raw)).unwrap_err();
+            assert!(matches!(error, CompositionError::SequenceInvalid(_)), "{error}");
+        }
+    }
+
+    /// An evaluation failure keeps Darkmatter's typed error as the cause, so a
+    /// library caller can tell an unknown function from a parse failure.
+    #[test]
+    fn a_failing_evaluation_keeps_the_typed_darkmatter_cause() {
+        use crate::composition::SequenceExpressionCause;
+        use darkmatter::markdown::compose::expression::ExpressionError;
+
+        let error = plan_from_frontmatter(&[("sequence", json!("{{ no_such_fn() }}"))]).unwrap_err();
+        let CompositionError::SequenceExpressionFailed { source, .. } = &error else {
+            panic!("expected SequenceExpressionFailed, got {error:?}");
+        };
+        assert!(
+            matches!(source, SequenceExpressionCause::Evaluate(cause)
+                if matches!(cause.as_ref(), ExpressionError::UnknownFunction { .. })),
+            "{source:?}"
+        );
+        let chained = std::error::Error::source(&error)
+            .and_then(|cause| cause.downcast_ref::<SequenceExpressionCause>());
+        assert!(chained.is_some(), "reachable through Error::source");
     }
 
     #[test]

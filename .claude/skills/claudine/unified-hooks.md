@@ -529,9 +529,9 @@ On non-blocking events, `Call` can still run, but any response it produces is in
 
 To prevent hook handlers from blocking the parent agent session indefinitely (e.g., during a 30s hang), `claudine handle` enforces a hard execution deadline.
 
-- **Global Deadline:** 5 seconds (default), overridable via `CLAUDINE_HANDLE_DEADLINE_SECONDS`.
+- **Global Deadline:** 15 seconds (default), overridable via `CLAUDINE_HANDLE_DEADLINE_SECONDS`.
 - **Exit Code:** Exits `124` when the deadline is exceeded.
-- **Action Timeouts:** `Bash` and `Message` actions have a tighter **3s timeout** when running inside `claudine handle`.
+- **Action Timeouts:** `Bash` actions are awaited with a fixed **3s timeout**. `Message` actions have no timeout of their own. Their sends are drained before exit, and that drain stops at the global deadline.
 - **Tracing:** Phase-level spans (`handle_stdin_read`, `handle_dispatch_canonical`, `load_config`, `run_bindings`, etc.) ensure that any hang can be diagnosed via `RUST_LOG=claudine=debug`.
 
 ## Support Level Implications

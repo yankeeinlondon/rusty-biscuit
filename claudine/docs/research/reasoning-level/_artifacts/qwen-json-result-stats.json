@@ -1,0 +1,19 @@
+{
+ "type": "result",
+ "subtype": "success",
+ "result": "10",
+ "stats": {
+  "models": {
+   "qwen3.5-plus": {
+    "tokens": {
+     "prompt": 40930,
+     "candidates": 168,
+     "total": 41098,
+     "cached": 19104,
+     "thoughts": 124
+    }
+   }
+  }
+ },
+ "_note": "thoughts token count under stats.models.<model>.tokens.thoughts evidences thinking ran; no effort field anywhere"
+}

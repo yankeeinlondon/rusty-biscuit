@@ -111,6 +111,12 @@ pub struct BlockOptions {
     /// remain in `set_object` / `set_properties` so they can still apply
     /// under permissive mode.
     pub deferred_set_errors: Vec<DeferredSetError>,
+
+    /// Origin of the `set` and one-off `replace` values: data when the
+    /// directive's options hold text an earlier stage inserted (for example
+    /// `set.note="{{ note }}"` after body interpolation), so the child never
+    /// scans it again.
+    pub values_origin: crate::markdown::compose::OverrideOrigin,
 }
 
 /// A parser-recorded set-override error whose severity is resolved later.
@@ -295,7 +301,12 @@ impl TransclusionRuntime {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResolvedTarget {
     /// Local filesystem path.
-    File { path: PathBuf, id: String },
+    ///
+    /// `path` is canonical and is the target's identity. `resolved` is the
+    /// path the opening document's context resolved the reference to, before
+    /// canonicalization; the target's own references resolve from it, so it
+    /// keeps the spelling of the tree it was found in.
+    File { path: PathBuf, id: String, resolved: PathBuf },
     /// Remote URL target.
     Url { url: url::Url, id: String },
 }

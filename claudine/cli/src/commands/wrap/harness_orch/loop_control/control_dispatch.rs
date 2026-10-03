@@ -367,7 +367,9 @@ pub(super) enum TerminalRecovery {
 /// *inside* that finalize halts with the evaluation error instead
 /// (Decision #2's single styled emission is preserved by the callees).
 ///
-/// `Err` means halt the run now; the caller propagates it unchanged.
+/// `Err` means halt the run now; the caller propagates it unchanged. That
+/// includes a success/blocked `error()` downgrade that neither the `failure`
+/// nor the `finalize` stack recovered.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn drive_terminal_recovery(
     lifecycle_guard: &mut claudine::composition::LifecycleRunGuard<'_>,
@@ -490,6 +492,17 @@ pub(super) fn drive_terminal_recovery(
         TerminalControlAction::Continue => Ok(TerminalRecovery::NextAttempt),
         TerminalControlAction::Proxy(request) => Ok(TerminalRecovery::Proxy(request)),
         TerminalControlAction::Abort(err) => Err(err),
-        TerminalControlAction::Fallthrough => Ok(TerminalRecovery::Completed),
+        // An unrecovered `error()` downgrade is the run's outcome, reported the
+        // way the same `error` raised from `start` or `finalize` is: the
+        // caller's success return would otherwise exit 0 after `failure` fired.
+        TerminalControlAction::Fallthrough => match event.downgrade_err {
+            Some(downgrade) => Err(
+                crate::commands::wrap::harness_orch::UnrecoveredLifecycleDowngrade {
+                    message: downgrade.msg,
+                }
+                .into(),
+            ),
+            None => Ok(TerminalRecovery::Completed),
+        },
     }
 }

@@ -15,7 +15,10 @@ mod remote_fixture;
 use std::fs;
 use std::time::{Duration, Instant};
 
-use perf_support::{refresh_workers, wait_for_refresh_workers};
+use perf_support::{
+    KillOnDrop, MANUFACTURED_FAILURE, assert_manufactured_failure, process_running, refresh_workers,
+    wait_for_refresh_workers,
+};
 use remote_fixture::{Fixture, UploadPackGate, WORKER_WAIT, assert_checked_now};
 use serial_test::serial;
 use worktree::remote_head::{refresh_receipt_path, remote_head_lock_path};
@@ -88,25 +91,23 @@ fn an_in_sync_check_fetches_nothing() {
 
 #[test]
 #[serial]
-fn a_forced_worker_records_the_given_attempt_and_a_receipt_for_both_halves() {
+fn a_worker_records_the_given_attempt_and_a_receipt_for_both_halves() {
     const ID: &str = "00112233445566778899aabbccddeeff";
     let fixture = Fixture::new();
     let pushed = fixture.commit_and_push("second");
     let receipt_path = fixture.cache_file(refresh_receipt_path(&fixture.main, ID).expect("receipt path"));
 
-    // Unforced: the attempt runs under the given id, and no receipt is written.
+    // Every attempt runs under the given id and writes its receipt; there is
+    // no `--force`.
     fixture.run_worker(&["--attempt", ID]);
     assert_eq!(fixture.stored_document()["attempt"]["id"], ID);
-    assert!(!receipt_path.exists(), "only a forced run writes a receipt");
-
-    fixture.run_worker(&["--attempt", ID, "--force"]);
     let receipt: serde_json::Value =
         serde_json::from_slice(&fs::read(&receipt_path).expect("a receipt")).expect("json");
     assert_eq!(receipt["attempt_id"], ID);
     assert_eq!(receipt["branch"], "main");
     assert_eq!(receipt["head"], "ok", "{receipt}");
-    // A local origin is no provider, so the PR half fails as `other`.
-    assert_eq!(receipt["prs"], serde_json::json!({ "kind": "failed", "failure": { "kind": "other" } }), "{receipt}");
+    // A local origin has no provider to ask: unsupported, not a failure.
+    assert_eq!(receipt["prs"], serde_json::json!({ "kind": "unsupported" }), "{receipt}");
     assert_eq!(fixture.git(&fixture.main, &["rev-parse", "origin/main"]), pushed);
     let _ = fs::remove_file(receipt_path);
 }
@@ -282,15 +283,18 @@ fn a_second_listing_adopts_the_running_attempt_and_asks_origin_nothing() {
     let fixture = Fixture::new();
     let gate = UploadPackGate::install(&fixture, 0);
 
-    let first = fixture.wt(&fixture.main).arg("list").spawn().expect("first wt list");
+    let mut first = KillOnDrop::spawn({
+        let mut command = fixture.wt(&fixture.main);
+        command.arg("list");
+        command
+    });
     gate.wait_for_runs(1);
     let caption = fixture.list();
 
     assert!(caption.contains("still checking in the background"), "adopted, not failed: {caption}");
     assert!(!caption.contains("couldn't check origin"), "the contender is no finished check: {caption}");
     gate.release();
-    let first = first.wait_with_output().expect("first wt list finishes");
-    assert!(first.status.success());
+    assert!(first.wait().success(), "the first wt list finishes");
     assert!(wait_for_refresh_workers(&fixture.main, 0, WORKER_WAIT).is_empty(), "every worker finished");
     assert_eq!(gate.runs(), 1, "one check between the two listings");
 }
@@ -381,7 +385,6 @@ fn seed_fresh_answers(fixture: &Fixture, head: &str) {
         "origin_digest": digest,
         "fetched_at": now,
         "publication": worktree::remote_head::new_attempt_id().expect("a publication id"),
-        "writer": "refresh",
         "source_repo": null,
         "pull_requests": [],
     });
@@ -437,3 +440,33 @@ fn a_shallow_clone_lists_with_the_incomplete_history_notice_and_asks_origin_noth
     assert!(transcript.contains("Some history is not shown"), "the notice is shown:\n{transcript}");
     assert_eq!(gate.runs() - without_graph, without_graph, "drawing the graph adds no ls-remote or fetch");
 }
+
+/// A failed assertion while the gate holds the worker's check: the gate,
+/// declared after the fixture, releases first, and the fixture reaps the
+/// worker before its directory goes; the failure reaches the harness
+/// unchanged.
+#[test]
+#[serial]
+fn a_failed_assertion_while_upload_pack_is_held_still_reaps_the_worker_before_the_fixture_goes() {
+    let mut workers = Vec::new();
+    let mut root = None;
+    let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let fixture = Fixture::new();
+        let gate = UploadPackGate::install(&fixture, 0);
+        let caption = fixture.list();
+        assert!(caption.contains("still checking in the background"), "{caption}");
+        gate.wait_for_runs(1);
+        workers = refresh_workers(&fixture.main).iter().map(|worker| worker.pid).collect();
+        root = Some(fixture.root.path().to_path_buf());
+        panic!("{MANUFACTURED_FAILURE}");
+    }));
+
+    assert_manufactured_failure(unwound);
+    assert_eq!(workers.len(), 1, "the listing returned with its worker held");
+    for pid in workers {
+        assert!(!process_running(pid), "worker {pid} outlived the fixture");
+    }
+    let root = root.expect("the fixture was built");
+    assert!(!root.exists(), "{root:?} outlived the fixture");
+}
+

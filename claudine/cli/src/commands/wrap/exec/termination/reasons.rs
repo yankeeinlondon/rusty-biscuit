@@ -90,12 +90,16 @@ pub(crate) fn early_termination_process_outcome(
         // The stalled-generation backstop fires for the same reason: retrying
         // a silently-dropped generation loop reproduces the stall, so it must
         // never route through `TimedOut` / `handle_timeout:`.
+        //
+        // An unanswerable input request aborts for the same reason: a retry
+        // reaches the same request.
         Some(
             EarlyTermination::ExitExpression { .. }
             | EarlyTermination::RunawayRepetition { .. }
             | EarlyTermination::RunawayVolume { .. }
             | EarlyTermination::RepeatedStreamError { .. }
-            | EarlyTermination::StalledGeneration { .. },
+            | EarlyTermination::StalledGeneration { .. }
+            | EarlyTermination::InputRequired { .. },
         ) => claudine::harness::ProcessTermination::Aborted,
         None => claudine::harness::ProcessTermination::Completed,
     }

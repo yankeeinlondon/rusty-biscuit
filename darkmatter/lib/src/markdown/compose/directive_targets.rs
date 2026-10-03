@@ -3,15 +3,16 @@
 use std::collections::BTreeSet;
 
 use crate::markdown::compose::ComposeWarning;
-use crate::markdown::compose::body_origin::TextEdit;
+use crate::markdown::compose::body_origin::{DataRanges, TextEdit};
 use crate::markdown::compose::context::context_variable_descriptors;
 use crate::markdown::compose::directives_api::{
     BlockKind, BlockScanError, DirectiveKind, scan_darkmatter_blocks,
-    scan_darkmatter_directives,
+    scan_darkmatter_directives, scan_darkmatter_directives_in,
 };
 use crate::markdown::compose::expression::{
     ComparisonOp, EvaluationLookup, Expr, parse, parse_condition, scalar_string,
 };
+use crate::markdown::compose::expression::absence;
 use crate::markdown::compose::expression::lint::whole_value_span;
 use crate::markdown::compose::interpolation::rewrite::interpolate_value;
 use crate::markdown::compose::interpolation::{
@@ -240,7 +241,7 @@ fn expression_path(expression: &Expr) -> Option<ExpressionPath> {
         }
         return Some(ExpressionPath(document_path.to_string()));
     }
-    if path.is_empty() || matches!(path, "null" | "doc" | "ctx" | "env") {
+    if path.is_empty() || absence::is_reserved_root(path) {
         return None;
     }
     Some(ExpressionPath(path.to_string()))
@@ -351,8 +352,12 @@ pub(crate) struct DirectiveTargetRewrite {
 ///
 /// A target is part of a full document, so every expression failure is fatal
 /// and located at the target's span in `source`.
+///
+/// Only authored directives are considered, and only a target that lies wholly
+/// in authored text is evaluated; its value is data.
 pub(crate) fn rewrite_directive_targets<L: EvaluationLookup>(
     source: &str,
+    data: Option<&DataRanges>,
     evaluator: &Evaluator<L>,
     line_offset: usize,
 ) -> Result<DirectiveTargetRewrite, LocatedInterpolationError> {
@@ -361,7 +366,7 @@ pub(crate) fn rewrite_directive_targets<L: EvaluationLookup>(
     let mut warnings = Vec::new();
     let mut edits = Vec::new();
 
-    for directive in scan_darkmatter_directives(source).into_iter().rev() {
+    for directive in scan_darkmatter_directives_in(source, data).into_iter().rev() {
         if !matches!(directive.kind, DirectiveKind::File | DirectiveKind::Code | DirectiveKind::Url)
         {
             continue;
@@ -369,6 +374,9 @@ pub(crate) fn rewrite_directive_targets<L: EvaluationLookup>(
         let Some(target) = directive.target else {
             continue;
         };
+        if data.is_some_and(|data| data.intersects(&target.span)) {
+            continue;
+        }
         let raw = &source[target.span.clone()];
         let Some(location) = whole_value_span(raw) else {
             continue;
@@ -410,7 +418,7 @@ pub(crate) fn rewrite_directive_targets<L: EvaluationLookup>(
         match &evaluation.target {
             EvaluatedDirectiveTarget::Concrete(value) => {
                 output.replace_range(evaluation.span.clone(), value);
-                edits.push(TextEdit { range: evaluation.span.clone(), replacement_len: value.len() });
+                edits.push(TextEdit::data(evaluation.span.clone(), value.len()));
             }
             EvaluatedDirectiveTarget::Absent { reason, root } => {
                 let expression_name = root.as_deref().unwrap_or(location.expression.trim());
@@ -427,7 +435,7 @@ pub(crate) fn rewrite_directive_targets<L: EvaluationLookup>(
                 );
                 let line = directive.span.start..line_end_including_terminator(source, directive.span.end);
                 output.replace_range(line.clone(), "");
-                edits.push(TextEdit { range: line, replacement_len: 0 });
+                edits.push(TextEdit::authored(line, 0));
             }
         }
     }

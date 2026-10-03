@@ -24,20 +24,25 @@ references:
 supersedes:
   - 2026-07-15-type-system
   - 2026-07-22-explicit-null
-  - 2026-09-21-schema-enhancements
 ---
 
 # Expression Type System
 
 Chartered by `2026-09-15-dasherized-identifiers`' ratified “ship now + charter”
-split (Resolved Decision 16). This document consolidates that charter with
-`2026-09-21-schema-enhancements`, favoring the newer schema design where it
-fits the confirmed decisions. Earlier July designs are retained in the
+split (Resolved Decision 16). Phase B detail is specified in
+`2026-09-21-schema-enhancements`
+([spec.md](../2026-09-21-schema-enhancements/spec.md)), which governs where it
+and this document's Phase B material differ. The annexes recorded here by the
+2026-09-26 consolidation of that proposal's original draft are input to a
+pending reconciliation (2026-09-27); see that spec's Summary and Goals.
+Earlier July designs are retained in the
 [declarations annex](declarations-design.md).
 
 ## Status
 
-Specification consolidation is complete and ready for review; runtime
+The 2026-09-26 consolidation absorbed the original draft of
+`2026-09-21-schema-enhancements` without sight of its 2026-09-25 clarification
+rounds; reconciling the resulting conflicts is pending (2026-09-27). Runtime
 implementation remains pending. The [merge decisions](merge-decisions.md)
 record the author's settled behavior choices. The [function contracts
 annex](function-contracts.md) owns tuple/function grammar, shared binding, and
@@ -101,7 +106,9 @@ Consequences:
   expression-engine function catalog's signatures in SimplifiedSchema,
   adding tuples with optional/rest elements, named optional/rest parameters,
   nested unions, categories, examples, successful result types, and fallibility
-  as specified in the [function contracts annex](function-contracts.md). Unify the ad-hoc `ParamType` system. Retain coverage of the existing
+  as specified in `2026-09-21-schema-enhancements`, with the
+  [function contracts annex](function-contracts.md) as consolidation input
+  pending reconciliation. Unify the ad-hoc `ParamType` system. Retain coverage of the existing
   catalog, updating behavioral expectations for explicitly approved changes
   rather than requiring preservation of inconsistent legacy conversions. Built-in
   and caller-supplied functions share the full declaration contract below.

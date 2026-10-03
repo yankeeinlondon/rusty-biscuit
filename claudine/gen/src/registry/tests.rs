@@ -17,9 +17,9 @@ fn registry_matches_matrix_source_counts() {
             .count()
     };
     assert_eq!(count("roster"), 10, "roster rows");
-    assert_eq!(count("research"), 11, "research rows");
+    assert_eq!(count("research"), 12, "research rows");
     assert_eq!(count("facts"), 24, "facts rows");
-    assert_eq!(REGISTRY.len(), 45, "total serialized fields");
+    assert_eq!(REGISTRY.len(), 46, "total serialized fields");
 }
 
 #[test]

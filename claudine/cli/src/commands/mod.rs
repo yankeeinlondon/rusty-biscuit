@@ -24,6 +24,7 @@ pub mod sequence;
 pub mod signals;
 pub mod skills;
 pub mod slash_commands;
+pub mod steer;
 pub mod sync;
 pub mod uninstall;
 pub mod wrap;

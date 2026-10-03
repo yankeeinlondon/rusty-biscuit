@@ -25,7 +25,17 @@ pub fn parse_page_blocks(
     content: &str,
     ctx: biscuit_terminal::errors::SourceContext,
 ) -> Result<Vec<PageBlockRegion>, PageBlockError> {
-    let pairs = super::super::block_pairs::scan_block_pairs(content).map_err(|e| match e {
+    parse_page_blocks_in(content, None, ctx)
+}
+
+/// [`parse_page_blocks`] over a body whose `data` bytes were inserted by an
+/// earlier stage; a marker line that holds data is not a marker.
+pub(crate) fn parse_page_blocks_in(
+    content: &str,
+    data: Option<&crate::markdown::compose::body_origin::DataRanges>,
+    ctx: biscuit_terminal::errors::SourceContext,
+) -> Result<Vec<PageBlockRegion>, PageBlockError> {
+    let pairs = super::super::block_pairs::scan_block_pairs_in(content, data).map_err(|e| match e {
         super::super::block_pairs::BlockPairError::UnmatchedEnd { line } => {
             PageBlockError::UnmatchedEnd {
                 ctx: Box::new(ctx.clone()),

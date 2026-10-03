@@ -30,7 +30,7 @@ success:
               - message: "🎉  the **System Prompt** research on **{{state.name}}** completed successfully"
 failure:
     message: "💥 the System Prompt research on **{{state.name}}** failed to complete!"
-    warn: "The System Prompt research on **{{state.name}}** failed to complete! (err: {{err.message}})"
+    warn: "The System Prompt research on **{{state.name}}** failed to complete! (err: {{ err.msg }})"
 ---
 # System Prompt Research on {{state.name}}
 

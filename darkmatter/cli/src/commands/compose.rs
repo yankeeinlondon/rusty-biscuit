@@ -238,10 +238,18 @@ pub fn run_compose(
         load_markdown(None)?
     };
     let load_input_dur = load_start.map(|s| s.elapsed()).unwrap_or_default();
+    // The input as authored, so a quoted `~/…` or `{{VAR}}/…` argument can
+    // supply the document's tree root (an unquoted `~` was already expanded by
+    // the shell and carries no anchor).
+    let input_reference =
+        input.and_then(|path| biscuit_file::FileReference::new(&path.to_string_lossy()).ok());
     let file_resolution_context = resolved_input.as_ref().map_or_else(
         || launch_file_resolution_context.clone(),
         |resolved| {
-            let document_context = launch_file_resolution_context.for_source(resolved);
+            let document_context = match &input_reference {
+                Some(reference) => launch_file_resolution_context.for_source_reference(reference, resolved),
+                None => launch_file_resolution_context.for_source(resolved),
+            };
             if document_context.validate().is_ok() {
                 document_context
             } else {
@@ -286,7 +294,12 @@ pub fn run_compose(
                 if let Some(package_area) = source_package_area {
                     external_context = external_context.with_package_area(package_area);
                 }
-                external_context.for_trusted_external_source(resolved)
+                match &input_reference {
+                    Some(reference) => {
+                        external_context.for_trusted_external_source_reference(reference, resolved)
+                    }
+                    None => external_context.for_trusted_external_source(resolved),
+                }
             }
         },
     );
@@ -388,6 +401,13 @@ pub fn run_compose(
                     }
 
                     // All errors are allowed — defer report for stderr after content
+                    Some(report)
+                } else if report.issues.iter().any(|i| {
+                    i.severity == ReferenceSeverity::Warning
+                        && i.code == darkmatter::markdown::reference::validate::ReferenceIssueCode::MissingLocalTarget
+                }) {
+                    // Warnings (such as a missing link inside inserted data)
+                    // never fail the run; report them after the content.
                     Some(report)
                 } else {
                     None
@@ -676,9 +696,25 @@ pub fn run_compose(
         use biscuit_terminal::components::renderable::TerminalRenderable as _;
         use darkmatter::markdown::reference::validate::ValidationReportView;
         let term = term_cell.get_or_init(Terminal::default);
-        let formatted = ValidationReportView::new(report).render(term);
+        let formatted = ValidationReportView::new(report.clone()).render(term);
         if !formatted.is_empty() {
             eprint!("\n{formatted}");
+        }
+        // The view lists errors only; a warning (a missing link inside text an
+        // expression inserted) is reported line by line.
+        use biscuit_terminal::components::prose::Prose;
+        use biscuit_terminal::prelude::{Status, StatusState};
+        use darkmatter::markdown::reference::validate::{ReferenceIssueCode, ReferenceSeverity};
+        for issue in report.issues.iter().filter(|i| {
+            i.severity == ReferenceSeverity::Warning && i.code == ReferenceIssueCode::MissingLocalTarget
+        }) {
+            let status = Status::from_prose(format!(
+                "{} <dim>(line {}, inside inserted text)</dim>",
+                Prose::escape_text(&issue.message),
+                issue.origin.line,
+            ))
+            .state(StatusState::Warning);
+            eprintln!("{}", status.render(term));
         }
     }
 

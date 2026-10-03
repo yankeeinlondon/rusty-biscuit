@@ -59,9 +59,9 @@ pub fn load_agentic_cli_names(area: &Path) -> Result<Vec<AgenticCliName>, GenErr
     };
     let roster = read_yaml(&path)?;
     let entries = roster
-        .get("list")
+        .get("sequence")
         .and_then(Value::as_array)
-        .ok_or_else(|| invalid("expected a top-level `list:` sequence".into()))?;
+        .ok_or_else(|| invalid("expected a top-level `sequence:` list".into()))?;
 
     let variants: Vec<String> = AiCli::iter().map(|variant| format!("{variant:?}")).collect();
     let mut owners = BTreeMap::<String, String>::new();

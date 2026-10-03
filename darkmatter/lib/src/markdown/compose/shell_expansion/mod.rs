@@ -464,17 +464,26 @@ pub(crate) fn prepare_directive(
 /// occurrence.
 const VOLATILE_EXECUTABLES: &[&str] = &["uuidgen", "date", "openssl"];
 
-/// Returns the normalized cache key for a directive.
+/// Returns the per-compose cache key for a directive run under `shell_opts`.
 ///
-/// The key is the canonical pipeline shape: each action is rendered with
-/// [`normalize_command`] (so quoting is canonical), joined by its real chain
-/// operator (`&&`/`||`), with redirection tokens appended. This prevents two
-/// directives that differ only in chain operator or redirection from sharing
-/// one cache entry — `false || echo fallback` and `false && echo fallback`
-/// have different execution semantics and must not collide.
-fn cache_key(effective: &ShellDirective) -> String {
+/// The command part is the canonical pipeline shape: each action is rendered
+/// with [`normalize_command`] (so quoting is canonical), joined by its real
+/// chain operator (`&&`/`||`), with redirection tokens appended. This prevents
+/// two directives that differ only in chain operator or redirection from
+/// sharing one cache entry — `false || echo fallback` and `false && echo
+/// fallback` have different execution semantics and must not collide.
+///
+/// The execution context and the deadline are part of the key: an outcome is
+/// reused only by a reader that would have run the command in the same working
+/// directory, with the same color environment, under the same timeout and
+/// timeout policy.
+fn cache_key(
+    effective: &ShellDirective,
+    shell_opts: &ShellExpansionOptions,
+    source: &crate::markdown::compose::ComposeSource,
+) -> String {
+    let mut key = String::new();
     if let Some(ref pipeline) = effective.pipeline {
-        let mut key = String::new();
         for action in &pipeline.actions {
             let op_str = match action.operator {
                 types::ChainOperator::None => "",
@@ -488,10 +497,25 @@ fn cache_key(effective: &ShellDirective) -> String {
             ));
             key.push_str(&types::render_redirection(&action.command.redirection));
         }
-        key
     } else {
-        normalize_command(&effective.executable, &effective.args)
+        key.push_str(&normalize_command(&effective.executable, &effective.args));
     }
+    let timeout = effective.timeout_override.unwrap_or(shell_opts.timeout);
+    // One directory can be spelled two ways (a transcluded child's source path
+    // is canonical, macOS temp paths run through `/var` → `/private/var`); the
+    // key names the directory, so it uses the canonical spelling when there is
+    // one. A directory that cannot be canonicalized keeps its spelling, which
+    // can only cost a second run, never share one wrongly.
+    let working_dir = executor::resolve_working_directory(shell_opts, source);
+    let working_dir = std::fs::canonicalize(&working_dir).unwrap_or(working_dir);
+    key.push_str(&format!(
+        "\u{0}{}\u{0}{}\u{0}{}\u{0}{:?}",
+        working_dir.display(),
+        shell_opts.strip_ansi,
+        timeout.as_nanos(),
+        shell_opts.timeout_behavior,
+    ));
+    key
 }
 
 /// Returns `true` if any executable in the directive is on the volatile
@@ -517,70 +541,97 @@ fn volatile_cache_warning(effective: &ShellDirective, display: &str) -> ComposeW
              (frontmatter), or `no_cache=true` (shell block) for a fresh value each time."
         ),
     );
-    match effective.origin {
-        ShellCommandOrigin::Body { line } => warning.at_line(line),
+    locate_warning(warning, &effective.origin)
+}
+
+fn locate_warning(warning: ComposeWarning, origin: &ShellCommandOrigin) -> ComposeWarning {
+    match origin {
+        ShellCommandOrigin::Body { line } => warning.at_line(*line),
         ShellCommandOrigin::Frontmatter { .. } => warning,
-        ShellCommandOrigin::ShellBlock { command_line, .. } => warning.at_line(command_line),
+        ShellCommandOrigin::ShellBlock { command_line, .. } => warning.at_line(*command_line),
     }
 }
 
-/// Executes a previously prepared directive, applying the per-compose command
-/// cache.
+/// A prepared directive's whole outcome, as one reader receives it.
+#[derive(Debug, Clone)]
+pub(crate) struct DirectiveOutcome {
+    pub outcome: executor::ShellOutcome,
+    /// `true` when this reader ran the command; `false` when it reused a
+    /// cached outcome.
+    pub fresh: bool,
+    pub warnings: Vec<ComposeWarning>,
+}
+
+/// Executes a previously prepared directive and returns its whole outcome,
+/// applying the per-compose command cache.
 ///
-/// Identical normalized commands execute once per compose: the first occurrence
-/// runs and memoizes its output; later occurrences reuse it. A directive marked
-/// `no_cache` (via `--no-cache` / `::no-cache` / `no_cache=true`) bypasses the
-/// cache entirely — it neither reads nor writes it and runs fresh every time.
+/// Identical commands under an equivalent execution context and deadline run
+/// once per compose: the first occurrence runs and memoizes its outcome,
+/// whatever its status; later and concurrent occurrences reuse it. A directive
+/// marked `no_cache` (via `--no-cache` / `::no-cache` / `no_cache=true`)
+/// bypasses the cache entirely — it neither reads nor writes it and runs fresh
+/// every time.
+pub(crate) fn execute_prepared_outcome(
+    prepared: &PreparedShellDirective,
+    options: &ComposeOptions,
+    shell_runtime: &ShellExpansionRuntime,
+) -> Result<DirectiveOutcome, ShellExpansionError> {
+    let shell_opts = options.shell_options();
+    let run = || executor::execute_directive_outcome(&prepared.effective, &shell_opts, &options.source);
+    if prepared.effective.no_cache {
+        return Ok(DirectiveOutcome {
+            outcome: run()?,
+            fresh: true,
+            warnings: Vec::new(),
+        });
+    }
+
+    let key = cache_key(&prepared.effective, &shell_opts, &options.source);
+    let (outcome, fresh) = shell_runtime.cached_outcome(&key, run)?;
+    // Warnings from the original execution (e.g. a timeout fallback) belong to
+    // that occurrence and are not replayed; a one-shot discoverability warning
+    // may fire for a volatile command the cache just collapsed.
+    let mut warnings = Vec::new();
+    if !fresh
+        && directive_is_volatile(&prepared.effective)
+        && shell_runtime.note_volatile_cache_hit(&key)
+    {
+        warnings.push(volatile_cache_warning(
+            &prepared.effective,
+            &prepared.display_command,
+        ));
+    }
+    Ok(DirectiveOutcome {
+        outcome,
+        fresh,
+        warnings,
+    })
+}
+
+/// Executes a previously prepared directive for a text reader: exit `0` yields
+/// its streams, any other status is an error unless the directive's error
+/// handling replaces it, and an allowed timeout yields its streams with a
+/// warning.
 pub(crate) fn execute_prepared_directive(
     prepared: &PreparedShellDirective,
     options: &ComposeOptions,
     shell_runtime: &ShellExpansionRuntime,
 ) -> Result<DirectiveExecutionResult, ShellExpansionError> {
-    if prepared.effective.no_cache {
-        return run_prepared_fresh(prepared, options);
-    }
-
-    let key = cache_key(&prepared.effective);
-
-    if let Some((stdout, stderr)) = shell_runtime.cache_lookup(&key) {
-        // Warnings from the original execution (e.g. a timeout fallback) belong
-        // to that occurrence and are not replayed; a one-shot discoverability
-        // warning may fire for a volatile command the cache just collapsed.
-        let mut warnings = Vec::new();
-        if directive_is_volatile(&prepared.effective)
-            && shell_runtime.note_volatile_cache_hit(&key)
-        {
-            warnings.push(volatile_cache_warning(
-                &prepared.effective,
-                &prepared.display_command,
-            ));
-        }
-        return Ok(DirectiveExecutionResult {
-            stdout,
-            stderr,
-            warnings,
-        });
-    }
-
-    let result = run_prepared_fresh(prepared, options)?;
-    shell_runtime.cache_store(&key, &result.stdout, &result.stderr);
-    Ok(result)
-}
-
-/// Executes a prepared directive without consulting the cache and converts
-/// timeout fallbacks into compose warnings.
-fn run_prepared_fresh(
-    prepared: &PreparedShellDirective,
-    options: &ComposeOptions,
-) -> Result<DirectiveExecutionResult, ShellExpansionError> {
-    let execution = execute_and_handle_errors(
-        &prepared.effective,
-        options,
+    let DirectiveOutcome {
+        outcome,
+        fresh,
+        mut warnings,
+    } = execute_prepared_outcome(prepared, options, shell_runtime)?;
+    let execution = handle_errors(
+        executor::outcome_to_execution(
+            &prepared.effective,
+            outcome,
+            options.shell_options().timeout_behavior,
+        ),
         &prepared.effective.error_handling,
     )?;
 
-    let mut warnings = Vec::new();
-    if let Some(timeout) = execution.timeout_fallback {
+    if fresh && let Some(timeout) = execution.timeout_fallback {
         let warning = ComposeWarning::new(
             "shell_expansion",
             format!(
@@ -588,11 +639,7 @@ fn run_prepared_fresh(
                 prepared.effective.origin, prepared.display_command
             ),
         );
-        warnings.push(match prepared.effective.origin {
-            ShellCommandOrigin::Body { line } => warning.at_line(line),
-            ShellCommandOrigin::Frontmatter { .. } => warning,
-            ShellCommandOrigin::ShellBlock { command_line, .. } => warning.at_line(command_line),
-        });
+        warnings.push(locate_warning(warning, &prepared.effective.origin));
     }
 
     Ok(DirectiveExecutionResult {
@@ -602,19 +649,15 @@ fn run_prepared_fresh(
     })
 }
 
-/// Executes a command and applies error handling rules to `ExecutionFailed` errors.
+/// Applies error handling rules to an `ExecutionFailed` error.
 ///
-/// If the directive has error handling options and the command fails with a
+/// If the directive has error handling options and the command failed with a
 /// non-zero exit code, the error may be suppressed (replaced with text) or
 /// enriched with additional context.
-fn execute_and_handle_errors(
-    effective: &ShellDirective,
-    options: &ComposeOptions,
+fn handle_errors(
+    result: Result<executor::CommandExecution, ShellExpansionError>,
     error_handling: &types::ErrorHandling,
 ) -> Result<executor::CommandExecution, ShellExpansionError> {
-    let shell_opts = options.shell_options();
-    let result = executor::execute_directive_impl(effective, &shell_opts, &options.source);
-
     // Fast path: no error handling configured or command succeeded
     if error_handling.is_empty() || result.is_ok() {
         return result;
@@ -623,48 +666,42 @@ fn execute_and_handle_errors(
     // Apply error handling rules to ExecutionFailed errors
     match result {
         Err(ShellExpansionError::ExecutionFailed {
-            ref code,
-            ref stderr,
-            ..
-        }) => {
-            let outcome = error_handling.resolve(*code, stderr);
-            match outcome {
-                types::ErrorHandlingOutcome::Replace(text) => Ok(
-                    executor::CommandExecution::from_streams(text, String::new()),
-                ),
-                types::ErrorHandlingOutcome::Enrich(enrichment) => {
-                    // Re-construct the error with enrichment appended to stderr
-                    match result {
-                        Err(ShellExpansionError::ExecutionFailed {
-                            ctx,
-                            command,
-                            code,
-                            stdout,
-                            stderr,
-                            origin,
-                        }) => {
-                            let enriched_stderr = if stderr.is_empty() {
-                                enrichment
-                            } else {
-                                format!("{stderr}\n{enrichment}")
-                            };
-                            Err(ShellExpansionError::ExecutionFailed {
-                                ctx,
-                                command,
-                                code,
-                                stdout,
-                                stderr: enriched_stderr,
-                                origin,
-                            })
-                        }
-                        _ => unreachable!(),
-                    }
-                }
-                types::ErrorHandlingOutcome::Propagate => result,
+            ctx,
+            command,
+            code,
+            stdout,
+            stderr,
+            origin,
+        }) => match error_handling.resolve(code, &stderr) {
+            types::ErrorHandlingOutcome::Replace(text) => Ok(
+                executor::CommandExecution::from_streams(text, String::new()),
+            ),
+            types::ErrorHandlingOutcome::Enrich(enrichment) => {
+                let enriched_stderr = if stderr.is_empty() {
+                    enrichment
+                } else {
+                    format!("{stderr}\n{enrichment}")
+                };
+                Err(ShellExpansionError::ExecutionFailed {
+                    ctx,
+                    command,
+                    code,
+                    stdout,
+                    stderr: enriched_stderr,
+                    origin,
+                })
             }
-        }
+            types::ErrorHandlingOutcome::Propagate => Err(ShellExpansionError::ExecutionFailed {
+                ctx,
+                command,
+                code,
+                stdout,
+                stderr,
+                origin,
+            }),
+        },
         // Non-ExecutionFailed errors (Timeout, CommandNotFound, etc.) are not handled
-        _ => result,
+        other => other,
     }
 }
 
@@ -1209,7 +1246,7 @@ mod integration_tests {
     #[test]
     fn pipeline_timeout_fallback_emits_warning() {
         let temp_dir = TempDir::new().unwrap();
-        // `execute_pipeline_detailed` spends one timeout budget on every `&&`
+        // `run_actions` spends one timeout budget on every `&&`
         // segment, so `echo after` must spawn and exit inside it too. The sleep
         // therefore has to overshoot the budget by a wide margin while the
         // budget stays wide enough for a slow spawn under parallel-suite load.

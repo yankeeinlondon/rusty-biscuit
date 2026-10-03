@@ -4,23 +4,28 @@ use super::super::super::Markdown;
 use super::super::super::types::MarkdownResult;
 use super::super::indent;
 use super::super::perf;
-use super::super::shell_expansion::{
-    self, apply_replacements_in_reverse, execute_directive_detailed,
-};
+use super::super::body_origin::{BodyProvenance, EditOrigin, apply_replacements_with_edits};
+use super::super::shell_expansion::{self, execute_directive_detailed};
 use super::super::{ComposeOptions, ComposeReport, ShellCommandSpan, redact_shell_command};
 use tracing::debug;
 
 /// Runs Stage 1 shell expansion directives.
+///
+/// Only authored directives run (see [`shell_expansion::parser::parse_directives_in`]);
+/// their output is data.
 pub(crate) fn run_stage(
     markdown: &mut Markdown,
     options: &ComposeOptions,
     runtime: &mut shell_expansion::types::PipelineRuntime,
     report: &mut ComposeReport,
     perf: &mut perf::PerfCollector,
+    body: &mut BodyProvenance,
 ) -> MarkdownResult<()> {
     let line_offset = markdown.frontmatter_line_count();
-    let directives = shell_expansion::parse_directives(
+    body.data.ensure_describes(markdown.content())?;
+    let directives = shell_expansion::parser::parse_directives_in(
         markdown.content(),
+        Some(&body.data),
         markdown.full_source_context_for_errors(),
         line_offset,
     )?;
@@ -57,7 +62,9 @@ pub(crate) fn run_stage(
         report.shell_expansions_applied += 1;
     }
 
-    apply_replacements_in_reverse(markdown.content_mut(), replacements);
+    let before = markdown.content().to_string();
+    let edits = apply_replacements_with_edits(markdown.content_mut(), replacements, EditOrigin::Data);
+    body.advance(&before, &edits, markdown.content())?;
     report.shell_approvals_used += runtime.shell.take_recent_approval_count();
     Ok(())
 }

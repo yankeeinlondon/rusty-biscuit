@@ -102,6 +102,31 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                 ))
                 .hint(hint)
         }
+        CompositionError::InlineAgentFrontmatterRejected { path, rejection } => {
+            let file_link = render_file_link(path);
+            let attribution = if rejection.agent_edit {
+                "The agent wrote this line during the run."
+            } else {
+                "The line could not be matched to the pre-run document."
+            };
+            let location = match (rejection.line, &rejection.property) {
+                (Some(line), Some(property)) => format!("line {line}, <cyan>`{property}`</cyan>"),
+                (Some(line), None) => format!("line {line}"),
+                (None, Some(property)) => format!("<cyan>`{property}`</cyan>"),
+                (None, None) => "the frontmatter".to_string(),
+            };
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("CompositionError", "agent frontmatter rejected"))
+                .body(format!(
+                    "The agent's frontmatter in {file_link} cannot be saved ({location}): {}. \
+                     {attribution} Nothing was stamped or written.",
+                    rejection.reason
+                ))
+                .hint(
+                    "Quote a text value that contains `: ` or ` #`, keep each key once, and \
+                     write plain scalars or indented block mappings and sequences.",
+                )
+        }
         CompositionError::CompletionSchemaFailed {
             source_path,
             status,

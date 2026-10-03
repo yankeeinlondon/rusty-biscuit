@@ -24,15 +24,11 @@ feature_or_fix: "{{ contains(spec, 'fixes') ? 'fix' : 'feature' }}"
 initialize:
     stack:
         # Inside the review-loop sequence the step list is static; a repair
-        # whose review is ready, or reports a recurring finding class, opts out
-        # here instead of launching an agent to write one log line.
+        # whose review is ready opts out here instead of launching an agent to
+        # write one log line.
         - when: "in_loop && ready == true"
           action:
               - message: "repair of review #{{iteration}} skipped: `{{parent_dir(spec)}}` is production ready"
-              - skip
-        - when: "in_loop && frontmatter(review, 'recurrence') == true"
-          action:
-              - message: "repair of review #{{iteration}} skipped: the review reports a recurring finding class"
               - skip
         - action:
             - ensure_file: '{{log}}'
@@ -174,6 +170,13 @@ the specification: "flagged for the reviewer", "left unchanged", "deliberately
 left tolerant", "out of scope for this finding", "possible follow-up". Either
 fix it in this cycle, or list it as **deferred** under `### Successful
 Completion` with the reason. A deferred defect counts as deferred, not fixed.
+
+::block when="review && file_exists(review) && frontmatter(review, 'recurrence') == true"
+**This review reports a recurring finding class.** Its `## Recurrence` section
+names the sibling sites an earlier fix missed. That list is the minimum scope
+for this cycle: fix every site it names, then run your own sweep for any it
+missed. A site left from that list repeats the class a third time.
+::end-block
 
 The repository's surgical-changes rule bounds each change to the defect class.
 It does not bound it to the sentence in the review.

@@ -4,7 +4,7 @@ last_updated: 2026-09-17
 ---
 # Darkmatter
 
-<img src="../assets/darkmatter-512.png" style="width: 250px" />
+<img src="../assets/darkmatter.png" style="width: 250px" />
 
 - [Compose](./docs/topics/what-is-composition.md) documents together dynamically
 - Render to [multiple output formats](./docs/topics/output-formats.md)

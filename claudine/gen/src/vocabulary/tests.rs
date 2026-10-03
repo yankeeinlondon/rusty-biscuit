@@ -182,6 +182,7 @@ fn graduated_loader_rejects_a_stale_facts_entry() {
         research: [(RESEARCH_TOPIC.into(), research_vocab())]
             .into_iter()
             .collect(),
+        research_authored: Default::default(),
         sidecars: Default::default(),
         overrides: Default::default(),
     };

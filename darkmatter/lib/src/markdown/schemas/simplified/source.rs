@@ -17,6 +17,7 @@ use serde_yaml_ng::Value as YamlValue;
 
 use crate::markdown::schemas::errors::SchemaError;
 
+use super::grammar;
 use super::yaml_scalar::{self, DecodedScalar};
 use super::{
     Constraint, PropertyAtom, PropertyDef, SchemaArm, SchemaDeclaration, SchemaShape,
@@ -103,6 +104,16 @@ impl SchemaSourceMap {
             .get(&(path.clone(), kind))
             .map(Vec::as_slice)
             .unwrap_or(&[])
+    }
+
+    /// Every recorded path and role with its spans, ordered by path and then
+    /// role, so a caller can check that nothing is missing or extra.
+    pub fn entries(
+        &self,
+    ) -> impl Iterator<Item = (&SchemaSourcePath, SchemaSpanKind, &[Range<usize>])> {
+        self.spans
+            .iter()
+            .map(|((path, kind), spans)| (path, *kind, spans.as_slice()))
     }
 
     fn insert(&mut self, path: &SchemaSourcePath, kind: SchemaSpanKind, span: Range<usize>) {
@@ -441,7 +452,7 @@ impl BlockLocator<'_> {
         if sequence_content(content).is_some() {
             self.sequence(indent)
         } else if explicit_indicator_content(content, '?').is_some()
-            || mapping_separator(content).is_some()
+            || mapping_separator(content, false).is_some()
         {
             self.mapping(indent)
         } else {
@@ -462,7 +473,7 @@ impl BlockLocator<'_> {
             if explicit_indicator_content(content, '?').is_some() {
                 self.next += 1;
                 pairs.push(self.explicit_pair(line.content_start..line.end, indent)?);
-            } else if mapping_separator(content).is_some() {
+            } else if mapping_separator(content, false).is_some() {
                 self.next += 1;
                 pairs.push(self.pair(line.content_start..line.end, indent)?);
             } else {
@@ -492,16 +503,23 @@ impl BlockLocator<'_> {
             if item_start < line.end {
                 let item_content = &self.source[item_start..line.end];
                 if explicit_indicator_content(item_content, '?').is_some()
-                    || mapping_separator(item_content).is_some()
+                    || mapping_separator(item_content, false).is_some()
                 {
-                    let first = if explicit_indicator_content(item_content, '?').is_some() {
-                        self.explicit_pair(item_start..line.end, indent + 2)?
+                    // The item's keys align with its first key. The closed v1
+                    // grammar keeps the conventional `- ` width.
+                    let item_indent = if self.multi_line_scalars {
+                        indent + relative
                     } else {
-                        self.pair(item_start..line.end, indent + 2)?
+                        indent + 2
+                    };
+                    let first = if explicit_indicator_content(item_content, '?').is_some() {
+                        self.explicit_pair(item_start..line.end, item_indent)?
+                    } else {
+                        self.pair(item_start..line.end, item_indent)?
                     };
                     let mut pairs = vec![first];
                     while let Some(next) = self.lines.get(self.next).cloned() {
-                        if next.indent != indent + 2
+                        if next.indent != item_indent
                             || sequence_content(&self.source[next.content_start..next.end]).is_some()
                         {
                             break;
@@ -510,11 +528,11 @@ impl BlockLocator<'_> {
                         if explicit_indicator_content(next_content, '?').is_some() {
                             self.next += 1;
                             pairs.push(
-                                self.explicit_pair(next.content_start..next.end, indent + 2)?,
+                                self.explicit_pair(next.content_start..next.end, item_indent)?,
                             );
-                        } else if mapping_separator(next_content).is_some() {
+                        } else if mapping_separator(next_content, false).is_some() {
                             self.next += 1;
-                            pairs.push(self.pair(next.content_start..next.end, indent + 2)?);
+                            pairs.push(self.pair(next.content_start..next.end, item_indent)?);
                         } else {
                             break;
                         }
@@ -542,7 +560,7 @@ impl BlockLocator<'_> {
 
     fn pair(&mut self, range: Range<usize>, indent: usize) -> Result<LocatedPair, SchemaError> {
         let raw = &self.source[range.clone()];
-        let colon = mapping_separator(raw).ok_or_else(projection_error)?;
+        let colon = mapping_separator(raw, false).ok_or_else(projection_error)?;
         let key_range = trim_range(self.source, range.start..range.start + colon);
         let key = decoded_text(self.source, &key_range)?;
         let value_range = trim_range(self.source, range.start + colon + 1..range.end);
@@ -620,13 +638,25 @@ impl BlockLocator<'_> {
                 self.inline_value(value_range, indent)
             }
         } else {
-            let child_indent = self
-                .lines
-                .get(self.next)
-                .filter(|line| line.indent > indent)
-                .map(|line| line.indent)
-                .ok_or_else(projection_error)?;
-            self.node(child_indent)
+            let next = self.lines.get(self.next).cloned();
+            match next {
+                Some(line) if line.indent > indent => self.node(line.indent),
+                // `serde_yaml_ng` writes a mapping's sequence value without
+                // indenting it (`key:\n- a`), and an empty value is null.
+                Some(line)
+                    if self.multi_line_scalars
+                        && line.indent == indent
+                        && sequence_content(&self.source[line.content_start..line.end])
+                            .is_some() =>
+                {
+                    self.sequence(indent)
+                }
+                _ if self.multi_line_scalars => Ok(LocatedValue {
+                    span: value_range.start..value_range.start,
+                    kind: LocatedKind::Scalar(DecodedScalar::empty(value_range.start)),
+                }),
+                _ => Err(projection_error()),
+            }
         }
     }
 }
@@ -721,12 +751,12 @@ fn locate_inline(source: &str, range: Range<usize>) -> Result<LocatedValue, Sche
         return Err(projection_error());
     }
     if raw.starts_with('[') {
-        let end = matching_delimiter(source, range.start, b'[', b']')
+        let end = flow_collection_end(source, range.start)
             .filter(|end| *end + 1 == range.end)
             .ok_or_else(projection_error)?;
         // An empty flow collection (`[]`) splits into one empty item; it has
         // no child node, and is itself the smallest authored node there is.
-        let items = split_top_level(source, range.start + 1..end, b',')
+        let items = split_flow_entries(source, range.start + 1..end)
             .into_iter()
             .map(|item| trim_range(source, item))
             .filter(|item| item.start < item.end)
@@ -738,17 +768,17 @@ fn locate_inline(source: &str, range: Range<usize>) -> Result<LocatedValue, Sche
         });
     }
     if raw.starts_with('{') {
-        let end = matching_delimiter(source, range.start, b'{', b'}')
+        let end = flow_collection_end(source, range.start)
             .filter(|end| *end + 1 == range.end)
             .ok_or_else(projection_error)?;
         let mut pairs = Vec::new();
-        for pair in split_top_level(source, range.start + 1..end, b',') {
+        for pair in split_flow_entries(source, range.start + 1..end) {
             let pair = trim_range(source, pair);
             if pair.start == pair.end {
                 continue;
             }
             let raw_pair = &source[pair.clone()];
-            let colon = mapping_separator(raw_pair).ok_or_else(projection_error)?;
+            let colon = mapping_separator(raw_pair, true).ok_or_else(projection_error)?;
             let key_span = trim_range(source, pair.start..pair.start + colon);
             let key = decoded_text(source, &key_span)?;
             let value = locate_inline(source, pair.start + colon + 1..pair.end)?;
@@ -773,6 +803,195 @@ fn locate_inline(source: &str, range: Range<usize>) -> Result<LocatedValue, Sche
     })
 }
 
+/// Where the raw YAML flow collection opening at byte `start` of `source`
+/// closes: the offset of its matching `]` or `}`.
+///
+/// A quote opens a quoted scalar only as the scalar's first character, so the
+/// apostrophe in `[don't, "v"]` is content, and so is the one in
+/// `[a:'b, "v"]`, whose `:` is plain-scalar content rather than a value
+/// indicator; a `]` inside `"a]"` is not structure. A `#` after whitespace
+/// starts a comment that runs to the end of its line.
+///
+/// ## Returns
+///
+/// `None` when `start` does not open a flow collection or the collection is
+/// not closed, including by an unterminated quoted scalar.
+pub fn flow_collection_end(source: &str, start: usize) -> Option<usize> {
+    if !matches!(source.as_bytes().get(start), Some(b'[' | b'{')) {
+        return None;
+    }
+    let mut depth = 0usize;
+    let mut end = None;
+    scan_flow_yaml(source, start..source.len(), |index, byte| {
+        match byte {
+            b'[' | b'{' => depth += 1,
+            b']' | b'}' if depth > 0 => {
+                depth -= 1;
+                if depth == 0 {
+                    end = Some(index);
+                    return true;
+                }
+            }
+            _ => {}
+        }
+        false
+    });
+    end
+}
+
+/// The top-level `,`-separated entries of a raw YAML flow collection's
+/// interior, with [`flow_collection_end`]'s quote and comment rules.
+///
+/// Only the YAML collection delimiters `[`/`{` nest. Parentheses are plain
+/// scalar content, so `[a(b, c)d, v]` has three entries; the decoded
+/// expression splitter ([`split_top_level`]) is the one that nests `(`/`)`.
+pub(super) fn split_flow_entries(source: &str, range: Range<usize>) -> Vec<Range<usize>> {
+    let mut spans = Vec::new();
+    let mut start = range.start;
+    let mut depth = 0usize;
+    scan_flow_yaml(source, range.clone(), |index, byte| {
+        match byte {
+            b'[' | b'{' => depth += 1,
+            b']' | b'}' => depth = depth.saturating_sub(1),
+            b',' if depth == 0 => {
+                spans.push(start..index);
+                start = index + 1;
+            }
+            _ => {}
+        }
+        false
+    });
+    spans.push(start..range.end);
+    spans
+}
+
+/// Calls `visit` with each byte of `range` outside quoted scalars and
+/// comments, in raw YAML flow context, until `visit` returns `true`.
+///
+/// `range` must start where a scalar may begin (at or just inside a
+/// collection's opening bracket). Scalar boundaries follow
+/// [`scan_raw_yaml`]; a content `:` inside a plain scalar (`a:'b`,
+/// `http://x`) is not passed to `visit`. The decoded schema-expression
+/// scanner ([`scan_expression`]) does not use these rules.
+pub(super) fn scan_flow_yaml(
+    source: &str,
+    range: Range<usize>,
+    mut visit: impl FnMut(usize, u8) -> bool,
+) {
+    scan_raw_yaml(source, range, true, |index, byte, _| visit(index, byte));
+}
+
+/// Calls `visit` with each byte of `range` outside quoted scalars and
+/// comments, and the YAML flow-collection depth before that byte, until
+/// `visit` returns `true`. `flow` says whether `range` lies inside a flow
+/// collection; otherwise it is block context and starts at depth `0`.
+///
+/// A quote opens a quoted scalar only where a scalar begins: at the start of
+/// `range`, or after `[`, `{`, `,`, or a mapping value indicator, with
+/// optional whitespace between. Scanning stops at an unterminated one. A `#`
+/// after whitespace starts a comment that runs to the end of its line.
+///
+/// A `:` is a mapping value indicator when whitespace or the end of `range`
+/// follows it, and in flow context also when a flow indicator follows it or
+/// it directly follows a quoted scalar or collection (`{"a":b}`). Otherwise it
+/// is content of a plain scalar and is not passed to `visit`, so the quote in
+/// `a:'b` stays content. This is `serde_yaml_ng`'s reading. In block context,
+/// `[` and `{` open a collection only where a scalar begins, and `,`, `]`, and
+/// `}` are content outside one.
+fn scan_raw_yaml(
+    source: &str,
+    range: Range<usize>,
+    flow: bool,
+    mut visit: impl FnMut(usize, u8, usize) -> bool,
+) {
+    let bytes = source.as_bytes();
+    let mut depth = usize::from(flow);
+    let mut scalar_start = true;
+    let mut in_plain = false;
+    let mut after_blank = true;
+    let mut index = range.start;
+    while index < range.end {
+        let byte = bytes[index];
+        if scalar_start && matches!(byte, b'\'' | b'"') {
+            let Some(end) = quoted_flow_scalar_end(bytes, index, range.end) else {
+                return;
+            };
+            index = end;
+            scalar_start = false;
+            in_plain = false;
+            after_blank = false;
+            continue;
+        }
+        if byte == b'#' && after_blank {
+            while index < range.end && !matches!(bytes[index], b'\n' | b'\r') {
+                index += 1;
+            }
+            in_plain = false;
+            continue;
+        }
+        let in_flow = depth > 0;
+        let depth_before = depth;
+        match byte {
+            _ if byte.is_ascii_whitespace() => {}
+            b'[' | b'{' if in_flow || !in_plain => {
+                depth += 1;
+                scalar_start = true;
+                in_plain = false;
+            }
+            b']' | b'}' if in_flow => {
+                depth -= 1;
+                scalar_start = false;
+                in_plain = false;
+            }
+            b',' if in_flow => {
+                scalar_start = true;
+                in_plain = false;
+            }
+            b':' => {
+                let next = bytes.get(index + 1).filter(|_| index + 1 < range.end);
+                let indicator = next.is_none_or(u8::is_ascii_whitespace)
+                    || (in_flow
+                        && (!in_plain || next.is_some_and(|next| b",[]{}".contains(next))));
+                if !indicator {
+                    in_plain = true;
+                    scalar_start = false;
+                    after_blank = false;
+                    index += 1;
+                    continue;
+                }
+                scalar_start = true;
+                in_plain = false;
+            }
+            _ => {
+                scalar_start = false;
+                in_plain = true;
+            }
+        }
+        if visit(index, byte, depth_before) {
+            return;
+        }
+        after_blank = byte.is_ascii_whitespace();
+        index += 1;
+    }
+}
+
+/// Just past the closing quote of the quoted scalar opening at `start`,
+/// honoring `''` in single quotes and `\` escapes in double quotes.
+pub(super) fn quoted_flow_scalar_end(bytes: &[u8], start: usize, end: usize) -> Option<usize> {
+    let quote = bytes[start];
+    let mut index = start + 1;
+    while index < end {
+        match bytes[index] {
+            b'\\' if quote == b'"' => index += 1,
+            b'\'' if quote == b'\'' && index + 1 < end && bytes[index + 1] == b'\'' => index += 1,
+            byte if byte == quote => return Some(index + 1),
+            _ => {}
+        }
+        index += 1;
+    }
+    None
+}
+
 fn is_block_scalar_header(source: &str) -> bool {
     let header = source.split('#').next().unwrap_or(source).trim();
     let mut chars = header.chars();
@@ -789,26 +1008,41 @@ fn sequence_content(content: &str) -> Option<usize> {
     (spaces > 0).then_some(1 + spaces)
 }
 
-fn mapping_separator(source: &str) -> Option<usize> {
-    let mut quote = None;
-    let mut escaped = false;
-    let mut flow_depth = 0usize;
-    for (index, byte) in source.bytes().enumerate() {
-        if escaped {
-            escaped = false;
-            continue;
+/// The byte offset of the `:` separating a raw YAML mapping entry's key from
+/// its value.
+///
+/// `source` is one entry: a block mapping line without its indentation, or,
+/// with `flow` set, one entry of a flow mapping, where an adjacent `:` after
+/// a quoted or collection key separates (`"a":b`). A quoted or collection key
+/// is skipped whole, and a `:` inside a plain scalar is content, so `a:b: c`
+/// has the key `a:b` and `a:'b: c` the key `a:'b`.
+///
+/// ## Examples
+///
+/// ```
+/// use darkmatter::markdown::schemas::mapping_separator;
+///
+/// assert_eq!(mapping_separator("a:b: c", false), Some(3));
+/// assert_eq!(mapping_separator("'x: y': z", false), Some(6));
+/// assert_eq!(mapping_separator("http://x", false), None);
+/// assert_eq!(mapping_separator("\"a\":b", true), Some(3));
+/// ```
+///
+/// ## Returns
+///
+/// `None` when `source` holds no separator, including when a quoted scalar
+/// is not closed.
+pub fn mapping_separator(source: &str, flow: bool) -> Option<usize> {
+    let top = usize::from(flow);
+    let mut separator = None;
+    scan_raw_yaml(source, 0..source.len(), flow, |index, byte, depth| {
+        if byte == b':' && depth == top {
+            separator = Some(index);
+            return true;
         }
-        match (quote, byte) {
-            (Some(b'\"'), b'\\') => escaped = true,
-            (Some(active), current) if active == current => quote = None,
-            (None, b'\'' | b'\"') => quote = Some(byte),
-            (None, b'[' | b'{') => flow_depth += 1,
-            (None, b']' | b'}') => flow_depth = flow_depth.saturating_sub(1),
-            (None, b':') if flow_depth == 0 => return Some(index),
-            _ => {}
-        }
-    }
-    None
+        false
+    });
+    separator
 }
 
 fn trim_range(source: &str, mut range: Range<usize>) -> Range<usize> {
@@ -1083,7 +1317,7 @@ fn scan_expression_range(
     source_map: &mut SchemaSourceMap,
 ) -> Result<(), SchemaError> {
     let source = scalar.decoded();
-    let arrow = find_top_level_arrow(&source[range.clone()]).map(|index| range.start + index);
+    let arrow = find_top_level_arrow(source, range.clone());
     let expression = trim_local(source, range.start..arrow.unwrap_or(range.end));
     let atom = scalar.project(expression.clone()).ok_or_else(projection_error)?;
     source_map.insert(path, SchemaSpanKind::Atom, offset_span(&atom, source_offset));
@@ -1093,7 +1327,12 @@ fn scan_expression_range(
     }
 
     let name = leading_identifier(source, expression.clone()).ok_or_else(projection_error)?;
-    if let Some(at) = find_top_level_byte(source, expression.clone(), b'@') {
+    if let Some(at) = find_top_level_byte(
+        source,
+        expression.clone(),
+        ExpressionContext::Expression,
+        b'@',
+    ) {
         insert_projected(
             scalar,
             path,
@@ -1151,19 +1390,17 @@ fn project_inline_shape_range(
     source_map: &mut SchemaSourceMap,
 ) -> Result<(), SchemaError> {
     let source = scalar.decoded();
-    let expression_end = find_top_level_arrow(&source[range.clone()])
-        .map(|index| range.start + index)
-        .unwrap_or(range.end);
+    let expression_end = find_top_level_arrow(source, range.clone()).unwrap_or(range.end);
     let expression = trim_local(source, range.start..expression_end);
-    let close = matching_delimiter(source, expression.start, b'{', b'}')
-        .ok_or_else(projection_error)?;
+    let close = inline_object_end(source, expression.clone()).ok_or_else(projection_error)?;
     let body = expression.start + 1..close;
-    for pair in split_top_level(source, body, b',') {
+    for pair in split_top_level(source, body, ExpressionContext::ObjectBody, b',') {
         let pair = trim_local(source, pair);
         if pair.start == pair.end {
             continue;
         }
-        let colon = find_top_level_byte(source, pair.clone(), b':').ok_or_else(projection_error)?;
+        let colon = find_top_level_byte(source, pair.clone(), ExpressionContext::ObjectBody, b':')
+            .ok_or_else(projection_error)?;
         let key_span = trim_local(source, pair.start..colon);
         let key = source[key_span.clone()].to_string();
         let property_path = path.property(&key);
@@ -1217,6 +1454,9 @@ fn project_inline_shape_range(
     Ok(())
 }
 
+/// Records the constraints and arguments of every `(…)` constraint list in
+/// `range`, a type expression without its description. Lists inside an inline
+/// object belong to its properties and are skipped here.
 fn scan_constraint_groups(
     scalar: &DecodedScalar,
     path: &SchemaSourcePath,
@@ -1225,68 +1465,83 @@ fn scan_constraint_groups(
     source_map: &mut SchemaSourceMap,
 ) -> Result<(), SchemaError> {
     let source = scalar.decoded();
-    let bytes = source.as_bytes();
-    let mut quote = None;
-    let mut escaped = false;
-    let mut brace_depth = 0usize;
-    let mut index = range.start;
-    while index < range.end {
-        let byte = bytes[index];
-        if escaped {
-            escaped = false;
-            index += 1;
-            continue;
+    let mut groups = Vec::new();
+    let mut open = None;
+    scan_expression(source, range, ExpressionContext::Expression, |index, byte, level| {
+        if level.objects > 0 {
+            return false;
         }
-        match (quote, byte) {
-            (Some(b'\"'), b'\\') => escaped = true,
-            (Some(active), current) if active == current => quote = None,
-            (None, b'\'' | b'\"') => quote = Some(byte),
-            (None, b'{') => brace_depth += 1,
-            (None, b'}') => brace_depth = brace_depth.saturating_sub(1),
-            (None, b'(') if brace_depth == 0 => {
-                let end = matching_delimiter(source, index, b'(', b')')
-                    .ok_or_else(projection_error)?;
-                for constraint in split_top_level(source, index + 1..end, b';') {
-                    let constraint = trim_local(source, constraint);
-                    if constraint.start == constraint.end {
-                        continue;
-                    }
+        match (byte, level.groups) {
+            (b'(', 0) => open = Some(index),
+            (b')', 1) => groups.extend(open.take().map(|open| open..index)),
+            _ => {}
+        }
+        false
+    });
+    if open.is_some() {
+        return Err(projection_error());
+    }
+    for group in groups {
+        let list = group.start + 1..group.end;
+        for constraint in split_top_level(source, list, ExpressionContext::Arguments, b';') {
+            let constraint = trim_local(source, constraint);
+            if constraint.start == constraint.end {
+                continue;
+            }
+            insert_projected(
+                scalar,
+                path,
+                SchemaSpanKind::Constraint,
+                constraint.clone(),
+                source_offset,
+                source_map,
+            )?;
+            let Some(arguments) = constraint_call_arguments(source, constraint)? else {
+                continue;
+            };
+            for argument in split_top_level(source, arguments, ExpressionContext::Arguments, b',') {
+                let argument = trim_local(source, argument);
+                if argument.start < argument.end {
                     insert_projected(
                         scalar,
                         path,
-                        SchemaSpanKind::Constraint,
-                        constraint.clone(),
+                        SchemaSpanKind::Argument,
+                        argument,
                         source_offset,
                         source_map,
                     )?;
-                    if let Some(open) = source[constraint.clone()]
-                        .find('(')
-                        .map(|relative| constraint.start + relative)
-                    {
-                        let close = matching_delimiter(source, open, b'(', b')')
-                            .ok_or_else(projection_error)?;
-                        for argument in split_top_level(source, open + 1..close, b',') {
-                            let argument = trim_local(source, argument);
-                            if argument.start < argument.end {
-                                insert_projected(
-                                    scalar,
-                                    path,
-                                    SchemaSpanKind::Argument,
-                                    argument,
-                                    source_offset,
-                                    source_map,
-                                )?;
-                            }
-                        }
-                    }
                 }
-                index = end;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The interior of the argument list of the constraint call in `constraint`
+/// (text inside a constraint list), or `None` for a bare keyword or positional
+/// members such as `enum('a(b', c)`'s, whose quoted `(` is argument text.
+fn constraint_call_arguments(
+    source: &str,
+    constraint: Range<usize>,
+) -> Result<Option<Range<usize>>, SchemaError> {
+    let mut open = None;
+    let mut close = None;
+    scan_expression(source, constraint, ExpressionContext::Arguments, |index, byte, level| {
+        match (byte, level.groups) {
+            (b'(', 1) if open.is_none() => open = Some(index),
+            (b')', 2) if open.is_some() => {
+                close = Some(index);
+                return true;
             }
             _ => {}
         }
-        index += 1;
+        false
+    });
+    match (open, close) {
+        (None, _) => Ok(None),
+        (Some(open), Some(close)) => Ok(Some(open + 1..close)),
+        (Some(_), None) => Err(projection_error()),
     }
-    Ok(())
 }
 
 fn insert_projected(
@@ -1315,121 +1570,213 @@ fn leading_identifier(source: &str, range: Range<usize>) -> Option<Range<usize>>
     (end > range.start).then_some(range.start..end)
 }
 
-fn find_top_level_arrow(source: &str) -> Option<usize> {
+/// The `->` opening the top-level description of the type expression in
+/// `range`.
+fn find_top_level_arrow(source: &str, range: Range<usize>) -> Option<usize> {
     let bytes = source.as_bytes();
-    let mut quote = None;
-    let mut escaped = false;
-    let mut paren = 0usize;
-    let mut brace = 0usize;
-    for index in 0..bytes.len().saturating_sub(1) {
-        let byte = bytes[index];
-        if escaped {
-            escaped = false;
-            continue;
+    let mut found = None;
+    scan_expression(source, range, ExpressionContext::Expression, |index, byte, level| {
+        if level.is_top() && byte == b'-' && bytes.get(index + 1) == Some(&b'>') {
+            found = Some(index);
+            return true;
         }
-        match (quote, byte) {
-            (Some(b'\"'), b'\\') => escaped = true,
-            (Some(active), current) if active == current => quote = None,
-            (None, b'\'' | b'\"') => quote = Some(byte),
-            (None, b'(') => paren += 1,
-            (None, b')') => paren = paren.saturating_sub(1),
-            (None, b'{') => brace += 1,
-            (None, b'}') => brace = brace.saturating_sub(1),
-            (None, b'-')
-                if paren == 0 && brace == 0 && bytes.get(index + 1) == Some(&b'>') =>
-            {
-                return Some(index);
-            }
-            _ => {}
-        }
-    }
-    None
+        false
+    });
+    found
 }
 
-fn find_top_level_byte(source: &str, range: Range<usize>, needle: u8) -> Option<usize> {
-    let bytes = source.as_bytes();
-    let mut quote = None;
-    let mut escaped = false;
-    let mut paren = 0usize;
-    let mut brace = 0usize;
-    for index in range {
-        let byte = bytes[index];
-        if escaped {
-            escaped = false;
-            continue;
+/// The first `needle` read as structure outside every inline object and
+/// constraint list in `range`.
+fn find_top_level_byte(
+    source: &str,
+    range: Range<usize>,
+    context: ExpressionContext,
+    needle: u8,
+) -> Option<usize> {
+    let mut found = None;
+    scan_expression(source, range, context, |index, byte, level| {
+        if level.is_top() && byte == needle {
+            found = Some(index);
+            return true;
         }
-        match (quote, byte) {
-            (Some(b'\"'), b'\\') => escaped = true,
-            (Some(active), current) if active == current => quote = None,
-            (None, b'\'' | b'\"') => quote = Some(byte),
-            (None, b'(') => paren += 1,
-            (None, b')') => paren = paren.saturating_sub(1),
-            (None, b'{') => brace += 1,
-            (None, b'}') => brace = brace.saturating_sub(1),
-            (None, current) if current == needle && paren == 0 && brace == 0 => {
-                return Some(index);
-            }
-            _ => {}
-        }
-    }
-    None
+        false
+    });
+    found
 }
 
-fn matching_delimiter(source: &str, start: usize, open: u8, close: u8) -> Option<usize> {
-    let bytes = source.as_bytes();
-    let mut quote = None;
-    let mut escaped = false;
-    let mut depth = 0usize;
-    for (index, byte) in bytes.iter().copied().enumerate().skip(start) {
-        if escaped {
-            escaped = false;
-            continue;
+/// The `}` closing the inline object that opens at `range.start`.
+fn inline_object_end(source: &str, range: Range<usize>) -> Option<usize> {
+    let mut found = None;
+    scan_expression(source, range, ExpressionContext::Expression, |index, byte, level| {
+        if byte == b'}' && level.objects == 1 && level.groups == 0 {
+            found = Some(index);
+            return true;
         }
-        match (quote, byte) {
-            (Some(b'\"'), b'\\') => escaped = true,
-            (Some(active), current) if active == current => quote = None,
-            (None, b'\'' | b'\"') => quote = Some(byte),
-            (None, current) if current == open => depth += 1,
-            (None, current) if current == close => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(index);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
+        false
+    });
+    found
 }
 
-fn split_top_level(source: &str, range: Range<usize>, separator: u8) -> Vec<Range<usize>> {
-    let bytes = source.as_bytes();
+/// Splits `range` at each `separator` read as structure at the level where
+/// `range` starts: between properties for [`ExpressionContext::ObjectBody`],
+/// between constraints or arguments for [`ExpressionContext::Arguments`].
+/// Raw YAML uses [`split_flow_entries`].
+fn split_top_level(
+    source: &str,
+    range: Range<usize>,
+    context: ExpressionContext,
+    separator: u8,
+) -> Vec<Range<usize>> {
     let mut spans = Vec::new();
     let mut start = range.start;
-    let mut quote = None;
-    let mut escaped = false;
-    let mut depth = 0usize;
-    for index in range.clone() {
-        let byte = bytes[index];
-        if escaped {
-            escaped = false;
-            continue;
+    scan_expression(source, range.clone(), context, |index, byte, level| {
+        if byte == separator && level.is_top() {
+            spans.push(start..index);
+            start = index + 1;
         }
-        match (quote, byte) {
-            (Some(b'\"'), b'\\') => escaped = true,
-            (Some(active), current) if active == current => quote = None,
-            (None, b'\'' | b'\"') => quote = Some(byte),
-            (None, b'(' | b'[' | b'{') => depth += 1,
-            (None, b')' | b']' | b'}') => depth = depth.saturating_sub(1),
-            (None, current) if current == separator && depth == 0 => {
-                spans.push(start..index);
-                start = index + 1;
-            }
-            _ => {}
-        }
-    }
+        false
+    });
     spans.push(start..range.end);
     spans
+}
+
+/// Where a [`scan_expression`] range sits in the decoded type-expression
+/// grammar, which decides where a description ends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ExpressionContext {
+    /// A whole type expression. A top-level description runs to the end of
+    /// the range, as the parser reads it.
+    Expression,
+    /// A whole type expression written as a plain arm of a raw YAML flow
+    /// sequence, where YAML ends a top-level description at the next `,` or
+    /// `]`.
+    FlowArm,
+    /// The body of an inline object, so a description ends at the object's
+    /// next `,` or `}`.
+    ObjectBody,
+    /// The inside of a constraint or argument list.
+    Arguments,
+}
+
+/// The structural nesting before a byte passed to [`scan_expression`],
+/// relative to the start of the scanned range.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ExpressionLevel {
+    /// Enclosing inline objects `{ … }`.
+    pub(super) objects: usize,
+    /// Enclosing constraint and argument lists `( … )`, counting the list an
+    /// [`ExpressionContext::Arguments`] range starts inside.
+    pub(super) groups: usize,
+    base_groups: usize,
+}
+
+impl ExpressionLevel {
+    /// Whether the byte is at the level where the scanned range starts.
+    pub(super) fn is_top(self) -> bool {
+        self.objects == 0 && self.groups == self.base_groups
+    }
+}
+
+/// Calls `visit` with each byte of `range` that the type-expression grammar
+/// reads as structure, and the nesting before it, until `visit` returns `true`.
+///
+/// The grammar has one lexical mode per kind of text, and this scanner follows
+/// the same mode the parser is in rather than inferring one from delimiter
+/// depth:
+///
+/// - **Type text** (`{`, `}`, `[]`, `(`, `@`, `->`, `,`, `:`, identifiers) is
+///   visited. `{` opens an inline object and `(` a constraint list.
+/// - **Argument lists**, inside a constraint list's `(…)`: `(`/`)` nest and a
+///   quote opens a string the lexer reads with `\` escapes, so
+///   `suggest('a)b', c)` holds two arguments. `[`, `{`, and the rest are
+///   argument text. String contents are not visited.
+/// - **Descriptions** after `->` are prose, never visited: quotes and brackets
+///   in them mean nothing, so `(it's fine)` and `plain [x` hide no boundary.
+///   Inside an inline object one ends where
+///   [`grammar::inline_description_end`] ends it.
+/// - **Imported file references** after `@` are opaque, never visited, and
+///   end where [`grammar::file_reference_end`] ends them, so
+///   `Name@./a{b.yaml -> d` has a top-level `->`.
+/// - **Pattern keys** `<…>` are opaque to their first `>`.
+///
+/// The byte that ends a description or reference is visited as type text.
+/// Scanning stops at an unterminated string or pattern key, and at an
+/// unbalanced `)` in a description, which the parser rejects.
+pub(super) fn scan_expression(
+    source: &str,
+    range: Range<usize>,
+    context: ExpressionContext,
+    mut visit: impl FnMut(usize, u8, ExpressionLevel) -> bool,
+) {
+    let bytes = source.as_bytes();
+    let end = range.end;
+    let base_groups = usize::from(context == ExpressionContext::Arguments);
+    let mut level = ExpressionLevel {
+        objects: 0,
+        groups: base_groups,
+        base_groups,
+    };
+    let mut index = range.start;
+    while index < end {
+        let byte = bytes[index];
+        if level.groups > 0 {
+            if matches!(byte, b'\'' | b'"') {
+                let Some(next) = grammar::quoted_end(bytes, index, end) else {
+                    return;
+                };
+                index = next;
+                continue;
+            }
+            if visit(index, byte, level) {
+                return;
+            }
+            match byte {
+                b'(' => level.groups += 1,
+                b')' => level.groups -= 1,
+                _ => {}
+            }
+            index += 1;
+            continue;
+        }
+        if visit(index, byte, level) {
+            return;
+        }
+        index = match byte {
+            b'(' => {
+                level.groups = 1;
+                index + 1
+            }
+            b'{' => {
+                level.objects += 1;
+                index + 1
+            }
+            b'}' => {
+                level.objects = level.objects.saturating_sub(1);
+                index + 1
+            }
+            b'<' => match grammar::pattern_key_end(bytes, index, end) {
+                Some(next) => next,
+                None => return,
+            },
+            b'@' => grammar::file_reference_end(bytes, index + 1, end),
+            b'-' if bytes.get(index + 1) == Some(&b'>') => {
+                let start = index + 2;
+                if level.objects > 0 || context == ExpressionContext::ObjectBody {
+                    match grammar::inline_description_end(bytes, start, end) {
+                        Ok(next) => next,
+                        Err(_) => return,
+                    }
+                } else if context == ExpressionContext::FlowArm {
+                    (start..end)
+                        .find(|&next| matches!(bytes[next], b',' | b']'))
+                        .unwrap_or(end)
+                } else {
+                    end
+                }
+            }
+            _ => index + 1,
+        };
+    }
 }
 
 fn trim_local(source: &str, mut range: Range<usize>) -> Range<usize> {
@@ -1661,23 +2008,10 @@ fn scan_value_scalars(source: &str) -> Vec<DecodedScalar> {
     scalars
 }
 
+/// Just past the key/value separator of a raw block YAML line, as found by
+/// [`mapping_separator`].
 fn mapping_value_offset(line: &str) -> Option<usize> {
-    let mut quote = None;
-    let mut escaped = false;
-    for (index, ch) in line.char_indices() {
-        if escaped {
-            escaped = false;
-            continue;
-        }
-        match (quote, ch) {
-            (Some('"'), '\\') => escaped = true,
-            (Some(active), current) if active == current => quote = None,
-            (None, '\'' | '"') => quote = Some(ch),
-            (None, ':') => return Some(index + 1),
-            _ => {}
-        }
-    }
-    None
+    mapping_separator(line, false).map(|colon| colon + 1)
 }
 
 fn scan_value(raw: &str, base: usize, out: &mut Vec<DecodedScalar>) {
@@ -1727,6 +2061,330 @@ mod tests {
             unreachable!()
         };
         candidates[1].span.clone()
+    }
+
+    #[test]
+    fn mapping_separator_treats_a_quote_as_quoting_only_where_a_scalar_begins() {
+        for (line, expected) in [
+            ("it's: x", Some(4)),
+            ("say \"hi: x", Some(7)),
+            ("a 'b: c'", Some(4)),
+            ("'a:b': c", Some(5)),
+            ("'it''s: x': y", Some(10)),
+            ("\"a\\\": b\": c", Some(8)),
+            ("[a, 'b: c']: x", Some(11)),
+            ("{k: 'v: w'}: x", Some(11)),
+            ("'unterminated: x", None),
+            ("plain scalar", None),
+        ] {
+            assert_eq!(mapping_separator(line, false), expected, "{line:?}");
+        }
+    }
+
+    /// A `:` separates a key only as a YAML value indicator; inside a plain
+    /// scalar it is content, and the quote after it stays content too.
+    #[test]
+    fn mapping_separator_skips_content_colons_inside_plain_scalars() {
+        for (line, flow, expected) in [
+            // Block context: only `: ` or a line-ending `:` separates.
+            ("a:b: c", false, Some(3)),
+            ("a:'b: c", false, Some(4)),
+            ("a:\"b: c", false, Some(4)),
+            ("url: http://x:8080", false, Some(3)),
+            ("key:", false, Some(3)),
+            ("key:value", false, None),
+            ("'a':b", false, None),
+            ("a #b: c", false, None),
+            // Flow context adds a `:` right after a quoted or collection key.
+            ("a:'b: \"v\"", true, Some(4)),
+            ("a:\"b: 'v'", true, Some(4)),
+            ("\"a\":b", true, Some(3)),
+            ("'a' :b", true, Some(4)),
+            ("[x]:b", true, Some(3)),
+            ("a :b", true, None),
+            ("http://x", true, None),
+        ] {
+            assert_eq!(mapping_separator(line, flow), expected, "{line:?} flow={flow}");
+        }
+    }
+
+    /// Renders a located node as its authored scalars, `[a|b]` sequences, and
+    /// `{key=value|…}` mappings, so one string pins structure and spans.
+    fn located_shape(source: &str, node: &SchemaValueNode) -> String {
+        let join = |parts: Vec<String>| parts.join("|");
+        match &node.kind {
+            SchemaValueKind::Scalar => source[node.span.clone()].to_string(),
+            SchemaValueKind::Sequence(items) => format!(
+                "[{}]",
+                join(items.iter().map(|item| located_shape(source, item)).collect())
+            ),
+            SchemaValueKind::Mapping(entries) => format!(
+                "{{{}}}",
+                join(
+                    entries
+                        .iter()
+                        .map(|entry| format!("{}={}", entry.key, located_shape(source, &entry.value)))
+                        .collect()
+                )
+            ),
+        }
+    }
+
+    #[test]
+    fn raw_flow_collections_open_a_quote_only_where_a_scalar_begins() {
+        for (yaml, expected) in [
+            // Controls: ordinary plain siblings, genuinely quoted spellings,
+            // and delimiters inside real quoted scalars.
+            ("[ordinary, \"v\"]", "[ordinary|\"v\"]"),
+            ("['don''t', \"v\"]", "['don''t'|\"v\"]"),
+            ("{'don''t': \"v\"}", "{don't=\"v\"}"),
+            ("[\"a, b\", 'c'']d', \"e\\\"]f\"]", "[\"a, b\"|'c'']d'|\"e\\\"]f\"]"),
+            // A quote inside a plain scalar is content.
+            ("[don't, \"v\"]", "[don't|\"v\"]"),
+            ("[say \"hi, 'v']", "[say \"hi|'v']"),
+            ("[don't, can't, \"v\"]", "[don't|can't|\"v\"]"),
+            ("{don't: \"v\"}", "{don't=\"v\"}"),
+            ("{say \"hi: 'v'}", "{say \"hi='v'}"),
+            ("{a: don't, b: \"v\"}", "{a=don't|b=\"v\"}"),
+            ("{a: say \"hi, b: 'v'}", "{a=say \"hi|b='v'}"),
+            // Nested collections take the same rule.
+            ("{list: [don't, \"v\"], z: 1}", "{list=[don't|\"v\"]|z=1}"),
+            ("[{k: don't}, {k: 'v'}]", "[{k=don't}|{k='v'}]"),
+            ("[don't, {can't: \"v\"}]", "[don't|{can't=\"v\"}]"),
+            ("key: [don't, can't, \"v\"]", "{key=[don't|can't|\"v\"]}"),
+            ("key: {a: say \"hi, b: 'v'}", "{key={a=say \"hi|b='v'}}"),
+        ] {
+            let node = locate_schema_value(yaml, 0)
+                .unwrap_or_else(|| panic!("{yaml:?} was not located"));
+            assert_eq!(located_shape(yaml, &node), expected, "{yaml:?}");
+        }
+    }
+
+    /// Every row is first read by `serde_yaml_ng`, whose structure the
+    /// located shape must match, under LF and CRLF.
+    #[test]
+    fn a_content_colon_does_not_reopen_quote_mode_in_raw_flow_yaml() {
+        for (flow, expected) in [
+            // Controls: ordinary and `don't` siblings, genuinely quoted
+            // colons, and adjacent JSON-like keys, which do separate.
+            ("[ordinary, \"v\"]", "[ordinary|\"v\"]"),
+            ("[don't, \"v\"]", "[don't|\"v\"]"),
+            ("['a:''b', \"v\"]", "['a:''b'|\"v\"]"),
+            ("[\"a:b\", 'v']", "[\"a:b\"|'v']"),
+            ("{\"a\":b, c: 'v'}", "{a=b|c='v'}"),
+            ("{'a':'v'}", "{a='v'}"),
+            ("[http://x, 'v']", "[http://x|'v']"),
+            ("{a:b: c, d: 'v'}", "{a:b=c|d='v'}"),
+            // A quote after a content colon is content.
+            ("[a:'b, \"v\"]", "[a:'b|\"v\"]"),
+            ("[a:\"b, 'v']", "[a:\"b|'v']"),
+            ("[a:'b, c:'d, \"v\"]", "[a:'b|c:'d|\"v\"]"),
+            ("[a:\"b, c:\"d, 'v']", "[a:\"b|c:\"d|'v']"),
+            ("{a:'b: \"v\"}", "{a:'b=\"v\"}"),
+            ("{a:\"b: 'v'}", "{a:\"b='v'}"),
+            ("{a: a:'b, b: \"v\"}", "{a=a:'b|b=\"v\"}"),
+            ("{a: a:\"b, b: 'v'}", "{a=a:\"b|b='v'}"),
+            // Nested collections take the same rule.
+            ("{list: [a:'b, \"v\"]}", "{list=[a:'b|\"v\"]}"),
+            ("{list: [a:\"b, c:\"d, 'v'], z: 1}", "{list=[a:\"b|c:\"d|'v']|z=1}"),
+            ("[{k: a:'b}, {k: 'v'}]", "[{k=a:'b}|{k='v'}]"),
+            ("[a:'b, {c:'d: \"v\"}]", "[a:'b|{c:'d=\"v\"}]"),
+        ] {
+            let parsed: YamlValue = serde_yaml_ng::from_str(flow)
+                .unwrap_or_else(|error| panic!("{flow:?} is not YAML: {error}"));
+            for newline in ["\n", "\r\n"] {
+                let yaml = format!("a:'b: {flow}{newline}q: {flow}{newline}");
+                let node = locate_schema_value(&yaml, 0)
+                    .unwrap_or_else(|| panic!("{yaml:?} was not located"));
+                assert_eq!(
+                    located_shape(&yaml, &node),
+                    format!("{{a:'b={expected}|q={expected}}}"),
+                    "{yaml:?}"
+                );
+                let SchemaValueKind::Mapping(entries) = &node.kind else {
+                    unreachable!()
+                };
+                assert_eq!(entry_count(&entries[1].value), entry_count_of(&parsed), "{yaml:?}");
+            }
+            let end = flow_collection_end(flow, 0);
+            assert_eq!(end, Some(flow.len() - 1), "{flow:?}");
+        }
+    }
+
+    /// Parentheses are plain-scalar content in raw YAML: they neither hide a
+    /// `,` between entries nor, when they balance across two entries, merge
+    /// those entries.
+    #[test]
+    fn parentheses_are_content_in_raw_flow_yaml() {
+        for (flow, expected) in [
+            // Controls: no parenthesis, and parentheses inside quotes.
+            ("[ordinary, \"v\"]", "[ordinary|\"v\"]"),
+            ("['a(b', \"v\"]", "['a(b'|\"v\"]"),
+            ("[\"a(b, c)d\", 'v']", "[\"a(b, c)d\"|'v']"),
+            ("[a(b)c, \"v\"]", "[a(b)c|\"v\"]"),
+            // Unbalanced and cross-entry balanced parentheses.
+            ("[a(b, \"v\"]", "[a(b|\"v\"]"),
+            ("[a)b, \"v\"]", "[a)b|\"v\"]"),
+            ("[a(b, c)d, \"v\"]", "[a(b|c)d|\"v\"]"),
+            ("{a: a(b, b: \"v\"}", "{a=a(b|b=\"v\"}"),
+            ("{a(b: x, c)d: \"v\"}", "{a(b=x|c)d=\"v\"}"),
+            // Nested collections take the same rule.
+            ("{list: [a(b, \"v\"]}", "{list=[a(b|\"v\"]}"),
+            ("[{k: a(b}, {k: c)d}, 'v']", "[{k=a(b}|{k=c)d}|'v']"),
+            ("[[a(b, c)d], \"v\"]", "[[a(b|c)d]|\"v\"]"),
+        ] {
+            let parsed: YamlValue = serde_yaml_ng::from_str(flow)
+                .unwrap_or_else(|error| panic!("{flow:?} is not YAML: {error}"));
+            for newline in ["\n", "\r\n"] {
+                let yaml = format!("p(x: {flow}{newline}q: {flow}{newline}");
+                let node = locate_schema_value(&yaml, 0)
+                    .unwrap_or_else(|| panic!("{yaml:?} was not located"));
+                assert_eq!(
+                    located_shape(&yaml, &node),
+                    format!("{{p(x={expected}|q={expected}}}"),
+                    "{yaml:?}"
+                );
+                let SchemaValueKind::Mapping(entries) = &node.kind else {
+                    unreachable!()
+                };
+                assert_eq!(entry_count(&entries[1].value), entry_count_of(&parsed), "{yaml:?}");
+            }
+            assert_eq!(flow_collection_end(flow, 0), Some(flow.len() - 1), "{flow:?}");
+        }
+    }
+
+    fn entry_count(node: &SchemaValueNode) -> usize {
+        match &node.kind {
+            SchemaValueKind::Scalar => 0,
+            SchemaValueKind::Sequence(items) => items.len(),
+            SchemaValueKind::Mapping(entries) => entries.len(),
+        }
+    }
+
+    fn entry_count_of(value: &YamlValue) -> usize {
+        match value {
+            YamlValue::Sequence(items) => items.len(),
+            YamlValue::Mapping(entries) => entries.len(),
+            _ => 0,
+        }
+    }
+
+    fn suggestion_candidates(yaml: &str, property: &str) -> Vec<String> {
+        let value: YamlValue = serde_yaml_ng::from_str(yaml).unwrap();
+        let schema = parse_yaml_schema_with_source(&value, yaml, 0)
+            .unwrap_or_else(|error| panic!("{yaml:?}: {error}"));
+        let SimplifiedSchema::Single(shape) = schema else {
+            panic!("expected single shape");
+        };
+        let mut atom = match &shape.properties[property] {
+            PropertyDef::Single(atom) => atom,
+            PropertyDef::Union(_) => panic!("expected single atom"),
+        };
+        while let TypeExpr::InlineObject(nested) = &atom.ty {
+            let PropertyDef::Single(inner) = nested.properties.values().next().unwrap() else {
+                panic!("expected single nested atom");
+            };
+            atom = inner;
+        }
+        atom.constraints
+            .iter()
+            .find_map(|constraint| match constraint {
+                Constraint::Suggest(candidates) => Some(candidates),
+                _ => None,
+            })
+            .unwrap()
+            .iter()
+            .map(|candidate| yaml[candidate.span.clone()].to_string())
+            .collect()
+    }
+
+    #[test]
+    fn a_schema_key_holding_a_quote_inside_a_plain_scalar_projects_its_suggestions() {
+        for yaml in ["it's: string(suggest(alpha, beta))\n", "say \"hi: string(suggest(alpha, beta))\n"] {
+            let key = yaml.split(": ").next().unwrap();
+            assert_eq!(suggestion_candidates(yaml, key), ["alpha", "beta"], "{yaml:?}");
+        }
+        let quoted = "'it''s': string(suggest(alpha, beta))\n";
+        assert_eq!(suggestion_candidates(quoted, "it's"), ["alpha", "beta"]);
+    }
+
+    #[test]
+    fn a_schema_key_holding_a_content_colon_projects_its_suggestions() {
+        for (key, newline) in [
+            ("a:'b", "\n"),
+            ("a:\"b", "\n"),
+            ("a:b", "\n"),
+            ("a:'b", "\r\n"),
+            ("a:\"b", "\r\n"),
+        ] {
+            let yaml = format!("{key}: string(suggest(alpha, beta)){newline}other: string{newline}");
+            assert_eq!(suggestion_candidates(&yaml, key), ["alpha", "beta"], "{yaml:?}");
+        }
+    }
+
+    /// The decoded expression grammar is not YAML: its quotes open anywhere,
+    /// so a quoted argument after `(` keeps its `,` and `}`.
+    #[test]
+    fn expression_quotes_open_anywhere_in_the_decoded_grammar() {
+        assert_eq!(
+            suggestion_candidates("value: string(suggest('a,b', c))\n", "value"),
+            ["'a,b'", "c"]
+        );
+        assert_eq!(
+            suggestion_candidates("value: \"{ mode: string(suggest('x}y', z)) }\"\n", "value"),
+            ["'x}y'", "z"]
+        );
+    }
+
+    /// The decoded helpers follow the expression lexer's quoting: `\` escapes
+    /// in either quote style, a quote opens a string only inside an argument
+    /// list, and braces inside an argument list are argument text.
+    #[test]
+    fn expression_projection_follows_the_lexer_quote_rule() {
+        let root = SchemaSourcePath::root();
+        let rows: &[(&str, &str, &[&str], &[&str])] = &[
+            // Controls.
+            ("string(suggest('a,b', c); min(1))", "", &["suggest('a,b', c)", "min(1)"], &["'a,b'", "c", "1"]),
+            ("string(suggest(\"a\\\")b\", c))", "", &["suggest(\"a\\\")b\", c)"], &["\"a\\\")b\"", "c"]),
+            // A backslash escapes inside single quotes too.
+            ("string(suggest('a\\')b', c); min(1))", "", &["suggest('a\\')b', c)", "min(1)"], &["'a\\')b'", "c", "1"]),
+            // A quote outside parentheses is description prose.
+            ("\"{ a: string -> it's, b: string(suggest(x, y)) }\"", "b", &["suggest(x, y)"], &["x", "y"]),
+            ("\"{ a: string -> say \\\"hi, b: string(suggest(x, y)) }\"", "b", &["suggest(x, y)"], &["x", "y"]),
+            ("'{ a: string(suggest(''p,q'', r)) -> it''s here, b: number(min(2)) }'", "b", &["min(2)"], &["2"]),
+            // A brace inside an argument is argument text.
+            ("\"{ a: string(pattern(^[}]$)), b: number(min(2)) }\"", "b", &["min(2)"], &["2"]),
+        ];
+        for (yaml, property, constraints, arguments) in rows {
+            let value: YamlValue = serde_yaml_ng::from_str(yaml).unwrap();
+            let projected = parse_property_definition_with_source("p", &value, yaml, 0)
+                .unwrap_or_else(|error| panic!("{yaml:?}: {error:?}"));
+            let path = if property.is_empty() { root.clone() } else { root.property(*property) };
+            let texts = |kind| {
+                projected
+                    .source_map
+                    .spans(&path, kind)
+                    .iter()
+                    .map(|span| &yaml[span.clone()])
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(texts(SchemaSpanKind::Constraint), *constraints, "{yaml:?}");
+            assert_eq!(texts(SchemaSpanKind::Argument), *arguments, "{yaml:?}");
+        }
+    }
+
+    /// The suggestion projector reads semantic candidate spans and YAML
+    /// decoding rather than expression structure, so description and filename
+    /// punctuation beside a suggestion leaves its spans exact.
+    #[test]
+    fn suggestion_spans_ignore_description_and_file_reference_punctuation() {
+        for yaml in [
+            "value: \"{ a: string(suggest(p, q)) -> (it's fine), b: Name@./a(b.yaml }\"\n",
+            "value: '{ a: string(suggest(p, q)) -> (say \"hi), b: string -> plain [x }'\n",
+            "value: \"{ a: string(suggest(p, q)) -> ({x} it's), b: Name@./a{b.yaml -> d }\"\r\n",
+        ] {
+            assert_eq!(suggestion_candidates(yaml, "value"), ["p", "q"], "{yaml:?}");
+        }
     }
 
     #[test]

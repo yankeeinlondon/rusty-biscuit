@@ -30,7 +30,7 @@ success:
               - message: "🎉  the **Hooks** research on **{{state.name}}** completed successfully"
 failure:
     message: "💥 the Hooks research on **{{state.name}}** failed to complete!"
-    warn: "The Hooks research on **{{state.name}}** failed to complete! (err: {{err.message}})"
+    warn: "The Hooks research on **{{state.name}}** failed to complete! (err: {{ err.msg }})"
 ---
 # Hooks Research on {{state.name}}
 

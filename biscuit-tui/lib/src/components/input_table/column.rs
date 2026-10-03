@@ -79,8 +79,8 @@ impl Default for TextAreaInputConfig {
 ///
 /// ## Variants
 ///
-/// - [`InputTableColumn::StaticText`] — a display-only column whose
-///   string is painted identically for every row.
+/// - [`InputTableColumn::StaticText`] — a display-only column; each row
+///   may supply its own text, and the column sizes to the widest one.
 /// - [`InputTableColumn::BooleanSwitch`] — every cell renders a
 ///   [`BooleanSwitch`](crate::components::BooleanSwitch) seeded from
 ///   [`BooleanSwitchConfig`].
@@ -96,12 +96,20 @@ impl Default for TextAreaInputConfig {
 ///   supplied [`ChoiceInput`].
 #[derive(Debug, Clone)]
 pub enum InputTableColumn {
-    /// Display-only column. The string is rendered identically for
-    /// every row.
+    /// Display-only column.
+    ///
+    /// Its preferred width is the widest of `text` and every row's value
+    /// (at least three cells). When the table is too narrow, the column
+    /// shrinks and a clipped value ends with `…`; clipping is display-only
+    /// and never changes the returned value.
     StaticText {
         /// Column identifier for value extraction.
         id: String,
-        /// Text rendered in every cell of this column.
+        /// Text seeded into every cell of this column until a row value or
+        /// [`InputTableState::set_cell_initial`] replaces it; it still
+        /// counts toward the column's preferred width.
+        ///
+        /// [`InputTableState::set_cell_initial`]: super::InputTableState::set_cell_initial
         text: String,
     },
     /// Boolean toggle-switch column.

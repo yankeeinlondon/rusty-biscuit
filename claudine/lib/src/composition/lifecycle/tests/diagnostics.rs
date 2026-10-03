@@ -173,7 +173,7 @@ fn err_in_start_stack_when_clause_is_rejected() {
         }
     });
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
-    let err = validate_no_err_in_no_error_events(&config, dummy_path()).unwrap_err();
+    let err = validate_no_err_in_no_error_events(&fm, &config, dummy_path()).unwrap_err();
     match err {
         CompositionError::LifecycleErrNotAvailable { event, property, .. } => {
             assert_eq!(event, "start");
@@ -195,7 +195,7 @@ fn err_member_access_in_single_text_arg_is_literal() {
         }
     });
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
-    assert!(validate_no_err_in_no_error_events(&config, dummy_path()).is_ok());
+    assert!(validate_no_err_in_no_error_events(&fm, &config, dummy_path()).is_ok());
 }
 
 #[test]
@@ -209,7 +209,7 @@ fn err_in_single_text_arg_is_literal_across_no_error_events() {
         });
         let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
         assert!(
-            validate_no_err_in_no_error_events(&config, dummy_path()).is_ok(),
+            validate_no_err_in_no_error_events(&fm, &config, dummy_path()).is_ok(),
             "bare `err` in a {ev} message arg should be literal, not rejected"
         );
     }
@@ -221,7 +221,7 @@ fn err_in_single_text_arg_is_literal_across_no_error_events() {
         }
     });
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
-    assert!(validate_no_err_in_no_error_events(&config, dummy_path()).is_ok());
+    assert!(validate_no_err_in_no_error_events(&fm, &config, dummy_path()).is_ok());
 }
 
 #[test]
@@ -232,7 +232,7 @@ fn err_in_blocked_failure_finalize_is_allowed() {
             event: {"stack": [{"action": {"say": "err.msg"}}]}
         });
         let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
-        let result = validate_no_err_in_no_error_events(&config, dummy_path());
+        let result = validate_no_err_in_no_error_events(&fm, &config, dummy_path());
         assert!(
             result.is_ok(),
             "err should be allowed in {event}, got: {:?}",
@@ -259,7 +259,7 @@ fn doc_err_escape_hatch_is_allowed_everywhere() {
             })
         };
         let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
-        let result = validate_no_err_in_no_error_events(&config, dummy_path());
+        let result = validate_no_err_in_no_error_events(&fm, &config, dummy_path());
         assert!(
             result.is_ok(),
             "doc.err should be allowed in {event}, got: {:?}",
@@ -279,7 +279,7 @@ fn err_in_control_reason_single_text_arg_is_literal() {
         }
     });
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
-    assert!(validate_no_err_in_no_error_events(&config, dummy_path()).is_ok());
+    assert!(validate_no_err_in_no_error_events(&fm, &config, dummy_path()).is_ok());
 }
 
 #[test]
@@ -293,7 +293,7 @@ fn err_in_shell_command_single_text_arg_is_literal() {
         }
     });
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
-    assert!(validate_no_err_in_no_error_events(&config, dummy_path()).is_ok());
+    assert!(validate_no_err_in_no_error_events(&fm, &config, dummy_path()).is_ok());
 }
 
 // -- err static scan over interpolation spans (C4) --------------------
@@ -304,7 +304,7 @@ fn err_interpolation_span_in_top_level_field_rejected_in_no_error_event() {
     // `{{ … }}` span, and `err` is still forbidden in a no-error event.
     let fm = json!({ "start": { "message": "❌️  {{err.msg}}" } });
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
-    let err = validate_no_err_in_no_error_events(&config, dummy_path()).unwrap_err();
+    let err = validate_no_err_in_no_error_events(&fm, &config, dummy_path()).unwrap_err();
     match err {
         CompositionError::LifecycleErrNotAvailable { event, property, .. } => {
             assert_eq!(event, "start");
@@ -322,7 +322,7 @@ fn err_interpolation_span_in_stack_message_rejected_in_no_error_event() {
         "start": { "stack": [{"action": {"message": "❌️  {{err.msg}}"}}] }
     });
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
-    let err = validate_no_err_in_no_error_events(&config, dummy_path()).unwrap_err();
+    let err = validate_no_err_in_no_error_events(&fm, &config, dummy_path()).unwrap_err();
     match err {
         CompositionError::LifecycleErrNotAvailable { event, property, .. } => {
             assert_eq!(event, "start");
@@ -339,7 +339,7 @@ fn timing_and_current_interpolation_allowed_in_no_error_events() {
         "start": { "message": "took {{timing.document_ms}}ms on {{current.agent}}" }
     });
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
-    assert!(validate_no_err_in_no_error_events(&config, dummy_path()).is_ok());
+    assert!(validate_no_err_in_no_error_events(&fm, &config, dummy_path()).is_ok());
 }
 
 #[test]
@@ -347,7 +347,7 @@ fn err_interpolation_span_allowed_in_error_carrying_event() {
     // The same `{{err.msg}}` span is fine in `failure` (an error event).
     let fm = json!({ "failure": { "message": "❌️  {{err.msg}}" } });
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
-    assert!(validate_no_err_in_no_error_events(&config, dummy_path()).is_ok());
+    assert!(validate_no_err_in_no_error_events(&fm, &config, dummy_path()).is_ok());
 }
 
 // -- deferred effect validation (C4) ----------------------------------
@@ -370,127 +370,5 @@ fn effect_field_literal_unknown_name_still_rejected_at_prepare() {
         err,
         CompositionError::LifecycleUnknownEffect(_, _)
     ));
-}
-
-// -- stack undefined-variable scan -------------------------------------
-
-#[test]
-fn stack_undefined_variable_in_when_clause_is_rejected() {
-    let fm = json!({
-        "start": {
-            "stack": [
-                {"when": "missing_var == 'x'", "action": {"say": "hi"}}
-            ]
-        }
-    });
-    let raw = fm_from_json(fm.clone());
-    let effective = json!({});
-    let lifecycle = parse_lifecycle_config(&fm, dummy_path()).unwrap();
-    let err = validate_no_undefined_lifecycle_variables(&raw, &effective, &lifecycle, dummy_path())
-        .unwrap_err();
-    match err {
-        CompositionError::LifecycleUndefinedVariable { property, variable, .. } => {
-            assert!(property.contains("when"), "got: {property}");
-            assert_eq!(variable, "missing_var");
-        }
-        other => panic!("expected undefined variable, got: {other:?}"),
-    }
-}
-
-#[test]
-fn stack_err_global_is_not_undefined_in_failure() {
-    // `err` is a lifecycle global in stack expressions, so it must not
-    // trip the undefined-variable scan (the err static scan handles
-    // misuse).
-    let fm = json!({
-        "failure": {
-            "stack": [{"action": {"say": "err.msg"}}]
-        }
-    });
-    let raw = fm_from_json(fm.clone());
-    let effective = json!({});
-    let lifecycle = parse_lifecycle_config(&fm, dummy_path()).unwrap();
-    let result = validate_no_undefined_lifecycle_variables(&raw, &effective, &lifecycle, dummy_path());
-    assert!(result.is_ok(), "err should not be undefined, got: {:?}", result.err());
-}
-
-#[test]
-fn stack_timing_and_current_globals_are_not_undefined() {
-    let fm = json!({
-        "start": {
-            "stack": [
-                {"action": {"say": "timing.document_ms"}},
-                {"action": {"say": "current.agent"}}
-            ]
-        }
-    });
-    let raw = fm_from_json(fm.clone());
-    let effective = json!({});
-    let lifecycle = parse_lifecycle_config(&fm, dummy_path()).unwrap();
-    let result = validate_no_undefined_lifecycle_variables(&raw, &effective, &lifecycle, dummy_path());
-    assert!(result.is_ok(), "got: {:?}", result.err());
-}
-
-#[test]
-fn stack_bare_token_in_action_arg_is_literal_not_undefined_variable() {
-    // A positional scalar value is literal text by default, so a bare token
-    // is not an undefined-variable reference. Real references go through a
-    // whole-value `{{ … }}` span.
-    let fm = json!({
-        "start": {
-            "stack": [{"action": {"say": "missing_var"}}]
-        }
-    });
-    let raw = fm_from_json(fm.clone());
-    let effective = json!({});
-    let lifecycle = parse_lifecycle_config(&fm, dummy_path()).unwrap();
-    assert!(
-        validate_no_undefined_lifecycle_variables(&raw, &effective, &lifecycle, dummy_path())
-            .is_ok(),
-        "a bare token in a literal message arg is not a variable reference"
-    );
-}
-
-// -- lifecycle globals vs body/frontmatter interpolation --------------
-
-#[test]
-fn late_binding_global_in_top_level_field_is_a_known_root() {
-    // Late binding (C4 / 5.3): `err`/`timing`/`current`/`current_env` are known roots in
-    // top-level communication fields just like in stack surfaces — they
-    // resolve at event-time, not against frontmatter — so the
-    // undefined-variable scan does not flag a bare reference. (Placement
-    // misuse — `err` in a no-error event — is caught separately by
-    // `validate_no_err_in_no_error_events`.)
-    for global in ["err", "timing", "current"] {
-        let raw = fm_from_json(json!({
-            "failure": { "message": format!("x: {{{{ {global} }}}}") }
-        }));
-        let effective = json!({});
-        let result = validate_no_undefined_lifecycle_variables(
-            &raw,
-            &effective,
-            &LifecycleConfig::default(),
-            dummy_path(),
-        );
-        assert!(result.is_ok(), "`{global}` is a known root; got: {result:?}");
-    }
-}
-
-#[test]
-fn bare_err_in_top_level_field_passes_when_frontmatter_defines_it() {
-    // When frontmatter has a literal `err` property, `{{ err }}` in a
-    // top-level field resolves to it — the lifecycle global does not
-    // interfere.
-    let raw = fm_from_json(json!({
-        "start": { "message": "error: {{ err }}" }
-    }));
-    let effective = json!({ "err": "literal-value" });
-    let result = validate_no_undefined_lifecycle_variables(
-        &raw,
-        &effective,
-        &LifecycleConfig::default(),
-        dummy_path(),
-    );
-    assert!(result.is_ok(), "got: {:?}", result.err());
 }
 

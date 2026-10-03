@@ -664,8 +664,8 @@ fn an_overlay_never_writes_to_disk() {
 // ── schema interaction ────────────────────────────────────────────────────
 
 /// A router can satisfy a target's required schema property that the target
-/// does not author — the overlay lands in the authored layer, ahead of
-/// validation.
+/// does not author — the overlay lands in the target's frontmatter ahead of
+/// validation (and reaches compose as a data layer).
 #[test]
 fn with_satisfies_a_required_schema_property_the_target_does_not_author() {
     let fx = overlay_fixture("---\n$schema:\n    topic: 'string(required)'\n---\nplan {{ topic }}\n");

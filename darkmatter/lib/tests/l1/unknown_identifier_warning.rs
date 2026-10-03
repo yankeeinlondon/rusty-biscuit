@@ -1,10 +1,11 @@
 //! Requirement 4 of the dasherized-identifiers spec
 //! (`darkmatter/features/2026-09-15-dasherized-identifiers`): a well-formed
-//! identifier that resolves to nothing warns at
-//! `dm.expression.unknown_identifier`, composition still succeeds and the value
-//! still renders empty — unless the author handled the absence explicitly or
-//! the root is known to the effective state, a caller input layer, or the
-//! effective schema.
+//! identifier that resolves to nothing is an undeclared document property: it
+//! raises the `dm.expression.undeclared_property` advisory, composition still
+//! succeeds and the value still renders empty — unless the author handled the
+//! absence explicitly or the root is declared by the effective state, a caller
+//! input layer, or the effective schema. A runtime-context name is not a
+//! declaration: a bare `today` is a document property, never `ctx.today`.
 //!
 //! Every test composes a real document through `compose_with` and asserts the
 //! rendered output together with the warning set.
@@ -75,18 +76,18 @@ fn unknown_identifiers(report: &ComposeReport) -> Vec<&ComposeWarning> {
     report
         .warnings
         .iter()
-        .filter(|w| w.code.as_deref() == Some(ComposeWarning::UNKNOWN_IDENTIFIER_CODE))
+        .filter(|w| w.code.as_deref() == Some(ComposeWarning::UNDECLARED_PROPERTY_CODE))
         .collect()
 }
 
-/// The roots named by the report's unknown-identifier warnings, in order.
+/// The roots named by the report's undeclared-property advisories, in order.
 fn warned_roots(report: &ComposeReport) -> Vec<String> {
     unknown_identifiers(report)
         .iter()
         .map(|w| {
-            // Messages are Prose markup, so `_` in a root arrives escaped.
-            let rest = w.message.strip_prefix("unknown identifier '").expect(&w.message);
-            rest[..rest.find('\'').unwrap()].replace('\\', "")
+            // The root leads the message as a Prose code span.
+            let rest = w.message.strip_prefix('`').expect(&w.message);
+            rest[..rest.find('`').unwrap()].to_string()
         })
         .collect()
 }
@@ -107,7 +108,14 @@ fn an_undeclared_kebab_root_warns_renders_empty_and_composes() {
     assert_eq!(warning.source.as_deref(), Some(ComposeWarning::EXPRESSION_SOURCE));
     assert_eq!(warning.path.as_deref(), Some(path.as_path()));
     assert_eq!(warning.line_number, Some(4));
-    assert!(warning.message.starts_with("unknown identifier 'iteration-1' at "), "{}", warning.message);
+    assert!(warning.message.starts_with("`iteration-1` at "), "{}", warning.message);
+    assert!(
+        warning.message.ends_with(
+            "is an undeclared document property (unknown type; `null` unless supplied at runtime)"
+        ),
+        "{}",
+        warning.message
+    );
     assert!(warning.message.contains("doc.md:4"), "{}", warning.message);
     assert_eq!(report.warnings.len(), 1, "no other diagnostic: {:?}", report.warnings);
 }
@@ -150,7 +158,7 @@ fn a_declared_required_root_fails_with_the_schema_message_only() {
     };
     assert_eq!(problems.len(), 1, "{problems:?}");
     assert_eq!(problems[0].property.as_deref(), Some("iteration-1"), "{problems:?}");
-    assert!(!error.to_string().contains("unknown identifier"), "{error}");
+    assert!(!error.to_string().contains("undeclared document property"), "{error}");
 }
 
 // ── Suppression table (spec) ─────────────────────────────────────────────────
@@ -216,8 +224,27 @@ fn a_bare_unknown_page_block_gate_warns_at_its_line() {
     assert!(!content.contains("hidden"), "{content}");
     let warnings = unknown_identifiers(&report);
     assert_eq!(warnings.len(), 1, "{:?}", report.warnings);
-    assert!(warnings[0].message.starts_with("unknown identifier 'gate'"), "{}", warnings[0].message);
+    assert!(warnings[0].message.starts_with("`gate`"), "{}", warnings[0].message);
     assert_eq!(warnings[0].line_number, Some(6));
+}
+
+/// A bare name that matches a runtime-context key is a document property
+/// (R3): it renders empty and is reported, while `ctx.<name>` reads the
+/// context. Before the fallback was removed, `{{ today }}` rendered the date
+/// and was never reported.
+#[test]
+fn a_bare_context_name_is_an_undeclared_property_not_ctx() {
+    let (content, report) = compose_doc("---\ntitle: T\n---\n[{{ today }}]({{ ctx.today }})\n");
+
+    let (bare, namespaced) = content.split_once(']').unwrap();
+    assert_eq!(bare, "[", "a bare `today` never reads ctx.today: {content}");
+    assert!(namespaced.len() > "()".len(), "ctx.today still resolves: {content}");
+    assert_eq!(warned_roots(&report), ["today"], "{:?}", report.warnings);
+
+    let (gated, report) =
+        compose_doc("---\ntitle: T\n---\n::block when=\"year\"\nhidden\n::end-block\nshown\n");
+    assert_eq!(gated, "shown", "a bare `year` gate is a falsy absent property");
+    assert_eq!(warned_roots(&report), ["year"], "{:?}", report.warnings);
 }
 
 // ── Known roots: missing is not the same as falsy ────────────────────────────

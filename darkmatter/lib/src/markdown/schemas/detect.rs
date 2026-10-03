@@ -102,7 +102,7 @@ pub fn detect_from_document_with_context(
 ) -> SchemaShape {
     let context = match md.source() {
         Some(ComposeSource::File(path)) => request_context.for_source(path),
-        _ => request_context.for_base(request_context.base_dir()),
+        _ => request_context.for_cwd(request_context.cwd()),
     };
     let mut properties: IndexMap<String, PropertyDef> = IndexMap::new();
     for (key, value) in md.frontmatter().as_map() {

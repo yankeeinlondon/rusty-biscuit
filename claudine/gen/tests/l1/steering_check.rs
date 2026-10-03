@@ -10,7 +10,7 @@ fn generation_stops_before_writes_when_steering_gate_fails() {
     fs::create_dir_all(&research).expect("steering directory");
     fs::write(
         area.path().join("docs/providers.yaml"),
-        "list:\n  - slug: codex\n",
+        "sequence:\n  - slug: codex\n",
     )
     .expect("roster");
     fs::copy(

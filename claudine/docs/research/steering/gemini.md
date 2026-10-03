@@ -1,6 +1,6 @@
 ---
 "$schema": "./_schema.yaml"
-schema_revision: 3
+schema_revision: 4
 provider: gemini
 created: 2026-09-08
 last_updated: 2026-09-08
@@ -266,6 +266,7 @@ gaps:
     detail: No documented version bounds or passive protocol-version negotiation sufficient for safe adapter selection were found.
     next_check: Maintain a conservative tested-version allowlist keyed by ACP capabilities and block unknown versions until reviewed.
 changes:
+  - "Migrated to schema revision 4 on 2026-09-28: verification rows gained stable ids and typed assertion kinds; no provider facts changed."
   - Initial steering revision-2 report for Gemini CLI.
 requires_claudine_update: true
 reason: A future managed ACP launch/registry/adapter could support idle prompts and consented interrupt-then-submit, but ordinary sessions remain undiscoverable for exact live-conversation delivery and all activation is blocked by empty verification.

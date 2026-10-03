@@ -267,9 +267,41 @@ fn classifier_other_on_non_composition_subcommand() {
 }
 
 #[test]
-fn classifier_other_when_cursor_crosses_double_dash_separator() {
+fn classifier_declines_when_cursor_crosses_double_dash_separator() {
     let a = argv(&["claudine", "claude", "--", "--model"]);
-    assert_eq!(classify_completion_target(&a, 3), CompletionTarget::Other,);
+    assert_eq!(classify_completion_target(&a, 3), CompletionTarget::Declined);
+    // A composition command's authored `--` starts the agent's opaque tail:
+    // no Claudine flag, setter, or clap fallback past it.
+    for cursor in ["-", "--mod", "phase=", "ph", ""] {
+        let a = argv(&["claudine", "compose", "plan.md", "--", cursor]);
+        assert_eq!(classify_completion_target(&a, 4), CompletionTarget::Declined, "{cursor:?}");
+    }
+}
+
+#[test]
+fn scan_reads_value_options_from_the_clap_surface() {
+    // `--step-timeout` and `--budget-ledger` were missing from the old
+    // hand-written list, so their value read as the composition file.
+    for flag in ["--step-timeout", "--model", "-m", "--set", "--fail-fast"] {
+        let a = argv(&["claudine", "sequence", flag, "30m", "plan.md", ""]);
+        let scan = scan_committed_positional(&a, 2, 5);
+        assert_eq!(scan.file_arg.as_deref(), Some("plan.md"), "{flag}");
+    }
+    // An attached value is one word.
+    let a = argv(&["claudine", "compose", "--model=gpt", "plan.md", ""]);
+    assert_eq!(scan_committed_positional(&a, 2, 4).file_arg.as_deref(), Some("plan.md"));
+}
+
+#[test]
+fn classifier_leaves_a_claudine_option_value_to_clap() {
+    // Before the fix `--model gp<TAB>` after the file read as a setter name.
+    for (words, cursor) in [
+        (&["claudine", "compose", "plan.md", "--model", "gp"][..], 4),
+        (&["claudine", "compose", "--model", ""][..], 3),
+        (&["claudine", "compose", "plan.md", "--set", "k="][..], 4),
+    ] {
+        assert_eq!(classify_completion_target(&argv(words), cursor), CompletionTarget::Other, "{words:?}");
+    }
 }
 
 #[test]
@@ -503,17 +535,18 @@ fn scan_committed_positional_finds_file_arg_among_setters_and_flags() {
     let a = argv(&[
         "claudine", "compose", "--model", "gpt-4", "spec=val", "plan.md", "",
     ]);
-    let (file, seen) = scan_committed_positional(&a, 2, 6);
-    assert_eq!(file.as_deref(), Some("plan.md"));
-    assert!(seen);
+    let scan = scan_committed_positional(&a, 2, 6);
+    assert_eq!(scan.file_arg.as_deref(), Some("plan.md"));
+    assert!(scan.seen_positional);
+    assert!(!scan.cursor_is_option_value);
 }
 
 #[test]
 fn scan_committed_positional_returns_none_when_no_positional() {
     let a = argv(&["claudine", "compose", "spec=val", "--model", "gpt", ""]);
-    let (file, seen) = scan_committed_positional(&a, 2, 5);
-    assert!(file.is_none());
-    assert!(!seen);
+    let scan = scan_committed_positional(&a, 2, 5);
+    assert!(scan.file_arg.is_none());
+    assert!(!scan.seen_positional);
 }
 
 #[test]
@@ -545,4 +578,20 @@ fn clap_fallback_completes_providers_format_values() {
         got.iter().any(|c| c == "json"),
         "expected 'json' format value, got {got:?}"
     );
+}
+
+/// Completion's setter shapes read the shared grammar
+/// (`claudine::composition::setter_key`), so a word ownership calls a
+/// setter is the word completion offers setter values for.
+#[test]
+fn completion_setter_shapes_match_the_shared_grammar() {
+    for token in [
+        "phase=2", "_k=v", "a-b=", "k9_-=x=y", "a=b=c", "foo.bar=baz", "9key=v", "-k=v", "é=v", "=v", "phase", "",
+    ] {
+        let key = claudine::composition::setter_key(token);
+        assert_eq!(is_setter_shaped(token), key.is_some(), "`{token}`");
+        assert_eq!(split_setter(token), key.map(|key| (key, &token[key.len() + 1..])), "`{token}`");
+        let name = token.split_once('=').map_or(token, |(name, _)| name);
+        assert_eq!(is_setter_name_partial(name), claudine::composition::is_setter_name(name), "`{name}`");
+    }
 }

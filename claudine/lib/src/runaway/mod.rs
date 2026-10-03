@@ -4,7 +4,10 @@
 //! feed arbitrary streamed chunks of assistant text in (`feed`/`flush`) and
 //! receive a [`Trip`] out the moment one of three guards fires — an
 //! exit-expression match, a group-cycle repetition, or a per-turn volume
-//! breach. The detector owns a bounded ring buffer of recent normalized
+//! breach. Separately, `observe` reports nonterminal [`RepetitionSignal`]s —
+//! an early repetition warning at half the stop limit and the recovery that
+//! ends a warned episode — which feed automatic steering and never change a
+//! trip. The detector owns a bounded ring buffer of recent normalized
 //! lines so memory is constant regardless of how long the runaway runs.
 //!
 //! Provider/model scope selection, kill-switch flags, and channel plumbing
@@ -24,7 +27,10 @@ pub use config::{
     ExitExpressionEntry, ExitExpressionsLayer, ExitExpressionsValue, GuardSettings, LayerMode,
     RepetitionGuardSettings, VolumeGuardSettings,
 };
-pub use detector::{CaptureVolumeCap, ContentDetector, DetectorConfig};
+pub use detector::{
+    recovery_lines, warning_threshold, CaptureVolumeCap, ContentDetector, ContentObservation, DetectorConfig,
+    RepetitionSignal, MIN_RECOVERY_LINES,
+};
 pub use patterns::{CompiledExitExpressions, ExitExpressionInput, PatternKind};
 
 /// A terminal content-guard trip emitted by [`ContentDetector::feed`] /

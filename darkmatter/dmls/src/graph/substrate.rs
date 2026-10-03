@@ -539,14 +539,21 @@ fn inline_schema_file_keys(ast: &FrontmatterAst) -> HashSet<String> {
         .collect()
 }
 
-/// Whether a SimplifiedSchema type string declares a `file(...)` type (in any
-/// union arm), ignoring the trailing `-> description`.
+/// Whether a SimplifiedSchema type string declares a `file(...)` type.
+///
+/// Only the leading type keyword decides. The expression grammar has no `|`
+/// union (a union is a YAML sequence, which is not a scalar here), so a `|` in
+/// an argument such as `pattern(^a|file(b)$)` is argument text.
 fn is_file_type_string(type_string: &str) -> bool {
-    let type_part = type_string.split("->").next().unwrap_or("").trim();
-    type_part.split('|').any(|arm| {
-        let arm = arm.trim();
-        arm == "file" || arm.starts_with("file(") || arm.starts_with("file[") || arm.starts_with("file ")
-    })
+    type_string
+        .trim_start()
+        .strip_prefix("file")
+        .is_some_and(|rest| {
+            rest.is_empty()
+                || rest.starts_with(['(', '['])
+                || rest.starts_with("->")
+                || rest.starts_with(char::is_whitespace)
+        })
 }
 
 /// The 1-indexed document line containing byte `offset`.
@@ -562,6 +569,27 @@ fn shift(span: SourceSpan, base: usize) -> SourceSpan {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The leading type keyword alone decides; a `|` or `file(` inside an
+    /// argument, a description, or an import is not a file type.
+    #[test]
+    fn a_file_type_is_named_by_the_leading_keyword_only() {
+        for (type_string, expected) in [
+            ("file", true),
+            ("file(eager; required)", true),
+            ("file[](min(1))", true),
+            ("file -> the spec", true),
+            ("file->the spec", true),
+            ("  file(match('*.md'))", true),
+            ("string(pattern(^a|file(b)$))", false),
+            ("string -> a | file(x) note", false),
+            ("string|file", false),
+            ("files", false),
+            ("Doc@./file(x).yaml", false),
+        ] {
+            assert_eq!(is_file_type_string(type_string), expected, "{type_string:?}");
+        }
+    }
 
     #[test]
     fn test_index_headings_and_slugs() {

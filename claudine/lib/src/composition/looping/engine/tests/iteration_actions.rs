@@ -92,6 +92,7 @@ fn loop_iterations_share_one_exact_document_epoch() {
     assert_eq!(
         document_epoch.work_snapshot(),
         crate::invocation_context::DocumentEpochWork {
+            volatile_observations: Default::default(),
             launch_context_constructions: 1,
             launch_context_extensions: 0,
             ambient_fallbacks: 0,
@@ -110,7 +111,7 @@ fn loop_iterations_share_one_exact_document_epoch() {
 #[test]
 fn runs_until_condition_stops_and_commits_actions() {
     let config = counter_loop(3);
-    let result = execute_loop_with_config(
+    let result = run_loop(
         Path::new("loop.md"),
         &config,
         object(json!({"counter": 0})),
@@ -120,7 +121,9 @@ fn runs_until_condition_stops_and_commits_actions() {
     .unwrap();
 
     assert!(result.error.is_none());
-    assert_eq!(result.iteration_count, 3);
+    // Post-checked: iterations run with counter 0, 1, 2, 3; the gate after
+    // the counter-3 iteration reads `3 < 3` and stops without incrementing.
+    assert_eq!(result.iteration_count, 4);
     assert_eq!(result.final_frontmatter.get("counter"), Some(&json!(3)));
     assert_eq!(result.final_exit_code, 0);
     assert_eq!(result.last_output, "ok");
@@ -130,13 +133,16 @@ fn runs_until_condition_stops_and_commits_actions() {
 fn injects_ambient_values_and_current_frontmatter() {
     let config = counter_loop(2);
     let seen = RefCell::new(Vec::new());
-    let result = execute_loop_with_config(
+    let result = run_loop(
         Path::new("loop.md"),
         &config,
         object(json!({"counter": 0, "iteration": 99})),
         LoopExecutionOptions::default(),
         |ctx| {
-            seen.borrow_mut().push(ctx.as_set_overrides());
+            seen.borrow_mut().push(
+                ctx.as_layered_overrides(&crate::composition::LayeredOverrides::new())
+                    .to_value(),
+            );
             Ok(LoopIterationOutput::success(format!(
                 "run {}",
                 ctx.iteration
@@ -147,6 +153,8 @@ fn injects_ambient_values_and_current_frontmatter() {
 
     assert!(result.error.is_none());
     let seen = seen.borrow();
+    // `counter < 2` from 0 runs with counter 0, 1, 2.
+    assert_eq!(seen.len(), 3);
     assert_eq!(seen[0]["counter"], json!(0));
     // User frontmatter property `iteration` is preserved verbatim
     // because loop ambients live under `_loop_*`.
@@ -161,11 +169,14 @@ fn injects_ambient_values_and_current_frontmatter() {
     assert_eq!(seen[1]["_loop_last_output"], json!("run 1"));
 }
 
+/// `_loop_is_last` is predicted by reading the condition against the state an
+/// iteration is about to run with. `counter < 3` from 0 runs four times; only
+/// the counter-3 iteration fails the condition, so only it is last.
 #[test]
-fn computes_is_last_from_post_action_condition() {
+fn computes_is_last_from_condition_on_iteration_state() {
     let config = counter_loop(3);
     let seen = RefCell::new(Vec::new());
-    execute_loop_with_config(
+    run_loop(
         Path::new("loop.md"),
         &config,
         object(json!({"counter": 0})),
@@ -177,7 +188,7 @@ fn computes_is_last_from_post_action_condition() {
     )
     .unwrap();
 
-    assert_eq!(&*seen.borrow(), &[false, false, true]);
+    assert_eq!(&*seen.borrow(), &[false, false, false, true]);
 }
 
 #[test]
@@ -190,7 +201,7 @@ fn computes_is_last_when_max_iterations_is_stopping_condition() {
         on_rate_limit: None,
     };
     let seen = RefCell::new(Vec::new());
-    let result = execute_loop_with_config(
+    let result = run_loop(
         Path::new("loop.md"),
         &config,
         Map::new(),
@@ -229,7 +240,7 @@ fn fail_fast_false_continues_after_iteration_failure() {
         on_rate_limit: None,
     };
     let seen_exit_codes = RefCell::new(Vec::new());
-    let result = execute_loop_with_config(
+    let result = run_loop(
         Path::new("loop.md"),
         &config,
         object(json!({"counter": 0})),
@@ -252,15 +263,18 @@ fn fail_fast_false_continues_after_iteration_failure() {
     .unwrap();
 
     assert!(result.error.is_none());
-    assert_eq!(&*seen_exit_codes.borrow(), &[0, 42, 0]);
-    assert_eq!(result.iteration_count, 3);
-    assert_eq!(result.final_frontmatter.get("counter"), Some(&json!(2)));
+    // `_loop_count < 4` stops at the gate after iteration 4. Under
+    // `fail_fast: false` the failed iteration 1 still reaches the gate, so its
+    // action applies like any other continuing pass: gates 1-3 increment.
+    assert_eq!(&*seen_exit_codes.borrow(), &[0, 42, 0, 0]);
+    assert_eq!(result.iteration_count, 4);
+    assert_eq!(result.final_frontmatter.get("counter"), Some(&json!(3)));
 }
 
 #[test]
 fn fail_fast_true_stops_after_iteration_failure() {
     let config = counter_loop(3);
-    let result = execute_loop_with_config(
+    let result = run_loop(
         Path::new("loop.md"),
         &config,
         object(json!({"counter": 0})),
@@ -296,7 +310,7 @@ fn fail_fast_false_discards_failed_action_stage() {
         fail_fast: Some(false),
         on_rate_limit: None,
     };
-    let result = execute_loop_with_config(
+    let result = run_loop(
         Path::new("loop.md"),
         &config,
         object(json!({"counter": 0, "bad": "abc"})),
@@ -306,7 +320,10 @@ fn fail_fast_false_discards_failed_action_stage() {
     .unwrap();
 
     assert!(result.error.is_none());
-    assert_eq!(result.iteration_count, 2);
+    // `_loop_count < 3` stops at the gate after iteration 3. Each continuing
+    // gate's action list fails on `bad`, and the whole stage is discarded, so
+    // `counter` never moves even though its own increment succeeded.
+    assert_eq!(result.iteration_count, 3);
     assert_eq!(result.final_frontmatter.get("counter"), Some(&json!(0)));
     assert_eq!(result.final_frontmatter.get("bad"), Some(&json!("abc")));
 }
@@ -333,7 +350,7 @@ fn set_template_renders_against_post_executor_iteration_state() {
         fail_fast: None,
         on_rate_limit: None,
     };
-    let result = execute_loop_with_config(
+    let result = run_loop(
         Path::new("loop.md"),
         &config,
         Map::new(),
@@ -356,7 +373,7 @@ fn set_template_renders_against_post_executor_iteration_state() {
 }
 
 #[test]
-fn five_iteration_counter_loop() {
+fn counter_below_five_runs_six_iterations() {
     let config = LoopConfig {
         condition: LoopCondition::While("counter < 5".into()),
         actions: vec![LoopAction::Increment("counter".into())],
@@ -364,7 +381,7 @@ fn five_iteration_counter_loop() {
         fail_fast: None,
         on_rate_limit: None,
     };
-    let result = execute_loop_with_config(
+    let result = run_loop(
         Path::new("loop.md"),
         &config,
         object(json!({"counter": 0})),
@@ -374,15 +391,16 @@ fn five_iteration_counter_loop() {
     .unwrap();
 
     assert!(result.error.is_none());
-    assert_eq!(result.iteration_count, 5);
+    // Iterations run with counter 0 through 5; the counter-5 gate stops.
+    assert_eq!(result.iteration_count, 6);
     assert_eq!(result.final_frontmatter.get("counter"), Some(&json!(5)));
     assert_eq!(result.last_output, "tick");
 }
 
 #[test]
 fn until_loop_runs_until_condition_met() {
-    // until: "counter >= 2" means "continue while counter < 2"
-    // actions increment counter each iteration, so 2 iterations run
+    // `until: "counter >= 2"` continues while the iteration that just ran
+    // had counter < 2.
     let config = LoopConfig {
         condition: LoopCondition::Until("counter >= 2".into()),
         actions: vec![LoopAction::Increment("counter".into())],
@@ -390,7 +408,7 @@ fn until_loop_runs_until_condition_met() {
         fail_fast: None,
         on_rate_limit: None,
     };
-    let result = execute_loop_with_config(
+    let result = run_loop(
         Path::new("loop.md"),
         &config,
         object(json!({"counter": 0})),
@@ -400,10 +418,10 @@ fn until_loop_runs_until_condition_met() {
     .unwrap();
 
     assert!(result.error.is_none());
-    // Iteration 1: counter=0 < 2 -> continue -> counter=1
-    // Iteration 2: counter=1 < 2 -> continue -> counter=2
-    // Iteration 3: counter=2 >= 2 -> stop
-    assert_eq!(result.iteration_count, 2);
+    // Iteration 1 runs with counter=0; gate: 0 >= 2 false -> counter=1
+    // Iteration 2 runs with counter=1; gate: 1 >= 2 false -> counter=2
+    // Iteration 3 runs with counter=2; gate: 2 >= 2 true -> stop
+    assert_eq!(result.iteration_count, 3);
     assert_eq!(result.final_frontmatter.get("counter"), Some(&json!(2)));
 }
 
@@ -417,7 +435,7 @@ fn until_loop_with_counter_reaches_target() {
         fail_fast: None,
         on_rate_limit: None,
     };
-    let result = execute_loop_with_config(
+    let result = run_loop(
         Path::new("loop.md"),
         &config,
         object(json!({"counter": 0})),
@@ -427,11 +445,9 @@ fn until_loop_with_counter_reaches_target() {
     .unwrap();
 
     assert!(result.error.is_none());
-    // Iteration 1: counter=0 < 3 -> continue -> counter=1
-    // Iteration 2: counter=1 < 3 -> continue -> counter=2
-    // Iteration 3: counter=2 < 3 -> continue -> counter=3
-    // Iteration 4: counter=3 >= 3 -> stop
-    assert_eq!(result.iteration_count, 3);
+    // Iterations run with counter=0, 1, 2, 3; the gate after the counter=3
+    // iteration reads `3 >= 3` and stops.
+    assert_eq!(result.iteration_count, 4);
     assert_eq!(result.final_frontmatter.get("counter"), Some(&json!(3)));
 }
 
@@ -447,7 +463,7 @@ fn append_accumulates_log_across_iterations() {
         fail_fast: None,
         on_rate_limit: None,
     };
-    let result = execute_loop_with_config(
+    let result = run_loop(
         Path::new("loop.md"),
         &config,
         object(json!({"log": ""})),
@@ -457,7 +473,8 @@ fn append_accumulates_log_across_iterations() {
     .unwrap();
 
     assert!(result.error.is_none());
-    assert_eq!(result.iteration_count, 3);
+    // Gates 1-3 read `_loop_count < 4` as true and append; gate 4 stops.
+    assert_eq!(result.iteration_count, 4);
     let log = result
         .final_frontmatter
         .get("log")
@@ -477,7 +494,7 @@ fn last_output_and_last_exit_code_propagate() {
         on_rate_limit: None,
     };
     let outputs = RefCell::new(Vec::new());
-    let result = execute_loop_with_config(
+    let result = run_loop(
         Path::new("loop.md"),
         &config,
         object(json!({})),
@@ -495,13 +512,15 @@ fn last_output_and_last_exit_code_propagate() {
     .unwrap();
 
     assert!(result.error.is_none());
-    assert_eq!(result.iteration_count, 3);
-    assert_eq!(result.last_output, "run-3");
+    // `_loop_count < 4` stops at the gate after iteration 4.
+    assert_eq!(result.iteration_count, 4);
+    assert_eq!(result.last_output, "run-4");
 
     let seen = outputs.borrow();
     assert_eq!(seen[0], (1, String::new(), 0));
     assert_eq!(seen[1], (2, "run-1".into(), 0));
     assert_eq!(seen[2], (3, "run-2".into(), 0));
+    assert_eq!(seen[3], (4, "run-3".into(), 0));
 }
 
 #[test]
@@ -514,7 +533,7 @@ fn last_exit_code_reflects_failure_in_next_iteration() {
         on_rate_limit: None,
     };
     let exit_codes = RefCell::new(Vec::new());
-    let result = execute_loop_with_config(
+    let result = run_loop(
         Path::new("loop.md"),
         &config,
         object(json!({})),
@@ -535,19 +554,21 @@ fn last_exit_code_reflects_failure_in_next_iteration() {
     .unwrap();
 
     assert!(result.error.is_none());
-    assert_eq!(result.iteration_count, 3);
+    // `_loop_count < 4` stops at the gate after iteration 4, which succeeded.
+    assert_eq!(result.iteration_count, 4);
     assert_eq!(result.final_exit_code, 0);
 
     let seen = exit_codes.borrow();
-    assert_eq!(&*seen, &[0, 0, 7]);
+    assert_eq!(&*seen, &[0, 0, 7, 0]);
 }
 
 #[test]
 fn until_file_exists_resolves_against_prompt_parent() {
     // `until="file_exists('artifact')"` continues while the artifact is
-    // absent and stops once the executor creates it under the prompt's
-    // parent directory — proving the loop condition's read-side function
-    // resolves against the prompt document root, re-probed each iteration.
+    // absent and stops at the gate after the iteration that creates it under
+    // the prompt's parent directory — proving the loop condition's read-side
+    // function resolves against the prompt document root, re-probed at each
+    // gate.
     let dir = tempfile::TempDir::new().unwrap();
     let prompt_path = dir.path().join("loop.md");
     let artifact = dir.path().join("artifact");
@@ -560,14 +581,14 @@ fn until_file_exists_resolves_against_prompt_parent() {
         on_rate_limit: None,
     };
 
-    let result = execute_loop_with_config(
+    let result = run_loop(
         &prompt_path,
         &config,
         Map::new(),
         LoopExecutionOptions::default(),
         |ctx| {
-            // Create the artifact on the third iteration; earlier passes
-            // see it absent and keep looping.
+            // Create the artifact on the third iteration; the gates after
+            // iterations 1 and 2 see it absent and keep looping.
             if ctx.iteration == 3 {
                 std::fs::write(&artifact, "done").unwrap();
             }

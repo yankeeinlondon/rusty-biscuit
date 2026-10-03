@@ -44,7 +44,9 @@ pub(crate) fn run_structured_stream_session(
     wrapper_span: &tracing::Span,
     mut perf_collector: Option<&mut crate::perf::CommandPerfCollector>,
     status_reporter: super::session_report::StatusReporter,
-) -> Result<(i32, Option<String>)> {
+    control: Option<std::sync::Arc<dyn exec::control::StdioControl>>,
+    steering: Option<claudine::steering::controller::SteeringController>,
+) -> Result<crate::output::native_exit::NativeExit> {
     let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
     let parser_config = claudine::stream::ParserConfig {
         model: args.model.clone(),
@@ -73,6 +75,12 @@ pub(crate) fn run_structured_stream_session(
     )?);
     let runaway_guards = guard_inputs.compile_for_model(args.model.as_deref())?;
     sink.set_content_detector(runaway_guards.detector);
+    if guard_inputs.automatic_steering() {
+        sink.set_automatic_help(crate::steering::automatic::AutomaticHelp::new(
+            steering,
+            crate::steering::automatic::stderr_notices(sink.stream_output()),
+        ));
+    }
     sink.set_guard_rescope_source(guard_inputs, args.model.as_deref());
     let live_metrics = sink.live_metrics();
     let stream_output = sink.stream_output();
@@ -162,6 +170,7 @@ pub(crate) fn run_structured_stream_session(
             signal_hub,
             // Direct wrapper path: no sequence task owns this stream.
             None,
+            control,
         )?
     };
     let mut summary = stream_result.data;
@@ -201,6 +210,9 @@ pub(crate) fn run_structured_stream_session(
         args.model.as_deref(),
     );
 
-    let stderr_text = summary.stderr_text.clone();
-    Ok((summary.exit_code, stderr_text))
+    Ok(exec::structured_native_exit(
+        summary.exit_code,
+        stream_result.termination,
+        stream_result.stream_tails.as_ref(),
+    ))
 }

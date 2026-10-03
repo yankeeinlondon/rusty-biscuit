@@ -8,8 +8,12 @@ use serde_json::Value;
 
 use crate::errors::GenError;
 use crate::inputs;
+use crate::steering_catalog;
 
 const TOPIC: &str = "steering";
+/// The steering research contract revision this checker (and the generated
+/// steering catalog) consumes.
+pub const SCHEMA_REVISION: u64 = 4;
 const CONCRETE_EVIDENCE: &[&str] = &[
     "official_docs",
     "source_code",
@@ -45,7 +49,7 @@ impl SteeringValidation {
     }
 }
 
-/// Validate one schema-v3 steering document, including cross-record references
+/// Validate one schema-v4 steering document, including cross-record references
 /// and the case products that a shape schema cannot express.
 pub fn check_provider(area: &Path, slug: &str) -> Result<SteeringValidation, GenError> {
     let path = area.join(format!("docs/research/{TOPIC}/{slug}.md"));
@@ -57,25 +61,42 @@ pub fn check_provider(area: &Path, slug: &str) -> Result<SteeringValidation, Gen
     if execution_path.is_file() {
         let execution = inputs::load_validated_frontmatter(&execution_path)?;
         validate_execution_references(slug, &execution, &document, &mut result.errors);
+        // Activation applicability needs the typed projection, which is only
+        // meaningful once the relational checks above hold.
+        if result.errors.is_empty() {
+            let policy = steering_catalog::load_activation_policy(area)?;
+            let research = steering_catalog::project_research(slug, &document, &execution)?;
+            result.errors.extend(
+                steering_catalog::activation_errors(slug, &research, &policy)
+                    .into_iter()
+                    .map(|error| format!("activation: {error}")),
+            );
+        }
         result.errors.sort();
         result.errors.dedup();
     }
     Ok(result)
 }
 
-/// Validate every active research provider in roster order.
+/// Validate every active research provider in roster order, plus policy
+/// entries naming a provider outside that roster.
 pub fn check_fleet(area: &Path) -> Result<Vec<SteeringValidation>, GenError> {
-    inputs::roster_active_slugs(area)?
-        .into_iter()
-        .map(|slug| check_provider(area, &slug))
-        .collect()
+    let active = inputs::roster_active_slugs(area)?;
+    let orphans = steering_catalog::orphan_policy_errors(
+        &active,
+        &steering_catalog::load_activation_policy(area)?,
+    );
+    if !orphans.is_empty() {
+        return Err(GenError::SteeringActivationInvalid { errors: orphans.join("\n") });
+    }
+    active.iter().map(|slug| check_provider(area, slug)).collect()
 }
 
 fn evaluate(slug: &str, document: &Value) -> SteeringValidation {
     let mut errors = Vec::new();
     let revision = document.get("schema_revision").and_then(Value::as_u64);
-    if revision != Some(3) {
-        errors.push(format!("schema_revision must be 3, found {revision:?}"));
+    if revision != Some(SCHEMA_REVISION) {
+        errors.push(format!("schema_revision must be {SCHEMA_REVISION}, found {revision:?}"));
     }
     if document.get("provider").and_then(Value::as_str) != Some(slug) {
         errors.push(format!("provider must match document slug `{slug}`"));
@@ -97,6 +118,7 @@ fn evaluate(slug: &str, document: &Value) -> SteeringValidation {
 
     let profile_map = id_map("launch_profiles", profiles, &mut errors);
     let evidence_map = id_map("evidence", evidence, &mut errors);
+    id_map("verification", verification, &mut errors);
     let discovery_map = id_map("discovery", discovery, &mut errors);
     let mechanism_map = id_map("mechanisms", mechanisms, &mut errors);
 

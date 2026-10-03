@@ -436,56 +436,148 @@ deps:
     echo
     sniff repo package-dependencies "$(sniff repo package-area)"
 
-# Keep the GitNexus index fresh. Interactive runs watch this worktree; finite
-# callers retain the one-shot refresh used by hooks and agents.
+# Keep the GitNexus index fresh. Interactive runs start a background watcher for
+# this worktree; finite callers retain the one-shot refresh used by hooks and
+# agents. Every run first stops watchers whose worktree has been removed.
 gitnexus:
     #!/usr/bin/env bash
     set -euo pipefail
 
     repo_root=$(git rev-parse --show-toplevel)
     repo_root=$(cd "${repo_root}" && pwd -P)
-    watcher_file="${repo_root}/.gitnexus/just-watch.pid"
 
-    watcher_is_running() {
-        local watcher_pid
-        [[ -r "${watcher_file}" ]] || return 1
-        IFS= read -r watcher_pid < "${watcher_file}"
-        [[ "${watcher_pid}" =~ ^[0-9]+$ ]] || return 1
-        kill -0 "${watcher_pid}" 2>/dev/null
+    # The registry lives outside every worktree so a watcher can still be found
+    # after its worktree, and the `.gitnexus/` inside it, is deleted. It is a
+    # fixed path rather than `$TMPDIR` because agent sandboxes may override
+    # `$TMPDIR`, which would split the registry. Each watcher has `<slug>.pid`
+    # (pid, then worktree root) and `<slug>.log`.
+    state_dir="/tmp/gitnexus-watch-$(id -un)"
+    mkdir -p "${state_dir}"
+    slug=$(printf '%s' "${repo_root}" | sed -e 's/[^A-Za-z0-9._-]/-/g' -e 's/^-*//')
+    pid_file="${state_dir}/${slug}.pid"
+    log_file="${state_dir}/${slug}.log"
+
+    # Prints a log path as an OSC 8 hyperlink when the stream it is written to
+    # ($2: `out`, the default, or `err`) is a terminal, and as plain text
+    # otherwise. The terminal test is taken here because `$(log_link …)` runs
+    # with stdout captured. Git Bash and Cygwin paths are converted so the URI
+    # names the real Windows file.
+    stdout_is_tty=false stderr_is_tty=false
+    [[ -t 1 ]] && stdout_is_tty=true
+    [[ -t 2 ]] && stderr_is_tty=true
+    log_link() {
+        local path=$1 stream=${2:-out} uri_path=$1 is_tty
+        [[ "${stream}" == err ]] && is_tty=${stderr_is_tty} || is_tty=${stdout_is_tty}
+        if [[ "${is_tty}" != true ]]; then
+            printf '%s' "${path}"
+            return
+        fi
+        if command -v cygpath >/dev/null 2>&1; then
+            uri_path="/$(cygpath -m "${path}")"
+        fi
+        printf '\033]8;;file://%s\033\\%s\033]8;;\033\\' "${uri_path}" "${path}"
     }
 
-    if watcher_is_running; then
+    # Guards against signalling an unrelated process that reused a recorded
+    # pid. Where `ps -o` is unsupported (Cygwin), liveness alone has to do.
+    is_watcher_pid() {
+        local pid=$1 command_line
+        [[ "${pid}" =~ ^[0-9]+$ ]] || return 1
+        kill -0 "${pid}" 2>/dev/null || return 1
+        if command_line=$(ps -p "${pid}" -o command= 2>/dev/null); then
+            [[ "${command_line}" == *gitnexus* ]]
+        fi
+    }
+
+    # Watchers lead their own process group (see `set -m` below), so the group
+    # signal also reaches a first-build `gitnexus analyze` still running under it.
+    stop_watcher() {
+        local pid=$1
+        kill -TERM -- "-${pid}" 2>/dev/null || kill -TERM "${pid}" 2>/dev/null || return 0
+        for _ in {1..20}; do
+            kill -0 "${pid}" 2>/dev/null || return 0
+            sleep 0.5
+        done
+        kill -KILL -- "-${pid}" 2>/dev/null || kill -KILL "${pid}" 2>/dev/null || true
+    }
+
+    for entry in "${state_dir}"/*.pid; do
+        [[ -f "${entry}" ]] || continue
+        entry_pid="" entry_root=""
+        { IFS= read -r entry_pid; IFS= read -r entry_root; } < "${entry}" || true
+        if ! is_watcher_pid "${entry_pid}"; then
+            rm -f "${entry}"
+        elif [[ -n "${entry_root}" && ! -e "${entry_root}/.git" ]]; then
+            stop_watcher "${entry_pid}"
+            rm -f "${entry}"
+            echo "Stopped GitNexus watcher (pid ${entry_pid}) for ${entry_root}:"
+            echo "  that worktree has been removed, so there is nothing left to watch."
+            echo "  Its log remains at $(log_link "${entry%.pid}.log")"
+        fi
+    done
+
+    report_running_watcher() {
+        local pid
+        IFS= read -r pid < "${pid_file}"
+        echo "GitNexus watcher already running (pid ${pid}) for ${repo_root}"
+        echo "  Log: $(log_link "${log_file}")"
+        echo
         gitnexus status
+    }
+
+    if [[ -f "${pid_file}" ]]; then
+        report_running_watcher
         exit $?
     fi
 
-    # A dead watcher cannot run its EXIT trap. Remove only its small ownership
-    # marker; the index itself remains untouched.
-    rm -f "${watcher_file}"
-
     if [[ -t 0 && -t 1 ]]; then
-        mkdir -p "${repo_root}/.gitnexus"
-        if ! (set -o noclobber; printf '%s\n' "$$" > "${watcher_file}") 2>/dev/null; then
-            if watcher_is_running; then
-                gitnexus status
-                exit $?
+        if ! (set -o noclobber; printf '%s\n%s\n' "$$" "${repo_root}" > "${pid_file}") 2>/dev/null; then
+            report_running_watcher
+            exit $?
+        fi
+
+        # Without index metadata, GitNexus treats a non-empty `.gitnexus/` (the
+        # Claude Code hook's `.hook-locks/`, say) as "unowned" storage and
+        # refuses to analyze. `--watch` rejects `--force`, so a worktree with no
+        # index yet is bootstrapped by a one-shot forced build first.
+        needs_bootstrap=false
+        if [[ ! -f "${repo_root}/.gitnexus/gitnexus.json" && ! -f "${repo_root}/.gitnexus/meta.json" ]]; then
+            needs_bootstrap=true
+        fi
+
+        printf '\n=== %s: starting watcher for %s ===\n' "$(date '+%Y-%m-%d %H:%M:%S')" "${repo_root}" >> "${log_file}"
+        # `set -m` puts the watcher in its own process group. Without it the
+        # watcher stays in the terminal's foreground group and dies of SIGHUP
+        # when that terminal closes; node does not honor nohup's ignored SIGHUP.
+        # `exec` makes the recorded pid the watcher itself once any bootstrap
+        # build has finished.
+        set -m
+        # shellcheck disable=SC2016
+        nohup bash -c '
+            if [[ "$2" == true ]]; then
+                gitnexus analyze "$1" --skip-agents-md --force || exit $?
             fi
-            echo "Unable to claim the GitNexus watcher marker: ${watcher_file}" >&2
+            exec gitnexus analyze "$1" --watch
+        ' gitnexus-watch "${repo_root}" "${needs_bootstrap}" < /dev/null >> "${log_file}" 2>&1 &
+        watcher_pid=$!
+        set +m
+        printf '%s\n%s\n' "${watcher_pid}" "${repo_root}" > "${pid_file}"
+
+        sleep 1
+        if ! kill -0 "${watcher_pid}" 2>/dev/null; then
+            rm -f "${pid_file}"
+            echo "GitNexus watcher exited immediately; see $(log_link "${log_file}" err)" >&2
+            tail -n 20 "${log_file}" >&2
             exit 1
         fi
 
-        # shellcheck disable=SC2329
-        cleanup_gitnexus_watcher() {
-            local recorded_pid=""
-            IFS= read -r recorded_pid 2>/dev/null < "${watcher_file}" || true
-            if [[ "${recorded_pid}" == "$$" ]]; then
-                rm -f "${watcher_file}"
-            fi
-        }
-        trap cleanup_gitnexus_watcher EXIT
-
-        gitnexus analyze "${repo_root}" --watch
-        exit $?
+        echo "Started GitNexus watcher (pid ${watcher_pid}) for ${repo_root}"
+        if [[ "${needs_bootstrap}" == true ]]; then
+            echo "  No index exists yet, so a full build runs before watching begins."
+        fi
+        echo "  Log: $(log_link "${log_file}")"
+        echo "  Stop: kill ${watcher_pid}"
+        exit 0
     fi
 
     status_output=""

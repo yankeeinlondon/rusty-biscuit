@@ -36,8 +36,7 @@ fn interpolation_heavy_fixture_composes_expected_output() {
 
     // Body interpolation of a frontmatter-resolved title.
     assert!(out.contains("# Darkmatter Interpolation Fixture"), "title:\n{out}");
-    // Nested interpolation: the outer ternary yields a string still holding
-    // `{{proj}}`, which the rescan pass then resolves.
+    // Nested value: the ternary branch concatenates `proj` into its text.
     assert!(out.contains("Nested: inside Darkmatter now"), "nested:\n{out}");
     // A `{{{ … }}}` literal is converted to literal `{{ … }}` text, never
     // evaluated.

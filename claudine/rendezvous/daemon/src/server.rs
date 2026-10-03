@@ -562,6 +562,7 @@ where
         quic_local_addr,
     } = prepared;
 
+    let steering = service.steering_router();
     let server = RendezvousServer::new(service);
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
 
@@ -570,6 +571,9 @@ where
             .add_service(server)
             .serve_with_incoming_shutdown(incoming, async move {
                 let _ = shutdown_rx.await;
+                // Steering control streams stay open for an owner's whole
+                // execution; end them so the graceful drain can finish.
+                steering.close();
             })
             .await
     });

@@ -7,7 +7,11 @@
 
 use std::ops::Range;
 
-use super::parse_utils::{find_code_regions, is_in_code_region, strip_blockquote_prefix};
+use super::body_origin::DataRanges;
+use super::parse_utils::{
+    authored_directive, find_code_regions, is_in_code_region, strip_blockquote_prefix,
+    structural_view,
+};
 
 /// Which kind of block opened a pair.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,7 +70,18 @@ pub(crate) struct BlockPair {
 /// assert!(matches!(pairs[0].kind, BlockOpenKind::Shell));
 /// ```
 pub(crate) fn scan_block_pairs(content: &str) -> Result<Vec<BlockPair>, BlockPairError> {
-    let code_regions = find_code_regions(content);
+    scan_block_pairs_in(content, None)
+}
+
+/// [`scan_block_pairs`] over a body whose `data` bytes were inserted by an
+/// earlier stage. An opener or closer counts only when its whole line,
+/// including the line break that starts it, is authored; code regions are
+/// found in the masked view, so data can neither open, close, nor hide a block.
+pub(crate) fn scan_block_pairs_in(
+    content: &str,
+    data: Option<&DataRanges>,
+) -> Result<Vec<BlockPair>, BlockPairError> {
+    let code_regions = find_code_regions(&structural_view(content, data));
     let bytes = content.as_bytes();
 
     // Stack entries: (block_start_byte, body_start_byte, start_line, kind, opening_text, quoted)
@@ -96,7 +111,9 @@ pub(crate) fn scan_block_pairs(content: &str) -> Result<Vec<BlockPair>, BlockPai
 
         if !trimmed.is_empty() {
             let first_non_ws = line_start + line.len().saturating_sub(line.trim_start().len());
-            if !is_in_code_region(first_non_ws, &code_regions) {
+            if !is_in_code_region(first_non_ws, &code_regions)
+                && authored_directive(data, line_start, text_line_end)
+            {
                 // Block-quote support is scoped to `::shell-block`. Page blocks
                 // (`::block`) match against the unstripped line, so a quoted
                 // `> ::block ... > ::end-block` region stays literal Markdown

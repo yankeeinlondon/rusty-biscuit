@@ -10,14 +10,20 @@
 mod common;
 
 mod agent_cwd;
+#[cfg(unix)]
+mod agent_text_is_data;
 mod argv_normalization;
+mod authored_text_rendering;
+mod cfg_gate;
 mod characterization_error_routes;
 mod cli_process_fixture;
+mod codex_app_server;
 mod command_routing;
 mod completion_cli;
 mod completion_compose;
 mod completion_contract;
 mod completion_inline_compose;
+mod completion_ownership;
 mod completion_perf;
 mod completion_resolution_round_trip;
 mod completion_sequence;
@@ -52,16 +58,20 @@ mod contamination_probes;
 mod context_command;
 mod contextual_errors;
 mod ctx_launch_anchor;
+mod ctx_per_run;
 mod detached_audio;
 mod diagnostic_discovery;
 mod dispatch_inventory;
 mod effective_diagnostic_render;
 mod error_guards;
 mod errors_command;
+mod exit_site_guard;
 #[cfg(unix)]
 mod handle_blocking_output;
 mod handle_deadline;
+mod handle_message_drain;
 mod handle_repo_config;
+mod handoff_owners;
 mod hooks_cli;
 #[cfg(unix)]
 mod inline_completion_lifecycle;
@@ -80,6 +90,10 @@ mod level1_provided_partial_file_pty;
 #[cfg(unix)]
 mod level1_provider_overlay_home;
 #[cfg(unix)]
+mod level1_provider_picker_pty;
+#[cfg(unix)]
+mod level1_ownership_prompt_pty;
+#[cfg(unix)]
 mod level1_pty_wrapper_summary;
 #[cfg(unix)]
 mod level1_review_router_partial_pty;
@@ -87,16 +101,37 @@ mod level1_review_router_partial_pty;
 mod level1_schema_prompt_pty;
 #[cfg(unix)]
 mod level1_structured_error_message;
+mod lifecycle_downgrade_outcome;
+mod lifecycle_literal_escapes;
+mod lifecycle_message_drain;
+#[cfg(windows)]
+mod lifecycle_message_drain_console_windows;
+mod lifecycle_message_drain_interrupt;
 #[cfg(unix)]
 mod loop_cli;
+mod loop_gate_ambient;
 mod loop_initialize_state;
 mod mcp_cli;
+mod override_boundary_guard;
+mod preflight_execution_parity;
+mod pr_flow_rehearsal;
+mod prompt_guide_defects;
+mod lifecycle_set_shell_values;
 #[cfg(unix)]
 mod prompt_reporting;
+// Installs the `claudine-fake-pi` fixture binary, which only `test-fixtures`
+// builds.
+#[cfg(feature = "test-fixtures")]
+mod pi_managed_rpc;
 mod propagated_context_fixtures;
+mod prose_escape_guard;
 mod protect_cli;
 mod provider_error_finalize;
+mod provider_tail_launch;
+mod provider_tail_notice;
+mod provider_tail_ownership;
 mod run_harness_loop_call_sites;
+mod setter_after_switch;
 // Spawns the `claudine-fake-goose` fixture binary, which only
 // `test-fixtures` builds.
 #[cfg(feature = "test-fixtures")]
@@ -105,13 +140,19 @@ mod sequence_cli;
 #[cfg(windows)]
 mod sequence_ctrl_c_windows;
 mod sequence_errors_cli;
+mod steer_cli;
 #[cfg(unix)]
 mod sequence_groups;
+// Reads the `CLAUDINE_TEST_DIAGNOSTIC_SNAPSHOT` seam, which only
+// `test-fixtures` builds compile into the binary.
+#[cfg(feature = "test-fixtures")]
 mod sequence_initialize_include_preflight;
 #[cfg(unix)]
 mod sequence_jit;
 #[cfg(unix)]
 mod sequence_magic_reference;
+#[cfg(unix)]
+mod sequence_planned_model;
 #[cfg(unix)]
 mod sequence_overlay_pty;
 #[cfg(unix)]
@@ -126,8 +167,10 @@ mod shipped_prompt_route_drift;
 mod shipped_prompts;
 mod skills_integration;
 mod spawn_site_guard;
+mod switch_catalog_guard;
 mod system_prompt_perf_bench;
 mod test_placement;
+mod test_seam_gate_guard;
 #[cfg(unix)]
 mod wrap_antigravity_exit_signal;
 mod wrap_basics;

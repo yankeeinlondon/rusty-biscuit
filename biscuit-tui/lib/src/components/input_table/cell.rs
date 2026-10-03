@@ -139,7 +139,8 @@ use super::column::{BooleanSwitchConfig, InputTableColumn, TextAreaInputConfig, 
 #[derive(Debug, Clone)]
 #[allow(clippy::large_enum_variant)]
 pub enum CellState {
-    /// Display-only cell; the string renders verbatim.
+    /// Display-only cell; the string renders on one line, clipped with `…`
+    /// when the column is narrower than it.
     StaticText(String),
     /// Boolean toggle-switch cell.
     BooleanSwitch(BooleanSwitchState),

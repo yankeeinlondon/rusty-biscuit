@@ -378,7 +378,9 @@ The behavior interview is closed. The consolidated `spec.md` and its
 `function-contracts.md`, `number-contract.md`, and `declarations-design.md`
 annexes apply M1–M16 together with the prior diagnostic, predicate, access, and
 ownership decisions. `catalog-audit.md` records the source review and remaining
-implementation acceptance work. The source proposal is marked historical;
+implementation acceptance work. The source proposal was marked historical on 2026-09-26; that marking was
+reversed on 2026-09-27 because this consolidation had not seen the proposal's
+2026-09-25 clarification rounds, and reconciliation is pending;
 no lifecycle directories were moved and no runtime implementation is claimed.
 
 Grammar completion, metadata field names, and catalog corrections are reviewable

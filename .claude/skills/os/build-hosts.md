@@ -8,7 +8,7 @@ were declared when you report.
 
 | Variable | Provides | Notes |
 |---|---|---|
-| `BUILD_LINUX` | Native Linux | Target of `just cross-check --os linux`. |
+| `BUILD_LINUX` | Native Linux | Target of `just cross-check --os linux`. Has `tmux` and `wezterm` but no `Xvfb`, `kitty`, or `xdotool` (checked 2026-09-28), so X11 Level 3 tests skip there; run them in Docker instead ([macos.md](macos.md)). Do not install packages on it. |
 | `BUILD_WIN` | Native Windows, PowerShell as the remote shell | Target of `just cross-check --os windows`. Git's stderr shows as a red `NativeCommandError`; harmless. |
 | `BUILD_WSL` | A WSL2 Ubuntu guest | Target of `just cross-check --os wsl`, which runs CI's archive mode ([wsl.md](wsl.md)). For ad hoc commands, non-login shells lack `~/.cargo/bin`; wrap them in `bash -lc`. |
 | `BUILD_MACOS` | A macOS host other than the current one | Target of `just cross-check --os macos`; same flow as Linux. |
@@ -117,7 +117,9 @@ within seconds (2026-09-26). The linux leg's archive build also hit the stale
 read-only kache links described below in a *different* standing clone
 (`<host>--fix-sniff`, 372 files); clearing only the read-only multiply-linked
 files (`find target/release -type f ! -perm -u+w -links +1 -delete`) fixed it
-without a cold rebuild.
+without a cold rebuild. Same failure and fix in `<host>--feat-reusable-path` on
+2026-09-30 (373 files, first seen as `libav_scenechange-*.rmeta is not
+writeable`), so clear them in any standing clone before reading the leg as red.
 
 The `just` recipe re-splits its arguments, so a filterset containing spaces
 or parentheses (`-E 'binary(a) | binary(b)'`) dies with a shell syntax error
@@ -260,10 +262,12 @@ archive mode failed while compiling the release `ci-build` tool
 profile, and that ran green. The links were still there on 2026-09-26 (same error, same
 workaround), and remain until someone clears that clone's `target/release`. Still there on
 2026-09-27 (`libthiserror-*.rmeta` and eight more); `worktree-cli --features terminal-tests`
-took the native path green. The native path runs the whole suite, `perf_` tests included,
-which the archive (CI) L1 drops, so it can fail on a stale `perf_` expectation that the
-local `just test` never ran: run `just test-perf` for the package too before reading such a
-failure as Linux-specific.
+took the native path green. The `feat-schema-enhancement` clone on `build-linux` showed the
+same failure on 2026-09-27, and the same workaround applies, so check any standing clone for
+these links, not only `fix-wt-ux`. The native path runs the whole suite, `perf_` tests
+included, which the archive (CI) L1 drops, so it can fail on a stale `perf_` expectation that
+the local `just test` never ran: run `just test-perf` for the package too before reading such
+a failure as Linux-specific.
 
 `unset RUSTC_WRAPPER` does **not** keep kache out; only an explicitly empty
 `RUSTC_WRAPPER=""` does (measured 2026-09-21):

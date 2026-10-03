@@ -33,8 +33,8 @@
       "source": "darkmatter.compose"
     },
     {
-      "code": "dm.expression.unknown_identifier",
-      "message": "`i` matches no frontmatter key, schema property, `ctx.*`, `env.*`, or function",
+      "code": "dm.expression.undeclared_property",
+      "message": "`i` is an undeclared document property (unknown type; `null` unless supplied at runtime)",
       "range": {
         "end": {
           "character": 6,
@@ -49,8 +49,24 @@
       "source": "darkmatter.compose"
     },
     {
-      "code": "dm.expression.unknown_identifier",
-      "message": "`i` matches no frontmatter key, schema property, `ctx.*`, `env.*`, or function",
+      "code": "dm.expression.unknown_function",
+      "message": "`skill_description` is not a Darkmatter expression function",
+      "range": {
+        "end": {
+          "character": 24,
+          "line": 24
+        },
+        "start": {
+          "character": 7,
+          "line": 24
+        }
+      },
+      "severity": 1,
+      "source": "darkmatter.compose"
+    },
+    {
+      "code": "dm.expression.undeclared_property",
+      "message": "`i` is an undeclared document property (unknown type; `null` unless supplied at runtime)",
       "range": {
         "end": {
           "character": 26,
@@ -84,8 +100,8 @@
       "source": "darkmatter.schema"
     },
     {
-      "code": "dm.expression.unknown_identifier",
-      "message": "`log` matches no frontmatter key, schema property, `ctx.*`, `env.*`, or function",
+      "code": "dm.expression.undeclared_property",
+      "message": "`log` is an undeclared document property (unknown type; `null` unless supplied at runtime)",
       "range": {
         "end": {
           "character": 36,
@@ -100,8 +116,8 @@
       "source": "darkmatter.compose"
     },
     {
-      "code": "dm.expression.unknown_identifier",
-      "message": "`spec` matches no frontmatter key, schema property, `ctx.*`, `env.*`, or function",
+      "code": "dm.expression.undeclared_property",
+      "message": "`spec` is an undeclared document property (unknown type; `null` unless supplied at runtime)",
       "range": {
         "end": {
           "character": 23,
@@ -116,8 +132,8 @@
       "source": "darkmatter.compose"
     },
     {
-      "code": "dm.expression.unknown_identifier",
-      "message": "`design` matches no frontmatter key, schema property, `ctx.*`, `env.*`, or function",
+      "code": "dm.expression.undeclared_property",
+      "message": "`design` is an undeclared document property (unknown type; `null` unless supplied at runtime)",
       "range": {
         "end": {
           "character": 27,
@@ -132,8 +148,8 @@
       "source": "darkmatter.compose"
     },
     {
-      "code": "dm.expression.unknown_identifier",
-      "message": "`review` matches no frontmatter key, schema property, `ctx.*`, `env.*`, or function",
+      "code": "dm.expression.undeclared_property",
+      "message": "`review` is an undeclared document property (unknown type; `null` unless supplied at runtime)",
       "range": {
         "end": {
           "character": 27,
@@ -224,8 +240,8 @@
   "_writing-clearly.md": [],
   "brainstorm.md": [
     {
-      "code": "dm.expression.unknown_identifier",
-      "message": "`context` matches no frontmatter key, schema property, `ctx.*`, `env.*`, or function",
+      "code": "dm.expression.undeclared_property",
+      "message": "`context` is an undeclared document property (unknown type; `null` unless supplied at runtime)",
       "range": {
         "end": {
           "character": 9,

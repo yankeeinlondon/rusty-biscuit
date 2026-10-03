@@ -76,46 +76,52 @@ fn test_home_dir_interpolation() {
     fs::remove_file(&target).ok();
 }
 
+/// Link resolution and normalization through `compose_with`: a declared
+/// portable variable comes back as the `{{{VAR}}}` literal, and composing
+/// that output (interpolation, resolution, normalization) reproduces it.
 #[test]
 fn test_env_var_interpolation() {
     let dir = tempdir().unwrap();
-    let project_root = dir.path().join("project");
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let project_root = root.join("project");
+    let elsewhere = root.join("elsewhere");
     fs::create_dir_all(&project_root).unwrap();
+    fs::create_dir_all(&elsewhere).unwrap();
     let target = project_root.join("config.json");
     fs::write(&target, "{}").unwrap();
-    let abs_target = std::fs::canonicalize(&target).unwrap();
-    let abs_root = std::fs::canonicalize(&project_root).unwrap();
     let mut env = std::collections::HashMap::new();
     env.insert(
         "PROJECT_ROOT_INTEGRATION".to_string(),
-        abs_root.to_string_lossy().into_owned(),
+        // Exported spelling: a verbatim `\\?\` value cannot anchor `{{VAR}}/…`.
+        biscuit_file::to_portable_string(&project_root),
     );
-    let snapshot = biscuit_file::FileResolutionContext::new(&project_root)
+    let snapshot = biscuit_file::FileResolutionContext::new(&elsewhere)
         .without_home_dir()
         .with_env(env);
-    let content = format!(
-        "[config]({})",
-        abs_target
-            .to_string_lossy()
-            .trim_start_matches(r"\\?\")
-            .replace('\\', "/")
-    );
-    let md = Markdown::new(&content);
-    let options = ComposeOptions::new()
-        .with_env_path_whitelist(vec!["PROJECT_ROOT_INTEGRATION".to_string()])
-        .with_file_resolution_context(snapshot)
-        .only(&[
+    let options = |operations: &[ComposeOperation]| {
+        ComposeOptions::new()
+            .with_source_file(elsewhere.join("doc.md"))
+            .with_portable_env(["PROJECT_ROOT_INTEGRATION"])
+            .with_file_resolution_context(snapshot.clone())
+            .only(operations)
+    };
+    let content = format!("[config]({})", biscuit_file::to_portable_string(&target));
+
+    let (composed, _) = Markdown::new(&content)
+        .compose_with(options(&[
             ComposeOperation::LinkResolve,
             ComposeOperation::LinkNormalization,
-        ]);
-    let (composed, _) = md.compose_with(options).unwrap();
-    assert!(
-        composed
-            .content()
-            .contains("${PROJECT_ROOT_INTEGRATION}/config.json"),
-        "Content was: {}",
-        composed.content()
+        ]))
+        .unwrap();
+    assert_eq!(
+        composed.content(),
+        "[config]({{{PROJECT_ROOT_INTEGRATION}}}/config.json)"
     );
+
+    let (recomposed, _) = Markdown::new(composed.content())
+        .compose_with(options(ComposeOperation::default_order()))
+        .unwrap();
+    assert_eq!(recomposed.content().trim_end(), composed.content());
 }
 
 #[test]

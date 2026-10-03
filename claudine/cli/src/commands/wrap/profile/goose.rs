@@ -72,20 +72,43 @@ impl WrapperProfile for GooseWrapper {
         &self,
         args: &[String],
         prompt: &str,
-        _non_interactive: bool,
+        non_interactive: bool,
     ) -> Result<PromptDelivery> {
-        // Goose: insert -t <prompt> after "run" subcommand
-        if let Some(pos) = args.iter().position(|a| a == "run") {
-            Ok(PromptDelivery::InsertArgs {
-                index: pos + 1,
-                args: vec!["-t".to_string(), prompt.to_string()],
-            })
-        } else {
-            Ok(PromptDelivery::AppendArgs(vec![
-                "run".to_string(),
-                "-t".to_string(),
-                prompt.to_string(),
-            ]))
+        let run_at = args.iter().position(|a| a == "run");
+        if non_interactive {
+            return Ok(match run_at {
+                Some(pos) => PromptDelivery::InsertArgs {
+                    index: pos + 1,
+                    args: vec!["-t".to_string(), prompt.to_string()],
+                },
+                None => PromptDelivery::AppendArgs(vec![
+                    "run".to_string(),
+                    "-t".to_string(),
+                    prompt.to_string(),
+                ]),
+            });
         }
+        // Goose has no top-level prompt: an interactive session with a first
+        // turn is `goose run --text <p> --interactive` ("continue in
+        // interactive mode after processing initial input"). `run` leads the
+        // argv so every other flag parses as a `run` option. Goose's clap
+        // `--text` does not allow hyphen values, so a `-`-prefixed prompt
+        // (a Markdown bullet) is attached as `--text=<p>`.
+        let text = if prompt.starts_with('-') {
+            vec![format!("--text={prompt}")]
+        } else {
+            vec!["--text".to_string(), prompt.to_string()]
+        };
+        let mut inserted = Vec::with_capacity(4);
+        if run_at.is_none() {
+            inserted.push("run".to_string());
+        }
+        let index = run_at.map_or(0, |pos| pos + 1);
+        inserted.extend(text);
+        inserted.push("--interactive".to_string());
+        Ok(PromptDelivery::InsertArgs {
+            index,
+            args: inserted,
+        })
     }
 }

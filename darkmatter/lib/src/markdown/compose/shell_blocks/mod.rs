@@ -14,11 +14,11 @@ pub use types::ShellBlockError;
 use super::ComposeOptions;
 use super::shell_expansion::types::{ShellCommandOrigin, ShellDirective, ShellExpansionRuntime};
 use super::shell_expansion::{
-    apply_replacements_in_reverse, execute_prepared_directive, prepare_directive,
+    execute_prepared_directive, prepare_directive,
     resolve_policy_paths,
 };
 use super::ComposeReport;
-use crate::markdown::MarkdownResult;
+use super::body_origin::{DataRanges, EditOrigin, TextEdit};
 use std::path::PathBuf;
 use types::{ShellBlockCommandResult, SourceExcerpt};
 
@@ -33,6 +33,7 @@ fn source_file_from_options(options: &ComposeOptions) -> Option<PathBuf> {
 /// Run the shell blocks stage on the given content.
 ///
 /// Returns the transformed content and a compose report.
+#[cfg(test)]
 pub(crate) fn run_shell_blocks_stage(
     content: &str,
     options: &ComposeOptions,
@@ -40,10 +41,29 @@ pub(crate) fn run_shell_blocks_stage(
     ctx: &biscuit_terminal::errors::SourceContext,
     line_offset: usize,
 ) -> Result<(String, ComposeReport), ShellBlockError> {
+    run_shell_blocks_stage_in(content, None, options, runtime, ctx, line_offset)
+        .map(|(content, report, _)| (content, report))
+}
+
+/// [`run_shell_blocks_stage`] over a body whose `data` bytes were inserted by
+/// an earlier stage, also returning the edits it made (each block's output is
+/// data).
+///
+/// Block markers must be authored, and data may supply a command's arguments
+/// but never split a command, join two, or supply an executable, chain
+/// operator, or redirection.
+pub(crate) fn run_shell_blocks_stage_in(
+    content: &str,
+    data: Option<&DataRanges>,
+    options: &ComposeOptions,
+    runtime: &mut ShellExpansionRuntime,
+    ctx: &biscuit_terminal::errors::SourceContext,
+    line_offset: usize,
+) -> Result<(String, ComposeReport, Vec<TextEdit>), ShellBlockError> {
     let source_file = source_file_from_options(options);
 
     // Scan for block pairs (both page and shell)
-    let pairs = super::block_pairs::scan_block_pairs(content).map_err(|e| {
+    let pairs = super::block_pairs::scan_block_pairs_in(content, data).map_err(|e| {
         // Extract line number from BlockPairError
         let line = match &e {
             super::block_pairs::BlockPairError::UnmatchedEnd { line } => *line,
@@ -65,7 +85,7 @@ pub(crate) fn run_shell_blocks_stage(
         .collect();
 
     if shell_pairs.is_empty() {
-        return Ok((content.to_string(), ComposeReport::new()));
+        return Ok((content.to_string(), ComposeReport::new(), Vec::new()));
     }
 
     // Resolve policy paths once
@@ -94,6 +114,16 @@ pub(crate) fn run_shell_blocks_stage(
         let region = parser::parse_shell_block_region(content, &pair)?;
         let body_text = &content[pair.body_span.clone()];
         let commands = body::split_logical_commands(body_text, pair.start_line + 1)?;
+        if let Some(data) = data.filter(|data| data.intersects(&pair.body_span)) {
+            reject_data_shaped_commands(
+                &commands,
+                &data.masked(content)[pair.body_span.clone()],
+                pair.start_line + 1,
+                body_text,
+                line_offset,
+                source_file.clone(),
+            )?;
+        }
 
         if commands.is_empty() {
             // Empty block body: replace with empty string
@@ -193,29 +223,64 @@ pub(crate) fn run_shell_blocks_stage(
 
     // Apply replacements in reverse span order
     let mut new_content = content.to_string();
-    apply_replacements_in_reverse(&mut new_content, replacements);
+    let edits = super::body_origin::apply_replacements_with_edits(
+        &mut new_content,
+        replacements,
+        EditOrigin::Data,
+    );
     report.shell_approvals_used += runtime.take_recent_approval_count();
 
-    Ok((new_content, report))
+    Ok((new_content, report, edits))
 }
 
-/// Integration with Markdown::run_shell_blocks_stage.
+/// Fails when inserted data shaped a block's commands: split or joined a
+/// command, or supplied an executable, chain operator, or redirection.
 ///
-/// This is called from the compose pipeline. It runs the shell blocks stage
-/// and updates the report.
-pub(crate) fn run_shell_blocks_stage_for_markdown(
-    content: &mut String,
-    options: &ComposeOptions,
-    runtime: &mut ShellExpansionRuntime,
-    report: &mut ComposeReport,
-    ctx: &biscuit_terminal::errors::SourceContext,
+/// `masked_body` is the block body with every data byte masked; it splits
+/// into the same commands as the real body unless data contributed a line
+/// break, a continuation, or command structure.
+pub(crate) fn reject_data_shaped_commands(
+    commands: &[types::ShellBlockCommand],
+    masked_body: &str,
+    body_start_line: usize,
+    body_text: &str,
     line_offset: usize,
-) -> MarkdownResult<()> {
-    let (new_content, stage_report) = run_shell_blocks_stage(content, options, runtime, ctx, line_offset)?;
-    *content = new_content;
-    report.shell_blocks_applied += stage_report.shell_blocks_applied;
-    report.shell_approvals_used += stage_report.shell_approvals_used;
-    report.warnings.extend(stage_report.warnings);
+    source_file: Option<PathBuf>,
+) -> Result<(), ShellBlockError> {
+    let error = |line: usize, change: String| ShellBlockError::Parse {
+        line: line + line_offset,
+        message: format!(
+            "inserted data {change}; interpolation may supply a command's arguments, never its \
+             executable or structure"
+        ),
+        excerpt: SourceExcerpt::from_text(body_text, line, body_start_line, 2),
+        source_file: source_file.clone(),
+    };
+    let (masked_groups, _) = body::group_logical_commands(masked_body, body_start_line);
+    let spans_match = masked_groups.len() == commands.len()
+        && masked_groups
+            .iter()
+            .zip(commands)
+            .all(|(masked, real)| masked.physical_span == real.physical_span);
+    if !spans_match {
+        let line = commands.first().map_or(body_start_line, |command| command.start_line);
+        return Err(error(line, "splits or joins the block's commands".to_string()));
+    }
+    let ctx = biscuit_terminal::errors::SourceContext::new(
+        PathBuf::from("<shell-block>"),
+        PathBuf::from("<shell-block>"),
+        masked_body.to_string(),
+    );
+    for (masked, real) in masked_groups.iter().zip(commands) {
+        if let Some(change) = super::shell_expansion::parser::data_changed_shape(
+            &real.pipeline,
+            &masked.raw_command,
+            false,
+            &ctx,
+        ) {
+            return Err(error(real.start_line, change));
+        }
+    }
     Ok(())
 }
 

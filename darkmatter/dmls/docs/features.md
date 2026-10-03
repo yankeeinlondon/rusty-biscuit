@@ -125,16 +125,21 @@ Intelligence for Darkmatter's composition DSL — all **read-only**:
 - **Interpolation** (`{{ }}`) — completion (frontmatter keys, `ctx.*`,
   functions), hover showing the resolved static value (falling back to the
   effective-schema property description for a declared-but-unset key),
-  variable → frontmatter-key definition, and malformed / unknown-identifier
-  diagnostics (every operand is checked; a schema-declared property counts as
-  known).
+  variable → frontmatter-key definition, malformed-expression and
+  unknown-function diagnostics, and the undeclared-property advisory (every
+  operand is checked; a schema-declared property is declared). Bare names are
+  document properties: only `ctx.`-qualified names get context-variable
+  completion and hover.
 - **Interpolation literals** (`{{{ … }}}`) — recognized as inert: hover shows
   the composed `{{ … }}` output with an inertness note, the content produces
   no interpolation diagnostics, and a quick-fix can wrap a spurious malformed
   interpolation into a literal.
 - **Shell awareness** — `::shell` and frontmatter `$()` values hover with an
   approved / denied / unknown policy verdict, and denied built-ins raise a
-  `darkmatter.security.*` diagnostic. Nothing is ever executed.
+  `darkmatter.security.*` diagnostic. A `$()` value's suffixes complete, hover
+  with their meaning, and raise `dm.shell.invalid_suffix` when compose would
+  reject them. A quoted `$()` value is recognized like an unquoted one. Nothing
+  is ever executed.
 - **Fenced-code languages** — unknown fence languages are flagged with a
   nearest-match suggestion.
 

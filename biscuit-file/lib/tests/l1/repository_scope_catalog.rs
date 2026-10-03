@@ -162,7 +162,7 @@ fn context_derivations_recompute_or_clear_repository_scopes() {
     assert_eq!(second.package_area(), Some(second_area.as_path()));
     assert_eq!(second.repository_root(), Some(repo.as_path()));
 
-    let external = request.for_trusted_external_base(&outside);
+    let external = request.for_trusted_external_cwd(&outside);
     assert_eq!(external.package_root(), None);
     assert_eq!(external.package_area(), None);
     assert_eq!(external.repository_root(), None);
@@ -184,7 +184,7 @@ fn replacing_the_catalog_selects_the_second_repository() {
 
     let context = FileResolutionContext::new(first_repo.join("docs"))
         .with_repository_scope_catalog(first)
-        .for_trusted_external_base(second_package.join("src"))
+        .for_trusted_external_cwd(second_package.join("src"))
         .with_repository_scope_catalog(second);
 
     assert_eq!(context.repository_root(), Some(second_repo.as_path()));

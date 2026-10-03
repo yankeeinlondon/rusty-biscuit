@@ -23,8 +23,9 @@ Because composition flows through the same execution path as `claudine claude` /
 
 ### Positional Arguments
 
-Each command accepts exactly one file reference plus zero or more `key=value`
-setters, in any order:
+Each command takes one file reference plus any number of `key=value` setters
+and bare words. The first bare word that is not a setter is the file; it must
+come before any provider switch:
 
 ```sh
 claudine compose @prompts/review.md review=review.md
@@ -35,39 +36,263 @@ claudine inline-compose draft=false @notes/update.md
 A token is a setter when it contains `=` and its key starts with an ASCII
 letter or `_` and contains only letters, digits, `_`, or `-`. Dot-paths and
 path-like tokens (for example `foo.bar=baz`) are not setters and are treated
-as file-reference candidates.
+as file-reference candidates (or, after the file, as positional arguments).
+
+Every bare word after the file that no provider switch takes becomes the
+`argv` frontmatter property, an array of strings in the order typed:
+
+```sh
+claudine compose plan.md alpha --codex -c x=y beta phase=2
+# argv: ["alpha", "beta"]   phase: 2   provider tail: -c x=y
+```
+
+```markdown
+Arguments: {{ argv }}
+```
+
+- Values are strings, never JSON5-parsed (`1` stays `"1"`); an empty argument
+  stays an empty string. The file is not in `argv`, and neither is anything
+  after an authored `--`.
+- With at least one positional, `argv` overrides an authored `argv`, like a
+  setter. With none, an authored `argv` is left alone.
+- `argv` is reserved: an `argv=…` setter, or a `--set` object holding `argv`,
+  is an error before `--` (with or without positionals). Pass the values as
+  bare words instead.
+- `sequence` applies `argv` to every step, and it stays caller input through
+  retries and `proxy` hand-offs. `inline-compose` never writes it into the
+  document.
+- A document that declares `argv` in its `$schema` validates the effective
+  array like any other value (declare it as `string[]`).
 
 Setter values are parsed as JSON5 first and fall back to strings when JSON5
 parsing fails, so `count=3`, `enabled=true`, `tags=["a","b"]`, and
-`review=review.md` all resolve to their natural types.
+`review=review.md` all resolve to their natural types. The value is split at
+the first `=`, so `label=a=b` sets `label` to `a=b`, and `phase=` sets an
+empty string.
 
-Inline setters override matching keys from `--set`. For `sequence`, reserved
-per-step overlay keys still win over both `--set` and shorthand setters.
+Setters can sit anywhere after the file, including after provider switches
+(see [Setters after a provider switch](#setters-after-a-provider-switch)).
+When a key is repeated, the last occurrence wins. Inline setters override
+matching keys from `--set` wherever either is written (`--set` is accepted
+once per command). For `sequence`, reserved per-step overlay keys still win
+over both `--set` and shorthand setters.
 
 ### Provider Argument Forwarding
 
 Any CLI switch Claudine does not own is forwarded to the underlying agent,
-mirroring the direct-wrapper contract. The first non-Claudine switch **after
-the composition file** starts an agent tail; every token from there is passed
-through verbatim:
+mirroring the direct-wrapper contract. No `--` is needed. Which tokens after
+the file belong to the agent is decided per token from the switch's researched
+type in Claudine's compiled catalog:
 
 ```sh
-# `-c model_reasoning_effort=low` is forwarded to Codex; the setter-shaped
-# value is NOT applied as a frontmatter override.
-claudine sequence fleet.md --codex -c model_reasoning_effort=low
+# Codex's -c takes one value, so the setter-shaped value is forwarded and
+# not applied as a frontmatter override; phase=2 is Claudine's setter.
+claudine sequence fleet.md --codex -c model_reasoning_effort=low phase=2
+
+# Claude's --add-dir takes a list: a and b are forwarded; x=y is a setter.
+claudine compose plan.md --claude --add-dir a b x=y
 ```
 
-No `--` is required. An explicit `--` after the file still works and forwards
-its tail opaquely (no Claudine flag is extracted from it). Claudine-owned flags
-always win before a `--` — a colliding native switch (e.g. Codex's own `-m`)
-must be placed after `--`. The composition file must come first: an unowned
-switch (or a `--`) before the file is an error with ordering guidance.
+- A `key=value` the document's `$schema` declares is always Claudine's, even
+  directly after a provider switch.
+- Any other `key=value` goes to the agent only as the first value of a switch
+  that takes a string or a list; otherwise it is a setter.
+- A bare word a switch does not take is a positional argument (`argv`), so a
+  provider operand needs `--`.
+- The types come from the provider named on the command line, else the
+  document's literal `agent`, else every provider. When those providers read a
+  word differently (Claude's `-c` takes nothing, Codex's takes a value),
+  Claudine asks which agent the arguments are for in an interactive session,
+  and otherwise fails with `ambiguous provider argument`. Naming the provider
+  (`--codex`) or using `--` settles it.
+- Ownership reads the document **as authored**: a caller `agent=…` or `--set`
+  changes the run, not who owns a token.
+- Before every launch the implicit switches are checked against the provider
+  that actually runs, at the command it runs (including a resume entrypoint).
+  A value the switch does not take, or a missing required value, fails before
+  the spawn.
 
-A generic INFO status names the forwarded switches (values redacted); `--dry-run`
-shows the forwarded tail in its metadata table so a launch can be audited.
-Because unknown switches are always forwarded, a genuinely invalid one may be
-rejected by the agent at startup. See the mechanism in
+An explicit `--` after the file still works and forwards its tail opaquely:
+nothing after it is classified or checked. Claudine-owned flags always win
+before a `--` — a colliding native switch (e.g. Codex's own `-m`) must be
+placed after `--`. The composition file must come first: an unowned switch
+(or a `--`) before the file is an error with ordering guidance. The full rules
+are in [argv-normalization.md → Type-aware ownership](argv-normalization.md#type-aware-ownership).
+
+#### Setters after a provider switch
+
+A `key=value` written after a provider switch is still a setter: it changes
+the prompt's frontmatter and is never sent to the agent. The only exception
+is the switch's own value. Claudine knows how many values each provider
+switch takes, so it can tell the two apart:
+
+```sh
+# -c takes one value: x=y is Codex's, phase=2 is a setter.
+claudine compose plan.md --codex -c x=y phase=2
+#   frontmatter: phase: 2        agent receives: -c x=y
+
+# The attached form carries its value, so phase=2 is a setter.
+claudine compose plan.md --codex --config=x=y phase=2
+#   frontmatter: phase: 2        agent receives: --config=x=y
+
+# --add-dir takes a list: the run of bare words ends at the setter.
+claudine compose plan.md --claude --add-dir a b phase=2
+#   frontmatter: phase: 2        agent receives: --add-dir a b
+
+# A list switch takes at most one key=value, and only as its first value.
+claudine compose plan.md --claude --add-dir x=y phase=2
+#   frontmatter: phase: 2        agent receives: --add-dir x=y
+
+# A Claudine option (-m) between the words ends the switch's run.
+claudine compose plan.md --codex -c x=y -m gpt5 phase=2
+#   model: gpt5   frontmatter: phase: 2   agent receives: -c x=y
+```
+
+A switch that takes no value, or one Claudine has no record of, never takes
+a `key=value`, so a setter right after it stays a setter. Values the agent
+receives are unchanged strings: in `-c count=3 count=3` the first `count=3`
+reaches Codex as text and the second sets `count` to the number `3`.
+
+The per-token decision, including the cases above, is drawn in the
+flowchart under
+[argv-normalization.md → Type-aware ownership](argv-normalization.md#type-aware-ownership).
+
+**A declared parameter is never a switch's value.** If the document's
+`$schema` declares `phase`, then `phase=2` is a setter even directly after
+`-c`. That leaves `-c` with no value, so the command fails before any agent
+starts. The words after it never move up to fill the gap, so
+`--codex -c phase=2 x=y` fails the same way:
+
+```text
+Error: provider argument `-c` takes a value for Codex (at its `exec` command), but none was
+forwarded with it: the `phase` setter after it is a parameter the document declares, so it
+stays Claudine's and is never the switch's value.
+Give `-c` a separate provider value, or put intentional provider arguments after `--`.
+```
+
+The message names the switch, the parameter, and the provider, but never the
+setter's value. When the `$schema` is written as an expression, its parameter
+names are not known before it runs, so a `key=value` a switch could take is
+an error asking you to put the provider value after `--` or pass the setter
+with `--set`.
+
+**`--` keeps provider data away from the prompt.** Every word after an
+authored `--` goes to the agent untouched, even one shaped like a declared
+parameter:
+
+```sh
+claudine compose plan.md --codex -- -c x=y phase=2
+#   frontmatter: unchanged       agent receives: -c x=y phase=2
+```
+
+The same setter applies to every launch of the command: each `sequence`
+step, a lifecycle `retry`, `resume`, or `proxy` target. `inline-compose` uses
+it for the run and never writes it into the document.
+
+> **Behavior change.** Earlier releases forwarded every token after the first
+> provider switch Claudine did not own, so a trailing `phase=2` reached the
+> agent and the prompt silently kept its default. Setters are now applied
+> wherever they appear. If you meant a `key=value` as provider data, put it
+> after `--`.
+
+Before launch, one INFO status says what is forwarded. It names switches only,
+never values, and describes a tail after `--` as opaque. Each switch before
+the `--` is then explained from Claudine's compiled switch catalog:
+
+```text
+ℹ Forwarding provider arguments to Codex: -c
+- -c is Codex's --config switch (override one configuration value for this run); forwarding to Codex.
+
+ℹ Forwarding an opaque argument tail to Codex (passed after --).
+```
+
+The notice appears once per distinct provider and tail for the whole command,
+so a `sequence` whose steps and parallel tasks all launch Codex with the same
+tail shows it once. `--quiet` and `--silent` suppress it. A switch the catalog
+does not establish is still forwarded, and its sentence says so. Claudine
+makes no claim about whether the agent accepts a forwarded switch, so a genuinely
+invalid one may be rejected by the agent at startup (see
+[When the agent rejects the tail](#when-the-agent-rejects-the-tail)).
+
+`--dry-run` shows the forwarded tail in its metadata table, with secret-shaped
+values (`--api-key ****`, `--token=****`, `-c****` for a credential attached
+to a short switch) masked, so a launch can be audited. The `AGENT_PARAMS`
+variable the agent's environment carries is masked the same way. The agent
+itself receives the original tokens. An argument after the file that is not
+valid UTF-8 is refused before anything runs, because Claudine will not change
+its bytes.
+See the mechanism in
 [argv-normalization.md → Provider-argument partition](argv-normalization.md#provider-argument-partition).
+
+#### Every launch carries the tail once
+
+The tail is fixed for the whole command. Each launch the command makes gets
+it exactly once, token for token: the first attempt, a lifecycle `retry`, a
+`proxy` target, every `sequence` step (whichever provider the step launches),
+and a lifecycle `resume`.
+
+A resume launches the provider's resume entrypoint instead of the original
+argv. Claudine appends the tail right after that entrypoint, then re-adds
+only its own transport flags (such as Codex's `--json` or OpenCode's
+`--format json`):
+
+```text
+first attempt:  codex exec --add-dir a --add-dir a --json …
+resume:         codex exec resume <session> --add-dir a --add-dir a --json
+```
+
+Repeated switches keep their order and count. A flag you forwarded yourself
+(the `--json` above) is not dropped and is not doubled by Claudine's own copy.
+Claudine does not filter the tail per entrypoint, so a resume entrypoint that
+does not accept a forwarded switch rejects it like any other launch.
+
+#### When the agent rejects the tail
+
+When a launch that forwarded a tail fails because the agent rejected its
+arguments, Claudine prints one report after recovery is exhausted (a failure
+the lifecycle `retry`s or `resume`s away reports nothing):
+
+```text
+Agent Error (Goose, exit 2)
+Goose rejected its arguments. This was likely caused by the forwarded
+arguments: --bogus.
+error: unexpected argument '--bogus' found
+Check Goose's usage for the forwarded arguments.
+```
+
+The report names forwarded switches without values, or says the tail was
+opaque when it came after `--`. It quotes the agent's own diagnostic line with
+recognized secrets masked, including a forwarded secret the agent echoed back
+without its flag. A line you already saw (streamed live by a structured run, or
+printed as the run's failure line) is not repeated; the report points at it
+instead. `--quiet` and `--silent` never hide the report, and it changes
+nothing else: exit code, lifecycle `failure`/`finalize`, and retry policy are
+the same as without it.
+
+Claudine classifies the agent's exit from its termination, exit code, and the
+last ten lines of both stdout and stderr, in this order; the first match wins:
+
+```mermaid
+flowchart TD
+    A[agent exited] --> B{interrupted?}
+    B -- yes --> X[interrupted: not attributed]
+    B -- no --> C{timed out?}
+    C -- yes --> Y[timeout: not attributed]
+    C -- no --> D{missing binary, auth, API error, unknown model?}
+    D -- yes --> Z[that cause: not attributed]
+    D -- no --> E{argument rejected?}
+    E -- no --> W[missing argument or unclassified: not attributed]
+    E -- yes --> F{tail non-empty, and any switch the message names is in the tail?}
+    F -- no --> V[generic argument error]
+    F -- yes --> R[correlated report]
+```
+
+A rejection that names one of Claudine's own injected switches (for example
+`--output-last-message`) is reported as an ordinary agent error, not blamed on
+the tail. A rejection that names no switch is attributed to a non-empty tail,
+including an explicit tail of operands only. A launch path that hands the
+terminal to the agent (an interactive session) captures nothing, so its
+failures are never classified.
 
 ### Shell Completion
 
@@ -124,7 +349,7 @@ claudine compose --codex @commit.md
 
 Steps:
 
-1. **Resolve** — resolve the file reference using `biscuit-file::FileReference`. A bare **implicit** path (`foo.md`, `dir/foo.md`) resolves from the source document's directory first, then the repository root; an **explicit** `./`/`../` path resolves from the source directory only; `@` is a magic-root search, `&` pins to the repository root, `^` searches package root then package-area root then repository root, `~/` is the user's home, `vault:` a configured vault, `%` a recursive modifier, and absolute paths resolve to themselves
+1. **Resolve** — resolve the file reference using `biscuit-file::FileReference`. A bare **implicit** path (`foo.md`, `dir/foo.md`) resolves from the source document's directory first, then the repository root; an **explicit** `./`/`../` path resolves from the source directory only; `@` is a magic-root search, `&` pins to the repository root, `^` searches package root then package-area root then repository root, `~/` is the user's home, `vault:` a configured vault, `%` a recursive modifier, and absolute paths resolve to themselves. Relative references inside the document may not leave its **tree root**: the repository it is in, else a configured vault, else the anchor of the argument that opened it. A prompt opened as `claudine compose "~/.claudine/prompts/x.md"` (quoted, so the shell leaves the `~`) outside any repository has `~` as its tree root, so `../../shared.md` reaches `~/shared.md` while a link out of the home directory is an error. Opened by absolute path or `@x.md`, it has no anchor and nothing bounds its relative links. See Darkmatter's [File Trees](../../../darkmatter/docs/transclusion/block-transclusion.md#file-trees)
 2. **Initialize and compose** — for live staged documents, bootstrap shell-free frontmatter, reject initialization shell actions, run `initialize`, and reread before body discovery; then audit and compose through Darkmatter (see [Documents That Declare `initialize`](#documents-that-declare-initialize))
 3. **Prepare** — extract the effective (composed) frontmatter; this is the single source of truth for all downstream decisions
 4. **Select provider** — choose which agentic CLI to use (see Provider Selection below)
@@ -171,7 +396,9 @@ Steps:
    source produces a warning naming the file and migration, but the run
    continues and Claudine never overwrites it. The guardrails name the three closure-owned
    properties (`prompt`, `hash`, `last_updated`), the direct write-and-re-read
-   duty, the schema type duty, and the two-to-three-paragraph summary contract.
+   duty, the schema type duty, the plain-scalar rule (a `#` in a value the
+   agent writes is kept as text, so a comment needs a quoted value or its own
+   line), and the two-to-three-paragraph summary contract.
 5. **Prepare** — retain the launch-resolved schema and launch report
    (`PreparedComposition::launch_schema`) and the inline guard (native path,
    pre-run text, pre-run `Simple` hash) so the completion verdict never resolves
@@ -197,18 +424,72 @@ Steps:
      body hash (leading/trailing whitespace and blank lines ignored, internal
      whitespace significant). A trimmed-empty or unchanged body is refused and
      nothing is stamped or written.
+   - **Repair.** A top-level key the agent added or changed whose value is a
+     single-line plain scalar that YAML would misread is wrapped in double
+     quotes, keeping its whole text (comment or blank lines under the key do
+     not make the value multi-line): `title: Fix: colons` becomes
+     `title: "Fix: colons"`, and `note: see issue #42` becomes
+     `note: "see issue #42"` (the `#` is text, not a comment). A value that
+     contains `: ` or ` #`, ends with `:`, or starts with a reserved indicator
+     (`%`, `@`, or a backtick, which begin no YAML form) is quoted. Numbers,
+     booleans, nulls, unchanged keys, and the owned properties are never
+     touched, and neither is a value whose first character starts another YAML
+     form — a quoted or block scalar (`"`, `'`, `|`, `>`), a flow collection
+     (`[`, `{`), an anchor, alias, or tag (`&`, `*`, `!`), a comment (`#`), or
+     `- `, `? `, `: ` — whether or not it is valid. A malformed one is refused,
+     not saved as text: `added: "half" quoted`, `added: [a, b`, and
+     `added: {k: v` each fail on their own line, naming the key and the form
+     they started, and the agent can close the form or quote the whole value.
+     The whole frontmatter is then parsed again. A duplicate key, bad nesting,
+     a missing closing `---`, or anything else outside that repair fails with
+     `CompositionError::InlineAgentFrontmatterRejected` (code
+     `document.invalid_frontmatter`), which names the line and says whether the
+     agent wrote it. Nothing is written, and the rollback below restores the
+     baseline.
    - The three closure-owned nodes (`prompt`, `hash`, `last_updated`) are
      restored textually from the pre-run snapshot with Darkmatter's
      `restore_properties_text`. One warning is printed per property the agent
      touched; this is never an error. Every other frontmatter byte the agent
      wrote is the deliverable and is kept — the 2026-09-01 drift-restoration
      semantics are inverted, because on-disk changes are now the product of the
-     run rather than interference with it.
+     run rather than interference with it. A restoration that would change
+     the value of any other property is refused with
+     `CompositionError::InlineArtifactEditFailed` and nothing is written: for
+     example, when the agent anchored `hash: &h …` and added `mirror: *h`,
+     restoring the original `hash` line would silently re-point `mirror` at an
+     earlier `&h` declaration.
+   - **Encode.** Every string value the agent added or changed (compared by
+     value, so reformatting does not count; inside a new list or mapping, every
+     string) that contains `{{` or `$(` is replaced in place by a Darkmatter
+     literal token, `"{{!data:v1:<base64url>}}"`. The next run decodes it to
+     the agent's exact text as data, so `summary: fixed {{…}} parsing` never
+     becomes a template or a command. Other values stay readable YAML; an
+     unchanged value, including a token stored by an earlier run, keeps its
+     bytes; mapping keys are never encoded. A value that must be encoded but
+     has no exact source span (an anchor, alias, tag, `<<` merge, plain
+     flow-collection item, or nested sequence) is refused with the same
+     `InlineAgentFrontmatterRejected` error; the document is never encoded
+     wholesale. Tools that read the YAML file directly see the token, not the
+     text; see [Values an agent writes](frontmatter-properties.md#values-an-agent-writes)
+     for the on-disk contract and how to edit a token by hand.
+     - Only those two sequences are gated, because they are the only way
+       Darkmatter reads frontmatter text as an instruction. `note: see #42` or
+       `count: 3` stays exactly as the agent wrote it.
+     - List items are compared **by position**. An agent that inserts an item at
+       the front of an authored list changes every later index, so an authored
+       `{{ … }}` item that shifted is treated as the agent's, encoded, and stops
+       being a template. Append to a list whose items are templates, or keep
+       templates out of lists an agent edits.
+     - A clipped (`|`) or kept (`|+`) block scalar that ends the frontmatter is
+       stored as composition reads it: Darkmatter trims the frontmatter block
+       before parsing, so the value has no final newline there, and the token
+       holds exactly that value.
    - The agent's semantic top-level changes (addition, replacement, deletion;
      value-preserving reformatting is not a change) travel out as a
-     `FrontmatterDelta` for the completion instance. Owned properties are
-     excluded from it.
-   - Malformed YAML, a non-mapping root, or a duplicate owned key fails with
+     `FrontmatterDelta` for the completion instance, with tokens decoded. Owned
+     properties are excluded from it.
+   - A non-mapping root that survives the repair, or a frontmatter shape
+     `restore_properties_text` cannot edit, fails with
      `CompositionError::InlineArtifactEditFailed` without modifying the source.
    - `last_updated` is set to today's date (local time, `YYYY-MM-DD`), `hash` is
      stamped, and the file is written atomically exactly once.
@@ -226,7 +507,9 @@ hand-off ends the run, and the target's own run captures its own baseline.
 
 It restores the captured text atomically, before failure handling, on a non-zero
 provider exit, an interrupt/exit 130, a post-`start` launch failure, a closure
-parse/edit failure, a duplicate owned key, and an empty or unchanged body. A
+edit failure, frontmatter the agent wrote that cannot be repaired or encoded
+(`InlineAgentFrontmatterRejected`: malformed YAML, bad nesting, or a duplicate
+key, a duplicate owned key included), and an empty or unchanged body. A
 rollback stamps nothing — the document goes back with the `hash` and
 `last_updated` it had before the run. A *completion-schema* failure is the
 deliberate exception: the artifact stands, because discarding the agent's work
@@ -316,6 +599,19 @@ that persists the body.
 - **Malformed existing hash** — if the source file contains a malformed
   `hash:` value, the closure fails with `CompositionError::InlineHashMalformed`
   before any write occurs, leaving the file on disk untouched.
+- **Unwritable `last_updated`** — if `last_updated` carries a YAML anchor
+  (`&name`), alias (`*name`), or tag (`!tag`), or holds a list or mapping, the
+  date cannot be stamped without changing other values, so the closure fails
+  the same way and writes nothing. A single value that cannot be rewritten on
+  one line, a block scalar (`|`, `>`) or a plain or quoted value continued
+  across lines, is refused the same way. An ordinary date is stamped whether
+  it follows the key or sits alone on the line below it, and comment or blank
+  lines under it, such as an indented `# set on save`, are kept byte for
+  byte. The same happens if the edited frontmatter
+  would no longer parse, or if replacing the `hash` node would change the
+  value of any other property (an alias to an anchor declared on the hash,
+  where an earlier declaration reuses the same anchor name, would otherwise
+  resolve to that earlier value).
 
 This behavior is implemented by [`reconcile_inline_artifact`] in the closure
 module, using `inline_hash_options`, `plan_hash_save`,
@@ -371,9 +667,10 @@ frontmatter keys are available to inspect.
 The diagnostic identifies the resolved document (OSC8-linked when supported),
 names both `prompt` and `sequence`, points to `claudine sequence`, and notes the
 upcoming `sections` feature. Like every frontmatter-rooted composition error, it
-appends the authored frontmatter as a syntax-highlighted, line-numbered YAML
-block (see [Frontmatter YAML blocks in errors](#frontmatter-yaml-blocks-in-errors)).
-When stderr is not a TTY the block is withheld to avoid exposing frontmatter,
+appends a focused, syntax-highlighted excerpt of the frontmatter, here around
+the `prompt` and `sequence` keys (see
+[Frontmatter YAML blocks in errors](#frontmatter-yaml-blocks-in-errors)).
+When stderr is not a TTY the excerpt is withheld to avoid exposing frontmatter,
 and there is no flag to reveal it.
 
 ## Whole-Value Frontmatter Expansion Is Executable State
@@ -389,14 +686,19 @@ effective frontmatter as raw expansion syntax.
   successfully. A parse failure (e.g. the malformed `spec_path: "{{ dirname(review) + '/spec.md') }}"`)
   or an evaluation failure aborts composition with a precise
   `Interpolation parse failed` / `Interpolation evaluation failed` diagnostic
-  naming the frontmatter key — **even when `fail_fast` is off**. Undefined
-  variables remain lenient: a bare `{{ missing }}` still resolves to `null`
-  rather than aborting.
+  naming the frontmatter key — **even when `fail_fast` is off**. An absent
+  document property is not a failure: a bare `{{ missing }}` resolves to
+  `null`, and no `||` fallback is needed to make it legal.
 - **Whole-value `$(...)` shell expansion** must parse and expand when
   frontmatter shell expansion is enabled. If shell expansion is explicitly
   disabled, the `$(...)` value is deferred unchanged. When enabled, a value
   that still trims to a whole-value `$(...)` candidate after the expansion pass
   is rejected as a leak.
+- **A stored literal token is data, not executable state.** A value such as
+  `summary: "{{!data:v1:…}}"` (written by the inline closure or a lifecycle
+  frontmatter effect) decodes to its text and is never evaluated or run, even
+  when that text is exactly `{{ x }}` or `$(echo X)`. See
+  [Values an agent writes](frontmatter-properties.md#values-an-agent-writes).
 
 This strictness is scoped to whole-value expansion only. **Mixed strings**
 (`"prefix {{ x }} suffix"`, `"literal $(echo ok)"`) and **body prose**
@@ -408,43 +710,85 @@ and [Frontmatter Shell Expansion](../../../darkmatter/docs/inline/fm-shell-expan
 
 ## Frontmatter YAML blocks in errors
 
-Every composition error rooted in a prompt file's YAML frontmatter appends the
-authored frontmatter — delimiters included — as a `CodeBlock`: syntax
-highlighted, line-numbered so block line N equals source-file line N, and with
-the offending line highlighted when the error's property maps to a locatable
-key. This covers the lifecycle guards (nested span in a literal, undefined variable,
-say/effect/shape errors), the prompt/agent/model/interactive type errors, the
-schema errors (load, validation, missing, unsupported-interactive), the
-inline-compose / sequence mismatch, and body-composition failures
-(`ComposeFailed`, `ShellExpansionFailed`, which show the block as context with no
-highlight).
+A composition error rooted in a prompt file's YAML frontmatter appends a
+**focused excerpt** of that frontmatter: only the lines the error involves,
+each with 3 lines of context above and below, plus the header lines that
+enclose it (a `$schema:` parent, or the `- …` line that opens a union arm).
+Lines keep their real source numbers, the involved lines are highlighted, and a
+`⋮` line marks each gap between non-adjacent regions.
 
-The block is **TTY-gated**: it is rendered only when stderr is a TTY, and
+For example, `claudine compose prompts/clarify.md spec=fix` fails on the
+caller input `/spec`. `spec` is not a frontmatter key; it is declared in the
+first `$schema` union arm, so the excerpt focuses that declaration:
+
+```text
+ 2 │ description: |-
+ 3 │     Runs an interactive session to clarify the passed in spec or design file.
+ 4 │ $schema:
+ 5 │     - spec: file(required; match(**/*spec*.md); eager) -> pass in a …   ← highlighted
+ 6 │       doc: file
+ 7 │     - design: file(required; match(**/*design*.md)) -> pass in a …
+ 8 │       doc: file
+```
+
+What each error focuses on:
+
+| Error | Focus |
+|---|---|
+| Lifecycle guards, `proxy.with`/`set` shape errors, `InvalidFileReference`, the prompt/agent/model/interactive/hash type errors, `SchemaLoad` | the named property path (sequence indexes such as `initialize.stack[0].action[1].set` resolve; a sequence task's `tasks[0].…` path matches its unique authored suffix) |
+| `SchemaValidation`, `MissingProperties`, `UnresolvedFileReference`, `UnsupportedInteractiveSchema` | every named property, both where the frontmatter sets it and where `$schema` declares it: under an inline `$schema` mapping, or in **every** arm of a `$schema` union |
+| `SchemaParse` | the offending `$schema.<property>` line (a grammar span advances into a multi-line value), else the `$schema:` line |
+| `FrontmatterParse` | the line the YAML parser reported; for a near-miss `----` fence, the fence line |
+| Inline-compose / sequence mismatch | the `prompt` and `sequence` keys |
+| Whole-value interpolation failure | its receiving key |
+| `ShellExpansionFailed` | the frontmatter key a `$(…)` came from; a body or shell-block command gets no excerpt |
+
+**Nothing locatable, no excerpt.** When nothing the error names can be found in
+the frontmatter (a missing `prompt`, an `agent` that came from the command line,
+a body-rooted compose failure, a YAML error with no location), the excerpt is
+omitted. The diagnostic text already names the path, and a whole-block dump
+adds noise. The whole block renders only when the focused regions already
+cover every line between its delimiters. A block that uses YAML anchors,
+aliases, or merge keys (`&`, `*`, `<<`) is never sliced, because a partial
+slice can hide what an alias expands to: it is shown whole when the regions
+cover it, and omitted otherwise.
+
+```mermaid
+flowchart TD
+    E[frontmatter-rooted error] --> F{focus: property, schema property, or line}
+    F -->|none for this error| X[no excerpt]
+    F --> L{located in the frontmatter?}
+    L -->|no| X
+    L -->|yes| W[±3 lines + enclosing headers, merged into regions]
+    W --> U{anchors / aliases and regions miss a line?}
+    U -->|yes| X
+    U -->|no| R[one YAML CodeBlock per region, joined by ⋮]
+    R --> T{stderr is a TTY?}
+    T -->|no| H[withheld]
+    T -->|yes| A[appended after the diagnostic]
+```
+
+The excerpt is **TTY-gated**: it is rendered only when stderr is a TTY, and
 withheld in piped / `NO_COLOR` / CI output so frontmatter is never exposed into
 logs — unless `FORCE_COLOR=1` overrides the gate. At `ColorDepth::None`,
-`report_block_error` strips escapes for every variant. Capture happens at the
-render boundary — after all control-flow handling — so the wrapper never
-interferes with upstream decisions; the CLI error walker (`output::error_walker`)
-renders the deepest typed diagnostic and appends the YAML block after it
-(`excerpt.render_appendix`). The motivating case: a `success.message` referencing
-`{{review-file}}` (hyphen) when the variable is `review_file` (underscore) now
-shows the frontmatter with the offending line highlighted, instead of an opaque
-"interpolation leaked" message.
-
-**Near-miss frontmatter fences.** A `----`+ delimiter (instead of `---`) is
-detected by Darkmatter as `MarkdownError::FrontmatterFenceMismatch` and mapped by
-Claudine to `CompositionError::FrontmatterParse`; `FrontmatterExcerpt::capture_line`
-captures the matched fence pair and highlights the delimiter line (typically
-line 1).
+`report_block_error` strips escapes for every variant, and `CodeBlock` draws a
+plain fence without line numbers. Capture happens at the render boundary —
+after all control-flow handling — so the wrapper never interferes with
+upstream decisions; the CLI error walker (`output::error_walker`) renders the
+deepest typed diagnostic and appends the excerpt after it
+(`excerpt.render_appendix`).
 
 **Mechanism.** `composition::FrontmatterExcerpt` (module `frontmatter_excerpt`)
-captures the block plus its highlight line;
+resolves the error's property paths to source lines, and `biscuit-terminal`'s
+`SourceContext::focused_line_regions` selects the windows and enclosing headers
+(the width is the constant `EXCERPT_CONTEXT_LINES`, with no configuration
+surface). Each region renders as a Darkmatter `CodeBlock` numbered from its
+first source line (`CodeBlock::with_start_line`).
 `CompositionError::enrich_frontmatter(source, stderr_is_tty)` wraps a
 frontmatter-rooted error in the transparent
 `CompositionError::WithFrontmatter { inner, excerpt }` variant at the render
-boundary, so upstream variant matching is unaffected. This superseded the
-inline-compose mismatch's bespoke verbatim-YAML dump — the `raw_yaml` /
-`stderr_is_tty` fields were removed.
+boundary, so upstream variant matching is unaffected, and leaves the error
+unwrapped when nothing is locatable.
 
 ## Prepare-time warnings
 
@@ -462,6 +806,10 @@ Provider selection behaves differently in **TTY** (interactive terminal) and **n
 When stdout is a terminal and no explicit `--<provider>` flag is given:
 
 1. **Interactive picker** — a `biscuit-tui` one-shot picker shows all installed providers. Frontmatter `agent` and config `favorite_agent` only influence the **default index** and **row ordering**; they do not bypass the picker.
+
+The picker renders **inline**, directly below the cursor, sized to its rows (at most 8 terminal rows), like the schema choosers. It never switches to the alternate screen, so earlier output stays in scrollback. `Esc` keeps the initial selection; `Ctrl-C` cancels.
+
+The picker is the **last** question before launch. Caller file completion ([Provided Partial File References](#provided-partial-file-references)) runs first, and an input failure that is already decidable is reported before the picker opens. For example, `spec=nomatch` with no matching file prints `no existing file matched reference` and exits; the picker never renders.
 
 ### Non-TTY Mode
 
@@ -557,7 +905,7 @@ Dry-run output follows Unix stream conventions so `claudine compose --dry-run do
 - **stdout** — the composed document body (the data product).
 - **stderr** — the finalized YAML frontmatter (syntax-highlighted) followed by a metadata table.
 
-The metadata table rows, in order: **Document** (frontmatter `name`, or the relative path, rendered as a blue OSC8 link), **Description** (italic + dim, only when set), **Agent** (the resolved provider name when one is selected, or a classified resolution breakdown — no-agent, invalid frontmatter hint, not-installed hint, multi-suggestion list, auto-selected single suggestion, or zero-installed list — rendered as a multi-line cell), **Model** (the resolved model, or `default`), **YOLO** (`true`/`false`), **Session** (`interactive` or `non-interactive` with the resolved source in parentheses, e.g. `interactive (frontmatter)` or `non-interactive (--no-interactive)`), **Area** (the focused monorepo area, only when inside a monorepo), and **Deferred** (the lifecycle event keys left raw in the YAML block above because they interpolate at event-time, only when at least one such key is present — so a raw `{{err.code}}` span there reads as intentional, not as an unresolved-variable bug).
+The metadata table rows, in order: **Document** (frontmatter `name`, or the relative path, rendered as a blue OSC8 link), **Description** (italic + dim, only when set, and shown exactly as authored: Markdown such as `**bold**` or `_emphasis_` in it is not interpreted, so a file name like `_pr/open.md` keeps every character), **Agent** (the resolved provider name when one is selected, or a classified resolution breakdown — no-agent, invalid frontmatter hint, not-installed hint, multi-suggestion list, auto-selected single suggestion, or zero-installed list — rendered as a multi-line cell), **Model** (the resolved model, or `default`), **YOLO** (`true`/`false`), **Session** (`interactive` or `non-interactive` with the resolved source in parentheses, e.g. `interactive (frontmatter)` or `non-interactive (--no-interactive)`), **Area** (the focused monorepo area, only when inside a monorepo), and **Deferred** (the lifecycle event keys left raw in the YAML block above because they interpolate at event-time, only when at least one such key is present — so a raw `{{err.code}}` span there reads as intentional, not as an unresolved-variable bug).
 
 `--quiet` and `--silent` have **no effect** in dry-run mode: the full output is always rendered.
 
@@ -591,9 +939,18 @@ runtime mutation, and sequence/task-authored values retain their own ownership
 and are not relabeled as caller input.
 
 Before frontmatter interpolation pass 1, Darkmatter applies the active
-document's effective schema to each caller record. Exactly one applicable file
-arm must be selected; ambiguous or unmatched unions remain the responsibility
-of normal schema validation. A selected local `file(eager)` value resolves from
+document's effective schema to each caller record. For a root union, the arm
+the caller's values apply to decides whether a property is a file. When no
+single arm applies, because several accept the values or none does, a caller
+property is still materialized if every contending arm declares it as the same
+kind of file: the value resolves from the caller origin whichever arm wins.
+With the two-arm `features`/`fixes` schema shown under
+[Provided Partial File References](#provided-partial-file-references),
+`spec=fixes/x/spec.md` typed at the repository root resolves from the root even
+though the prompt lives in `prompts/`. When the arms disagree (one declares
+`spec: string`, another `spec: file`) or one omits the property, it stays raw
+for normal schema validation, and the eager-file rewrite never re-anchors a
+raw caller value on the document. A selected local `file(eager)` value resolves from
 the caller origin and must identify an existing file. A selected non-recursive
 lazy `file` value binds to the first ordered, lexically normalized candidate
 from that same origin without checking whether it exists. Lazy HTTP(S)
@@ -637,19 +994,25 @@ Each lifecycle property interpolates **when its event fires**, not during the in
 
 Claudine renders `{{ … }}` templates on two frontmatter surfaces: **loop action values** (`set`/`append`/`prepend`/`merge`, via `looping::actions::render_action_value`) and **lifecycle event text** (via the Darkmatter DM2 substrate `SubtreeCompose`). The loop/capability API keeps the positional spelling `set(key, value)`; Claudine lifecycle YAML uses only `set: {property: value}`. Both consume the *same* Darkmatter expression core — `parse` / `evaluate` / `ExpressionFinder` / `scalar_string` over an `EvaluationLookup` — so the loop renderer is **not** a second expression engine; it is a loop-specific value renderer sharing that core. A [shared conformance matrix](../../lib/src/composition/interpolation_conformance.rs) pins the overlap: literal/mixed strings, whole-value typed expansion, arrays/objects, the `doc` namespace, functions, string-literal escaping, and malformed-expression fail-closed behavior all resolve **identically** from the same input and state.
 
-Three semantic differences are deliberate and keep the two renderers separate rather than merging the loop path into DM2:
+Two differences remain between the renderers:
 
 | Concern | Loop action renderer | Lifecycle DM2 (`SubtreeCompose`) |
 |---------|----------------------|-----------------------------------|
-| Mixed string that forms valid JSON (e.g. `"{{a}}{{b}}"` with `a=1, b=2`) | Re-parsed as JSON → `12` (number). See [looping.md](flow-control/looping.md). | Kept as string → `"12"`. |
-| Error on a malformed/invalid template | Contextual `CompositionError::InvalidAction` carrying iteration + action index (`InvalidAction at iteration N, action M of K`) | Generic `MarkdownError::Transform` |
-| Unknown variable root in a mixed string (e.g. `"x={{typo}}"`) | Lenient → resolves empty (`"x="`), matching loop **condition** evaluation | Strict / fail-closed → typed error before any side effect dispatches |
+| Error on a malformed/invalid template | Contextual `CompositionError::LoopActionExpressionInvalid` carrying iteration + action index | Typed `MarkdownError::Interpolation` |
+| A `{{{ … }}}` escape | Not recognized; the text passes through unchanged | Renders the literal `{{ … }}` |
 
-The loop renderer's leniency and JSON re-parse serve state mutation (a loop action writes frontmatter, where an empty/typed result is the natural outcome and mirrors `while`/`until` evaluation), while DM2 strict mode serves side-effect dispatch (a lifecycle message must never reach Discord/TTS/stderr carrying an unresolved reference). Both engines are held to the shared matrix so the overlap cannot silently drift.
+Everything else is shared, and the matrix holds both engines (and the sequence
+source renderer) to one missing-property table: an absent property is `null` as
+a whole value and empty in a mixed string (`"x={{typo}}"` renders `"x="`), a
+ternary over it takes the falsy branch, a fallback chooses the next operand, and
+a bare name never reads `ctx`. Both keep a mixed string such as `"{{a}}{{b}}"`
+(with `a=1, b=2`) as the string `"12"`: the inserted values are data, so the
+result is never re-parsed as JSON. A malformed span or unknown function fails in
+both before anything is written or dispatched.
 
 ### Loop Execution
 
-A frontmatter `loop:` block turns the prompt into a repeating run. The first iteration runs `initialize` once; later iterations re-enter at `start` without re-running `initialize`, schema validation, or shell pre-flight. `success`, `failure`, and `finalize` fire once per iteration, and the loop condition is evaluated at the post-`finalize` gate after any `loop:` lifecycle concerns.
+A frontmatter `loop:` block turns the prompt into a repeating run. The first iteration runs `initialize` once; later iterations re-enter at `start` without re-running `initialize` or schema validation. Each iteration is a composition run of its own: it captures its own `ctx`, so it observes what earlier iterations changed, and it audits the commands its own state produces. `success`, `failure`, and `finalize` fire once per iteration, and the loop condition is evaluated at the post-`finalize` gate after any `loop:` lifecycle concerns.
 
 The condition is checked at the **end** of each iteration, against the state that iteration ran with, and the actions are applied only when the loop continues. A loop therefore always runs at least once, and a counter counts one further than it reads: `while: "n < 2"` counting from `0` runs three times. To run zero times, `skip` from `initialize`. See [Looping — Iteration semantics](flow-control/looping.md#iteration-semantics) for the full counting table.
 
@@ -724,7 +1087,7 @@ When Interactive Mode is allowed, claudine first prints a per-property status re
 | `string` / `date` / `datetime` / `time` / `url` / `email` / `file` | text input with format hint |
 | `object`, `any`, property-level union, root-level union without projection | `UnsupportedInteractiveSchema` |
 
-Numeric inputs reprompt with an inline error on parse failure instead of aborting. Collected values feed back into the override set; composition re-runs with the new overrides before any provider session starts.
+Each widget renders inline, directly below the status report, in a viewport sized to its label, rows, and help hint (choosers show at most 8 terminal rows and scroll beyond that). None switches to the alternate screen, so earlier output stays in scrollback. Numeric inputs reprompt with an inline error on parse failure instead of aborting. Collected values feed back into the override set; composition re-runs with the new overrides before any provider session starts.
 
 ### Provided Partial File References
 
@@ -741,7 +1104,32 @@ $schema:
 2. filters candidates whose path contains `everywhere` (case-insensitive), and
 3. drives a **confirmation dialog** on a single match or a **chooser** on multiple, then records the selected path in the effective override and caller provenance before continuing preparation. Each unresolved supplied input is handled, including individual file-array elements.
 
-The `match(...)` glob is consulted **only after** literal path resolution fails, so valid explicit paths keep their existing behavior. Both required-eager and optional-eager file properties reach this resolution. Lazy file properties may name future output files and do not enter this early completion pass. Zero glob+substring matches, a declined confirmation, or a cancelled chooser fall back to the original `no existing file matched reference` schema-validation error unchanged. When Interactive Mode is denied (not both stdin and stderr TTYs, `--silent`, etc.), the original error is preserved byte-for-byte so scripts and CI output are unaffected. The glob compile and walk live in `claudine-cli`; the library only classifies the failure into the typed `UnresolvedFileReference { property, provided, patterns }` signal and never gains a `globset`/`ignore` dependency.
+The `match(...)` glob is consulted **only after** literal path resolution fails, so valid explicit paths keep their existing behavior. Both required-eager and optional-eager file properties reach this resolution. Lazy file properties may name future output files and do not enter this early completion pass. Zero glob+substring matches, a declined confirmation (`n`/`Esc`), or a cancelled dialog or chooser (`Ctrl-C`) fall back to the original `no existing file matched reference` schema-validation error unchanged.
+
+Root-union schemas get the same completion. The caller's inputs first pick the arm they apply to; a sibling whose value is still a template (`doc: "{{spec || design}}"`) cannot rule an arm out, because composition may yet make it valid. When no single arm applies, completion still runs if **every** arm in contention declares the property as an eager `file(match)` of the same shape, because the file must exist whichever arm wins. The chooser then searches all of those arms' globs, de-duplicated in arm order:
+
+```yaml
+$schema:
+  - kind: 'literal(feature)'
+    spec: 'file(required;eager;match(**/features/**/spec.md))'
+  - kind: 'literal(fix)'
+    spec: 'file(required;eager;match(**/fixes/**/spec.md))'
+```
+
+`spec=cli` lists matching specs from both trees. The pick is a literal path, and the arms' globs then settle which arm applies: picking `fixes/…/spec.md` rules the `feature` arm out, so only the `fix` arm's requirements and types apply. The pick resolves from the launch directory, because both arms declare `spec` as an eager `file` (see [Caller File Provenance and Materialization](#caller-file-provenance-and-materialization)). If any contending arm types the property differently (a `string`, a lazy `file`, `file[]` against `file`) or does not declare it, the pass stays out and the full verdict decides.
+
+In a root union, an **existing** file outside a simplified arm's declared `match(...)` glob rules that arm out, whether you typed the path, picked it in the chooser, or the document authored it. The rule also applies when another arm declares the same glob, does not declare the property, or uses raw JSON Schema. A single schema's glob still only suggests candidates:
+
+| Schema and input | Result |
+|---|---|
+| single schema `match(**/fixes/**/spec.md)`, `spec=features/x/spec.md` | accepted: the glob only suggests |
+| the union above with `kind: fix`, `spec=features/x/spec.md` | rejected: the path is outside the `fix` arm's `match(**/fixes/**/spec.md)` |
+| the union above, `spec=fixes/x/spec.md` | the `fix` arm applies |
+| the union above, `spec=features/x/spec.md` | the `feature` arm applies |
+
+A partial such as `cli` names no file yet, so it rules no arm out; a settled `kind: fix` still offers only the `fixes` tree. Paths are compared in `/` spelling relative to the launch directory, the same anchor the chooser walks, so every file the chooser offers is one its arm accepts. When the late verdict reports an unresolved value on a union whose literal discriminant is settled, the chooser searches only that arm's glob.
+
+Every report of an unresolved caller value names the directory that value was resolved from, which is the launch directory for `key=value`, not the prompt's directory. This holds for the verdict reached after `initialize` as well as for the early pass. When Interactive Mode is denied (not both stdin and stderr TTYs, `--silent`, etc.), the original error is preserved byte-for-byte so scripts and CI output are unaffected. The directory walk lives in `claudine-cli`, and the glob comparison is Darkmatter's `FileMatchGlobs`, the one validation uses; the library only classifies the failure into the typed `UnresolvedFileReference { property, provided, patterns }` signal and never gains a `globset`/`ignore` dependency.
 
 Supplied eager file inputs are resolved **before `initialize` consumes them**,
 including on a proxy target that first declares their file schema. Candidate
@@ -753,11 +1141,13 @@ for unrelated `plan` or `review` inputs. `-y` does not suppress confirmation or
 choose a file automatically; the usual TTY, configuration, and `--silent`
 gates still apply.
 
-For a root-level schema union, completion requires exactly one alternative to
-match after deferring existence checks on caller-supplied files. If other
-constraints leave no matching alternative, or several alternatives match,
-completion defers to canonical preparation without guessing a file type or
-issuing an early schema verdict.
+For a root-level schema union, an arm is chosen after deferring existence
+checks on caller-supplied files and treating templated values as undecided;
+an existing caller file outside a glob the arm contests rules it out.
+When exactly one arm applies, its declaration drives completion. When no arm
+applies, or several do, completion runs only through the merged-glob rule
+above; otherwise it defers to canonical preparation without guessing a file
+type or issuing an early schema verdict.
 
 ### Schema Collection Independence
 
@@ -833,11 +1223,27 @@ Plain `ctx.*` in a composed document describes the caller's **launch context** �
 - **One owner.** The launch anchor and the launch repository/topology/environment/host evidence are paired as a single operation on `InvocationContext` (`capture_launch_context` for a fresh document epoch, `extend_launch_context` for a same-epoch reread). A caller cannot combine a launch directory with prompt-derived evidence, so moving a prompt, task, group, overlay, or system-prompt file cannot change launch-facing `ctx.*` values (`ctx.area`, `ctx.repo_root`, `ctx.current_packages`, …). A source stored in another repository never substitutes that repository for the launch repository.
 - **`ctx.cwd` is invocation state.** Darkmatter exposes the absolute, portable launch directory through its no-I/O `Invocation` context group. Supplied invocation evidence never rediscovers the process CWD; ambient compatibility capture reports `null` with a partial-capture diagnostic if its one boundary read fails.
 - **Caller file parameters retain their authoring anchor.** Darkmatter materializes only overrides whose selected effective schema arm is `file` or `file(eager)`. Lazy local values retain the first unprobed candidate, eager values select the first existing file, recursive lazy values are rejected, and remote lazy values remain URLs. The raw override stays in the input layer while effective frontmatter and expressions receive the anchored absolute value, so later document handoffs cannot reinterpret the caller's relative text.
-- **One snapshot per document epoch.** Direct, inline, loop, proxy-target, retry, and resume entry each prepare one target-adjusted early-binding snapshot after provider/model resolution and reuse that exact snapshot through shell preflight, body and effective-frontmatter composition, schema evaluation, loop conditions, and every lifecycle event. The post-`initialize` stabilized reread stays inside its epoch: newly demanded context groups are extended from retained launch evidence, and the anchor, environment capture, and applied target overrides never change. Proxying to another document, and retry/resume re-entry, start a new epoch (at most one new snapshot each).
-- **Reuse is observable and attributable.** Every canonical preparation carries a Claudine-local document-epoch token whose recorder owns that epoch's launch construction, same-epoch extensions, ambient fallbacks, and populated-context observations under the stable consumer names `preflight`, `body`, `effective-frontmatter`, `loop-condition`, and `lifecycle`. The recorder is separate from Darkmatter's `ComposeContext`; overlapping parallel sequence workers therefore cannot contribute to one another's exact maps. Performance reports project both invocation totals and each sorted epoch map. Canonical preparation records a fallback on the owning epoch if its prepared context is absent, so dropping the snapshot cannot pass a zero-fallback assertion invisibly.
+- **`ctx` is evaluated once for each composition run.** A composition run is one document being composed and executed: a document invoked directly or adopted through `proxy`, each sequence step (each task of a serial group; a parallel group shares one capture until a sibling re-enters), each loop iteration, and each retry or resume attempt. Transclusion does not start a run: a document and every file it includes share one `ctx`. `current` is observed once per lifecycle event. Each run prepares one target-adjusted early-binding snapshot after provider/model resolution — a new document epoch — and reuses that exact snapshot through shell preflight, body and effective-frontmatter composition, schema evaluation, loop conditions, and every lifecycle event of the run. Only the groups the run's composed tree names are captured, so a run that names no Git fact observes no Git state.
+- **Git working state belongs to the run; everything else to the invocation.** Git working state — `branch`, `worktree`, `merge_conflicts`, the staged, dirty, and untracked file keys, and `recent_commits` — can change between runs, including by another process, so each run observes it once, on the run's first request for it, and holds it for the rest of the run. Which run first mentioned a property has no effect on what a later run sees. The launch directory, repository identity, package topology, area, host facts, languages, documents, and the environment are observed once per invocation and never rediscovered, so a hop cannot move `ctx.cwd` or `ctx.repo_root`.
+
+  ```md
+  ---
+  start:
+      stack:
+          - action:
+                - shell: "git add notes.md"
+                - proxy: ./commit.md
+  ---
+  ```
+
+  Here `commit.md` is a new run, so its `ctx.staged_files` lists `notes.md` whether or not the router named `ctx.staged_files` itself. The router's own `ctx.staged_files` keeps the value it observed before its `start` stack staged the file.
+- **Requirements come from the whole tree.** A run captures what its root page names — frontmatter, lifecycle blocks, and body — plus what every file it transcludes names, recursively, including a file chosen by an interpolated `::file`. A mention inside a fenced or indented code block, an interpolation literal (`{{{ … }}}`), or a `::code` inclusion is an example, not a reference, and captures nothing. Pre-flight discovery walks the tree with the inputs composition gives each child, so an included file's groups are captured before anything in the run executes; an include path that cannot be resolved before execution is a preparation error naming the directive, never an empty value.
+- **A staged document reads its root before `initialize`.** A document that declares `initialize` captures what its root page names — text, frontmatter, lifecycle blocks, and body — before `initialize` runs, and follows no include until afterwards. The post-`initialize` reread stays in the same run: a group already observed is reused, never observed again. **The one exception is an include.** An included file cannot be read before `initialize`, which may be what creates it, so a group that an include is the first to name is captured on first demand, after `initialize`, and held for the rest of the run.
+- **Parallel groups share at launch and refresh on re-entry.** Before any sibling starts, a parallel group captures the union of what its tasks and their prompt documents name, once, and every sibling's first run starts from that view of the working tree. A sibling that retries, resumes, proxies, or begins another loop iteration is a new run and observes the working tree as it is then, including what its siblings changed. Sharing covers Git evidence only: each task layers its own resolved `ctx.agent`, `ctx.model`, `env.AGENT`, and `env.MODEL` over it.
+- **Reuse is observable and attributable.** Every canonical preparation carries a Claudine-local document-epoch token whose recorder owns that epoch's launch construction, same-epoch extensions, ambient fallbacks, and populated-context observations under the stable consumer names `preflight`, `body`, `effective-frontmatter`, `loop-condition`, and `lifecycle`. The recorder is separate from Darkmatter's `ComposeContext`; overlapping parallel sequence workers therefore cannot contribute to one another's exact maps. Performance reports project both invocation totals and each sorted epoch map. Git working-state observations are counted apart from stable discovery, per group, and the `--perf` note lists them as `volatile observations [...]`: one per requesting run, never more. Canonical preparation records a fallback on the owning epoch if its prepared context is absent, so dropping the snapshot cannot pass a zero-fallback assertion invisibly.
 - **Target identity is layered, not captured.** `ctx.agent`, `ctx.model`, `env.AGENT`, and `env.MODEL` reflect the resolved target's environment overrides applied on top of the launch snapshot, preserving target-identity precedence on every route.
 - **The source context stays source-relative.** The active document's `SourceContext` (its authoring base, repository identity, and `FileResolutionContext`) remains authoritative for document-authored file references, transclusion, `$schema` discovery, and provenance. Source-relative resolution is unchanged by this contract.
-- **`current.*` and `current_env.*` are the lazy roots.** They are Darkmatter reserved roots, not a fallback for a missing prepared `ctx.*`: `current.<key>` observes a fact through the invocation's refresh capability when the reference is reached, and `current_env.<KEY>` rereads the live process environment. A key the invocation cannot observe renders `null` with a `PartialRuntimeCapture` diagnostic — never an ambient probe. Lazy is bounded by the request: Repository metadata and topology (`repo`, `repo_root`, `packages`, `area`, and the rest of the repository keys) are fixed by the request's repository observation, so `current.repo` always reads what `ctx.repo` does; only mutable Git and filesystem facts (`branch`, `recent_commits`, `dirty_files`) and `current_env.*` refresh at reference time. See [Context Variables — Binding time](state-management/context-variables.md#binding-time-eager-ctx-lazy-current).
+- **`current.*` and `current_env.*` are the lazy roots.** They are Darkmatter reserved roots, not a fallback for a missing prepared `ctx.*`: `current.<key>` observes a fact through the invocation's refresh capability once per lifecycle event — every read in one event's notification fields and stack sees the same value, and the next event observes afresh — and `current_env.<KEY>` rereads the live process environment. A key the invocation cannot observe renders `null` with a `PartialRuntimeCapture` diagnostic — never an ambient probe. Lazy is bounded by the request: Repository metadata and topology (`repo`, `repo_root`, `packages`, `area`, and the rest of the repository keys) are fixed by the request's repository observation, so `current.repo` always reads what `ctx.repo` does; only mutable Git and filesystem facts (`branch`, `recent_commits`, `dirty_files`) and `current_env.*` refresh. See [Context Variables — Binding time](state-management/context-variables.md#binding-time-eager-ctx-lazy-current).
 
 In sequences, the graph phase runs before per-task target selection, so graph-resolved shell bytes cannot legally reference target identity: a command referencing `ctx.agent`, `ctx.model`, `env.AGENT`, or `env.MODEL` fails graph preflight with a typed target-identity rejection directing the author to the task that owns the target. Static bracket access such as `ctx["agent"]` is canonicalized to the same identity path. A computed index rooted at `ctx` or `env` also fails closed because its dynamic key could select a target-dependent leaf; computed indexes under other namespaces are unaffected. Per-task and just-in-time audits — where the selected target's environment is available — continue to expand those roots. The capture-owner drift guard in `cli/tests/l1/composition_seams.rs` rejects any new direct prepared-context capture outside the invocation owner and its allowlisted compatibility sites.
 
@@ -870,6 +1276,8 @@ State is owned in four layers, which is what makes "what survives a handoff" ans
 
 A failed handoff never half-activates the target: the source stays active for diagnostic attribution, the failure follows the normal event-aware routing, and no duplicate terminal or `finalize` event is synthesized.
 
+**The chain records handoffs, not requests.** A request refused because its target does not resolve, its `with:` overlay fails to evaluate, it would revisit a document already in the chain, or it would exceed the hop limit adds nothing to the chain, so a later legitimate request is never refused against it. A committed handoff adds exactly one entry, and every owner adopts what it commits. Adoption does not depend on the target succeeding: a target that then fails its `initialize` or validation stays in the chain. For example, a looping source whose iteration 1 proxies to itself is refused as a cycle; under `fail_fast: false`, iteration 2 can still proxy to `target.md`, and the chain reads `loop.md -> target.md`.
+
 ### Entry reasons and the stage matrix
 
 Every entry into canonical preparation declares **why**, and each reason has exactly one row — no reason falls through to another's policy:
@@ -880,17 +1288,17 @@ Every entry into canonical preparation declares **why**, and each reason has exa
 | Proxy target | a fresh read from disk | yes | yes | recognized from this document |
 | Retry | a fresh read from disk | no | yes | inherits the active document's |
 | Resume | a fresh read from disk | no | yes | inherits the active document's |
-| Next loop iteration | the stamped structural plan | no | no | reuses the owning loop's plan |
+| Next loop iteration | the stamped structural plan | no | shell audit only | reuses the owning loop's plan |
 
 The table describes live entry. Direct documents with an authored `initialize` key and newly adopted proxy targets use staged boot; direct documents without that key retain eager preparation. A proxy target reads fresh because the handoff commits to a document the source may never have touched.
 
-`initialize` fires once per **active document**, not once per attempt: a retry or resume re-enters a document that has already initialized. A loop iteration skips validation because it re-materializes against an already-audited structural plan and therefore cannot introduce command bytes the audit never saw.
+`initialize` fires once per **active document**, not once per attempt: a retry or resume re-enters a document that has already initialized. A loop iteration skips schema validation because iteration 1 already judged the document it re-materializes. Every row is still a new composition run with its own `ctx` capture, and every row audits the command bytes its own state produces (see [Pre-Flight — Re-Audits](pre-flight-checks.md#re-audits-handoffs-retries-and-loop-iterations)).
 
 ### Retry and resume re-entry
 
 Retry and resume replace only the **provider-attempt slice** of the active document. They refresh the document canonically (a fresh read, full validation), keep the document's overlay and proxy provenance, and retain and decrement their own budgets — a retry cannot reset its budget by replacing the attempt. Retry drops any live session and starts a fresh attempt; resume keeps the session and delivers its follow-up message. Proxy and the next loop iteration are the two transitions that grant *fresh* budgets, because both are new active-document scope; retry, resume, proxy, and loop counters each have their own labeled home rather than sharing one counter.
 
-**Launch identity is rebuilt at the fresh-read boundary, not snapshotted at adoption.** Every retry/resume re-materializes the active document from disk and recomputes the whole launch bundle against *that* read — provider, the profile and binary it selects, the resume protocol that profile supports, model, interactivity, the permission mode `--yolo` actually achieves for that pair, the structured-output shape it implies, the MCP tag set lexed from the refreshed body, the provider argv, and the environment overlay (`harness_orch/loop_control/target_launch.rs::rebuild_launch_identity`, called at every fresh-read boundary). An attempt therefore launches with the identity the document it is about to run resolves to now, not with an adoption-time snapshot.
+**Launch identity is rebuilt at the fresh-read boundary, not snapshotted at adoption.** Every retry/resume re-materializes the active document from disk and recomputes the whole launch bundle against *that* read — provider, the profile and binary it selects, the resume protocol that profile supports, model, interactivity, the permission mode `--yolo` actually achieves for that pair, the structured-output shape it implies, the MCP tag set lexed from the refreshed body, the provider argv, and the environment overlay (`harness_orch/loop_control/target_launch.rs::rebuild_launch_identity`, called at every fresh-read boundary). An attempt therefore launches with the identity the document it is about to run resolves to now, not with an adoption-time snapshot. What the document does not name falls back to the invocation's plan: a document with no `agent:` keeps the planned provider, and one with no `model:` (and no `--model`) keeps the planned model while it keeps that provider. A sequence step's plan is its reviewed or planned target; elsewhere the planned model is the invocation's own, minus a model the launched document's frontmatter chose, so a retry after `model:` is removed launches without it.
 
 **One rebuild per attempt, and it *is* the launch.** The rebuilt bundle is both what the child is spawned with and what the compatibility key below is computed from, so the key can never describe a plan the child did not receive. Argv and MCP injection come from `wrap/launch_plan.rs::build_launch_plan`, a re-entrant, side-effect-free builder the invocation feeds once with the results of every effect it performed (temp files, the provider overlay plan, MCP tag ambiguity resolutions — which is why a retry never re-prompts for an ambiguous tag). A rebuild whose facets match the invocation's gets that recorded plan back verbatim, so an unchanged document is byte-identical to the invocation by construction. System-prompt *delivery* is re-applied per provider and so moves with the provider; its *content* is composed once at invocation.
 
@@ -929,7 +1337,12 @@ The coordinator is nested **inside** the command's own ownership — a handoff c
 
 - **`compose`** routes the final active document's output to stdout.
 - **`inline-compose`** stays inline mode across a handoff, but only the **final** target is eligible for the inline closure. The document that proxied away is not rewritten.
-- **`sequence`** contains a proxy within its current step: no step advance, no restart, and the step keeps its scoped inputs and timing identity. There is no cross-step handoff.
+- **`compose --loop`** (any looping document) ends the loop on a proxy from any event that can raise one — `initialize`, `start`, `success`, `failure`, or `finalize` — and hands the target to the command's coordinator. No further source iteration runs, and the loop gate does not fire for the abandoned iteration. The target is not an extra iteration.
+- **`sequence`** contains a proxy within its current step: no step advance, no restart, and the step keeps its scoped inputs and timing identity. There is no cross-step handoff. This holds for a step that runs the document body and for a `prompt:` task, whichever event raised the proxy:
+    - the target reads the step's inputs (the user's setters, a task's `params`, `state`/`previous`/`next`) and sees the step's environment (a task's `operation` as `OPERATION`, and `CLAUDINE_FAIL_FAST`), while `AGENT`, `MODEL`, and `YOLO` describe the target's own provider; it writes `set` and `outputs` into the step's runtime state, so later steps see them;
+    - a `prompt:` task's `setup` and `teardown` run once around the whole chain, and the task publishes one `outputs` entry: the final target's. A target that fails fails the task, and `fail_fast` decides what runs next;
+    - each task owns its chain, so two parallel siblings may both proxy to the same target, while a cycle within one task's chain is still refused;
+    - a step that runs the document body publishes every completed provider run, as a `retry` does, so a proxy from `success` leaves the source's entry and the target's.
 - **`--dry-run`** never traverses a dynamic proxy route, and this follows structurally rather than from a per-route check: the dry-run seam returns *before* the lifecycle runtime is constructed, so `initialize` never fires and no `proxy` control can be produced. A dry run always reports the document named on the command line. See [Dry Run](#dry-run).
 
 ### Backward compatibility
@@ -959,7 +1372,7 @@ A document that still declares any of these keys fails composition with a typed 
 | `handle` | a lifecycle `shell` action or other lifecycle action |
 | `deviate` | a lifecycle `shell` action plus a recovery action (`retry`, `resume`, etc.) |
 
-The scan runs before lifecycle event blocks are parsed, so the diagnostic names the removed DSL key rather than falling through to generic unknown-field handling. Like every frontmatter-rooted composition error, it appends the authored frontmatter as a syntax-highlighted YAML block under a TTY.
+The scan runs before lifecycle event blocks are parsed, so the diagnostic names the removed DSL key rather than falling through to generic unknown-field handling. Like every frontmatter-rooted composition error, it appends a focused, syntax-highlighted excerpt of the frontmatter around the removed key under a TTY.
 
 **Verification** that the agentic loop actually did the work it claimed (the old `post_checks` role) now belongs in the `success` or `finalize` stack: guard a `when:` clause and raise an `Error` lifecycle action when the contract is unmet. **Recovery** (the old `handle_*` role) belongs in a `failure`/`blocked` stack — or any other event's, since flow control is universal — via `retry`, `resume`, or `proxy`. See [Flow Control](flow-control/flow-control.md) for the full directive catalog.
 
@@ -1082,7 +1495,7 @@ See [Flow Control](flow-control/flow-control.md) for the full recovery-action re
 
 ### Shell Policy
 
-All shell commands — `::shell` directives in the template, top-level frontmatter `$(cmd)` expressions, and lifecycle `shell` stack actions — are approved upfront during the pre-flight phase, before the provider session starts. See [Pre-Flight Shell Approval](pre-flight-checks.md) for the full flow.
+All shell commands — `::shell` directives in the template, top-level frontmatter `$(cmd)` expressions, and lifecycle `shell` stack actions — are approved upfront during the pre-flight phase, before the provider session starts. Each is approved with the bytes it will execute with, including a command in a transcluded partial that interpolates a value its parent supplies. A later preparation with different state — a `proxy` target, a `retry` or `resume`, a loop iteration — audits the commands that state produces; after the first attempt that audit is deny-only, so an approval never covers a changed command. See [Pre-Flight Shell Approval](pre-flight-checks.md) for the full flow. A command in a transcluded partial that fails without a fallback fails the composition exactly as it would written inline, so moving facts into a shared partial never lets a stage launch without them (see [Block Transclusion](../../../darkmatter/docs/transclusion/block-transclusion.md#when-an-included-file-fails)).
 
 ## Retired Interfaces
 

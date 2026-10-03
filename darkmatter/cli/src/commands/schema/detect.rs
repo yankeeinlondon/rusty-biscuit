@@ -110,6 +110,7 @@ fn emit_json_error(message: &str) {
     eprintln!("{}", Prose::new(body).render(&terminal));
 }
 
+/// Escape text so it renders exactly as written inside Prose markup.
 fn escape_prose(input: &str) -> String {
-    input.replace('<', "&lt;").replace('>', "&gt;")
+    Prose::escape_text(input)
 }

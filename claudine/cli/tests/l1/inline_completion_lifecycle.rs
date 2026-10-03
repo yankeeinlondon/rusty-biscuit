@@ -364,9 +364,10 @@ fn a_duplicate_owned_key_is_refused_and_rolled_back() {
     let assert = fixture.inline_compose().failure();
 
     let stderr = stderr_of(&assert);
+    let flat = stderr.split_whitespace().filter(|word| *word != "┃").collect::<Vec<_>>().join(" ");
     assert!(
-        stderr.contains("could not reconcile the inline document"),
-        "a duplicate owned key is a typed edit failure:\n{stderr}"
+        flat.contains("agent frontmatter rejected") && flat.contains("(line 3)"),
+        "a duplicate owned key is refused and names the agent's line:\n{stderr}"
     );
     assert_eq!(
         fixture.document_text(),

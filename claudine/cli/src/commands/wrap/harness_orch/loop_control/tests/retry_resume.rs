@@ -167,6 +167,7 @@ fn canonical_retry_and_resume_reentry_each_produce_exact_epoch_work() {
     assert_eq!(
         retried.document_epoch.as_ref().unwrap().work_snapshot(),
         claudine::invocation_context::DocumentEpochWork {
+            volatile_observations: Default::default(),
             launch_context_constructions: 1,
             launch_context_extensions: 0,
             ambient_fallbacks: 0,
@@ -239,6 +240,7 @@ fn canonical_retry_and_resume_reentry_each_produce_exact_epoch_work() {
     assert_eq!(
         resumed.document_epoch.as_ref().unwrap().work_snapshot(),
         claudine::invocation_context::DocumentEpochWork {
+            volatile_observations: Default::default(),
             launch_context_constructions: 1,
             launch_context_extensions: 0,
             ambient_fallbacks: 0,
@@ -637,6 +639,7 @@ fn a_resume_whose_only_moved_facet_is_the_overlay_is_refused() {
         .unwrap();
     let launch = crate::commands::wrap::harness_orch::AttemptLaunch {
         args: Vec::new(),
+        provider_tail: claudine::composition::ProviderTail::default(),
         env: std::collections::HashMap::new(),
         stdin_seed: None,
         wire_prompt: None,

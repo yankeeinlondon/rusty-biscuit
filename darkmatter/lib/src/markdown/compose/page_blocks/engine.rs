@@ -101,7 +101,7 @@ pub(crate) fn render_page_blocks_with_edits<L: EvaluationLookup>(
 
 fn removed(edits: &mut Vec<TextEdit>, range: Range<usize>) {
     if !range.is_empty() {
-        edits.push(TextEdit { range, replacement_len: 0 });
+        edits.push(TextEdit::authored(range, 0));
     }
 }
 

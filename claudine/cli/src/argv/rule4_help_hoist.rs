@@ -15,16 +15,15 @@ use crate::argv::{COMPOSITION_SUBCOMMANDS, find_subcommand, first_dash_dash_inde
 /// a non-global `help: bool`, which means composition subcommands never
 /// inherit a working `--help` handler. Without this rule, a user typing
 /// `claudine compose file.md --gemini name=Ken --help` lands in clap's
-/// greedy positional collector and sees either the misleading "unexpected
-/// argument" tip or a downstream "expected at most one file reference"
-/// error.
+/// greedy positional collector and sees the misleading "unexpected
+/// argument" tip.
 ///
 /// Hoisting `--help` / `-h` to position 1 converts the same argv into a
 /// root-help invocation, which `main.rs` catches and forwards to
-/// [`crate::commands::help::run`]. The rest of the argv still parses
-/// cleanly under clap (compose accepts the remaining positionals), but
-/// `cli.help == true` short-circuits into the grouped help screen before
-/// any subcommand runs.
+/// [`crate::commands::help::run`] before any subcommand runs. The rest of
+/// the argv need not satisfy the subcommand: `parse_cli_from` answers a root
+/// help request even when clap reports a missing required argument, so
+/// `claudine compose --help` needs no file.
 ///
 /// No-ops when:
 ///

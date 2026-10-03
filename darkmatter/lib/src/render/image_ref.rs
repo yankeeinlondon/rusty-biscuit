@@ -127,14 +127,14 @@ impl biscuit_terminal::errors::BlockError for ImageRefError {
                     "Input did not look like an HTML `<img ... />` tag or a Markdown `![alt](src)` reference.",
                 )
                 .hint(
-                    "Use <cyan>![alt](src \"title\")</cyan> for Markdown or <cyan>&lt;img src=\"...\" alt=\"...\" /&gt;</cyan> for HTML.",
+                    "Use <cyan>!\\[alt\\](src \"title\")</cyan> for Markdown or <cyan>\\<img src=\"...\" alt=\"...\" /\\></cyan> for HTML.",
                 ),
 
             Self::MalformedHtml(message) => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("ImageRefError", "malformed HTML image"))
-                .body(format!("<dim>Message:</dim> {message}"))
+                .body(format!("<dim>Message:</dim> {}", Prose::escape_text(message)))
                 .hint(
-                    "Ensure the tag starts with <cyan>&lt;img</cyan> and ends with <cyan>&gt;</cyan> (self-closing is allowed).",
+                    "Ensure the tag starts with <cyan>\\<img</cyan> and ends with <cyan>\\></cyan> (self-closing is allowed).",
                 ),
 
             Self::MalformedMarkdown {
@@ -142,7 +142,7 @@ impl biscuit_terminal::errors::BlockError for ImageRefError {
                 message,
                 caret,
             } => {
-                let mut body = vec![Prose::new(format!("<dim>Message:</dim> {message}"))];
+                let mut body = vec![Prose::new(format!("<dim>Message:</dim> {}", Prose::escape_text(message)))];
                 body.push(Prose::new("Image parsing failed here:"));
 
                 // Image fragments usually start at line 1 of their own string.

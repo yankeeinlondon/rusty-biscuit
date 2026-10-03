@@ -15,23 +15,34 @@ use super::{
 };
 use crate::log;
 
-pub(crate) fn validate_timeout_constraints(
+/// Reject an explicit `--interactive` request combined with a provider timeout.
+///
+/// Runs before `--edit` opens the editor, so the user is never asked to draft
+/// a prompt for a launch that cannot happen. The mode-dependent timeout rules,
+/// which need to know whether the (possibly edited) prompt is empty, stay in
+/// [`validate_timeout_constraints`].
+pub(crate) fn reject_interactive_timeouts(
     args: &WrapperArgs,
     interactive_requested: bool,
-    non_interactive_requested: bool,
-    edit_requested: bool,
 ) -> Result<()> {
-    if args.timeout.is_some() && interactive_requested {
+    if !interactive_requested {
+        return Ok(());
+    }
+    if args.timeout.is_some() {
         return Err(eyre!("--timeout cannot be used with --interactive mode"));
     }
-    if args.step_timeout.is_some() && interactive_requested {
+    if args.step_timeout.is_some() {
         return Err(eyre!(
             "--step-timeout cannot be used with --interactive mode"
         ));
     }
-    if edit_requested && interactive_requested {
-        return Err(eyre!("--edit cannot be used with --interactive"));
-    }
+    Ok(())
+}
+
+pub(crate) fn validate_timeout_constraints(
+    args: &WrapperArgs,
+    non_interactive_requested: bool,
+) -> Result<()> {
     if args.timeout.is_some() && !non_interactive_requested {
         return Err(eyre!(
             "--timeout can only be used in non-interactive mode \
@@ -478,6 +489,9 @@ fn passthrough_launch_intent(
         // rebuilt fallback would republish — though the empty dispatch context
         // below means the passthrough publishes no selection metadata at all.
         fallback_provider_reason: claudine::composition::ProviderResolutionReason::ExplicitFlag,
+        // The passthrough's only model source is `--model`, which every rebuild
+        // receives as `cli_model`; there is no planned model to fall back to.
+        fallback_model: None,
         dispatch_context: std::collections::HashMap::new(),
         launch_plan_inputs: crate::commands::wrap::launch_plan::LaunchPlanInputs::recorded_only(
             crate::commands::wrap::launch_plan::DocumentLaunchFacets {
@@ -524,7 +538,7 @@ pub(crate) fn run_execution_stage(
     wrapper_span: &tracing::Span,
     mut perf_collector: Option<&mut crate::perf::CommandPerfCollector>,
     invocation: &claudine::invocation_context::InvocationContext,
-) -> Result<(i32, Option<String>)> {
+) -> Result<crate::output::native_exit::NativeExit> {
     if let Some(WrapperHarness {
         source_path,
         source_context,
@@ -653,7 +667,12 @@ pub(crate) fn run_execution_stage(
         if let (Some(collector), Some(perf)) = (perf_collector.as_mut(), harness_perf) {
             collector.set_agent_perf(perf);
         }
-        Ok((harness_code, None))
+        // The harness loop reported its own attempts; the exit code is all
+        // that reaches this report.
+        Ok(crate::output::native_exit::NativeExit::new(
+            harness_code,
+            claudine::harness::ProcessTermination::Completed,
+        ))
     } else if use_structured {
         // Presence bracket for the direct structured-stream path (the
         // harness path above reports per attempt inside
@@ -666,6 +685,17 @@ pub(crate) fn run_execution_stage(
             &env_plan.env,
         );
         let status_reporter = session_presence.status_reporter();
+        // A launch whose argv selects the provider's managed control
+        // interface is driven over retained stdin (Pi RPC).
+        let control = wire_prompt.is_none().then(|| profile.stdio_control(child_args, child_cwd)).flatten();
+        // Steering ownership for the same child; see `crate::steering::owner`.
+        let steering = crate::steering::owner::ExecutionSteering::for_wrapped_child(
+            provider,
+            !effective_non_interactive,
+            child_cwd,
+            control.as_ref(),
+        );
+        let steering_controller = steering.as_ref().map(|owner| owner.controller().clone());
         wrapper_exec::run_structured_stream_session(
             args,
             provider,
@@ -687,6 +717,8 @@ pub(crate) fn run_execution_stage(
             wrapper_span,
             perf_collector,
             status_reporter,
+            control,
+            steering_controller,
         )
     } else {
         let _session_presence = session_report::SessionPresence::started(
@@ -714,7 +746,8 @@ pub(crate) fn run_execution_stage(
         if let Some(collector) = perf_collector.as_mut() {
             collector.set_agent_perf(result.telemetry.into_agent_perf(None));
         }
-        Ok((result.data, None))
+        // Both streams were forwarded live, so nothing was captured.
+        Ok(crate::output::native_exit::NativeExit::new(result.data, result.termination))
     }
 }
 

@@ -64,6 +64,11 @@ Darkmatter's use of the "info block" provides it super powers that include:
 - `use={lang}`
 - `highlight={grammar}`
 
+Line numbers always start at 1 in a fenced block. A `CodeBlock` built in Rust
+can start them elsewhere with `with_start_line(n)` (for example, an excerpt of
+lines 12–14 of a file); its `highlight` ranges then use those same absolute
+line numbers. There is no info-string key for this.
+
 These superpower will be evident not when you _compose_ a document -- because in those situations the info block just remains text -- but when you are _rendering_ a document the semantic meaning of the info block comes into bloom.
 
 ### Rendered Languages

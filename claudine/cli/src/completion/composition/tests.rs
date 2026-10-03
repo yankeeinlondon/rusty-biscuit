@@ -343,7 +343,10 @@ fn compose_magic_does_not_emit_a_nested_file_without_its_scope() {
         "---\ntitle: X\n---\n",
     );
 
-    let ctx = ScopeContext::discover_from(tmp.path());
+    let mut ctx = ScopeContext::discover_from(tmp.path());
+    // Keep the real `~/.claudine/prompts` out: a host `plan.md` there is a
+    // genuine `@plan.md` candidate.
+    ctx.home = None;
     let got = run(ComposeMode::Compose, &ctx, "@plan");
     assert!(
         !got.iter().any(|candidate| candidate == "@plan.md"),

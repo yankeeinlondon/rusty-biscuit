@@ -32,11 +32,12 @@ fn execute_frontmatter_shell_expansion(
     runtime: &mut PipelineRuntime,
     pre_interpolation_snapshot: Option<&std::collections::HashMap<String, String>>,
 ) -> crate::markdown::types::MarkdownResult<FrontmatterShellExpansionReport> {
+    let mut provenance = super::tests::test_provenance(frontmatter, pre_interpolation_snapshot);
     super::execute_frontmatter_shell_expansion(
         frontmatter,
         options,
         runtime,
-        pre_interpolation_snapshot,
+        &mut provenance,
         &test_ctx(),
     )
 }

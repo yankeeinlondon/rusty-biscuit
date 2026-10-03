@@ -23,6 +23,10 @@ fn fake_goose(fixture: &CliProcessFixture) {
 fn run(fixture: &CliProcessFixture, args: &[&str]) -> (String, String, i32) {
     let output = fixture
         .command()
+        // The task header glyph (`▶`) falls back to ASCII under a non-UTF-8
+        // locale, and the fixture inherits the host's: `LANG=C` on the Linux
+        // build host turned every header assertion red there.
+        .env("LC_ALL", "C.UTF-8")
         .args(args)
         .assert()
         .get_output()
@@ -43,6 +47,9 @@ fn run_in_color(fixture: &CliProcessFixture, args: &[&str]) -> (String, String, 
     let output = fixture
         .command()
         .env("FORCE_COLOR", "1")
+        // See `run`: pin a UTF-8 locale so the header glyph is not the ASCII
+        // fallback on a `LANG=C` host.
+        .env("LC_ALL", "C.UTF-8")
         // `NO_COLOR` is absolute for this CLI (`log::colors_disabled`), so
         // `FORCE_COLOR` cannot out-vote an inherited one the way it does in
         // bare `biscuit-terminal` detection. Without this the child renders

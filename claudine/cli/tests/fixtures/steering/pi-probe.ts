@@ -126,12 +126,22 @@ function streamProbe(
 				? Number.parseInt(await readFile(countFile, "utf8"), 10) || 0
 				: 0;
 			await mark("model-call-count", `${previousCount + 1}\n`);
-			if (context.systemPrompt?.includes("CONTEXT_NONCE")) await mark("context-observed");
+			// Pi 0.84 passes context files in `systemPrompt`; 0.87 moved the system
+			// prompt into a `role: "system"` message with sections.
+			const systemText = [
+				context.systemPrompt ?? "",
+				...(context.messages as Array<{ role: string }>)
+					.filter((message) => message.role === "system")
+					.map((message) => JSON.stringify(message)),
+			].join("\n");
+			if (systemText.includes("CONTEXT_NONCE")) await mark("context-observed");
 			if (fixtureUserTexts.some((text) => text.includes("STEERING_NONCE"))) await mark("steering-observed");
 			if (fixtureUserTexts.some((text) => text.includes("TEMPLATE_NONCE"))) await mark("template-observed");
 			if (fixtureUserTexts.some((text) => text.includes("SKILL_NONCE"))) await mark("skill-observed");
 
-			if (fixtureUserTexts.length === 1 && fixtureUserTexts[0] === "PROBE_TOOL_BATCH") {
+			// One batch per task: after its results, answer instead of calling again.
+			const hasToolResults = context.messages.some((message) => message.role === "toolResult");
+			if (fixtureUserTexts.length === 1 && fixtureUserTexts[0] === "PROBE_TOOL_BATCH" && !hasToolResults) {
 				pushToolCall(stream, output, "batch-a", "a");
 				pushToolCall(stream, output, "batch-b", "b");
 				output.stopReason = "toolUse";

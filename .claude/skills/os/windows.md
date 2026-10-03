@@ -113,6 +113,36 @@ Compare against that, never against `to_string_lossy()`.
    passed the whole time — the zero-candidate path and the interaction-denied
    path produce the same diagnostic — which is why only a real-terminal run
    on Windows could see it.
+10. **A fixture joined as `root.join("a/b/x.md")` keeps the `/` in the native
+    text.** Ordinary Win32 calls accept it, so most tests pass, but it breaks
+    the two places where `/` is not a separator: a `\\?\` path built from it
+    fails every probe with os error 123 ("filename, directory name, or volume
+    label syntax is incorrect"), and `cmd /C mklink /J` refuses the link.
+    Join name by name (`rel.split('/').fold(root, |p, n| p.join(n))`) in any
+    fixture that feeds a verbatim spelling or `mklink`. Found 2026-10-01 by the
+    `biscuit-file` `portable_path::platform` tests on `build-win-native`.
+11. **A `{{VAR}}` reference whose value is a verbatim path does not resolve.**
+    `FileReference` interpolation concatenates text, so `{{ROOT}}/x.md` with
+    `ROOT=\\?\C:\r` becomes `\\?\C:\r/x.md`, one component under the
+    verbatim prefix. `PortablePath` therefore never writes `{{ROOT}}/…` for
+    such a value (verification rejects it) and falls through to `~` or the
+    absolute path. A test that sets a variable from `fs::canonicalize` must
+    store `to_portable_string(&path)`, the spelling a user would export.
+    Found 2026-10-01 by the Darkmatter `link_normalization` tests.
+12. **A suffix splitter that cuts at `?` cuts a verbatim path at its prefix.**
+    `\\?\C:\…` contains `?`, so treating the first `?` as a URL query turns
+    every verbatim destination into `\\` (not absolute) and silently skips
+    it. Skip the `\\?\` / `//?/` prefix before looking for `#`, `?`, or `:`.
+    Darkmatter's `link_normalization::split_suffix` does; the macOS and Linux
+    legs cannot see it. Found 2026-10-01 on `build-win-native`.
+13. **`PathBuf::push` drops `.` and `..` pushed onto a verbatim buffer**, and
+    `collect::<PathBuf>()` pushes, so rebuilding `\\?\C:\a\..\b` from its
+    components yields `\\?\C:\b`, a different directory (under `\\?\` the
+    dots are literal names). A lexical normalizer that must keep them, such
+    as `biscuit-file`'s `normalize_native`, assembles the result as text.
+    Likewise, never write a `..` loop that calls `Vec::pop` on components:
+    it pops the `RootDir` or drive prefix and makes `/../a` relative.
+    Confirmed 2026-10-01 on `build-win-native`.
 
 ## WezTerm on `build-win`
 
@@ -227,12 +257,13 @@ Compare against that, never against `to_string_lossy()`.
   the log on the console without binding it. `$LASTEXITCODE` after each native
   command is still the right check — the bug is in how the result leaves the
   function, not in how it is read.
-- **Ctrl+C and the exit-130 contract are Unix-only in Claudine today.** The
-  Windows termination path is a bare `child.wait()` with no console control
-  handler, and the child sits in `CREATE_NEW_PROCESS_GROUP`. Do not accept a
-  cross-platform Ctrl+C acceptance criterion as met until a
-  `SetConsoleCtrlHandler` path exists; see the claudine skill's
-  `signal-handling.md`, "Windows parity".
+- **Claudine's Ctrl+C on Windows goes through one process-wide
+  `SetConsoleCtrlHandler` handler** that accepts `CTRL_C_EVENT` and
+  `CTRL_BREAK_EVENT`, and its force-exit rung exits `130` through
+  `ExitProcess`. A test can deliver a press either way: `CTRL_BREAK_EVENT`
+  to a `CREATE_NEW_PROCESS_GROUP` child, or ETX typed into a pseudoconsole
+  (see the ConPTY section below for the inherited-ignore trap). See the
+  claudine skill's `signal-handling.md`, "Windows parity".
 - **The main thread gets a 1 MiB stack, not 8 MiB.** Symptom: a test's
   spawned binary dies with `code=-1073741571` (`0xC00000FD`,
   `STATUS_STACK_OVERFLOW`) and empty stderr on Windows only. Debug-build frames
@@ -340,6 +371,23 @@ Measured on `build-win-native` on 2026-09-25 through `just cross-check`
   test that wrote `"guide\n"`, committed it, and read the file back from a
   `git worktree add` checkout got `"guide\r\n"`. Normalize line endings
   before comparing checked-out content (2026-09-25).
+- **Ctrl+C typed into a pseudoconsole is ignored unless the child inherits
+  Ctrl+C processing.** Writing ETX (`\x03`) to the ConPTY input makes conhost
+  raise `CTRL_C_EVENT`, as a terminal key press does, but "ignore Ctrl+C"
+  (`SetConsoleCtrlHandler(NULL, TRUE)`) is a process attribute that children
+  inherit, and a process chain under sshd and nextest can carry it. The child
+  then never sees the event, its registered handler is never called, and it
+  runs to completion; `CTRL_BREAK_EVENT` is unaffected, which is why the
+  group-targeted Ctrl+Break tests pass on the same host. Call
+  `SetConsoleCtrlHandler(None, FALSE)` in the test process before spawning,
+  as a terminal launching a shell effectively does
+  (`claudine/cli/tests/l1/lifecycle_message_drain_console_windows.rs`,
+  `build-win-native`, 2026-09-27).
+- **`xpty::CommandBuilder` starts from the parent's environment**, like
+  `std::process::Command`. When copying a `Command` built by a fixture that
+  inherits and only overrides, apply its `get_envs()` on top without
+  `env_clear()`: clearing dropped `PATHEXT`, so `which("claude")` no longer
+  matched `claude.cmd` (2026-09-27).
 - The process's working directory is the one passed to `CommandBuilder::cwd`,
   so this is also how a test reproduces "a window launched inside the
   directory" for the current-directory lock above.

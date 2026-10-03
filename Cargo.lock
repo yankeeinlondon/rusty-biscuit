@@ -1466,6 +1466,7 @@ dependencies = [
  "serial_test",
  "tempfile",
  "unicode-width 0.2.2",
+ "x11rb",
 ]
 
 [[package]]
@@ -1483,6 +1484,7 @@ dependencies = [
  "serde_yaml_ng",
  "thiserror 2.0.18",
  "tui-input",
+ "unicode-segmentation",
  "unicode-width 0.2.2",
  "windows-sys 0.61.2",
 ]
@@ -2197,6 +2199,7 @@ dependencies = [
  "libc",
  "messenger",
  "playa",
+ "proc-macro2",
  "proptest",
  "regex",
  "renderable",
@@ -2219,6 +2222,7 @@ dependencies = [
  "tracing",
  "tracing-test",
  "url",
+ "uuid",
  "walkdir",
  "which 8.0.2",
  "windows 0.62.2",
@@ -2256,7 +2260,6 @@ dependencies = [
  "darkmatter-cli",
  "dirs",
  "expectrl",
- "globset",
  "ignore",
  "indexmap 2.14.0",
  "inquire",
@@ -2285,6 +2288,7 @@ dependencies = [
  "test-toolkit",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-stream",
  "toml 1.1.2+spec-1.1.0",
  "tonic",
  "tracing",
@@ -2294,6 +2298,7 @@ dependencies = [
  "uuid",
  "which 8.0.2",
  "windows 0.62.2",
+ "xpty",
 ]
 
 [[package]]
@@ -3015,6 +3020,7 @@ name = "darkmatter"
 version = "0.1.0"
 dependencies = [
  "aho-corasick",
+ "base64 0.22.1",
  "biscuit-browser-harness",
  "biscuit-file",
  "biscuit-hash",
@@ -10794,6 +10800,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-stream",
  "tonic",
  "tonic-prost",
  "tower",

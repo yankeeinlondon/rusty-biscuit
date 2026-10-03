@@ -12,7 +12,7 @@ use biscuit_terminal::terminal::Terminal;
 use chrono::{DateTime, Utc};
 use darkmatter::markdown::MarkdownError;
 use darkmatter::markdown::compose::context::merge::CtxMergeError;
-use darkmatter::markdown::compose::shell_expansion::ShellExpansionError;
+use darkmatter::markdown::compose::shell_expansion::{ShellCommandOrigin, ShellExpansionError};
 
 use darkmatter::markdown::compose::expression::file_suggestions::DEFAULT_MAX_SUGGESTIONS;
 use darkmatter::markdown::compose::expression::{
@@ -368,6 +368,23 @@ pub enum CompositionError {
     #[error("could not reconcile the inline document: {0}")]
     InlineArtifactEditFailed(#[source] MarkdownError),
 
+    /// The agent's frontmatter edit cannot be saved as written.
+    ///
+    /// Either it is not valid YAML after the closure's narrow repair (a
+    /// duplicate key, bad nesting, a missing delimiter), or a value the agent
+    /// wrote that must be stored as a literal token has no exact source span.
+    /// The caller rolls the document back to its pre-run bytes.
+    #[error(
+        "the agent's frontmatter edit to {} cannot be saved: {rejection}",
+        biscuit_file::to_portable_string(path)
+    )]
+    InlineAgentFrontmatterRejected {
+        /// The active document the agent edited.
+        path: PathBuf,
+        /// The line, value, and reason at fault.
+        rejection: Box<super::closure::AgentFrontmatterRejection>,
+    },
+
     /// The agent left the document body empty or semantically unchanged.
     ///
     /// The body half of the completion verdict (spec §D5). Never carries a
@@ -628,29 +645,6 @@ pub enum CompositionError {
         /// one can be proven equivalent. Illustrative: it carries no YAML
         /// quoting and no `{{ }}` wrapper.
         suggestion: Option<String>,
-    },
-
-    /// A lifecycle string references a bare `{{ variable }}` that is undefined
-    /// after composition.
-    ///
-    /// Darkmatter resolves an unknown bare variable to an empty string with no
-    /// warning and no error (even in fail-fast mode), so a message like
-    /// `"before {{ missing }} after"` would otherwise dispatch silently as
-    /// `"before  after"`. This guard inspects the **raw** (pre-composition)
-    /// lifecycle strings — where the span is still visible — and aborts
-    /// preparation before any side effect (Discord, Slack, TTS, stderr,
-    /// desktop notification) can dispatch the degraded message.
-    #[error(
-        "lifecycle property `{property}` references undefined variable `{variable}` ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path)
-    )]
-    LifecycleUndefinedVariable {
-        /// The prompt file whose lifecycle frontmatter referenced the variable.
-        source_path: PathBuf,
-        /// Dotted lifecycle key path, e.g. `"start.message"`.
-        property: String,
-        /// The undefined bare variable name, e.g. `"missing_lifecycle_var"`.
-        variable: String,
     },
 
     /// A removed harness validation or handler DSL key was found in the
@@ -995,6 +989,9 @@ pub enum CompositionError {
         target: String,
         /// The expression-layer reason.
         message: String,
+        /// The typed evaluation failure, when the expression layer raised one.
+        #[source]
+        cause: Option<super::lifecycle_context::LifecycleCause>,
     },
 
     /// A parameter that only `proxy` accepts was authored on another action.
@@ -1149,12 +1146,10 @@ pub enum CompositionError {
     /// no-error event (`initialize`, `start`, `success`, `loop`).
     ///
     /// The `err` global is only meaningful when the iteration may have errored
-    /// (`blocked`, `failure`, and the optional-error `finalize`). Reading it
-    /// elsewhere is faulty logic and is rejected at parse time by walking the
-    /// expression surfaces (`when:` clauses, message strings, short-form
-    /// action arguments) with the existing Darkmatter AST machinery. The
-    /// `doc.err` escape hatch is exempt — only a bare `err` (or `err.*`
-    /// member access) triggers this variant.
+    /// (`blocked`, `failure`, and the optional-error `finalize`). Elsewhere the
+    /// lifecycle binding catalog declares it unavailable, and Darkmatter's
+    /// passive validation rejects a read in any branch at preparation. The
+    /// `doc.err` escape hatch is exempt — it reads the document.
     #[error(
         "lifecycle property `{property}` references `err` in the `{event}` event, \
          which never carries an error ({source_path})",
@@ -1167,20 +1162,23 @@ pub enum CompositionError {
         property: String,
         /// The event name the reference appeared in (e.g. `"start"`).
         event: String,
+        /// Darkmatter's typed unavailable-binding error, when Darkmatter
+        /// produced the finding.
+        #[source]
+        source: Option<Box<darkmatter::markdown::compose::expression::ExpressionError>>,
     },
 
     /// A lifecycle shell command failed pre-flight resolution via DM2 (C3).
     ///
     /// Shell commands live inside the deferred lifecycle subtree, so they are
-    /// unresolved after main compose. Pre-flight resolves each one via DM2
-    /// with an early-binding-only lookup (`doc.*`, `ctx.*`, `env.*`, read-side
-    /// functions) and stamps the resolved bytes back so the approved command
-    /// equals the executed command. This variant covers every failure DM2
-    /// surfaces: malformed expressions, unknown roots (typos), unknown
-    /// functions, and late-binding references
-    /// (`err`/`timing`/`current`/`current_env`),
-    /// which are rejected because shell commands are approved at pre-flight
-    /// time, before any event fires.
+    /// unresolved after main compose. Pre-flight resolves each one via DM2 in
+    /// the lifecycle shell approval scope (`doc.*`, `ctx.*`, `env.*`, document
+    /// properties, read-side functions) and stamps the resolved bytes back so
+    /// the approved command equals the executed command. This variant covers
+    /// every failure DM2 surfaces: malformed expressions, unknown functions,
+    /// and late-binding references (`err`/`timing`/`group`/`current`/
+    /// `current_env`), which are rejected because shell commands are approved
+    /// at pre-flight time, before any event fires.
     #[error(
         "lifecycle shell command at `{property}` failed pre-flight resolution: {message} \
          (raw: `{raw}`) ({source_path})",
@@ -1193,16 +1191,14 @@ pub enum CompositionError {
         property: String,
         /// The raw command string exactly as authored (pre-resolution).
         raw: String,
-        /// Human-readable resolution failure (parse error, unknown root,
+        /// Human-readable resolution failure (parse error, unknown function,
         /// late-binding reference, etc.).
         message: String,
-        /// The typed DM2 failure, when one exists.
-        ///
-        /// `None` for the late-binding rejection, which is this layer's own
-        /// pre-resolution guard and never calls Darkmatter — there is no typed
-        /// error to retain. Boxed because `MarkdownError` is heavy and this
-        /// variant already carries four fields; nothing downcasts to it, since
-        /// a Darkmatter error is not a registered Claudine diagnostic.
+        /// The typed DM2 failure. A late-binding refusal found by passive
+        /// validation is carried as the `Interpolation` error composition would
+        /// raise, so every producer supplies one. Boxed because `MarkdownError`
+        /// is heavy and this variant already carries four fields; it is not a
+        /// registered Claudine diagnostic, so it never changes the rendering.
         #[source]
         source: Option<Box<MarkdownError>>,
     },
@@ -1453,8 +1449,9 @@ pub enum CompositionError {
 
     /// A late-binding lifecycle expression *raised* at event time — a `when:`
     /// guard, a top-level communication string, or an action-value
-    /// interpolation that threw (an unknown root under DM2 strict mode, a
-    /// malformed `{{ … }}` span, or a read-side function error).
+    /// interpolation that threw (an unknown function, a read of an unavailable
+    /// lifecycle global, a malformed `{{ … }}` span, or a read-side function
+    /// error).
     ///
     /// Unlike a side-effect **dispatch** failure (which honors `no_error: true`
     /// and the per-phase routing policy), an evaluation error halts on **every**
@@ -1483,9 +1480,13 @@ pub enum CompositionError {
         /// `start.stack[1].action[0].set.metadata.files[2]`), when the executor
         /// located it.
         property: Option<String>,
-        /// Why evaluation failed; selects the remediation hint. Boxed to keep
-        /// `CompositionError` within `clippy::result_large_err`.
-        reason: Box<LifecycleEvaluationReason>,
+        /// Why evaluation failed; selects the remediation hint. Zero-sized
+        /// while it has one variant, so it costs `CompositionError` nothing.
+        reason: LifecycleEvaluationReason,
+        /// The typed evaluation failure (the Darkmatter error is its source),
+        /// when the expression layer raised one.
+        #[source]
+        cause: Option<super::lifecycle_context::LifecycleCause>,
     },
 
     // -- Sequence errors -------------------------------------------------------
@@ -1856,10 +1857,14 @@ pub enum CompositionError {
     SequenceShellLateBinding {
         /// The authored command.
         command: String,
-        /// The offending root (`outputs`, `err`, `timing`, `current`, `current_env`).
+        /// The offending root (`outputs`, `err`, `timing`, `group`, `current`,
+        /// `current_env`).
         root: String,
         /// A label locating the task.
         task: String,
+        /// Darkmatter's typed unavailable-binding error.
+        #[source]
+        source: Option<Box<darkmatter::markdown::compose::expression::ExpressionError>>,
     },
 
     /// A graph-phase shell command references the resolved target's identity.
@@ -2056,9 +2061,14 @@ pub enum CompositionError {
         field: String,
         /// The underlying evaluation failure.
         message: String,
-        /// The typed lower-layer failure.
+        /// The typed Darkmatter failure. A [`LifecycleCause`] rather than the
+        /// bare error so it survives into the cloneable
+        /// [`LifecycleErrorInfo`](super::lifecycle_context::LifecycleErrorInfo)
+        /// a task outcome reports.
+        ///
+        /// [`LifecycleCause`]: super::lifecycle_context::LifecycleCause
         #[source]
-        source: Box<MarkdownError>,
+        cause: super::lifecycle_context::LifecycleCause,
     },
 
     /// A task shape reached execution that only a later phase can schedule.
@@ -2660,13 +2670,16 @@ pub enum SequenceLoadCause {
 #[derive(Error, Debug)]
 pub enum SequenceExpressionCause {
     /// The expression could not be parsed.
-    #[error(transparent)]
-    Parse(#[from] ParseError),
+    #[error("{}", .0.cause)]
+    Prepare(#[from] darkmatter::markdown::compose::expression::PreparationError),
     /// The expression parsed but could not be evaluated.
     ///
     /// Boxed to keep the enum small, matching [`LoopExpressionCause`].
     #[error(transparent)]
     Evaluate(#[from] Box<ExpressionError>),
+    /// Interpolating a template string failed outside one expression.
+    #[error(transparent)]
+    Compose(Box<MarkdownError>),
 }
 
 /// Where a `$( … )` sequence source failed.
@@ -3089,7 +3102,8 @@ impl CompositionError {
     /// `event` is the lifecycle event whose stack raised (e.g. `success`); the
     /// offending surface and message are lifted from `info` so a single
     /// snapshot constructed at the executor layer renders consistently
-    /// regardless of which orchestrator caught it.
+    /// regardless of which orchestrator caught it. The typed cause travels
+    /// with it as this error's source.
     pub fn lifecycle_evaluation(
         event: impl Into<String>,
         source_path: impl Into<PathBuf>,
@@ -3108,7 +3122,26 @@ impl CompositionError {
             surface: info.variant.clone(),
             message,
             property: info.property.clone(),
-            reason: Box::new(info.reason.clone()),
+            reason: info.reason.clone(),
+            cause: info.cause.clone(),
+        }
+    }
+
+    /// The typed lifecycle or sequence-task-value evaluation failure this
+    /// error reports, seeing through the transparent render wrappers.
+    ///
+    /// Its [`source`](std::error::Error::source) is the original Darkmatter
+    /// error, so a library caller can inspect it without parsing rendered
+    /// text.
+    pub fn lifecycle_cause(&self) -> Option<&super::lifecycle_context::LifecycleCause> {
+        match self {
+            Self::LifecycleEvaluationError { cause, .. }
+            | Self::LifecycleProxyWithEvaluationFailed { cause, .. } => cause.as_ref(),
+            Self::SequenceTaskValueResolution { cause, .. } => Some(cause),
+            Self::WithFrontmatter { inner, .. } | Self::LifecycleEvaluationAlreadyEmitted { inner } => {
+                inner.lifecycle_cause()
+            }
+            _ => None,
         }
     }
 
@@ -3140,9 +3173,10 @@ impl CompositionError {
     ///
     /// Called at the render boundary — after all control-flow `match`es on the
     /// unwrapped variant — so the wrapper never interferes with upstream
-    /// decision-making. For errors that do not relate to frontmatter, or when
-    /// `source` has no parseable frontmatter block, the error is returned
-    /// unchanged. Idempotent: an already-wrapped error is returned as-is.
+    /// decision-making. For errors that do not relate to frontmatter, when
+    /// `source` has no parseable frontmatter block, or when nothing the error
+    /// names can be located in it, the error is returned unchanged.
+    /// Idempotent: an already-wrapped error is returned as-is.
     pub fn enrich_frontmatter(
         self,
         source: &ResolvedCompositionSource,
@@ -3167,7 +3201,17 @@ impl CompositionError {
                 FrontmatterExcerpt::capture_line(source_text, line, stderr_is_tty)
             }
             FrontmatterHighlight::Property(property) => {
-                FrontmatterExcerpt::capture(source_text, Some(&property), stderr_is_tty)
+                FrontmatterExcerpt::capture(source_text, &property, stderr_is_tty)
+            }
+            FrontmatterHighlight::Properties(properties) => {
+                FrontmatterExcerpt::capture_properties(source_text, &properties, stderr_is_tty)
+            }
+            FrontmatterHighlight::SchemaProperties(properties) => {
+                FrontmatterExcerpt::capture_schema_properties(
+                    source_text,
+                    &properties,
+                    stderr_is_tty,
+                )
             }
             FrontmatterHighlight::SchemaSpan {
                 property,
@@ -3178,9 +3222,6 @@ impl CompositionError {
                 span_start,
                 stderr_is_tty,
             ),
-            FrontmatterHighlight::BlockOnly => {
-                FrontmatterExcerpt::capture(source_text, None, stderr_is_tty)
-            }
         };
         match excerpt {
             Some(excerpt) => CompositionError::WithFrontmatter {
@@ -3206,10 +3247,14 @@ impl CompositionError {
                 MarkdownError::FrontmatterFenceMismatch { line, .. } => {
                     Some(FrontmatterHighlight::Line(*line))
                 }
-                _ => Some(FrontmatterHighlight::BlockOnly),
+                // The YAML parser numbers lines within the block's interior;
+                // the opening `---` is source line 1.
+                MarkdownError::FrontmatterParse { source, .. } => source
+                    .location()
+                    .map(|location| FrontmatterHighlight::Line(location.line() + 1)),
+                _ => None,
             },
             CompositionError::LifecycleNestedSpanInLiteral { property, .. }
-            | CompositionError::LifecycleUndefinedVariable { property, .. }
             | CompositionError::LifecycleInvalid { property, .. }
             | CompositionError::LifecycleStackInvalidShape { property, .. }
             | CompositionError::LifecycleWhenExpressionInvalid { property, .. }
@@ -3302,36 +3347,46 @@ impl CompositionError {
                 Some(FrontmatterHighlight::Property("hash".to_string()))
             }
             CompositionError::UnsupportedInteractiveSchema { property, .. } => {
-                Some(FrontmatterHighlight::Property(property.clone()))
+                Some(FrontmatterHighlight::SchemaProperties(vec![property.clone()]))
             }
+            // A missing property is absent from the frontmatter by definition,
+            // so its `$schema` declaration is what can be shown.
             CompositionError::MissingProperties {
                 missing,
                 pointer_paths,
                 ..
-            } => match (missing.split_first(), pointer_paths.split_first()) {
-                (Some((only, [])), _) => Some(FrontmatterHighlight::Property(only.name.clone())),
-                (_, Some((only, []))) => {
-                    Some(FrontmatterHighlight::Property(pointer_to_dotted(only)))
-                }
-                _ => Some(FrontmatterHighlight::BlockOnly),
-            },
-            CompositionError::SchemaValidation { problems, .. } => match problems.split_first() {
-                Some((only, [])) => Some(FrontmatterHighlight::Property(pointer_to_dotted(only))),
-                _ => Some(FrontmatterHighlight::BlockOnly),
-            },
+            } => Some(FrontmatterHighlight::SchemaProperties(
+                missing
+                    .iter()
+                    .map(|property| property.name.clone())
+                    .chain(pointer_paths.iter().map(|pointer| pointer_to_dotted(pointer)))
+                    .collect(),
+            )),
+            CompositionError::SchemaValidation { problems, .. } => {
+                Some(FrontmatterHighlight::SchemaProperties(
+                    problems.iter().map(|pointer| pointer_to_dotted(pointer)).collect(),
+                ))
+            }
             CompositionError::UnresolvedFileReference { property, .. } => {
-                Some(FrontmatterHighlight::Property(property.clone()))
+                Some(FrontmatterHighlight::SchemaProperties(vec![property.clone()]))
             }
             // A whole-value frontmatter interpolation failure names its receiving
-            // key — focus the excerpt on that line rather than dumping the whole
-            // block. Body interpolation (key `None`) falls through to BlockOnly.
+            // key. Body interpolation (key `None`) and every other compose
+            // failure point into the body, so they get no excerpt.
             CompositionError::ComposeFailed(MarkdownError::Interpolation {
                 key: Some(key),
                 ..
             }) => Some(FrontmatterHighlight::Property(key.clone())),
-            CompositionError::InlineComposeSequenceMismatch { .. }
-            | CompositionError::ComposeFailed(_)
-            | CompositionError::ShellExpansionFailed { .. } => Some(FrontmatterHighlight::BlockOnly),
+            // Both keys are authored whenever this error fires.
+            CompositionError::InlineComposeSequenceMismatch { .. } => Some(
+                FrontmatterHighlight::Properties(vec!["prompt".to_string(), "sequence".to_string()]),
+            ),
+            CompositionError::ShellExpansionFailed { error, .. } => match error.origin() {
+                Some(ShellCommandOrigin::Frontmatter { key, .. }) => {
+                    Some(FrontmatterHighlight::Property(key.clone()))
+                }
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -3342,21 +3397,24 @@ impl CompositionError {
 /// Typed so the renderer chooses a remediation without matching message text.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum LifecycleEvaluationReason {
-    /// An expression raised: an unknown root, a malformed span, or a function
-    /// error.
+    /// An expression raised: a malformed span, an unknown function, an
+    /// unavailable global, or a function error.
     #[default]
     Expression,
-    /// Resolution finished but a `{{ … }}` span survived in the rendered text.
-    SurvivingSpan {
-        /// The first surviving span, braces included.
-        span: String,
-    },
 }
 
-/// How a frontmatter-rooted error should be highlighted in the captured excerpt.
+/// What a frontmatter-rooted error's excerpt should focus on.
+///
+/// An error whose focus cannot be located in the document gets no excerpt.
 enum FrontmatterHighlight {
-    /// Highlight a dotted frontmatter property key.
+    /// A dotted frontmatter property key.
     Property(String),
+    /// Several dotted frontmatter property keys, shown together.
+    Properties(Vec<String>),
+    /// Properties a schema problem names: each at its frontmatter key, when
+    /// the document sets one, and at its `$schema` declaration (in every arm
+    /// of a union).
+    SchemaProperties(Vec<String>),
     /// Highlight a 1-based document line (used for delimiter-level errors).
     Line(usize),
     /// Highlight a schema property whose type-and-constraint string failed to
@@ -3367,8 +3425,6 @@ enum FrontmatterHighlight {
         property: Option<String>,
         span_start: usize,
     },
-    /// Show the frontmatter block with no line highlighted.
-    BlockOnly,
 }
 
 #[cfg(test)]

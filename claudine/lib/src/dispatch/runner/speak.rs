@@ -148,6 +148,7 @@ mod tests {
             harvest_unmatched: false,
             exit_expressions: None,
             guard_settings: Default::default(),
+            steering: Default::default(),
         }
     }
 

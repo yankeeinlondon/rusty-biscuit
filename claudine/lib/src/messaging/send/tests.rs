@@ -94,6 +94,29 @@ fn execute_resolved_message_with_no_route_is_noop() {
 }
 
 #[test]
+fn execute_resolved_message_without_a_runtime_does_not_panic() {
+    // A parallel sequence-group member thread has no Tokio runtime. The send
+    // used a bare `tokio::spawn`, which panicked there; now nothing is sent.
+    let messaging = RuntimeMessagingSettings {
+        user: Some(crate::messaging::ScopedMessagingSettings {
+            active: Some("alerts".to_string()),
+            configs: [(
+                "alerts".to_string(),
+                MessagingRouteConfig::DiscordWebhook {
+                    webhook_url: Some(
+                        "http://127.0.0.1:9/webhooks/1/dummy-token".to_string(),
+                    ),
+                    webhook_url_env: "UNUSED_WEBHOOK_URL".to_string(),
+                },
+            )]
+            .into(),
+        }),
+        repo: None,
+    };
+    execute_resolved_message("Build finished", None, None, None, &messaging);
+}
+
+#[test]
 fn execute_resolved_message_empty_text_is_noop() {
     let messaging = RuntimeMessagingSettings {
         user: None,
@@ -173,22 +196,30 @@ fn failure_hint_discord_rate_limit() {
     );
 }
 
+/// Render `markup` as plain text, the way a `Status::from_prose` body shows it.
+fn rendered_plain(markup: &str) -> String {
+    use biscuit_terminal::components::prose::Prose;
+    biscuit_terminal::utils::escape_codes::strip_escape_codes(
+        Prose::new(markup).render_optimistic(None),
+    )
+}
+
 #[test]
 fn prose_escape_neutralizes_angle_brackets() {
-    assert_eq!(
-        prose_escape("<script>alert('x')</script>"),
-        "\\<script\\>alert('x')\\</script\\>"
-    );
+    let text = "<script>alert('x')</script>";
+    assert_eq!(rendered_plain(&prose_escape(text)), text);
 }
 
 #[test]
 fn prose_escape_neutralizes_template_and_bold_tokens() {
-    assert_eq!(prose_escape("{{variable}}"), "\\{{variable\\}}");
-    assert_eq!(prose_escape("**bold**"), "\\*\\*bold\\*\\*");
-    assert_eq!(
-        prose_escape("Error: {{url}} and **token**"),
-        "Error: \\{{url\\}} and \\*\\*token\\*\\*"
-    );
+    for text in [
+        "{{variable}}",
+        "**bold**",
+        "Error: {{url}} and **token**",
+        "_leading_ underscore and `code_span`",
+    ] {
+        assert_eq!(rendered_plain(&prose_escape(text)), text);
+    }
 }
 
 // =====================================================================

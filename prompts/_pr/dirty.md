@@ -27,10 +27,7 @@ start:
               - action: proxy
                 target: ../commit.md
                 with:
-                    # `commit.md` lists `ctx.staged_files` in its body, and `ctx` is the
-                    # start-of-run snapshot, so that list predates the `git add` above. A body
-                    # has no live `current`, so the real list travels in `message`.
-                    message: "{{ about || 'These are the uncommitted changes that were in the working tree when a pull request was requested.' }} IMPORTANT: the staged-file list printed in this prompt was captured before these files were staged, so it is out of date. Run `git diff --cached --name-only` for the real list. At handoff it was: {{ as_csv(ctx.dirty_files) }}."
+                    message: "{{ about || 'These are the uncommitted changes that were in the working tree when a pull request was requested.' }}"
                     success:
                         message: "🗳️  the uncommitted changes on `{{ctx.branch}}` are committed; continuing to the push stage"
                         stack:

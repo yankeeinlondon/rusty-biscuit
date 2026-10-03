@@ -8,7 +8,7 @@ Source: `biscuit-file/lib/src/`
 | `yaml` | `yaml` | `Yaml`, `YamlError`, `YamlSource`, `ConversionOutput` |
 | `json5` | `json5` | `Json5`, `Json5Error`, `Json5Source` |
 | `pdf` | `extract` / `lopdf` / `pdfium` | `Pdf`, `PdfConfig`, `PdfError`, `PdfMarkdown`, `PdfToc` |
-| `file_reference` | `file-reference` | `FileReference`, `FileReferenceError`, `PathPosition` |
+| `file_reference` | `file-reference` | `FileReference`, `FileReferenceError`, `PathPosition`, `FileResolutionContext`, `BaseDirOrigin`, `LaunchMagicScope`; from `file_reference::portable` (`strategy`, `env_anchor`, `diagnostics`, `evaluate`, `path_identity`, crate-internal `text`): `PortablePath`, `PortableReference`, `PortabilityPreference`, `IntentForms`, `PORTABLE_ENV_VARIABLES`, `PortablePathError` and its diagnostics types, `PathIdentity`, `RelativeRoute` |
 | `detect` | (always) | `FileType`, `detect_file_type`, `detect_file_type_from_bytes` |
 | `format` | (always) | `DataFormat` |
 | `path_text` | (always) | `to_portable_string`, `try_portable_string` |

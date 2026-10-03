@@ -10,8 +10,9 @@
 //! compiled far enough to reach `cargo check` but broke `claudine-cli`).
 //!
 //! The compiler already rejects an arity mismatch; this guard adds the piece
-//! the compiler cannot: it **enumerates** the call sites. A new or removed
-//! call site fails this test, forcing a conscious update that threads
+//! the compiler cannot: it **enumerates** the call sites, each keyed by its
+//! file and enclosing function. A new, removed, or relocated call site fails
+//! this test, even one that keeps its file's call count, forcing a conscious update that threads
 //! `handoff_ledger` and consumes the surfaced handoff (whether by propagating
 //! it or explicitly rejecting an impossible one). It also asserts each call
 //! destructures the full 4-element tuple, so a site cannot silently drop the
@@ -28,15 +29,20 @@
 //! never surfaced to the command coordinator. The guard fails if a refactor
 //! reverts `build_execution_request` to an always-`None` field.
 
+use crate::common::site_identity::site_contexts;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Production call sites, relative to `claudine/cli/src`. Both thread
-/// `handoff_ledger` and destructure the 4-tuple; update this set (and the
-/// callers) whenever a `run_harness_loop` call site is added or removed.
-const EXPECTED_CALL_SITES: &[&str] = &[
-    "commands/wrap/composition/runner.rs",
-    "commands/wrap/wrapper_stages.rs",
+/// Production call sites as `(file, enclosing function)`, one entry per call;
+/// files are relative to `claudine/cli/src`. Both thread `handoff_ledger` and
+/// destructure the 4-tuple; update this set (and the callers) whenever a
+/// `run_harness_loop` call site is added, removed, or moved to another
+/// function. The function is read by `common::site_identity`, so a line move
+/// inside it does not fail the guard.
+const EXPECTED_CALL_SITES: &[(&str, &str)] = &[
+    ("commands/wrap/composition/runner.rs", "run_composition_body"),
+    ("commands/wrap/wrapper_stages.rs", "run_execution_stage"),
 ];
 
 fn cli_src_root() -> PathBuf {
@@ -92,6 +98,45 @@ fn is_commented(content: &str, idx: usize) -> bool {
     content[line_start..idx].contains("//")
 }
 
+/// `(file, enclosing function)` of every `run_harness_loop` call in `content`,
+/// panicking when a call does not destructure the full 4-element tuple.
+fn call_sites(rel: &str, content: &str) -> Vec<(String, String)> {
+    let needle = "run_harness_loop(";
+    let bytes = content.as_bytes();
+    let mut offsets = Vec::new();
+    let mut search_from = 0usize;
+    while let Some(rel_idx) = content[search_from..].find(needle) {
+        let idx = search_from + rel_idx;
+        search_from = idx + needle.len();
+        if is_definition(content, idx) || is_commented(content, idx) {
+            continue;
+        }
+
+        // The call must destructure the full 4-element `HarnessLoopResult`
+        // (the 4th element is the surfaced proxy handoff): find the
+        // preceding `let (` tuple pattern and count its elements.
+        let head = &content[..idx];
+        let let_at = head
+            .rfind("let (")
+            .unwrap_or_else(|| panic!("{rel}: run_harness_loop call is not a `let (...) =` destructure"));
+        let tuple_open = let_at + "let ".len();
+        let elems = tuple_elem_count(bytes, tuple_open);
+        assert_eq!(
+            elems, 4,
+            "{rel}: run_harness_loop must destructure a 4-element tuple \
+             (i32, perf, signals, surfaced_handoff); found {elems}"
+        );
+        offsets.push(idx);
+    }
+    if offsets.is_empty() {
+        return Vec::new();
+    }
+    site_contexts(content, &offsets)
+        .into_iter()
+        .map(|context| (rel.to_string(), context.function))
+        .collect()
+}
+
 #[test]
 fn every_run_harness_loop_call_site_is_accounted_for() {
     let src_root = cli_src_root();
@@ -103,50 +148,23 @@ fn every_run_harness_loop_call_site_is_accounted_for() {
         src_root.display()
     );
 
-    let needle = "run_harness_loop(";
-    let mut found: Vec<String> = Vec::new();
-
+    let mut found: Vec<(String, String)> = Vec::new();
     for file in &files {
         let content = fs::read_to_string(file)
             .unwrap_or_else(|e| panic!("read {}: {e}", file.display()));
-        let bytes = content.as_bytes();
         let rel = file
             .strip_prefix(&src_root)
             .expect("scanned file lives under src root")
             .to_string_lossy()
             .replace('\\', "/");
-
-        let mut search_from = 0usize;
-        while let Some(rel_idx) = content[search_from..].find(needle) {
-            let idx = search_from + rel_idx;
-            search_from = idx + needle.len();
-            if is_definition(&content, idx) || is_commented(&content, idx) {
-                continue;
-            }
-
-            // The call must destructure the full 4-element `HarnessLoopResult`
-            // (the 4th element is the surfaced proxy handoff): find the
-            // preceding `let (` tuple pattern and count its elements.
-            let head = &content[..idx];
-            let let_at = head
-                .rfind("let (")
-                .unwrap_or_else(|| panic!("{rel}: run_harness_loop call is not a `let (...) =` destructure"));
-            let tuple_open = let_at + "let ".len();
-            let elems = tuple_elem_count(bytes, tuple_open);
-            assert_eq!(
-                elems, 4,
-                "{rel}: run_harness_loop must destructure a 4-element tuple \
-                 (i32, perf, signals, surfaced_handoff); found {elems}"
-            );
-
-            found.push(rel.clone());
-        }
+        found.extend(call_sites(&rel, &content));
     }
-
     found.sort();
-    found.dedup();
 
-    let mut expected: Vec<String> = EXPECTED_CALL_SITES.iter().map(|s| s.to_string()).collect();
+    let mut expected: Vec<(String, String)> = EXPECTED_CALL_SITES
+        .iter()
+        .map(|(file, function)| (file.to_string(), function.to_string()))
+        .collect();
     expected.sort();
 
     assert_eq!(
@@ -223,4 +241,26 @@ fn build_execution_request_populates_the_handoff_ledger() {
          terminal-event proxy surfacing (review-5 Finding 2).",
         src_root.display()
     );
+}
+
+/// A call that moves to another function of an expected file keeps the file's
+/// count but not its identity, so the census no longer matches.
+#[test]
+fn a_call_moved_to_another_function_is_not_accounted_for() {
+    let original = r#"
+fn run_execution_stage() {
+    let (code, perf, signals, handoff) = harness_orch::run_harness_loop(a, b);
+}
+fn resume_stage() {}
+"#;
+    let moved = r#"
+fn run_execution_stage() {}
+fn resume_stage() {
+    let (code, perf, signals, handoff) = harness_orch::run_harness_loop(a, b);
+}
+"#;
+    let rel = "commands/wrap/wrapper_stages.rs";
+    let expected = vec![(rel.to_string(), "run_execution_stage".to_string())];
+    assert_eq!(call_sites(rel, original), expected);
+    assert_eq!(call_sites(rel, moved), vec![(rel.to_string(), "resume_stage".to_string())]);
 }

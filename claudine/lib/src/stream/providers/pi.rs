@@ -1,14 +1,24 @@
-//! Native [`SemanticStreamParser`] implementation for Pi's `--mode json`
-//! NDJSON output.
+//! Native [`SemanticStreamParser`] implementation for Pi's `--mode json` and
+//! `--mode rpc` NDJSON output.
 //!
 //! Pi is a bespoke (non-fork) provider, so this parser is authored from scratch
 //! rather than reusing another provider's. The wire format is one JSON object
 //! per line with a top-level `type` discriminator; `message_update` carries a
-//! nested `assistantMessageEvent.type` for streaming text/thinking deltas.
+//! nested `assistantMessageEvent.type` for streaming text/thinking deltas. RPC
+//! mode carries the same events plus the records the managed owner exchanges
+//! with Pi; the owner acts on those itself, so the parser only reports them.
 //!
 //! Routing:
 //!
-//! - `session` → [`SemanticEvent::SessionStart`] (session id + cwd).
+//! - `session` (JSON mode) → [`SemanticEvent::SessionStart`] (session id +
+//!   cwd). RPC mode has no header: a successful `get_state` `response` naming
+//!   a session other than the current one produces the same event.
+//! - a refused `prompt` `response` → [`SemanticEvent::Error`]; other responses
+//!   are dropped.
+//! - `extension_ui_request` → [`SemanticEvent::Warning`] for a dialog (the
+//!   managed owner cancels it) or an unsupported method (the owner fails the
+//!   run), [`SemanticEvent::Info`] for a `notify` notice; other notices are
+//!   dropped. `extension_error` → [`SemanticEvent::Warning`].
 //! - `message_update` → [`SemanticEvent::OutputText`] (`text_delta`) or
 //!   [`SemanticEvent::Reasoning`] (`thinking_delta`); a nested `error` delta
 //!   becomes [`SemanticEvent::Error`]. Block-boundary deltas
@@ -30,9 +40,11 @@
 use serde_json::{Map, Value};
 
 use super::parser::SemanticStreamParser;
+use super::protocol::pi::rpc::{UiMethodKind, ui_method_kind};
 use super::protocol::pi::{
     PiAssistantMessageEvent, PiAutoRetryEnd, PiAutoRetryStart, PiCompactionEnd, PiEvent,
-    PiMessageEnvelope, PiSession, PiToolEnd, PiToolStart,
+    PiExtensionError, PiExtensionUiRequest, PiMessageEnvelope, PiResponse, PiSession, PiToolEnd,
+    PiToolStart,
 };
 use super::semantic::{SemanticErrorKind, SemanticEvent, SemanticEventSink};
 use super::summary::StreamExecutionSummary;
@@ -93,6 +105,78 @@ impl<S: SemanticEventSink> PiSemanticStreamParser<S> {
             session_id: self.session_id.clone(),
             model: self.model.clone(),
             extra: Value::Object(extra),
+        });
+    }
+
+    fn handle_response(&mut self, response: PiResponse, raw_kind: &str) {
+        match (response.command.as_deref(), response.success) {
+            (Some("get_state"), Some(true)) => {
+                let data = response.data.unwrap_or_default();
+                let Some(session_id) = data.get("sessionId").and_then(|v| v.as_str()) else {
+                    return;
+                };
+                if self.session_id.as_deref() == Some(session_id) {
+                    return;
+                }
+                if let Some(model) = data.pointer("/model/id").and_then(|v| v.as_str()) {
+                    self.model = Some(model.to_string());
+                }
+                self.handle_session(
+                    PiSession { id: Some(session_id.to_string()), cwd: None, version: None },
+                    raw_kind,
+                );
+            }
+            (Some("prompt"), Some(false)) => {
+                let reason = response.error.unwrap_or_else(|| "no reason given".to_string());
+                self.record_error(&format!("Pi refused the prompt: {reason}"), raw_kind);
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_ui_request(&mut self, request: PiExtensionUiRequest, raw_kind: &str) {
+        let method = request.method.unwrap_or_default();
+        let extra = Value::Object(self.base_extra(raw_kind));
+        let event = match ui_method_kind(&method) {
+            UiMethodKind::Dialog => {
+                let title = request.title.map(|title| format!(" (\"{title}\")")).unwrap_or_default();
+                SemanticEvent::Warning {
+                    message: format!(
+                        "a Pi extension asked for `{method}` input{title}; nobody can answer during a \
+                         managed run, so the request was cancelled"
+                    ),
+                    extra,
+                }
+            }
+            UiMethodKind::Notice if method == "notify" => {
+                let Some(message) = request.message.filter(|message| !message.is_empty()) else {
+                    return;
+                };
+                match request.notify_type.as_deref() {
+                    Some("warning" | "error") => SemanticEvent::Warning { message, extra },
+                    _ => SemanticEvent::Info { message, extra },
+                }
+            }
+            UiMethodKind::Notice => return,
+            UiMethodKind::Unsupported => SemanticEvent::Warning {
+                message: format!(
+                    "a Pi extension sent an unsupported `{method}` UI request, which no managed run can answer"
+                ),
+                extra,
+            },
+        };
+        self.sink.on_semantic_event(event);
+    }
+
+    fn handle_extension_error(&mut self, error: PiExtensionError, raw_kind: &str) {
+        let detail = error.error.unwrap_or_else(|| "no detail".to_string());
+        let message = match error.event {
+            Some(event) => format!("a Pi extension failed in `{event}`: {detail}"),
+            None => format!("a Pi extension failed: {detail}"),
+        };
+        self.sink.on_semantic_event(SemanticEvent::Warning {
+            message,
+            extra: Value::Object(self.base_extra(raw_kind)),
         });
     }
 
@@ -311,6 +395,11 @@ impl<S: SemanticEventSink> SemanticStreamParser for PiSemanticStreamParser<S> {
                     PiEvent::ToolExecutionStart(tool) => self.handle_tool_start(tool, raw_kind),
                     PiEvent::ToolExecutionEnd(tool) => self.handle_tool_end(tool, raw_kind),
                     PiEvent::AgentEnd(_) => self.handle_agent_end(raw_kind),
+                    PiEvent::Response(response) => self.handle_response(response, raw_kind),
+                    PiEvent::ExtensionUiRequest(request) => {
+                        self.handle_ui_request(request, raw_kind)
+                    }
+                    PiEvent::ExtensionError(error) => self.handle_extension_error(error, raw_kind),
                     PiEvent::AutoRetryStart(retry) => self.handle_auto_retry_start(retry, raw_kind),
                     PiEvent::AutoRetryEnd(retry) => self.handle_auto_retry_end(retry, raw_kind),
                     PiEvent::CompactionEnd(compaction) => {
@@ -318,6 +407,7 @@ impl<S: SemanticEventSink> SemanticStreamParser for PiSemanticStreamParser<S> {
                     }
                     // Recognized-but-silent lifecycle events.
                     PiEvent::AgentStart(_)
+                    | PiEvent::AgentSettled(_)
                     | PiEvent::TurnStart(_)
                     | PiEvent::MessageStart(_)
                     | PiEvent::ToolExecutionUpdate(_)

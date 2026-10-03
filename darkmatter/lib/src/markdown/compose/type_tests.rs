@@ -682,22 +682,15 @@ use super::pipeline::operations::COMPOSE_OPERATION_DESCRIPTORS;
     }
 
     #[test]
-    fn env_path_whitelist_default_is_empty_with_known_fallbacks() {
-        let options = ComposeOptions::new();
-        assert!(options.env_path_whitelist.is_empty());
-        assert_eq!(
-            options.effective_env_path_whitelist(),
-            vec!["PROJECT_ROOT".to_string(), "DOCS_BASE".to_string()]
-        );
-    }
+    fn portable_env_has_no_built_in_names_and_accumulates() {
+        assert!(ComposeOptions::new().portable_env().is_empty());
 
-    #[test]
-    fn with_env_path_whitelist_overrides_default() {
         let options = ComposeOptions::new()
-            .with_env_path_whitelist(vec!["MY_VAR".to_string(), "OTHER".to_string()]);
+            .with_portable_env(["MY_VAR", "OTHER"])
+            .with_portable_env(["MY_VAR"]);
         assert_eq!(
-            options.effective_env_path_whitelist(),
-            vec!["MY_VAR".to_string(), "OTHER".to_string()]
+            options.portable_env().iter().map(String::as_str).collect::<Vec<_>>(),
+            ["MY_VAR", "OTHER"]
         );
     }
 

@@ -719,7 +719,7 @@ fn validate_local_path(
                 ComposeSource::File(path) if source != root_source => graph_options
                     .compose
                     .clone()
-                    .with_accepted_source_file(path),
+                    .with_accepted_source_file(path, None),
                 ComposeSource::File(path) => graph_options.compose.clone().with_source_file(path),
                 _ => unreachable!("file source matched above"),
             };
@@ -731,10 +731,16 @@ fn validate_local_path(
                 report.references_valid += 1;
                 return Ok(Some(resolved));
             }
+            // A link inside data (text an expression inserted) is content, not
+            // authored structure: a missing target warns rather than failing.
+            let in_data = record
+                .attributes
+                .get(super::graph::DATA_ORIGIN_ATTRIBUTE)
+                .is_some_and(|origin| origin == "data");
             report.issues.push(ReferenceIssue {
                 code: ReferenceIssueCode::MissingLocalTarget,
                 message: format!("Missing local target: {raw}"),
-                severity: ReferenceSeverity::Error,
+                severity: if in_data { ReferenceSeverity::Warning } else { ReferenceSeverity::Error },
                 kind: record.kind,
                 reference_display: raw.to_string(),
                 reference_id: record.id.clone(),

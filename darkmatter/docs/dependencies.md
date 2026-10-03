@@ -57,6 +57,16 @@ features their tier requires.
   scanner had, but without its `O(content × rules × keylen)` cost. Already
   compiled transitively via `regex`, so it adds no build cost.
 
+## Literal Tokens
+
+- `base64` encodes the payload of the `{{!data:v1:…}}` literal token in
+  `markdown/literal_token.rs`. The token stores one frontmatter string as data,
+  so a later compose never scans it. The unpadded URL-safe alphabet holds no
+  brace, quote, `$`, `:`, or whitespace, so the token cannot close early, open
+  `$(`, or need YAML escaping. Canonical decoding rejects padding and stray
+  trailing bits, so each string has exactly one token. Already in the tree
+  through several workspace crates.
+
 ## Expression List Serialization
 
 - `biscuit-file` with the `json5` feature supplies `json5::to_json5_compact`,

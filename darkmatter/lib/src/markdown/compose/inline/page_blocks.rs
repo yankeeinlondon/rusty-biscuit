@@ -3,26 +3,31 @@
 use super::super::super::Markdown;
 use super::super::super::types::MarkdownResult;
 use super::super::context::effective_state as state;
-use super::super::body_origin::{self, BodyOrigin};
+use super::super::body_origin::BodyProvenance;
 use super::super::page_blocks;
 use super::super::shell_expansion;
 use super::super::context::report::CandidateLocus;
 use super::super::{ComposeOptions, ComposeReport, ComposeWarning, EffectiveState};
 use tracing::debug;
 
-/// Runs page blocks (conditional content regions) and carries `origin` past
-/// the regions they remove.
+/// Runs page blocks (conditional content regions) and carries `body` past
+/// the regions they remove. A marker line that holds data is not a marker.
 pub(crate) fn run_stage(
     markdown: &mut Markdown,
     state: &EffectiveState,
     options: &ComposeOptions,
     runtime: &shell_expansion::types::PipelineRuntime,
     report: &mut ComposeReport,
-    origin: &mut Option<BodyOrigin>,
+    body: &mut BodyProvenance,
 ) -> MarkdownResult<()> {
     debug!("compose: running page blocks");
     let source = markdown.source_context_for_errors();
-    let regions = page_blocks::parser::parse_page_blocks(markdown.content(), source.clone())?;
+    body.data.ensure_describes(markdown.content())?;
+    let regions = page_blocks::parser::parse_page_blocks_in(
+        markdown.content(),
+        Some(&body.data),
+        source.clone(),
+    )?;
     if regions.is_empty() {
         return Ok(());
     }
@@ -64,7 +69,7 @@ pub(crate) fn run_stage(
         }
         other => other.clone(),
     });
-    body_origin::advance(origin, markdown.content(), &edits, &rendered);
+    body.advance(markdown.content(), &edits, &rendered)?;
     *markdown.content_mut() = rendered;
     Ok(())
 }

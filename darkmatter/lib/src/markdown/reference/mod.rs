@@ -64,14 +64,12 @@ fn resolve_transclusion_target(
         return Ok(None);
     };
     let context = match options.file_resolution_context() {
-        Some(snapshot) => match options.source_derivation {
-            crate::markdown::compose::context::options::SourceDerivation::Ordinary => {
-                snapshot.for_source(source_path)
-            }
-            crate::markdown::compose::context::options::SourceDerivation::TrustedExternal => {
-                snapshot.for_trusted_external_source(source_path)
-            }
-        },
+        Some(snapshot) => crate::markdown::compose::context::options::source_file_context(
+            snapshot,
+            source_path,
+            options.source_derivation,
+            options.source_opening.as_ref(),
+        ),
         None => crate::markdown::compose::document_resolution_context(
             base_dir,
             Some(source_path),

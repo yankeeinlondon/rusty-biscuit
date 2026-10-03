@@ -36,6 +36,9 @@ use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use std::fmt;
 use tracing::debug;
 
+/// What follows `{{` in a literal token (`{{!data:…}}`).
+const LITERAL_TOKEN_BODY_PREFIX: &str = "!data:";
+
 /// Location of an interpolation expression in markdown content.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExpressionLocation {
@@ -62,6 +65,21 @@ pub struct InterpolationLiteral {
     pub content: String,
 }
 
+/// Location of a literal token (`{{!data:…}}`) in content.
+///
+/// The scanner only finds the token; whether it is well formed and allowed
+/// where it sits is decided by the caller (see
+/// [`literal_token`](crate::markdown::literal_token)).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiteralTokenLocation {
+    /// Byte offset of the first `{` in the source.
+    pub start: usize,
+
+    /// Byte offset after the first `}}` following the opener, or the end of
+    /// the content when there is none.
+    pub end: usize,
+}
+
 /// Result of scanning content for interpolation expressions and literals.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExpressionScanResult {
@@ -70,6 +88,9 @@ pub struct ExpressionScanResult {
 
     /// Interpolation literals found in the content.
     pub literals: Vec<InterpolationLiteral>,
+
+    /// Literal tokens found in the content. A token is never an expression.
+    pub tokens: Vec<LiteralTokenLocation>,
 }
 
 /// Finds interpolation expressions in markdown content.
@@ -133,6 +154,7 @@ impl<'a> ExpressionFinder<'a> {
     pub fn scan(&self) -> ExpressionScanResult {
         let mut expressions = Vec::new();
         let mut literals = Vec::new();
+        let mut tokens = Vec::new();
         let mut pos = 0;
         let bytes = self.content.as_bytes();
         let len = bytes.len();
@@ -200,6 +222,18 @@ impl<'a> ExpressionFinder<'a> {
                 }
 
                 let start = pos;
+                // A literal token is classified before expression parsing,
+                // where `!` would lex as the unary operator. It ends at the
+                // first `}}`; its payload alphabet holds no brace.
+                if self.content[start + 2..].starts_with(LITERAL_TOKEN_BODY_PREFIX) {
+                    let body = start + 2 + LITERAL_TOKEN_BODY_PREFIX.len();
+                    let end = self.content[body..]
+                        .find("}}")
+                        .map_or(len, |close| body + close + 2);
+                    tokens.push(LiteralTokenLocation { start, end });
+                    pos = end;
+                    continue;
+                }
                 let (expr, next_pos) = self.scan_legacy_expression(start);
                 if let Some(expr) = expr {
                     expressions.push(expr);
@@ -214,9 +248,14 @@ impl<'a> ExpressionFinder<'a> {
         debug!(
             expression_count = expressions.len(),
             literal_count = literals.len(),
+            token_count = tokens.len(),
             "interpolation: scan complete"
         );
-        ExpressionScanResult { expressions, literals }
+        ExpressionScanResult {
+            expressions,
+            literals,
+            tokens,
+        }
     }
 
     /// Scans a legacy `{{ ... }}` expression starting at `start`.
@@ -265,6 +304,11 @@ impl<'a> ExpressionFinder<'a> {
     }
 
     /// Checks if a position is within a code region.
+    /// The fenced and indented code-block byte ranges this finder skips.
+    pub(crate) fn code_regions(&self) -> &[(usize, usize)] {
+        &self.code_regions
+    }
+
     fn is_in_code_region(&self, pos: usize) -> bool {
         self.code_regions
             .iter()

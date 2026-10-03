@@ -77,6 +77,14 @@ Does the test need a real terminal, browser, or device to verify behaviour?
 │       └── NO  → L2. Name it `level2_*`. Requires a harness (tmux/WezTerm/Chrome).
 ```
 
+"Needs OS keyboard/mouse injection" means that the code under test handles the
+input event itself: a TUI that reads keys, a chooser, or a focus-dependent
+widget. It does not mean that a keypress starts the behavior. If the code only
+reacts to what the OS or terminal makes of the key (`SIGINT`,
+`CTRL_C_EVENT`, bytes on stdin), prove it at L1 or L2 with that signal or
+those bytes. A keypress promise does not by itself require an L3 test, and
+having an L3 test on one OS does not require one on every OS.
+
 If the only meaningful coverage of a public API requires a real resource,
 document the exception in `docs/testing-strategy.md`; do not force it into
 `sanity`.

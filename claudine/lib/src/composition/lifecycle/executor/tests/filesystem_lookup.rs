@@ -3,16 +3,17 @@
 use super::*;
 
 #[test]
-fn ctx_scan_hint_descends_container_literals() {
+fn ctx_capture_hint_covers_container_literals() {
+    // A snapshot-less event captures `ctx` groups from the expression's own
+    // rendering, so every path inside a container literal must survive it.
     use darkmatter::markdown::compose::expression::parse;
 
-    let array = parse("[ctx.area, ctx.package]").expect("array literal must parse");
-    let hint = ctx_scan_hint(&array);
-    assert!(hint.contains("ctx.area"), "got: {hint}");
-    assert!(hint.contains("ctx.package"), "got: {hint}");
+    let array = parse("[ctx.area, ctx.package]").expect("array literal must parse").to_string();
+    assert!(array.contains("ctx.area"), "got: {array}");
+    assert!(array.contains("ctx.package"), "got: {array}");
 
-    let object = parse("{ ctx: ctx.agent }").expect("object literal must parse");
-    assert_eq!(ctx_scan_hint(&object), "ctx.agent");
+    let object = parse("{ ctx: ctx.agent }").expect("object literal must parse").to_string();
+    assert!(object.contains("ctx.agent"), "got: {object}");
 }
 
 #[test]
@@ -61,6 +62,7 @@ fn lifecycle_file_functions_reuse_all_request_resolution_inputs() {
     let fm = Map::new();
     let context = StackExecutionContext {
         signal: LifecycleSignal::Start,
+        scope: None,
         frontmatter: &fm,
         live_frontmatter: None,
         runtime_state: None,
@@ -132,6 +134,7 @@ fn ctx_capture_follows_ctx_base_dir_not_base_dir() {
 
     let context = StackExecutionContext {
         signal: LifecycleSignal::Start,
+        scope: None,
         frontmatter: &fm,
         live_frontmatter: None,
         runtime_state: None,
@@ -226,6 +229,7 @@ fn lifecycle_reuses_prepared_snapshot_for_prompt_outside_launch_area() {
 
     let context = StackExecutionContext {
         signal: LifecycleSignal::Initialize,
+        scope: None,
         frontmatter: &fm,
         live_frontmatter: None,
         runtime_state: None,
@@ -300,6 +304,7 @@ fn file_exists_resolves_against_base_dir_after_chdir() {
 
     let context = StackExecutionContext {
         signal: LifecycleSignal::Initialize,
+        scope: None,
         frontmatter: &fm,
         live_frontmatter: None,
         runtime_state: None,
@@ -378,6 +383,7 @@ fn prepare_time_and_event_time_agree_on_file_reference() {
     let source_path = prompt_dir.path().join("prompt.md");
     let context = StackExecutionContext {
         signal: LifecycleSignal::Initialize,
+        scope: None,
         frontmatter: &fm,
         live_frontmatter: None,
         runtime_state: None,
@@ -405,8 +411,8 @@ fn prepare_time_and_event_time_agree_on_file_reference() {
         prepare_ctx.file_ref_fallback_dir, event_ctx.file_ref_fallback_dir,
         "prepare-time and event-time must share the launch-area fallback"
     );
-    // Both base dirs point at the prompt's parent.
-    assert_eq!(prepare_ctx.base_dir, event_ctx.base_dir);
+    // Both document directories point at the prompt's parent.
+    assert_eq!(prepare_ctx.cwd, event_ctx.cwd);
 
     // The event-time file_exists agrees with the prepare-time anchor.
     let resolved = context
@@ -447,6 +453,7 @@ fn frontmatter_reads_resolve_against_base_dir() {
 
     let context = StackExecutionContext {
         signal: LifecycleSignal::Initialize,
+        scope: None,
         frontmatter: &fm,
         live_frontmatter: None,
         runtime_state: None,
@@ -517,6 +524,7 @@ fn regression_path_only_under_launch_area_does_not_resolve() {
 
     let context = StackExecutionContext {
         signal: LifecycleSignal::Initialize,
+        scope: None,
         frontmatter: &fm,
         live_frontmatter: None,
         runtime_state: None,
@@ -587,6 +595,7 @@ fn source_local_candidate_ignores_same_named_launch_file() {
 
     let context = StackExecutionContext {
         signal: LifecycleSignal::Initialize,
+        scope: None,
         frontmatter: &fm,
         live_frontmatter: None,
         runtime_state: None,

@@ -7,7 +7,9 @@
 //! exit-expression set to the entries whose `scope` matches the run's
 //! `(provider, model)`, compiles that set once, and hands back a
 //! [`ContentDetector`] for the streaming path plus a [`CaptureVolumeCap`]
-//! for the capture path.
+//! for the capture path. The same layers also decide whether automatic
+//! repetition help is on (`steering.automatic.enabled`, overridden by
+//! `CLAUDINE_AUTO_STEER`).
 //!
 //! Resolution fails closed on a declared-but-broken safety rule: the
 //! contract is **absent = built-in defaults; present-but-invalid = abort**.
@@ -59,6 +61,10 @@ pub(crate) struct ResolvedGuardInputs {
     provider: Provider,
     entries: Vec<ExitExpressionEntry>,
     guards: GuardSettings,
+    /// Whether automatic repetition help is on (`CLAUDINE_AUTO_STEER` >
+    /// repo > user `steering.automatic.enabled` > on). Resolved here because
+    /// it reads the same layers at the same point, before launch.
+    automatic_steering: bool,
 }
 
 impl ResolvedGuardInputs {
@@ -76,7 +82,13 @@ impl ResolvedGuardInputs {
             provider,
             entries,
             guards,
+            automatic_steering: true,
         }
+    }
+
+    /// Whether automatic repetition help is on for this run.
+    pub(crate) fn automatic_steering(&self) -> bool {
+        self.automatic_steering
     }
 
     /// The provider this config was resolved for.
@@ -320,10 +332,19 @@ pub(crate) fn resolve_guard_inputs(
         fm_guards.as_ref(),
     );
 
+    // Automatic steering reads the same two files plus its environment
+    // override. A malformed override fails here, before the launch.
+    let automatic_steering = claudine::steering::automatic::resolve_enabled(
+        std::env::var_os(claudine::steering::automatic::AUTO_STEER_ENV).as_deref(),
+        repo.as_ref().map(|r| &r.steering),
+        &user.steering,
+    )?;
+
     Ok(ResolvedGuardInputs {
         provider,
         entries,
         guards,
+        automatic_steering,
     })
 }
 

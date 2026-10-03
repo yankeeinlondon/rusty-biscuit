@@ -31,6 +31,15 @@ Throughout the pipelining process we use Frontmatter to represent a form of stat
       - We must propagate this key/value pair into the base document we are composing
 - every time there is a transclusion event we are also propagating the frontmatter from
 
+`--state` and `--set` values are authored: a person typed them, so the root document evaluates any `{{ … }}` or whole-value `$( … )` they contain, exactly as if the document had written it. Once a document has composed, though, everything it passes to a child is **data**. The child inserts those values as text and never evaluates them again, so an expression's result, a file read, or shell output cannot turn into a template or command further down the tree. See [Frontmatter and Recursion](../topics/frontmatter-recursion.md#inherited-values-are-data).
+
+```mermaid
+flowchart LR
+    S["--state / --set<br/>(authored)"] --> R["root document<br/>scans once"]
+    R -->|composed values: data| C1["child"]
+    C1 -->|composed values: data| C2["grandchild"]
+```
+
 ### Exceptions to Propagation
 
 There are few Frontmatter properties which are _excluded_ from propagation:
@@ -40,4 +49,4 @@ There are few Frontmatter properties which are _excluded_ from propagation:
 
 ## Finalization
 
-The **finalization** stage runs only on the root document after all other composition and transclusion has completed. Operations in this stage (like [Link Normalization](../operations/link-normalization.md)) see the fully-composed body but are still driven by the root document's configuration.
+The **finalization** stage runs only on the root document after all other composition and transclusion has completed. Operations in this stage (like [Link Normalization](../inline/link-normalization.md)) see the fully-composed body but are still driven by the root document's configuration.

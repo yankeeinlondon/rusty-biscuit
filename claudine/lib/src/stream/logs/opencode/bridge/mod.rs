@@ -222,6 +222,18 @@ pub enum EarlyTermination {
         stall_duration: Duration,
         context: StalledGenerationContext,
     },
+    /// The provider is waiting for human input that a managed run has no
+    /// documented way to answer (for example, a Pi extension UI request
+    /// whose method has no defined response). Claudine never fabricates an
+    /// answer, so the wrapper terminates the child and maps the outcome to
+    /// [`crate::harness::ProcessTermination::Aborted`]: retrying would reach
+    /// the same request.
+    ///
+    /// ## Notes
+    ///
+    /// Synthesized summary marks `error_kind = "input_required"`. `message`
+    /// names what was requested, never what the provider displayed.
+    InputRequired { message: String },
 }
 
 impl EarlyTermination {
@@ -286,6 +298,9 @@ impl EarlyTermination {
                     "{generation_count} generation attempts over {}s with no progress",
                     stall_duration.as_secs()
                 )),
+            },
+            Self::InputRequired { message } => TaxonomySignalEvent::HumanInputRequested {
+                prompt: Some(message.clone()),
             },
         }
     }

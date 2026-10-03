@@ -87,183 +87,6 @@ fn scan_returns_none_for_clean_frontmatter() {
 }
 
 #[test]
-fn undefined_bare_variable_flags_missing_root() {
-    let effective = json!({ "area": "claudine" });
-    let defined = effective.as_object();
-    assert_eq!(undefined_bare_variable("missing", defined), Some("missing"));
-    assert_eq!(undefined_bare_variable("area", defined), None);
-    // Nested miss under a defined root is treated as defined.
-    assert_eq!(undefined_bare_variable("area.sub", defined), None);
-    // Runtime namespaces resolve outside the frontmatter.
-    assert_eq!(undefined_bare_variable("ctx.area", defined), None);
-    assert_eq!(undefined_bare_variable("env.HOME", defined), None);
-    assert_eq!(undefined_bare_variable("doc", defined), None);
-    assert_eq!(undefined_bare_variable("doc.area", defined), None);
-}
-
-#[test]
-fn undefined_lifecycle_variable_is_rejected() {
-    let raw = fm_from_json(json!({
-        "start": { "message": "before {{ missing_lifecycle_var }} after" }
-    }));
-    let effective = json!({ "start": { "message": "before  after" } });
-
-    let err =
-        validate_no_undefined_lifecycle_variables(&raw, &effective, &LifecycleConfig::default(), dummy_path()).unwrap_err();
-    match err {
-        CompositionError::LifecycleUndefinedVariable {
-            property, variable, ..
-        } => {
-            assert_eq!(property, "start.message");
-            assert_eq!(variable, "missing_lifecycle_var");
-        }
-        other => panic!("expected LifecycleUndefinedVariable, got: {other:?}"),
-    }
-}
-
-#[test]
-fn defined_and_namespaced_lifecycle_variables_pass() {
-    let raw = fm_from_json(json!({
-        "start": { "message": "{{ area }} on {{ ctx.today }}" },
-        "success": { "say": "{{ missing || 'fallback' }}" },
-    }));
-    let effective = json!({ "area": "claudine" });
-
-    assert!(validate_no_undefined_lifecycle_variables(&raw, &effective, &LifecycleConfig::default(), dummy_path()).is_ok());
-}
-
-#[test]
-fn undefined_variable_inside_function_call_is_rejected() {
-    // The original broken prompt used `parent_dir(review)`: a bare undefined
-    // variable as a function argument must fail preparation, not collapse to
-    // an empty string the way the whole-span-only guard let it.
-    let raw = fm_from_json(json!({
-        "start": { "message": "before {{ parent_dir(missing_review) }} after" }
-    }));
-    let effective = json!({ "area": "claudine" });
-
-    let err =
-        validate_no_undefined_lifecycle_variables(&raw, &effective, &LifecycleConfig::default(), dummy_path()).unwrap_err();
-    match err {
-        CompositionError::LifecycleUndefinedVariable {
-            property, variable, ..
-        } => {
-            assert_eq!(property, "start.message");
-            assert_eq!(variable, "missing_review");
-        }
-        other => panic!("expected LifecycleUndefinedVariable, got: {other:?}"),
-    }
-}
-
-#[test]
-fn undefined_variable_inside_fallback_argument_passes() {
-    // Fallback semantics tolerate the undefined operand even when it is
-    // wrapped in a function call, so the whole subtree is skipped.
-    let raw = fm_from_json(json!({
-        "start": { "message": "{{ parent_dir(missing) || 'home' }}" }
-    }));
-    let effective = json!({ "area": "claudine" });
-
-    assert!(validate_no_undefined_lifecycle_variables(&raw, &effective, &LifecycleConfig::default(), dummy_path()).is_ok());
-}
-
-#[test]
-fn undefined_variable_in_ternary_condition_is_rejected() {
-    let raw = fm_from_json(json!({
-        "start": { "message": "{{ missing == 'x' ? 'a' : 'b' }}" }
-    }));
-    let effective = json!({});
-
-    let err =
-        validate_no_undefined_lifecycle_variables(&raw, &effective, &LifecycleConfig::default(), dummy_path()).unwrap_err();
-    match err {
-        CompositionError::LifecycleUndefinedVariable {
-            property, variable, ..
-        } => {
-            assert_eq!(property, "start.message");
-            assert_eq!(variable, "missing");
-        }
-        other => panic!("expected LifecycleUndefinedVariable, got: {other:?}"),
-    }
-}
-
-#[test]
-fn undefined_variable_in_ternary_truthy_condition_is_rejected() {
-    let raw = fm_from_json(json!({
-        "start": { "message": "{{ missing ? 'a' : 'b' }}" }
-    }));
-    let effective = json!({});
-
-    let err =
-        validate_no_undefined_lifecycle_variables(&raw, &effective, &LifecycleConfig::default(), dummy_path()).unwrap_err();
-    match err {
-        CompositionError::LifecycleUndefinedVariable {
-            property, variable, ..
-        } => {
-            assert_eq!(property, "start.message");
-            assert_eq!(variable, "missing");
-        }
-        other => panic!("expected LifecycleUndefinedVariable, got: {other:?}"),
-    }
-}
-
-#[test]
-fn defined_condition_with_undefined_branch_operands_passes() {
-    // Ternary branches intentionally tolerate undefined operands; only the
-    // condition is checked.
-    let raw = fm_from_json(json!({
-        "start": { "message": "{{ defined ? missing : also_missing }}" }
-    }));
-    let effective = json!({ "defined": true });
-
-    assert!(validate_no_undefined_lifecycle_variables(&raw, &effective, &LifecycleConfig::default(), dummy_path()).is_ok());
-}
-
-#[test]
-fn undefined_variable_in_index_is_rejected() {
-    let raw = fm_from_json(json!({
-        "start": { "message": "{{ missing[0] }}" }
-    }));
-    let effective = json!({});
-
-    let err =
-        validate_no_undefined_lifecycle_variables(&raw, &effective, &LifecycleConfig::default(), dummy_path()).unwrap_err();
-    match err {
-        CompositionError::LifecycleUndefinedVariable { variable, .. } => {
-            assert_eq!(variable, "missing");
-        }
-        other => panic!("expected LifecycleUndefinedVariable, got: {other:?}"),
-    }
-}
-
-#[test]
-fn undefined_variable_in_member_access_is_rejected() {
-    let raw = fm_from_json(json!({
-        "start": { "message": "{{ missing.foo }}" }
-    }));
-    let effective = json!({});
-
-    let err =
-        validate_no_undefined_lifecycle_variables(&raw, &effective, &LifecycleConfig::default(), dummy_path()).unwrap_err();
-    match err {
-        CompositionError::LifecycleUndefinedVariable { variable, .. } => {
-            assert_eq!(variable, "missing");
-        }
-        other => panic!("expected LifecycleUndefinedVariable, got: {other:?}"),
-    }
-}
-
-#[test]
-fn defined_variable_inside_function_call_passes() {
-    let raw = fm_from_json(json!({
-        "start": { "message": "{{ parent_dir(area) }}" }
-    }));
-    let effective = json!({ "area": "/repo/claudine" });
-
-    assert!(validate_no_undefined_lifecycle_variables(&raw, &effective, &LifecycleConfig::default(), dummy_path()).is_ok());
-}
-
-#[test]
 fn err_inside_array_literal_when_clause_is_rejected() {
     let fm = json!({
         "start": {
@@ -273,7 +96,7 @@ fn err_inside_array_literal_when_clause_is_rejected() {
         }
     });
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
-    let err = validate_no_err_in_no_error_events(&config, dummy_path()).unwrap_err();
+    let err = validate_no_err_in_no_error_events(&fm, &config, dummy_path()).unwrap_err();
     assert!(
         matches!(err, CompositionError::LifecycleErrNotAvailable { .. }),
         "got: {err:?}"
@@ -290,7 +113,7 @@ fn err_inside_object_literal_value_when_clause_is_rejected() {
         }
     });
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
-    let err = validate_no_err_in_no_error_events(&config, dummy_path()).unwrap_err();
+    let err = validate_no_err_in_no_error_events(&fm, &config, dummy_path()).unwrap_err();
     assert!(
         matches!(err, CompositionError::LifecycleErrNotAvailable { .. }),
         "got: {err:?}"
@@ -298,20 +121,18 @@ fn err_inside_object_literal_value_when_clause_is_rejected() {
 }
 
 #[test]
-fn err_span_inside_object_literal_key_is_rejected() {
+fn err_span_inside_object_literal_key_is_text_not_a_read() {
+    // An object key is authored text that Darkmatter never evaluates, so a
+    // `{{ err.msg }}` spelled inside one reads nothing.
     let fm = json!({
         "start": {
             "stack": [
-                {"when": "{ \"{{ err.msg }}\": 1 }", "action": {"say": "leaked"}}
+                {"when": "{ \"{{ err.msg }}\": 1 }", "action": {"say": "fine"}}
             ]
         }
     });
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
-    let err = validate_no_err_in_no_error_events(&config, dummy_path()).unwrap_err();
-    assert!(
-        matches!(err, CompositionError::LifecycleErrNotAvailable { .. }),
-        "got: {err:?}"
-    );
+    assert!(validate_no_err_in_no_error_events(&fm, &config, dummy_path()).is_ok());
 }
 
 #[test]
@@ -324,65 +145,6 @@ fn doc_err_inside_container_literal_is_still_allowed() {
         }
     });
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
-    assert!(validate_no_err_in_no_error_events(&config, dummy_path()).is_ok());
+    assert!(validate_no_err_in_no_error_events(&fm, &config, dummy_path()).is_ok());
 }
 
-#[test]
-fn stack_undefined_variable_inside_container_literal_is_rejected() {
-    for when in [
-        "length([missing_var]) > 0",
-        "{ reason: missing_var }",
-    ] {
-        let fm = json!({
-            "start": { "stack": [{"when": when, "action": {"say": "hi"}}] }
-        });
-        let raw = fm_from_json(fm.clone());
-        let effective = json!({});
-        let lifecycle = parse_lifecycle_config(&fm, dummy_path()).unwrap();
-        let err =
-            validate_no_undefined_lifecycle_variables(&raw, &effective, &lifecycle, dummy_path())
-                .unwrap_err();
-        match err {
-            CompositionError::LifecycleUndefinedVariable { variable, .. } => {
-                assert_eq!(variable, "missing_var", "for `when: {when}`");
-            }
-            other => panic!("expected undefined variable for `{when}`, got: {other:?}"),
-        }
-    }
-}
-
-#[test]
-fn stack_container_literal_key_is_not_an_undefined_variable() {
-    let fm = json!({
-        "start": {
-            "stack": [{"when": "{ missing_var: 1 }", "action": {"say": "hi"}}]
-        }
-    });
-    let raw = fm_from_json(fm.clone());
-    let effective = json!({});
-    let lifecycle = parse_lifecycle_config(&fm, dummy_path()).unwrap();
-    let result =
-        validate_no_undefined_lifecycle_variables(&raw, &effective, &lifecycle, dummy_path());
-    assert!(result.is_ok(), "an object key is not a reference: {result:?}");
-}
-
-#[test]
-fn top_level_undefined_variable_inside_container_literal_is_rejected() {
-    let raw = fm_from_json(json!({
-        "start": { "message": "{{ length([missing_var]) }}" }
-    }));
-    let effective = json!({});
-    let err = validate_no_undefined_lifecycle_variables(
-        &raw,
-        &effective,
-        &LifecycleConfig::default(),
-        dummy_path(),
-    )
-    .unwrap_err();
-    match err {
-        CompositionError::LifecycleUndefinedVariable { variable, .. } => {
-            assert_eq!(variable, "missing_var");
-        }
-        other => panic!("expected undefined variable, got: {other:?}"),
-    }
-}

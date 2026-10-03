@@ -103,6 +103,7 @@ mod schema_validation;
 pub mod subtree;
 mod unknown_identifiers;
 mod util;
+pub(crate) mod value_origin;
 
 #[cfg(test)]
 mod type_tests;
@@ -142,8 +143,12 @@ pub use remote::{
 };
 pub use remote_fetch::RemoteFetchStats;
 pub use frontmatter_shell_expansion::{
-    FrontmatterShellAction, FrontmatterShellBody, FrontmatterShellPipeline, FrontmatterShellSuffix,
-    FrontmatterShellTernary, FrontmatterShellValue, parse_frontmatter_shell_value_spanned,
+    FRONTMATTER_SHELL_SUFFIXES, FrontmatterShellAction, FrontmatterShellBody,
+    FrontmatterShellPipeline, FrontmatterShellSuffix, FrontmatterShellTernary,
+    FrontmatterShellValue, ResolvedShellValue, ShellResultKind, ShellSuffixDescriptor,
+    ShellSuffixError, check_frontmatter_shell_value, describe_suffix,
+    execute_resolved_shell_values, expected_suffixes, parse_frontmatter_shell_suffixes,
+    parse_frontmatter_shell_value_spanned,
 };
 pub use icmp::PlannedIcmpProbe;
 pub use preflight::{ComposePreflightApprovals, ComposePreflightReport, PreflightApprovalStats, collect_frontmatter_shell_commands, collect_shell_commands};
@@ -159,6 +164,7 @@ pub use context::repository_scope_catalog;
 pub(crate) use context::options::ReferenceGraphOptionsIdentity;
 pub use context::report::{ComposeReport, ComposeWarning, SourceRange};
 pub use context::runtime::ComposeContext;
+pub use value_origin::{OverrideLayer, OverrideOrigin};
 pub use perf::{
     ComposePerfMetric, ComposePerfReport, ComposeStage, ShellCommandSpan, redact_shell_command,
 };

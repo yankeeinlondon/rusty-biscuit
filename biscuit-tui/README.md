@@ -29,7 +29,7 @@ The library provides six interactive input components, each following the same a
 | `BooleanSwitch` | Toggle switch with customizable on/off captions | `bool` |
 | `ChooseOne` | Single-selection list with fuzzy filtering, hotkey shortcuts, and vim navigation | Generic `V` |
 | `ChooseMany` | Multi-selection list with `min_selections` / `max_selections` constraints | `Vec<V>` |
-| `InputTable` | 2D grid of heterogeneous editable cells (any component + static text) | `Vec<Row>` |
+| `InputTable` | 2D grid of heterogeneous editable cells (any component + static text); static columns size to their content and clip with `…` | `Vec<Row>` |
 
 ### Core Primitives
 

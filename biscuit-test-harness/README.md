@@ -21,7 +21,7 @@ Levels 2 and 3.
 |-------|------------|-------------------|
 | **Level 1** | PTY-based tests. The test generates input bytes; the binary parses them. No real terminal involved. Use `expectrl` directly. | No |
 | **Level 2** | Run-in-real-terminal with IPC. The binary renders through a real terminal's display path; input is injected as bytes via the terminal's own CLI. | **Yes** — the `TerminalHarness` implementations. |
-| **Level 3** | OS-level keyboard injection. Real `CGEvent` / X11 XTEST / `SendInput` key presses, so the *terminal's input encoder* fires. | **Yes** — one injector module per platform: [`cliclick`](src/cliclick.rs) (macOS), [`xdotool`](src/xdotool.rs) (Linux/X11), [`win_input`](src/win_input.rs) (Windows). |
+| **Level 3** | OS-level keyboard injection. Real `CGEvent` / X11 XTEST / `SendInput` key presses, so the *terminal's input encoder* fires. | **Yes** — one injector module per platform: [`cliclick`](src/cliclick.rs) (macOS), [`xdotool`](src/xdotool.rs) (Linux/X11), [`win_input`](src/win_input.rs) (Windows), plus [`xvfb`](src/xvfb.rs) (Linux, a private display that never touches the user's desktop). |
 
 **Why Level 2/3 exist:** a Level 1 test can never catch a bug in the
 *terminal's* encoder or display path, because the test itself produces
@@ -151,6 +151,7 @@ against an already-running server), a shell command line for Terminal.app.
 | `send_command_with_env(cmd, env)` | The normal case: run a command, optionally with env vars scoped to just that command. |
 | `send_text(&[u8])` | Raw escape sequences / kitty keyboard-protocol bytes — anything that must reach the pane's stdin un-interpreted. |
 | `TmuxHarness::send_key("C-space")` | Symbolic chord names routed through tmux's key-translation layer. Needed for chords containing bytes (NUL) that `Command::arg` rejects. tmux-only. |
+| `KittyHarness::send_key("ctrl+c")` | A key press encoded by kitty's own key encoder for the program's current keyboard mode, as a physical press is once it reaches kitty. Never raises or focuses the window, so it works on an unfocused `KittyInstance`. The OS input layer is not involved: an OS-level event posted to an unfocused kitty (`CGEventPostToPid`) is dropped, so this is the closest a no-focus test gets to a keypress. |
 
 ### Capturing — `CapturedFrame`
 
@@ -364,6 +365,7 @@ required tooling is missing — the test then skips rather than fails.
 | `cliclick` (Level 3, macOS) | `cliclick` on `$PATH`. Gate *additionally* on `cliclick::accessibility_trusted()` — cliclick can be installed yet have every event dropped by the WindowServer when the runner lacks macOS Accessibility trust. |
 | `xdotool` (Level 3, Linux) | Linux, `xdotool` on `$PATH`, **and** `DISPLAY` set. Wayland has no reachable XTEST equivalent, so a Wayland session reports unavailable and skips. |
 | `win_input` (Level 3, Windows) | Windows and a working `powershell`. |
+| `XvfbKitty::can_launch()` (Level 3, Linux) | `Xvfb` and `kitty` on `$PATH` (Debian/Ubuntu packages `xvfb`, `kitty`). No `DISPLAY`, window manager, or `xdotool` needed. |
 
 ### The "which terminal am I running inside" gotcha
 
@@ -463,6 +465,12 @@ Ctrl+C?". There is one module per platform; each exposes its own
 | [`cliclick`](src/cliclick.rs) | macOS | The `cliclick` Homebrew utility (`CGEventCreateKeyboardEvent`), plus `osascript` / System Events for the cases cliclick cannot express. |
 | [`xdotool`](src/xdotool.rs) | Linux / X11 | `xdotool key` via the X11 **XTEST** extension — the same server input pipeline a physical keyboard uses. |
 | [`win_input`](src/win_input.rs) | Windows | A PowerShell driver over `SendKeys.SendWait` (`keybd_event`/`SendInput`). |
+| [`xvfb`](src/xvfb.rs) | Linux | XTEST through the `x11rb` crate, on a private `Xvfb` display with its own kitty window. Never touches the user's desktop. |
+
+`cliclick`, `xdotool`, and `win_input` press keys on the user's own
+desktop, so the target window must be raised and focused there. `xvfb`
+does the same on a display nothing shows, which is the only way here to
+press a real key without taking the user's focus.
 
 ### `cliclick` (macOS)
 
@@ -496,6 +504,35 @@ to `XSendEvent`, whose events carry the `send_event` flag that terminals
 ignore as untrusted input. That would inject nothing and then fail as
 though the product were broken. Focus the window first, inject globally.
 
+### `xvfb` (Linux, private display)
+
+Types: `XvfbDisplay` (`start`, `name`) and `XvfbKitty` (`can_launch`,
+`launch`, `harness`, `press_ctrl`, `press_escape`).
+
+```rust
+use biscuit_test_harness::xvfb::XvfbKitty;
+
+let kitty = XvfbKitty::launch(160, 50)?;   // own Xvfb, own kitty window
+let mut pane = kitty.harness();            // a KittyHarness: type, capture
+pane.send_command_with_env("sleep 60", &[])?;
+kitty.press_ctrl('c')?;                    // XTEST Ctrl+C on that display
+kitty.press_escape()?;                     // XTEST Escape
+```
+
+`launch` starts `Xvfb -displayfd` (a free display number, local socket
+only) and kitty with `--config NONE` and a private remote-control
+socket. `press_ctrl` and `press_escape` move X input focus to kitty *on the private
+display* with `SetInputFocus`, confirms it with `GetInputFocus`, then
+sends XTEST press and release events. No window manager runs there, and
+none is needed. The events enter the X server where a physical keyboard's
+do, so kitty encodes the key itself. Both processes are started with
+`PR_SET_PDEATHSIG`, so a test killed before `Drop` leaves nothing behind.
+
+Nothing on the user's desktop changes, so these tests can run unattended.
+macOS and Windows have no equivalent: macOS routes key events only to the
+key window of the one login session, and Windows `SendInput` reaches only
+the input desktop, which is the one the user sees.
+
 ### `win_input` (Windows)
 
 Free functions: `available`, `focus_then_ctrl_chord`.
@@ -513,7 +550,8 @@ a flashing taskbar button and the chord lands in the user's real window.
 ### Level-3 practices
 
 - The spawned window must be **focused** — use
-  `SpawnVisibility::Foreground` and `focus_spawned_pane()`.
+  `SpawnVisibility::Foreground` and `focus_spawned_pane()`. `xvfb` is the
+  exception: it focuses its own window on its own display.
 - Window selection is by **unique** title match on all three platforms.
   Zero or several matches is an error rather than a first-match guess:
   injecting Ctrl+C into the wrong window looks identical to a broken

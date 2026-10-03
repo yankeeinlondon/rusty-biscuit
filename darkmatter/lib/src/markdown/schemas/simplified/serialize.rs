@@ -293,8 +293,11 @@ fn write_quoted(out: &mut String, value: &str) {
     out.push('\'');
 }
 
+/// Whether `value` is not one bare argument word as `Lexer::read_word` reads
+/// it, which also ends a word at the description arrow `->`.
 fn needs_quoting(value: &str) -> bool {
     value.is_empty()
+        || value.contains("->")
         || value
             .chars()
             .any(|c| c.is_whitespace() || matches!(c, ',' | ';' | '(' | ')' | '\'' | '"'))
@@ -417,6 +420,19 @@ mod tests {
             array_constraints: vec![],
             description: None,
         });
+    }
+
+    /// A bare argument word ends at `->`, so a value containing one is quoted.
+    #[test]
+    fn round_trip_arguments_containing_the_description_arrow() {
+        round_trip(PropertyAtom {
+            ty: TypeExpr::Primitive(SimplifiedType::Enum),
+            is_array: false,
+            constraints: vec![Constraint::Members(vec!["a->b".into(), "plain".into()])],
+            array_constraints: vec![],
+            description: None,
+        });
+        round_trip(literal_atom(serde_json::Value::String("x->y".into())));
     }
 
     #[test]

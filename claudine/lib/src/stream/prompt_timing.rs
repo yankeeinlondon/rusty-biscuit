@@ -216,16 +216,9 @@ fn prompt_link(ctx: &PromptTimingContext) -> String {
     }
 }
 
+/// Escape the prompt path so it renders exactly as written inside Prose markup.
 fn escape_prose(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    for ch in input.chars() {
-        match ch {
-            '<' => out.push_str("\\<"),
-            '>' => out.push_str("\\>"),
-            _ => out.push(ch),
-        }
-    }
-    out
+    biscuit_terminal::components::prose::Prose::escape_text(input)
 }
 
 #[cfg(test)]

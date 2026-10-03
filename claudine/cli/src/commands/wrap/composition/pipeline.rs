@@ -314,7 +314,7 @@ fn emit_dry_run_outcome(
         // Dry-run never produces a per-iteration summary.
         iteration_signals: None,
         terminal_signal: None,
-        initialize_handoff: None,
+        handoff: None,
         final_output: None,
     }
 }
@@ -756,16 +756,25 @@ fn construct_argv_and_system_prompt(
         // model, transport, system-prompt, MCP, and prompt-delivery injections
         // (`apply_entrypoint` inserts the entrypoint subcommand at index 0, so a
         // tail-first base still lands after it, exactly like the wrapper). Announce
-        // it once per distinct (provider, tail) before launch.
-        provider_args::announce_forwarded_tail(
-            provider,
-            &request.provider_args,
-            request.provider_args_explicit,
+        // it once per distinct (provider, tail) for the owning command, after
+        // the resolved-provider check: a switch this provider types
+        // differently from ownership's reading fails before anything runs.
+        let switch_context = crate::commands::wrap::provider_tail_report::SwitchContext::for_launch(
+            profile,
+            effective_non_interactive,
+        );
+        switch_context
+            .check(&request.provider_tail)
+            .map_err(color_eyre::eyre::Report::new)?;
+        crate::commands::wrap::provider_tail_report::announce(
+            &switch_context,
+            &request.provider_tail,
+            &request.provider_tail_notices,
             silent,
             quiet,
             term,
         );
-        let mut child_args = request.provider_args.clone();
+        let mut child_args = request.provider_tail.launch_args().to_vec();
 
         // -- Yolo ----------------------------------------------------------------
 
@@ -824,7 +833,7 @@ fn construct_argv_and_system_prompt(
             request_yolo = request.yolo,
             effective_yolo,
             non_interactive = effective_non_interactive,
-            child_args = ?child_args,
+            child_args = ?crate::commands::wrap::env::redact_sensitive_args(&child_args),
             "yolo applied to provider argv",
         );
 
@@ -1148,7 +1157,7 @@ fn construct_argv_and_system_prompt(
                 }
             }
             lp::LaunchPlanInputs {
-                provider_args_tail: request.provider_args.clone(),
+                provider_tail: request.provider_tail.clone(),
                 output_format: request.output.map(Into::into),
                 system_prompt_args,
                 system_prompt_opencode_config,
@@ -1351,9 +1360,6 @@ fn construct_lifecycle_runtime(
         // event and no per-event sniff scan runs. `current.*` stays event-time
         // and is captured below.
         let lifecycle_context = {
-            let fm_json =
-                serde_json::to_string(&request.prepared.effective_frontmatter).unwrap_or_default();
-            let scan = format!("{fm_json}\n{}", request.prepared.prompt);
             let mut ctx = request.prepared.compose_context.clone();
             if let Some(epoch) = request.prepared.document_epoch.as_ref() {
                 epoch.record_prepared_context_consumer(
@@ -1366,7 +1372,12 @@ fn construct_lifecycle_runtime(
             }
             if let Some(invocation) = request.invocation_context.as_ref() {
                 let requirements =
-                    darkmatter::markdown::compose::ContextRequirements::for_content(&scan);
+                    darkmatter::markdown::compose::ContextRequirements::for_frontmatter([
+                        &request.prepared.effective_frontmatter,
+                    ])
+                    .union(&darkmatter::markdown::compose::ContextRequirements::for_content(
+                        &request.prepared.prompt,
+                    ));
                 if let Some(epoch) = request.prepared.document_epoch.as_ref() {
                     epoch.extend_launch_context(&mut ctx, &requirements);
                 } else {
@@ -1506,7 +1517,7 @@ pub(super) fn route_initialize(
                             iteration_signals: None,
                             terminal_signal: None,
                             final_output: None,
-                            initialize_handoff: None,
+                            handoff: None,
                         },
                     )));
                 }
@@ -1730,6 +1741,7 @@ fn provider_run_handoff(
     );
     let init_ctx = StackExecutionContext {
         signal: LifecycleSignal::Initialize,
+        scope: None,
         frontmatter: fm_map.unwrap_or(&empty_frontmatter),
         // Single pre-launch `initialize` event; the cross-event live cell is
         // owned by the harness loop, which re-materializes frontmatter before
@@ -1738,7 +1750,9 @@ fn provider_run_handoff(
         runtime_state: None,
         err: None,
         timing: Some(&lifecycle_timing),
-        current: lifecycle_current.clone(),
+        current: lifecycle_current
+            .as_ref()
+            .map(darkmatter::markdown::compose::CurrentAuthority::memoized),
         group: None,
         base_dir,
         ctx_base_dir: Some(launch_workspace.launch_cwd.as_path()),
@@ -1848,7 +1862,7 @@ fn provider_run_handoff(
                 iteration_signals: None,
                 terminal_signal: None,
                 final_output: None,
-                initialize_handoff: Some(committed),
+                handoff: Some(committed),
             })
         }
         // Dry-run proxies (and every other transition) stay on the in-harness

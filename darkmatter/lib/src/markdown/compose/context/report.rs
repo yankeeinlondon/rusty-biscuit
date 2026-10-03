@@ -93,6 +93,12 @@ pub struct ComposeReport {
     /// "raw because composition failed". Empty when no keys were deferred.
     pub deferred_frontmatter_keys: std::collections::HashSet<String>,
 
+    /// Which bytes of the composed body are data, when the compose ended
+    /// before the transclusion directive parse (an inline-pre-only compose,
+    /// such as preflight discovery). A caller that scans that body for
+    /// instructions must skip them. Never merged from a child report.
+    pub(crate) body_data: Option<crate::markdown::compose::body_origin::DataRanges>,
+
     /// Reads of roots unknown when they were evaluated (spec Requirement 4).
     /// Frontmatter pass 1 runs before the final state and schema exist, so
     /// these are candidates, not warnings: each document's pipeline
@@ -101,7 +107,7 @@ pub struct ComposeReport {
     pub(crate) unknown_root_candidates: UnknownRootCandidates,
 }
 
-/// First-read unknown-root candidates in read order, one per root.
+/// First-read undeclared-property candidates in read order, one per root.
 ///
 /// The root set is private to this type so it cannot drift from the list.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -229,7 +235,7 @@ pub(crate) struct UnknownRootCandidate {
     pub(crate) locus: CandidateLocus,
 }
 
-/// Where an unknown-root candidate was read, as precisely as the reading
+/// Where an undeclared-property candidate was read, as precisely as the reading
 /// surface can prove.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CandidateLocus {
@@ -510,7 +516,7 @@ impl ComposeReport {
         }
     }
 
-    /// Records the unknown-root `roots` one stage read, each at `locus(root)`.
+    /// Records the undeclared-property `roots` one stage read, each at `locus(root)`.
     ///
     /// Only a root's first read is kept (and located): the document warns
     /// once per root, at its first authored location.
@@ -596,8 +602,8 @@ pub(crate) enum WarningSubject {
         /// The normalized root name.
         name: String,
     },
-    /// One expression, once per source document no matter how many times a
-    /// rescan evaluates it.
+    /// One expression, once per source document no matter how many times it
+    /// is reported.
     Expression {
         /// Source document; `None` until the document's pipeline attributes it.
         document: Option<PathBuf>,
@@ -608,21 +614,14 @@ pub(crate) enum WarningSubject {
     },
 }
 
-/// Where an expression was first observed in a scanned text.
+/// Where an expression was observed in a scanned text.
 ///
-/// Byte offsets into the text as the caller supplied it, never into the
-/// buffer a rescan rewrites.
+/// Byte offsets into the text as the caller supplied it. Every expression is
+/// authored: a scan never reads text an expression produced.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum ExpressionOrigin {
     /// The expression is authored in the scanned text.
     Authored(std::ops::Range<usize>),
-    /// A replacement generated the expression; `span` is where the rescan at
-    /// `pass` first observed it. Kept distinct from `Authored` so a generated
-    /// expression never aliases an authored one at the same offsets.
-    Generated {
-        pass: usize,
-        span: std::ops::Range<usize>,
-    },
 }
 
 impl WarningSubject {
@@ -641,9 +640,9 @@ impl WarningSubject {
 impl ComposeWarning {
     /// Code of the `unknown context variable` warning.
     pub const UNKNOWN_CONTEXT_VARIABLE_CODE: &'static str = "dm.expression.unknown_context_variable";
-    /// Code of the unknown-identifier warning, shared with DMLS.
-    pub const UNKNOWN_IDENTIFIER_CODE: &'static str = "dm.expression.unknown_identifier";
-    /// Producer of the unknown-identifier warning.
+    /// Code of the undeclared-property advisory, shared with DMLS.
+    pub const UNDECLARED_PROPERTY_CODE: &'static str = "dm.expression.undeclared_property";
+    /// Producer of the undeclared-property advisory.
     pub const EXPRESSION_SOURCE: &'static str = "darkmatter.expression";
     /// Code of a lenient expression parse failure.
     pub const EXPRESSION_PARSE_FAILURE_CODE: &'static str = "dm.expression.parse_failure";
@@ -707,10 +706,10 @@ impl ComposeWarning {
         }
     }
 
-    /// An unknown-identifier warning for the root `name`, read in `document`
-    /// (at `line` when provable). One per source document per root: every
-    /// read of `name` there is one issue.
-    pub(crate) fn unknown_identifier(
+    /// An undeclared-property advisory for the root `name`, read in
+    /// `document` (at `line` when provable). One per source document per root:
+    /// every read of `name` there is one issue.
+    pub(crate) fn undeclared_property(
         stage: impl Into<String>,
         message: impl Into<String>,
         name: &str,
@@ -719,7 +718,7 @@ impl ComposeWarning {
     ) -> Self {
         Self {
             source: Some(Self::EXPRESSION_SOURCE.to_string()),
-            code: Some(Self::UNKNOWN_IDENTIFIER_CODE.to_string()),
+            code: Some(Self::UNDECLARED_PROPERTY_CODE.to_string()),
             identity: Some(WarningIdentity {
                 subject: WarningSubject::Root {
                     document: None,
@@ -896,20 +895,6 @@ mod tests {
 
         let messages: Vec<&str> = report.warnings.iter().map(|w| w.message.as_str()).collect();
         assert_eq!(messages, ["a", "b"]);
-    }
-
-    #[test]
-    fn a_generated_origin_never_aliases_an_authored_one_at_the_same_offsets() {
-        let mut report = ComposeReport::new();
-        report.add_warning(authored_failure(0..17, "authored"));
-        report.add_warning(ComposeWarning::expression_failure(
-            "interpolation",
-            "generated",
-            ComposeWarning::EXPRESSION_PARSE_FAILURE_CODE,
-            ExpressionOrigin::Generated { pass: 1, span: 0..17 },
-        ));
-
-        assert_eq!(report.warnings.len(), 2);
     }
 
     /// `in_scope` only scopes expression failures; a root warning's identity

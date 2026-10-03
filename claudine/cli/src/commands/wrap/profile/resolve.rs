@@ -133,7 +133,8 @@ pub(crate) fn no_model_error(provider: claudine::provider::Provider) -> color_ey
 ///
 /// Whenever a flag or positional is returned as the prompt, it is
 /// removed from the returned `Vec<String>` so downstream trait methods
-/// see clean args with zero prompt characters.
+/// see clean args with zero prompt characters. The third element lists
+/// the removed `passthrough` indices in ascending order.
 ///
 /// ## Errors
 ///
@@ -146,37 +147,40 @@ pub(crate) fn extract_prompt_source_from_passthrough(
     profile: &dyn WrapperProfile,
     passthrough: &[String],
     has_piped_stdin: bool,
-) -> Result<(Vec<String>, PromptSource)> {
+) -> Result<(Vec<String>, PromptSource, Vec<usize>)> {
     let conv = profile.prompt_arg_conventions();
     let mut args: Vec<String> = passthrough.to_vec();
 
     // 1. Look for a prompt-carrying flag.
-    if let Some((prompt, indices)) = find_prompt_flag(&args, conv.prompt_flags)? {
+    if let Some((prompt, mut indices)) = find_prompt_flag(&args, conv.prompt_flags)? {
+        indices.sort_unstable();
         // Remove the matched indices in reverse order so earlier
         // indices stay valid while splicing.
         for idx in indices.iter().rev() {
             args.remove(*idx);
         }
-        return Ok((args, PromptSource::Inline(prompt)));
+        return Ok((args, PromptSource::Inline(prompt), indices));
     }
 
     // 2. Look for a positional prompt, skipping the entrypoint (if any)
     //    and any value-taking flags.
     if let Some(idx) = find_positional_prompt_index(&args, &conv) {
         let prompt = args.remove(idx);
+        let mut removed = vec![idx];
         if idx > 0 && args[idx - 1] == "--" {
             args.remove(idx - 1);
+            removed.insert(0, idx - 1);
         }
-        return Ok((args, PromptSource::Inline(prompt)));
+        return Ok((args, PromptSource::Inline(prompt), removed));
     }
 
     // 3. Piped stdin.
     if has_piped_stdin {
-        return Ok((args, PromptSource::InheritStdin));
+        return Ok((args, PromptSource::InheritStdin, Vec::new()));
     }
 
     // 4. No prompt.
-    Ok((args, PromptSource::None))
+    Ok((args, PromptSource::None, Vec::new()))
 }
 
 /// Find a prompt delivered via one of `prompt_flags`. Returns the prompt

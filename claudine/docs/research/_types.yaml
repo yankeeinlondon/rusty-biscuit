@@ -1,0 +1,24 @@
+# Named types shared by research contracts. A topic's own types live beside
+# its contract, in docs/research/<topic>/_types.yaml.
+#
+# A named type is closed: a key it does not declare is an error.
+kind: schema
+types:
+    identifier: string(pattern(^[a-z][a-z0-9-]*$)) -> Lowercase letters, digits, and hyphens, starting with a letter
+    version: string(pattern(^[0-9]+[.][0-9]+[.][0-9]+[0-9A-Za-z.+-]*$)) -> An exact released version such as 0.157.1, never a range or a description
+    pointer: string(pattern(^/[A-Za-z0-9_/~.-]+$)) -> JSON Pointer from the root of the value being read, such as /params/turn/id
+    os: enum(macos,linux,windows) -> Host operating system; WSL counts as linux
+    launch_mode: enum(interactive,non_interactive) -> Whether the session was started with a terminal interface or without one
+
+    research_agent: enum(codex,claude,opencode) -> Agentic CLI that performed the research; it must be the one the fleet assigned to this provider
+    research_model: enum(gpt-6.1-sol,gpt-6-luna,sonnet,zai-coding-plan/glm-5.3) -> Model that performed the research, as the agent reports it at run time; a model that has left the rotation stays here while a document it wrote remains, and a default or unnamed model is rejected
+    research_effort: enum(low,medium,high,provider_default) -> Reasoning effort the research ran with; provider_default only where the fleet assigns none
+
+    evidence:
+        id: identifier(required)@this -> Stable name other entries use to cite this source
+        method: enum(official_docs,source_code,local_inspection,disposable_test,inference; required) -> How the claim was established; inference alone never supports a verified finding
+        location: string(required; not-empty) -> URL, commit-pinned source link, or path of a sanitized local artifact
+        version: string(required; not-empty) -> Provider version the source describes, or the literal word unknown
+        observed_on: date(required) -> Date the source was read or the observation was made
+        claim: string(required; not-empty) -> The one thing this source establishes
+        limitations: string(required; not-empty) -> What this source does not establish

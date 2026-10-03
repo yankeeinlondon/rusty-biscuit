@@ -57,6 +57,8 @@ regex = "1.11"
 # replacement (Finding 13). Already compiled transitively via `regex`, so no
 # added build cost.
 aho-corasick = "1.1"
+# The `{{!data:v1:…}}` literal token's payload (unpadded URL-safe alphabet).
+base64 = "0.22"
 tempfile = "3.8"
 globset = "0.4"
 # Blocking child-process wait that stays killable from another thread, so shell

@@ -37,7 +37,7 @@ success:
               - message: "🎉  the **Agent Models** research on **{{state.name}}** completed successfully"
 failure:
     message: "💥 the Agent Models research on **{{state.name}}** failed to complete!"
-    warn: "The Agent Models research on **{{state.name}}** failed to complete! (err: {{err.message}})"
+    warn: "The Agent Models research on **{{state.name}}** failed to complete! (err: {{ err.msg }})"
 ---
 # Agent Model Research on {{state.name}}
 

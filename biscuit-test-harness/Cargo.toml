@@ -11,6 +11,11 @@ serde_json = "1.0"
 tempfile = "3"
 unicode-width = "0.2"
 
+# XTEST key presses on a private Xvfb display (`src/xvfb.rs`). Pure Rust; no
+# default features, only the `xtest` extension.
+[target.'cfg(target_os = "linux")'.dependencies]
+x11rb = { version = "0.13.2", default-features = false, features = ["xtest"] }
+
 [dev-dependencies]
 serial_test = "3"
 

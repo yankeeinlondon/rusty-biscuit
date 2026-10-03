@@ -3,7 +3,7 @@
 use super::types::{DirectiveKind, ResolvedTarget, TransclusionError};
 use crate::markdown::compose::util::document_resolution_context;
 use crate::markdown::compose::{ComposeSource, TransclusionOptions};
-use crate::markdown::compose::context::options::SourceDerivation;
+use crate::markdown::compose::context::options::{SourceOpening, source_file_context};
 use biscuit_file::{FileReference, FileReferenceError, FileReferenceKind};
 use biscuit_terminal::errors::SourceContext;
 use std::path::{Path, PathBuf};
@@ -39,11 +39,13 @@ pub(crate) fn resolve_parsed_target(
             resolve_url_target(file_ref.raw(), options)
         }
         (DirectiveKind::File | DirectiveKind::Code, _) => {
-            let path = resolve_file_reference(file_ref, kind, options, source, line, ctx)?;
+            let LocalTarget { resolved, canonical: path } =
+                resolve_file_reference(file_ref, kind, options, source, line, ctx)?;
             validate_local_target(kind, &path, options)?;
             Ok(ResolvedTarget::File {
                 id: path.to_string_lossy().to_string(),
                 path,
+                resolved,
             })
         }
     }
@@ -81,7 +83,9 @@ fn resolve_url_target(
 /// Source provenance controls context derivation. Ordinary sources retain
 /// repository containment; only a child that already resolved outside that
 /// boundary uses trusted-external derivation. The originating request boundary
-/// remains validated in both cases.
+/// remains validated in both cases. A source opened by a parent derives from
+/// its [`SourceOpening`], so its relative references stay inside the tree
+/// root that opening selected.
 pub(crate) fn resolve_path(
     raw_target: &str,
     kind: DirectiveKind,
@@ -92,7 +96,27 @@ pub(crate) fn resolve_path(
 ) -> Result<PathBuf, TransclusionError> {
     trace!(raw_target = %raw_target, "transclusion: resolving path");
     let file_ref = FileReference::new(raw_target)?;
-    resolve_file_reference(&file_ref, kind, options, source, line, ctx)
+    resolve_file_reference(&file_ref, kind, options, source, line, ctx).map(|target| target.canonical)
+}
+
+/// The opening record for a Markdown child that `raw_target` resolved to
+/// `resolved` (see [`ResolvedTarget::File`]).
+///
+/// `None` only when `raw_target` no longer parses, which cannot happen for a
+/// target that resolved; the child then derives its context from its path.
+pub(crate) fn source_opening(raw_target: &str, resolved: &Path) -> Option<SourceOpening> {
+    FileReference::new(raw_target).ok().map(|reference| SourceOpening {
+        reference,
+        resolved: resolved.to_path_buf(),
+    })
+}
+
+/// A resolved local target in its two spellings.
+struct LocalTarget {
+    /// The path the source's context resolved the reference to.
+    resolved: PathBuf,
+    /// The canonical path: the target's identity.
+    canonical: PathBuf,
 }
 
 fn resolve_file_reference(
@@ -102,7 +126,7 @@ fn resolve_file_reference(
     source: &ComposeSource,
     line: usize,
     ctx: SourceContext,
-) -> Result<PathBuf, TransclusionError> {
+) -> Result<LocalTarget, TransclusionError> {
     let raw_target = file_ref.raw();
     if file_ref.class().kind == FileReferenceKind::Url {
         return Err(TransclusionError::UnsupportedReferenceType {
@@ -128,7 +152,7 @@ fn resolve_file_reference(
         file_ref.class().kind,
         FileReferenceKind::Absolute | FileReferenceKind::Home | FileReferenceKind::Url
     );
-    let base_dir = match source_file_dir(source) {
+    let cwd = match source_file_dir(source) {
         Some(dir) => dir,
         None if needs_base => {
             return Err(TransclusionError::MissingSourceContext {
@@ -141,15 +165,19 @@ fn resolve_file_reference(
         None => PathBuf::from("."),
     };
     let resolution_ctx = match options.file_resolution_context.as_ref() {
-        Some(snapshot) => match (source_file_path(source), options.source_derivation) {
-            (Some(path), SourceDerivation::TrustedExternal) => {
-                snapshot.for_trusted_external_source(path)
-            }
-            (Some(path), SourceDerivation::Ordinary) => snapshot.for_source(path),
-            (None, _) => snapshot.for_base(&base_dir),
+        Some(snapshot) => match source_file_path(source) {
+            Some(path) => source_file_context(
+                snapshot,
+                &path,
+                options.source_derivation,
+                options.source_opening.as_ref(),
+            ),
+            // A pathless source lives in the request's `cwd`; the local `cwd`
+            // is only the neutral `.` placeholder here.
+            None => snapshot.clone(),
         },
         None => document_resolution_context(
-            &base_dir,
+            &cwd,
             source_file_path(source).as_deref(),
             &options.magic_paths,
             None,
@@ -162,8 +190,9 @@ fn resolve_file_reference(
             format!("File not found: {raw_target}"),
         ))
     })?;
-    // Canonicalize so downstream transclusion identity (and macOS
-    // `/var`→`/private/var` symlinks) match historical behavior.
+    // Canonicalize only for transclusion identity (macOS `/var` versus
+    // `/private/var`); the child's own context keeps `path`'s spelling, which
+    // is the one its tree root uses.
     let canonical = std::fs::canonicalize(&path).map_err(|e| {
         TransclusionError::Io(std::io::Error::new(
             e.kind(),
@@ -171,7 +200,7 @@ fn resolve_file_reference(
         ))
     })?;
     debug!(resolved = %canonical.display(), "transclusion: path resolved");
-    Ok(canonical)
+    Ok(LocalTarget { resolved: path, canonical })
 }
 
 /// The directory a file-backed source's references resolve against: the source

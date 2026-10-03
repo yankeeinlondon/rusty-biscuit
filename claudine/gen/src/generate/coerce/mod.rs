@@ -6,8 +6,9 @@
 //! loud shape validation lives in the [`emit`](crate::emit) expression half)
 //! stay inline; the record-projecting coercions delegate to domain modules
 //! that mirror the emit split: [`identity_paths`] (session-log / config
-//! paths), [`execution_prompting`] (env-var / cli-flag selection), and
-//! [`models_offerings`] / [`event_policy`] for their catalog areas.
+//! paths), [`execution_prompting`] (env-var / cli-flag selection),
+//! [`models_offerings`] / [`event_policy`] for their catalog areas, and
+//! [`cli_switches`] (typed switch records, read from authored frontmatter).
 
 use serde_json::Value;
 
@@ -15,6 +16,9 @@ use crate::errors::GenError;
 use crate::generate::CoercionSkip;
 use crate::registry::{Coercion, RegistryEntry};
 
+pub(crate) use cli_switches::{check_cli_switch_catalog, cli_switch_catalog};
+
+mod cli_switches;
 mod event_policy;
 mod execution_prompting;
 mod identity_paths;
@@ -119,6 +123,9 @@ pub(crate) fn coerce_to_catalog_shape(
         Coercion::AcpRecord => unreachable!("AcpRecord is handled in extract_catalog_value"),
         Coercion::DefaultModelsToExpectedOfferings => {
             unreachable!("DefaultModelsToExpectedOfferings is handled in extract_catalog_value")
+        }
+        Coercion::CliSwitchRecords => {
+            unreachable!("CliSwitchRecords is handled in extract_catalog_value")
         }
         // Facts-shaped records pass through; emit.rs validates loudly.
         Coercion::PathTemplateList

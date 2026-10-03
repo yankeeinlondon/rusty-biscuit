@@ -86,8 +86,10 @@ Interpolation literals come back as `InterpolationLiteral` with the same
 Regions are returned in document order. The interpolation rewriter applies
 replacements **from the end of the string backward**, so earlier offsets stay
 valid as the text changes length. Literal conversion (`{{{ … }}}` → `{{ … }}`)
-runs after the final scan pass over a surface, so a literal produced *by* a
-replacement value is still converted exactly once.
+happens in the same single scan as expression evaluation, so only an authored
+literal converts; a `{{{ … }}}` that a replacement value inserts stays as
+written, and the replacement text is never scanned again (see
+[Inserted Text Is Data](../../../inline/interpolation.md#inserted-text-is-data)).
 
 ## Frontmatter has no markdown structure
 

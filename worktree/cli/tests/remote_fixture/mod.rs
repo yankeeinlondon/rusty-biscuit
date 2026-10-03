@@ -2,7 +2,9 @@
 //! and the listed clone with one linked worktree, all with the user's and the
 //! system's git configuration shut out; plus [`UploadPackGate`], which holds
 //! `origin`'s `upload-pack` to keep the worker working. Shared by the
-//! real-Git listing tests (`list_remote_head.rs`, `list_flags.rs`).
+//! real-Git listing tests (`list_remote_head.rs`, `list_flags.rs`,
+//! `perf_pr_request.rs`). Declare a gate after its fixture: the gate releases
+//! on drop, and the fixture then reaps the workers before removing anything.
 
 #![allow(dead_code)]
 
@@ -12,10 +14,10 @@ use std::process::{Command, Output};
 use std::time::{Duration, Instant};
 
 use assert_cmd::cargo::cargo_bin;
-use worktree::pull_requests::{pr_lock_path, pr_store_path};
-use worktree::remote_head::{remote_head_lock_path, remote_head_store_path};
+use worktree::pull_requests::pr_store_path;
+use worktree::remote_head::remote_head_store_path;
 
-use crate::perf_support::{isolated_cache_file, wait_for_refresh_workers};
+use crate::perf_support::{WorkerPaths, isolated_cache_file, reap_workers};
 
 /// How long a test waits for a detached worker before failing.
 pub const WORKER_WAIT: Duration = Duration::from_secs(20);
@@ -149,14 +151,22 @@ impl Fixture {
 }
 
 impl Drop for Fixture {
-    /// On Windows the stores live in the real user cache, keyed by this
-    /// temporary repository; remove them with it.
+    /// Reaps the workers first ([`reap_workers`]), then removes the stores:
+    /// on Windows they live in the real user cache, keyed by this temporary
+    /// repository. An [`UploadPackGate`] declared after the fixture is
+    /// released before this runs.
     fn drop(&mut self) {
-        let _ = wait_for_refresh_workers(&self.main, 0, WORKER_WAIT);
-        let pr_store = self.cache_file(pr_store_path(&self.main).expect("PR store path"));
-        let head_store = self.head_store();
-        for path in [pr_lock_path(&pr_store), pr_store, remote_head_lock_path(&head_store), head_store] {
-            let _ = fs::remove_file(path);
+        let real_pr = pr_store_path(&self.main).ok();
+        let real_head = remote_head_store_path(&self.main).ok();
+        let paths = WorkerPaths {
+            main: self.main.clone(),
+            pr_store: real_pr.map(|real| self.cache_file(real)),
+            head_store: real_head.map(|real| self.cache_file(real)),
+        };
+        let finished = reap_workers(&paths, || {});
+        paths.remove_stores();
+        if !std::thread::panicking() {
+            assert!(finished, "a refresh worker outlived the test or kept a lock");
         }
     }
 }

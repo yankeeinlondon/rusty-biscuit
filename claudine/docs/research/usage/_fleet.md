@@ -37,7 +37,7 @@ success:
               - message: "🎉  the **Usage** research on **{{state.name}}** completed successfully"
 failure:
     message: "💥 the Usage research on **{{state.name}}** failed to complete!"
-    warn: "The Usage research on **{{state.name}}** failed to complete! (err: {{err.message}})"
+    warn: "The Usage research on **{{state.name}}** failed to complete! (err: {{ err.msg }})"
 ---
 # Usage Research on {{state.name}}
 

@@ -103,7 +103,11 @@ mod loading {
         let source_context = invocation.derive_source(&source.resolved_path).unwrap();
         let requirements =
             darkmatter::markdown::compose::ContextRequirements::for_document(&source.markdown);
-        let evidence = invocation.runtime_evidence(&source_context, &requirements);
+        let evidence = invocation.runtime_evidence(
+            &crate::invocation_context::RunEvidence::default(),
+            &source_context,
+            &requirements,
+        );
         let context = darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
             source_context.base_dir(),
             &requirements,
@@ -1027,6 +1031,28 @@ mod shell {
             graph.shell_commands[0].command, "echo alpha",
             "the approval set carries the resolved bytes, not the template",
         );
+    }
+
+    /// A stored literal token resolves to the text it holds, exactly as
+    /// composition will read it, so the approved bytes match what runs; the
+    /// inserted text is data and is not scanned again.
+    #[test]
+    fn a_stored_token_resolves_to_its_text_in_approved_bytes() {
+        let dir = TempDir::new().unwrap();
+        let token = darkmatter::markdown::literal_token::encode("see {{ title }}");
+        let source = write_source(
+            dir.path(),
+            "seq.md",
+            &[
+                ("title", json!("t")),
+                ("note", json!(token)),
+                ("sequence", json!([{ "name": "alpha", "shell": "echo '{{ note }}'" }])),
+            ],
+            "Body.\n",
+        );
+
+        let graph = graph_for(&source).unwrap();
+        assert_eq!(graph.shell_commands[0].command, "echo 'see {{ title }}'");
     }
 
     /// Each step resolves against its own state, so a per-step command is

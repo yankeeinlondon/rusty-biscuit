@@ -420,6 +420,7 @@ fn bootstrap_observes_the_prepared_context_as_frontmatter_only() {
     assert_eq!(
         staged.document_epoch.unwrap().work_snapshot(),
         crate::invocation_context::DocumentEpochWork {
+            volatile_observations: Default::default(),
             launch_context_constructions: 1,
             launch_context_extensions: 0,
             ambient_fallbacks: 0,

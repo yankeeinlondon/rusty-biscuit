@@ -75,34 +75,59 @@ it always was. See
 
 Every frontmatter property of a lifecycle event interpolates **when that event fires**, not during the initial compose. This is what lets a lifecycle message report the state at the moment it runs — including the late-binding roots (`err`, `timing`, `current`, `current_env`) that do not exist at compose time. So `failure.message: "❌️  {{err.code}}"` renders the real error's code, and a `failure` stack `message: "❌️  {{err.code}}"` does too.
 
-The variables a lifecycle `{{{ … }}}` span can read fall into two groups:
+The variables a lifecycle `{{ … }}` span can read fall into two groups:
 
 - **Early-binding** (resolvable before the run): `doc.*` (frontmatter), `ctx.*`, `env.*`, and read-side functions (`parent_dir`, `dirname`, `frontmatter`, `file_exists`, …).
-- **Late-binding** (only exists at event-time): `err` (in `blocked`/`failure`/optional-error `finalize`), `timing`, `current`, `current_env`.
+- **Late-binding** (only exists at event-time): `err` (in `blocked`/`failure`/optional-error `finalize`), `timing`, `group` (inside a sequence group), `current`, `current_env`.
 
-A lifecycle property's interpolation resolves against the union of both, at event-time. Bare frontmatter references (`{{phase}}`, `{{artifact.path}}`) read the **current** effective document state at the moment the event fires — not a copy captured at the initial compose — so a `set_frontmatter` side effect that mutates `phase` between loop iterations is visible to the next iteration's lifecycle message.
+`err`, `timing`, and `group` are Claudine's lifecycle globals. Which of them an
+event can read is fixed per event (and per sequence task stack), and both the
+prepare-time check and event-time evaluation consult that one declaration:
 
-This is the consistent rule used everywhere else: a value is literal text and `{{{ … }}}` is how you opt into the expression engine. The document body and ordinary (non-lifecycle) frontmatter keys still interpolate at compose-time and are unchanged.
+| Where the expression runs | `err` | `timing` | `group` |
+| --- | --- | --- | --- |
+| `initialize`, `start`, `success`, `loop`, task `setup:` | unavailable | available | inside a group only |
+| `blocked`, `failure` | the failure | available | inside a group only |
+| `finalize`, task `teardown:` | the failure, or `null` when there is none | available | inside a group only |
+| a `shell` command (approved before any event fires) | unavailable | unavailable | unavailable |
+| a sequence task's commands at sequence-wide approval (primary, `setup:`, `teardown:`, group members) | unavailable | unavailable | unavailable |
+
+Reading an unavailable global is an error that names the global and the
+reason (`claudine.event-has-no-error`, `claudine.outside-group`,
+`claudine.preflight-unavailable`). It never falls back to a document property
+of the same name; write `doc.err` or `doc.group` to read one of those.
+
+Two consequences are worth calling out. In `finalize` and a task's
+`teardown:`, `err` is always readable: it is an explicit `null` when the run
+did not fail, so `when: "err"` is simply false. At sequence-wide approval no
+group has been entered yet, so `group` is unavailable there even for a command
+that will run inside a group; a group member reads `group` at event time
+instead. Sequence approval also refuses `outputs`, because no step has
+produced one yet when the whole graph is approved.
+
+A lifecycle property's interpolation resolves against the union of the early- and late-binding surfaces, at event-time. Bare frontmatter references (`{{phase}}`, `{{artifact.path}}`) read the **current** effective document state at the moment the event fires — not a copy captured at the initial compose — so a `set_frontmatter` side effect that mutates `phase` between loop iterations is visible to the next iteration's lifecycle message.
+
+Spans follow ordinary Darkmatter rules: `{{ … }}` is evaluated, and `{{{ … }}}` is an escape that renders the literal text `{{ … }}` without evaluating it. The backslash escapes `\{{ … }}` and `\{\{ … }}` are not evaluated either, but interpolation keeps them exactly as written, backslash included; the backslash disappears only on a channel that renders inline Markdown, such as `stderr`. Use `{{{ … }}}` when the braces must arrive without a backslash wherever the value goes (a `set:` value, a file, a shell command). The document body and ordinary (non-lifecycle) frontmatter keys still interpolate at compose-time and are unchanged.
 
 ## When Lifecycle Properties Interpolate
 
 Lifecycle strings keep their authored `{{{ … }}}` spans through the prepare stage — Darkmatter defers the seven lifecycle keys from compose-time resolution (DM1, `ComposeOptions::with_exclude_keys`) — and Claudine re-interpolates each property/action string through Darkmatter (DM2, `SubtreeCompose`; the same composition engine, no second interpolator — the bespoke `lifecycle_executor::interpolate` + `LifecycleLookup` runtime path was removed) just-in-time, immediately before it is used:
 
 - **Communication and action bodies** (`say`, `message`, `notify`, `stderr`, `info`, side-effect args, …) resolve at the instant the event fires, against the live document state plus the in-scope late-binding globals. Resolution is **just-in-time**, not a single snapshot: a `set_frontmatter` run by stack action #1 is visible to action #2 in the same event's stack.
-- **Resolution fails closed.** A malformed expression, an unknown function, an unknown root (a typo), or a late-binding global used outside its legal event fails the event with a typed error *before any side effect is dispatched* — a lifecycle string never silently renders empty for these cases. A *known* surface (a declared frontmatter key, `ctx`/`env`/`doc`, or an in-scope late-binding global) that resolves to `null`/empty still renders empty, as today. To tolerate an *unknown* optional name, opt in with explicit fallback syntax: `{{ maybe || '' }}`.
+- **Resolution fails closed on real expression failures.** A malformed expression, an unknown function, or a late-binding global used outside its legal event (for example bare `group` outside a group) fails the event with a typed error *before any side effect is dispatched*. A bare name that is none of those is a document property: when nothing supplies it, it is `null` and renders empty, in top-level fields and `stack` entries alike. A `when:` over an absent property is falsy, so its item is skipped; a fallback (`plan || 'none'`) chooses a default value and is never needed to make an expression legal.
 - **An evaluation error halts the run on every phase.** This fail-closed raise is an *expression-layer* error (a crashed `when:` guard or interpolation), distinct from a side-effect dispatch failure (below). It is carried as the typed `CompositionError::LifecycleEvaluationError` and surfaced to stderr as a styled error **at the point of error — before the catch events (`failure`/`finalize`) fire — and exactly once**, so the original crash is visible ahead of any catch-event output rather than buried beneath it. The run exits non-zero. On terminal-phase events (`success`/`failure`/`finalize`/`loop`) it does **not** retroactively fire `failure` (the provider already ran) but does fire `finalize` once with the error exposed as the `err` global, so an author can catch it. If a catch event *itself* raises a new evaluation error, that later crash is the surfaced (and exit-determining) one. A raise inside `finalize` itself surfaces and halts without re-entering `finalize`. A `when:` that evaluates cleanly to `false` is *not* a raise — it just skips its item, unchanged.
 
 ### The `shell` exception
 
-`shell` commands (positional `shell: "…"` and key/value `command:`) are the single early-binding exception. They are approved during pre-flight, so they are resolved **then**, against early-binding surfaces only (`doc.*`, `ctx.*`, `env.*`, read-side functions). The approved command is byte-identical to the executed command. A late-binding reference (`err`/`timing`/`current`/`current_env`) inside a shell command is rejected at prepare time with a typed error naming the property path — those values do not exist yet at pre-flight.
+`shell` commands (positional `shell: "…"` and key/value `command:`) are the single early-binding exception, and so are the commands inside a `set` value written as a whole-value `$( … )` (see [Reading a Command's Result](#reading-a-commands-result)). They are approved during pre-flight, so they are resolved **then**, against early-binding surfaces only (`doc.*`, `ctx.*`, `env.*`, document properties, read-side functions). The approved command is byte-identical to the executed command, including a sequence task's `setup:`/`teardown:` commands, which run the bytes sequence approval fixed. A late-binding reference (`err`, `timing`, `group`, `current`, `current_env`) inside a shell command is rejected at prepare time with a typed error naming the property path — even in a branch that would never run — because those values do not exist yet at pre-flight. `doc.group` still reads the document.
 
 Lifecycle YAML accepts only `set: {property: value}`; the positional
 `set(key, value)` spelling belongs to the separate capability and loop-control
 API. Mapping-based lifecycle `set` evaluates every value against one pre-write snapshot. Its
 destination keys are declared bindings: an absent destination reads as null,
 while an existing value is retained for evaluation. A whole-value expression
-preserves null; null embedded in text renders empty. Unrelated undeclared roots
-still fail strict evaluation. In a loop, initialization and its catch handlers
+preserves null; null embedded in text renders empty. Any other absent property
+reads as `null` too. In a loop, initialization and its catch handlers
 use the full bootstrap frontmatter, and initialization writes persist in the
 runtime state for subsequent iterations.
 The mapping keeps its authored key order whether it was written in YAML
@@ -130,6 +155,8 @@ Each lifecycle property is an object containing any of these fields:
 | `stack` | list | Ordered list of conditional actions (see [Stacks](#stacks)). |
 
 Most lifecycle output is written to stderr, messaging routes, or desktop notifications. The `stdout` channel is the lone exception: it writes to stdout, which is otherwise reserved for pipeable command output, so reach for it only when you specifically want lifecycle text on stdout.
+
+A `message` or `notify` sent from a terminal event (`success`, `failure`, `finalize`) finishes, or is reported as unfinished, before the process exits normally. Claudine waits at most 10 seconds for it. A send still running at that limit is reported with a warning, and whether it arrived is unknown. The exit code does not change. See [Messaging → The CLI drains before every ordinary exit](../messaging.md#the-cli-drains-before-every-ordinary-exit).
 
 ### Audio Ordering
 
@@ -164,7 +191,7 @@ Actions run in order. The first [flow-control directive](flow-control.md) (`skip
 
 An action is written in one of exactly two forms — **positional** or **key/value**. Both follow a single evaluation rule:
 
-> **Every value in a lifecycle action is literal text. Use `{{{ … }}}` to inject a variable or expression. The only expression-evaluated keys in the entire lifecycle surface are the boolean predicates `when`, `until`, and `while`.**
+> **Every value in a lifecycle action is literal text. Use `{{ … }}` to inject a variable or expression, and `{{{ … }}}` to write the literal text `{{ … }}`. The only expression-evaluated keys in the entire lifecycle surface are the boolean predicates `when`, `until`, and `while`.**
 
 **Positional** — an object whose single key is a known verb; the value carries the argument(s):
 
@@ -226,11 +253,11 @@ success:
     {{ ctx.area ? "Review in " + ctx.area + " completed" : "Review completed" }}
 ```
 
-The document body and mixed frontmatter strings rescan their output, so the same construction resolves there. The rule applies only to the single-pass lifecycle surfaces. To emit literal braces, use `{{{ … }}}`.
+Darkmatter's document body and mixed frontmatter strings are single-pass too: the same construction there emits the braces as literal text. Preparation refuses it only on the lifecycle surfaces. To emit literal braces, use `{{{ … }}}`.
 
 #### Object-valued arguments
 
-Some side-effect verbs take an object argument (`merge_frontmatter`, `append_jsonl`, key/value `http_post`). Direct nested YAML maps are **not** accepted inside action values. Place the object in frontmatter or context and pass it through a whole-value `{{{ … }}}` span:
+Some side-effect verbs take an object argument (`merge_frontmatter`, `append_jsonl`, key/value `http_post`). Direct nested YAML maps are **not** accepted inside action values. Place the object in frontmatter or context and pass it through a whole-value `{{ … }}` span:
 
 ```yaml
 payload:
@@ -276,7 +303,74 @@ start:
         on_error: "typecheck failed"
 ```
 
-A non-zero exit code is an action error unless `no_error: true` is set.
+A non-zero exit code is an action error unless `no_error: true` is set. A
+`shell` action returns nothing; to branch on a command, read its result with
+`set`.
+
+### Reading a Command's Result
+
+A `set` value written as a whole-value `$( … )` runs the command when the
+action executes and stores what it produced. The frontmatter
+[result suffixes](../../../../darkmatter/docs/inline/fm-shell-expansion.md#reading-a-commands-result)
+apply: no suffix stores the trimmed stdout (a non-zero exit fails the action),
+`::ok` a boolean, `::exit-code` a number, and `::result` an object
+`{ ok, code, stdout, stderr }` a later `when:` can read with dotted access.
+
+```yaml
+start:
+  stack:
+    - action:
+        - set:
+            sha: "$(git rev-parse --short HEAD)"
+            diff: "$(git diff --quiet)::result"
+    - when: "!diff.ok"
+      action:
+        - info: "Uncommitted changes at {{ sha }}: exit {{ diff.code }}"
+```
+
+Two lifetimes apply to such a value, and they are separate:
+
+```mermaid
+flowchart LR
+    A["pre-flight<br/>resolve {{ … }} from early-binding values"] --> B["approve the bare command<br/>(no suffix)"]
+    B --> C{"event fires,<br/>guard passes?"}
+    C -- no --> D["nothing runs"]
+    C -- yes --> E["run the approved bytes<br/>in a fresh result cache"]
+    E --> F{"every value<br/>succeeded?"}
+    F -- yes --> G["write every destination"]
+    F -- no --> H["write none"]
+```
+
+- **The command bytes are fixed at pre-flight.** Arguments resolve once from
+  early-binding values, pre-flight approves exactly those bytes, and the action
+  runs them. A later `set` of a value the command interpolated does not change
+  what runs.
+- **The result is produced each time the action executes.** Each executed
+  `set` gets its own result cache: two values naming the same command share one
+  run, but a command read in `start` and again in `success` runs twice, because
+  the agent may have changed the answer.
+- **It runs only when the action runs**: after its `when:` passes, never at
+  pre-flight, never under `--dry-run`, and never for an item whose guard is
+  false.
+- **Every value reads the pre-write state**, and no destination is written
+  unless every value succeeds. Expression values evaluate first, so a failing
+  expression runs no command. A command that already ran is **not undone** when
+  a later value fails: its external effects stand.
+- **Only an exit status becomes a value.** A missing, blacklisted, denied, or
+  timed-out command fails the action (Claudine has no allowed-timeout mode), a
+  command ended by a signal fails it, and a user interruption keeps its
+  cancellation outcome: `no_error: true` cannot turn it into `ok: false`.
+- **Only a top-level, whole-value `$( … )` runs.** `"sha $(cmd)"`, and a
+  `$( … )` inside a nested object or list, are stored as text.
+- Like a `shell` action, it runs from `start` or a later event, in Claudine's
+  working directory. It is refused in `initialize`, in every item including one
+  whose guard is false, and cannot run in an early catch handler before
+  pre-flight reaches `start`. A `set` in `start` is legal in a document that
+  also has `initialize`. A sequence task's `set` (`setup:`, `teardown:`, or a
+  `side_effect:` task) cannot run a command and refuses a whole-value `$( … )`.
+
+A `capture:` option on the `shell` action is not available; `set` is the one
+way a lifecycle step reads a command's result.
 
 ### Side-Effect Actions
 
@@ -314,7 +408,7 @@ start:
 
 ### `no_error`
 
-The `no_error` flag can be set on any action category. When `true`, an unintentional side-effect **dispatch** failure is logged but does not stop the stack or change the composition outcome. Its scope is the side-effect layer only: an expression-layer evaluation error (a crashed `when:` guard or a `{{{ … }}}` interpolation that raised) always halts and is never suppressed by `no_error`.
+The `no_error` flag can be set on any action category. When `true`, an unintentional side-effect **dispatch** failure is logged but does not stop the stack or change the composition outcome. Its scope is the side-effect layer only: an expression-layer evaluation error (a crashed `when:` guard or a `{{ … }}` interpolation that raised) always halts and is never suppressed by `no_error`.
 
 ```yaml
 start:
@@ -334,14 +428,14 @@ Stack expressions have access to four late-binding roots in addition to frontmat
 |------|--------------|--------|
 | `err` | `blocked`, `failure`, `finalize` | faceted fields below (`code`, `category`, `disposition`, `origin`, `detail.*`, plus promoted conveniences) |
 | `timing` | every event | `document_ms`, `total_ms`, `step_ms` (all optional) |
-| `current` | every event | `current.<key>` for every `ctx.<key>`, observed when the reference is reached |
+| `current` | every event | `current.<key>` for every `ctx.<key>`, observed once per event: every read in one event's notification fields and stack agrees |
 | `current_env` | every event | `current_env.<KEY>` for every `env.<KEY>`, reread from the live process environment when the reference is reached |
 
 `err` and `timing` are Claudine globals. `current` and `current_env` are
 Darkmatter **reserved roots**: Claudine supplies the invocation's refresh
 capability, and a key that capability does not hold renders `null` with a
 `PartialRuntimeCapture` diagnostic rather than probing the host. Lazy is
-bounded by the request: Repository metadata and topology (`repo`, `repo_root`, `packages`, `area`, and the rest of the repository keys) are fixed by the request's repository observation, so `current.repo` always reads what `ctx.repo` does; only mutable Git and filesystem facts (`branch`, `recent_commits`, `dirty_files`) and `current_env.*` refresh at reference time. See
+bounded by the request: Repository metadata and topology (`repo`, `repo_root`, `packages`, `area`, and the rest of the repository keys) are fixed by the request's repository observation, so `current.repo` always reads what `ctx.repo` does; only mutable Git and filesystem facts (`branch`, `recent_commits`, `dirty_files`) refresh from one event to the next, and `current_env.*` is reread at reference time. A gate that asks about now — "is anything staged yet?" — reads `current`; `ctx` holds what this composition run observed when it started. See
 [Context Variables — Binding time](../state-management/context-variables.md#binding-time-eager-ctx-lazy-current).
 
 `err` is only meaningful in events that can carry an error. Using bare `err` (or `err.*`) in `initialize`, `start`, `success`, or `loop` is rejected at parse time.
@@ -437,7 +531,7 @@ The original `err` fields remain available for backward compatibility but are **
 
 ### `doc.err` Escape Hatch
 
-A frontmatter property literally named `err` can still be reached through the `doc` namespace. This is the only way to reference an `err` value in no-error events.
+A frontmatter property literally named `err` is reached through the `doc` namespace. In every event a bare `err` is the lifecycle global — the failure, `null`, or unavailable — so `doc.err` is the only way to read the property. The same holds for `group` and `doc.group`.
 
 ```yaml
 err: "user-configured reason"
@@ -464,7 +558,16 @@ Loop execution runs `initialize` once at the start, then re-enters each iteratio
 
 The condition is checked at the **end** of each iteration, against the state that iteration ran with, and the actions are applied only when the loop continues. A loop therefore always runs at least once, and a counter counts one further than it reads: `while: "n < 2"` counting from `0` runs three times. To run zero times, `skip` from `initialize`. See [Looping — Iteration semantics](looping.md#iteration-semantics) for the full counting table.
 
-The `loop:` block's own fields can read ordinary frontmatter, which is how the example above would report progress. They cannot currently read the ambient loop values (`state.loop.*`, spelled `_loop_*` by the current engine): referencing one there fails the run with an "unknown root" error, which is a known defect. `start`, `success`, `failure`, and `finalize` can read them.
+The `loop:` block's own fields and stack read ordinary frontmatter and the ambient loop values (`_loop_count`, `_loop_is_first`, `_loop_is_last`, `_loop_last_output`, `_loop_last_exit_code`). Inside the gate these describe the iteration that just finished, the same values the `while`/`until` condition reads, so on the pass that ends the loop `_loop_count` is the number of iterations that ran:
+
+```yaml
+loop:
+  until: "_loop_count >= 2"
+  action: increment(counter)
+  info: "gate after iteration {{_loop_count}}"
+```
+
+This prints `gate after iteration 1` and then `gate after iteration 2`, and the loop stops after the second iteration.
 
 ## Examples
 
@@ -524,14 +627,14 @@ failure:
 
 ### Positional actions with interpolation
 
-Action values are literal text; `{{{ … }}}` interpolates a value:
+Action values interpolate `{{ … }}` spans; context values are read through `ctx.*` (a bare `agent` or `branch` is a document property, not context):
 
 ```yaml
 ---
 start:
   stack:
-    - action: { info: "running {{agent}}" }
-    - action: { shell: "git fetch origin {{branch}}" }
+    - action: { info: "running {{ ctx.agent }}" }
+    - action: { shell: "git fetch origin {{ ctx.branch }}" }
 ---
 ```
 
@@ -561,11 +664,11 @@ loop:
     - increment(iteration)
   stderr: "loop gate"
   stack:
-    - action: { info: "finished iteration {{iteration}} of {{max_iterations}}" }
+    - action: { info: "finished iteration {{_loop_count}} of {{max_iterations}}" }
 ---
 ```
 
-This runs three times. The gate follows each iteration and asks its question of the iteration that just ran, so `<` is right here: with `<=` the gate after the third iteration would still say "continue" and a fourth would run. The message reads the document's own `iteration` counter because the `loop:` block cannot currently read `_loop_count` (see [Loop Gate Concerns](#loop-gate-concerns)).
+This runs three times and reports `finished iteration 1 of 3`, then `2 of 3`, then `3 of 3`. The gate follows each iteration and asks its question of the iteration that just ran, so `<` is right here: with `<=` the gate after the third iteration would still say "continue" and a fourth would run. The message reads `_loop_count`, which inside the `loop:` block is the count of the iteration that just finished (see [Loop Gate Concerns](#loop-gate-concerns)).
 
 ### Recover from a usage cap by switching providers
 
@@ -741,22 +844,45 @@ success:
 
 A positional action body such as `message: "review {{iteration}} passed"` is not affected. That string is not an expression literal; Claudine interpolates it as template text.
 
-### `LifecycleEvaluationError`: surviving span
+### Template text in a value is data, not an error
 
-Some template text only appears at event time, typically a frontmatter value that itself holds `{{ … }}` (for example, one a `set_frontmatter` stored). Static validation cannot see it. As a backstop, `reject_surviving_spans` runs after event-time resolution and before dispatch: a top-level communication field whose resolved text still contains a span fails the event, and the side effect is not sent. The error carries the lifecycle property (`in success.say`) and the typed `SurvivingSpan` reason, which selects a hint to concatenate with `+` (or use `{{{ … }}}` for intentional braces) instead of the missing-path hint that ordinary evaluation errors get. A stack action operand that resolves to template text is re-expanded when its message renders. An unknown root in that text then fails as an ordinary expression error.
+Some values only hold template syntax at event time: a frontmatter value a `set_frontmatter` stored, a file an agent wrote, or the output of a `{{{ … }}}` escape. The authored text of a lifecycle field or action operand is scanned **once**; whatever its spans insert is data and is delivered exactly as written. It is never refused and never expanded a second time.
 
-### `LifecycleUndefinedVariable`
+```yaml
+# log.md, written by the agent:  message_to_agent: "see {{ title }}"
+success:
+  info: "agent says: {{ frontmatter('log.md', 'message_to_agent') }}"
+# prints: agent says: see {{ title }}
+```
 
-A reference to a genuinely-unknown root — a typo such as `{{spec_fil}}` for `{{spec_file}}` — fails the event closed at event-time via Darkmatter's strict mode. A *known* root that resolves to empty (`{{spec_file}}` when the key is legitimately absent) renders empty and does not error. To tolerate an unknown optional name, use explicit fallback syntax: `{{ maybe || '' }}`.
+The same holds for a `set:` value, a `proxy` `with:` value, a side-effect argument, and a shell command: a pre-flight-resolved command runs its approved bytes as they stand. The one exception is a `with:` value for a lifecycle key (see [Passing values with `with:`](flow-control-reference.md#passing-values-with-with)).
+
+What is still checked is the syntax **you** wrote. Every `{{ … }}` span in an authored lifecycle string is evaluated when the event fires, and a malformed expression or an unknown function fails the event before any side effect dispatches, whether the span is the whole value or sits inside other text. An absent document property is not a failure: it is `null`. The check never looks inside what a span returned, so an agent's words cannot trip it:
+
+| Value | Result |
+|-------|--------|
+| `info: "{{ spec_fil }}"` (absent property) | prints an empty line |
+| `info: "done: {{ spec_fil }}"` (absent property in text) | prints `done: ` |
+| `info: "{{ 1 + }}"` (malformed) | fails before dispatch |
+| `info: "{{ note }}"` where `note` is `see {{ title }}` | prints `see {{ title }}` |
+
+Ordinary frontmatter and the body, which compose before the run, keep Darkmatter's rules: an unresolved whole value is an error, while an unresolved span in mixed text leaves the span in place with a warning. See [Whole-Value Frontmatter Expansion Is Executable State](../composition.md#whole-value-frontmatter-expansion-is-executable-state).
+
+#### Frontmatter an action writes is data
+
+`set_frontmatter`, `merge_frontmatter`, `append_frontmatter`, and `prepend_frontmatter` write the **result** of evaluating their value, so what lands in the file is data. A string that contains `{{` or `$(` is stored as a literal token and reads back on the next run as the same text, never as a template:
 
 ```yaml
 success:
-  stderr: "Done: {{undefined_kee}}"  # ERROR at event-time: unknown root (typo)
+  stack:
+    - action: { set_frontmatter: ["state.md", "last_note", "{{ frontmatter('log.md', 'message_to_agent') }}"] }
 ```
+
+This also means these effects cannot write a template into a file. An authored `{{{ title }}}` writes the text `{{ title }}` as data, and the next run shows those braces instead of the title. To give a file a template, author it in that file. The token format, and how to edit one by hand, are described in [Values an Agent Writes](../frontmatter-properties.md#values-an-agent-writes); [Side Effects](../state-management/side-effects.md) covers the verbs.
 
 ### `LifecycleErrNotAvailable`
 
-`err` is referenced in an event that never carries an error (`initialize`, `start`, `success`, `loop`). The scan walks the `{{{ … }}}` spans inside communication/action strings **and** the whole `when:` expression, and rejects at parse time (`validate_no_err_in_no_error_events`, using `literal_spans_reference_err` for the interpolation spans). `timing`/`current`/`current_env` are allowed everywhere — via the shared `LATE_BINDING_ROOTS` known-root authority, also consulted by `resolves_outside_frontmatter`; `doc.err` remains the escape hatch.
+`err` is read in an event that never carries an error (`initialize`, `start`, `success`, `loop`). Darkmatter's passive validation checks every `{{ … }}` span in communication and action strings and every `when:` expression against the event's declared globals — every branch, without evaluating anything — and the document fails preparation before any event runs. The typed Darkmatter error is the diagnostic's source. `timing`, `current`, and `current_env` are readable in every event; `doc.err` reads the document.
 
 ```yaml
 start:

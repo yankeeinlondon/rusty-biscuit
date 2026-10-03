@@ -25,7 +25,7 @@ mod guardrails;
 pub mod hints;
 pub mod inline_prompt;
 #[cfg(test)]
-mod interpolation_conformance;
+pub(crate) mod interpolation_conformance;
 pub(crate) mod json_util;
 pub mod launch_workspace;
 pub mod lifecycle;
@@ -37,6 +37,8 @@ pub mod looping;
 pub mod mismatch;
 pub mod preflight;
 mod prepare;
+pub mod provider_tail;
+pub mod ownership;
 mod reserved;
 mod resolve;
 pub mod runtime_state;
@@ -44,11 +46,18 @@ pub mod schema;
 mod select;
 pub mod sequence;
 mod types;
+pub use ownership::{
+    ARGV_KEY, ArgumentOwner, ArgumentsAfterFile, CallerArgument, OwnedArguments,
+    OwnershipCandidate, OwnershipError, SchemaParameters, TailMismatch, check_launch_tail,
+    is_setter_name, own_arguments, owner_of_last_argument, setter_key,
+};
+pub use provider_tail::{ProviderTail, ProviderTailNotices, SwitchAssignment};
 
 pub use agent_message::{agent_state_breakdown, invalid_agent_message};
 pub use authored_order::AuthoredOrder;
 pub use closure::{
-    BodyRejection, CLOSURE_OWNED_PROPERTIES, InlineArtifact, InlineReconciliation,
+    AgentFrontmatterRejection, BodyRejection, CLOSURE_OWNED_PROPERTIES, EncodeError, InlineArtifact,
+    InlineReconciliation,
     reconcile_inline_artifact, reconcile_inline_artifact_with_evidence, restore_inline_baseline,
 };
 pub use completion::{
@@ -93,9 +102,7 @@ pub use lifecycle_actions::{
     LifecycleActionKind, LifecycleControlAction, LifecycleStackItem, RetryBackoff, ShellAction,
     SideEffectAction, is_known_side_effect, side_effect_signature,
 };
-pub use lifecycle_context::{
-    LifecycleErrorInfo, LifecycleTiming, lifecycle_injected_globals,
-};
+pub use lifecycle_context::{LifecycleErrorInfo, LifecycleTiming};
 pub use lifecycle_control::{
     ControlDispatch, MAX_PROXY_HOPS, compute_backoff_delay, control_budget_for, decide_control,
     parse_delay, proxy_handoff_allowed, proxy_path_identity, resolve_proxy_target,
@@ -108,8 +115,7 @@ pub use lifecycle_executor::{
 pub use looping::{
     DEFAULT_MAX_ITERATIONS, LoopExecutionOptions, LoopExecutionResult, LoopIterationContext,
     LoopIterationOutput, LoopSeed, build_loop_seed, build_loop_seed_from_bootstrap,
-    build_loop_seed_with_lifecycle, execute_loop,
-    execute_loop_with_config, execute_loop_with_lifecycle,
+    build_loop_seed_with_lifecycle, execute_loop_with_lifecycle,
 };
 pub use looping::{LoopAmbient, LoopExpressionLookup, evaluate_condition};
 pub use looping::{
@@ -124,8 +130,8 @@ pub use preflight::{
 pub use prepare::{
     BootstrapPreparation, BootstrapRequest, DocumentEntryReason, DocumentPreparation,
     LoopOwnership, PreparationStages, PrepareOptions, PromptSource, SchemaStage, SourceBasis,
-    bind_agent_workspace, preflight_bootstrap_shell, preflight_document_shell, prepare_bootstrap,
-    prepare_direct, prepare_document, prepare_inline,
+    approve_document_shell, bind_agent_workspace, preflight_bootstrap_shell, preflight_document_shell,
+    prepare_bootstrap, prepare_direct, prepare_document, prepare_inline,
 };
 #[cfg(test)]
 pub(crate) use resolve::resolve_fixture_source;
@@ -138,14 +144,15 @@ pub use resolve::{
     with_prompt_magic_roots, without_formal_sequence_keys,
 };
 pub use runtime_state::{
-    OUTPUTS_KEY, RuntimeMutationError, RuntimeSnapshot, RuntimeState, layered_set_overrides,
-    trim_transport_newline, with_initialized_outputs,
+    LayeredOverrides, OUTPUTS_KEY, RuntimeMutationError, RuntimeSnapshot, RuntimeState,
+    layered_set_overrides, trim_transport_newline,
 };
 pub use schema::{
-    InteractiveSchemaOptions, PreValidatedSchema, PropertyState, PropertyStatus,
+    InteractiveSchemaOptions, authored_schema_parameters, PreValidatedSchema, PropertyState, PropertyStatus,
     SchemaStatusReport, build_schema_status_report, build_schema_status_report_for_mode,
     description_suffix, drop_invalid_optionals, escape_schema_prose, launch_phase_for_mode,
-    pre_validate_schema, pre_validate_schema_for_mode, prepare_direct_with_schema,
+    pre_validate_layered_for_mode, pre_validate_schema, pre_validate_schema_for_mode,
+    prepare_direct_with_schema,
     prepare_direct_with_schema_and_prompt, prepare_inline_with_schema, render_optional_line,
     render_required_line, schema_status_report_prose,
 };

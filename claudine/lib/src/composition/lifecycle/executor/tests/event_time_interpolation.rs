@@ -36,6 +36,7 @@ fn io_err(msg: &str) -> LifecycleErrorInfo {
         snapshot: None,
         property: None,
         reason: crate::composition::LifecycleEvaluationReason::Expression,
+        cause: None,
     }
 }
 
@@ -173,7 +174,7 @@ fn message_reflects_current_frontmatter_per_event() {
 #[test]
 fn event_time_rendering_matches_compose() {
     use darkmatter::markdown::compose::EffectiveStateBuilder;
-    use darkmatter::markdown::compose::subtree::{SubtreeStrictness, compose_subtree};
+    use darkmatter::markdown::compose::subtree::compose_subtree;
 
     let template = "phase {{phase}}: {{err.msg}}";
     let err = io_err("disk full");
@@ -220,8 +221,14 @@ fn event_time_rendering_matches_compose() {
     let compose_value = compose_subtree(
         &json!(template),
         &state,
-        lifecycle_injected_globals(Some(&err), None),
-        SubtreeStrictness::Lenient,
+        crate::composition::lifecycle::bindings::runtime_bindings(
+            crate::composition::lifecycle::bindings::LifecycleScope::Event(LifecycleSignal::Failure),
+            crate::composition::lifecycle::bindings::LifecycleValues {
+                err: Some(&err),
+                ..Default::default()
+            },
+        )
+        .1,
     )
     .unwrap();
     assert_eq!(executor_text, compose_value.as_str().unwrap());
@@ -301,10 +308,11 @@ fn known_but_empty_reference_renders_empty() {
     assert_eq!(recorder.events(), vec![Emitted::Message("spec=".to_string())]);
 }
 
-/// A typo (an unknown root) fails closed: the action errors and nothing is
-/// dispatched (5.6).
+/// A typo is an absent document property, not an error (R1): the whole-value
+/// span is `null`, which a message renders empty. A genuine defect still fails
+/// closed (see `expression_raise_keeps_the_missing_path_hint`).
 #[test]
-fn unknown_root_typo_fails_closed() {
+fn a_typo_in_a_stack_message_is_an_absent_property() {
     let config = parse_lifecycle_config(
         &json!({"success": {"stack": [{"action": {"message": "{{spec_fil}}"}}]}}),
         Path::new("t.md"),
@@ -326,18 +334,14 @@ fn unknown_root_typo_fails_closed() {
         Path::new("t.md"),
     );
     let outcome = context.execute_event(&config);
-    assert!(
-        outcome.evaluation_error.is_some(),
-        "typo must fail closed through the evaluation channel"
-    );
-    assert!(outcome.action_error.is_none());
-    assert!(recorder.events().is_empty(), "nothing dispatched");
+    assert_eq!(outcome, LifecycleEventOutcome::default());
+    assert_eq!(recorder.events(), vec![Emitted::Message(String::new())]);
 }
 
-/// A top-level field with an unknown root fails the event closed before any
-/// side effect is dispatched (5.5).
+/// A top-level field reading an absent document property is not an error: the
+/// property is `null`, which a message renders empty (R1).
 #[test]
-fn top_level_unknown_root_fails_event_closed() {
+fn top_level_absent_property_renders_empty() {
     let config = parse_lifecycle_config(
         &json!({"success": {"message": "{{spec_fil}}"}}),
         Path::new("t.md"),
@@ -359,27 +363,23 @@ fn top_level_unknown_root_fails_event_closed() {
         Path::new("t.md"),
     );
     let outcome = context.execute_event(&config);
-    assert!(
-        outcome.evaluation_error.is_some(),
-        "a top-level interpolation raise is an evaluation error"
-    );
+    assert!(outcome.evaluation_error.is_none(), "{:?}", outcome.evaluation_error);
     assert!(outcome.action_error.is_none());
-    assert!(recorder.events().is_empty());
+    assert_eq!(recorder.events(), vec![Emitted::Message(String::new())]);
 }
 
-/// Post-DM2 leak guard (5.4): a known reference whose resolved value is
-/// itself raw template text leaves a surviving `{{ … }}` span, which fails
-/// before dispatch.
+/// A known reference whose value is itself template text is data (N10): the
+/// value is dispatched verbatim, never expanded a second time and never
+/// refused.
 #[test]
-fn post_dm2_surviving_span_fails_before_dispatch() {
+fn a_frontmatter_value_holding_template_text_is_sent_verbatim() {
     let config = parse_lifecycle_config(
-        &json!({"success": {"stack": [{"action": {"message": "{{tmpl}}"}}]}}),
+        &json!({"success": {"stack": [{"action": {"action": "info", "message": "{{tmpl}}"}}]}}),
         Path::new("t.md"),
     )
     .unwrap();
-    // The frontmatter value is literal template text — resolving `{{tmpl}}`
-    // yields `{{x}}`, a surviving recognized span.
-    let fm = map(json!({"tmpl": "{{x}}"}));
+    // `x` is defined, so a second expansion would visibly render `second`.
+    let fm = map(json!({"tmpl": "{{x}} and {{…}} and $(echo X)", "x": "second"}));
     let (_dir, engine) = temp_engine();
     let shell = MockShell::new(0);
     let recorder = Recorder::default();
@@ -395,28 +395,23 @@ fn post_dm2_surviving_span_fails_before_dispatch() {
         Path::new("t.md"),
     );
     let outcome = context.execute_event(&config);
-    let info = outcome
-        .evaluation_error
-        .expect("surviving span is an evaluation-layer failure");
-    assert!(outcome.action_error.is_none());
-    assert!(recorder.events().is_empty(), "no side effect dispatched");
-    assert_eq!(info.property.as_deref(), Some("success.stack[0].action[0]"));
+    assert!(outcome.evaluation_error.is_none(), "{:?}", outcome.evaluation_error);
+    assert_eq!(
+        recorder.events(),
+        vec![Emitted::Info("{{x}} and {{…}} and $(echo X)".to_string())]
+    );
 }
 
-/// The backstop names the top-level property and carries a typed reason, and
-/// the rendered error selects the concatenate/`{{{ … }}}` hint from that reason
-/// rather than the missing-path hint (spec D4).
+/// The same holds for a top-level field and for mixed authored text: the
+/// authored span is scanned once, and what it inserts is kept as text.
 #[test]
-fn surviving_span_in_top_level_field_renders_property_reason_and_specific_hint() {
-    use biscuit_terminal::errors::BlockError;
-    use biscuit_terminal::utils::escape_codes::strip_escape_codes;
-
+fn a_top_level_field_inserts_template_text_once() {
     let config = parse_lifecycle_config(
-        &json!({"success": {"message": "{{ tmpl }}"}}),
+        &json!({"success": {"message": "done: {{ tmpl }}"}}),
         Path::new("t.md"),
     )
     .unwrap();
-    let fm = map(json!({"tmpl": "done in {{ctx.repo_name}}"}));
+    let fm = map(json!({"tmpl": "in {{ctx.repo_name}}"}));
     let (_dir, engine) = temp_engine();
     let shell = MockShell::new(0);
     let recorder = Recorder::default();
@@ -431,27 +426,41 @@ fn surviving_span_in_top_level_field_renders_property_reason_and_specific_hint()
         &harness,
         Path::new("t.md"),
     );
-    let info = context
-        .execute_event(&config)
-        .evaluation_error
-        .expect("a surviving span fails the event");
-    assert!(recorder.events().is_empty(), "no side effect dispatched");
-    assert_eq!(info.property.as_deref(), Some("success.message"));
+    let outcome = context.execute_event(&config);
+    assert!(outcome.evaluation_error.is_none(), "{:?}", outcome.evaluation_error);
     assert_eq!(
-        info.reason,
-        crate::composition::LifecycleEvaluationReason::SurvivingSpan {
-            span: "{{ctx.repo_name}}".to_string()
-        }
+        recorder.events(),
+        vec![Emitted::Message("done: in {{ctx.repo_name}}".to_string())]
     );
+}
 
-    let err = CompositionError::lifecycle_evaluation("success", "t.md", &info);
-    let rendered = strip_escape_codes(err.report_block_error_optimistic(Some(200)));
-    assert!(rendered.contains("success.message"), "{rendered}");
-    assert!(rendered.contains("still contains `{{ctx.repo_name}}`"), "{rendered}");
-    assert!(rendered.contains("concatenate with `+`"), "{rendered}");
-    assert!(rendered.contains("{{{ … }}}"), "{rendered}");
-    assert!(!rendered.contains("resolve the missing"), "{rendered}");
-    assert!(!rendered.contains("an interpolated string"), "{rendered}");
+/// An authored span reading an absent document property renders empty in a
+/// mixed string; it is not refused (R1).
+#[test]
+fn an_authored_span_with_an_absent_property_renders_empty() {
+    let config = parse_lifecycle_config(
+        &json!({"success": {"message": "done: {{ tmpl_typo }}"}}),
+        Path::new("t.md"),
+    )
+    .unwrap();
+    let fm = map(json!({"tmpl": "x"}));
+    let (_dir, engine) = temp_engine();
+    let shell = MockShell::new(0);
+    let recorder = Recorder::default();
+    let harness = Harness::default();
+    let context = ctx(
+        LifecycleSignal::Success,
+        &fm,
+        None,
+        &engine,
+        &shell,
+        &recorder,
+        &harness,
+        Path::new("t.md"),
+    );
+    let outcome = context.execute_event(&config);
+    assert!(outcome.evaluation_error.is_none(), "{:?}", outcome.evaluation_error);
+    assert_eq!(recorder.events(), vec![Emitted::Message("done: ".to_string())]);
 }
 
 /// A genuine expression raise keeps the missing-path hint and gains the
@@ -464,7 +473,7 @@ fn expression_raise_keeps_the_missing_path_hint() {
     let config = parse_lifecycle_config(
         &json!({"success": {"stack": [
             {"when": "false", "action": "stop"},
-            {"when": "missing_key == 1", "action": "stop"}
+            {"when": "missing_key() == 1", "action": "stop"}
         ]}}),
         Path::new("t.md"),
     )
@@ -487,7 +496,7 @@ fn expression_raise_keeps_the_missing_path_hint() {
     let info = context
         .execute_event(&config)
         .evaluation_error
-        .expect("an undefined guard root raises");
+        .expect("an unknown function in a guard raises");
     assert_eq!(info.property.as_deref(), Some("success.stack[1].when"));
     assert_eq!(info.reason, crate::composition::LifecycleEvaluationReason::Expression);
 
@@ -555,12 +564,12 @@ fn evaluation_raise_projects_typed_cause_without_moving_err_aliases() {
 }
 
 /// The `Prose` arm carries a failure the expression layer describes itself, and
-/// round-trips its text unchanged through `Display` — the leak guard's message
-/// is a user surface.
+/// round-trips its text unchanged through `Display` — the message is a user
+/// surface.
 #[test]
 fn lifecycle_expr_error_prose_arm_round_trips_its_text() {
-    let error = LifecycleExprError::Prose("references undefined variable `x`".to_string());
-    assert_eq!(error.to_string(), "references undefined variable `x`");
+    let error = LifecycleExprError::Prose("expected a number, got \"x\"".to_string());
+    assert_eq!(error.to_string(), "expected a number, got \"x\"");
     assert!(std::error::Error::source(&error).is_none());
 }
 

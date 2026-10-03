@@ -2,14 +2,15 @@
 //!
 //! Shares the Darkmatter expression core (`parse`/`evaluate`/`ExpressionFinder`/
 //! `scalar_string`) with the lifecycle DM2 substrate, but keeps a small
-//! loop-specific value renderer for three required semantic differences
-//! (mixed-string JSON re-parse, contextual `InvalidAction` errors, and
-//! unknown-root leniency). The overlap that both engines must preserve is
-//! pinned by `composition::interpolation_conformance`. See
+//! loop-specific value renderer for its contextual `InvalidAction` errors. It
+//! does not recognize `{{{ … }}}` escapes. The overlap that both engines must
+//! preserve, missing-property semantics included, is pinned by
+//! `composition::interpolation_conformance`. See
 //! `docs/topics/composition.md` → "Loop vs lifecycle interpolation".
 
 use darkmatter::markdown::compose::expression::{
-    EvaluationLookup, ExpressionFinder, evaluate, parse, scalar_string,
+    BindingView, EvaluationLookup, ExpressionError, ExpressionFinder, ResolutionContext,
+    ResolvedBinding, evaluate, parse, scalar_string,
 };
 use serde_json::{Map, Number, Value};
 
@@ -151,9 +152,10 @@ fn apply_action_with_context(
 /// When `lookup` is `None`, returns a clone of the input unchanged.
 ///
 /// String leaves containing templates are rendered through Darkmatter's
-/// expression engine using the provided lookup, then re-parsed as JSON when
-/// possible so numeric, boolean, and `null` template results land as their
-/// proper JSON types. Strings without templates and non-string scalars are
+/// expression engine using the provided lookup. A leaf that is exactly one
+/// `{{ … }}` span keeps the expression's typed result; mixed text renders to a
+/// string and stays one — it is never re-parsed as JSON, because the inserted
+/// values are data. Strings without templates and non-string scalars are
 /// passed through. Arrays and objects are walked recursively.
 fn render_action_value(
     value: &Value,
@@ -238,11 +240,15 @@ fn render_string_with_lookup(
     }
 
     output.push_str(&raw[cursor..]);
-    Ok(serde_json::from_str(&output).unwrap_or(Value::String(output)))
+    Ok(Value::String(output))
 }
 
 /// Sized newtype around a borrowed `&dyn EvaluationLookup` so it can be passed
 /// to `evaluate`, whose generic parameter requires `Sized`.
+///
+/// Forwards every trait method: a method left to its default would silently
+/// replace the inner lookup's classification, formatting, or resolution
+/// context.
 struct SizedLookup<'a>(&'a dyn EvaluationLookup);
 
 impl<'a> EvaluationLookup for SizedLookup<'a> {
@@ -250,8 +256,40 @@ impl<'a> EvaluationLookup for SizedLookup<'a> {
         self.0.get(path)
     }
 
+    fn resolve(&self, path: &str) -> Result<ResolvedBinding, ExpressionError> {
+        self.0.resolve(path)
+    }
+
+    fn binding_view(&self) -> Option<&BindingView> {
+        self.0.binding_view()
+    }
+
+    fn format_resolved(&self, path: &str, value: &Value) -> String {
+        self.0.format_resolved(path, value)
+    }
+
     fn get_string(&self, path: &str) -> String {
         self.0.get_string(path)
+    }
+
+    fn resolution_context(&self) -> Option<ResolutionContext> {
+        self.0.resolution_context()
+    }
+
+    fn resolution_context_ref(&self) -> Option<&ResolutionContext> {
+        self.0.resolution_context_ref()
+    }
+
+    fn is_valid_context_variable(&self, name: &str) -> bool {
+        self.0.is_valid_context_variable(name)
+    }
+
+    fn context_variable_names(&self) -> &[&'static str] {
+        self.0.context_variable_names()
+    }
+
+    fn begin_expression_scope(&self) {
+        self.0.begin_expression_scope();
     }
 }
 

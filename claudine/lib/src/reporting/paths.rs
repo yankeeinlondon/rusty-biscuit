@@ -31,6 +31,14 @@ pub fn default_logs_dir() -> Result<PathBuf> {
     Ok(claudine_home_dir()?.join("logs"))
 }
 
+/// Return the steering audit directory, `~/.claudine/logs/steering/`.
+///
+/// A subdirectory keeps audit records out of `claudine logs` event ingestion,
+/// which reads only files directly under [`default_logs_dir`].
+pub fn default_steering_logs_dir() -> Result<PathBuf> {
+    Ok(default_logs_dir()?.join("steering"))
+}
+
 /// Return the default SQLite metrics database path.
 pub fn default_metrics_db_path() -> Result<PathBuf> {
     Ok(default_logs_dir()?.join("metrics.db"))

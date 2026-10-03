@@ -26,6 +26,7 @@ pub(crate) mod launch_plan;
 pub(crate) mod overlay;
 pub(crate) mod policy;
 pub(crate) mod prompt_source;
+pub(crate) mod provider_tail_report;
 pub(crate) mod resume;
 pub(crate) mod write_grant;
 pub(crate) mod wrapper_exec;
@@ -59,12 +60,12 @@ pub(crate) use policy::{
 };
 pub(crate) use prompt_source::{maybe_edit_prompt_source, maybe_edit_prompt_source_with};
 pub(crate) use resume::{
-    append_resume_passthrough_args, check_resume_support, normalize_resume_args,
+    assemble_resume_args, check_resume_support, normalize_resume_args,
 };
 use wrapper_stages::{
     apply_opencode_yolo_config_overlay, detect_wrapper_harness, emit_preflight_preamble,
-    parse_cli_timeouts, prepare_stream_and_prompt, resolve_and_apply_system_prompt,
-    run_execution_stage, validate_timeout_constraints,
+    parse_cli_timeouts, prepare_stream_and_prompt, reject_interactive_timeouts,
+    resolve_and_apply_system_prompt, run_execution_stage, validate_timeout_constraints,
 };
 
 use biscuit_terminal::terminal::Terminal;
@@ -197,16 +198,32 @@ fn bootstrap_mcp_state(repo_root: Option<&std::path::Path>) -> Result<bool> {
     Ok(true)
 }
 
-/// Run a wrapped provider command.
+/// How a wrapper run ended.
+enum WrapperOutcome {
+    /// The agent ran and exited; a non-zero exit still needs the agent error
+    /// report.
+    AgentExited {
+        exit: Box<crate::output::native_exit::NativeExit>,
+        /// The passthrough tail, for correlating an argument rejection.
+        provider_tail: claudine::composition::ProviderTail,
+        model_source: Option<profile::ModelSource>,
+    },
+    /// A dry run, or an `--edit` the user abandoned: nothing launched, exit `0`.
+    NotLaunched,
+    /// No model could be resolved; its report has already rendered. Exit `1`.
+    NoModel,
+}
+
+/// Run a wrapped provider command; returns the process exit code.
 pub fn run_provider_wrapper(
     provider: Provider,
     args: WrapperArgs,
     verbose: u8,
     startup_timings: Option<crate::perf::StartupTimings>,
-) -> Result<()> {
+) -> Result<i32> {
     if args.help {
         flags::print_wrapper_help(provider);
-        return Ok(());
+        return Ok(0);
     }
 
     let mut perf_collector =
@@ -214,8 +231,8 @@ pub fn run_provider_wrapper(
 
     let wrapper_result =
         run_provider_wrapper_inner(provider, args, verbose, perf_collector.as_mut());
-    let (code, stderr_capture, model_source) = match wrapper_result {
-        Ok(result) => result,
+    let wrapper_outcome = match wrapper_result {
+        Ok(outcome) => outcome,
         Err(error) => {
             if let Some(mut collector) = perf_collector {
                 collector.mark_env_setup_complete();
@@ -225,16 +242,28 @@ pub fn run_provider_wrapper(
         }
     };
 
-    if code != 0 {
-        let term = wrap_terminal();
-        let report = crate::output::error_report::AgentErrorReport::from_exit_code_with_source(
-            provider,
-            code,
-            stderr_capture.as_deref(),
-            model_source.as_ref(),
-        );
-        report.render(&term);
-    }
+    let code = match wrapper_outcome {
+        WrapperOutcome::AgentExited {
+            exit,
+            provider_tail,
+            model_source,
+        } => {
+            if exit.exit_code != 0 {
+                let term = wrap_terminal();
+                crate::output::error_report::AgentErrorReport::for_native_exit(
+                    provider,
+                    &exit,
+                    &provider_tail,
+                    model_source.as_ref(),
+                )
+                .report
+                .render(&term);
+            }
+            exit.exit_code
+        }
+        WrapperOutcome::NotLaunched => 0,
+        WrapperOutcome::NoModel => return Ok(1),
+    };
 
     // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
     // The perf report is always emitted to stderr when requested.
@@ -242,7 +271,7 @@ pub fn run_provider_wrapper(
         crate::perf::emit_report(&collector.into_report());
     }
 
-    std::process::exit(code);
+    Ok(code)
 }
 
 fn run_provider_wrapper_inner(
@@ -250,7 +279,7 @@ fn run_provider_wrapper_inner(
     args: WrapperArgs,
     verbose: u8,
     mut perf_collector: Option<&mut crate::perf::CommandPerfCollector>,
-) -> Result<(i32, Option<String>, Option<profile::ModelSource>)> {
+) -> Result<WrapperOutcome> {
     let perf_enabled = perf_collector.is_some();
     // ------------------------------------------------------------------
     // Stage 1: Resolve profile and binary
@@ -291,6 +320,7 @@ fn run_provider_wrapper_inner(
     let mut env_overrides: Vec<(String, String)> = Vec::new();
     let mut deferred_warnings: Vec<String> = Vec::new();
     let mut deferred_messages: Vec<String> = Vec::new();
+    reject_interactive_timeouts(&args, interactive_requested)?;
 
     // ------------------------------------------------------------------
     // Stage 3: Extract and optionally edit the prompt source
@@ -302,15 +332,24 @@ fn run_provider_wrapper_inner(
     // Composition (Task 14) is where InheritStdin / stdin_seed matters.
     let has_piped_stdin = false;
 
-    let (extracted_args, mut prompt_source) =
+    let (extracted_args, mut prompt_source, prompt_indices) =
         profile::extract_prompt_source_from_passthrough(profile, &child_args, has_piped_stdin)?;
     child_args = extracted_args;
+    // The user's forwarded arguments, before any Claudine injection, for the
+    // forwarding notice. Reporting only: the child argv is never rebuilt
+    // from it.
+    let provider_tail = flags::passthrough_provider_tail(
+        &child_args,
+        extracted.dash_boundary.map(|at| {
+            at - prompt_indices.iter().filter(|&&index| index < at).count()
+        }),
+    );
 
     if edit_requested {
         let Some(edited_prompt) =
             prompt_source::maybe_edit_prompt_source(prompt_source, silent_requested)?
         else {
-            return Ok((0, None, None));
+            return Ok(WrapperOutcome::NotLaunched);
         };
         prompt_source = edited_prompt;
     }
@@ -364,15 +403,9 @@ fn run_provider_wrapper_inner(
     // ------------------------------------------------------------------
     // Stage 5: Validate and parse timeouts
     // ------------------------------------------------------------------
-    validate_timeout_constraints(
-        &args,
-        interactive_requested,
-        non_interactive_requested,
-        edit_requested,
-    )?;
+    validate_timeout_constraints(&args, non_interactive_requested)?;
     let cli_timeout_duration = parse_cli_timeouts(&args)?;
 
-    // The effective interactivity state is determined solely by the explicit flag.
     let effective_non_interactive = non_interactive_requested;
     let term = wrap_terminal_for_mode(effective_non_interactive);
 
@@ -406,7 +439,7 @@ fn run_provider_wrapper_inner(
         request_yolo = yolo_requested,
         effective_yolo = yolo_enabled,
         non_interactive = non_interactive_requested,
-        child_args = ?child_args,
+        child_args = ?env::redact_sensitive_args(&child_args),
         "yolo applied to provider argv",
     );
 
@@ -419,7 +452,7 @@ fn run_provider_wrapper_inner(
     // Model resolution, universal --model, and non-interactive validation —
     // shared prep stage (see `commands::exec_prep`). Only the no-model
     // presentation stays wrapper-specific: render the agent error report and
-    // exit instead of propagating.
+    // end with exit `1` instead of propagating.
     let has_model_env = env_overrides.iter().any(|(k, _)| k == "MODEL");
     let model_source: Option<profile::ModelSource> =
         match crate::commands::exec_prep::resolve_model_and_validate(
@@ -438,7 +471,7 @@ fn run_provider_wrapper_inner(
                 let report =
                     crate::output::error_report::AgentErrorReport::no_model_provided(provider);
                 report.render(&term);
-                std::process::exit(1);
+                return Ok(WrapperOutcome::NoModel);
             }
             Err(err) => return Err(err.into_report()),
         };
@@ -671,7 +704,7 @@ fn run_provider_wrapper_inner(
         if let Some(collector) = perf_collector.as_mut() {
             collector.set_dry_run();
         }
-        return Ok((0, None, None));
+        return Ok(WrapperOutcome::NotLaunched);
     }
 
     // ------------------------------------------------------------------
@@ -695,6 +728,14 @@ fn run_provider_wrapper_inner(
         model_source.as_ref(),
         &term,
         verbose,
+    );
+    provider_tail_report::announce(
+        &provider_tail_report::SwitchContext::for_launch(profile, non_interactive_requested),
+        &provider_tail,
+        &claudine::composition::ProviderTailNotices::default(),
+        silent_requested,
+        quiet_requested,
+        &term,
     );
 
     // ------------------------------------------------------------------
@@ -802,14 +843,18 @@ fn run_provider_wrapper_inner(
     if let Some(collector) = perf_collector.as_mut() {
         collector.set_invocation_work(&invocation.work_snapshot());
     }
-    let (exit_code, stderr_capture) = execution_result?;
+    let exit = execution_result?;
 
     // ------------------------------------------------------------------
     // Stage 16: Cleanup and return
     // ------------------------------------------------------------------
     exec::cleanup_mcp_injection(mcp_cleanup);
 
-    Ok((exit_code, stderr_capture, model_source))
+    Ok(WrapperOutcome::AgentExited {
+        exit: Box::new(exit),
+        provider_tail,
+        model_source,
+    })
 }
 
 #[cfg(test)]

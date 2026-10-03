@@ -364,9 +364,13 @@ pub struct ProviderPickerPlan {
 }
 
 /// Per-step draft for sequence review.
+///
+/// Every step has a draft, but only steps whose outer executable can launch a
+/// provider (a prompt, task, group, or body step) are shown for review.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SequenceStepDraft {
-    /// Zero-based step index.
+    /// Zero-based index of the step in the whole sequence; reviewed choices
+    /// are mapped back by this index, never by row number or name.
     pub step_index: usize,
     /// Display name for the step.
     pub step_name: String,
@@ -380,7 +384,8 @@ pub struct SequenceStepDraft {
     pub provider_locked: bool,
     /// Whether the model is locked by an explicit CLI flag.
     pub model_locked: bool,
-    /// The resolved provider when locked (`provider_locked=true`), otherwise `None`.
+    /// The provisional provider: the explicit flag, the auto-selected agent,
+    /// or the picker plan's default. `None` when the plan has no options.
     pub resolved_provider: Option<Provider>,
 }
 
@@ -501,6 +506,9 @@ pub struct EffectiveSelectionHints {
 pub struct CallerInputLayers {
     /// Frontmatter `--set` overrides (JSON object) the caller supplied.
     pub set_overrides: Option<serde_json::Value>,
+    /// Top-level keys of [`set_overrides`](Self::set_overrides) that are data
+    /// (see [`PrepareOptions::data_override_keys`][super::PrepareOptions]).
+    pub data_override_keys: std::collections::BTreeSet<String>,
     /// Immutable raw caller overrides paired with their launch-time origins.
     pub caller_input_records: darkmatter::markdown::compose::CallerInputRecords,
     /// Launch-area directory that anchors caller-supplied file references.
@@ -562,6 +570,7 @@ impl CallerInputLayers {
     pub fn from_options(options: &super::PrepareOptions) -> Self {
         Self {
             set_overrides: options.set_overrides.clone(),
+            data_override_keys: options.data_override_keys.clone(),
             caller_input_records: options.caller_input_records.clone(),
             file_ref_fallback_dir: options.file_ref_fallback_dir.clone(),
             file_resolution_context: options.file_resolution_context.clone(),
@@ -570,10 +579,22 @@ impl CallerInputLayers {
         }
     }
 
+    /// The overrides with the origin of each key.
+    pub fn layered_overrides(&self) -> super::LayeredOverrides {
+        super::LayeredOverrides::from_parts(self.set_overrides.as_ref(), &self.data_override_keys)
+    }
+
+    /// Replace the overrides and their origins together.
+    pub fn set_layered_overrides(&mut self, overrides: super::LayeredOverrides) {
+        self.data_override_keys = overrides.data_keys().clone();
+        self.set_overrides = Some(overrides.to_value());
+    }
+
     /// Apply these layers onto `options` — the one assembly point every
     /// canonical preparation goes through.
     pub fn apply_to(&self, mut options: super::PrepareOptions) -> super::PrepareOptions {
         options.set_overrides = self.set_overrides.clone();
+        options.data_override_keys = self.data_override_keys.clone();
         options.caller_input_records = self.caller_input_records.clone();
         options.file_ref_fallback_dir = self.file_ref_fallback_dir.clone();
         options.file_resolution_context = self.file_resolution_context.clone();
@@ -889,17 +910,17 @@ pub struct CompositionExecutionRequest {
     /// executor emits it after resolving the target itself.
     pub header_emitted: bool,
 
-    /// Provider-argument tail forwarded verbatim to the underlying agent,
-    /// captured by the CLI's pre-clap ownership partition. Seeds the child
+    /// Provider-argument tail forwarded verbatim to the underlying agent, as
+    /// type-aware ownership ([`super::own_arguments`]) decided it, with each
+    /// implicit switch's value assignment. Seeds the child
     /// argv at the same stage as direct-wrapper passthrough, ahead of
     /// Claudine's entrypoint / model / transport / prompt-delivery
     /// injections. Distinct from MCP arguments. Empty when no tail was given.
-    pub provider_args: Vec<String>,
+    pub provider_tail: super::ProviderTail,
 
-    /// `true` when [`Self::provider_args`] came from an explicit `--` boundary
-    /// (opaque, unclassified) rather than an implicit non-Claudine switch.
-    /// Drives the INFO status wording only; never affects forwarding.
-    pub provider_args_explicit: bool,
+    /// The command-scoped record of forwarding notices already shown, shared
+    /// by every attempt and `sequence` task of one top-level command.
+    pub provider_tail_notices: super::ProviderTailNotices,
 
     /// The committed proxy handoff's evaluated `with:` overlay for this
     /// document, when it was reached through a proxy. Re-applied over the

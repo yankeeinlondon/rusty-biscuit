@@ -69,9 +69,12 @@ run, Claudine must:
 ### The compose-scoped guard
 
 [`install_user_interrupt_guard`](../../cli/src/commands/compose/interrupt.rs) is
-called once at the top of `run_compose_inner` and `run_inline_compose_inner`.
-It returns an RAII [`UserInterruptGuard`] whose `Drop` removes the
-registered handler so the next subcommand starts with a clean slate.
+called once near the top of `run_composition_inner`, which serves both
+`compose` and `inline-compose`. It returns an RAII [`UserInterruptGuard`]
+whose `Drop` removes the registered handler. The run hands the guard to the
+CLI's shutdown path (`shutdown::hold_interrupt_guard`) at once, so it stays
+installed after the command returns and through the exit-time delivery drain
+(see [Ctrl+C during the exit drain](#ctrlc-during-the-exit-drain)).
 
 The handler itself runs in the signal-handling context, so it is restricted
 to async-signal-safe operations:
@@ -116,6 +119,75 @@ to async-signal-safe operations:
 `signal_hook::low_level::register` stacks handlers, so this compose-scoped
 guard composes cleanly with the per-iteration handler installed around
 each agent child by `wait_with_signal_and_early_termination`.
+
+### Ctrl+C during the exit drain
+
+Before any ordinary exit, the CLI waits up to 10 seconds for outbound
+messages and desktop notifications that are still sending (see
+[Messaging](messaging.md#the-cli-drains-before-every-ordinary-exit)). Ctrl+C
+keeps working during that wait:
+
+- After `compose` or `inline-compose`, the run's own guard is still installed,
+  so the ladder above applies unchanged.
+- After any other command (for example `sequence` or a provider wrapper) that
+  left a delivery running, the shutdown path installs the same ladder with a drain notice:
+  `User interrupted while waiting for outbound messages; press Ctrl+C again to
+  exit now`. With nothing pending, no handler is installed and the process
+  exits at once.
+- The first press prints the notice. A second press, or the first press after
+  one already made during the run, force-exits with `130`. Deliveries cut off
+  that way are not reported.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Draining: command returns, a delivery is pending
+    Draining --> Exit: every delivery finished or 10 s passed
+    Draining --> Noticed: first Ctrl+C (notice printed)
+    Noticed --> Exit: drain ends
+    Noticed --> Forced: second Ctrl+C
+    Exit --> [*]: warn about unfinished sends, exit with the command's code
+    Forced --> [*]: exit 130
+```
+
+The two-press contract is tested for `compose`, `inline-compose`, `sequence`,
+and the `claude` wrapper, whose message comes from a user-config hook action.
+Every tier uses one fixture, `claudine/cli/tests/common/drain_interrupt.rs`,
+and differ only in how each press arrives:
+
+| Tier | Press | OS | File |
+|---|---|---|---|
+| L1 | `SIGINT` to the process; `CTRL_BREAK_EVENT` to its console group on Windows | macOS, Linux, Windows | `lifecycle_message_drain_interrupt.rs` |
+| L1 | ETX typed into a windowless console (ConPTY): conhost raises `CTRL_C_EVENT` | Windows | `lifecycle_message_drain_console_windows.rs` |
+| L2 | `tmux send-keys C-c`: the pane's line discipline signals the foreground process group | macOS, Linux | `level2_drain_ctrl_c_tmux.rs` |
+| L2 | `kitty @ send-key ctrl+c` into an unfocused kitty window, encoded by kitty's key encoder | macOS (private kitty), Linux (host kitty session) | `level2_drain_ctrl_c_kitty.rs` |
+| L3 | An OS key event: XTEST Ctrl+C on a private `Xvfb` display, into a kitty window focused on that display | Linux | `level3_drain_ctrl_c.rs` |
+
+The L2 rows are terminal-level evidence: the press starts inside the terminal,
+after the operating system's input layer. Only the L3 row starts where a
+physical keypress starts. It runs on a display of its own, so it never shows a
+window or moves focus on the user's desktop.
+
+macOS and Windows have no L3 row, because neither offers an isolated desktop
+that can receive a real key event:
+
+- **macOS** delivers key events only to the key window of the one login
+  session. A Ctrl+C posted to an unfocused kitty's process
+  (`CGEventPostToPid`) never reaches its pane, so a real keypress would take
+  the user's focus.
+- **Windows** `SendInput` reaches only the input desktop, which is the one the
+  user sees. A desktop made with `CreateDesktop` gets no input until
+  `SwitchDesktop` shows it to the user. There, the L1 ConPTY test types the
+  byte a terminal writes for a Ctrl+C key press, so the console's own input
+  handling raises the event.
+
+These rows are enough for this contract. The code under test is Claudine's
+interrupt ladder, which stays installed through the drain. It never reads
+keyboard events. Turning a key press into `SIGINT` or `CTRL_C_EVENT` is the
+job of the operating system and the terminal, and the drain does not change
+that path. Each OS proves the ladder with a real interrupt from its terminal
+layer: the tmux and kitty rows on macOS, and the ConPTY row on Windows. The
+Linux L3 row is kept as an extra end-to-end check. It is not a bar that every
+OS must meet.
 
 ### Process-scoped flag
 
@@ -262,6 +334,30 @@ because the timeout branch took the no-signal helper. Timeout
 enforcement is now delegated uniformly to the watchdog ticker (see
 [Watchdog-driven SIGTERM](#watchdog-driven-sigterm)) for all three paths,
 so a configured `timeout` is always group-targeted and signal-aware.
+
+### Controlled launches (Pi RPC, Codex app-server)
+
+A provider Claudine drives over a control protocol on stdin — managed Pi RPC
+and the Codex app-server, which is what makes a run steerable — is spawned by
+the streaming path and has one extra phase before the loop above: a readiness
+pre-flight (`await_readiness` in
+[`exec/spawn/retained.rs`](../../cli/src/commands/wrap/exec/spawn/retained.rs)).
+
+- **Ctrl+C before the provider is ready** abandons the launch with
+  "interrupted before the provider was ready". The task was never submitted,
+  and the pre-submission fallback (`codex exec`, Pi's JSON mode) is **not**
+  tried: an interrupt is not a launch failure.
+- **After readiness** the child is in the unified wait loop like any other,
+  and Ctrl+C, the watchdogs, and the stop guards terminate its process group
+  exactly as described here.
+- **Stdin stays open until the run settles.** Closing it is not a gentle stop
+  for these providers: Codex's app-server exits `0` and abandons its running
+  turn. Only settlement (the turn ended and the provider reports itself idle)
+  closes stdin; every other ending is a group termination with its usual
+  label.
+
+A steering message never changes this: a steered turn ends, is interrupted,
+or times out on the same clocks and signals as an unsteered one.
 
 ### Per-child SIGINT escalation
 
@@ -491,9 +587,13 @@ provider hooks call into — enforces a per-invocation execution deadline
 When the deadline is exceeded the handler aborts with exit code `124`
 to prevent a slow handler from blocking the parent agent session.
 
-This deadline is enforced by checking elapsed time against the budget at
-each phase boundary, not by `SIGALRM`. There is no signal involvement
-beyond the standard `_exit(124)`.
+The handler's work runs under a Tokio timer (`timeout_at`) armed before any
+work starts, not under `SIGALRM`, and no signal is involved. On the deadline
+the handler prints a one-line diagnostic and returns `124` to the CLI's
+shared shutdown path, which exits with it. That path's delivery drain is
+capped by the same deadline, so a hook `message` still sending cannot keep the
+handler alive past it: a handler that already hit the deadline reports its
+pending deliveries and exits without waiting.
 
 ## Signal-safety rules for new code
 
