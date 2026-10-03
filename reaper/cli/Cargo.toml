@@ -11,3 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 reaper = { path = "../lib" }
+
+[package.metadata.ci.tests]
+tiers = []
+no-tests-reason = "placeholder CLI over the placeholder reaper library"

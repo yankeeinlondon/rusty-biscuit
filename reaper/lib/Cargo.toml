@@ -8,3 +8,7 @@ description = "Deterministic web-page and site context extraction (placeholder; 
 [lib]
 name = "reaper"
 path = "src/lib.rs"
+
+[package.metadata.ci.tests]
+tiers = []
+no-tests-reason = "placeholder library; its implementation is still being specified"

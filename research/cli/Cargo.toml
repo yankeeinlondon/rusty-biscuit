@@ -24,3 +24,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 [package.metadata.benchmarks]
 required = false
 reason = "Thin CLI wrapper around research; no measurable hot paths."
+
+[package.metadata.ci.tests]
+tiers = []
+no-tests-reason = "thin clap front end; behavior is tested in the research library"
