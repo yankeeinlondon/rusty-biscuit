@@ -94,8 +94,9 @@ pub fn description_suffix(description: Option<&str>) -> String {
 }
 
 /// Escape schema text (paths, names, types, descriptions) for splicing into
-/// Prose markup, so it renders exactly as written.
+/// Prose markup, so it renders exactly as written; code spans a description
+/// marks with backticks stay literal.
 #[doc(hidden)]
 pub fn escape_schema_prose(input: &str) -> String {
-    Prose::escape_text(input)
+    Prose::escape_text_outside_code_spans(input)
 }

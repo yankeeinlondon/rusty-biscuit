@@ -334,7 +334,13 @@ fn triggers_command_marks_unset_and_invalid_schemas_dir() {
     root_line(&stdout, "package root", "not in a package");
     root_line(&stdout, "SCHEMAS_DIR", "unset");
 
-    for (value, verdict) in [("", "invalid (empty)"), ("dm-defs", "invalid (not an absolute path)")] {
+    for (value, verdict) in [
+        ("", "invalid (empty)"),
+        ("dm-defs", "invalid (not an absolute path)"),
+        // Markup characters inside the value's code span stay literal and gain
+        // no escaping backslash.
+        ("dm_defs*x*", "invalid (not an absolute path)"),
+    ] {
         let output = process
             .command_builder()
             .plain_terminal(1000, 50)
@@ -345,7 +351,13 @@ fn triggers_command_marks_unset_and_invalid_schemas_dir() {
             .output()
             .unwrap();
         assert!(output.status.success(), "{output:?}");
-        root_line(&stdout_of(&output), "SCHEMAS_DIR", verdict);
+        let stdout = stdout_of(&output);
+        root_line(&stdout, "SCHEMAS_DIR", verdict);
+        let line = stdout
+            .lines()
+            .find(|line| line.contains("SCHEMAS_DIR:"))
+            .unwrap_or_else(|| panic!("no SCHEMAS_DIR line in:\n{stdout}"));
+        assert!(line.contains(value) && !line.contains('\\'), "{line}");
     }
 }
 

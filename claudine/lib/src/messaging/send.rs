@@ -514,9 +514,10 @@ fn redact_webhook_urls(input: &str) -> String {
 }
 
 /// Escape arbitrary error text so it renders exactly as written when embedded
-/// in a `Status::from_prose` body.
+/// in a `Status::from_prose` body; code spans the text marks with backticks
+/// stay literal.
 pub(super) fn prose_escape(text: &str) -> String {
-    biscuit_terminal::components::prose::Prose::escape_text(text)
+    biscuit_terminal::components::prose::Prose::escape_text_outside_code_spans(text)
 }
 
 /// Internal payload structure for the async send task.

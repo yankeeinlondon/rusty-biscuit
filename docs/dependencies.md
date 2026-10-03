@@ -2,6 +2,11 @@
 
 ## Recent Dependency Notes
 
+- `renderable` adds `pulldown-cmark` 0.13 as a **dev-dependency** with
+  `default-features = false` (2026-10-03). It was already in the graph through
+  `darkmatter`, so the lockfile gains one edge and no package. Its tests parse
+  the output of `renderable::markdown::code_span` with a real CommonMark
+  parser to prove every value round-trips as one code span.
 - `biscuit-test-harness` adds a Linux-only `x11rb = "0.13.2"` edge with
   `default-features = false` and only the `xtest` feature (2026-09-28). The
   crate is pure Rust and was already in the graph through `clipboard-rs`, so

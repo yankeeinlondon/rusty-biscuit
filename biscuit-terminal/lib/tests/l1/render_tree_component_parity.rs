@@ -40,10 +40,10 @@
 //!   that the renderer joins with a blank line and re-borders. The visible
 //!   text `— {attribution}` survives on both paths, but its layout differs.
 //! - **`Prose` styling is preserved on the terminal target.**
-//!   `BlockQuote::render_tree()` projects a `Prose` content component
-//!   through `Prose::to_render_nodes`, lifting bold/italic/colored inline
-//!   runs into structured `Strong` / `Emphasis` / styled `Span` nodes that
-//!   the terminal tree renderer lowers back to SGR. Both paths emit the
+//!   `BlockQuote::render_tree()` embeds a `Prose` content component's own
+//!   `Paragraph` and `Code` blocks, whose bold/italic/colored inline runs are
+//!   structured `Strong` / `Emphasis` / styled `Span` nodes that the terminal
+//!   tree renderer lowers back to SGR. Both paths emit the
 //!   same styled words; this token-level parity check focuses on visible
 //!   content presence, but the dedicated
 //!   `test_prose_bold_inline_styling_survives_terminal_tree_render` and
@@ -192,8 +192,8 @@ fn render_tree_component_parity_multiline() {
 
 /// A quote built from a `Prose` component (rich inline content).
 ///
-/// `render_tree()` now projects the `Prose` IR into structured inline
-/// nodes (Strong / Emphasis / styled Span) so styling survives the
+/// `render_tree()` embeds the `Prose` blocks, whose inline nodes
+/// (Strong / Emphasis / styled Span) carry its styling through the
 /// render-tree path on the terminal target. After ANSI-stripping the
 /// *words* match on both paths, which is what this token-level test
 /// asserts; the SGR byte-level guarantee is covered by the dedicated
@@ -307,10 +307,10 @@ fn render_tree_node_matches_render_tree_for_block_quote_with_custom_border() {
 // Stage 3a: nested-component projection inside BlockQuote
 //
 // `BlockQuote::render_tree` runs `project_renderable_content` in
-// `ProjectionMode::Structural` for non-`Prose` content components, so nested
+// `ProjectionMode::Structural` for every content component, so nested
 // `Section`, `List`, `Table`, etc. appear as direct block-level children of
-// the projected `BlockQuote`. Inline content (`String`, `Prose`) still wraps
-// in a single `Paragraph`.
+// the projected `BlockQuote`, and a `Prose` contributes its own blocks. A
+// plain `String` still wraps in a single `Paragraph`.
 //
 // These tests pin the structural contract in both directions:
 //

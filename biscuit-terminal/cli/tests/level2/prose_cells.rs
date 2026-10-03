@@ -1,4 +1,4 @@
-//! Level-2 tests for `StyledProse` table cells in a real terminal emulator.
+//! Level-2 tests for `StyledInlineProse` table cells in a real terminal emulator.
 //!
 //! Styled Prose cells and the cursor-alignment bespoke path are driven through
 //! the `bt table` CLI (`--prose-row`, `--cursor-align`) inside a real WezTerm /
@@ -802,7 +802,7 @@ fn assert_prose_cell_dim_styled<H: TerminalHarness>(harness: &mut H) {
 /// border stay unclickable.
 ///
 /// `cursor_align` selects the cursor-alignment bespoke path, which resolves
-/// `StyledProse` through `Prose::render(term)` before planning — a different
+/// `StyledInlineProse` through `InlineProse::render(term)` before planning — a different
 /// implementation boundary from canonical tree reconstruction. Both paths must
 /// project an equally contained link.
 fn assert_prose_cell_link_styled<H: TerminalHarness>(harness: &mut H, cursor_align: bool) {
@@ -911,7 +911,7 @@ fn assert_mixed_row_alignment<H: TerminalHarness>(harness: &mut H, cursor_align:
     assert_eq!(
         left_or_right_aligned(cells[0]),
         Some("left"),
-        "the StyledProse cell must be left-aligned (content at the left edge): {:?}",
+        "the StyledInlineProse cell must be left-aligned (content at the left edge): {:?}",
         cells[0],
     );
     // Each numeric cell hugs the right edge.

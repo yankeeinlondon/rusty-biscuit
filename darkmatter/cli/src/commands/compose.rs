@@ -653,7 +653,7 @@ pub fn run_compose(
         }) {
             let status = Status::from_prose(format!(
                 "{} <dim>(line {}, inside inserted text)</dim>",
-                Prose::escape_text(&issue.message),
+                Prose::escape_text_outside_code_spans(&issue.message),
                 issue.origin.line,
             ))
             .state(StatusState::Warning);
@@ -888,7 +888,7 @@ fn format_compose_perf_report(
     compose_perf: Option<&darkmatter::markdown::compose::ComposePerfReport>,
 ) -> String {
     use biscuit_terminal::components::block_quote::BlockQuote;
-    use biscuit_terminal::components::prose::Prose;
+    use biscuit_terminal::components::prose::{LineBreaks, Prose};
     use biscuit_terminal::components::renderable::TerminalRenderable as _;
     use biscuit_terminal::components::two_column::TwoColumn;
     use biscuit_terminal::utils::color::{Color, Tailwind};
@@ -953,7 +953,10 @@ fn format_compose_perf_report(
     let title = Prose::new("<b><yellow>Compose Performance</yellow></b>").render_optimistic(None);
 
     // ── Two-column layout ────────────────────────────────────────────
-    let columns = TwoColumn::new(Prose::new(left.trim_end()), Prose::new(right.trim_end()))
+    let columns = TwoColumn::new(
+        Prose::new(left.trim_end()).with_line_breaks(LineBreaks::Hard),
+        Prose::new(right.trim_end()).with_line_breaks(LineBreaks::Hard),
+    )
         .with_left_percent(0.5)
         .with_gap(2);
 

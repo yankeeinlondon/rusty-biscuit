@@ -438,7 +438,7 @@ fn compose_env_anchored_child_is_bounded_by_the_variable() {
     assert!(!escape.status.success(), "stdout: {stdout}");
     assert!(!stdout.contains("outside-content"), "{stdout}");
     assert!(
-        collapsed.contains("relative reference `../../outside.md` leaves file tree"),
+        collapsed.contains("relative reference ../../outside.md leaves file tree"),
         "{collapsed}"
     );
 }

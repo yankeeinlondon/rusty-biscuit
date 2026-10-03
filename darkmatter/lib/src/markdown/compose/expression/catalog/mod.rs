@@ -936,6 +936,8 @@ functions:
             // Phase 5 — link and skill functions
             "link(file)",
             "link(target, desc)",
+            "code_link(file)",
+            "code_link(target, desc)",
             "has_skill(name)",
             "has_local_skill(name)",
         ];

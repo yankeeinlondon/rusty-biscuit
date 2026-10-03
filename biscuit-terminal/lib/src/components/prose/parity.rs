@@ -364,8 +364,23 @@ fn terminal_styled_fenced_code_splits_around_block() {
     // tree validation and the whole span rendered empty.)
     assert_eq!(
         term("<red>before\n```\ncode\n```\nafter</red>"),
-        "\x1b[31mbefore\n\x1b[0m\n\n\x1b[2m```\x1b[0m\n\x1b[2mcode\x1b[0m\n\x1b[2m```\x1b[0m\n\n\x1b[31m\nafter\x1b[0m"
+        "\x1b[31mbefore\x1b[0m\n\n\x1b[2m```\x1b[0m\n\x1b[2mcode\x1b[0m\n\x1b[2m```\x1b[0m\n\n\x1b[31mafter\x1b[0m"
     );
+}
+
+// ── Terminal: code spans ─────────────────────────────────────────────────
+
+#[test]
+fn terminal_code_span_is_dim_without_backticks() {
+    assert_eq!(term("run `md hash` now"), "run \x1b[2mmd hash\x1b[0m now");
+}
+
+#[test]
+fn terminal_code_span_keeps_backticks_without_styling() {
+    let plain = Terminal::builder()
+        .color_depth(crate::discovery::detection::ColorDepth::None)
+        .build();
+    assert_eq!(term_caps("run `md hash` now", &plain), "run `md hash` now");
 }
 
 // ── Terminal: layout, margin, word wrapping ──────────────────────────────
@@ -391,7 +406,23 @@ fn terminal_word_wrap_breaks_long_line() {
 
 #[test]
 fn browser_bold_is_semantic_strong() {
-    assert!(html("<b>x</b>").contains("<strong>x</strong>"));
+    assert_eq!(html("<b>x</b>"), "<p><strong>x</strong></p>");
+}
+
+#[test]
+fn browser_paragraphs_and_code_blocks_are_siblings() {
+    assert_eq!(
+        html("a\nb\n\nc\n```\nx\n```"),
+        "<p>a b</p><p>c</p><pre><code>x</code></pre>"
+    );
+}
+
+#[test]
+fn browser_code_span_is_code_element() {
+    assert_eq!(
+        html("See [`a<b`](https://e.io) and `c`"),
+        r#"<p>See <a href="https://e.io"><code>a&lt;b</code></a> and <code>c</code></p>"#
+    );
 }
 
 #[test]
@@ -512,6 +543,16 @@ fn markdown_link_description_not_double_escaped() {
 #[test]
 fn markdown_unknown_tag_is_escaped_text() {
     assert_eq!(md("<unknown>x</unknown>"), "<unknown>x</unknown>");
+}
+
+#[test]
+fn markdown_code_spans_use_a_safe_fence() {
+    assert_eq!(md("`a` and ``b`c`` and `[d](e)`"), "`a` and ``b`c`` and `[d](e)`");
+}
+
+#[test]
+fn markdown_breaks_and_paragraphs() {
+    assert_eq!(md("a\nb\\\nc\n\n\nd"), "a\nb\\\nc\n\nd");
 }
 
 #[test]

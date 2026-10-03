@@ -136,6 +136,8 @@ In addition to the best practices above, the repository keeps a short journal of
 
 Step 5 says when, and how rarely, an entry may be added.
 
+::file "./_headless-orchestration.md"
+
 ## Task
 
 Your task is to:

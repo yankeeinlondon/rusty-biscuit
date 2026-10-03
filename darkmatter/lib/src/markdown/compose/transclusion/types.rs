@@ -151,6 +151,7 @@ impl biscuit_terminal::errors::BlockError for DeferredSetError {
         &self,
         _term: &biscuit_terminal::terminal::Terminal,
     ) -> biscuit_terminal::components::status_block::StatusBlock {
+        use biscuit_terminal::components::prose::{LineBreaks, Prose};
         use biscuit_terminal::components::status::StatusState;
         use biscuit_terminal::components::status_block::StatusBlock;
         use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
@@ -161,9 +162,9 @@ impl biscuit_terminal::errors::BlockError for DeferredSetError {
                     "DeferredSetError",
                     "invalid set assignment",
                 ))
-                .body(format!(
+                .body(Prose::new(format!(
                     "<dim>Line:</dim> {line}\n<dim>Value:</dim> <cyan>{raw}</cyan>\n<dim>Reason:</dim> {reason}"
-                ))
+                )).with_line_breaks(LineBreaks::Hard))
                 .hint(
                     "Use a JSON5 object like <cyan>set={ key: \"value\" }</cyan> or a property form like <cyan>set.key=\"value\"</cyan>.",
                 ),
@@ -484,7 +485,7 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
         &self,
         _term: &biscuit_terminal::terminal::Terminal,
     ) -> biscuit_terminal::components::status_block::StatusBlock {
-        use biscuit_terminal::components::prose::Prose;
+        use biscuit_terminal::components::prose::{LineBreaks, Prose};
         use biscuit_terminal::components::status::StatusState;
         use biscuit_terminal::components::status_block::StatusBlock;
         use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
@@ -510,8 +511,10 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
                 StatusBlock::new(StatusState::Error)
                     .error_header(ErrorHeader::new("TransclusionError", "directive parse failed"))
                     .body(body)
+                    // The hint is Prose markup: `\` before the newline keeps
+                    // the two lines apart (a bare newline is a soft break).
                     .hint(format!(
-                        "Error: {message}\nCheck syntax: <cyan>::file path=\"...\"</cyan>"
+                        "Error: {message}\\\nCheck syntax: <cyan>::file path=\"...\"</cyan>"
                     ))
             }
 
@@ -633,7 +636,7 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
                         "condition evaluation failed",
                     ))
                     .body(body)
-                    .hint(format!("Error: {}", Prose::escape_text(&cause.to_string())))
+                    .hint(format!("Error: {}", Prose::escape_text_outside_code_spans(&cause.to_string())))
             }
 
             TransclusionError::ConditionParse {
@@ -653,12 +656,12 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
                 StatusBlock::new(StatusState::Error)
                     .error_header(ErrorHeader::new("TransclusionError", "condition parse failed"))
                     .body(body)
-                    .hint(format!("Error: {}", Prose::escape_text(message)))
+                    .hint(format!("Error: {}", Prose::escape_text_outside_code_spans(message)))
             }
 
             TransclusionError::Relevel(message) => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("TransclusionError", "re-leveling failed"))
-                .body(Prose::escape_text(message))
+                .body(Prose::escape_text_outside_code_spans(message))
                 .hint("Check that transcluded headings do not push past H6."),
 
             TransclusionError::UrlExecutionDisabled { url } => StatusBlock::new(StatusState::Error)
@@ -677,7 +680,7 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
                 .body(format!(
                     "Fetching <cyan>{}</cyan> failed: {}",
                     Prose::escape_text(url),
-                    Prose::escape_text(reason)
+                    Prose::escape_text_outside_code_spans(reason)
                 ))
                 .hint("Check the URL, the allowed-hosts policy, and network availability."),
 
@@ -702,7 +705,7 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
                         "invalid frontmatter assignment",
                     ))
                     .body(body)
-                    .hint(format!("Error: {}", Prose::escape_text(reason)))
+                    .hint(format!("Error: {}", Prose::escape_text_outside_code_spans(reason)))
             }
 
             TransclusionError::InvalidReassignedFrontmatterProperty { ctx, line, name } => {
@@ -753,11 +756,11 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
                     "TransclusionError",
                     "JSON5 parse failure in options",
                 ))
-                .body(format!(
+                .body(Prose::new(format!(
                     "{source}\n<dim>Position:</dim> line {}, column {}",
                     source.line(),
                     source.column()
-                ))
+                )).with_line_breaks(LineBreaks::Hard))
                 .hint("Directive options use JSON5; check braces, quoting, and commas."),
         }
     }

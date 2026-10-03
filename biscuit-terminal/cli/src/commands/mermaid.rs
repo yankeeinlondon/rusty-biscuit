@@ -101,6 +101,14 @@ pub fn display_mermaid(
     Ok(())
 }
 
+/// The diagram source as a fenced `mermaid` block.
+///
+/// A fenced block's body is literal, so `instructions` is not escaped:
+/// `Prose::escape_text` here would show its backslashes.
+fn mermaid_source_block(instructions: &str) -> Prose {
+    Prose::new(format!("```mermaid\n{instructions}\n```"))
+}
+
 /// Handle Mermaid rendering errors with user-friendly output.
 pub fn handle_mermaid_error(
     error: biscuit_terminal::components::mermaid::MermaidRenderError,
@@ -121,16 +129,13 @@ pub fn handle_mermaid_error(
             let mut section = Section::new(HeadingLevel::h3, "Error");
             section.push(Prose::new(format!(
                 "<red><b>Error:</b></red> {}",
-                Prose::escape_text(&viz_err.to_string())
+                Prose::escape_text_outside_code_spans(&viz_err.to_string())
             )));
             section.push(Prose::new(format!(
                 "<dim>Mermaid {} was defined as:</dim>",
                 diagram_type
             )));
-            section.push(Prose::new(format!(
-                "```mermaid\n{}\n```",
-                Prose::escape_text(instructions)
-            )));
+            section.push(mermaid_source_block(instructions));
             eprintln!("{}", section.render(term));
             Err(color_eyre::eyre::eyre!("{}", viz_err))
         }
@@ -138,10 +143,31 @@ pub fn handle_mermaid_error(
             let mut section = Section::new(HeadingLevel::h3, "Error");
             section.push(Prose::new(format!(
                 "<red><b>Error:</b></red> Failed to display image: {}",
-                Prose::escape_text(msg)
+                Prose::escape_text_outside_code_spans(msg)
             )));
             eprintln!("{}", section.render(term));
             Err(color_eyre::eyre::eyre!("Failed to display image: {}", msg))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use biscuit_terminal::discovery::detection::ColorDepth;
+
+    #[test]
+    fn mermaid_source_block_shows_the_diagram_source_verbatim() {
+        let instructions = "flowchart LR\n    A[Start] --> B{Ok?}\n    B -->|yes| C(Done_1)";
+
+        let term = Terminal::builder()
+            .width(120)
+            .color_depth(ColorDepth::None)
+            .build();
+
+        let rendered = mermaid_source_block(instructions).render(&term);
+
+        assert!(rendered.contains(instructions), "source not verbatim: {rendered:?}");
+        assert!(!rendered.contains('\\'), "stray escape backslash: {rendered:?}");
     }
 }

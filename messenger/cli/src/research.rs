@@ -170,7 +170,7 @@ pub fn run(args: ResearchArgs, snapshot: std::io::Result<RequestSnapshot>) -> i3
             if json {
                 println!("{}", pretty(&json!({ "error": message })));
             } else {
-                eprint!("{}", Prose::new(format!("<b>error:</b> {}", Prose::escape_text(&message))).render(&terminal()));
+                eprint!("{}", Prose::new(format!("<b>error:</b> {}", Prose::escape_text_outside_code_spans(&message))).render(&terminal()));
                 eprintln!();
             }
             EXIT_UNAVAILABLE

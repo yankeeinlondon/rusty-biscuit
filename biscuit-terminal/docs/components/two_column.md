@@ -38,6 +38,10 @@ println!("{}", cols.display(&term));
 | `.with_left_percent(f32)` | Set left column as percentage (0.0..=1.0) |
 | `.with_gap(u32)` | Set gap between columns (default: 3) |
 
+### Prose Columns
+
+Each column is a block region, so it takes the block [`Prose`](./prose.md): the Prose's paragraphs and fenced code blocks become the column's blocks, with their inline styling intact on the terminal, browser, and MarkdownPlus targets. A plain string or other inline content is wrapped in one paragraph.
+
 ### ColumnWidth
 
 | Variant | Description |

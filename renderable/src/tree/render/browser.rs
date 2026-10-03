@@ -610,7 +610,7 @@ impl Writer<'_> {
                 if let Some(hints) = node.attrs.progress_hints_ref() {
                     self.render_progress(node, hints, children)
                 } else {
-                    self.block(BlockTag::P, &node.attrs, children)
+                    self.block(paragraph_tag(&node.attrs), &node.attrs, children)
                 }
             }
             NodeKind::BlockQuote { children } => {
@@ -1693,7 +1693,7 @@ impl StreamWriter<'_> {
                     self.write_progress(node, hints, children);
                     Ok(())
                 } else {
-                    self.block(BlockTag::P, &node.attrs, children)
+                    self.block(paragraph_tag(&node.attrs), &node.attrs, children)
                 }
             }
             NodeKind::BlockQuote { children } => {
@@ -2985,6 +2985,16 @@ fn push_browser_attributes(out: &mut Vec<HtmlAttribute>, attrs: &NodeAttrs) {
             value.clone(),
         ));
     }
+}
+
+/// The element a non-progress [`NodeKind::Paragraph`] renders as: its
+/// [`BlockElement`](crate::tree::BlockElement) browser attribute, `<p>` by
+/// default. Shared by the fragment and streaming writers so they cannot
+/// disagree.
+fn paragraph_tag(attrs: &NodeAttrs) -> BlockTag {
+    attrs
+        .browser_ref()
+        .map_or(BlockTag::P, |browser| browser.block_element.block_tag())
 }
 
 /// Whether a [`Layout`](crate::layout::Layout) lowers a non-default `width` or
@@ -4812,6 +4822,94 @@ mod tests {
             assert_eq!(direct.output, via_page, "byte mismatch under {mode:?}");
         }
     }
+
+    fn paragraph_with_block_element(element: crate::tree::BlockElement) -> RenderNode {
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("x")]);
+        para.attrs.browser_mut_or_default().block_element = element;
+        para.attrs.retain_non_default_browser();
+        para
+    }
+
+    /// Every block element renders as its own tag, identically through the
+    /// fragment writer and the streaming document writer, and two paragraphs
+    /// sharing a tag render as two sibling elements.
+    #[test]
+    fn paragraph_block_element_matches_in_fragment_and_streaming_paths() {
+        for element in crate::tree::BlockElement::ALL {
+            let tag = element.block_tag().name();
+            let expected = format!("<{tag}>x</{tag}>");
+
+            let fragment = html(&paragraph_with_block_element(element));
+            assert_eq!(fragment, expected, "fragment path for {element:?}");
+
+            let doc = Document {
+                sources: SourceRegistry::default(),
+                metadata: DocumentMetadata::default(),
+                root: RenderNode::root(vec![
+                    paragraph_with_block_element(element),
+                    paragraph_with_block_element(element),
+                ]),
+            };
+            let opts = BrowserRenderOptions::default();
+            let streamed = render_browser_document_body(&doc, &opts)
+                .expect("streaming render")
+                .output;
+            assert_eq!(streamed.body, format!("{expected}{expected}"), "{element:?}");
+            let via_page = render_browser_document(&doc, &opts)
+                .expect("fragment render")
+                .output
+                .render()
+                .expect("fragment render");
+            assert_eq!(streamed.document, via_page, "byte mismatch for {element:?}");
+        }
+    }
+
+    /// The block element changes only the element name: other browser
+    /// attributes and node styling still land on it.
+    #[test]
+    fn paragraph_block_element_keeps_other_browser_attributes() {
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("x")]);
+        let browser = para.attrs.browser_mut_or_default();
+        browser.block_element = crate::tree::BlockElement::Aside;
+        browser
+            .data_attrs
+            .insert(crate::tree::DataAttrName::new("role").unwrap(), "note".into());
+        assert_eq!(html(&para), r#"<aside data-role="note">x</aside>"#);
+    }
+
+    /// A paragraph serialized before the block-element attribute existed (no
+    /// `block_element` key) deserializes to the default and renders `<p>`; an
+    /// unknown element name is rejected at deserialization, never mapped to a
+    /// default.
+    #[test]
+    fn paragraph_without_block_element_field_keeps_p() {
+        // A default block element is omitted on write, so this serialization
+        // is byte-identical to one written before the field existed.
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("x")]);
+        para.attrs
+            .browser_mut_or_default()
+            .data_attrs
+            .insert(crate::tree::DataAttrName::new("role").unwrap(), "note".into());
+        let legacy = serde_json::to_string(&para).unwrap();
+        assert!(!legacy.contains("block_element"), "{legacy}");
+
+        let node: RenderNode = serde_json::from_str(&legacy).expect("legacy node");
+        assert_eq!(
+            node.attrs.browser_ref().map(|b| b.block_element),
+            Some(crate::tree::BlockElement::P)
+        );
+        assert_eq!(html(&node), r#"<p data-role="note">x</p>"#);
+
+        let explicit = legacy.replace(r#""data_attrs""#, r#""block_element":"div","data_attrs""#);
+        let node: RenderNode = serde_json::from_str(&explicit).expect("explicit element");
+        assert_eq!(html(&node), r#"<div data-role="note">x</div>"#);
+
+        let unknown = legacy.replace(r#""data_attrs""#, r#""block_element":"blockquote","data_attrs""#);
+        assert!(serde_json::from_str::<RenderNode>(&unknown).is_err());
+        let wrong_type = legacy.replace(r#""data_attrs""#, r#""block_element":1,"data_attrs""#);
+        assert!(serde_json::from_str::<RenderNode>(&wrong_type).is_err());
+    }
+
 
     /// The `<title>` must fall back to the first `<h1>` text exactly as the
     /// fragment-page path does, including when the heading carries nested

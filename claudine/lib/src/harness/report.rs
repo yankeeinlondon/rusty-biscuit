@@ -22,12 +22,13 @@ fn emit_status(markup: &str, state: StatusState, term: &Terminal) {
 /// Escape user-controlled text (file references, file names, shell commands,
 /// recovery messages) so Prose renders it exactly as written.
 ///
-/// Delegates to [`Prose::escape_text`], which also neutralizes Markdown
-/// emphasis and code delimiters: a hand-rolled escaper that skipped `_` and `*`
-/// rendered `_draft_.md` as an italic `draft.md`. For an attribute value such
-/// as an `href`, use [`Prose::quoted_attr`] instead.
+/// Delegates to [`Prose::escape_text_outside_code_spans`], which neutralizes
+/// Markdown emphasis and tags (a hand-rolled escaper that skipped `_` and `*`
+/// rendered `_draft_.md` as an italic `draft.md`) while leaving a code span the
+/// text marks with backticks literal. For an attribute value such as an
+/// `href`, use [`Prose::quoted_attr`] instead.
 pub fn prose_escape(s: &str) -> String {
-    Prose::escape_text(s)
+    Prose::escape_text_outside_code_spans(s)
 }
 
 /// Emit the source-file existence status.

@@ -207,7 +207,7 @@ impl BlockError for DocumentArgumentError {
             Prose::escape_text(&self.argument)
         ))];
         if let Some(source) = &self.source {
-            body.push(Prose::new(Prose::escape_text(&source.to_string())));
+            body.push(Prose::new(Prose::escape_text_outside_code_spans(&source.to_string())));
         }
         body.push(resolution_failure_row(self.failure));
         let hint = if let Some(glob_hint) = self.failure.glob_hint(&self.argument) {

@@ -25,7 +25,7 @@ pub use crate::components::metrics_tree::{
 };
 pub use crate::components::pad::{PadLeft, PadRight};
 pub use crate::components::progress::Progress;
-pub use crate::components::prose::Prose;
+pub use crate::components::prose::{InlineProse, LineBreaks, Prose, ProseTag};
 pub use crate::components::renderable::{
     BrowserRenderable, RenderableTerminalContent, TerminalRenderable,
 };

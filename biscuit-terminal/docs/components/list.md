@@ -62,6 +62,21 @@ list.add(Prose::new("<bold>Important</bold> item"))
 
 Both list types automatically configure hanging indent on child components so that wrapped continuation lines align with the text after the bullet/number prefix, not the margin.
 
+### Prose Items
+
+A list item holds blocks, as a Markdown list item does, so a list item takes the block [`Prose`](./prose.md). Its first paragraph sits on the marker line and wraps with the hanging indent; each further paragraph or fenced code block follows as its own block, indented under the item.
+
+```rust
+let mut list = UnorderedList::empty();
+list.add(Prose::new("<b>Install</b> the tool.\n\nThen run `md hash`."));
+// Markdown:
+// - **Install** the tool.
+//
+//   Then run `md hash`.
+```
+
+A layout set on the `Prose` (for example `with_left_margin`) moves onto the Prose's own blocks, never onto the list item, so the marker does not move. The terminal list renderer places the marker line itself and does not apply that layout; the browser target does. Plain strings are added literally; their markup is not parsed.
+
 ## CLI
 
 Exposed via `bt list`:

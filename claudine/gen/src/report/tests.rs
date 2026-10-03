@@ -100,3 +100,13 @@ fn wrote_line_renders_windows_shaped_path_portably() {
     let out = wrote(&plain(), &PathBuf::from(r"C:\repo\generated\data.rs"));
     assert!(out.contains("C:/repo/generated/data.rs"), "{out:?}");
 }
+
+#[test]
+fn unrecognized_answer_renders_literally_in_its_code_span() {
+    // A code span's contents are literal, so the typed answer is fenced, not
+    // Prose-escaped; a backtick in the answer widens the fence.
+    let out = prompt_unrecognized(&plain(), r"_a_[x]{{y}}a\b");
+    assert_eq!(out, "unrecognized `_a_[x]{{y}}a\\b` — expected y, n, or q\n");
+    let out = prompt_unrecognized(&plain(), "a`b");
+    assert_eq!(out, "unrecognized ``a`b`` — expected y, n, or q\n");
+}

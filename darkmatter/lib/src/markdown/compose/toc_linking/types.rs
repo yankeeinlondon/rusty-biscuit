@@ -71,6 +71,7 @@ impl biscuit_terminal::errors::BlockError for TocLinkingError {
         &self,
         _term: &biscuit_terminal::terminal::Terminal,
     ) -> biscuit_terminal::components::status_block::StatusBlock {
+        use biscuit_terminal::components::prose::{LineBreaks, Prose};
         use biscuit_terminal::components::status::StatusState;
         use biscuit_terminal::components::status_block::StatusBlock;
         use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
@@ -81,9 +82,9 @@ impl biscuit_terminal::errors::BlockError for TocLinkingError {
                     "TocLinkingError",
                     "directive parse failed",
                 ))
-                .body(format!(
+                .body(Prose::new(format!(
                     "<dim>Line:</dim> {line}\n<dim>Message:</dim> {message}"
-                ))
+                )).with_line_breaks(LineBreaks::Hard))
                 .hint("Syntax: <cyan>::toc-linking ./doc.md levels=2,3 cleanup=number,capitalize</cyan>."),
 
             TocLinkingError::InvalidCleanupService { service, line } => {
@@ -103,22 +104,22 @@ impl biscuit_terminal::errors::BlockError for TocLinkingError {
                         "TocLinkingError",
                         "invalid cleanup service",
                     ))
-                    .body(format!(
+                    .body(Prose::new(format!(
                         "<dim>Service:</dim> <cyan>{service}</cyan>\n<dim>Line:</dim> {line}\n<dim>Valid services:</dim>\n{valid}"
-                    ))
+                    )).with_line_breaks(LineBreaks::Hard))
                     .hint("Pass a comma-separated list of valid service names to <cyan>cleanup=</cyan>.")
             }
 
             TocLinkingError::InvalidLevel { level, line } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("TocLinkingError", "invalid heading level"))
-                .body(format!(
+                .body(Prose::new(format!(
                     "<dim>Level:</dim> <cyan>{level}</cyan>\n<dim>Line:</dim> {line}"
-                ))
+                )).with_line_breaks(LineBreaks::Hard))
                 .hint("Heading levels must be integers between <cyan>1</cyan> and <cyan>6</cyan>."),
 
             TocLinkingError::Unresolved { path, line, failure, glob_hint } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("TocLinkingError", "file reference failure"))
-                .body(
+                .body(Prose::new(
                     [
                         Some(format!("<dim>Path:</dim> <cyan>{path}</cyan>\n<dim>Line:</dim> {line}")),
                         failure.map(|failure| {
@@ -133,22 +134,22 @@ impl biscuit_terminal::errors::BlockError for TocLinkingError {
                     .flatten()
                     .collect::<Vec<_>>()
                     .join("\n"),
-                )
+                ).with_line_breaks(LineBreaks::Hard))
                 .hint("Add a <cyan>| fallback.md</cyan> option or end the chain with <cyan>| false</cyan> to allow missing files."),
 
             TocLinkingError::InvalidGlob { pattern, line, message } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("TocLinkingError", "invalid glob pattern"))
-                .body(format!(
+                .body(Prose::new(format!(
                     "<dim>Pattern:</dim> <cyan>{pattern}</cyan>\n<dim>Line:</dim> {line}\n<dim>Message:</dim> {message}"
-                ))
+                )).with_line_breaks(LineBreaks::Hard))
                 .hint("See the globset crate docs for supported pattern syntax."),
 
             TocLinkingError::Io(source) => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("TocLinkingError", "I/O error"))
-                .body(format!(
+                .body(Prose::new(format!(
                     "<dim>Kind:</dim> {:?}\n{source}",
                     source.kind()
-                ))
+                )).with_line_breaks(LineBreaks::Hard))
                 .hint("Confirm the referenced file exists and is readable."),
         }
     }

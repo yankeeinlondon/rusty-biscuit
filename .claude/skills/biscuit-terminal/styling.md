@@ -46,10 +46,19 @@ let text = curly_underline("error", &term);
 
 ## Prose Component
 
-The `Prose` struct allows styled text with bracketed tags and a Markdown subset.
-It parses directly into the shared `renderable::tree::RenderNode` tree and
-renders Terminal, Browser, Markdown, and MarkdownPlus through the shared tree
-renderers — it carries no component-local IR.
+Two components share one grammar (bracketed tags plus a Markdown subset) and
+parse directly into the shared `renderable::tree::RenderNode` tree; Terminal,
+Browser, Markdown, and MarkdownPlus all render through the shared tree
+renderers, with no component-local IR.
+
+- **`Prose`** is **block** content: paragraphs (split on blank lines) and
+  fenced code blocks under a `Root`, with a `Layout` applied on every target
+  (CSS in HTML) and a `ProseTag` choosing each paragraph's HTML element
+  (default `<p>`). Use it for anything printed as its own message.
+- **`InlineProse`** is **inline**: one neutral `Span` of phrasing nodes, no
+  layout builders, no outer HTML element. Use it for table cells, labels,
+  badges, and values inside a line. A fenced block in it becomes one
+  `InlineCode` (language dropped, line endings → spaces).
 
 ```rust
 use biscuit_terminal::components::prose::Prose;
@@ -63,8 +72,27 @@ let output = prose.render_optimistic(None);
 // With builder pattern
 let prose = Prose::new("<b>Important</b> message")
     .with_word_wrap(WordWrap::WrapProse(None, None))
-    .with_left_margin(Margin::Chars(4));
+    .with_left_margin(TargetValue::universal(Length::ch(4)))
+    .with_tag(ProseTag::Div);
+
+// Inline content
+let cell = InlineProse::new("run `md hash`");
 ```
+
+### Newlines
+
+Markdown rules, the same in both components:
+
+| Input | Meaning |
+|---|---|
+| single `\n` | soft break (a space on terminal/HTML), spaces around it dropped |
+| two or more `\n` (only spaces/tabs between) | paragraph boundary in `Prose`; one soft break in `InlineProse` |
+| `\` before `\n` (Rust: `"a\\\nb"`) | hard break (`<br>`; Markdown `\` + newline) |
+| trailing spaces before `\n` | **not** a hard break |
+
+CRLF and lone CR are read as LF. Text that uses single `\n` as line breaks
+needs `.with_line_breaks(LineBreaks::Hard)` (on either component); without it
+the lines join.
 
 ### Block Tags
 
@@ -144,7 +172,7 @@ A strict CommonMark subset is recognised in addition to block tags. Markdown for
 | `**text**`      | `<b>text</b>`                  |
 | `_text_`        | `<i>text</i>`                  |
 
-Strict subset — `__bold__` and `*italics*` are **not** recognised; both pass through as literal text. The pre-processor runs in a fixed order: fenced code blocks → code spans → links → bold → italics → block-tag parser. Link URLs are placeholdered before the bold/italics phases so a URL like `https://example.com/path_with_underscores` is never re-interpreted. An inline code span (`` `x_y` ``) keeps its backticks and is opaque: nothing inside it is interpreted.
+Strict subset — `__bold__` and `*italics*` are **not** recognised; both pass through as literal text. The pre-processor runs in a fixed order: fenced code blocks → code spans → links → bold → italics → block-tag parser. Link URLs are placeholdered before the bold/italics phases so a URL like `https://example.com/path_with_underscores` is never re-interpreted. A code span (`` `x_y` ``) is opaque and becomes `NodeKind::InlineCode`: terminal dim (or theme colors) without backticks, HTML `<code>`, Markdown a safe backtick fence. Its value follows CommonMark: backslashes literal (`` `a\_b` `` shows `a\_b`), line endings → spaces, one edge space stripped when both edges have one. A span never crosses a paragraph boundary. On a terminal that emits no styling, inline code keeps a backtick fence. `` [`desc`](ref) `` is a link with code text; `` `[desc](ref)` `` is literal code (darkmatter's `code_link()` emits the former).
 
 #### Flanking rules
 
@@ -160,11 +188,11 @@ Strict subset — `__bold__` and `*italics*` are **not** recognised; both pass t
 | `**_pr/a.md** **_pr/b.md**` | `<b>_pr/a.md</b> <b>_pr/b.md</b>` | No valid closer for either `_` |
 | `<dim>=OPENCODE_CONFIG_CONTENT</dim>` | unchanged | Tag wrapper preserved; intra-word `_` not triggered inside body |
 
-**Practical consequence for callers:** author text, identifiers, paths, and error messages spliced into a Prose format string go through `Prose::escape_text` (attribute values through `Prose::quoted_attr`). Do not hand-roll a partial escaper; one that skips `_`, `*`, or `[` lets `_draft_` become italics.
+**Practical consequence for callers:** author text, identifiers, paths, and error messages spliced into a Prose format string go through `Prose::escape_text` (attribute values through `Prose::quoted_attr`). Do not hand-roll a partial escaper; one that skips `_`, `*`, or `[` lets `_draft_` become italics. **Never** escape text placed inside a code span: the span is opaque, so the escape's backslashes would show. Fence a dynamic value with `renderable::markdown::code_span(value)` instead of hand-written backticks; it widens the fence when the value holds a backtick.
 
 #### Escape mechanism
 
-A backslash escapes the immediately following character. Escapable: `* _ [ ] ( ) < > { \`. `Prose::escape_text` applies it to every escapable character.
+Outside code spans, a backslash escapes the immediately following character. Escapable: `* _ [ ] ( ) < > { \`. `Prose::escape_text` applies it to every escapable character. Inside a code span backslashes are literal.
 
 ```
 \_text\_  →  _text_   (literal underscores, no italics)
@@ -174,14 +202,12 @@ A backslash escapes the immediately following character. Escapable: `* _ [ ] ( )
 
 ### Prose Options
 
-```rust
-pub struct Prose {
-    content: String,
-    word_wrap: bool,           // Default: true
-    margin_left: Option<u32>,  // Left padding
-    margin_right: Option<u32>, // Right padding
-}
-```
+`Prose`: `new`, `content`, `with_line_breaks(LineBreaks)`, `with_tag(ProseTag)`,
+`with_word_wrap`, `with_left_margin` / `with_right_margin`, and the
+`TerminalRenderable` layout helpers (`with_layout`, `alignment`).
+`InlineProse`: `new`, `content`, `with_line_breaks`, `to_render_nodes`; it
+stores a `Layout` only because the trait requires one, and logs a warning if
+it is non-default. Both have `escape_text` and `quoted_attr`.
 
 ## Manual Styling
 

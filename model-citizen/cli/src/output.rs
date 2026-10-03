@@ -1,6 +1,6 @@
 //! Output formatting and presentation logic for CLI commands.
 
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::InlineProse;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::{
     ColumnType, Conditional, Table, TableCellContent, TableColumn,
@@ -31,15 +31,16 @@ pub fn print_models(
         let term = Terminal::default();
 
         let mut columns = vec![
-            TableColumn::new(Prose::new("Name").render(&term)),
-            TableColumn::new(Prose::new("Quant").render(&term)).with_alignment(Alignment::Center),
-            TableColumn::new(Prose::new("Size").render(&term))
+            TableColumn::new(InlineProse::new("Name").render(&term)),
+            TableColumn::new(InlineProse::new("Quant").render(&term))
+                .with_alignment(Alignment::Center),
+            TableColumn::new(InlineProse::new("Size").render(&term))
                 .with_type(ColumnType::String)
                 .with_alignment(Alignment::Right),
-            TableColumn::new(Prose::new("Arch").render(&term))
+            TableColumn::new(InlineProse::new("Arch").render(&term))
                 .with_alignment(Alignment::Center)
                 .with_when(Conditional::WidthGreaterThan(89)),
-            TableColumn::new(Prose::new("Source").render(&term))
+            TableColumn::new(InlineProse::new("Source").render(&term))
                 .with_alignment(Alignment::Center)
                 .with_when(Conditional::WidthGreaterThan(69)),
         ];
@@ -47,12 +48,12 @@ pub fn print_models(
         if verbose {
             columns.insert(
                 1,
-                TableColumn::new(Prose::new("Params").render(&term))
+                TableColumn::new(InlineProse::new("Params").render(&term))
                     .with_alignment(Alignment::Center),
             );
             columns.insert(
                 5,
-                TableColumn::new(Prose::new("Format").render(&term))
+                TableColumn::new(InlineProse::new("Format").render(&term))
                     .with_alignment(Alignment::Center),
             );
         }
@@ -62,7 +63,7 @@ pub fn print_models(
         for m in models {
             let name_cell = if let Some(repo) = m.metadata.huggingface_repo.as_deref() {
                 let name_link = format!("<a href=\"https://huggingface.co/{repo}\">{}</a>", m.name);
-                TableCellContent::Text(Prose::new(name_link).render(&term))
+                TableCellContent::Text(InlineProse::new(name_link).render(&term))
             } else {
                 TableCellContent::Text(m.name.clone())
             };
@@ -283,23 +284,26 @@ pub fn print_search_results(
         let show_modified = verbose || sort == SortOrder::Modified;
 
         let mut columns = vec![
-            TableColumn::new(Prose::new("Repository").render(&term)),
+            TableColumn::new(InlineProse::new("Repository").render(&term)),
             TableColumn::new(
-                Prose::new(sort_header("Downloads", sort == SortOrder::Downloads)).render(&term),
+                InlineProse::new(sort_header("Downloads", sort == SortOrder::Downloads))
+                    .render(&term),
             )
             .with_type(ColumnType::Integer),
             TableColumn::new(
-                Prose::new(sort_header("Likes", sort == SortOrder::Likes)).render(&term),
+                InlineProse::new(sort_header("Likes", sort == SortOrder::Likes)).render(&term),
             )
             .with_type(ColumnType::Integer),
-            TableColumn::new(Prose::new("G").render(&term)).with_alignment(Alignment::Center),
-            TableColumn::new(Prose::new("ST").render(&term)).with_alignment(Alignment::Center),
-            TableColumn::new(Prose::new("Tags").render(&term)),
+            TableColumn::new(InlineProse::new("G").render(&term)).with_alignment(Alignment::Center),
+            TableColumn::new(InlineProse::new("ST").render(&term))
+                .with_alignment(Alignment::Center),
+            TableColumn::new(InlineProse::new("Tags").render(&term)),
         ];
         if show_created {
             columns.push(
                 TableColumn::new(
-                    Prose::new(sort_header("Created", sort == SortOrder::Created)).render(&term),
+                    InlineProse::new(sort_header("Created", sort == SortOrder::Created))
+                        .render(&term),
                 )
                 .with_alignment(Alignment::Center),
             );
@@ -307,7 +311,8 @@ pub fn print_search_results(
         if show_modified {
             columns.push(
                 TableColumn::new(
-                    Prose::new(sort_header("Modified", sort == SortOrder::Modified)).render(&term),
+                    InlineProse::new(sort_header("Modified", sort == SortOrder::Modified))
+                        .render(&term),
                 )
                 .with_alignment(Alignment::Center),
             );
@@ -321,10 +326,10 @@ pub fn print_search_results(
             let blank = TableCellContent::Text(String::new());
             let tags_markup = format_tags(r);
             let neither = !r.has_gguf() && !r.has_safetensors();
-            let dot = Prose::new("<red-500>\u{23fa}</red-500>").render(&term);
+            let dot = InlineProse::new("<red-500>\u{23fa}</red-500>").render(&term);
 
             let mut row = vec![
-                Prose::new(&repo_link).render(&term).into(),
+                InlineProse::new(&repo_link).render(&term).into(),
                 TableCellContent::Integer(r.downloads as i64),
                 TableCellContent::Integer(r.likes as i64),
                 if r.has_gguf() {
@@ -341,7 +346,7 @@ pub fn print_search_results(
                 } else {
                     blank
                 },
-                Prose::new(&tags_markup).render(&term).into(),
+                InlineProse::new(&tags_markup).render(&term).into(),
             ];
             if show_created {
                 row.push(format_date(&r.created_at));
@@ -456,5 +461,36 @@ mod tests {
           }
         ]
         "###);
+    }
+
+    #[test]
+    fn search_result_cells_render_as_single_line_inline_text() {
+        // Arrange
+        let result = SearchResult {
+            repo_id: "TheBloke/Llama-2-7B-GGUF".to_string(),
+            author: None,
+            downloads: 0,
+            likes: 0,
+            variant_count: 0,
+            created_at: None,
+            last_modified: None,
+            tags: vec!["gguf".to_string(), "mlx".to_string(), "tool-use".to_string()],
+            pipeline_tag: Some("image-text-to-text".to_string()),
+        };
+        let term = Terminal::builder()
+            .is_tty(false)
+            .color_depth(biscuit_terminal::discovery::detection::ColorDepth::None)
+            .osc_link_support(false)
+            .build();
+
+        // Act
+        let repo = InlineProse::new(format_repo_link(&result.repo_id)).render(&term);
+        let tags = InlineProse::new(format_tags(&result)).render(&term);
+
+        // Assert
+        let repo = biscuit_terminal::prelude::strip_escape_codes(repo);
+        let tags = biscuit_terminal::prelude::strip_escape_codes(tags);
+        assert_eq!(repo, "TheBloke/Llama-2-7B-GGUF");
+        assert_eq!(tags, " image input   mlx   tool ");
     }
 }

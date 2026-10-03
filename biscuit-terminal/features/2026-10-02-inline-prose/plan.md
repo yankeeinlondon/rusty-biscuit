@@ -4,6 +4,142 @@ created: 2026-10-03
 phase: 1
 agent: claude/sonnet
 yolo: true
+source_files_during_phase_2:
+    - renderable/Cargo.toml
+    - renderable/src/markdown.rs
+    - renderable/src/tree/attrs.rs
+    - renderable/src/tree/mod.rs
+    - renderable/src/tree/render/browser.rs
+    - renderable/src/tree/render/markdown.rs
+    - renderable/src/tree/validate.rs
+    - Cargo.lock
+docs_updated_during_phase_2:
+    - renderable/docs/tree-rendering.md
+    - docs/dependencies.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/renderable/tree.md
+    - .claude/skills/renderable/markdown.md
+source_files_during_phase_3:
+    - biscuit-terminal/lib/src/components/prose/blocks.rs
+    - biscuit-terminal/lib/src/components/prose/inline_prose.rs
+    - biscuit-terminal/lib/src/components/prose/markdown.rs
+    - biscuit-terminal/lib/src/components/prose/tokens.rs
+    - biscuit-terminal/lib/src/components/prose/prose.rs
+    - biscuit-terminal/lib/src/components/prose/tree.rs
+    - biscuit-terminal/lib/src/components/prose/mod.rs
+    - biscuit-terminal/lib/src/components/prose/parity.rs
+    - biscuit-terminal/lib/src/render_tree/render.rs
+    - biscuit-terminal/lib/src/render_tree/projection.rs
+    - biscuit-terminal/lib/src/components/table/table.rs
+    - biscuit-terminal/lib/src/components/metrics_tree.rs
+    - biscuit-terminal/lib/src/components/block_quote.rs
+    - biscuit-terminal/lib/src/components/list.rs
+    - biscuit-terminal/lib/src/prelude.rs
+    - biscuit-terminal/lib/tests/l1/prose_grammar.rs
+    - biscuit-terminal/lib/tests/l1/main.rs
+    - biscuit-terminal/lib/tests/l1/prelude_exports.rs
+    - biscuit-terminal/lib/tests/l1/prose_cells_parity.rs
+    - "biscuit-terminal/lib/tests/l1/snapshots/l1__layout_matrix__MetricsTree__*.snap (38 files)"
+    - biscuit-terminal/cli/src/commands/prose.rs
+    - biscuit-terminal/cli/tests/l1/integration_test.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/biscuit-terminal/SKILL.md
+source_files_during_phase_4:
+    - biscuit-terminal/lib/src/components/prose/tree.rs
+    - biscuit-terminal/lib/src/components/prose/render.rs
+    - biscuit-terminal/lib/src/render_tree/projection.rs
+    - biscuit-terminal/lib/src/render_tree/render.rs
+    - biscuit-terminal/lib/src/components/list.rs
+    - biscuit-terminal/lib/src/components/block_quote.rs
+    - biscuit-terminal/lib/src/components/two_column.rs
+    - biscuit-terminal/lib/src/components/status_block.rs
+    - biscuit-terminal/lib/src/components/inline_content.rs
+    - biscuit-terminal/lib/src/components/compose.rs
+    - biscuit-terminal/lib/src/components/table/cell.rs
+    - biscuit-terminal/lib/src/components/table/column.rs
+    - biscuit-terminal/lib/src/components/table/table.rs
+    - biscuit-terminal/lib/tests/l1/main.rs
+    - biscuit-terminal/lib/tests/l1/prose_containers.rs
+    - biscuit-terminal/lib/tests/l1/prose_cells_parity.rs
+    - biscuit-terminal/lib/tests/l1/status_block_parity.rs
+    - biscuit-terminal/lib/tests/l1/unordered_list_parity.rs
+    - biscuit-terminal/lib/tests/l1/ordered_list_parity.rs
+    - biscuit-terminal/lib/tests/l1/render_tree_component_parity.rs
+    - biscuit-terminal/lib/tests/l1/inline_content_matrix.rs
+    - biscuit-terminal/lib/tests/inline_content_matrix_support/mod.rs
+    - biscuit-terminal/cli/src/commands/table.rs
+    - biscuit-terminal/cli/tests/level2/prose_cells.rs
+    - renderable/src/tree/attrs.rs
+    - biscuit-icon/cli/src/commands.rs
+    - biscuit-icon/cli/src/sets_table.rs
+    - darkmatter/cli/src/commands/schema/about.rs
+    - claudine/cli/src/commands/steer/render.rs
+docs_updated_during_phase_4:
+    - biscuit-terminal/docs/components/table.md
+    - biscuit-terminal/docs/components/inline_content.md
+    - biscuit-terminal/docs/components/list.md
+    - biscuit-terminal/docs/components/block_quote.md
+    - biscuit-terminal/docs/components/two_column.md
+    - biscuit-terminal/lib/src/components/table/README.md
+    - biscuit-terminal/README.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/biscuit-terminal/SKILL.md
+    - .claude/skills/biscuit-terminal/components.md
+source_files_during_phase_5:
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/paths.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/parser.rs
+    - darkmatter/docs/schemas/expression-functions.yaml
+    - darkmatter/lib/tests/l1/code_link.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__link__unrecognized_format.snap
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - darkmatter/dmls/tests/fixtures/mapping_only_corpus/_reviews__review-spec-inline.md
+    - claudine/cli/tests/l1/context_command.rs
+    - claudine/cli/tests/fixtures/nested_span_regression/review-spec-inline.md
+    - prompts/plan.md
+    - prompts/_reviews/review-spec-inline.md
+docs_updated_during_phase_5:
+    - darkmatter/docs/topics/darkmatter-expressions.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/darkmatter/compose.md
+source_files_during_phase_6:
+    - biscuit-terminal/cli/src/commands/prose.rs
+    - biscuit-terminal/cli/src/commands/section.rs
+    - biscuit-terminal/cli/src/commands/list.rs
+    - biscuit-terminal/cli/src/commands/shared.rs
+    - biscuit-terminal/cli/tests/l1/integration_test.rs
+    - biscuit-terminal/lib/src/components/prose/render.rs
+    - biscuit-terminal/lib/src/components/prose/tree.rs
+    - biscuit-terminal/lib/tests/l1/prose_grammar.rs
+docs_updated_during_phase_6:
+    - biscuit-terminal/docs/components/prose.md
+    - biscuit-terminal/docs/components/index.md
+    - biscuit-terminal/docs/components/section.md
+    - biscuit-terminal/docs/components/table.md
+    - biscuit-terminal/lib/src/components/table/README.md
+    - biscuit-terminal/README.md
+    - renderable/docs/components.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/biscuit-terminal/styling.md
+    - .claude/skills/biscuit-terminal/components.md
+    - .claude/skills/biscuit-terminal/cli.md
+packages:
+    - renderable
+    - biscuit-terminal
+    - biscuit-terminal-cli
+    - biscuit-icon-cli
+    - darkmatter-cli
+    - claudine-cli
+    - darkmatter
+    - dmls
 ---
 
 # Plan: `Prose` Is a Block, `InlineProse` Is Inline, and Code Spans Are Code
@@ -220,7 +356,7 @@ Goal: the shared renderer pieces everything else builds on. Package area
 
 ### Wave 1 — independent edits (parallel; disjoint files)
 
-- [ ] **Block-element attribute** (`attrs.rs`, `validate.rs`, `render/browser.rs`)
+- [x] **Block-element attribute** (`attrs.rs`, `validate.rs`, `render/browser.rs`)
   - add a typed `BlockElement` enum (`P` default-by-absence, `Div`, `Section`,
     `Article`, `Aside`, `Header`, `Footer`) in `BrowserAttrs`, optional,
     omitted when default; update the sparsity predicate (`is_empty`),
@@ -233,7 +369,7 @@ Goal: the shared renderer pieces everything else builds on. Package area
   - tests: each tag in both browser paths agree; legacy serialized tree
     without the field keeps `<p>`; invalid placement rejected on every
     non-`Paragraph` kind; round-trip serialization (AC 8, 31).
-- [ ] **Safe inline-code fence helper** (new public helper per R6)
+- [x] **Safe inline-code fence helper** (new public helper per R6)
   - fence = backtick run longer than the longest run in the value (1 if none);
     pad one space each side when the value begins/ends with a backtick, or
     begins and ends with a space and is not all spaces;
@@ -244,16 +380,16 @@ Goal: the shared renderer pieces everything else builds on. Package area
 
 ### Wave 2 — Markdown renderer (depends on the helper)
 
-- [ ] **Markdown inline code** (`render/markdown.rs`): `InlineCode` uses the
+- [x] **Markdown inline code** (`render/markdown.rs`): `InlineCode` uses the
   helper; table-cell pipe escaping applied to the value *before* fencing; table
   soft breaks stay spaces.
-- [ ] **Markdown hard break**: `HardBreak` emits `\` + newline outside tables
+- [x] **Markdown hard break**: `HardBreak` emits `\` + newline outside tables
   (was two trailing spaces) for both Markdown dialects; `<br>` inside tables
   unchanged.
-- [ ] **Tests** (AC 19, 30): fence table inside and outside a table cell,
+- [x] **Tests** (AC 19, 30): fence table inside and outside a table cell,
   directly constructed nodes (not only via Prose), both dialects, hard-break
   forms.
-- [ ] **Docs and comments**: `renderable` docs and module docs describing
+- [x] **Docs and comments**: `renderable` docs and module docs describing
   inline-code or hard-break Markdown output; `renderable` skill if it
   documents either behavior.
 
@@ -276,7 +412,7 @@ Agree the interface before starting (first task, done by the orchestrator):
 block splitter's output type (`Vec<Block>` where `Block` is `Paragraph(String)`
 or `Code { lang, body }` plus scope-reopen info for bracketed tags).
 
-- [ ] **1a — Block splitter and newline rules** (new module; `markdown.rs`
+- [x] **1a — Block splitter and newline rules** (new module; `markdown.rs`
   fenced-block recognition retained)
   - normalize CRLF and lone CR to LF first;
   - recognize opaque fenced blocks first (existing rules kept: language hints,
@@ -291,7 +427,7 @@ or `Code { lang, body }` plus scope-reopen info for bracketed tags).
   - leading/trailing blank lines produce no blocks; empty and whitespace-only
     `Prose` produce no blocks;
   - `LineBreaks` enum (`Soft` default, `Hard`) defined here.
-- [ ] **1b — Code-span lifting and sentinel** (`markdown.rs`, `tokens.rs`)
+- [x] **1b — Code-span lifting and sentinel** (`markdown.rs`, `tokens.rs`)
   - lift each span into the lifted-content table with a sentinel placeholder
     (R1: literal sentinel chars in input are pre-escaped);
   - matching rules unchanged (a run opens a span only if a later run of the
@@ -308,7 +444,7 @@ or `Code { lang, body }` plus scope-reopen info for bracketed tags).
   - in `InlineProse` mode a fenced block becomes one `InlineCode` (language
     hint dropped, each line ending → space, other whitespace untouched, no
     code-span stripping; empty body → no node).
-- [ ] **1c — Terminal inline-code rendering** (`render_tree/render.rs`; depends
+- [x] **1c — Terminal inline-code rendering** (`render_tree/render.rs`; depends
   on S2 and the Phase 2 helper)
   - inline code drops backticks when it emits styling (theme background/color
     when present, else dim); when the effective appearance emits **no styling
@@ -323,7 +459,7 @@ or `Code { lang, body }` plus scope-reopen info for bracketed tags).
 
 ### Wave 2 — inline parse and `InlineProse` (depends on Wave 1)
 
-- [ ] **Inline parser** (`parse_inline`): tags, `**`/`_`, links, code spans,
+- [x] **Inline parser** (`parse_inline`): tags, `**`/`_`, links, code spans,
   escapes, soft/hard breaks per mode
   - single `\n` → soft (or hard in `Hard`); discard spaces/tabs around a soft
     break; trailing spaces are never a hard break;
@@ -333,7 +469,7 @@ or `Code { lang, body }` plus scope-reopen info for bracketed tags).
   - two or more `\n` in `InlineProse`/`Soft` = one soft break; `Hard` = each
     `\n` hard (R2);
   - escaped tags/delimiters and sentinel-lookalike input stay user content.
-- [ ] **`InlineProse` type** (new file): `new`, `content`,
+- [x] **`InlineProse` type** (new file): `new`, `content`,
   `with_line_breaks`, escape helpers; **no** margin/width/align/wrap builders
   - `to_render_nodes()` returns the inline sequence; `render_tree()` returns a
     single neutral `Span` (also when empty); one shared projection helper feeds
@@ -347,23 +483,23 @@ or `Code { lang, body }` plus scope-reopen info for bracketed tags).
 
 ### Wave 3 — `Prose` block component (depends on Wave 2)
 
-- [ ] **`Prose` reshape** (`prose.rs`, `tree.rs`, `mod.rs`): sequence of blocks;
+- [x] **`Prose` reshape** (`prose.rs`, `tree.rs`, `mod.rs`): sequence of blocks;
   paragraphs are `InlineProse`-parsed `Paragraph`s, fenced code → `Code`
   blocks under `Root`; `with_line_breaks` forwards the mode to each
   paragraph's parser
-- [ ] **`ProseTag`** enum and `with_tag`; per-paragraph element via the Phase 2
+- [x] **`ProseTag`** enum and `with_tag`; per-paragraph element via the Phase 2
   attribute; code blocks always `<pre><code>`; tag is HTML-only
-- [ ] **Layout on every target**: terminal margins/alignment/wrap as today; CSS
+- [x] **Layout on every target**: terminal margins/alignment/wrap as today; CSS
   on the browser; browser fragment rendered from `render_tree()` like other
   targets; `<span class="prose">` removed; delete the interim-contract doc
   comment on `render_html_fragment`
-- [ ] **Remove `Prose::to_render_nodes`**; update `escape_text` rustdoc (no
+- [x] **Remove `Prose::to_render_nodes`**; update `escape_text` rustdoc (no
   longer promises clean output inside a code span; do not escape text placed in
   a span)
-- [ ] **Exports**: `InlineProse`, `LineBreaks`, `ProseTag` from the component
+- [x] **Exports**: `InlineProse`, `LineBreaks`, `ProseTag` from the component
   module, crate public exports, and `prelude`; update `prelude_exports.rs`
-- [ ] **`parity.rs`** expectations updated for code spans and the new shapes
-- [ ] **Tests** (new files declared in `lib/tests/l1/main.rs`), one cell per
+- [x] **`parity.rs`** expectations updated for code spans and the new shapes
+- [x] **Tests** (new files declared in `lib/tests/l1/main.rs`), one cell per
   case, through public results:
   - paragraph/newline table: `a\nb`, `a\n\nb`, `a\n\n\nb`, `a\n  \nb`,
     `a\\\nb`, `a  \nb`, CRLF and lone-CR twins, `\\` + newline, trailing
@@ -402,22 +538,22 @@ Goal: each container accepts the shape in the spec's table. Package:
 
 ### Wave 1 — one task per container (parallel; shared file `render_tree/projection.rs` is edited by one task only)
 
-- [ ] **Table** (`components/table/table.rs`): header labels and cells take
+- [x] **Table** (`components/table/table.rs`): header labels and cells take
   `InlineProse`; string conversions use `InlineProse`; `StyledProse` →
   `StyledInlineProse` (R4); remove `degrade_code_nodes` on Prose content;
   fenced code in a cell becomes inline code (AC 28 table half)
-- [ ] **`InlineContent`**: takes `InlineProse`; update `From` impls, helper
+- [x] **`InlineContent`**: takes `InlineProse`; update `From` impls, helper
   traits, downcasts
-- [ ] **Lists** (`components/list.rs`): `UnorderedList`/`OrderedList` items
+- [x] **Lists** (`components/list.rs`): `UnorderedList`/`OrderedList` items
   take `Prose`; drop `fold_prose_nodes_into_blocks`; nested word wrap and
   `Prose` content ergonomics preserved; layout transfer per R3
-- [ ] **`BlockQuote`** (`components/block_quote.rs`): takes `Prose`; drop
+- [x] **`BlockQuote`** (`components/block_quote.rs`): takes `Prose`; drop
   folding; layout transfer per R3
-- [ ] **`TwoColumn`**: columns take `Prose` (each a block region); drop its
+- [x] **`TwoColumn`**: columns take `Prose` (each a block region); drop its
   text-to-paragraph grouping; layout transfer per R3
-- [ ] **`StatusBlock::body` / `body_line`**: take `Prose`; keep `IntoProseVec`
+- [x] **`StatusBlock::body` / `body_line`**: take `Prose`; keep `IntoProseVec`
   only if still needed
-- [ ] **Projection** (`render_tree/projection.rs`): remove the
+- [x] **Projection** (`render_tree/projection.rs`): remove the
   `to_render_nodes`/fold paths; embed `Prose` as root children with layout on a
   valid enclosing block (no nested `Root`, layout exactly once) (AC 31)
 
@@ -428,11 +564,11 @@ signatures.
 
 ### Wave 2 — tests (parallel with Wave 1 per container after its edit lands)
 
-- [ ] Update `prose_cells_parity.rs`, `unordered_list_parity.rs`,
+- [x] Update `prose_cells_parity.rs`, `unordered_list_parity.rs`,
   `ordered_list_parity.rs`, `render_tree_component_parity.rs`,
   `table_parity.rs`, `two_column_parity.rs`, `status_block_parity.rs`,
   `inline_content_matrix.rs` for the new shapes
-- [ ] Assert: `fold_prose_nodes_into_blocks` / `degrade_code_nodes` no longer
+- [x] Assert: `fold_prose_nodes_into_blocks` / `degrade_code_nodes` no longer
   exist or run on Prose content (AC 12); embedded layout exactly once and no
   nested `Root` (AC 31); multiline fence in a table cell → one inline code
   value (AC 28)
@@ -451,40 +587,40 @@ Can start after Phase 2 (helper); rendering assertions need Phase 3.
 
 ### Wave 1 (parallel)
 
-- [ ] **Factor label/destination resolution** out of `link_fn`
+- [x] **Factor label/destination resolution** out of `link_fn`
   (`darkmatter/lib/src/markdown/compose/expression/functions/mod.rs`) into a
   shared internal; `link` behavior and error text unchanged; `code_link`
   reports errors under its own function name with the same underlying cause
-- [ ] **Bind `code_link`** beside `link` in `functions/paths.rs`:
+- [x] **Bind `code_link`** beside `link` in `functions/paths.rs`:
   `code_link(file)` (portable relative path as text) and
   `code_link(target, desc)`; label goes in a backtick fence via the Phase 2
   helper; `[`/`]` not escaped; backslashes as is; line endings → spaces; empty
   label → `[](dest)`; same destination spelling/quoting as `link()`
-- [ ] **Catalog entry** in `darkmatter/docs/schemas/expression-functions.yaml`
+- [x] **Catalog entry** in `darkmatter/docs/schemas/expression-functions.yaml`
   beside `link`, both overloads, description, one `display-only` example each;
   add `code_link(file)` and `code_link(target, desc)` to the expected-signature
   list in `expression/catalog/mod.rs`; parity test
   `catalog_and_runtime_bindings_have_bidirectional_canonical_parity` passes
-- [ ] **Docs**: `darkmatter/docs/topics/darkmatter-expressions.md` function
+- [x] **Docs**: `darkmatter/docs/topics/darkmatter-expressions.md` function
   table and "Link Helpers" with one example each and the bracket note
 
 ### Wave 2 (after Wave 1)
 
-- [ ] **Template migration**: `prompts/plan.md:30`,
+- [x] **Template migration**: `prompts/plan.md:30`,
   `prompts/_reviews/review-spec-inline.md:18`,
   `claudine/cli/tests/fixtures/nested_span_regression/review-spec-inline.md`,
   `darkmatter/dmls/tests/fixtures/mapping_only_corpus/_reviews__review-spec-inline.md`:
   `` `{{link(x)}}` `` → `{{code_link(x)}}`; `~/.claudine/prompts/` copies are
   out of repo, listed in the final report as a manual step for Ken
-- [ ] **Snapshot**: restore `l1__error_snapshots__link__unrecognized_format.snap`
+- [x] **Snapshot**: restore `l1__error_snapshots__link__unrecognized_format.snap`
   to literal `[text](href)` (renders without backticks as inline code; review
   the diff, AC 20)
-- [ ] **Tests** (AC 22, 23): `code_link("plans/foo.md")` label and destination
+- [x] **Tests** (AC 22, 23): `code_link("plans/foo.md")` label and destination
   match `link()`; `code_link(url, "a]b")`; `code_link(url, r"a\_b")` shows
   `a\_b` in Prose and in darkmatter's Markdown parser; `code_link(url, "")`;
   backtick in text gets a longer fence; the four templates render a link with
   an inline-code label on every target
-- [ ] **Surfaces**: `claudine context --expressions` lists both in the
+- [x] **Surfaces**: `claudine context --expressions` lists both in the
   Filesystem group beside `link` (add or extend a claudine CLI test); DMLS
   completion offers `code_link`
 
@@ -502,19 +638,19 @@ Depends on Phases 3–4; can overlap Phase 5.
 
 ### Wave 1 — CLI
 
-- [ ] **`bt prose`** (`cli/src/commands/prose.rs`): stop wrapping the fragment
+- [x] **`bt prose`** (`cli/src/commands/prose.rs`): stop wrapping the fragment
   in its own `<div style>`; remove `render_html_with_layout` and its
   interim-contract doc comment; output comes from `Prose` with `Layout` as CSS
   (R7: no new flags); help text updated
-- [ ] **Other `bt` commands** that used `class="prose"` or the old shapes
+- [x] **Other `bt` commands** that used `class="prose"` or the old shapes
   (`section.rs`, `list.rs`): update to the new components
-- [ ] **CLI tests** (`cli/tests/l1/integration_test.rs`): `--margin-left`
+- [x] **CLI tests** (`cli/tests/l1/integration_test.rs`): `--margin-left`
   output carries the margin exactly once; no `class="prose"`; code span
   example with `--html` and `--md` output (AC 10, 11)
 
 ### Wave 2 — documentation (parallel with Wave 1; one writer per file)
 
-- [ ] **`docs/components/prose.md`** — every Documentation-table row, section
+- [x] **`docs/components/prose.md`** — every Documentation-table row, section
   by section (intro; Rendering Model with the Mermaid diagram grammar → block
   split → inline parse → render tree → three targets; Programmatic Use;
   new Paragraphs and Line Breaks, Block Tag, Layout sections; Markdown Subset
@@ -523,19 +659,19 @@ Depends on Phases 3–4; can overlap Phase 5.
   Components/Table Cells; Key API; CLI). Audience: a developer new to the
   repo; lead with what the reader can do, one example per rule. Do not link to
   or name a spec/feature
-- [ ] Decide whether `InlineProse` warrants `docs/components/inline-prose.md`;
+- [x] Decide whether `InlineProse` warrants `docs/components/inline-prose.md`;
   if so link it from `prose.md` and keep the grammar documented once in
   `prose.md`
-- [ ] Other component pages (`table.md`, `list.md`, `block_quote.md`,
+- [x] Other component pages (`table.md`, `list.md`, `block_quote.md`,
   `two_column.md`, `inline_content.md`, `status.md`, `index.md`,
   `browser-renderable-trait.md`) updated for accepted types and removed
   `<span class="prose">`
-- [ ] **Skills**: `.claude/skills/biscuit-terminal/SKILL.md`, `styling.md`,
+- [x] **Skills**: `.claude/skills/biscuit-terminal/SKILL.md`, `styling.md`,
   `components.md`, `cli.md`: name `InlineProse` and when to use it; code spans
   as inline code; `renderable` skill and `darkmatter` skill for the hard-break
   and `code_link` changes
-- [ ] README and `docs/dependencies.md` only if crates changed (expected: no)
-- [ ] Module docs in `markdown.rs` and `tree.rs` match the new behavior; the
+- [x] README and `docs/dependencies.md` only if crates changed (expected: no)
+- [x] Module docs in `markdown.rs` and `tree.rs` match the new behavior; the
   `prose.md` doc must contain no sentence describing the old behavior (inline-
   only Prose, `<span class="prose">`, uninterpreted newlines, fenced code
   degrading to plain text in cells, visible backticks, `` `[desc](ref)` `` as

@@ -1020,3 +1020,41 @@ fn source_context_keeps_its_own_repository_and_the_launch_scope() {
     assert_eq!(derived.launch_magic_scope(), launch_context.launch_magic_scope());
     derived.validate().unwrap();
 }
+
+/// Code-span contents are literal, so a reference, a searched or tried path,
+/// and a suggestion must render exactly as written, without the backslashes
+/// Prose escaping would add. Path separators are normalized to `/`, so these
+/// values carry underscores, brackets, and braces rather than a backslash.
+fn assert_no_prose_escapes(rendered: &str) {
+    for escaped in [r"\_", r"\[", r"\{"] {
+        assert!(!rendered.contains(escaped), "escape `{escaped}` leaked into:\n{rendered}");
+    }
+}
+
+#[test]
+fn candidate_no_match_shows_reference_paths_and_suggestions_literally() {
+    let repo = TempDir::new().unwrap();
+    let launch = repo.path().join("_l_[d]{e}");
+    fs::create_dir_all(&launch).unwrap();
+    let context = FileResolutionContext::new(&launch).with_repository_root(repo.path());
+    let err = resolve_composition_source_in_context("./_a_x.md", &context)
+        .unwrap_err()
+        .with_file_reference_suggestions(vec!["_s_[y]/{z}.md".to_string()]);
+
+    let rendered = err.report_block_error(&plain_terminal());
+    assert!(rendered.contains("`./_a_x.md`"), "{rendered}");
+    assert!(rendered.contains("_l_[d]{e}`."), "launch directory: {rendered}");
+    assert!(rendered.contains("_l_[d]{e}/./_a_x.md`"), "tried candidate: {rendered}");
+    assert!(rendered.contains("`_s_[y]/{z}.md`"), "suggestion: {rendered}");
+    assert_no_prose_escapes(&rendered);
+}
+
+#[test]
+fn magic_no_match_shows_payload_and_search_roots_literally() {
+    let rendered = render_magic_miss("@_a_x.md");
+    assert!(
+        rendered.contains("`_a_x.md` was not found under any directory"),
+        "{rendered}"
+    );
+    assert_no_prose_escapes(&rendered);
+}

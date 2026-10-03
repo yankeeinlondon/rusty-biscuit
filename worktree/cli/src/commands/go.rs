@@ -29,7 +29,8 @@ pub fn run(name: &str) -> Result<(), WorktreeError> {
             let worktree_name = entry.branch.as_deref().unwrap_or(name);
             format!("<blue-500>{worktree_name}</blue-500> <i>worktree</i>")
         };
-        let msg = format!("\nAlready in the {kind} of <yellow>{repo}</yellow>.");
+        let msg = format!("Already in the {kind} of <yellow>{repo}</yellow>.");
+        eprintln!();
         eprintln!("{}", Prose::new(msg).render(&terminal));
         return Ok(());
     }
@@ -44,33 +45,34 @@ pub fn run(name: &str) -> Result<(), WorktreeError> {
     let msg = if entry.is_main {
         if path_adjusted {
             format!(
-                "\nYou've been moved into the <blue-500>base</blue-500> <i>checkout</i> of <yellow>{repo}</yellow> <dim>(<b>{relative_display}</b> doesn't exist here — moved to <i>root</i>)</dim>"
+                "You've been moved into the <blue-500>base</blue-500> <i>checkout</i> of <yellow>{repo}</yellow> <dim>(<b>{relative_display}</b> doesn't exist here — moved to <i>root</i>)</dim>"
             )
         } else {
             format!(
-                "\nYou've been moved into the <blue-500>base</blue-500> <i>checkout</i> of <yellow>{repo}</yellow> {location_msg}"
+                "You've been moved into the <blue-500>base</blue-500> <i>checkout</i> of <yellow>{repo}</yellow> {location_msg}"
             )
         }
     } else {
         let worktree_name = entry.branch.as_deref().unwrap_or(name);
         if path_adjusted {
             format!(
-                "\nYou've been moved into the <blue-500>{worktree_name}</blue-500> <i>worktree</i> of <yellow>{repo}</yellow> <dim>(<b>{relative_display}</b> doesn't exist here — moved to <i>root</i>)</dim>"
+                "You've been moved into the <blue-500>{worktree_name}</blue-500> <i>worktree</i> of <yellow>{repo}</yellow> <dim>(<b>{relative_display}</b> doesn't exist here — moved to <i>root</i>)</dim>"
             )
         } else {
             format!(
-                "\nYou've been moved into the <blue-500>{worktree_name}</blue-500> <i>worktree</i> of <yellow>{repo}</yellow> {location_msg}"
+                "You've been moved into the <blue-500>{worktree_name}</blue-500> <i>worktree</i> of <yellow>{repo}</yellow> {location_msg}"
             )
         }
     };
 
     if !crate::env::shell_wrapper_active() {
         return Err(WorktreeError::BlockedByEnvironment(format!(
-            "\n<red><b>Shell wrapper not active.</b></red> The directory cannot be changed.\n{}",
+            "<red><b>Shell wrapper not active.</b></red> The directory cannot be changed.\n{}",
             wrapper_setup_help()
         )));
     }
 
+    eprintln!();
     eprintln!("{}", Prose::new(msg).render(&terminal));
     println!("cd:{}", target.display());
 
@@ -79,6 +81,8 @@ pub fn run(name: &str) -> Result<(), WorktreeError> {
 
 /// How to activate the shell wrapper, for every shell `wt --completions`
 /// supports. Shared by every command that moves the caller's shell.
+///
+/// One shell per line: render it with `LineBreaks::Hard`.
 pub(crate) fn wrapper_setup_help() -> String {
     let lines: String = [
         ("bash", "source <(wt --completions bash)"),

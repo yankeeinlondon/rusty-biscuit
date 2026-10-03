@@ -4,7 +4,7 @@ use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
 use biscuit_terminal::components::list::UnorderedList;
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::InlineProse;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::{FileAssociationBreakdown, FileAssociationStats};
@@ -141,7 +141,7 @@ pub fn render_path_list(
         } else {
             format_styled_filepath(&relative, &absolute)
         };
-        Prose::new(&markup).render(&terminal)
+        InlineProse::new(&markup).render(&terminal)
     };
 
     match format {

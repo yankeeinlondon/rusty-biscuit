@@ -2687,6 +2687,52 @@ fn function_completion_shape() {
     fixture.shutdown();
 }
 
+const CODE_LINK_COMPLETION_DOC: &str = "# Doc\n\nSee {{ code_l\n";
+
+/// DMLS offers `code_link` from the shared catalog, with bare-name insertion
+/// and the catalog's signature and description.
+#[test]
+fn function_completion_offers_code_link() {
+    let workspace = LspWorkspace::new();
+    std::fs::write(workspace.path().join("doc.md"), CODE_LINK_COMPLETION_DOC).unwrap();
+
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
+    open(&fixture, uri.as_str(), CODE_LINK_COMPLETION_DOC);
+
+    let completions = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 2, "character": 13 }
+            }),
+        )
+        .result
+        .expect("completions");
+    let items = completions.as_array().expect("completion array");
+    let code_link = items
+        .iter()
+        .find(|item| item["textEdit"]["newText"] == json!("code_link"))
+        .unwrap_or_else(|| panic!("`code_l` offers `code_link`; got {items:?}"));
+
+    let descriptor = expressions::function_descriptor("code_link").unwrap();
+    assert_eq!(code_link["label"], json!(descriptor.signature));
+    assert_eq!(code_link["label"], json!("code_link(file)"));
+    assert_eq!(code_link["detail"], json!(descriptor.typed_signature()));
+    assert_eq!(
+        code_link["documentation"]["value"],
+        json!(descriptor.description)
+    );
+    assert_eq!(
+        code_link["textEdit"]["range"]["start"],
+        json!({ "line": 2, "character": 7 })
+    );
+
+    fixture.shutdown();
+}
+
 /// Dasherized identifiers. Line 8 holds a kebab name; lines 9 and 10 hold
 /// dashes the lexer must not join (spaced subtraction and `foo--bar`).
 const KEBAB_NAVIGATION_DOC: &str = "---\nspec-name: alpha\nfoo: fval\nbar: bval\na: aval\nb: bval2\n---\n\nK: {{ spec-name }}\nS: {{ a - b }}\nD: {{ foo--bar }}\n";

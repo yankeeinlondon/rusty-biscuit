@@ -25,6 +25,7 @@ use std::{ops::Range, path::PathBuf};
 
 use thiserror::Error;
 
+
 /// Errors produced by the schemas subsystem.
 #[derive(Debug, Error)]
 pub enum SchemaError {
@@ -320,7 +321,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                 .body(
                     errors
                         .iter()
-                        .map(|error| Prose::new(Prose::escape_text(&error.to_string())))
+                        .map(|error| Prose::new(Prose::escape_text_outside_code_spans(&error.to_string())))
                         .collect::<Vec<_>>(),
                 )
                 .hint("Fix each listed property definition, then validate the schema again."),
@@ -337,7 +338,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                         )),
                         Prose::new(format!(
                             "<dim>Cause:</dim> {}",
-                            Prose::escape_text(&source.to_string())
+                            Prose::escape_text_outside_code_spans(&source.to_string())
                         )),
                     ])
                     .hint("Fix the referenced schema definition, then validate again.")
@@ -358,7 +359,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                     )),
                     Prose::new(format!(
                         "<dim>Message:</dim> {}",
-                        Prose::escape_text(message)
+                        Prose::escape_text_outside_code_spans(message)
                     )),
                 ];
                 StatusBlock::new(StatusState::Error)
@@ -383,7 +384,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                     )),
                     Prose::new(format!(
                         "<dim>Reason:</dim> {}",
-                        Prose::escape_text(message)
+                        Prose::escape_text_outside_code_spans(message)
                     )),
                 ])
                 .hint(
@@ -400,7 +401,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                     )),
                     Prose::new(format!(
                         "<dim>Cause:</dim> {}",
-                        Prose::escape_text(&source.to_string())
+                        Prose::escape_text_outside_code_spans(&source.to_string())
                     )),
                 ])
                 .hint(
@@ -420,7 +421,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                         "Could not resolve <cyan>$schema: {}</cyan>",
                         Prose::escape_text(reference)
                     )),
-                    Prose::new(format!("<dim>Cause:</dim> {}", Prose::escape_text(&cause))),
+                    Prose::new(format!("<dim>Cause:</dim> {}", Prose::escape_text_outside_code_spans(&cause))),
                 ];
                 if let Some(hint) = failure.glob_hint(reference) {
                     body.push(Prose::new(format!("<dim>hint:</dim> {hint}")));
@@ -461,7 +462,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                     )),
                     Prose::new(format!(
                         "<dim>Reason:</dim> {}",
-                        Prose::escape_text(message)
+                        Prose::escape_text_outside_code_spans(message)
                     )),
                 ])
                 .hint(
@@ -483,12 +484,12 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
             SchemaError::Baseline { message, source } => {
                 let mut body = vec![Prose::new(format!(
                     "<dim>Reason:</dim> {}",
-                    Prose::escape_text(message)
+                    Prose::escape_text_outside_code_spans(message)
                 ))];
                 if let Some(cause) = source {
                     body.push(Prose::new(format!(
                         "<dim>Cause:</dim> {}",
-                        Prose::escape_text(&cause.to_string())
+                        Prose::escape_text_outside_code_spans(&cause.to_string())
                     )));
                 }
                 StatusBlock::new(StatusState::Error)
@@ -507,7 +508,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                 ))
                 .body(Prose::new(format!(
                     "<dim>jsonschema:</dim> {}",
-                    Prose::escape_text(message)
+                    Prose::escape_text_outside_code_spans(message)
                 )))
                 .hint(
                     "The lowered JSON Schema was rejected at compile time. Re-run with \
@@ -523,7 +524,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                     )),
                     Prose::new(format!(
                         "<dim>Cause:</dim> {} <dim>({:?})</dim>",
-                        Prose::escape_text(&source.to_string()),
+                        Prose::escape_text_outside_code_spans(&source.to_string()),
                         source.kind()
                     )),
                 ])
@@ -536,7 +537,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                 ))
                 .body(Prose::new(format!(
                     "<dim>Reason:</dim> {}",
-                    Prose::escape_text(message)
+                    Prose::escape_text_outside_code_spans(message)
                 )))
                 .hint(
                     "<cyan>$schema</cyan> must be a YAML mapping (inline schema), a string (file \
@@ -600,7 +601,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                         )),
                         Prose::new(format!(
                             "<dim>Reason:</dim> {}",
-                            Prose::escape_text(message)
+                            Prose::escape_text_outside_code_spans(message)
                         )),
                     ])
                     .hint(
@@ -617,7 +618,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                 ))
                 .body(Prose::new(format!(
                     "<dim>Reason:</dim> {}",
-                    Prose::escape_text(message)
+                    Prose::escape_text_outside_code_spans(message)
                 )))
                 .hint(
                     "See the trigger grammar: combinators (<cyan>all</cyan>/<cyan>any</cyan>/\
@@ -712,7 +713,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                         )),
                         Prose::new(format!(
                             "<dim>Reason:</dim> {}",
-                            Prose::escape_text(&source.to_string())
+                            Prose::escape_text_outside_code_spans(&source.to_string())
                         )),
                     ])
                     .hint(
@@ -766,7 +767,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                     )),
                     Prose::new(format!(
                         "<dim>Reason:</dim> {}",
-                        Prose::escape_text(reason)
+                        Prose::escape_text_outside_code_spans(reason)
                     )),
                 ])
                 .hint(
