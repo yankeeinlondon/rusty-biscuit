@@ -193,6 +193,7 @@ fn ctx<'a>(
 ) -> StackExecutionContext<'a> {
     StackExecutionContext {
         signal,
+        scope: None,
         frontmatter,
         live_frontmatter: None,
         runtime_state: None,
@@ -256,6 +257,7 @@ fn ctx_with_live<'a>(
 ) -> StackExecutionContext<'a> {
     StackExecutionContext {
         signal,
+        scope: None,
         frontmatter: base,
         live_frontmatter: Some(live),
         runtime_state: None,
@@ -280,6 +282,7 @@ fn ctx_with_live<'a>(
 
 
 mod action_dispatch;
+mod binding_contract;
 mod conditions_control;
 mod event_time_interpolation;
 mod filesystem_lookup;

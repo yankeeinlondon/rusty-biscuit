@@ -71,7 +71,7 @@ const FIXTURE_MODEL: &str = "fixture/opencode-model";
 /// observable; only the injector call is out of scope here.
 fn plan_inputs() -> launch_plan::LaunchPlanInputs {
     launch_plan::LaunchPlanInputs {
-        provider_args_tail: Vec::new(),
+        provider_tail: claudine::composition::ProviderTail::default(),
         output_format: None,
         system_prompt_args: Vec::new(),
         system_prompt_opencode_config: None,

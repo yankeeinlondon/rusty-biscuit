@@ -28,11 +28,14 @@ fn capture_lifecycle_timing_populates_document_and_total_ms() {
 #[test]
 #[serial_test::serial(env_loop_control_current)]
 fn attached_globals_resolve_through_lookup() {
-    use claudine::composition::lifecycle_injected_globals;
+    use claudine::composition::LifecycleSignal;
+    use claudine::composition::lifecycle::bindings::{
+        LifecycleScope, LifecycleValues, runtime_bindings,
+    };
     use darkmatter::markdown::compose::expression::{
         EvaluationLookup, evaluate, is_truthy, parse,
     };
-    use darkmatter::markdown::compose::subtree::LayeredLookup;
+    use darkmatter::markdown::compose::subtree::layered_session;
     use darkmatter::markdown::compose::{ComposeContext, EffectiveStateBuilder};
 
     let key = "CLAUDINE_TEST_LOOP_CONTROL_LATE_BIND";
@@ -44,8 +47,14 @@ fn attached_globals_resolve_through_lookup() {
         .with_context(ComposeContext::capture_for_content(Path::new("."), ""))
         .build()
         .unwrap();
-    let globals = lifecycle_injected_globals(None, Some(&timing));
-    let lookup = LayeredLookup::new(&state, &globals, None);
+    let (view, globals) = runtime_bindings(
+        LifecycleScope::Event(LifecycleSignal::Loop),
+        LifecycleValues {
+            timing: Some(&timing),
+            ..LifecycleValues::default()
+        },
+    );
+    let lookup = layered_session(&state, globals, Some(view), None).expect("the globals associate");
 
     let when = parse(&format!("current_env.{key} == 'ready'")).expect("parses");
     let fired = is_truthy(&evaluate(&when, &lookup).expect("evaluates"));

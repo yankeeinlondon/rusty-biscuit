@@ -225,6 +225,30 @@ pub fn mask_secrets(text: &str) -> Cow<'_, str> {
     replace_spans(text, find_secret_spans(text))
 }
 
+/// Byte ranges of the secrets in one command-line token, sorted and merged.
+///
+/// Adds two argument shapes to [`find_secret_spans`], whatever the value's
+/// length: a whole token starting with a [`CREDENTIAL_TOKEN_PREFIXES`] entry,
+/// and such a value after the token's first `=` (`--config=sk-…`). Context
+/// that spans two tokens (`--token value`) is the caller's to recognize.
+pub fn find_argument_secret_spans(token: &str) -> Vec<Range<usize>> {
+    let mut spans = find_secret_spans(token);
+    if has_credential_prefix(token) {
+        spans.push(0..token.len());
+    } else if let Some(eq) = token.find('=')
+        && has_credential_prefix(&token[eq + 1..])
+    {
+        spans.push(eq + 1..token.len());
+    }
+    merge(spans)
+}
+
+/// `token` with every [`find_argument_secret_spans`] span replaced by
+/// [`MASK`].
+pub fn mask_argument_token(token: &str) -> Cow<'_, str> {
+    replace_spans(token, find_argument_secret_spans(token))
+}
+
 fn collect_rule_spans(regex: &Regex, text: &str, spans: &mut Vec<Range<usize>>) {
     let has_key = regex.capture_names().any(|name| name == Some("key"));
     let mut position = 0;
@@ -344,6 +368,21 @@ impl Redactor {
         known.sort();
         known.dedup();
         Self { known }
+    }
+
+    /// Also masks every occurrence of `values`, for secrets a caller
+    /// identified by position rather than by shape (the value after
+    /// `--password`). Values shorter than [`MIN_KNOWN_SECRET_BYTES`] are
+    /// ignored, as for learned values.
+    pub fn with_known_values(mut self, values: impl IntoIterator<Item = String>) -> Self {
+        self.known.extend(
+            values
+                .into_iter()
+                .filter(|value| value.len() >= MIN_KNOWN_SECRET_BYTES && value != MASK),
+        );
+        self.known.sort();
+        self.known.dedup();
+        self
     }
 
     /// `text` with recognized spans and known values masked.

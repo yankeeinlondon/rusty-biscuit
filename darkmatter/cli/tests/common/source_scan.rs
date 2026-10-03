@@ -14,7 +14,9 @@
 //! [`production_sources`] applies the production-scope rule on top: every
 //! `#[cfg(test)]` / `#[cfg(all(test, ..))]` item is blanked, and every file
 //! such an item declares with `mod name;` (honoring `#[path]`) is dropped
-//! along with everything below that module.
+//! along with everything below that module. [`module_tree_sources`] applies
+//! the same rule but reaches files by following `mod` declarations from crate
+//! roots instead of walking a directory.
 
 // Each gate including this file by `#[path]` uses a different subset.
 #![allow(dead_code)]
@@ -327,12 +329,250 @@ fn relative_key(src: &Path, path: &Path) -> String {
         .join("/")
 }
 
-/// One production file outside a scanned directory (a build script), with
-/// comments, literals, and test-only items blanked. A test-only `mod name;`
-/// it declares is not followed: such a file is never compiled into it.
-pub fn production_file(path: &Path) -> String {
-    let text = std::fs::read_to_string(path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
-    let mut bytes = sanitize(&text);
-    blank_test_items(&text, &mut bytes);
-    String::from_utf8(bytes).expect("blanking keeps UTF-8")
+/// Production source reachable from crate roots, followed through the module
+/// tree the way rustc loads it, with comments, literals, and test-only items
+/// blanked. Keys and `roots` are relative to `base`, `/`-separated, and
+/// lexically normalized ([`normalize_relative`]); a key may start with `..`
+/// when a `#[path]` leaves `base`. The `Vec` holds one problem per root or
+/// declared module whose file is missing or unreadable, each naming
+/// `label`-prefixed keys.
+///
+/// Unlike [`production_sources`], nothing is walked: a file is scanned only
+/// because a root is, or because a scanned file declares it with `mod name;`.
+/// So a root at the package top does not pull in `tests/`, and a `#[path]`
+/// module outside the root's directory is not missed.
+///
+/// ## Module resolution
+///
+/// - A root, a `mod.rs`, and a file loaded through `#[path]` own their
+///   directory: `mod x;` is `x.rs` or `x/mod.rs` beside them. Any other file
+///   `a/b.rs` looks in `a/b/`.
+/// - `mod x;` inside inline `mod m { .. }` blocks looks one directory deeper
+///   per block (the block's own `#[path]`, else its name).
+/// - `#[path = "p"]` is relative to the declaring file's directory, or, inside
+///   inline blocks, to the directory those blocks select (for a non-`mod.rs`
+///   file, starting from `a/b/`).
+/// - `#[cfg_attr(pred, path = "p")]` is followed on every branch: each such
+///   `p` is required, and the default `x.rs` / `x/mod.rs` is scanned when it
+///   exists. A plain `#[path]` wins over both.
+/// - `#[cfg(test)]` / `#[cfg(all(test, ..))]` declarations are blanked before
+///   declarations are read, so test-only module files are never reached.
+///   Every other `#[cfg(..)]` is followed.
+///
+/// ## Notes
+///
+/// `include!` targets, modules a macro declares, and modules a build script
+/// generates (`include!(concat!(env!("OUT_DIR"), ..))`) are not followed.
+/// Normalization is lexical: a symlinked directory followed by `..` is read
+/// where the text says, not where the filesystem goes.
+pub fn module_tree_sources(base: &Path, label: &str, roots: &[String]) -> (BTreeMap<String, String>, Vec<String>) {
+    let mut files = BTreeMap::new();
+    let mut problems = Vec::new();
+    let mut visited = BTreeSet::new();
+    let mut pending: Vec<(String, bool)> = roots.iter().map(|root| (normalize_relative(root), true)).collect();
+    pending.reverse();
+    let shown = |key: &str| normalize_relative(&format!("{label}/{key}"));
+    while let Some((key, owns_directory)) = pending.pop() {
+        if !visited.insert((key.clone(), owns_directory)) {
+            continue;
+        }
+        let text = match std::fs::read_to_string(base.join(&key)) {
+            Ok(text) => text,
+            Err(error) => {
+                problems.push(format!("production source {} is unreadable: {error}", shown(&key)));
+                continue;
+            }
+        };
+        let mut bytes = sanitize(&text);
+        blank_test_items(&text, &mut bytes);
+        let blanked = String::from_utf8(bytes).expect("blanking keeps UTF-8");
+        let directory = key.rsplit_once('/').map_or("", |(directory, _)| directory);
+        let stem = key.rsplit('/').next().unwrap_or_default().trim_end_matches(".rs");
+        let own_directory = if owns_directory { directory.to_string() } else { format!("{directory}/{stem}") };
+        for declaration in module_declarations(&text, &blanked) {
+            let inline: Vec<&str> = declaration.inline.iter().map(String::as_str).collect();
+            let module_directory = normalize_relative(&[own_directory.as_str()].into_iter().chain(inline.iter().copied()).collect::<Vec<_>>().join("/"));
+            let path_base = if inline.is_empty() { directory.to_string() } else { module_directory.clone() };
+            let at = format!("{}:{}", shown(&key), line_at(&text, declaration.offset));
+            let attributed = |path: &str| normalize_relative(&format!("{path_base}/{path}"));
+            if let Some(path) = &declaration.path {
+                pending.push((attributed(path), true));
+                continue;
+            }
+            for path in &declaration.cfg_paths {
+                pending.push((attributed(path), true));
+            }
+            let flat = normalize_relative(&format!("{module_directory}/{}.rs", declaration.name));
+            let nested = normalize_relative(&format!("{module_directory}/{}/mod.rs", declaration.name));
+            if base.join(&flat).is_file() {
+                pending.push((flat, false));
+            } else if base.join(&nested).is_file() {
+                pending.push((nested, true));
+            } else if declaration.cfg_paths.is_empty() {
+                problems.push(format!(
+                    "production module `{}` declared at {at} has no source: neither {} nor {} exists",
+                    declaration.name,
+                    shown(&flat),
+                    shown(&nested)
+                ));
+            }
+        }
+        files.insert(key, blanked);
+    }
+    (files, problems)
+}
+
+/// An out-of-line `mod name;` that survived test-only blanking.
+struct ModuleDeclaration {
+    name: String,
+    offset: usize,
+    path: Option<String>,
+    cfg_paths: Vec<String>,
+    /// Directory segment per enclosing inline module, outermost first.
+    inline: Vec<String>,
+}
+
+/// Every production `mod name;` in a file. `blanked` is `original` after
+/// [`sanitize`] and test-only blanking; `original` supplies the attribute
+/// string values `blanked` has erased.
+fn module_declarations(original: &str, blanked: &str) -> Vec<ModuleDeclaration> {
+    let bytes = blanked.as_bytes();
+    let mut inline_blocks = Vec::new();
+    let mut declarations = Vec::new();
+    for offset in ident_offsets(blanked, "mod") {
+        let mut cursor = offset + 3;
+        while bytes.get(cursor).is_some_and(u8::is_ascii_whitespace) {
+            cursor += 1;
+        }
+        if bytes[cursor..].starts_with(b"r#") {
+            cursor += 2;
+        }
+        let name_start = cursor;
+        while bytes.get(cursor).copied().is_some_and(is_ident) {
+            cursor += 1;
+        }
+        if cursor == name_start {
+            continue;
+        }
+        let name = blanked[name_start..cursor].to_string();
+        while bytes.get(cursor).is_some_and(u8::is_ascii_whitespace) {
+            cursor += 1;
+        }
+        let attributes = attributes_before(original, bytes, offset);
+        let path = attributes
+            .iter()
+            .filter(|attribute| attribute_name(attribute) == "path")
+            .find_map(|attribute| attribute_paths(attribute).into_iter().next());
+        match bytes.get(cursor) {
+            Some(b';') => {
+                let cfg_paths = attributes
+                    .iter()
+                    .filter(|attribute| attribute_name(attribute) == "cfg_attr")
+                    .flat_map(|attribute| attribute_paths(attribute))
+                    .collect();
+                declarations.push(ModuleDeclaration { name, offset, path, cfg_paths, inline: Vec::new() });
+            }
+            Some(b'{') => inline_blocks.push((offset, matching_brace(bytes, cursor), path.unwrap_or(name))),
+            _ => {}
+        }
+    }
+    for declaration in &mut declarations {
+        declaration.inline = inline_blocks
+            .iter()
+            .filter(|(start, end, _)| *start < declaration.offset && declaration.offset < *end)
+            .map(|(_, _, segment)| segment.clone())
+            .collect();
+    }
+    declarations
+}
+
+/// The original text of each `#[..]` attribute directly before the item
+/// keyword at `keyword`, skipping visibility (`pub`, `pub(crate)`).
+fn attributes_before(original: &str, bytes: &[u8], keyword: usize) -> Vec<String> {
+    let mut attributes = Vec::new();
+    let mut cursor = keyword;
+    loop {
+        while cursor > 0 && bytes[cursor - 1].is_ascii_whitespace() {
+            cursor -= 1;
+        }
+        let before = &bytes[..cursor];
+        if before.ends_with(b")") {
+            let Some(open) = matching_open(bytes, cursor - 1, b'(', b')') else { break };
+            let head = bytes[..open].trim_ascii_end();
+            if head.ends_with(b"pub") {
+                cursor = head.len() - 3;
+                continue;
+            }
+            break;
+        }
+        if before.ends_with(b"pub") && (cursor == 3 || !is_ident(bytes[cursor - 4])) {
+            cursor -= 3;
+            continue;
+        }
+        if before.ends_with(b"]") {
+            let Some(open) = matching_open(bytes, cursor - 1, b'[', b']') else { break };
+            if open == 0 || bytes[open - 1] != b'#' {
+                break;
+            }
+            attributes.push(original[open - 1..cursor].to_string());
+            cursor = open - 1;
+            continue;
+        }
+        break;
+    }
+    attributes.reverse();
+    attributes
+}
+
+/// Offset of the `open` byte matching the `close` byte at `at`, scanning back.
+fn matching_open(bytes: &[u8], at: usize, open: u8, close: u8) -> Option<usize> {
+    let mut depth = 0usize;
+    for index in (0..=at).rev() {
+        if bytes[index] == close {
+            depth += 1;
+        } else if bytes[index] == open {
+            depth -= 1;
+            if depth == 0 {
+                return Some(index);
+            }
+        }
+    }
+    None
+}
+
+/// The attribute's name: `path` for `#[path = ".."]`.
+fn attribute_name(attribute: &str) -> &str {
+    let inner = attribute.trim_start_matches("#[").trim_start();
+    &inner[..inner.bytes().take_while(|&byte| is_ident(byte)).count()]
+}
+
+/// Every `path = "<value>"` value in one attribute's original text.
+fn attribute_paths(attribute: &str) -> Vec<String> {
+    let mut paths = Vec::new();
+    for offset in ident_offsets(attribute, "path") {
+        let rest = attribute[offset + 4..].trim_start();
+        let Some(rest) = rest.strip_prefix('=') else { continue };
+        let Some(rest) = rest.trim_start().strip_prefix('"') else { continue };
+        if let Some(end) = rest.find('"') {
+            paths.push(rest[..end].to_string());
+        }
+    }
+    paths
+}
+
+/// `path` without `.` segments, each `..` folding the segment before it (a
+/// leading `..` stays), `/`-joined; `/` and `\` both separate. Lexical only:
+/// the path guard polices canonicalization, so it never canonicalizes.
+pub fn normalize_relative(path: &str) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    for part in path.split(['/', '\\']) {
+        match part {
+            "" | "." => {}
+            ".." if parts.last().is_some_and(|last| *last != "..") => {
+                parts.pop();
+            }
+            part => parts.push(part),
+        }
+    }
+    parts.join("/")
 }

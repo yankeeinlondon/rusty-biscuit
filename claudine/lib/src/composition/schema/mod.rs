@@ -407,6 +407,57 @@ pub fn launch_phase_for_mode(mode: CompositionMode) -> Option<SchemaPhase> {
     }
 }
 
+/// What the document's authored `$schema` establishes about parameter names,
+/// for composition token ownership ([`super::ownership::own_arguments`]).
+///
+/// Reads the literal `$schema` through the same loader the composer uses (no
+/// Darkmatter baseline or trigger layers, no templates, shell, or network), so
+/// a schema file resolves relative to the source document. A SimplifiedSchema
+/// contributes the names in every union arm; a raw JSON Schema its statically
+/// declared top-level names. A `$schema` reference written as a template is
+/// [`SchemaParameters::Unestablished`]: ownership never evaluates it.
+///
+/// ## Errors
+///
+/// The loader's [`CompositionError`] when the schema cannot be read; ownership
+/// must not guess past it.
+pub fn authored_schema_parameters(
+    source: &ResolvedCompositionSource,
+    file_ref_fallback_dir: Option<&std::path::Path>,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
+) -> Result<super::ownership::SchemaParameters, CompositionError> {
+    use super::ownership::SchemaParameters;
+
+    let frontmatter = source.markdown.frontmatter().as_map();
+    let Some(reference) = frontmatter.get("$schema") else {
+        return Ok(SchemaParameters::NoSchema);
+    };
+    let templated = |text: &str| text.contains("{{") || text.contains("$(");
+    let reference_is_templated = match reference {
+        serde_json::Value::String(text) => templated(text),
+        serde_json::Value::Array(arms) => arms
+            .iter()
+            .any(|arm| arm.as_str().is_some_and(templated)),
+        _ => false,
+    };
+    if reference_is_templated {
+        return Ok(SchemaParameters::Unestablished);
+    }
+    Ok(
+        match load_effective_schema(
+            source,
+            file_ref_fallback_dir,
+            file_resolution_context,
+            &darkmatter::markdown::compose::CallerInputRecords::new(),
+        )? {
+            None => SchemaParameters::NoSchema,
+            Some(schema) => SchemaParameters::Declared(std::sync::Arc::new(move |key| {
+                schema.declares_top_level_property(key)
+            })),
+        },
+    )
+}
+
 /// Resolve the document's effective schema under the same launch context the
 /// composer resolves it with, so the retained launch schema and the
 /// compose-time verdict agree on every file reference. `callers` are the

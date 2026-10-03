@@ -502,14 +502,14 @@ fn expression_rejects_unparseable_with_format_problem() {
 }
 
 #[test]
-fn expression_unknown_identifier_ok() {
-    // Identifier resolution is a compose-time concern; schema validation checks
-    // parseability only.
+fn expression_undeclared_property_ok() {
+    // An undeclared property is valid (it evaluates to `null`); schema
+    // validation checks parseability only.
     let report =
         validate("---\n$schema:\n  when: expression\nwhen: some_unknown_thing\n---\nbody\n");
     assert!(
         report.valid,
-        "unknown identifier must not be a schema error: {:?}",
+        "an undeclared property must not be a schema error: {:?}",
         report.problems
     );
 }

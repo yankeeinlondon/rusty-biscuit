@@ -78,7 +78,7 @@ fn unknown_identifiers(report: &ComposeReport) -> Vec<&ComposeWarning> {
     report
         .warnings
         .iter()
-        .filter(|w| w.code.as_deref() == Some(ComposeWarning::UNKNOWN_IDENTIFIER_CODE))
+        .filter(|w| w.code.as_deref() == Some(ComposeWarning::UNDECLARED_PROPERTY_CODE))
         .collect()
 }
 
@@ -138,7 +138,7 @@ fn the_typo_is_one_identifier_under_the_current_grammar() {
     let (_dir, prompt, spec) = repository(&typo);
 
     let (composed, report) =
-        compose_with_report(&prompt, &spec, false).expect("an unknown identifier renders empty");
+        compose_with_report(&prompt, &spec, false).expect("an undeclared property renders empty");
 
     let line = composed.lines().find(|line| line.contains("functionality defined by the")).unwrap();
     assert!(!line.contains("spec-name") && !line.contains("alpha"), "{line}");
@@ -146,6 +146,6 @@ fn the_typo_is_one_identifier_under_the_current_grammar() {
     // Requirement 4: the typo is no longer silent.
     let warnings = unknown_identifiers(&report);
     assert_eq!(warnings.len(), 1, "{:?}", report.warnings);
-    assert!(warnings[0].message.starts_with("unknown identifier 'spec-name' at "), "{}", warnings[0].message);
+    assert!(warnings[0].message.starts_with("`spec-name` at "), "{}", warnings[0].message);
     assert_eq!(warnings[0].line_number, Some(typo_line));
 }

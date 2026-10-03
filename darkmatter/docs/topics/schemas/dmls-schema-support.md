@@ -100,7 +100,8 @@ Diagnostics are **push-based** (`textDocument/publishDiagnostics`): DMLS compute
 | `dm.schema.missing_simplified_envelope`                        | a referenced bare property map looks like SimplifiedSchema but lacks a supported envelope             |
 | `dm.schema.document_malformed`                                 | a recognized standalone schema envelope is malformed                                                  |
 | `dm.style.unknown_key` / `dm.style.deprecated_key`             | `style:` surface problems                                                                             |
-| `dm.expression.malformed` / `dm.expression.unknown_identifier` | expression-typed frontmatter values that do not parse or name something resolvable                    |
+| `dm.expression.malformed` / `dm.expression.unknown_function`   | expression-typed frontmatter values that do not parse or call an unknown function (errors)            |
+| `dm.expression.undeclared_property`                            | an expression reads an undeclared document property (advisory warning; the property is valid)         |
 
 The severity policy follows one guiding principle: *diagnose edit-time problems, not compose-time ones*. A document is a template; values arrive at compose time via CLI `--set`, seeds, `$(...)` expansion, or an interactive prompt. So:
 

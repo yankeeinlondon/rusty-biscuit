@@ -7,7 +7,7 @@ this, and they share one recognizer, `claudine::secrets`:
 | --- | --- | --- | --- |
 | Capture-time scrubbing (`protect::scrub`) | unmatched-event harvest files | credential tokens, then email addresses; sensitive JSON keys; home path → `~` | `<redacted>` per whole match |
 | Messaging errors (`messaging::send`) | route warnings and test-connection errors | webhook URLs | `<redacted-webhook-url>` |
-| Wrapper sanitization (CLI `wrap::env`) | the child environment and `AGENT_PARAMS` | sensitive env-var names (stripped); sensitive flags and credential-token prefixes in argv | variable removed; argument value `****` |
+| Wrapper sanitization (CLI `wrap::env`) | the child environment, and every display of the provider argv (`AGENT_PARAMS`, dry runs, traces) | sensitive env-var names (stripped); in argv, sensitive flags, credential-token prefixes, and every rule family inside a token (`mask_argument_token`) | variable removed; argument value `****` |
 | Steering audit (`steering::audit`) | steering log records, errors, provider echoes | every rule family, plus values already recognized in the message | `****` per merged span |
 
 Recognition is shared; what a consumer does with a match is not. Only

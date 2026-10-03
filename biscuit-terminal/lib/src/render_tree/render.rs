@@ -1977,6 +1977,9 @@ impl Writer<'_> {
         if let Some(layout) = table_node.attrs.layout_ref() {
             table.layout_mut().width = layout.width.clone();
         }
+        if let Some(min_width) = terminal_hints.min_width {
+            table = table.with_min_width(min_width);
+        }
 
         // ── Pass 1: width planning ─────────────────────────────────────────
         let available = self.opts.context.available_width.max(1);

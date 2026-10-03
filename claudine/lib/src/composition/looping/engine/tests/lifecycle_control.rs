@@ -510,10 +510,10 @@ fn loop_gate_evaluation_error_fails_before_condition_and_mutation() {
         fail_fast: None,
         on_rate_limit: None,
     };
-    // The gate item's `when:` references an undefined root, so it *raises*
+    // The gate item's `when:` calls an unknown function, so it *raises*
     // at event time rather than evaluating cleanly to false.
     let lifecycle = lifecycle_from(json!({
-        "loop": { "stack": [{ "when": "missing_root == true", "action": {"stderr": "x"} }] },
+        "loop": { "stack": [{ "when": "missing_root() == true", "action": {"stderr": "x"} }] },
     }));
     let emitter = SignalRecorder::default();
     let invocations = RefCell::new(0usize);
@@ -546,7 +546,7 @@ fn loop_gate_evaluation_error_fails_before_condition_and_mutation() {
 }
 
 /// An explicit `error(...)` at `initialize` whose catch `failure.when:`
-/// guard raises (undefined root) surfaces the FAILURE evaluation error —
+/// guard raises (an unknown function) surfaces the FAILURE evaluation error —
 /// not the original `LifecycleInitializeFailed`. Proves the broken path
 /// that previously discarded the failure outcome now threads it through
 /// the lifecycle catch protocol.
@@ -554,13 +554,13 @@ fn loop_gate_evaluation_error_fails_before_condition_and_mutation() {
 fn loop_initialize_error_with_failure_raise_surfaces_failure_evaluation_error() {
     let config = counter_loop(3);
     // The `initialize` stack raises an explicit `error(...)`, which routes
-    // to `failure`. The `failure.when:` references an undefined root, so it
+    // to `failure`. The `failure.when:` calls an unknown function, so it
     // *raises* at event time rather than evaluating cleanly to false.
     let lifecycle = lifecycle_from(json!({
         "initialize": { "stack": [{ "action": {"error": "preflight refused"} }] },
         "failure": {
             "stderr": "fail",
-            "stack": [{ "when": "missing_root == true", "action": {"stderr": "never"}}]
+            "stack": [{ "when": "missing_root() == true", "action": {"stderr": "never"}}]
         },
         "finalize": { "stderr": "final" },
     }));
@@ -699,12 +699,12 @@ fn loop_gate_evaluation_error_fires_finalize_with_err() {
         fail_fast: None,
         on_rate_limit: None,
     };
-    // The gate `when:` references an undefined root, so it *raises* at event
+    // The gate `when:` calls an unknown function, so it *raises* at event
     // time. `finalize` (top-level `stderr` fires so the recorder logs the
     // signal) writes the threaded `err` fields to a log, gated on the
     // canonical `when: "err"` truthiness guard.
     let lifecycle = lifecycle_from(json!({
-        "loop": { "stack": [{ "when": "missing_root == true", "action": {"stderr": "x"} }] },
+        "loop": { "stack": [{ "when": "missing_root() == true", "action": {"stderr": "x"} }] },
         "finalize": {
             "stderr": "done",
             "stack": [{
@@ -765,12 +765,12 @@ fn loop_gate_evaluation_error_with_finalize_raise_surfaces_finalize() {
         on_rate_limit: None,
     };
     // `finalize` top-level `stderr` fires (recorder logs the signal) before
-    // its stack `when:` raises on an undefined root.
+    // its stack `when:` raises on an unknown function.
     let lifecycle = lifecycle_from(json!({
-        "loop": { "stack": [{ "when": "missing_root == true", "action": {"stderr": "x"} }] },
+        "loop": { "stack": [{ "when": "missing_root() == true", "action": {"stderr": "x"} }] },
         "finalize": {
             "stderr": "done",
-            "stack": [{ "when": "also_missing == true", "action": {"stderr": "never"} }]
+            "stack": [{ "when": "also_missing() == true", "action": {"stderr": "never"} }]
         },
     }));
     let emitter = SignalRecorder::default();
@@ -817,11 +817,11 @@ fn loop_initialize_error_with_failure_and_finalize_raise_surfaces_finalize() {
         "initialize": { "stack": [{ "action": {"error": "preflight refused"} }] },
         "failure": {
             "stderr": "fail",
-            "stack": [{ "when": "missing_root == true", "action": {"stderr": "never"}}]
+            "stack": [{ "when": "missing_root() == true", "action": {"stderr": "never"}}]
         },
         "finalize": {
             "stderr": "final",
-            "stack": [{ "when": "also_missing == true", "action": {"stderr": "never"}}]
+            "stack": [{ "when": "also_missing() == true", "action": {"stderr": "never"}}]
         },
     }));
     let emitter = SignalRecorder::default();

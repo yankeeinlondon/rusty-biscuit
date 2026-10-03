@@ -220,6 +220,9 @@ impl MaterializedHarnessPrompt {
 #[derive(Debug, Clone)]
 pub(crate) struct AttemptLaunch {
     pub(crate) args: Vec<String>,
+    /// The forwarded provider tail [`Self::args`] contains, kept typed so the
+    /// attempt can mask echoes of its values in the provider's diagnostics.
+    pub(crate) provider_tail: claudine::composition::ProviderTail,
     pub(crate) env: HashMap<OsString, OsString>,
     pub(crate) stdin_seed: Option<String>,
     /// Wire-mode JSON-RPC prompt body, when the provider's prompt

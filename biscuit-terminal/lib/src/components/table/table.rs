@@ -152,6 +152,8 @@ pub struct Table {
     /// Caller-supplied block appearance (color/background/emphasis/border)
     /// overlaid onto the projected table node so both render paths carry it.
     block_style: Style,
+    /// See [`Table::with_min_width`].
+    min_width: Option<usize>,
 }
 
 impl Table {
@@ -223,6 +225,28 @@ impl Table {
     /// alignment, and row fill.
     pub fn prefer_cursor_alignment(mut self) -> Self {
         self.prefer_cursor_alignment = true;
+        self
+    }
+
+    /// Draw the table at least `cells` wide, borders included.
+    ///
+    /// A table whose content is narrower grows its last visible column by the
+    /// difference, the same column a filling `width` grows, and stops at that
+    /// column's `max_width`. The available width still caps the table, and a
+    /// wider table is unchanged.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use biscuit_terminal::components::table::{Table, TableColumn};
+    ///
+    /// let table = Table::new()
+    ///     .with_columns(vec![TableColumn::new("A"), TableColumn::new("B")])
+    ///     .with_min_width(30);
+    /// assert_eq!(table.plan_widths(80).unwrap().table_width, 30);
+    /// ```
+    pub fn with_min_width(mut self, cells: u32) -> Self {
+        self.min_width = Some(cells as usize);
         self
     }
 
@@ -377,6 +401,7 @@ impl Table {
             prefer_cursor_alignment: self.prefer_cursor_alignment,
             style: self.style.clone(),
             block_style: self.block_style.clone(),
+            min_width: self.min_width,
         })
     }
 
@@ -697,11 +722,12 @@ impl Table {
         })
     }
 
-    /// Grow the last visible column when the table has an explicit width.
+    /// Grow the last visible column when the table has an explicit width or
+    /// a minimum width.
     ///
     /// Honors [`Layout::width`](renderable::layout::Layout):
     /// - [`Width::Auto`] (the default) and [`Width::FitContent`] hug the
-    ///   content's widest line.
+    ///   content's widest line, or grow to [`Table::with_min_width`].
     /// - [`Width::Fixed`] (e.g. `width: 100%` ⇒
     ///   `Width::Fixed(Length::Percent(100.0))`) fills the available width.
     ///
@@ -718,18 +744,23 @@ impl Table {
         available_render_width: usize,
         border_overhead: usize,
     ) {
-        if !matches!(self.layout.width, Width::Fixed(_)) {
-            return;
-        }
+        let target_width = if matches!(self.layout.width, Width::Fixed(_)) {
+            // Filling requires a finite width to fill to. An unbounded width —
+            // the `u32::MAX` sentinel a natural-width measurement passes — has
+            // nothing to fill, so the table hugs its content regardless of
+            // `width`.
+            if available_render_width >= u32::MAX as usize {
+                return;
+            }
+            available_render_width
+        } else {
+            match self.min_width {
+                Some(min_width) => min_width.min(available_render_width),
+                None => return,
+            }
+        };
 
-        // Filling requires a finite width to fill to. An unbounded width — the
-        // `u32::MAX` sentinel a natural-width measurement passes — has nothing to
-        // fill, so the table hugs its content regardless of `width`.
-        if available_render_width >= u32::MAX as usize {
-            return;
-        }
-
-        let content_budget = available_render_width.saturating_sub(border_overhead);
+        let content_budget = target_width.saturating_sub(border_overhead);
         let content_used: usize = columns.iter().map(|column| column.resolved_width).sum();
         if content_budget <= content_used {
             return;
@@ -1680,6 +1711,7 @@ impl Table {
             stripe_bg: self.style.stripe_bg,
             stripe_text: self.style.stripe_text,
             highlight_row: self.style.highlight_row,
+            min_width: self.min_width.and_then(|w| u32::try_from(w).ok()),
         });
 
         // Carry the consolidated layout when it differs from the default.

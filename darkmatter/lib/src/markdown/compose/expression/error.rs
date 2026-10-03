@@ -422,6 +422,12 @@ pub enum ExpressionError {
         path: String,
     },
 
+    /// A binding failure: a read of a global the host declared unavailable in
+    /// this scope, or an invalid host registration. Never resolved by falling
+    /// through to a same-named document property.
+    #[error(transparent)]
+    Binding(Box<super::binding::BindingError>),
+
     /// A literal token (`{{!data:…}}`) that is malformed, or that is not an
     /// entire frontmatter string value. A token never falls back to
     /// expression parsing, so this is authoring-fatal on every surface.
@@ -515,6 +521,9 @@ impl ExpressionError {
     /// - [`MalformedLiteralToken`] — a token never falls back to expression
     ///   parsing or to text, so a lenient caller cannot keep it either.
     ///
+    /// - [`Binding`] — an unavailable global must never render as an empty
+    ///   value or a same-named document property.
+    ///
     /// Every other variant (arity, arg-type, parse, arithmetic, generic
     /// [`Other`], …) is demoted to a `ComposeWarning` in lenient body
     /// interpolation. [`RemoteNotEnabled`] is
@@ -531,6 +540,7 @@ impl ExpressionError {
     /// [`ContextProjectionInvariant`]: ExpressionError::ContextProjectionInvariant
     /// [`ReservedRootPathUnknown`]: ExpressionError::ReservedRootPathUnknown
     /// [`MalformedLiteralToken`]: ExpressionError::MalformedLiteralToken
+    /// [`Binding`]: ExpressionError::Binding
     /// [`Other`]: ExpressionError::Other
     /// [`Malformed`]: FileRefFailure::Malformed
     /// [`NotFound`]: FileRefFailure::NotFound
@@ -544,6 +554,7 @@ impl ExpressionError {
             ExpressionError::ContractViolation { .. } => true,
             ExpressionError::ReservedRootPathUnknown { .. } => true,
             ExpressionError::MalformedLiteralToken(_) => true,
+            ExpressionError::Binding(_) => true,
             ExpressionError::ContextNotCaptured { .. }
             | ExpressionError::FunctionContextNotCaptured { .. }
             | ExpressionError::ContextProjectionInvariant { .. }

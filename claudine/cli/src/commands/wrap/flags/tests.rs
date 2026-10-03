@@ -527,3 +527,46 @@ mod proptests {
         }
     }
 }
+
+#[test]
+fn dash_boundary_counts_the_flags_removed_before_it() {
+    // User typed: claudine codex -y -c x=y prompt -- --native z
+    let mut args = string_args(&["-y", "-c", "x=y", "prompt", "--", "--native", "z"]);
+    let extracted =
+        extract_wrapper_flags_from_passthrough_with_boundary(&mut args, Some(DashBoundary::Literal(4)))
+            .unwrap();
+    assert_eq!(args, string_args(&["-c", "x=y", "prompt", "--native", "z"]));
+    assert_eq!(extracted.dash_boundary, Some(3));
+
+    // clap consumed the `--` itself: the tail still starts after the flags.
+    let mut args = string_args(&["--quiet", "-c", "x", "--native"]);
+    let extracted =
+        extract_wrapper_flags_from_passthrough_with_boundary(&mut args, Some(DashBoundary::Consumed(3)))
+            .unwrap();
+    assert_eq!(args, string_args(&["-c", "x", "--native"]));
+    assert_eq!(extracted.dash_boundary, Some(2));
+
+    let mut args = string_args(&["-c", "x"]);
+    let extracted = extract_wrapper_flags_from_passthrough_with_boundary(&mut args, None).unwrap();
+    assert_eq!(extracted.dash_boundary, None);
+}
+
+#[test]
+fn passthrough_provider_tail_splits_at_the_boundary() {
+    let args = string_args(&["-c", "x=y", "--native", "z"]);
+
+    let mixed = passthrough_provider_tail(&args, Some(2));
+    assert_eq!(mixed.launch_args(), args.as_slice());
+    assert_eq!(mixed.implicit_args(), string_args(&["-c", "x=y"]));
+    assert_eq!(mixed.opaque_args().unwrap(), string_args(&["--native", "z"]));
+
+    let implicit = passthrough_provider_tail(&args, None);
+    assert_eq!(implicit.boundary(), None);
+    assert_eq!(implicit.launch_args(), args.as_slice());
+
+    // A boundary past the end (every token after `--` was the prompt)
+    // leaves an authored, empty suffix.
+    let empty_suffix = passthrough_provider_tail(&args, Some(9));
+    assert_eq!(empty_suffix.boundary(), Some(4));
+    assert_eq!(empty_suffix.opaque_args().unwrap(), [] as [String; 0]);
+}

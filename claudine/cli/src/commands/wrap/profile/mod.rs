@@ -770,13 +770,14 @@ fn prompt_delivery_append_flags(
 
 pub(crate) fn validate_argv_flags_before_separator(binary: &str, args: &[String]) {
     if let Some(pos) = args.iter().position(|a| a == "--") {
-        for arg in args.iter().skip(pos + 2) {
+        let shown = crate::commands::wrap::env::redact_sensitive_args(args);
+        for (arg, shown_arg) in args.iter().zip(&shown).skip(pos + 2) {
             if arg.starts_with('-') {
                 tracing::warn!(
                     "Flag {:?} appears after -- separator in {} argv: {:?}",
-                    arg,
+                    shown_arg,
                     binary,
-                    args
+                    shown
                 );
             }
         }

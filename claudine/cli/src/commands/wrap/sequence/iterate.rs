@@ -555,8 +555,8 @@ fn build_body_request(
         // Composition now happens at the step's turn, so the executor's own
         // header emit is timely.
         header_emitted: false,
-        provider_args: shared.provider_args.clone(),
-        provider_args_explicit: shared.provider_args_explicit,
+        provider_tail: shared.provider_tail.clone(),
+        provider_tail_notices: shared.provider_tail_notices.clone(),
         runtime_state: Some(std::sync::Arc::clone(runtime_state)),
         // The default body *is* the step: the executor owns its output commit.
         suppress_output_commit: false,

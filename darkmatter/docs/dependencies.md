@@ -29,6 +29,14 @@ will never execute. CI enables the tier features for its reusable all-tier
 build; `just test-l2`, `just test-l3`, and `just test-browser` enable only the
 features their tier requires.
 
+## Source-guard Test Dependencies
+
+- `toml` (test-only, `darkmatter` and `darkmatter-cli`) — the shared
+  `path_lookup_guard` engine reads each package's `[lib]`, `[[bin]]`, and
+  `[package].build` with a real TOML parser, so every spelling Cargo accepts
+  selects the same sources and a malformed manifest fails the guard. Every
+  other package that includes the engine already depends on `toml`.
+
 ## Execution Identity and Network Context
 
 - `biscuit-hash` with the `blake3` feature computes `ctx.sid`, the full BLAKE3

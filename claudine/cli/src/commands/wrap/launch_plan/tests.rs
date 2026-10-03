@@ -20,7 +20,7 @@ fn inputs_for(provider: Provider) -> LaunchPlanInputs {
         writable_document: None,
     };
     let mut recorded = LaunchPlanInputs {
-        provider_args_tail: vec!["--tail-flag".to_string()],
+        provider_tail: claudine::composition::ProviderTail::new(vec!["--tail-flag".to_string()], None),
         output_format: None,
         system_prompt_args: Vec::new(),
         system_prompt_opencode_config: None,

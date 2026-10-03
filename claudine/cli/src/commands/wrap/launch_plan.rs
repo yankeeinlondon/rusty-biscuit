@@ -298,10 +298,12 @@ impl std::error::Error for LaunchPlanError {
 /// without repeating them.
 #[derive(Clone)]
 pub(crate) struct LaunchPlanInputs {
-    /// The forwarded `--` provider tail: the base every argv starts from, ahead
-    /// of Claudine's own injections (`apply_entrypoint` inserts at index 0, so a
-    /// tail-first base still lands after it).
-    pub(crate) provider_args_tail: Vec<String>,
+    /// The forwarded provider tail: the base every argv starts from, ahead of
+    /// Claudine's own injections (`apply_entrypoint` inserts at index 0, so a
+    /// tail-first base still lands after it). Later stages only prepend the
+    /// entrypoint or append, so the tail stays one contiguous run of the argv;
+    /// resume assembly relies on that to tell the tail from the injections.
+    pub(crate) provider_tail: claudine::composition::ProviderTail,
     /// The `--output <format>` the caller asked for, as semantic intent rather
     /// than as the argv one provider happened to render it into. The intent is
     /// invocation-fixed; its *encoding* is provider-owned (Goose renders `json`
@@ -406,7 +408,7 @@ impl LaunchPlanInputs {
     ) -> Self {
         let structured_codex = codex_last_message.is_some();
         Self {
-            provider_args_tail: Vec::new(),
+            provider_tail: claudine::composition::ProviderTail::default(),
             output_format: None,
             system_prompt_args: Vec::new(),
             system_prompt_opencode_config: None,
@@ -675,7 +677,7 @@ fn replay(
             facets.provider
         )))?;
 
-    let mut args = inputs.provider_args_tail.clone();
+    let mut args = inputs.provider_tail.launch_args().to_vec();
     let mut env_overlay: Vec<(OsString, OsString)> = Vec::new();
     // Collected, not rendered: this builder has no output policy. The caller
     // that owns the attempt applies the command's `silent`/`quiet` gate and

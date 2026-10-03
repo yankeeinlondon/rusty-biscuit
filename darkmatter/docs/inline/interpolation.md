@@ -37,7 +37,7 @@ approval rather than disappearing and later revealing unapproved content.
 
 - **Fallback Values**
     - if a template placeholder in the document refers to a frontmatter property that has no value then the default value of an empty string will be used.
-    - when nothing defines that property — no frontmatter key, caller input, or schema property — composition also warns, because the name is most likely a typo (see [Missing Variables](#missing-variables)).
+    - when nothing declares that property — no frontmatter key, caller input, or schema property — composition also adds the undeclared-property advisory, because the name may be a typo (see [Missing Variables](#missing-variables)).
     - this default is suitable for some situations but not others so you are allowed to express a fallback you'd like to use instead with the following syntax, which also tells Darkmatter the absence is intended:
 
       ```md
@@ -121,7 +121,7 @@ approval rather than disappearing and later revealing unapproved content.
       ```
 
     - in this example both lines will resolve the frontmatter `color` if it's set but if it's not the two lines will vary:
-        - the first line will resolve to the frontmatter property `unknown` which if not set will default to an empty string (and warn, since nothing defines `unknown`)
+        - the first line will resolve to the frontmatter property `unknown` which if not set will default to an empty string (with the undeclared-property advisory, since nothing declares `unknown`)
         - the second line will resolve to the string literal "unknown"
 
 - **Kebab-case Keys**
@@ -133,26 +133,30 @@ approval rather than disappearing and later revealing unapproved content.
 
 ## Missing Variables
 
-A reference to a property that has no value renders as an empty string, and
-composition continues. Whether it also warns depends on whether anything
-**knows** the name:
+A bare name that is not a reserved namespace is a document property. When
+nothing supplies it, it is absent: `null` as a whole value, an empty string in
+mixed text, and falsy in a condition. Composition continues. It never falls back
+to the runtime context: `{{ branch }}` is a document property, `{{ ctx.branch }}`
+the current branch. Whether the reference also raises an advisory depends on
+whether anything **declares** the name:
 
 | The name is | Result |
 | --- | --- |
 | present in frontmatter, `--set`, inherited state, or another caller input — even as `null` or `""` | silent |
 | declared by the effective schema (the document's `$schema`, the configured baseline, or a matched trigger) | silent; a `required` property left unset already failed schema validation |
-| a reserved namespace (`ctx`, `env`, `doc`, …) or a runtime context name | silent |
-| none of the above | warning `dm.expression.unknown_identifier`, once per name per source document |
+| a reserved namespace (`ctx`, `env`, `doc`, `current`, `current_env`) | silent |
+| none of the above, including a runtime-context name such as `branch` | advisory `dm.expression.undeclared_property`, once per name per source document |
 
 ```text
-unknown identifier 'colour' at docs/page.md:5: no frontmatter key, caller
-input, or schema property defines it, so it resolves to null
+`colour` at docs/page.md:5 is an undeclared document property (unknown type;
+`null` unless supplied at runtime)
 ```
 
-The warning is decided by the name's root: `{{ user.name }}` warns when nothing
-defines `user`. It is suppressed where the author has handled the absence:
+The advisory is decided by the name's root: `{{ user.name }}` is reported when
+nothing declares `user`. It is suppressed where the author has handled the
+absence:
 
-| Expression | Unresolved `x` warns? |
+| Expression | Undeclared `x` reported? |
 | --- | --- |
 | `{{ x }}` | yes |
 | `{{ x \|\| "d" }}` | no — primary of a fallback |
@@ -164,8 +168,8 @@ defines `user`. It is suppressed where the author has handled the absence:
 | `{{ is_empty(lower(x)) }}` | yes — the predicate no longer guards the lookup directly |
 | `::block when="x"` | yes — a misspelled gate would silently hide content |
 
-Composition warns only for what it evaluates, so an unchosen ternary branch or a
-short-circuited fallback never warns. The same rule applies to frontmatter
+Composition reports only what it evaluates, so an unchosen ternary branch or a
+short-circuited fallback is never reported. The same rule applies to frontmatter
 interpolation, `when="…"` conditions, and `$()` ternaries. The language server
 applies the same suppressions while you edit, but checks both ternary branches
 (see [DMLS diagnostics](../../dmls/docs/diagnostics.md)).
@@ -178,6 +182,11 @@ composition** with exit code 1, naming the file, the authored line and
 column, and the expression. Nothing is written to stdout, and the `{{ … }}` never reaches the
 output. `ComposeOptions::with_fail_fast(false)` does not relax this; it governs
 recoverable non-expression stages such as TOC linking.
+
+A host that registers its own globals can also mark one unavailable in a
+given scope; reading it fails the same way, with the host's reason (see
+[Host Bindings](../topics/darkmatter-expressions.md#host-bindings)). `md compose`
+registers none.
 
 A missing *value* is not a failure — see [Missing Variables](#missing-variables).
 
@@ -345,7 +354,7 @@ Expression at line: 2, column: 5
 - **Decoding one token.** `literal_token::decode(token)` returns the string or a `TokenError` (`NotAToken`, `Unterminated`, `MissingVersion`, `UnsupportedVersion`, `InvalidPayload`, `InvalidUtf8`, `Embedded`). `decode_leaf(value)` returns `None` for a value that is not a token at all.
 - **Finding a token's bytes.** `darkmatter::markdown::hash::locate_frontmatter_leaves(document, paths)` returns the exact source range of each requested string leaf (quotes and a block scalar's header included), so a writer can replace one value in place without re-serializing the document. It refuses a leaf behind an anchor, alias, tag, or `<<` merge, a plain flow-collection item, and a nested sequence.
 - **Writing a token.** `literal_token::encode_yaml_scalar(value)` returns the quoted scalar and `encode(value)` the bare token. Decide from where the value came from, never from what it looks like: a string that already resembles a token is encoded again.
-- **Lifecycle keys.** A key the caller defers to event time (Claudine's lifecycle stacks) keeps its raw text, token included, for the caller that evaluates it.
+- **Lifecycle keys.** A key the caller defers to event time (Claudine's lifecycle stacks) keeps its raw text, tokens and `{{{ … }}}` escapes included, for the caller that evaluates it; that evaluation applies the same escape rules.
 
 #### Editing a Token by Hand
 
@@ -428,7 +437,7 @@ The current implementation uses a source-first scanner that reads each authored 
 - Replacements are applied from the end of the string backward to preserve offsets
 - Literal conversion (`{{{ ... }}}` → `{{ ... }}`) happens in the same scan as expression evaluation, so only authored literals convert; a literal a replacement value introduces stays as written
 - The body carries the byte ranges of inserted data through every stage that rewrites it, until the transclusion directive parse. Each stage that looks for instructions reads a masked view in which data bytes cannot form an expression, a directive, or a code fence; if the ranges ever stop describing the body, composition fails rather than treat data as authored
-- A failing expression fails document composition. Under the lenient policy that only `compose_subtree(..., SubtreeStrictness::Lenient)` and preflight discovery use, it is left in place and reported once. Coded warnings are reported once per issue: an unknown `ctx.*` group warns once per source document however often it is referenced, and a transcluded document's issues stay separate from its parent's
+- A failing expression fails document composition, and subtree compose. Under the lenient policy that only preflight discovery uses, it is left in place and reported once. Coded warnings are reported once per issue: an unknown `ctx.*` group warns once per source document however often it is referenced, and a transcluded document's issues stay separate from its parent's
 
 See the source modules:
 

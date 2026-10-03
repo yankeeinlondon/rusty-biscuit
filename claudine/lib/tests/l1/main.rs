@@ -22,7 +22,6 @@ mod path_lookup_guard;
 mod protocol_fixture_replay;
 mod semantic_fidelity;
 mod single_loop_engine;
-mod strict_mode_provenance_spike;
 mod test_layout;
 mod tts_phase1_contract;
 mod tts_phase5_contract;

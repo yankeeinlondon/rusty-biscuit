@@ -9,7 +9,7 @@ workspace, completion, hover, and diagnostic work.
 - [Passive-analysis contract](#passive-analysis-contract)
 - [File-resolution contexts](#file-resolution-contexts)
 - [Features](#features)
-- [Unknown identifiers](#unknown-identifiers)
+- [Undeclared properties and unknown functions](#undeclared-properties-and-unknown-functions)
 - [Rollout chronology](#rollout-chronology)
 - [Verification](#verification)
 
@@ -121,11 +121,17 @@ Frontmatter `$( … )` suffixes follow the same rule: completion, hover, and the
 `frontmatter_shell_values` strips a quoted scalar's quotes before parsing,
 because the YAML span includes them.
 
-## Unknown identifiers
+## Undeclared properties and unknown functions
 
-`dm.expression.unknown_identifier` is a **Warning** on body `{{ … }}` and on
-Expression-typed frontmatter values. That is the same severity `md compose`
-uses for the same condition.
+`dm.expression.undeclared_property` is an advisory **Warning** on body
+`{{ … }}` and on Expression-typed frontmatter values, with the same code,
+severity, and wording `md compose` uses: the property is valid, of unknown
+type, and `null` unless supplied at runtime. `dm.expression.unknown_function`
+is an **Error** at both sites, ranged on the name and reported in every
+branch, even without frontmatter. It comes from the library's passive
+`expression::validate_expression` against `BindingView::baseline()`
+(`overlay::expressions::unknown_function_calls`), the check
+`validate_prepared` runs for preparation; never add a DMLS-side function list.
 
 - **Expression-typed values.** `providers::frontmatter::expression_values`
   decodes each value with the library's `decode_scalar_node`, the decoder
@@ -176,14 +182,21 @@ uses for the same condition.
   difference is that the static walk visits both ternary branches.
 - **`root_identifier` keeps its one-root contract.** Hover, definition, and
   graph indexing depend on it. Only the two diagnostic providers use the walk.
-- **Known roots.** `overlay::expressions::is_unknown_root` classifies the first
-  dotted segment. Reserved roots, `null`, and bare runtime-context names come
-  from the library's `is_statically_known_root`, so the editor never flags a
-  root the runtime knows. `providers::dsl::KnownRoots` adds frontmatter keys and
-  schema properties. It computes `known_shape` once per diagnostics pass, and
-  it is `None` for a frontmatter-less document, which is never diagnosed.
+- **One classification.** `overlay::expressions::is_undeclared_property`
+  classifies the first dotted segment through Darkmatter's binding model:
+  `BindingView::baseline().names_document_property` (reserved namespaces from
+  `reserved_root_descriptors()`, plus the `null` literal). DMLS supplies no
+  host descriptors, so Claudine's `err`/`timing`/`group` are undeclared
+  properties here, beneath lifecycle keys too, until R7c distributes host
+  descriptors. Root names DMLS needs (`ctx` hover/completion, the `doc[...]`
+  quick-fix) come from `context_root()`/`document_root()`, which read the same
+  catalog. `undeclared_property.rs` fails on any root-name string literal, a
+  host-global list, or an evaluation-session type in production `src/`.
+  `providers::dsl::KnownRoots` adds frontmatter keys and schema properties. It
+  computes `known_shape` once per diagnostics pass, and it is `None` for a
+  frontmatter-less document, whose names are never reported undeclared.
 - **Dash-separated keys.** A subtraction of only variables (`foo--bar`, `a- b`)
-  that contains an unknown operand, and whose whitespace-free source is a
+  that contains an undeclared operand, and whose whitespace-free source is a
   top-level key, gets one key-level finding. A literal operand
   (`iteration - 1`) stays arithmetic. A fix is attached only when the edited
   expression reparses with the replacement as one reference to the key: the

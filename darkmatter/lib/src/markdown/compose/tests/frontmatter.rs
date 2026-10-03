@@ -466,7 +466,7 @@ fn dm1a_composed_key_referencing_deferred_fails_through_compose() {
 
 #[test]
 fn dm2_subtree_resolves_injected_eager_and_lazy_globals() {
-    use super::subtree::{InjectedGlobal, SubtreeStrictness, compose_subtree};
+    use super::subtree::{InjectedGlobal, compose_subtree};
     use crate::markdown::compose::EffectiveStateBuilder;
     use std::collections::HashMap;
 
@@ -492,7 +492,6 @@ fn dm2_subtree_resolves_injected_eager_and_lazy_globals() {
         &serde_json::json!("phase {{phase}} failed: {{err.msg}} on {{snapshot.today}}"),
         &state,
         globals,
-        SubtreeStrictness::Lenient,
     )
     .unwrap();
 
@@ -504,7 +503,7 @@ fn dm2_subtree_resolves_injected_eager_and_lazy_globals() {
 
 #[test]
 fn dm2_subtree_layered_seed_state_still_resolves() {
-    use super::subtree::{SubtreeStrictness, compose_subtree};
+    use super::subtree::compose_subtree;
     use crate::markdown::compose::EffectiveStateBuilder;
     use std::collections::HashMap;
 
@@ -526,7 +525,6 @@ fn dm2_subtree_layered_seed_state_still_resolves() {
         &serde_json::json!("artifact={{config.artifact.path}} phase={{phase}}"),
         &state,
         HashMap::new(),
-        SubtreeStrictness::Lenient,
     )
     .unwrap();
     assert_eq!(result, serde_json::json!("artifact=/tmp/out phase=3"));
@@ -536,7 +534,7 @@ fn dm2_subtree_layered_seed_state_still_resolves() {
 fn dm2_subtree_parity_with_main_compose_whole_value() {
     // A whole-value single `{{ expr }}` yields the same typed Value in subtree
     // compose as main compose's frontmatter interpolation does.
-    use super::subtree::{SubtreeStrictness, compose_subtree};
+    use super::subtree::compose_subtree;
     use crate::markdown::compose::EffectiveStateBuilder;
     use std::collections::HashMap;
 
@@ -553,7 +551,6 @@ fn dm2_subtree_parity_with_main_compose_whole_value() {
         &serde_json::json!("{{count}}"),
         &state,
         HashMap::new(),
-        SubtreeStrictness::Strict,
     )
     .unwrap();
     assert_eq!(result, serde_json::json!(5));
@@ -561,7 +558,7 @@ fn dm2_subtree_parity_with_main_compose_whole_value() {
 
 #[test]
 fn dm2_subtree_parity_with_main_compose_mixed_string() {
-    use super::subtree::{SubtreeStrictness, compose_subtree};
+    use super::subtree::compose_subtree;
     use crate::markdown::compose::EffectiveStateBuilder;
     use std::collections::HashMap;
 
@@ -577,7 +574,6 @@ fn dm2_subtree_parity_with_main_compose_mixed_string() {
         &serde_json::json!("count={{count}}"),
         &state,
         HashMap::new(),
-        SubtreeStrictness::Strict,
     )
     .unwrap();
     assert_eq!(result, serde_json::json!("count=5"));
@@ -585,7 +581,7 @@ fn dm2_subtree_parity_with_main_compose_mixed_string() {
 
 #[test]
 fn dm2_subtree_lazy_global_only_evaluated_when_referenced() {
-    use super::subtree::{InjectedGlobal, SubtreeStrictness, compose_subtree};
+    use super::subtree::{InjectedGlobal, compose_subtree};
     use crate::markdown::compose::EffectiveStateBuilder;
     use std::collections::HashMap;
     use std::sync::Arc;
@@ -608,7 +604,6 @@ fn dm2_subtree_lazy_global_only_evaluated_when_referenced() {
         &serde_json::json!("no reference"),
         &state,
         globals,
-        SubtreeStrictness::Lenient,
     )
     .unwrap();
     assert_eq!(result, serde_json::json!("no reference"));
@@ -617,7 +612,7 @@ fn dm2_subtree_lazy_global_only_evaluated_when_referenced() {
 
 #[test]
 fn dm2_subtree_lazy_global_evaluated_at_most_once() {
-    use super::subtree::{InjectedGlobal, SubtreeStrictness, compose_subtree};
+    use super::subtree::{InjectedGlobal, compose_subtree};
     use crate::markdown::compose::EffectiveStateBuilder;
     use std::collections::HashMap;
     use std::sync::Arc;
@@ -640,7 +635,6 @@ fn dm2_subtree_lazy_global_evaluated_at_most_once() {
         &serde_json::json!("{{snapshot.phase}} then {{snapshot.phase}}"),
         &state,
         globals,
-        SubtreeStrictness::Lenient,
     )
     .unwrap();
     assert_eq!(result, serde_json::json!("7 then 7"));
@@ -648,8 +642,8 @@ fn dm2_subtree_lazy_global_evaluated_at_most_once() {
 }
 
 #[test]
-fn dm2_subtree_strict_rejects_unknown_root() {
-    use super::subtree::{SubtreeStrictness, compose_subtree};
+fn dm2_subtree_absent_property_is_null_not_an_error() {
+    use super::subtree::compose_subtree;
     use crate::markdown::compose::EffectiveStateBuilder;
     use std::collections::HashMap;
 
@@ -661,22 +655,14 @@ fn dm2_subtree_strict_rejects_unknown_root() {
         .build()
         .unwrap();
 
-    let err = compose_subtree(
-        &serde_json::json!("{{spec_fil}}"),
-        &state,
-        HashMap::new(),
-        SubtreeStrictness::Strict,
-    )
-    .unwrap_err()
-    .to_string();
-
-    assert!(err.contains("unknown root"), "error: {err}");
-    assert!(err.contains("spec_fil"), "error names the typo: {err}");
+    let result = compose_subtree(&serde_json::json!("{{spec_fil}}"), &state, HashMap::new())
+        .expect("an absent property is valid");
+    assert_eq!(result, serde_json::Value::Null);
 }
 
 #[test]
-fn dm2_subtree_strict_known_but_empty_renders_empty() {
-    use super::subtree::{SubtreeStrictness, compose_subtree};
+fn dm2_subtree_null_property_renders_empty() {
+    use super::subtree::compose_subtree;
     use crate::markdown::compose::EffectiveStateBuilder;
     use std::collections::HashMap;
 
@@ -693,15 +679,14 @@ fn dm2_subtree_strict_known_but_empty_renders_empty() {
         &serde_json::json!("spec={{spec_file}}"),
         &state,
         HashMap::new(),
-        SubtreeStrictness::Strict,
     )
     .unwrap();
     assert_eq!(result, serde_json::json!("spec="));
 }
 
 #[test]
-fn dm2_subtree_strict_rejects_malformed_span() {
-    use super::subtree::{SubtreeStrictness, compose_subtree};
+fn dm2_subtree_rejects_malformed_span() {
+    use super::subtree::compose_subtree;
     use crate::markdown::compose::EffectiveStateBuilder;
     use std::collections::HashMap;
 
@@ -711,17 +696,18 @@ fn dm2_subtree_strict_rejects_malformed_span() {
         &serde_json::json!("{{ > broken }}"),
         &state,
         HashMap::new(),
-        SubtreeStrictness::Strict,
     )
-    .unwrap_err()
-    .to_string();
+    .unwrap_err();
 
-    assert!(err.contains("failed to parse"), "error: {err}");
+    assert!(
+        matches!(err, crate::markdown::types::MarkdownError::Interpolation { .. }),
+        "a malformed span is a typed interpolation error: {err:?}"
+    );
 }
 
 #[test]
-fn dm2_subtree_strict_rejects_unknown_function() {
-    use super::subtree::{SubtreeStrictness, compose_subtree};
+fn dm2_subtree_rejects_unknown_function() {
+    use super::subtree::compose_subtree;
     use crate::markdown::compose::EffectiveStateBuilder;
     use std::collections::HashMap;
 
@@ -737,7 +723,6 @@ fn dm2_subtree_strict_rejects_unknown_function() {
         &serde_json::json!("{{ bogus_fn(phase) }}"),
         &state,
         HashMap::new(),
-        SubtreeStrictness::Strict,
     )
     .unwrap_err()
     .to_string();
@@ -749,32 +734,25 @@ fn dm2_subtree_strict_rejects_unknown_function() {
 }
 
 #[test]
-fn dm2_subtree_strict_rejects_unknown_root_in_function_argument() {
-    // The strict root check walks the AST, so a typo buried in a function
-    // argument also fails.
-    use super::subtree::{SubtreeStrictness, compose_subtree};
+fn dm2_subtree_absent_function_argument_is_null() {
+    // An absent property in a function argument is `null`, which the function
+    // receives like any other value; it is not a binding failure.
+    use super::subtree::compose_subtree;
     use crate::markdown::compose::EffectiveStateBuilder;
     use std::collections::HashMap;
 
-    let fm: HashMap<String, serde_json::Value> =
-        [("phase".to_string(), serde_json::json!(2))].into();
     let state = EffectiveStateBuilder::new()
-        .with_frontmatter(fm)
         .with_context(ComposeContext::capture_minimal())
         .build()
         .unwrap();
 
-    let err = compose_subtree(
-        &serde_json::json!("{{ parent_dir(typo_var) }}"),
+    let result = compose_subtree(
+        &serde_json::json!("{{ is_null(typo_var) }}"),
         &state,
         HashMap::new(),
-        SubtreeStrictness::Strict,
     )
-    .unwrap_err()
-    .to_string();
-
-    assert!(err.contains("unknown root"), "error: {err}");
-    assert!(err.contains("typo_var"), "error names the typo: {err}");
+    .unwrap();
+    assert_eq!(result, serde_json::json!(true));
 }
 
 // ── Nested external state regression tests ────────────────────────

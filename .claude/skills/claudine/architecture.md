@@ -630,8 +630,13 @@ Claudine enforces this at two boundaries:
 
 In the lifecycle executor, `evaluate_operand` interpolates an authored literal
 once and returns any other expression's result as data; the old
-`reject_surviving_spans` guard is gone. Strict DM2 still fails an unresolved
-authored span. Known limits: Darkmatter's `expression` format validator is
+`reject_surviving_spans` guard is gone. DM2 (Darkmatter subtree compose) fails
+a malformed span, an unknown function, or a read of an unavailable global, and
+an absent document property is `null`. Which globals a scope may read comes
+from `lifecycle/bindings.rs` (`binding_view`/`runtime_bindings`), handed to
+Darkmatter as a `BindingView`; `group` outside an established group is an
+unavailable global (`claudine.outside-group`).
+Known limits: Darkmatter's `expression` format validator is
 string-only, so decoded data with `{{` in an expression-typed field passes
 lexically; the public `pre_validate_schema[_for_mode]` treats every override
 as authored.

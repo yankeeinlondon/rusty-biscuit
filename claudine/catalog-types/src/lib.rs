@@ -13,6 +13,7 @@
 
 mod acp_server_mode;
 mod billing_model;
+mod cli_switch;
 mod display_policy;
 mod family;
 mod model_catalog_source;
@@ -27,6 +28,9 @@ mod vocab;
 
 pub use acp_server_mode::AcpServerMode;
 pub use billing_model::BillingModel;
+pub use cli_switch::{
+    CliSwitch, CliSwitchCatalog, SwitchAttachment, SwitchScope, SwitchValue, VariadicMin,
+};
 pub use display_policy::{DisplayPolicy, EventClass, ToolResultSummary};
 pub use family::{FamilyRow, family_key};
 pub use model_catalog_source::ModelCatalogSource;

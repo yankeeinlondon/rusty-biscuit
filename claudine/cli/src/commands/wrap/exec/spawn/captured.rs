@@ -226,6 +226,7 @@ pub(crate) fn run_child_capture(
         agent_pid: Some(captured_pid),
         guard_context,
         signals,
+        stream_tails: None,
     })
 }
 

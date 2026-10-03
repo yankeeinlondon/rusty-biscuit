@@ -74,7 +74,22 @@ roster, with structured facts in frontmatter validated by a `_schema.yaml` sidec
   rejected document once. Not yet read by the generator. Before writing or changing a
   contract, a fleet prompt, or the `research` recipe, read
   [Research Contracts and Fleets](research-contracts.md).
-- `agent-cli/`, `non-interactive-sessions/`, `usage/` — earlier topics; sidecars
+- `agent-cli/` — the public CLI surface, narrowed to the contract standard at
+  revision 2. Its typed switch inventory (`cli_switch` in its `_types.yaml`:
+  value type, aliases, attachment forms, invocation scope, gaps) is projected
+  by `claudine-gen` into `ProviderInfo::cli_switches`; all ten providers are
+  researched (2026-10-01). Read it only through
+  `claudine::provider::{lookup_switch, match_switch_token}`,
+  keyed by provider and native command path (`["exec"]`, `["exec", "resume"]`,
+  `[]` for the root); a guard test fails on a hand-written switch table.
+  Composition token ownership, the resolved-provider check
+  (`composition::ownership`), and shell completion
+  (`composition::owner_of_last_argument`) read it through
+  `match_switch_token`. The
+  fleet's relations script also runs `claudine-gen validate <slug>`, so the
+  generator judges switch records itself. See [Provider Metadata § Switch
+  metadata](topics/provider-metadata.md#switch-metadata-cli_switches).
+- `non-interactive-sessions/`, `usage/` — earlier topics; sidecars
   authored (every live topic directory carries a `_schema.yaml` sidecar as of
   2026-07-03, including `mcp/`, `acp/`, `hooks/`, `resume/`, `skills/`,
   `slash-commands/`, `subagents/`, `plugins/`, and `system-prompt/`)

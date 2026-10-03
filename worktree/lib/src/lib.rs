@@ -15,6 +15,7 @@ pub mod pull_requests;
 pub mod remote_head;
 pub mod remote_update;
 pub mod remove;
+mod strict_json;
 pub mod util;
 pub mod worktree;
 

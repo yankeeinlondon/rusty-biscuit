@@ -147,7 +147,7 @@ fn shipped_implement_plan_prepares_with_unset_optional_commit_message() {
             "git add ..".to_string(),
             "git commit -m \"\"".to_string(),
         ],
-        "preflight is condition-blind, so both branches must resolve without an unknown-root error",
+        "preflight is condition-blind, so both branches must resolve without an evaluation error",
     );
 }
 

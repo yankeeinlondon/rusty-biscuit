@@ -24,6 +24,7 @@ mod completion_committed_prompt_schema;
 mod completion_compose;
 mod completion_contract;
 mod completion_inline_compose;
+mod completion_ownership;
 mod completion_perf;
 mod completion_resolution_round_trip;
 mod completion_sequence;
@@ -95,6 +96,8 @@ mod level1_provider_overlay_home;
 #[cfg(unix)]
 mod level1_provider_picker_pty;
 #[cfg(unix)]
+mod level1_ownership_prompt_pty;
+#[cfg(unix)]
 mod level1_pty_wrapper_summary;
 #[cfg(unix)]
 mod level1_review_router_partial_pty;
@@ -103,6 +106,7 @@ mod level1_schema_prompt_pty;
 #[cfg(unix)]
 mod level1_structured_error_message;
 mod lifecycle_downgrade_outcome;
+mod lifecycle_literal_escapes;
 mod lifecycle_message_drain;
 #[cfg(windows)]
 mod lifecycle_message_drain_console_windows;
@@ -129,7 +133,11 @@ mod propagated_context_fixtures;
 mod prose_escape_guard;
 mod protect_cli;
 mod provider_error_finalize;
+mod provider_tail_launch;
+mod provider_tail_notice;
+mod provider_tail_ownership;
 mod run_harness_loop_call_sites;
+mod setter_after_switch;
 // Spawns the `claudine-fake-goose` fixture binary, which only
 // `test-fixtures` builds.
 #[cfg(feature = "test-fixtures")]
@@ -165,6 +173,7 @@ mod shipped_prompt_route_drift;
 mod shipped_prompts;
 mod skills_integration;
 mod spawn_site_guard;
+mod switch_catalog_guard;
 mod system_prompt_perf_bench;
 mod test_placement;
 mod test_seam_gate_guard;

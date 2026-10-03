@@ -286,15 +286,15 @@ fn no_error_suppresses_propagation_and_continues() {
 }
 
 /// `no_error` is scoped to side-effect dispatch failures: an action whose
-/// message interpolation *raises* (an unknown root) must still surface as an
-/// evaluation error and halt the stack even when `no_error: true` is set.
+/// message interpolation *raises* (an unknown function) must still surface as
+/// an evaluation error and halt the stack even when `no_error: true` is set.
 #[test]
 fn no_error_does_not_suppress_evaluation_raise() {
     let config = parse_lifecycle_config(
         &json!({
             "start": {
                 "stack": [
-                    {"action": {"action": "message", "message": "{{spec_fil}}", "no_error": true}},
+                    {"action": {"action": "message", "message": "{{ no_such_fn(spec_file) }}", "no_error": true}},
                     {"action": {"info": "unreached"}}
                 ]
             }

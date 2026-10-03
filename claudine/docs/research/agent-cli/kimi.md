@@ -1,900 +1,1374 @@
 ---
 $schema: ./_schema.yaml
+schema_revision: 2
+provider: kimi
 created: 2026-07-02
-last_updated: 2026-07-03
-agent: codex
-model: default
-latest_version: "0.22.2"
+last_updated: 2026-10-01
+agent: claude
+model: sonnet
+reasoning_effort: high
+latest_version: 2.1.1
+versions_examined:
+- 2.1.1
+evidence:
+- claim: Help text of the installed 2.1.1 binary lists each switch with its spelling, aliases, and value placeholder at the root and at every inventoried path.
+  id: help-output
+  limitations: Help hides hidden aliases (-r, --resume, -C, --yes, --auto-approve) and does not state how many values a switch takes beyond its placeholder.
+  location: 'local: `kimi --help` and `kimi <path> --help` for every command path, run against /Users/ken/.kimi-code/bin/kimi (kimi --version printed 2.1.1)'
+  method: local_inspection
+  observed_on: 2026-10-01
+  version: 2.1.1
+- claim: The root command is built with commander ^13.1.0 and enablePositionalOptions; it declares every root switch, the hidden aliases, the argParser for each repeatable or single-use switch, and the subcommand registrations.
+  id: src-root-commands
+  limitations: Reads the repository at the commit of tag @moonshot-ai/kimi-code@2.1.1; the shipped binary is a bundled build of this source.
+  location: https://github.com/MoonshotAI/kimi-code/blob/f67e6398fb3210ad8ace970e2dfd5bcc984ed61f/apps/kimi-code/src/cli/commands.ts
+  method: source_code
+  observed_on: 2026-10-01
+  version: 2.1.1
+- claim: validateOptions rejects the combinations recorded in the notes (prompt with yolo/auto/plan, continue with session, agent with agent-file) and reads KIMI_MODEL_OUTPUT_FORMAT only in prompt mode.
+  id: src-options
+  limitations: Conflicts are checked after parsing, so they show a switch was read but are not part of the parser declaration.
+  location: https://github.com/MoonshotAI/kimi-code/blob/f67e6398fb3210ad8ace970e2dfd5bcc984ed61f/apps/kimi-code/src/cli/options.ts
+  method: source_code
+  observed_on: 2026-10-01
+  version: 2.1.1
+- claim: export declares -o/--output <path>, -y/--yes, and --no-include-global-log; fork declares --cwd <path> and -y/--yes; both prompt for confirmation only when no session id is given and --yes is absent.
+  id: src-export-fork
+  limitations: Does not state which spellings commander accepts for attached values; that comes from the parser tests.
+  location: https://github.com/MoonshotAI/kimi-code/blob/f67e6398fb3210ad8ace970e2dfd5bcc984ed61f/apps/kimi-code/src/cli/sub/export.ts and https://github.com/MoonshotAI/kimi-code/blob/f67e6398fb3210ad8ace970e2dfd5bcc984ed61f/apps/kimi-code/src/cli/sub/fork.ts
+  method: source_code
+  observed_on: 2026-10-01
+  version: 2.1.1
+- claim: session list declares --cwd <path>, --all, --archived, --limit <n> parsed with Number.parseInt and rejected unless positive, and --json.
+  id: src-session-list
+  limitations: The unhandled-error behavior of an invalid --limit was observed only on the installed binary.
+  location: https://github.com/MoonshotAI/kimi-code/blob/f67e6398fb3210ad8ace970e2dfd5bcc984ed61f/apps/kimi-code/src/cli/sub/session.ts
+  method: source_code
+  observed_on: 2026-10-01
+  version: 2.1.1
+- claim: provider add, remove, list, catalog list, and catalog add declare the switches recorded for them, each taking at most one value.
+  id: src-provider
+  limitations: Network behavior against registries and models.dev was not exercised.
+  location: https://github.com/MoonshotAI/kimi-code/blob/f67e6398fb3210ad8ace970e2dfd5bcc984ed61f/apps/kimi-code/src/cli/sub/provider.ts
+  method: source_code
+  observed_on: 2026-10-01
+  version: 2.1.1
+- claim: acp declares --login (boolean) and --region <region>; without --login it runs the ACP server over stdio.
+  id: src-acp
+  limitations: The ACP protocol exchange itself was not run.
+  location: https://github.com/MoonshotAI/kimi-code/blob/f67e6398fb3210ad8ace970e2dfd5bcc984ed61f/apps/kimi-code/src/cli/sub/acp.ts
+  method: source_code
+  observed_on: 2026-10-01
+  version: 2.1.1
+- claim: doctor, doctor config [path], and doctor tui [path] declare no switches beyond help; the path is a positional argument.
+  id: src-doctor
+  limitations: Does not cover the validator rules beyond path handling.
+  location: https://github.com/MoonshotAI/kimi-code/blob/f67e6398fb3210ad8ace970e2dfd5bcc984ed61f/apps/kimi-code/src/cli/sub/doctor.ts
+  method: source_code
+  observed_on: 2026-10-01
+  version: 2.1.1
+- claim: 'Error messages naming the switch show the parser read the value: --output-format=bad and --output-format bad are rejected with the choice list, -m and --model with no value report a missing argument, -mx and -pfoo are read as values (a later validation error appears instead of an unknown-option error), -Sabc, -rabc, --session abc and --resume=abc are read as a session (conflict with -c, not unknown command), -S --continue leaves the id empty, -p --yolo takes --yolo as the prompt, --auto=x and --version=x are rejected as unknown options, and root switches are unknown at subcommands.'
+  id: test-root-parse
+  limitations: No test started a model session; switches whose value is only used after authentication were proven by the parser stage alone.
+  location: 'local: kimi invocations run with a throwaway KIMI_CODE_HOME, KIMI_DISABLE_TELEMETRY=1, and stdin from /dev/null; results summarized in the CLI Switch Inventory section'
+  method: disposable_test
+  observed_on: 2026-10-01
+  version: 2.1.1
+- claim: export -o and --limit, --cwd, --url, --region with no value report a missing argument; export -ofoo and export -yofoo are accepted as attached values; session list --limit 0, --limit=0, and --limit abc reach the positive-integer check and name --limit; acp --login --region bad and login --region=bad both reject the value naming --region; --no-include-global-log=x is an unknown option; export --version and doctor --version are unknown options.
+  id: test-subcommand-parse
+  limitations: A --limit failure surfaces as an unhandled exception with a stack trace rather than a commander error.
+  location: 'local: kimi subcommand invocations run with a throwaway KIMI_CODE_HOME, KIMI_DISABLE_TELEMETRY=1, and stdin from /dev/null'
+  method: disposable_test
+  observed_on: 2026-10-01
+  version: 2.1.1
+- claim: The official command reference lists the root switches, their short forms, prompt-mode behavior, and the stream-json output format.
+  id: docs-kimi-command
+  limitations: Does not list hidden aliases and omits some subcommand switches.
+  location: https://moonshotai.github.io/kimi-code/en/reference/kimi-command.md
+  method: official_docs
+  observed_on: 2026-10-01
+  version: 2.1.1
 homepage: https://moonshotai.github.io/kimi-code/
 repo: https://github.com/MoonshotAI/kimi-code
 docs: https://moonshotai.github.io/kimi-code/en/
 cli_docs: https://moonshotai.github.io/kimi-code/en/reference/kimi-command
 binaries:
-  - os: macos
-    binary: kimi
-    alt_binaries: ["kimi-code", "kimi-cli"]
-    notes: "Current Kimi Code installer places a single `kimi` executable on PATH. Homebrew formula is named `kimi-code`. A legacy Python `kimi-cli` command may still be installed separately and exposes a different CLI surface."
-  - os: linux
-    binary: kimi
-    alt_binaries: ["kimi-code", "kimi-cli"]
-    notes: "Current Kimi Code installer places a single `kimi` executable on PATH. Homebrew-on-Linux formula is named `kimi-code`. A legacy Python `kimi-cli` command may still be installed separately and exposes a different CLI surface."
-  - os: windows
-    binary: kimi.exe
-    alt_binaries: ["kimi.cmd", "kimi-code", "kimi-cli.exe", "kimi-cli.cmd"]
-    notes: "Official PowerShell installer exposes `kimi`; archive/npm installs may create `.exe` or `.cmd` shims. Git for Windows is required because the CLI uses Git Bash as its shell environment."
+- alt_binaries:
+  - kimi-code
+  binary: kimi
+  notes: 'Confirmed on this host: the installer places one executable at ~/.kimi-code/bin/kimi and `kimi --version` prints 2.1.1. The legacy Python `kimi-cli` is a different program and may be installed alongside.'
+  os: macos
+- binary: kimi
+  notes: From the official install script and npm package; not run on this macOS host.
+  os: linux
+- alt_binaries:
+  - kimi.exe
+  - kimi.cmd
+  binary: kimi
+  notes: From the official PowerShell installer and npm package, whose shims can be kimi.cmd; not run on this macOS host. Git for Windows (Git Bash) is required.
+  os: windows
 install_methods:
-  - os: macos
-    method: standalone_binary
-    command: "curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash"
-    notes: "Official recommended script; downloads the latest release, verifies checksum, and places `kimi` on PATH."
-  - os: macos
-    method: brew
-    command: "brew install kimi-code"
-    notes: "Official README documents Homebrew for macOS/Linux. Homebrew reported formula version 0.22.1 while npm/GitHub latest was 0.22.2 on 2026-07-03."
-  - os: macos
-    method: npm
-    command: "npm install -g @moonshot-ai/kimi-code"
-    notes: "Requires Node.js 22.19.0 or later. pnpm alternative is `pnpm add -g @moonshot-ai/kimi-code`."
-  - os: linux
-    method: standalone_binary
-    command: "curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash"
-    notes: "Official recommended script; downloads the latest release, verifies checksum, and places `kimi` on PATH."
-  - os: linux
-    method: brew
-    command: "brew install kimi-code"
-    notes: "Official README documents Homebrew for macOS/Linux."
-  - os: linux
-    method: npm
-    command: "npm install -g @moonshot-ai/kimi-code"
-    notes: "Requires Node.js 22.19.0 or later. pnpm alternative is `pnpm add -g @moonshot-ai/kimi-code`."
-  - os: windows
-    method: standalone_binary
-    command: "irm https://code.kimi.com/kimi-code/install.ps1 | iex"
-    notes: "Official PowerShell installer. Install Git for Windows before first launch, or set `KIMI_SHELL_PATH` to the absolute path of `bash.exe` if Git Bash is custom-installed."
-  - os: windows
-    method: npm
-    command: "npm install -g @moonshot-ai/kimi-code"
-    notes: "Requires Node.js 22.19.0 or later; package-manager shims may expose `kimi.cmd`."
+- command: curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash
+  method: standalone_binary
+  notes: Recommended. Downloads the latest release, verifies the checksum, and puts `kimi` on PATH; needs no Node.js.
+  os: macos
+- command: npm install -g @moonshot-ai/kimi-code
+  method: npm
+  notes: Needs Node.js 22.19.0 or later; `pnpm add -g @moonshot-ai/kimi-code` also works.
+  os: macos
+- command: brew install kimi-code
+  method: brew
+  notes: The formula resolved on this host at stable 2.1.0, one release behind npm 2.1.1. The README no longer lists it.
+  os: macos
+- command: curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash
+  method: standalone_binary
+  notes: Recommended; same script as macOS.
+  os: linux
+- command: npm install -g @moonshot-ai/kimi-code
+  method: npm
+  notes: Needs Node.js 22.19.0 or later.
+  os: linux
+- command: brew install kimi-code
+  method: brew
+  notes: Homebrew on Linux; formula unverified on a Linux host.
+  os: linux
+- command: irm https://code.kimi.com/kimi-code/install.ps1 | iex
+  method: standalone_binary
+  notes: PowerShell installer. Install Git for Windows first, or set KIMI_SHELL_PATH to bash.exe.
+  os: windows
+- command: npm install -g @moonshot-ai/kimi-code
+  method: npm
+  notes: Needs Node.js 22.19.0 or later.
+  os: windows
 subcommands:
-  - name: "(default TUI)"
-    description: "Starts an interactive terminal UI session in the current working directory."
-    non_interactive: false
-    notes: "Requires a TTY. First launch normally requires `/login` in the UI unless credentials/config already exist."
-  - name: "(prompt mode)"
-    description: "Runs one prompt non-interactively and exits."
-    non_interactive: true
-    notes: "Activated with `-p` or `--prompt`; supports `--output-format text|stream-json`."
-  - name: "login"
-    description: "Runs Kimi Code OAuth device-code login without opening the TUI."
-    non_interactive: false
-    notes: "No flags. It prints a verification URL/code and polls until browser-side authorization completes; user interaction is still required."
-  - name: "acp"
-    description: "Runs the Agent Client Protocol server over stdio for IDEs."
-    non_interactive: true
-    notes: "JSON-RPC protocol server. `--login` runs device-code login then exits for ACP terminal-auth."
-  - name: "server"
-    description: "Runs, installs, and manages the local REST/WebSocket/web service."
-    non_interactive: true
-    notes: "`server run` starts or reuses a background loopback daemon by default; `--foreground` stays attached. Service lifecycle commands may write OS service definitions."
-  - name: "web"
-    description: "Starts the local server and opens the browser web UI."
-    non_interactive: false
-    notes: "Alias-like convenience for `kimi server run --open`; `--no-open` avoids browser launch, but the web UI is still user-facing."
-  - name: "doctor"
-    description: "Validates `config.toml` and `tui.toml`."
-    non_interactive: true
-    notes: "Current docs include `doctor config [path]` and `doctor tui [path]`; installed 0.14.0 validated defaults but rejected the nested forms."
-  - name: "export"
-    description: "Exports a session as a ZIP archive."
-    non_interactive: true
-    notes: "Use `--yes` when omitting a session id to skip previous-session confirmation."
-  - name: "migrate"
-    description: "Migrates local data from the legacy Python `kimi-cli` installation."
-    non_interactive: false
-    notes: "Documented as entirely interactive."
-  - name: "upgrade"
-    description: "Checks for the latest Kimi Code version and offers an update path."
-    non_interactive: false
-    notes: "`update` is documented as an alias. It displays update choices and may run package-manager commands."
-  - name: "provider"
-    description: "Manages configured providers and imports catalog providers."
-    non_interactive: true
-    notes: "Includes `add`, `remove`, `list`, `catalog list`, and `catalog add`; JSON output is available for list/catalog commands in current docs."
-  - name: "vis"
-    description: "Runs the session trace visualizer web server."
-    non_interactive: false
-    notes: "Starts an in-process server, prints a URL, opens a browser unless `--no-open` is passed, and runs until interrupted."
+- description: Exports a session as a ZIP archive.
+  name: export
+  non_interactive: true
+  notes: Prompts "Export previous session ...? [Y/n]" only when no session id is given and --yes is absent. Prints the archive path on stdout.
+- description: Forks a session into a new session.
+  name: fork
+  non_interactive: true
+  notes: Prompts only when no session id is given and --yes is absent.
+- description: Group of non-interactive provider management commands.
+  name: provider
+  non_interactive: true
+  notes: Run alone it prints help and exits 1.
+- description: Imports every provider listed in a custom registry (api.json).
+  name: provider add
+  non_interactive: true
+  notes: Writes the providers and models into config.toml; fetches the URL.
+- description: Removes a provider and every model alias that referenced it.
+  name: provider remove
+  non_interactive: true
+  notes: Edits config.toml.
+- description: Shows configured providers and their model counts.
+  name: provider list
+  non_interactive: true
+  notes: --json prints the raw providers and models tables.
+- description: Group for discovering providers in the public models.dev catalog.
+  name: provider catalog
+  non_interactive: true
+  notes: Run alone it prints help and exits 1.
+- description: Lists catalog providers, or the models of one provider when an id is given.
+  name: provider catalog list
+  non_interactive: true
+  notes: Fetches the catalog over the network.
+- description: Imports a known provider from the catalog by id.
+  name: provider catalog add
+  non_interactive: true
+  notes: Edits config.toml; fetches the catalog.
+- description: Group of non-interactive session commands.
+  name: session
+  non_interactive: true
+  notes: Run alone it prints help and exits 1.
+- description: Lists sessions, most recently updated first.
+  name: session list
+  non_interactive: true
+  notes: Scoped to the current directory unless --all or --cwd is given.
+- description: Runs Kimi Code as an Agent Client Protocol server over stdio.
+  name: acp
+  non_interactive: true
+  notes: Long-running JSON-RPC server driven by an IDE; it needs no terminal. --login switches it to the device-code login flow, which needs a browser.
+- description: Runs the local Kimi server in the foreground and opens the web UI.
+  name: web
+  non_interactive: false
+  notes: Runs until interrupted and opens a browser unless --no-open is given. Prints a bearer token at startup.
+- description: Generates a new persistent server token and invalidates the previous one.
+  name: web rotate-token
+  non_interactive: true
+  notes: Writes server.token under the data root and prints the new token on stdout.
+- description: Runs the local server and exposes the web UI through Remote Control.
+  name: rc
+  non_interactive: false
+  notes: 'Alias: remote. Same server options as web with remote control forced on.'
+- description: Authenticates through the device-code flow.
+  name: login
+  non_interactive: false
+  notes: Prints a URL and code and polls until a person authorizes in a browser. Accepts --region.
+- description: Validates config.toml and tui.toml at their default paths.
+  name: doctor
+  non_interactive: true
+  notes: Exits 0 when the files are valid or absent and 1 when an issue is found. Reads only.
+- description: Validates config.toml, or the file given as the optional path argument.
+  name: doctor config
+  non_interactive: true
+  notes: Exits 1 and names the path when the file is missing or invalid.
+- description: Validates tui.toml, or the file given as the optional path argument.
+  name: doctor tui
+  non_interactive: true
+- description: Launches the session visualizer web server in a browser.
+  name: vis
+  non_interactive: false
+  notes: Runs until interrupted (SIGINT). Accepts --port, --host, --no-open, and an optional session id; an unparseable --port is silently ignored and a free port is chosen.
+- description: Prints the Kimi Code desktop app page and opens it in a browser.
+  name: install-desktop
+  non_interactive: false
+  notes: 'Hidden alias: install-app.'
+- description: Migrates data from a legacy kimi-cli installation into Kimi Code.
+  name: migrate
+  non_interactive: false
+  notes: Interactive by default; --run migrates non-interactively and --config-only (which requires --run) skips chat sessions.
+- description: Upgrades Kimi Code to the latest version.
+  name: upgrade
+  non_interactive: false
+  notes: 'Alias: update. Asks for confirmation unless -y/--yes is given, and installs a new binary.'
+- description: Deprecated; prints a notice that kimi web replaces it and exits 1.
+  name: server
+  non_interactive: false
+  notes: Kept only for the kill subcommand.
+- description: 'Deprecated: stops a server started by a version before 0.28.0.'
+  name: server kill
+  non_interactive: false
+  notes: Not exercised in this research.
 cli_switches:
-  - flag: --version
-    value: ""
-    scope: ["global", "meta"]
-    default: "false"
-    description: "Prints the version number and exits."
-    example: "kimi --version"
-    notes: "Short alias: `-V`. Local installed `kimi` returned `0.14.0`; npm/GitHub latest was `0.22.2`."
-  - flag: --help
-    value: ""
-    scope: ["global", "meta"]
-    default: "false"
-    description: "Shows help information and exits."
-    example: "kimi --help"
-    notes: "Short alias: `-h`. Local 0.14.0 help truncated or fell back to root help for several nested commands, so current docs were used for nested switch inventory."
-  - flag: --session
-    value: "[id]"
-    scope: ["global", "session"]
-    default: "none"
-    description: "Resumes a session by id, or opens an interactive selector when no id is supplied."
-    example: "kimi --session 01HZ...XYZ"
-    notes: "Short alias: `-S`; hidden aliases: `--resume`, `-r`. Mutually exclusive with `--continue`."
-  - flag: --continue
-    value: ""
-    scope: ["global", "session"]
-    default: "false"
-    description: "Continues the most recent session for the current working directory."
-    example: "kimi --continue"
-    notes: "Short alias in current docs is `-c`; local 0.14.0 help showed `-C`. Mutually exclusive with `--session`."
-  - flag: --model
-    value: "<model>"
-    scope: ["global", "model_selection"]
-    default: "default_model from config.toml"
-    description: "Uses a model alias for this invocation."
-    example: "kimi -m kimi-code/kimi-for-coding -p 'Explain the latest diff'"
-    notes: "Short alias: `-m`."
-  - flag: --prompt
-    value: "<prompt>"
-    scope: ["global", "automation"]
-    default: "interactive TUI"
-    description: "Runs one prompt non-interactively and streams assistant output to stdout."
-    example: "kimi -p 'Summarize the current repository status'"
-    notes: "Short alias: `-p`. Current docs say `--prompt` cannot be combined with `--yolo`, `--auto`, or `--plan`; installed 0.14.0 rejected those combinations."
-  - flag: --output-format
-    value: "<text|stream-json>"
-    scope: ["global", "automation"]
-    default: "text"
-    description: "Selects non-interactive prompt output format."
-    example: "kimi -p 'List changed files' --output-format stream-json"
-    notes: "Only valid with `--prompt`; installed 0.14.0 rejected `--output-format stream-json` without `-p`."
-  - flag: --yolo
-    value: ""
-    scope: ["global", "permissions"]
-    default: "false"
-    description: "Auto-approves regular tool calls, including file writes and shell commands."
-    example: "kimi --yolo"
-    notes: "Short alias: `-y`; hidden aliases: `--yes`, `--auto-approve`. Cannot be combined with `--auto`; current docs say prompt mode uses auto permission by default instead."
-  - flag: --auto
-    value: ""
-    scope: ["global", "permissions"]
-    default: "false"
-    description: "Starts with auto permission mode so tool approvals are automatic and the agent does not ask the user questions."
-    example: "kimi --auto"
-    notes: "Cannot be combined with `--yolo`; installed 0.14.0 rejected `-p hi --auto`."
-  - flag: --plan
-    value: ""
-    scope: ["global", "planning"]
-    default: "false"
-    description: "Starts in Plan mode, prioritizing read-only exploration and planning."
-    example: "kimi --plan"
-    notes: "Installed 0.14.0 rejected `-p hi --plan`. Plan-mode exit approval is not bypassed by `--yolo` in current docs."
-  - flag: --skills-dir
-    value: "<dir>"
-    scope: ["global", "skills"]
-    default: "auto-discovered user and project skills"
-    description: "Loads Skills from the specified directory and replaces automatic discovery for this launch."
-    example: "kimi --skills-dir /path/to/team-skills --skills-dir ./local-skills"
-    notes: "Repeatable. Persistent additions use `extra_skill_dirs` in `config.toml`."
-  - flag: --add-dir
-    value: "<dir>"
-    scope: ["global", "workspace"]
-    default: "[]"
-    description: "Adds an extra workspace directory for this session."
-    example: "kimi --add-dir ../shared"
-    notes: "Repeatable. Relative paths resolve against the current working directory."
-  - flag: --login
-    value: ""
-    scope: ["acp", "auth"]
-    default: "false"
-    description: "Runs the device-code login flow from the ACP subcommand and exits."
-    example: "kimi acp --login"
-    notes: "Observed in local `kimi acp --help`; intended for ACP terminal-auth."
-  - flag: --port
-    value: "<port>"
-    scope: ["server run", "server install", "web", "vis"]
-    default: "58627 for server; available port for vis"
-    description: "Sets the local server or visualizer port."
-    example: "kimi server run --port 58627"
-    notes: "For supervised install, records the chosen port in `$KIMI_CODE_HOME/server/install.json`."
-  - flag: --log-level
-    value: "<level>"
-    scope: ["server run", "server install", "web"]
-    default: "omitted"
-    description: "Enables server logs at the selected level."
-    example: "kimi server run --log-level debug"
-    notes: "Documented for server commands."
-  - flag: --debug-endpoints
-    value: ""
-    scope: ["server run", "web"]
-    default: "false"
-    description: "Mounts `/api/v1/debug/*` routes."
-    example: "kimi server run --debug-endpoints"
-    notes: "Use only for diagnostics."
-  - flag: --foreground
-    value: ""
-    scope: ["server run", "web"]
-    default: "false"
-    description: "Runs the server attached to the current terminal instead of spawning/reusing a background daemon."
-    example: "kimi server run --foreground"
-    notes: "Foreground mode stays running until interrupted."
-  - flag: --open
-    value: ""
-    scope: ["server run", "web"]
-    default: "false for server run; true for web"
-    description: "Opens the web UI in the default browser once the local server is healthy."
-    example: "kimi server run --open"
-    notes: "`kimi web` enables browser opening by default."
-  - flag: --no-open
-    value: ""
-    scope: ["web", "vis"]
-    default: "false"
-    description: "Suppresses automatic browser launch."
-    example: "kimi web --no-open"
-    notes: "Useful for wrappers that want to present the URL themselves."
-  - flag: --force
-    value: ""
-    scope: ["server install"]
-    default: "false"
-    description: "Replaces an existing OS service install instead of failing."
-    example: "kimi server install --force"
-    notes: "Service install writes launchd/systemd/schtasks definitions."
-  - flag: --json
-    value: ""
-    scope: ["server install", "server status", "provider list", "provider catalog list"]
-    default: "false"
-    description: "Outputs JSON for automation where supported."
-    example: "kimi provider list --json"
-    notes: "Current docs list `server status --json`, but installed 0.14.0 rejected that flag. `provider list --json` and `provider catalog list --json` worked locally."
-  - flag: --output
-    value: "<path>"
-    scope: ["export"]
-    default: "session-derived ZIP path in current directory"
-    description: "Sets the output ZIP path for a session export."
-    example: "kimi export 01HZ...XYZ -o ./bug-report.zip"
-    notes: "Short alias: `-o`."
-  - flag: --yes
-    value: ""
-    scope: ["export"]
-    default: "false"
-    description: "Skips confirmation when exporting the default previous session."
-    example: "kimi export -y"
-    notes: "Short alias: `-y`."
-  - flag: --no-include-global-log
-    value: ""
-    scope: ["export"]
-    default: "false"
-    description: "Excludes the global diagnostic log from the export."
-    example: "kimi export 01HZ...XYZ -o ./bug-report.zip --no-include-global-log"
-    notes: "By default, `~/.kimi-code/logs/kimi-code.log` is included."
-  - flag: --host
-    value: "<host>"
-    scope: ["vis"]
-    default: "127.0.0.1"
-    description: "Sets the visualizer bind host."
-    example: "kimi vis --host 0.0.0.0 --port 8123 --no-open"
-    notes: "Current command reference documents this for `vis`; server run binds loopback only."
-  - flag: --api-key
-    value: "<key>"
-    scope: ["provider add", "provider catalog add"]
-    default: "KIMI_REGISTRY_API_KEY fallback"
-    description: "Supplies the bearer token used to import providers from a registry/catalog."
-    example: "kimi provider add https://registry.example.com/v1/models/api.json --api-key YOUR_KEY"
-    notes: "Avoid logging the value. This is scoped to provider import, not ordinary model credential fallback."
-  - flag: --filter
-    value: "<substring>"
-    scope: ["provider catalog list"]
-    default: "none"
-    description: "Filters catalog providers or models by case-insensitive substring."
-    example: "kimi provider catalog list --filter anthropic"
-    notes: "Useful for catalog browsing."
-  - flag: --url
-    value: "<url>"
-    scope: ["provider catalog list", "provider catalog add"]
-    default: "https://models.dev/api.json"
-    description: "Overrides the provider catalog URL."
-    example: "kimi provider catalog list --url https://models.dev/api.json --json"
-    notes: "Also used when importing a known catalog provider."
-  - flag: --default-model
-    value: "<modelId>"
-    scope: ["provider catalog add"]
-    default: "none"
-    description: "Sets `default_model` after importing a catalog provider."
-    example: "kimi provider catalog add anthropic --api-key sk-ant-... --default-model claude-opus-4-7"
-    notes: "Current docs document this under `provider catalog add`."
+- aliases:
+  - -V
+  attachment: []
+  description: Prints the version number and exits.
+  evidence_ids:
+  - help-output
+  - src-root-commands
+  - test-root-parse
+  example: kimi --version
+  flag: --version
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Accepted only at the root entrypoint; `kimi export --version` is an unknown option. `--version=x` is rejected as an unknown option.
+  scope:
+  - meta
+  value_type: none
+- aliases:
+  - -h
+  attachment: []
+  description: Shows help for the command path and exits.
+  evidence_ids:
+  - help-output
+  - src-root-commands
+  - src-doctor
+  - test-subcommand-parse
+  example: kimi export --help
+  flag: --help
+  invocation_scope:
+  - applies_to: global
+  notes: Every command path accepts it. Help text is written to stdout and exits 0 at the leaf; a command group run without a leaf prints its help and exits 1.
+  scope:
+  - meta
+  value_type: none
+- aliases:
+  - -S
+  - --resume
+  - -r
+  attachment:
+  - space
+  - equals
+  - short_attached
+  description: Resumes a session by id, or opens an interactive picker when the id is left out.
+  evidence_ids:
+  - help-output
+  - src-root-commands
+  - src-options
+  - test-root-parse
+  - docs-kimi-command
+  example: kimi --session 01HZEXAMPLE
+  flag: --session
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: The id is optional. The next argument is taken as the id only when it does not begin with a dash, so `-S --continue` leaves the id empty. `--resume` and `-r` are hidden aliases declared as a separate option with the same parser. Prompt mode rejects an empty id ("Cannot use --session without an id in prompt mode"). Cannot be combined with --continue, --agent, or --agent-file.
+  scope:
+  - session
+  value: '[id]'
+  value_optional: true
+  value_type: string
+- aliases:
+  - -c
+  - -C
+  attachment: []
+  description: Continues the most recent session for the working directory.
+  evidence_ids:
+  - help-output
+  - src-root-commands
+  - src-options
+  - test-root-parse
+  - docs-kimi-command
+  example: kimi --continue
+  flag: --continue
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: '`-C` is a hidden option that behaves as an alias. `-c=x` is not an equals form: it is rejected as unknown option `-=x`. Cannot be combined with --session, --agent, or --agent-file.'
+  scope:
+  - session
+  value_type: none
+- aliases:
+  - -y
+  - --yes
+  - --auto-approve
+  attachment: []
+  description: 'Starts in the permission mode the CLI calls Ask When Needed: routine edits and commands run automatically while risky actions, questions, and plans still ask.'
+  evidence_ids:
+  - help-output
+  - src-root-commands
+  - src-options
+  - test-root-parse
+  - docs-kimi-command
+  example: kimi --yolo
+  flag: --yolo
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: '`--yes` and `--auto-approve` are hidden options that behave as aliases. Cannot be combined with --auto or with --prompt. Permission semantics belong to the agent-permissions topic.'
+  scope:
+  - permissions
+  value_type: none
+- attachment: []
+  description: 'Starts in the permission mode the CLI calls Never Ask: nothing interrupts the user and everything is decided automatically.'
+  evidence_ids:
+  - help-output
+  - src-root-commands
+  - src-options
+  - test-root-parse
+  - docs-kimi-command
+  example: kimi --auto
+  flag: --auto
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Cannot be combined with --yolo or with --prompt (prompt mode applies its own automatic policy). Permission semantics belong to the agent-permissions topic.
+  scope:
+  - permissions
+  value_type: none
+- aliases:
+  - -m
+  attachment:
+  - space
+  - equals
+  - short_attached
+  default: default_model from config.toml
+  description: Selects a model alias for this invocation.
+  evidence_ids:
+  - help-output
+  - src-root-commands
+  - src-options
+  - test-root-parse
+  - docs-kimi-command
+  example: kimi -m kimi-code/kimi-for-coding -p "Explain the latest diff"
+  flag: --model
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: A required value consumes the next argument even when it begins with a dash (`-m --plan` sets the model to `--plan`). An empty or blank value is rejected ("Model cannot be empty"). Model semantics belong to the model-config topic.
+  scope:
+  - model_selection
+  value: <model>
+  value_optional: false
+  value_type: string
+- aliases:
+  - -p
+  attachment:
+  - space
+  - equals
+  - short_attached
+  default: interactive TUI
+  description: Runs one prompt non-interactively and prints the response.
+  evidence_ids:
+  - help-output
+  - src-root-commands
+  - src-options
+  - test-root-parse
+  - docs-kimi-command
+  example: kimi -p "Summarize the current repository status"
+  flag: --prompt
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: 'A required value consumes the next argument even when it begins with a dash: `kimi -p --yolo` runs the prompt "--yolo" instead of failing, and `kimi -p --yolo hello` then fails with "unknown command hello". Always place the prompt immediately after -p. `-p=foo` is not an equals form for the short spelling: the value is "=foo". An empty prompt is rejected. Cannot be combined with --yolo, --auto, or --plan.'
+  scope:
+  - automation
+  value: <prompt>
+  value_optional: false
+  value_type: string
+- attachment:
+  - space
+  - equals
+  default: text
+  description: 'Selects the output format of prompt mode: text or stream-json.'
+  evidence_ids:
+  - help-output
+  - src-root-commands
+  - src-options
+  - test-root-parse
+  - docs-kimi-command
+  example: kimi -p "List changed files" --output-format stream-json
+  flag: --output-format
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Commander restricts the value to the choices text and stream-json and rejects anything else naming the switch. Valid only with --prompt ("Output format is only supported in prompt mode"). Without the switch, prompt mode reads KIMI_MODEL_OUTPUT_FORMAT.
+  scope:
+  - automation
+  value: <format>
+  value_optional: false
+  value_type: string
+- attachment:
+  - space
+  - equals
+  default: auto-discovered user and project skill directories
+  description: Loads skills from this directory instead of the auto-discovered user and project directories.
+  evidence_ids:
+  - help-output
+  - src-root-commands
+  - test-root-parse
+  example: kimi --skills-dir ./team-skills --skills-dir ./local-skills
+  flag: --skills-dir
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Repeatable, one value per occurrence; occurrences accumulate into a list.
+  scope:
+  - skills
+  value: <dir>
+  value_optional: false
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: Starts the new session with the named agent profile.
+  evidence_ids:
+  - help-output
+  - src-root-commands
+  - src-options
+  - test-root-parse
+  - docs-kimi-command
+  example: kimi --agent reviewer
+  flag: --agent
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: A second occurrence is rejected ("--agent may only be specified once"). Mutually exclusive with --agent-file, --session, and --continue.
+  scope:
+  - agents
+  value: <name>
+  value_optional: false
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: Loads one agent definition from a Markdown file and selects it for the new session.
+  evidence_ids:
+  - help-output
+  - src-root-commands
+  - src-options
+  - test-root-parse
+  - docs-kimi-command
+  example: kimi --agent-file ./reviewer.md
+  flag: --agent-file
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: A second occurrence is rejected. Mutually exclusive with --agent, --session, and --continue.
+  scope:
+  - agents
+  value: <path>
+  value_optional: false
+  value_type: string
+- attachment:
+  - space
+  - equals
+  default: '[]'
+  description: Adds an extra workspace directory for this session.
+  evidence_ids:
+  - help-output
+  - src-root-commands
+  - test-root-parse
+  - docs-kimi-command
+  example: kimi --add-dir ../shared
+  flag: --add-dir
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Repeatable, one value per occurrence. 2.1.0 rejects directories that resolve to the home directory or the filesystem root.
+  scope:
+  - workspace
+  value: <dir>
+  value_optional: false
+  value_type: string
+- attachment: []
+  description: Starts in plan mode.
+  evidence_ids:
+  - help-output
+  - src-root-commands
+  - src-options
+  - test-root-parse
+  - docs-kimi-command
+  example: kimi --plan
+  flag: --plan
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Cannot be combined with --prompt.
+  scope:
+  - planning
+  value_type: none
+- aliases:
+  - -o
+  attachment:
+  - space
+  - equals
+  - short_attached
+  default: session-derived ZIP name in the current directory
+  description: Sets the output path of the exported ZIP archive.
+  evidence_ids:
+  - help-output
+  - src-export-fork
+  - test-subcommand-parse
+  example: kimi export 01HZEXAMPLE -o ./bug-report.zip
+  flag: --output
+  invocation_scope:
+  - applies_to: command
+    command:
+    - export
+  scope:
+  - export
+  value: <path>
+  value_optional: false
+  value_type: string
+- aliases:
+  - -y
+  attachment: []
+  description: Skips the previous-session confirmation prompt.
+  evidence_ids:
+  - help-output
+  - src-export-fork
+  - test-subcommand-parse
+  example: kimi export -y
+  flag: --yes
+  invocation_scope:
+  - applies_to: command
+    command:
+    - export
+  - applies_to: command
+    command:
+    - fork
+  notes: 'The prompt appears only when no session id is given. With a session id, or with this switch, the command never prompts. At the root, `--yes` is a hidden alias of --yolo, not this switch. Short options bundle: `-yofoo` is `-y -o foo`.'
+  scope:
+  - export
+  - fork
+  value_type: none
+- attachment: []
+  default: the global log is included
+  description: Leaves the global diagnostic log out of the export archive.
+  evidence_ids:
+  - help-output
+  - src-export-fork
+  - test-subcommand-parse
+  example: kimi export 01HZEXAMPLE --no-include-global-log
+  flag: --no-include-global-log
+  invocation_scope:
+  - applies_to: command
+    command:
+    - export
+  notes: 'A negated boolean: the positive form --include-global-log is not documented.'
+  scope:
+  - export
+  value_type: none
+- attachment:
+  - space
+  - equals
+  default: the current directory
+  description: Working directory used to find the most recent session.
+  evidence_ids:
+  - help-output
+  - src-export-fork
+  - src-session-list
+  - test-subcommand-parse
+  example: kimi session list --cwd /path/to/repo
+  flag: --cwd
+  invocation_scope:
+  - applies_to: command
+    command:
+    - fork
+  - applies_to: command
+    command:
+    - session
+    - list
+  scope:
+  - session
+  value: <path>
+  value_optional: false
+  value_type: string
+- attachment: []
+  description: Lists sessions across every workspace.
+  evidence_ids:
+  - help-output
+  - src-session-list
+  example: kimi session list --all --json
+  flag: --all
+  invocation_scope:
+  - applies_to: command
+    command:
+    - session
+    - list
+  scope:
+  - session
+  value_type: none
+- attachment: []
+  description: Includes archived sessions in the list.
+  evidence_ids:
+  - help-output
+  - src-session-list
+  example: kimi session list --archived
+  flag: --archived
+  invocation_scope:
+  - applies_to: command
+    command:
+    - session
+    - list
+  scope:
+  - session
+  value_type: none
+- attachment:
+  - space
+  - equals
+  description: Prints at most n sessions.
+  evidence_ids:
+  - help-output
+  - src-session-list
+  - test-subcommand-parse
+  example: kimi session list --limit 5
+  flag: --limit
+  invocation_scope:
+  - applies_to: command
+    command:
+    - session
+    - list
+  notes: Parsed with parseInt and required to be a positive integer, so `5x` is accepted as 5. In 2.1.1 a rejected value (0, abc) ends in an unhandled exception with a stack trace and exit code 1 instead of a one-line error.
+  scope:
+  - session
+  value: <n>
+  value_optional: false
+  value_type: number
+- attachment: []
+  default: text
+  description: Emits the command result as JSON instead of text.
+  evidence_ids:
+  - help-output
+  - src-session-list
+  - src-provider
+  - test-subcommand-parse
+  example: kimi session list --json
+  flag: --json
+  invocation_scope:
+  - applies_to: command
+    command:
+    - session
+    - list
+  - applies_to: command
+    command:
+    - provider
+    - list
+  - applies_to: command
+    command:
+    - provider
+    - catalog
+    - list
+  notes: '`session list --json` prints a JSON array of session summaries; `provider list --json` prints the raw providers and models tables; `provider catalog list --json` prints the models.dev catalog slice.'
+  scope:
+  - output
+  value_type: none
+- attachment:
+  - space
+  - equals
+  default: KIMI_REGISTRY_API_KEY
+  description: Supplies the API key or registry key used for the import.
+  evidence_ids:
+  - help-output
+  - src-provider
+  example: kimi provider add https://registry.example.com/v1/api.json --api-key KEY
+  flag: --api-key
+  invocation_scope:
+  - applies_to: command
+    command:
+    - provider
+    - add
+  - applies_to: command
+    command:
+    - provider
+    - catalog
+    - add
+  notes: The key appears in the process argument list; redact it in any log of the command line.
+  scope:
+  - provider
+  value: <key>
+  value_optional: false
+  value_type: string
+- attachment:
+  - space
+  - equals
+  default: https://models.dev/api.json
+  description: Overrides the provider catalog URL.
+  evidence_ids:
+  - help-output
+  - src-provider
+  - test-subcommand-parse
+  example: kimi provider catalog list --url https://models.dev/api.json --json
+  flag: --url
+  invocation_scope:
+  - applies_to: command
+    command:
+    - provider
+    - catalog
+    - list
+  - applies_to: command
+    command:
+    - provider
+    - catalog
+    - add
+  scope:
+  - provider
+  value: <url>
+  value_optional: false
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: Filters catalog providers or models by a case-insensitive id or name substring.
+  evidence_ids:
+  - help-output
+  - src-provider
+  example: kimi provider catalog list --filter anthropic
+  flag: --filter
+  invocation_scope:
+  - applies_to: command
+    command:
+    - provider
+    - catalog
+    - list
+  scope:
+  - provider
+  value: <substring>
+  value_optional: false
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: Marks the imported model as default_model after import.
+  evidence_ids:
+  - help-output
+  - src-provider
+  example: kimi provider catalog add anthropic --default-model claude-opus-4-7
+  flag: --default-model
+  invocation_scope:
+  - applies_to: command
+    command:
+    - provider
+    - catalog
+    - add
+  scope:
+  - provider
+  value: <modelId>
+  value_optional: false
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: Overrides the endpoint the catalog declares for the provider.
+  evidence_ids:
+  - help-output
+  - src-provider
+  flag: --base-url
+  invocation_scope:
+  - applies_to: command
+    command:
+    - provider
+    - catalog
+    - add
+  notes: Required when the catalog declares no endpoint or only an environment placeholder.
+  scope:
+  - provider
+  value: <url>
+  value_optional: false
+  value_type: string
+- attachment: []
+  default: 'false'
+  description: Runs the device-code login flow and exits instead of starting the ACP server.
+  evidence_ids:
+  - help-output
+  - src-acp
+  example: kimi acp --login
+  flag: --login
+  invocation_scope:
+  - applies_to: command
+    command:
+    - acp
+  notes: The login flow needs a person to authorize in a browser.
+  scope:
+  - auth
+  value_type: none
+- attachment:
+  - space
+  - equals
+  description: 'Login region used together with --login: mainland-cn (kimi.com) or global (kimi.ai).'
+  evidence_ids:
+  - help-output
+  - src-acp
+  - test-subcommand-parse
+  example: kimi acp --login --region global
+  flag: --region
+  invocation_scope:
+  - applies_to: command
+    command:
+    - acp
+  notes: An unknown value is rejected after parsing with a message naming --region. Ignored unless --login is given.
+  scope:
+  - auth
+  value: <region>
+  value_optional: false
+  value_type: string
 config_paths:
-  - os: macos
-    scope: user
-    path: /Users/<name>/.kimi-code/config.toml
-    format: toml
-    notes: "Main runtime configuration. Can be relocated by `KIMI_CODE_HOME`; local host had `/Users/ken/.kimi-code/config.toml`."
-  - os: linux
-    scope: user
-    path: /home/<name>/.kimi-code/config.toml
-    format: toml
-    notes: "Main runtime configuration. Can be relocated by `KIMI_CODE_HOME`."
-  - os: windows
-    scope: user
-    path: 'C:\Users\<name>\.kimi-code\config.toml'
-    format: toml
-    notes: "Main runtime configuration. Can be relocated by `KIMI_CODE_HOME`."
-  - os: macos
-    scope: user
-    path: /Users/<name>/.kimi-code/tui.toml
-    format: toml
-    notes: "Terminal UI preferences, including theme, editor, notifications, and auto-update settings."
-  - os: linux
-    scope: user
-    path: /home/<name>/.kimi-code/tui.toml
-    format: toml
-    notes: "Terminal UI preferences, including theme, editor, notifications, and auto-update settings."
-  - os: windows
-    scope: user
-    path: 'C:\Users\<name>\.kimi-code\tui.toml'
-    format: toml
-    notes: "Terminal UI preferences, including theme, editor, notifications, and auto-update settings."
-  - os: macos
-    scope: user
-    path: /Users/<name>/.kimi-code/mcp.json
-    format: json
-    notes: "User-level MCP server declarations; project `.kimi-code/mcp.json` overrides entries with the same name."
-  - os: linux
-    scope: user
-    path: /home/<name>/.kimi-code/mcp.json
-    format: json
-    notes: "User-level MCP server declarations; project `.kimi-code/mcp.json` overrides entries with the same name."
-  - os: windows
-    scope: user
-    path: 'C:\Users\<name>\.kimi-code\mcp.json'
-    format: json
-    notes: "User-level MCP server declarations; project `.kimi-code/mcp.json` overrides entries with the same name."
-  - os: macos
-    scope: repo
-    path: <repo>/.kimi-code/mcp.json
-    format: json
-    notes: "Project-local MCP declarations. Stdio entries can execute local commands when a session starts."
-  - os: linux
-    scope: repo
-    path: <repo>/.kimi-code/mcp.json
-    format: json
-    notes: "Project-local MCP declarations. Stdio entries can execute local commands when a session starts."
-  - os: windows
-    scope: repo
-    path: '<repo>\.kimi-code\mcp.json'
-    format: json
-    notes: "Project-local MCP declarations. Stdio entries can execute local commands when a session starts."
-  - os: macos
-    scope: user
-    path: /Users/<name>/.kimi-code/AGENTS.md
-    format: text
-    notes: "Optional global Kimi-specific agent instructions; moves with `KIMI_CODE_HOME`."
-  - os: linux
-    scope: user
-    path: /home/<name>/.kimi-code/AGENTS.md
-    format: text
-    notes: "Optional global Kimi-specific agent instructions; moves with `KIMI_CODE_HOME`."
-  - os: windows
-    scope: user
-    path: 'C:\Users\<name>\.kimi-code\AGENTS.md'
-    format: text
-    notes: "Optional global Kimi-specific agent instructions; moves with `KIMI_CODE_HOME`."
-  - os: macos
-    scope: user
-    path: /Users/<name>/.kimi-code/updates/latest.json
-    format: json
-    notes: "Auto-update metadata. Local file recorded latest `0.22.2` on 2026-07-03."
-  - os: linux
-    scope: user
-    path: /home/<name>/.kimi-code/updates/latest.json
-    format: json
-    notes: "Auto-update metadata."
-  - os: windows
-    scope: user
-    path: 'C:\Users\<name>\.kimi-code\updates\latest.json'
-    format: json
-    notes: "Auto-update metadata."
-  - os: macos
-    scope: system
-    path: /Users/<name>/Library/LaunchAgents/ai.moonshot.kimi-server.plist
-    format: other
-    notes: "`kimi server install` writes this LaunchAgent plist on macOS."
-  - os: linux
-    scope: system
-    path: /home/<name>/.config/systemd/user/kimi-server.service
-    format: other
-    notes: "`kimi server install` writes this user systemd unit on Linux."
-  - os: windows
-    scope: system
-    path: KimiServer scheduled task
-    format: other
-    notes: "`kimi server install` registers a scheduled task named `KimiServer` via `schtasks /Create /XML`."
+- format: toml
+  notes: 'Main runtime configuration: providers, models, loop control, hooks. Created on first run and written by provider commands and the TUI. Relocated by KIMI_CODE_HOME.'
+  os: macos
+  path: /Users/<name>/.kimi-code/config.toml
+  scope: user
+- format: toml
+  notes: Terminal UI preferences, including the auto-update toggle. Written by TUI commands; a malformed file falls back to defaults.
+  os: macos
+  path: /Users/<name>/.kimi-code/tui.toml
+  scope: user
+- format: json
+  notes: User-level MCP server declarations, merged with the project file; MCP details belong to the mcp topic.
+  os: macos
+  path: /Users/<name>/.kimi-code/mcp.json
+  scope: user
+- format: text
+  notes: Optional global Kimi-specific agent instructions. Generic cross-tool instructions can live under the real home at ~/.agents/AGENTS.md.
+  os: macos
+  path: /Users/<name>/.kimi-code/AGENTS.md
+  scope: user
+- format: toml
+  notes: Project-local settings such as additional workspace directories. Read only after the workspace is trusted; the docs recommend gitignoring it.
+  os: macos
+  path: <repo>/.kimi-code/local.toml
+  scope: repo
+- format: json
+  notes: Project-local MCP declarations. Ignored in an untrusted workspace unless KIMI_CODE_TRUST_WORKSPACE is truthy.
+  os: macos
+  path: <repo>/.kimi-code/mcp.json
+  scope: repo
+- format: toml
+  notes: 'Main runtime configuration: providers, models, loop control, hooks. Created on first run and written by provider commands and the TUI. Relocated by KIMI_CODE_HOME.'
+  os: linux
+  path: /home/<name>/.kimi-code/config.toml
+  scope: user
+- format: toml
+  notes: Terminal UI preferences, including the auto-update toggle. Written by TUI commands; a malformed file falls back to defaults.
+  os: linux
+  path: /home/<name>/.kimi-code/tui.toml
+  scope: user
+- format: json
+  notes: User-level MCP server declarations, merged with the project file; MCP details belong to the mcp topic.
+  os: linux
+  path: /home/<name>/.kimi-code/mcp.json
+  scope: user
+- format: text
+  notes: Optional global Kimi-specific agent instructions. Generic cross-tool instructions can live under the real home at ~/.agents/AGENTS.md.
+  os: linux
+  path: /home/<name>/.kimi-code/AGENTS.md
+  scope: user
+- format: toml
+  notes: Project-local settings such as additional workspace directories. Read only after the workspace is trusted; the docs recommend gitignoring it.
+  os: linux
+  path: <repo>/.kimi-code/local.toml
+  scope: repo
+- format: json
+  notes: Project-local MCP declarations. Ignored in an untrusted workspace unless KIMI_CODE_TRUST_WORKSPACE is truthy.
+  os: linux
+  path: <repo>/.kimi-code/mcp.json
+  scope: repo
+- format: toml
+  notes: 'Main runtime configuration: providers, models, loop control, hooks. Created on first run and written by provider commands and the TUI. Relocated by KIMI_CODE_HOME.'
+  os: windows
+  path: C:\Users\<name>\.kimi-code\config.toml
+  scope: user
+- format: toml
+  notes: Terminal UI preferences, including the auto-update toggle. Written by TUI commands; a malformed file falls back to defaults.
+  os: windows
+  path: C:\Users\<name>\.kimi-code\tui.toml
+  scope: user
+- format: json
+  notes: User-level MCP server declarations, merged with the project file; MCP details belong to the mcp topic.
+  os: windows
+  path: C:\Users\<name>\.kimi-code\mcp.json
+  scope: user
+- format: text
+  notes: Optional global Kimi-specific agent instructions. Generic cross-tool instructions can live under the real home at ~/.agents/AGENTS.md.
+  os: windows
+  path: C:\Users\<name>\.kimi-code\AGENTS.md
+  scope: user
+- format: toml
+  notes: Project-local settings such as additional workspace directories. Read only after the workspace is trusted; the docs recommend gitignoring it.
+  os: windows
+  path: <repo>\.kimi-code\local.toml
+  scope: repo
+- format: json
+  notes: Project-local MCP declarations. Ignored in an untrusted workspace unless KIMI_CODE_TRUST_WORKSPACE is truthy.
+  os: windows
+  path: <repo>\.kimi-code\mcp.json
+  scope: repo
 env_vars:
-  - name: KIMI_CODE_HOME
-    effect: "Relocates the entire Kimi Code data root; config, sessions, logs, OAuth credentials, updates, Kimi-specific skills, and AGENTS.md are read/written under this directory instead of `~/.kimi-code`."
-  - name: KIMI_DISABLE_TELEMETRY
-    effect: "Truthy values (`1`, `true`, `yes`, `y`) disable anonymous telemetry even when `telemetry = true` in config."
-  - name: KIMI_CODE_BACKGROUND_KEEP_ALIVE_ON_EXIT
-    effect: "Overrides `[background].keep_alive_on_exit`; in prompt mode, a true value makes the process wait for background tasks to finish before exit, bounded by `print_wait_ceiling_s`."
-  - name: KIMI_CODE_PLUGIN_MARKETPLACE_URL
-    effect: "Overrides the plugin marketplace JSON URL used by `/plugins`; accepts HTTP(S), file URLs, and local paths."
-  - name: KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY
-    effect: "Caps how many AgentSwarm subagents run concurrently during initial ramp; invalid non-positive values fail fast."
-  - name: KIMI_CODE_EXPERIMENTAL_FLAG
-    effect: "Truthy values enable all registered experimental features for the process."
-  - name: KIMI_SHELL_PATH
-    effect: "On Windows, overrides Git Bash auto-detection with an absolute path to `bash.exe`."
-  - name: KIMI_CODE_NO_AUTO_UPDATE
-    effect: "Truthy values fully disable update preflight: no check, background install, or prompt."
-  - name: KIMI_CLI_NO_AUTO_UPDATE
-    effect: "Legacy alias honored for `KIMI_CODE_NO_AUTO_UPDATE`."
-  - name: KIMI_DISABLE_CRON
-    effect: "Set to `1` to disable the scheduled-task tool; new CronCreate requests are rejected and existing tasks do not fire."
-  - name: HOME
-    effect: "Used to resolve the default `~/.kimi-code` data path."
-  - name: VISUAL
-    effect: "External editor command; takes precedence over `EDITOR`."
-  - name: EDITOR
-    effect: "Fallback external editor command when `VISUAL` is unset."
-  - name: PATH
-    effect: "Used to locate dependencies such as `rg`, `fd`/`fdfind`, `git`, and Windows Git Bash candidates."
-  - name: NO_COLOR
-    effect: "Disables color output according to the no-color convention."
-  - name: FORCE_COLOR
-    effect: "Forces color output where supported."
-  - name: CI
-    effect: "When non-empty and not `0`, disables theme detection and falls back to the dark theme."
-  - name: HTTP_PROXY
-    effect: "Standard proxy variable honored for HTTP outbound traffic, including model API calls, MCP servers, web tools, telemetry, sign-in, and update checks."
-  - name: HTTPS_PROXY
-    effect: "Standard proxy variable honored for HTTPS outbound traffic."
-  - name: ALL_PROXY
-    effect: "Fallback proxy used when scheme-specific proxy variables are unset; supports SOCKS schemes."
-  - name: NO_PROXY
-    effect: "Comma-separated hosts that bypass proxy handling; loopback hosts always bypass."
+- effect: Relocates the whole data root (config, sessions, logs, OAuth credentials, updates, Kimi-specific skills, global AGENTS.md) from ~/.kimi-code to the given directory. Read-only commands still create cache, logs, sessions, and device_id files there.
+  name: KIMI_CODE_HOME
+- effect: A truthy value (1, true, yes, y; case-insensitive) turns off anonymous telemetry even when config.toml enables it.
+  name: KIMI_DISABLE_TELEMETRY
+- effect: 'A truthy value disables the update preflight entirely: no check, background install, or prompt.'
+  name: KIMI_CODE_NO_AUTO_UPDATE
+- effect: Legacy alias of KIMI_CODE_NO_AUTO_UPDATE.
+  name: KIMI_CLI_NO_AUTO_UPDATE
+- effect: Default output format for prompt mode (text or stream-json) when --output-format is absent. Ignored outside prompt mode; an invalid value fails the invocation.
+  name: KIMI_MODEL_OUTPUT_FORMAT
+- effect: A truthy value trusts the current workspace, enabling project-level MCP servers and project-local configuration that an untrusted workspace skips.
+  name: KIMI_CODE_TRUST_WORKSPACE
+- effect: On Windows, absolute path of bash.exe that overrides Git Bash auto-detection.
+  name: KIMI_SHELL_PATH
+- effect: A truthy value enables every registered experimental feature for the process.
+  name: KIMI_CODE_EXPERIMENTAL_FLAG
+- effect: 'Overrides [watch] enabled: whether filesystem watchers reload config and workspace files. On by default in 2.1.1.'
+  name: KIMI_CODE_WATCH
+- effect: 'Set to 1 to disable the scheduled-task tool: new schedules are rejected and existing ones do not fire.'
+  name: KIMI_DISABLE_CRON
+- effect: Overrides [background] keep_alive_on_exit; keeps background tasks when the session closes.
+  name: KIMI_CODE_BACKGROUND_KEEP_ALIVE_ON_EXIT
+- effect: 'What prompt mode does while background tasks are pending after the main turn: exit, drain, or steer (default steer).'
+  name: KIMI_CODE_BACKGROUND_PRINT_BACKGROUND_MODE
+- effect: Wall-clock ceiling in seconds for the prompt-mode drain or steer wait.
+  name: KIMI_CODE_BACKGROUND_PRINT_WAIT_CEILING_S
+- effect: Maximum number of new turns that background-task completions may trigger in prompt mode.
+  name: KIMI_CODE_BACKGROUND_PRINT_MAX_TURNS
+- effect: Overrides the plugin marketplace JSON used by /plugins; accepts http(s) and file URLs and local paths.
+  name: KIMI_CODE_PLUGIN_MARKETPLACE_URL
+- effect: Caps AgentSwarm subagents running concurrently; an invalid value fails fast.
+  name: KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY
+- effect: Password accepted as a second credential by the web server, recommended when binding beyond loopback.
+  name: KIMI_CODE_PASSWORD
+- effect: Comma-separated extra Host header values the web server accepts through its DNS-rebinding check; equivalent to --allowed-host.
+  name: KIMI_CODE_ALLOWED_HOSTS
+- effect: The value 1 selects the experimental fullscreen TUI mode.
+  name: KIMI_CODE_TUI_FULL_SCREEN
+- effect: Resolves the default ~/.kimi-code data root and the shared ~/.agents resources.
+  name: HOME
+- effect: External editor command for the TUI; takes precedence over EDITOR.
+  name: VISUAL
+- effect: External editor command used when VISUAL is unset.
+  name: EDITOR
+- effect: Disables color output.
+  name: NO_COLOR
+- effect: Forces color output where supported.
+  name: FORCE_COLOR
+- effect: When non-empty and not 0, disables terminal theme detection and falls back to the dark theme.
+  name: CI
+- effect: Proxy for http:// requests, applied to model calls, MCP servers, web tools, telemetry, sign-in, and update checks; the lowercase spelling is also read.
+  name: HTTP_PROXY
+- effect: Proxy for https:// requests; the lowercase spelling is also read.
+  name: HTTPS_PROXY
+- effect: Fallback proxy when the scheme-specific variable is unset; the usual place for a SOCKS proxy.
+  name: ALL_PROXY
+- effect: Comma-separated hosts that bypass the proxy; loopback hosts always bypass.
+  name: NO_PROXY
 machine_introspection:
-  - command: "kimi provider list --json"
-    purpose: config_dump
-    machine_readable: true
-    output_format: json
-    useful_for_codegen: true
-    notes: "Prints raw configured `providers` and `models` tables. Worked locally on installed 0.14.0, returning empty objects under the worktree-scoped home."
-  - command: "kimi provider catalog list --json"
-    purpose: models
-    machine_readable: true
-    output_format: json
-    useful_for_codegen: true
-    notes: "Downloads and prints the public models.dev provider/model catalog as JSON. Worked locally on installed 0.14.0."
-  - command: "kimi provider catalog list <providerId> --json"
-    purpose: models
-    machine_readable: true
-    output_format: json
-    useful_for_codegen: true
-    notes: "Narrows the models.dev catalog to one provider."
-  - command: "kimi doctor"
-    purpose: doctor
-    machine_readable: false
-    output_format: text
-    useful_for_codegen: false
-    notes: "Validates default `config.toml` and `tui.toml`; exits 0 when files are valid or missing defaults are skipped."
-  - command: "kimi doctor config [path]"
-    purpose: doctor
-    machine_readable: false
-    output_format: text
-    useful_for_codegen: false
-    notes: "Current docs document this nested validator; installed 0.14.0 rejected the nested form, so wrappers should probe version/help before relying on it."
-  - command: "kimi doctor tui [path]"
-    purpose: doctor
-    machine_readable: false
-    output_format: text
-    useful_for_codegen: false
-    notes: "Current docs document this nested validator; installed 0.14.0 rejected the nested form."
-  - command: "kimi server status --json"
-    purpose: doctor
-    machine_readable: true
-    output_format: json
-    useful_for_codegen: false
-    notes: "Current docs document JSON status for installed/running/pid/port/log-path. Installed 0.14.0 rejected `--json`, so treat as version-gated."
-  - command: "GET http://127.0.0.1:<port>/openapi.json"
-    purpose: capabilities
-    machine_readable: true
-    output_format: json
-    useful_for_codegen: true
-    notes: "Available when `kimi server run` has started the local server; returns the REST OpenAPI document."
-  - command: "GET http://127.0.0.1:<port>/asyncapi.json"
-    purpose: capabilities
-    machine_readable: true
-    output_format: json
-    useful_for_codegen: true
-    notes: "Available when `kimi server run` has started the local server; returns the local WebSocket AsyncAPI document."
-  - command: "kimi acp"
-    purpose: capabilities
-    machine_readable: true
-    output_format: json
-    useful_for_codegen: true
-    notes: "Long-running JSON-RPC server over stdin/stdout. `initialize` returns agent info, auth methods, and capability matrix; logs go to stderr and diagnostic files."
+- command: kimi session list --json --all
+  machine_readable: true
+  notes: Prints a JSON array of session summaries across workspaces; prints [] when there are none. Creates the data-root skeleton as a side effect.
+  output_format: json
+  purpose: other
+  useful_for_codegen: false
+- command: kimi provider list --json
+  machine_readable: true
+  notes: Prints the raw providers and models tables from config.toml, which can hold plaintext API keys; redact before logging. Prints empty objects in a fresh home.
+  output_format: json
+  purpose: config_dump
+  useful_for_codegen: false
+- command: kimi provider catalog list --json
+  machine_readable: true
+  notes: Downloads and prints the public models.dev catalog, a third-party provider and model list, not Kimi Code state. Needs network access.
+  output_format: json
+  purpose: models
+  useful_for_codegen: false
+- command: kimi provider catalog list <providerId> --json
+  machine_readable: true
+  notes: Narrows the models.dev catalog to one provider.
+  output_format: json
+  purpose: models
+  useful_for_codegen: false
+- command: kimi doctor
+  machine_readable: false
+  notes: Validates config.toml and tui.toml; prints SKIP for absent files and exits 1 when an issue is found.
+  output_format: text
+  purpose: doctor
+  useful_for_codegen: false
+- command: kimi doctor config <path>
+  machine_readable: false
+  notes: Validates one file as config.toml; exits 1 and names the path when it is missing or invalid.
+  output_format: text
+  purpose: doctor
+  useful_for_codegen: false
+- command: kimi doctor tui <path>
+  machine_readable: false
+  notes: Validates one file as tui.toml.
+  output_format: text
+  purpose: doctor
+  useful_for_codegen: false
+- command: kimi -p <prompt> --output-format stream-json
+  machine_readable: true
+  notes: Starts a model session and prints one JSON object per line on stdout; thinking is omitted and tool progress still goes to stderr. Not run in this research because it spends tokens.
+  output_format: jsonl
+  purpose: other
+  useful_for_codegen: false
+- command: kimi acp
+  machine_readable: true
+  notes: JSON-RPC over stdin/stdout; the initialize response reports agent info, auth methods, and capabilities. Not run in this research.
+  output_format: json
+  purpose: capabilities
+  useful_for_codegen: false
+- command: GET http://127.0.0.1:58627/openapi.json
+  machine_readable: true
+  notes: Served by kimi web (default port 58627); the live OpenAPI document of the experimental REST API. Requires the bearer token that web prints. /asyncapi.json is the WebSocket counterpart.
+  output_format: json
+  purpose: capabilities
+  useful_for_codegen: false
 wrapper_notes:
-  - "Do not conflate current Kimi Code CLI (`@moonshot-ai/kimi-code`, `kimi --version` style `0.x`) with the legacy Python `kimi-cli` (`kimi-cli --version` style `1.x`). This host has both: `kimi` at `/Users/ken/.kimi-code/bin/kimi` returned `0.14.0`, while `/Users/ken/.local/bin/kimi-cli` returned `1.47.0`."
-  - "Current upstream latest was verified as `0.22.2` from npm and GitHub releases on 2026-07-03. The installed `kimi` was older (`0.14.0`) and its help/flags lagged current docs."
-  - "For non-interactive wrapper execution, use `kimi -p <prompt>` and optionally `--output-format stream-json`; prompt mode does not open the TUI and uses auto permission behavior by default."
-  - "In prompt mode, assistant text goes to stdout, while thinking, tool progress, and resuming notices go to stderr. In `stream-json`, thinking content is not written to JSONL and tool progress still goes to stderr."
-  - "Installed 0.14.0 rejects `-p` combined with `--yolo`, `--auto`, or `--plan`; current docs document the same conflict and say prompt mode uses auto permission by default."
-  - "The default data root is `~/.kimi-code`, but `KIMI_CODE_HOME` relocates all config, credentials, sessions, logs, updates, Kimi-specific skills, and AGENTS.md. In this worktree, `kimi doctor` without explicit `KIMI_CODE_HOME` checked `/Users/ken/.claudine/.kimi-code`, so wrappers should set `KIMI_CODE_HOME` deliberately when isolation matters."
-  - "Config files can contain plaintext provider API keys. Wrappers and diagnostics must redact `config.toml`, provider imports, and command lines containing `--api-key`."
-  - "The CLI writes side-effect state on normal use: `config.toml`, `tui.toml`, `credentials/`, `oauth/`, `session_index.jsonl`, `sessions/`, `logs/`, `updates/`, and `user-history/` under `KIMI_CODE_HOME`."
-  - "OAuth login (`kimi login`, `kimi acp --login`, and TUI `/login`) is not unattended despite being outside the TUI; it requires a browser/device-code authorization flow."
-  - "`kimi acp` is the clean protocol entry point for IDE-style integration. It keeps JSON-RPC on stdout/stdin and writes logs to stderr/diagnostic files."
-  - "The local server binds loopback in documented server mode and exposes machine-readable OpenAPI/AsyncAPI documents only after startup. `web` and `vis` open browsers by default unless suppressed."
-  - "`kimi server install` writes OS-managed service definitions: launchd on macOS, user systemd on Linux, and a Windows scheduled task. Avoid running it from wrappers unless the user explicitly requested service installation."
-  - "Windows shell execution depends on Git Bash. Require Git for Windows or set `KIMI_SHELL_PATH` to `bash.exe`."
-  - "The root help output from installed 0.14.0 truncated at `--auto` in this non-interactive terminal, and several nested `--help` calls fell back to root help. Current docs were used for nested switch inventory where local help was incomplete."
+- 'Do not conflate Kimi Code CLI (`kimi`, npm `@moonshot-ai/kimi-code`, version 2.x, data root `~/.kimi-code`) with the archived Python kimi-cli (`kimi-cli`, version 1.x, data root `~/.kimi`). This host has both: `/Users/ken/.kimi-code/bin/kimi` reports 2.1.1 and `/Users/ken/.local/bin/kimi-cli` reports 1.47.0. The kimi-cli repository and its documentation site are archived and tell readers to migrate.'
+- 'Parsing is commander with enablePositionalOptions: root switches must come before any subcommand and are unknown after it. A required option value consumes the next argument even when it begins with a dash, so `kimi -p --yolo` runs the prompt "--yolo". A wrapper must place the prompt immediately after `-p` and must not forward a user token that starts with a dash as a value. Optional-value switches (`--session [id]`, and `--host [host]` on web) take the next argument only if it does not start with a dash.'
+- Short switches accept an attached value (`-mfoo`, `-pfoo`, `-Sid`, `-ofoo`) but not an equals form (`-p=foo` yields the value "=foo"). Boolean switches reject `=value` (`--auto=x` is an unknown option). Short boolean switches bundle (`-yofoo`).
+- Non-interactive runs use `kimi -p <prompt> [--output-format stream-json]`. Assistant text goes to stdout; thinking, tool progress, and the "kimi version" banner go to stderr. Prompt mode applies the automatic permission policy and refuses --yolo, --auto, and --plan. Ambient KIMI_MODEL_OUTPUT_FORMAT changes the prompt-mode format, so pin it with --output-format or clear it.
+- A prompt run with no configured model fails with "No model configured" and exit code 1; `/login` or a config.toml model is required first. Without a TTY, a plain `kimi` start still enters the TUI and stops at a "Trust this folder?" prompt in an untrusted workspace, so never launch it without -p from a wrapper expecting no terminal.
+- An untrusted workspace skips project-level MCP servers and project-local configuration; set KIMI_CODE_TRUST_WORKSPACE=1 or trust the folder interactively.
+- Every command, including read-only ones such as `session list`, creates a data-root skeleton (cache, logs, sessions, device_id, workspaces.json). Set KIMI_CODE_HOME to a disposable directory for isolation, together with KIMI_DISABLE_TELEMETRY=1 and KIMI_CODE_NO_AUTO_UPDATE=1.
+- config.toml, `provider list --json`, and the --api-key switch can carry plaintext API keys; redact them from logs and command lines.
+- '`session list --limit` with a rejected value ends in an unhandled exception with a stack trace, not a one-line error; treat any nonzero exit as failure without parsing the message.'
+- 'Conflicts are enforced after parsing and exit 1 with a one-line "error: Cannot combine ..." message: prompt with yolo, auto, or plan; continue with session; yolo with auto; agent with agent-file; agent or agent-file with session or continue.'
+- '`web`, `rc`, `vis`, `login`, `upgrade`, `install-desktop`, and `migrate` (without --run) open a browser, ask questions, or run until interrupted; `upgrade` replaces the installed binary. Avoid them in a wrapper unless the user asked.'
+- On Windows the shell tool needs Git Bash; install Git for Windows or set KIMI_SHELL_PATH to bash.exe. The Windows install path and shims were taken from documentation and were not tested on this macOS host.
+- Hidden internals exist (`__plugin_run_node`, `__update_download`, `install-app`); they are not part of the public surface.
 changes:
-  - "Retargeted the research from the legacy Python `MoonshotAI/kimi-cli` package to the current `MoonshotAI/kimi-code` Kimi Code CLI successor."
-  - "Updated latest upstream version from legacy `1.48.0` to current Kimi Code `0.22.2`, verified from npm and GitHub releases; recorded local installed `kimi` as `0.14.0` and legacy `kimi-cli` as `1.47.0`."
-  - "Replaced uv/Python install details with standalone install scripts, Homebrew `kimi-code`, and npm package `@moonshot-ai/kimi-code`."
-  - "Replaced legacy `--print`/`--quiet` automation with current `-p`/`--prompt` prompt mode and `--output-format text|stream-json`."
-  - "Replaced legacy `~/.kimi` configuration discovery with current `~/.kimi-code` / `KIMI_CODE_HOME` data layout."
-  - "Added current machine-readable provider catalog/config commands and local server OpenAPI/AsyncAPI introspection."
-  - "Recorded version-gated gaps where installed 0.14.0 rejects current documented nested doctor/server JSON forms."
+- Version moves from the previously recorded 0.22.2 (installed 0.14.0) to 2.1.1, verified with `kimi --version` and the npm registry; the installed binary now matches the newest release.
+- 'The document is reissued at contract revision 2: every switch carries a value type, aliases, attachment forms, and scope, established from the commander declarations at the 2.1.1 tag and from parse tests.'
+- '`kimi server` is deprecated and replaced by `kimi web`; `server run`, `server install`, `server status`, and the OS-service flags no longer exist. `web` gained --host, --allowed-host, --dangerous-bypass-auth, --web-title, and --rc, and `rc`/`remote` and `web rotate-token` are new.'
+- New root switches --agent and --agent-file; --yolo now means Ask When Needed mode and --auto means Never Ask mode; --continue is documented as -c with a hidden -C; --resume/-r and --yes/--auto-approve are hidden aliases.
+- New subcommands fork, session list, install-desktop (formerly install-app), and rc; `doctor config` and `doctor tui` now parse; `export` and `fork` take a session id and skip the prompt with it.
+- 'New or changed variables: KIMI_MODEL_OUTPUT_FORMAT, KIMI_CODE_TRUST_WORKSPACE, KIMI_CODE_WATCH, KIMI_CODE_PASSWORD, KIMI_CODE_ALLOWED_HOSTS, KIMI_CODE_TUI_FULL_SCREEN, and prompt-mode background-task controls. `.kimi-code/local.toml` is a new project file.'
+- The Homebrew formula is no longer in the README but still resolves on this host (`brew info kimi-code` reports stable 2.1.0), so it stays listed as an install method.
+- The assignment links the archived `MoonshotAI/kimi-cli` repository; research rests on the active `MoonshotAI/kimi-code` repository instead.
 requires_claudine_update: true
-reason: "Claudine's Kimi provider metadata and wrapper need to distinguish current Kimi Code (`kimi`, @moonshot-ai/kimi-code, ~/.kimi-code, -p prompt mode) from the legacy Python `kimi-cli` surface, update non-interactive flags/output handling, and add current config/introspection paths."
+reason: The previous document described 0.22.2 and an older command set. Claudine's kimi metadata should adopt the revision 2 switch inventory (root switches before subcommands, -p and -m taking one value that swallows a following dashed token, hidden aliases -r/--resume/-C/--yes/--auto-approve), the new fork and session list paths, the web replacement of server, and the new variables.
+contract_checked: 2026-10-01
 ---
 
-# Kimi Code CLI
+# Kimi Code CLI: Command-Line Surface
 
 ## Overview
 
-Kimi Code CLI is Moonshot AI's terminal AI coding agent. It can read and edit code, run shell commands, search files, fetch web pages, use MCP tools, and run either as an interactive TUI or as protocol/server entry points. The primary command a user types is `kimi`.
+Kimi Code CLI is Moonshot AI's terminal coding agent. It is a TypeScript program distributed as a single native binary (`kimi`) or as the npm package `@moonshot-ai/kimi-code`, licensed MIT, and it replaces the archived Python `kimi-cli`. Running `kimi` starts a full-screen terminal UI; `kimi -p <prompt>` runs one prompt and exits; `kimi acp` serves IDEs over the Agent Client Protocol; `kimi web` serves a local web UI.
 
-The current upstream version I verified is `0.22.2`. I verified it from `npm view @moonshot-ai/kimi-code version --json`, the GitHub releases page for `MoonshotAI/kimi-code`, and the local update cache at `~/.kimi-code/updates/latest.json`. The installed primary binary on this host is older: `kimi --version` returned `0.14.0`. A separate legacy Python command is also present: `kimi-cli --version` returned `kimi, version 1.47.0`.
+- **Version verified:** `kimi --version` printed `2.1.1` on this host (binary at `/Users/ken/.kimi-code/bin/kimi`, a Mach-O arm64 executable). The npm registry lists `2.1.1` as `latest`, so the installed version is the newest release (published 2026-09-24). Source was read at the commit of tag `@moonshot-ai/kimi-code@2.1.1`; the eight source files cited under Sources are identical at repository head.
+- **Repository note:** the assignment names `MoonshotAI/kimi-cli` and `moonshotai.github.io/kimi-cli/`. That repository is archived ("Legacy Python Kimi CLI, no longer maintained") and its documentation site carries an archive warning. The active project is `MoonshotAI/kimi-code`, and this document describes it.
+- **Parser:** [commander](https://github.com/tj/commander.js) `^13.1.0` with `enablePositionalOptions`, so root switches are valid only before a subcommand.
+- **Links:** [documentation](https://moonshotai.github.io/kimi-code/en/), [`kimi` command reference](https://moonshotai.github.io/kimi-code/en/reference/kimi-command), [repository](https://github.com/MoonshotAI/kimi-code), [changelog](https://moonshotai.github.io/kimi-code/en/release-notes/changelog).
 
-Primary URLs:
-
-- Homepage: [Kimi Code CLI](https://moonshotai.github.io/kimi-code/)
-- Repository: [MoonshotAI/kimi-code](https://github.com/MoonshotAI/kimi-code)
-- General docs: [Kimi Code CLI Docs](https://moonshotai.github.io/kimi-code/en/)
-- CLI reference: [`kimi` Command](https://moonshotai.github.io/kimi-code/en/reference/kimi-command)
-
-The user-provided legacy site and repository, [moonshotai.github.io/kimi-cli](https://moonshotai.github.io/kimi-cli/) and [MoonshotAI/kimi-cli](https://github.com/MoonshotAI/kimi-cli), still describe the Python `kimi-cli` line. Current official docs and the repository README point new users to the `kimi-code` successor, and this host's `kimi` command is the new single-binary Kimi Code CLI.
+```mermaid
+flowchart TD
+    A[kimi argv] --> B{First non-switch word}
+    B -->|none| C{-p given?}
+    C -->|yes| D[Prompt mode: stdout text or stream-json]
+    C -->|no| E[Interactive TUI]
+    B -->|export, fork, session, provider, doctor| F[Runs to completion]
+    B -->|acp| G[ACP server on stdio]
+    B -->|web, rc, vis, login, upgrade, migrate| H[Browser, prompt, or long-running]
+```
 
 ## Installation and Binaries
 
-The current official command is `kimi` on macOS, Linux, and Windows. The current project/package is named `kimi-code` for Homebrew and `@moonshot-ai/kimi-code` for npm, but those package names are not the primary runtime command. On Windows, installers or package managers may expose `.exe` or `.cmd` shims such as `kimi.exe` or `kimi.cmd`.
+| OS | Command | Install |
+| --- | --- | --- |
+| macOS | `kimi` | `curl -fsSL https://code.kimi.com/kimi-code/install.sh \| bash` (recommended), `npm install -g @moonshot-ai/kimi-code`, or `brew install kimi-code` |
+| Linux | `kimi` | the same script, npm, or Homebrew on Linux |
+| Windows | `kimi` (`kimi.exe`, or an npm `kimi.cmd` shim) | `irm https://code.kimi.com/kimi-code/install.ps1 \| iex` or npm; Git for Windows is required |
 
-Official install commands:
-
-```sh
-# macOS / Linux recommended installer
-curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash
-
-# macOS / Linux Homebrew
-brew install kimi-code
-
-# npm, all platforms with Node.js 22.19.0+
-npm install -g @moonshot-ai/kimi-code
-
-# pnpm alternative
-pnpm add -g @moonshot-ai/kimi-code
-```
-
-```powershell
-# Windows PowerShell recommended installer
-irm https://code.kimi.com/kimi-code/install.ps1 | iex
-```
-
-Windows has an extra runtime prerequisite: install Git for Windows before first launch because Kimi Code CLI uses the bundled Git Bash as its shell environment. If Git Bash is installed somewhere non-standard, set `KIMI_SHELL_PATH` to the absolute path of `bash.exe`.
-
-Local observations:
-
-- `command -v kimi` resolved to `/Users/ken/.kimi-code/bin/kimi`, a Mach-O arm64 executable.
-- `kimi --version` returned `0.14.0`.
-- `command -v kimi-cli` resolved to `/Users/ken/.local/bin/kimi-cli`, a Python/uv console script importing `kimi_cli.__main__`.
-- `kimi-cli --version` returned `kimi, version 1.47.0`.
-- Local `~/.kimi-code/updates/latest.json` recorded `"latest": "0.22.2"`.
-
-Wrapper detection should prefer `kimi` for Kimi Code. It may still be useful to detect `kimi-cli` as a legacy collision and warn rather than silently applying the wrong flag surface.
+- The script verifies a checksum and installs one native executable to `~/.kimi-code/bin/kimi`; no Node.js is needed. The npm route needs Node.js 22.19.0 or later.
+- `brew info kimi-code` on this host reports stable `2.1.0`, one release behind npm.
+- A legacy Python `kimi-cli` (1.47.0 here, also reachable as `kimi-legacy`) can sit beside it and is a different program.
+- Only the macOS binary was run. Linux and Windows details come from the documentation.
 
 ## Subcommands
 
-The default command, `kimi`, starts the interactive TUI in the current working directory. This requires a terminal and is not the automation entry point.
+Every path below was run with `--help`. Aliases: `rc` is also `remote`, `upgrade` is also `update`, and `install-desktop` keeps a hidden `install-app`. Hidden internals `__plugin_run_node` and `__update_download` are not public. A path counts as non-interactive only when it needs no terminal, browser, or answered prompt.
 
-Automation and protocol entry points:
-
-| Command or mode | Description | Non-interactive suitability |
+| Command path | Runs without a terminal | What it does |
 | --- | --- | --- |
-| `kimi -p <prompt>` / `kimi --prompt <prompt>` | Runs one prompt, streams output, and exits without opening the TUI. | Primary one-shot wrapper path. |
-| `kimi acp` | Runs an Agent Client Protocol JSON-RPC server over stdin/stdout. | Suitable for IDE/protocol wrappers. |
-| `kimi server run` | Starts or reuses a local REST/WebSocket/web daemon and returns when healthy unless `--foreground` is used. | Suitable for local API/web integration when a resident service is intended. |
-| `kimi doctor` | Validates config files. | Suitable for diagnostics. |
-| `kimi provider list --json` | Dumps configured providers/models. | Suitable for metadata inspection. |
-| `kimi provider catalog list --json` | Dumps the public models.dev provider/model catalog. | Suitable for catalog/codegen. |
-
-Interactive or user-mediated commands:
-
-| Command | Description | Interaction caveat |
-| --- | --- | --- |
-| `kimi login` | Device-code OAuth login outside the TUI. | Requires browser/device authorization and polls until completion. |
-| `kimi acp --login` | ACP terminal-auth login flow. | Requires browser/device authorization. |
-| `kimi web` | Starts local server and opens the web UI. | Browser-facing; use `--no-open` if a wrapper presents the URL. |
-| `kimi vis` | Starts the session visualizer. | Opens a browser by default and runs until interrupted. |
-| `kimi export` | Exports a session as ZIP. | Use `--yes` when omitting session id to avoid confirmation. |
-| `kimi migrate` | Migrates data from legacy `kimi-cli`. | Documented as entirely interactive. |
-| `kimi upgrade` / `kimi update` | Checks for updates and offers install choices. | Presents choices and may run package-manager commands. |
-| `kimi server install` | Installs an OS-managed server service. | Writes launchd/systemd/schtasks service definitions. |
-
-Current docs list these top-level subcommands: `login`, `acp`, `server`, `web`, `doctor`, `export`, `migrate`, `upgrade`/`update`, `provider`, and `vis`.
+| `export` | yes | Exports a session as a ZIP archive. Prompts "Export previous session ...? [Y/n]" only when no session id is given and --yes is absent. Prints the archive path on stdout. |
+| `fork` | yes | Forks a session into a new session. Prompts only when no session id is given and --yes is absent. |
+| `provider` | yes | Group of non-interactive provider management commands. Run alone it prints help and exits 1. |
+| `provider add` | yes | Imports every provider listed in a custom registry (api.json). Writes the providers and models into config.toml; fetches the URL. |
+| `provider remove` | yes | Removes a provider and every model alias that referenced it. Edits config.toml. |
+| `provider list` | yes | Shows configured providers and their model counts. --json prints the raw providers and models tables. |
+| `provider catalog` | yes | Group for discovering providers in the public models.dev catalog. Run alone it prints help and exits 1. |
+| `provider catalog list` | yes | Lists catalog providers, or the models of one provider when an id is given. Fetches the catalog over the network. |
+| `provider catalog add` | yes | Imports a known provider from the catalog by id. Edits config.toml; fetches the catalog. |
+| `session` | yes | Group of non-interactive session commands. Run alone it prints help and exits 1. |
+| `session list` | yes | Lists sessions, most recently updated first. Scoped to the current directory unless --all or --cwd is given. |
+| `acp` | yes | Runs Kimi Code as an Agent Client Protocol server over stdio. Long-running JSON-RPC server driven by an IDE; it needs no terminal. --login switches it to the device-code login flow, which needs a browser. |
+| `web` | no | Runs the local Kimi server in the foreground and opens the web UI. Runs until interrupted and opens a browser unless --no-open is given. Prints a bearer token at startup. |
+| `web rotate-token` | yes | Generates a new persistent server token and invalidates the previous one. Writes server.token under the data root and prints the new token on stdout. |
+| `rc` | no | Runs the local server and exposes the web UI through Remote Control. Alias: remote. Same server options as web with remote control forced on. |
+| `login` | no | Authenticates through the device-code flow. Prints a URL and code and polls until a person authorizes in a browser. Accepts --region. |
+| `doctor` | yes | Validates config.toml and tui.toml at their default paths. Exits 0 when the files are valid or absent and 1 when an issue is found. Reads only. |
+| `doctor config` | yes | Validates config.toml, or the file given as the optional path argument. Exits 1 and names the path when the file is missing or invalid. |
+| `doctor tui` | yes | Validates tui.toml, or the file given as the optional path argument.  |
+| `vis` | no | Launches the session visualizer web server in a browser. Runs until interrupted (SIGINT). Accepts --port, --host, --no-open, and an optional session id; an unparseable --port is silently ignored and a free port is chosen. |
+| `install-desktop` | no | Prints the Kimi Code desktop app page and opens it in a browser. Hidden alias: install-app. |
+| `migrate` | no | Migrates data from a legacy kimi-cli installation into Kimi Code. Interactive by default; --run migrates non-interactively and --config-only (which requires --run) skips chat sessions. |
+| `upgrade` | no | Upgrades Kimi Code to the latest version. Alias: update. Asks for confirmation unless -y/--yes is given, and installs a new binary. |
+| `server` | no | Deprecated; prints a notice that kimi web replaces it and exits 1. Kept only for the kill subcommand. |
+| `server kill` | no | Deprecated: stops a server started by a version before 0.28.0. Not exercised in this research. |
 
 ## CLI Switch Inventory
 
-Global/root switches observed in local help or documented in current official docs:
+Inventoried paths: the root entrypoint and every non-interactive path that declares a switch of its own (`export`, `fork`, `session list`, `provider add`, `provider list`, `provider catalog list`, `provider catalog add`, `acp`). `doctor`, `doctor config`, `doctor tui`, `provider remove`, `web rotate-token`, and the group paths declare only `--help`. Switches of `web`, `rc`, `vis`, `login`, `upgrade`, and `migrate` were left out; their help output was read but their values were not tested.
 
-| Flag | Type | Default | Scope | Example | Notes |
-| --- | --- | --- | --- | --- | --- |
-| `--version`, `-V` | boolean | `false` | global | `kimi --version` | Local `kimi` returned `0.14.0`; upstream latest was `0.22.2`. |
-| `--help`, `-h` | boolean | `false` | global | `kimi --help` | Local 0.14.0 help truncated in this non-interactive terminal. |
-| `--session [id]`, `-S` | optional value | none | global/session | `kimi --session 01HZ...XYZ` | Hidden aliases: `--resume`, `-r`; no id opens interactive selector. |
-| `--continue`, `-c` | boolean | `false` | global/session | `kimi --continue` | Local 0.14.0 help showed `-C`; current docs show `-c`. |
-| `--model <model>`, `-m` | value | `default_model` | global/model | `kimi -m kimi-code/kimi-for-coding -p "Explain the diff"` | Uses model aliases from config. |
-| `--prompt <prompt>`, `-p` | value | TUI mode | global/automation | `kimi -p "Summarize the repo"` | Primary one-shot path. |
-| `--output-format <format>` | value enum | `text` | prompt mode | `kimi -p "List files" --output-format stream-json` | `text` or `stream-json`; only valid with `--prompt`. |
-| `--yolo`, `-y` | boolean | `false` | global/permissions | `kimi --yolo` | Hidden aliases: `--yes`, `--auto-approve`; cannot combine with `--auto` or prompt mode. |
-| `--auto` | boolean | `false` | global/permissions | `kimi --auto` | Auto permission mode; cannot combine with `--yolo` or prompt mode. |
-| `--plan` | boolean | `false` | global/planning | `kimi --plan` | Cannot combine with prompt mode. |
-| `--skills-dir <dir>` | repeatable value | automatic discovery | global/skills | `kimi --skills-dir /team/skills --skills-dir ./skills` | Replaces automatic skill discovery for this launch. |
-| `--add-dir <dir>` | repeatable value | none | global/workspace | `kimi --add-dir ../shared` | Adds workspace directories. |
+`--help`/`-h` (value: none) is accepted at every path. `--version`/`-V` (value: none) is accepted only at the root.
 
-Prompt-mode behavior is wrapper-critical. `kimi -p` writes assistant text to stdout. Thinking, tool progress, and "resuming session" notices go to stderr. With `--output-format stream-json`, stdout is JSONL; thinking content is not written to JSONL, and progress still goes to stderr. Installed 0.14.0 rejected these documented invalid combinations:
+How values attach was established by the commander declarations in source and by disposable parse tests run with a throwaway `KIMI_CODE_HOME` and no model session. A test counts only when the error named the switch or a later validation error proved the value was read:
 
-```sh
-kimi -p hi --yolo
-kimi -p hi --auto
-kimi -p hi --plan
-kimi --output-format stream-json
-```
-
-`kimi acp`:
-
-| Flag | Type | Default | Example | Notes |
-| --- | --- | --- | --- | --- |
-| `--login` | boolean | `false` | `kimi acp --login` | Runs device-code login then exits. |
-| `--help`, `-h` | boolean | `false` | `kimi acp --help` | Local help worked. |
-
-`kimi server run` and `kimi web`:
-
-| Flag | Type | Default | Example | Notes |
-| --- | --- | --- | --- | --- |
-| `--port <port>` | value | `58627` | `kimi server run --port 58627` | Server loopback port. |
-| `--log-level <level>` | value | omitted | `kimi server run --log-level debug` | Enables server logs. |
-| `--debug-endpoints` | boolean | `false` | `kimi server run --debug-endpoints` | Mounts debug routes. |
-| `--foreground` | boolean | `false` | `kimi server run --foreground` | Keeps server attached. |
-| `--open` | boolean | `false` for `server run`, enabled by `web` | `kimi server run --open` | Opens browser. |
-| `--no-open` | boolean | `false` | `kimi web --no-open` | Suppresses browser launch. |
-
-`kimi server install`:
-
-| Flag | Type | Default | Example | Notes |
-| --- | --- | --- | --- | --- |
-| `--port <port>` | value | `58627` | `kimi server install --port 58627` | Stored in server install metadata. |
-| `--log-level <level>` | value | omitted | `kimi server install --log-level info` | Stored in generated service. |
-| `--force` | boolean | `false` | `kimi server install --force` | Replaces an existing install. |
-| `--json` | boolean | `false` | `kimi server install --json` | JSON output according to docs. |
-
-`kimi server status`:
-
-| Flag | Type | Default | Example | Notes |
-| --- | --- | --- | --- | --- |
-| `--json` | boolean | `false` | `kimi server status --json` | Current docs document this, but installed 0.14.0 rejected it with `unknown option '--json'`. |
-
-`kimi doctor`:
-
-| Command | Description | Notes |
+| Test | Result | Proves |
 | --- | --- | --- |
-| `kimi doctor` | Validates default `config.toml` and `tui.toml`. | Installed 0.14.0 worked and returned 0 for valid/skipped files. |
-| `kimi doctor config [path]` | Validates only runtime config. | Current docs document it; installed 0.14.0 rejected the nested form. |
-| `kimi doctor tui [path]` | Validates only TUI config. | Current docs document it; installed 0.14.0 rejected the nested form. |
+| `--output-format bad`, `--output-format=bad` | both rejected naming `--output-format` with the choices | space and equals |
+| `-m`, `--model`, `-p`, `export -o` (no value) | "argument missing" naming the switch | the value is required |
+| `-mx --output-format=text` | later error "Output format is only supported in prompt mode" | `-mx` is a short attached value |
+| `-Sabc -c`, `-rabc -c`, `--session abc -c`, `--resume=abc -c` | conflict error, not "unknown command" | the id was consumed by all three forms |
+| `-S --continue` | conflict with an empty id | the id is optional |
+| `-p --yolo` | runs prompt `--yolo` ("No model configured") | a required value swallows a dashed token |
+| `-p=foo --plan` | prompt/plan conflict | the short form reads `=foo` as the value |
+| `--auto=x`, `--version=x`, `web --no-open=x` | "unknown option" | booleans take no value |
+| `session list --limit 0`, `--limit=0`, `--limit abc` | positive-integer error naming `--limit` | one numeric value, both forms |
+| `export -ofoo`, `export -yofoo` | accepted | short attached and bundling |
+| `export --auto`, `session list --model x`, `acp --prompt x` | "unknown option" | root switches do not reach subcommands |
+| `login --region bad`, `acp --login --region=bad` | rejected naming `--region` | space and equals |
 
-`kimi export`:
+### Root entrypoint (`kimi`)
 
-| Flag | Type | Default | Example | Notes |
-| --- | --- | --- | --- | --- |
-| `--output <path>`, `-o` | value | derived ZIP name | `kimi export 01HZ...XYZ -o ./bug-report.zip` | Output path. |
-| `--yes`, `-y` | boolean | `false` | `kimi export -y` | Skips confirmation for default previous session. |
-| `--no-include-global-log` | boolean | `false` | `kimi export 01HZ...XYZ --no-include-global-log` | Excludes global diagnostic log. |
+| Switch | Value | Attachment | Established by |
+| --- | --- | --- | --- |
+| `--version`, `-V` | none | — | `help-output`, `src-root-commands`, `test-root-parse` |
+| `--session`, `-S`, `--resume`, `-r` | string (optional) | space, equals, short_attached | `help-output`, `src-root-commands`, `src-options`, `test-root-parse`, `docs-kimi-command` |
+| `--continue`, `-c`, `-C` | none | — | `help-output`, `src-root-commands`, `src-options`, `test-root-parse`, `docs-kimi-command` |
+| `--yolo`, `-y`, `--yes`, `--auto-approve` | none | — | `help-output`, `src-root-commands`, `src-options`, `test-root-parse`, `docs-kimi-command` |
+| `--auto` | none | — | `help-output`, `src-root-commands`, `src-options`, `test-root-parse`, `docs-kimi-command` |
+| `--model`, `-m` | string | space, equals, short_attached | `help-output`, `src-root-commands`, `src-options`, `test-root-parse`, `docs-kimi-command` |
+| `--prompt`, `-p` | string | space, equals, short_attached | `help-output`, `src-root-commands`, `src-options`, `test-root-parse`, `docs-kimi-command` |
+| `--output-format` | string | space, equals | `help-output`, `src-root-commands`, `src-options`, `test-root-parse`, `docs-kimi-command` |
+| `--skills-dir` | string | space, equals | `help-output`, `src-root-commands`, `test-root-parse` |
+| `--agent` | string | space, equals | `help-output`, `src-root-commands`, `src-options`, `test-root-parse`, `docs-kimi-command` |
+| `--agent-file` | string | space, equals | `help-output`, `src-root-commands`, `src-options`, `test-root-parse`, `docs-kimi-command` |
+| `--add-dir` | string | space, equals | `help-output`, `src-root-commands`, `test-root-parse`, `docs-kimi-command` |
+| `--plan` | none | — | `help-output`, `src-root-commands`, `src-options`, `test-root-parse`, `docs-kimi-command` |
 
-`kimi vis`:
+### `kimi export`
 
-| Flag | Type | Default | Example | Notes |
-| --- | --- | --- | --- | --- |
-| `--port <number>` | value | available port | `kimi vis --port 8123` | Visualizer server port. |
-| `--host <host>` | value | `127.0.0.1` | `kimi vis --host 0.0.0.0 --no-open` | Visualizer bind host. |
-| `--no-open` | boolean | `false` | `kimi vis --no-open` | Suppresses browser launch. |
+| Switch | Value | Attachment | Established by |
+| --- | --- | --- | --- |
+| `--output`, `-o` | string | space, equals, short_attached | `help-output`, `src-export-fork`, `test-subcommand-parse` |
+| `--yes`, `-y` | none | — | `help-output`, `src-export-fork`, `test-subcommand-parse` |
+| `--no-include-global-log` | none | — | `help-output`, `src-export-fork`, `test-subcommand-parse` |
 
-`kimi provider`:
+### `kimi fork`
 
-| Command or flag | Type | Default | Example | Notes |
-| --- | --- | --- | --- | --- |
-| `provider add <url>` | command | none | `kimi provider add https://registry.example.com/v1/models/api.json --api-key YOUR_KEY` | Imports every provider in a custom registry. |
-| `--api-key <key>` | value | `KIMI_REGISTRY_API_KEY` fallback | `kimi provider add <url> --api-key YOUR_KEY` | Redact in logs. |
-| `provider remove <providerId>` | command | none | `kimi provider remove kohub` | Removes provider and referenced model aliases. |
-| `provider list --json` | boolean flag | text | `kimi provider list --json` | Worked locally and returned `{"providers":{},"models":{}}` under the worktree-scoped home. |
-| `provider catalog list [providerId]` | command | all providers | `kimi provider catalog list anthropic` | Reads models.dev catalog. |
-| `--filter <substring>` | value | none | `kimi provider catalog list --filter anthropic` | Catalog filter. |
-| `--url <url>` | value | `https://models.dev/api.json` | `kimi provider catalog list --url https://models.dev/api.json --json` | Catalog override. |
-| `--json` | boolean | text | `kimi provider catalog list --json` | Worked locally and emitted JSON. |
-| `provider catalog add <providerId>` | command | none | `kimi provider catalog add anthropic --api-key sk-ant-...` | Imports provider from catalog. |
-| `--default-model <modelId>` | value | none | `kimi provider catalog add anthropic --api-key sk-ant-... --default-model claude-opus-4-7` | Optionally sets `default_model`. |
+| Switch | Value | Attachment | Established by |
+| --- | --- | --- | --- |
+| `--yes`, `-y` | none | — | `help-output`, `src-export-fork`, `test-subcommand-parse` |
+| `--cwd` | string | space, equals | `help-output`, `src-export-fork`, `src-session-list`, `test-subcommand-parse` |
 
-System-prompt delivery flags: no current Kimi Code root CLI flag equivalent to `--append-system-prompt` or `--replace-system-prompt` was observed in `kimi --help` or the current `kimi` command reference. Kimi has instruction/config surfaces such as `AGENTS.md`, Skills, agents/subagents, and agent files; delivery semantics belong to the sibling `system-prompt` topic, not this CLI surface document.
+### `kimi session list`
 
-When help output and official docs disagree, I trusted local installed output for installed-version behavior and current official docs for current upstream behavior. The installed binary is `0.14.0` while upstream latest is `0.22.2`; several documented current commands are version-gated relative to this host.
+| Switch | Value | Attachment | Established by |
+| --- | --- | --- | --- |
+| `--cwd` | string | space, equals | `help-output`, `src-export-fork`, `src-session-list`, `test-subcommand-parse` |
+| `--all` | none | — | `help-output`, `src-session-list` |
+| `--archived` | none | — | `help-output`, `src-session-list` |
+| `--limit` | number | space, equals | `help-output`, `src-session-list`, `test-subcommand-parse` |
+| `--json` | none | — | `help-output`, `src-session-list`, `src-provider`, `test-subcommand-parse` |
+
+### `kimi provider list`
+
+| Switch | Value | Attachment | Established by |
+| --- | --- | --- | --- |
+| `--json` | none | — | `help-output`, `src-session-list`, `src-provider`, `test-subcommand-parse` |
+
+### `kimi provider catalog list`
+
+| Switch | Value | Attachment | Established by |
+| --- | --- | --- | --- |
+| `--json` | none | — | `help-output`, `src-session-list`, `src-provider`, `test-subcommand-parse` |
+| `--url` | string | space, equals | `help-output`, `src-provider`, `test-subcommand-parse` |
+| `--filter` | string | space, equals | `help-output`, `src-provider` |
+
+### `kimi provider catalog add`
+
+| Switch | Value | Attachment | Established by |
+| --- | --- | --- | --- |
+| `--api-key` | string | space, equals | `help-output`, `src-provider` |
+| `--url` | string | space, equals | `help-output`, `src-provider`, `test-subcommand-parse` |
+| `--default-model` | string | space, equals | `help-output`, `src-provider` |
+| `--base-url` | string | space, equals | `help-output`, `src-provider` |
+
+### `kimi provider add`
+
+| Switch | Value | Attachment | Established by |
+| --- | --- | --- | --- |
+| `--api-key` | string | space, equals | `help-output`, `src-provider` |
+
+### `kimi acp`
+
+| Switch | Value | Attachment | Established by |
+| --- | --- | --- | --- |
+| `--login` | none | — | `help-output`, `src-acp` |
+| `--region` | string | space, equals | `help-output`, `src-acp`, `test-subcommand-parse` |
+
+Hidden aliases: `-r` and `--resume` (of `--session`), `-C` (of `--continue`), `--yes` and `--auto-approve` (of `--yolo`). `--session` is the only root switch with an optional value.
+
+Switches that never take a value: `--version`, `--help`, `--continue`, `--yolo`, `--auto`, `--plan`, `--yes`, `--no-include-global-log`, `--all`, `--archived`, `--json`, `--login`. `--limit` is the only numeric switch. No inventoried switch is variadic: `--skills-dir` and `--add-dir` repeat with one value each, and `--agent` and `--agent-file` accept one occurrence. The variadic `--allowed-host <host...>` belongs to `web`, which is not inventoried.
+
+Argument conflicts enforced after parsing: prompt mode refuses `--yolo`, `--auto`, and `--plan`; `--continue` and `--session` exclude each other; `--yolo` excludes `--auto`; `--agent` and `--agent-file` exclude each other and both exclude `--session` and `--continue`.
 
 ## Configuration Discovery
 
-Kimi Code stores all runtime data under `~/.kimi-code/` by default. The per-OS defaults are:
+The data root is `~/.kimi-code` (`C:\Users\<name>\.kimi-code` on Windows) unless `KIMI_CODE_HOME` names another directory. It also holds `credentials/`, `sessions/`, `session_index.jsonl`, `logs/kimi-code.log`, `updates/`, `user-history/`, `bin/` (managed `rg` and `fd`), `plugins/`, `skills/`, and `workspaces.json`. Generic cross-tool resources stay under the real home at `~/.agents/`. Project files apply only after the workspace is trusted.
 
-| OS | Default data root |
-| --- | --- |
-| macOS | `/Users/<name>/.kimi-code` |
-| Linux | `/home/<name>/.kimi-code` |
-| Windows | `C:\Users\<name>\.kimi-code` |
-
-Set `KIMI_CODE_HOME` to move the data root. Once set, config, sessions, logs, OAuth credentials, Kimi-specific user Skills, global Kimi-specific `AGENTS.md`, and update state all land under that directory.
-
-Important files and directories:
-
-| Path under `KIMI_CODE_HOME` | Format | Purpose |
-| --- | --- | --- |
-| `config.toml` | TOML | Main runtime config: providers, models, permissions, hooks, loop control, background behavior, services, default model/mode. |
-| `tui.toml` | TOML | TUI/client preferences: theme, editor, notifications, auto-update settings. |
-| `AGENTS.md` | Markdown/text | Optional global Kimi-specific agent instructions. |
-| `mcp.json` | JSON | User-level MCP server declarations. |
-| `skills/` | directory | Kimi-specific user-level Skills. |
-| `plugins/installed.json` | JSON | Installed plugin records and enabled state. |
-| `credentials/` | JSON files | OAuth credentials; docs state directory `0700` and files `0600`. |
-| `session_index.jsonl` | JSONL | Session index. |
-| `sessions/<workDirKey>/<sessionId>/` | mixed | Session state, wire logs, plans, background task state, cron state, and session logs. |
-| `logs/kimi-code.log` | text log | Global diagnostic log. |
-| `updates/latest.json`, `updates/install.json` | JSON | Auto-update state and install metadata. |
-| `user-history/<md5(workDir)>.jsonl` | JSONL | Per-working-directory input history. |
-
-Project-local MCP config is discovered at `.kimi-code/mcp.json` in the working directory. Entries with the same server name override user-level entries. Stdio MCP entries can execute local commands when a session starts, so wrappers should treat project-local MCP as trust-sensitive.
-
-The current docs say the CLI reads a single user-level `config.toml` and has no project-level config file mechanism for ordinary runtime config. Use different `KIMI_CODE_HOME` values to isolate config per project.
-
-Local side effects observed under `/Users/ken/.kimi-code/` included:
-
-- `config.toml`
-- `tui.toml`
-- `credentials/kimi-code.json`
-- `oauth/kimi-code`
-- `session_index.jsonl`
-- `sessions/...`
-- `logs/kimi-code.log`
-- `updates/install.json`
-- `updates/latest.json`
-- `user-history/*.jsonl`
-
-One wrapper-impacting local observation: running `kimi doctor` from this Claudine worktree without setting `KIMI_CODE_HOME` checked `/Users/ken/.claudine/.kimi-code/config.toml` and `/Users/ken/.claudine/.kimi-code/tui.toml`, while `KIMI_CODE_HOME=/Users/ken/.kimi-code kimi doctor` checked the expected user data root. Claudine wrappers should set `KIMI_CODE_HOME` deliberately for isolation and predictability.
+| OS | Scope | Path | Format | Notes |
+| --- | --- | --- | --- | --- |
+| macos | user | `/Users/<name>/.kimi-code/config.toml` | toml | Main runtime configuration: providers, models, loop control, hooks. Created on first run and written by provider commands and the TUI. Relocated by KIMI_CODE_HOME. |
+| macos | user | `/Users/<name>/.kimi-code/tui.toml` | toml | Terminal UI preferences, including the auto-update toggle. Written by TUI commands; a malformed file falls back to defaults. |
+| macos | user | `/Users/<name>/.kimi-code/mcp.json` | json | User-level MCP server declarations, merged with the project file; MCP details belong to the mcp topic. |
+| macos | user | `/Users/<name>/.kimi-code/AGENTS.md` | text | Optional global Kimi-specific agent instructions. Generic cross-tool instructions can live under the real home at ~/.agents/AGENTS.md. |
+| macos | repo | `<repo>/.kimi-code/local.toml` | toml | Project-local settings such as additional workspace directories. Read only after the workspace is trusted; the docs recommend gitignoring it. |
+| macos | repo | `<repo>/.kimi-code/mcp.json` | json | Project-local MCP declarations. Ignored in an untrusted workspace unless KIMI_CODE_TRUST_WORKSPACE is truthy. |
+| linux | user | `/home/<name>/.kimi-code/config.toml` | toml | Main runtime configuration: providers, models, loop control, hooks. Created on first run and written by provider commands and the TUI. Relocated by KIMI_CODE_HOME. |
+| linux | user | `/home/<name>/.kimi-code/tui.toml` | toml | Terminal UI preferences, including the auto-update toggle. Written by TUI commands; a malformed file falls back to defaults. |
+| linux | user | `/home/<name>/.kimi-code/mcp.json` | json | User-level MCP server declarations, merged with the project file; MCP details belong to the mcp topic. |
+| linux | user | `/home/<name>/.kimi-code/AGENTS.md` | text | Optional global Kimi-specific agent instructions. Generic cross-tool instructions can live under the real home at ~/.agents/AGENTS.md. |
+| linux | repo | `<repo>/.kimi-code/local.toml` | toml | Project-local settings such as additional workspace directories. Read only after the workspace is trusted; the docs recommend gitignoring it. |
+| linux | repo | `<repo>/.kimi-code/mcp.json` | json | Project-local MCP declarations. Ignored in an untrusted workspace unless KIMI_CODE_TRUST_WORKSPACE is truthy. |
+| windows | user | `C:\Users\<name>\.kimi-code\config.toml` | toml | Main runtime configuration: providers, models, loop control, hooks. Created on first run and written by provider commands and the TUI. Relocated by KIMI_CODE_HOME. |
+| windows | user | `C:\Users\<name>\.kimi-code\tui.toml` | toml | Terminal UI preferences, including the auto-update toggle. Written by TUI commands; a malformed file falls back to defaults. |
+| windows | user | `C:\Users\<name>\.kimi-code\mcp.json` | json | User-level MCP server declarations, merged with the project file; MCP details belong to the mcp topic. |
+| windows | user | `C:\Users\<name>\.kimi-code\AGENTS.md` | text | Optional global Kimi-specific agent instructions. Generic cross-tool instructions can live under the real home at ~/.agents/AGENTS.md. |
+| windows | repo | `<repo>\.kimi-code\local.toml` | toml | Project-local settings such as additional workspace directories. Read only after the workspace is trusted; the docs recommend gitignoring it. |
+| windows | repo | `<repo>\.kimi-code\mcp.json` | json | Project-local MCP declarations. Ignored in an untrusted workspace unless KIMI_CODE_TRUST_WORKSPACE is truthy. |
 
 ## Environment Variables
 
-General CLI/runtime variables:
+General runtime variables only. Model endpoint and credential variables (`KIMI_MODEL_*`, `KIMI_CODE_BASE_URL`, `KIMI_CODE_OAUTH_HOST`) belong to the model-config topic, permission variables to agent-permissions, MCP timeouts to mcp, and `KIMI_LOG_*` to agent-logging. Provider API keys are not read from the shell unless a provider names one through `api_key_env`.
 
 | Variable | Effect |
 | --- | --- |
-| `KIMI_CODE_HOME` | Relocates the whole data root from `~/.kimi-code`. |
-| `KIMI_DISABLE_TELEMETRY` | Truthy values disable anonymous telemetry. |
-| `KIMI_CODE_BACKGROUND_KEEP_ALIVE_ON_EXIT` | Overrides background-task shutdown behavior and can make prompt mode wait for background tasks. |
-| `KIMI_CODE_PLUGIN_MARKETPLACE_URL` | Overrides the plugin marketplace JSON loaded by `/plugins`. |
-| `KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY` | Caps initial AgentSwarm subagent concurrency. |
-| `KIMI_CODE_EXPERIMENTAL_FLAG` | Enables all registered experimental features for the process. |
-| `KIMI_SHELL_PATH` | Windows-only Git Bash path override. |
-| `KIMI_CODE_NO_AUTO_UPDATE` | Disables update checks, background installs, and prompts. |
-| `KIMI_CLI_NO_AUTO_UPDATE` | Legacy alias for disabling auto-update. |
-| `KIMI_DISABLE_CRON` | Disables scheduled-task creation and firing. |
-
-Standard environment variables Kimi Code uses for general runtime behavior:
-
-| Variable | Effect |
-| --- | --- |
-| `HOME` | Resolves the default data path. |
-| `VISUAL`, `EDITOR` | Select external editor command; `VISUAL` wins. |
-| `PATH` | Locates `rg`, `fd`/`fdfind`, `git`, and Git Bash candidates. |
-| `NO_COLOR`, `FORCE_COLOR` | Control color output. |
-| `CI` | Disables theme detection and falls back to dark theme when set and not `0`. |
-| `TERM_PROGRAM`, `TERM`, `TMUX` | Detect terminal capabilities and notification support. |
-| `DISPLAY`, `WAYLAND_DISPLAY`, `XDG_SESSION_TYPE` | Detect Linux graphical sessions for clipboard/image features. |
-| `WSL_DISTRO_NAME`, `WSLENV` | Detect WSL for clipboard bridging. |
-| `LOCALAPPDATA` | Windows fallback location while probing Git Bash. |
-| `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY` and lowercase variants | Configure outbound proxy behavior for Kimi Code traffic. Loopback hosts bypass the proxy. |
-
-Model endpoint and provider credential variables are intentionally not duplicated here. Current docs emphasize that ordinary provider credentials such as `KIMI_API_KEY`, `ANTHROPIC_API_KEY`, and `OPENAI_API_KEY` are not read automatically from the shell; they must be written in `config.toml` or the `[providers.<name>.env]` sub-table. The explicit `KIMI_MODEL_*` family belongs to model configuration, not this general CLI surface, except that wrappers should know it is an in-memory temporary model channel and does not persist.
+| `KIMI_CODE_HOME` | Relocates the whole data root (config, sessions, logs, OAuth credentials, updates, Kimi-specific skills, global AGENTS.md) from ~/.kimi-code to the given directory. Read-only commands still create cache, logs, sessions, and device_id files there. |
+| `KIMI_DISABLE_TELEMETRY` | A truthy value (1, true, yes, y; case-insensitive) turns off anonymous telemetry even when config.toml enables it. |
+| `KIMI_CODE_NO_AUTO_UPDATE` | A truthy value disables the update preflight entirely: no check, background install, or prompt. |
+| `KIMI_CLI_NO_AUTO_UPDATE` | Legacy alias of KIMI_CODE_NO_AUTO_UPDATE. |
+| `KIMI_MODEL_OUTPUT_FORMAT` | Default output format for prompt mode (text or stream-json) when --output-format is absent. Ignored outside prompt mode; an invalid value fails the invocation. |
+| `KIMI_CODE_TRUST_WORKSPACE` | A truthy value trusts the current workspace, enabling project-level MCP servers and project-local configuration that an untrusted workspace skips. |
+| `KIMI_SHELL_PATH` | On Windows, absolute path of bash.exe that overrides Git Bash auto-detection. |
+| `KIMI_CODE_EXPERIMENTAL_FLAG` | A truthy value enables every registered experimental feature for the process. |
+| `KIMI_CODE_WATCH` | Overrides [watch] enabled: whether filesystem watchers reload config and workspace files. On by default in 2.1.1. |
+| `KIMI_DISABLE_CRON` | Set to 1 to disable the scheduled-task tool: new schedules are rejected and existing ones do not fire. |
+| `KIMI_CODE_BACKGROUND_KEEP_ALIVE_ON_EXIT` | Overrides [background] keep_alive_on_exit; keeps background tasks when the session closes. |
+| `KIMI_CODE_BACKGROUND_PRINT_BACKGROUND_MODE` | What prompt mode does while background tasks are pending after the main turn: exit, drain, or steer (default steer). |
+| `KIMI_CODE_BACKGROUND_PRINT_WAIT_CEILING_S` | Wall-clock ceiling in seconds for the prompt-mode drain or steer wait. |
+| `KIMI_CODE_BACKGROUND_PRINT_MAX_TURNS` | Maximum number of new turns that background-task completions may trigger in prompt mode. |
+| `KIMI_CODE_PLUGIN_MARKETPLACE_URL` | Overrides the plugin marketplace JSON used by /plugins; accepts http(s) and file URLs and local paths. |
+| `KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY` | Caps AgentSwarm subagents running concurrently; an invalid value fails fast. |
+| `KIMI_CODE_PASSWORD` | Password accepted as a second credential by the web server, recommended when binding beyond loopback. |
+| `KIMI_CODE_ALLOWED_HOSTS` | Comma-separated extra Host header values the web server accepts through its DNS-rebinding check; equivalent to --allowed-host. |
+| `KIMI_CODE_TUI_FULL_SCREEN` | The value 1 selects the experimental fullscreen TUI mode. |
+| `HOME` | Resolves the default ~/.kimi-code data root and the shared ~/.agents resources. |
+| `VISUAL` | External editor command for the TUI; takes precedence over EDITOR. |
+| `EDITOR` | External editor command used when VISUAL is unset. |
+| `NO_COLOR` | Disables color output. |
+| `FORCE_COLOR` | Forces color output where supported. |
+| `CI` | When non-empty and not 0, disables terminal theme detection and falls back to the dark theme. |
+| `HTTP_PROXY` | Proxy for http:// requests, applied to model calls, MCP servers, web tools, telemetry, sign-in, and update checks; the lowercase spelling is also read. |
+| `HTTPS_PROXY` | Proxy for https:// requests; the lowercase spelling is also read. |
+| `ALL_PROXY` | Fallback proxy when the scheme-specific variable is unset; the usual place for a SOCKS proxy. |
+| `NO_PROXY` | Comma-separated hosts that bypass the proxy; loopback hosts always bypass. |
 
 ## Machine Introspection
 
-| Command | Machine-readable | Format | Wrapper/codegen use |
+| Command | Purpose | Format | Notes |
 | --- | --- | --- | --- |
-| `kimi provider list --json` | yes | JSON | Dumps configured `providers` and `models` tables. Useful for reporting/provider metadata. |
-| `kimi provider catalog list --json` | yes | JSON | Dumps the models.dev provider/model catalog. Useful for model/provider code generation. |
-| `kimi provider catalog list <providerId> --json` | yes | JSON | Narrows catalog introspection to one provider. |
-| `kimi doctor` | no | text | Validates active default config files. Useful for diagnostics, not codegen. |
-| `kimi doctor config [path]` | no | text | Current-doc validator for config candidates; installed 0.14.0 rejected the nested form. |
-| `kimi doctor tui [path]` | no | text | Current-doc validator for TUI config candidates; installed 0.14.0 rejected the nested form. |
-| `kimi server status --json` | yes, current docs | JSON | Should report installed/running/pid/port/log path, but installed 0.14.0 rejected `--json`. |
-| `GET /openapi.json` from the local server | yes | JSON/OpenAPI | REST API schema for code generation once `kimi server run` is healthy. |
-| `GET /asyncapi.json` from the local server | yes | JSON/AsyncAPI | WebSocket API schema for code generation once `kimi server run` is healthy. |
-| `kimi acp` + JSON-RPC `initialize` | yes | JSON-RPC | Returns agent info, auth methods, and capability matrix for ACP clients. |
-
-Negative probes are useful evidence:
-
-- Installed 0.14.0 accepted `kimi provider list --json` and emitted JSON.
-- Installed 0.14.0 accepted `kimi provider catalog list --json` and emitted JSON from models.dev.
-- Installed 0.14.0 rejected `kimi server status --json` with `unknown option '--json'`.
-- Installed 0.14.0 rejected `kimi doctor config` and `kimi doctor tui` even though current docs document them.
-
-Generic `--help` and `--version` are not listed as machine introspection in frontmatter because they do not expose structured state.
+| `kimi session list --json --all` | other | json | Prints a JSON array of session summaries across workspaces; prints [] when there are none. Creates the data-root skeleton as a side effect. |
+| `kimi provider list --json` | config_dump | json | Prints the raw providers and models tables from config.toml, which can hold plaintext API keys; redact before logging. Prints empty objects in a fresh home. |
+| `kimi provider catalog list --json` | models | json | Downloads and prints the public models.dev catalog, a third-party provider and model list, not Kimi Code state. Needs network access. |
+| `kimi provider catalog list <providerId> --json` | models | json | Narrows the models.dev catalog to one provider. |
+| `kimi doctor` | doctor | text | Validates config.toml and tui.toml; prints SKIP for absent files and exits 1 when an issue is found. |
+| `kimi doctor config <path>` | doctor | text | Validates one file as config.toml; exits 1 and names the path when it is missing or invalid. |
+| `kimi doctor tui <path>` | doctor | text | Validates one file as tui.toml. |
+| `kimi -p <prompt> --output-format stream-json` | other | jsonl | Starts a model session and prints one JSON object per line on stdout; thinking is omitted and tool progress still goes to stderr. Not run in this research because it spends tokens. |
+| `kimi acp` | capabilities | json | JSON-RPC over stdin/stdout; the initialize response reports agent info, auth methods, and capabilities. Not run in this research. |
+| `GET http://127.0.0.1:58627/openapi.json` | capabilities | json | Served by kimi web (default port 58627); the live OpenAPI document of the experimental REST API. Requires the bearer token that web prints. /asyncapi.json is the WebSocket counterpart. |
 
 ## Wrapper Notes
 
-Use `kimi -p <prompt>` for one-shot execution. Add `--output-format stream-json` when Claudine needs machine-readable streaming. In text output, plan for stderr noise during successful runs because thinking, tool progress, and resume notices go to stderr.
-
-Prompt mode uses auto permission behavior by default. Do not add `--yolo`, `--auto`, or `--plan` to prompt-mode launches; installed 0.14.0 rejects those combinations, and current docs document them as conflicts.
-
-Set `KIMI_CODE_HOME` explicitly when a wrapper needs a known config/state root. This prevents accidental reads/writes to a user or worktree-specific data directory and makes session/log cleanup predictable.
-
-Redact config and command lines. `config.toml` can contain plaintext provider API keys, OAuth references, custom headers, and provider import credentials. `kimi provider add --api-key ...` and `provider catalog add --api-key ...` should never be logged verbatim.
-
-Avoid unattended login and upgrade flows. `kimi login`, `kimi acp --login`, TUI `/login`, `kimi migrate`, and `kimi upgrade` require user interaction or can invoke package-manager actions.
-
-Avoid `kimi server install` unless the user explicitly requested a persistent service. It writes OS service definitions: launchd on macOS, user systemd on Linux, and a scheduled task on Windows.
-
-For web/visualizer use, pass `--no-open` if the wrapper should not open a browser. Treat local web services as user-facing stateful processes, not normal one-shot commands.
-
-On Windows, verify Git for Windows or `KIMI_SHELL_PATH` before relying on shell tool execution.
-
-Keep legacy detection explicit. A `kimi-cli` binary on PATH is likely the Python legacy project and does not support the same flags/config paths as current Kimi Code. On this host, both are installed.
-
-No current Kimi Code system-prompt CLI switch was found. System-prompt behavior should be handled by the sibling system-prompt research topic, especially for `AGENTS.md`, Skills, agent/subagent definitions, and any future prompt override flags.
-
-## Changelog
-
-- 2026-07-03: Retargeted the document from legacy Python `MoonshotAI/kimi-cli` to current `MoonshotAI/kimi-code`, because the primary installed `kimi` binary and current official docs now represent the successor CLI.
-- 2026-07-03: Updated upstream latest version to `0.22.2`, verified from npm, GitHub releases, and local update metadata; recorded local installed `kimi` as `0.14.0` and legacy `kimi-cli` as `1.47.0`.
-- 2026-07-03: Replaced uv/Python installation details with standalone install scripts, Homebrew `kimi-code`, and npm `@moonshot-ai/kimi-code`.
-- 2026-07-03: Replaced legacy `--print`/`--quiet` automation with current `-p`/`--prompt` prompt mode and `--output-format text|stream-json`.
-- 2026-07-03: Replaced legacy `~/.kimi` config discovery with `~/.kimi-code` / `KIMI_CODE_HOME`, including config, credentials, sessions, logs, updates, and user-history side effects.
-- 2026-07-03: Added current provider catalog/list JSON introspection, local server OpenAPI/AsyncAPI introspection, and version-gated notes for `doctor` and `server status --json`.
+- Do not conflate Kimi Code CLI (`kimi`, npm `@moonshot-ai/kimi-code`, version 2.x, data root `~/.kimi-code`) with the archived Python kimi-cli (`kimi-cli`, version 1.x, data root `~/.kimi`). This host has both: `/Users/ken/.kimi-code/bin/kimi` reports 2.1.1 and `/Users/ken/.local/bin/kimi-cli` reports 1.47.0. The kimi-cli repository and its documentation site are archived and tell readers to migrate.
+- Parsing is commander with enablePositionalOptions: root switches must come before any subcommand and are unknown after it. A required option value consumes the next argument even when it begins with a dash, so `kimi -p --yolo` runs the prompt "--yolo". A wrapper must place the prompt immediately after `-p` and must not forward a user token that starts with a dash as a value. Optional-value switches (`--session [id]`, and `--host [host]` on web) take the next argument only if it does not start with a dash.
+- Short switches accept an attached value (`-mfoo`, `-pfoo`, `-Sid`, `-ofoo`) but not an equals form (`-p=foo` yields the value "=foo"). Boolean switches reject `=value` (`--auto=x` is an unknown option). Short boolean switches bundle (`-yofoo`).
+- Non-interactive runs use `kimi -p <prompt> [--output-format stream-json]`. Assistant text goes to stdout; thinking, tool progress, and the "kimi version" banner go to stderr. Prompt mode applies the automatic permission policy and refuses --yolo, --auto, and --plan. Ambient KIMI_MODEL_OUTPUT_FORMAT changes the prompt-mode format, so pin it with --output-format or clear it.
+- A prompt run with no configured model fails with "No model configured" and exit code 1; `/login` or a config.toml model is required first. Without a TTY, a plain `kimi` start still enters the TUI and stops at a "Trust this folder?" prompt in an untrusted workspace, so never launch it without -p from a wrapper expecting no terminal.
+- An untrusted workspace skips project-level MCP servers and project-local configuration; set KIMI_CODE_TRUST_WORKSPACE=1 or trust the folder interactively.
+- Every command, including read-only ones such as `session list`, creates a data-root skeleton (cache, logs, sessions, device_id, workspaces.json). Set KIMI_CODE_HOME to a disposable directory for isolation, together with KIMI_DISABLE_TELEMETRY=1 and KIMI_CODE_NO_AUTO_UPDATE=1.
+- config.toml, `provider list --json`, and the --api-key switch can carry plaintext API keys; redact them from logs and command lines.
+- `session list --limit` with a rejected value ends in an unhandled exception with a stack trace, not a one-line error; treat any nonzero exit as failure without parsing the message.
+- Conflicts are enforced after parsing and exit 1 with a one-line "error: Cannot combine ..." message: prompt with yolo, auto, or plan; continue with session; yolo with auto; agent with agent-file; agent or agent-file with session or continue.
+- `web`, `rc`, `vis`, `login`, `upgrade`, `install-desktop`, and `migrate` (without --run) open a browser, ask questions, or run until interrupted; `upgrade` replaces the installed binary. Avoid them in a wrapper unless the user asked.
+- On Windows the shell tool needs Git Bash; install Git for Windows or set KIMI_SHELL_PATH to bash.exe. The Windows install path and shims were taken from documentation and were not tested on this macOS host.
+- Hidden internals exist (`__plugin_run_node`, `__update_download`, `install-app`); they are not part of the public surface.
 
 ## Sources
 
-- [Kimi Code CLI homepage](https://moonshotai.github.io/kimi-code/)
-- [MoonshotAI/kimi-code repository](https://github.com/MoonshotAI/kimi-code)
-- [Kimi Code CLI docs](https://moonshotai.github.io/kimi-code/en/)
-- [`kimi` command reference](https://moonshotai.github.io/kimi-code/en/reference/kimi-command)
-- [Getting started](https://moonshotai.github.io/kimi-code/en/guides/getting-started)
-- [Configuration files](https://moonshotai.github.io/kimi-code/en/configuration/config-files.md)
-- [Config overrides](https://moonshotai.github.io/kimi-code/en/configuration/overrides.md)
-- [Environment variables](https://moonshotai.github.io/kimi-code/en/configuration/env-vars.md)
-- [Data locations](https://moonshotai.github.io/kimi-code/en/configuration/data-locations.md)
-- [Model Context Protocol](https://moonshotai.github.io/kimi-code/en/customization/mcp.md)
-- [`kimi acp` subcommand](https://moonshotai.github.io/kimi-code/en/reference/kimi-acp.md)
-- [MoonshotAI/kimi-code releases](https://github.com/MoonshotAI/kimi-code/releases)
-- [Legacy MoonshotAI/kimi-cli repository](https://github.com/MoonshotAI/kimi-cli)
-- [Legacy Kimi CLI command reference](https://moonshotai.github.io/kimi-cli/en/reference/kimi-command.html)
-- Local command: `kimi --version` -> `0.14.0`
-- Local command: `kimi --help`
-- Local command: `kimi acp --help`
-- Local command: `kimi export --help`
-- Local command: `kimi doctor`
-- Local command: `kimi provider list --json`
-- Local command: `kimi provider catalog list --json`
-- Local command: `kimi server status --json` -> rejected by installed 0.14.0
-- Local command: `kimi-cli --version` -> `kimi, version 1.47.0`
-- Local inspection: `/Users/ken/.kimi-code/` file layout and update metadata
-- Local command: `npm view @moonshot-ai/kimi-code version --json` -> `"0.22.2"`
-- Local command: `brew info kimi-code --json=v2` -> Homebrew formula version `0.22.1` on 2026-07-03
+- [Kimi Code CLI documentation](https://moonshotai.github.io/kimi-code/en/) and its [`kimi` command reference](https://moonshotai.github.io/kimi-code/en/reference/kimi-command.md)
+- [Environment variables](https://moonshotai.github.io/kimi-code/en/configuration/env-vars.md), [Data locations](https://moonshotai.github.io/kimi-code/en/configuration/data-locations.md), [Configuration files](https://moonshotai.github.io/kimi-code/en/configuration/config-files.md), [Getting started](https://moonshotai.github.io/kimi-code/en/guides/getting-started.md), [Server API](https://moonshotai.github.io/kimi-code/en/reference/server-api.md)
+- [Changelog](https://moonshotai.github.io/kimi-code/en/release-notes/changelog.md)
+- Source at tag `@moonshot-ai/kimi-code@2.1.1` (commit `f67e6398fb3210ad8ace970e2dfd5bcc984ed61f`): [commands.ts](https://github.com/MoonshotAI/kimi-code/blob/f67e6398fb3210ad8ace970e2dfd5bcc984ed61f/apps/kimi-code/src/cli/commands.ts), [options.ts](https://github.com/MoonshotAI/kimi-code/blob/f67e6398fb3210ad8ace970e2dfd5bcc984ed61f/apps/kimi-code/src/cli/options.ts), [export.ts](https://github.com/MoonshotAI/kimi-code/blob/f67e6398fb3210ad8ace970e2dfd5bcc984ed61f/apps/kimi-code/src/cli/sub/export.ts), [fork.ts](https://github.com/MoonshotAI/kimi-code/blob/f67e6398fb3210ad8ace970e2dfd5bcc984ed61f/apps/kimi-code/src/cli/sub/fork.ts), [session.ts](https://github.com/MoonshotAI/kimi-code/blob/f67e6398fb3210ad8ace970e2dfd5bcc984ed61f/apps/kimi-code/src/cli/sub/session.ts), [provider.ts](https://github.com/MoonshotAI/kimi-code/blob/f67e6398fb3210ad8ace970e2dfd5bcc984ed61f/apps/kimi-code/src/cli/sub/provider.ts), [acp.ts](https://github.com/MoonshotAI/kimi-code/blob/f67e6398fb3210ad8ace970e2dfd5bcc984ed61f/apps/kimi-code/src/cli/sub/acp.ts), [doctor.ts](https://github.com/MoonshotAI/kimi-code/blob/f67e6398fb3210ad8ace970e2dfd5bcc984ed61f/apps/kimi-code/src/cli/sub/doctor.ts)
+- [MoonshotAI/kimi-code](https://github.com/MoonshotAI/kimi-code) and the archived [MoonshotAI/kimi-cli](https://github.com/MoonshotAI/kimi-cli) with its [archive notice](https://moonshotai.github.io/kimi-cli/en/guides/getting-started.md)
+- `npm view @moonshot-ai/kimi-code version` (2.1.1) and `gh release list -R MoonshotAI/kimi-code`
+- Local runs of `kimi --version`, `kimi <path> --help`, `brew info kimi-code`, and the disposable parse tests above, all on 2026-10-01
+
+## Changelog
+
+- Version moves from the previously recorded 0.22.2 (installed 0.14.0) to 2.1.1, verified with `kimi --version` and the npm registry; the installed binary now matches the newest release.
+- The document is reissued at contract revision 2: every switch carries a value type, aliases, attachment forms, and scope, established from the commander declarations at the 2.1.1 tag and from parse tests.
+- `kimi server` is deprecated and replaced by `kimi web`; `server run`, `server install`, `server status`, and the OS-service flags no longer exist. `web` gained --host, --allowed-host, --dangerous-bypass-auth, --web-title, and --rc, and `rc`/`remote` and `web rotate-token` are new.
+- New root switches --agent and --agent-file; --yolo now means Ask When Needed mode and --auto means Never Ask mode; --continue is documented as -c with a hidden -C; --resume/-r and --yes/--auto-approve are hidden aliases.
+- New subcommands fork, session list, install-desktop (formerly install-app), and rc; `doctor config` and `doctor tui` now parse; `export` and `fork` take a session id and skip the prompt with it.
+- New or changed variables: KIMI_MODEL_OUTPUT_FORMAT, KIMI_CODE_TRUST_WORKSPACE, KIMI_CODE_WATCH, KIMI_CODE_PASSWORD, KIMI_CODE_ALLOWED_HOSTS, KIMI_CODE_TUI_FULL_SCREEN, and prompt-mode background-task controls. `.kimi-code/local.toml` is a new project file.
+- The Homebrew formula is no longer in the README but still resolves on this host (`brew info kimi-code` reports stable 2.1.0), so it stays listed as an install method.
+- The assignment links the archived `MoonshotAI/kimi-cli` repository; research rests on the active `MoonshotAI/kimi-code` repository instead.

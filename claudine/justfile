@@ -389,6 +389,9 @@ research topic *args="":
     prompt="docs/research/{{topic}}/_fleet.md"
     [[ -f "$prompt" ]] || { echo "✗ no fleet prompt at $prompt" >&2; exit 2; }
     cargo build -q -p claudine-cli --bin claudine || exit 1
+    # A fleet whose success event runs `claudine-gen validate` must not
+    # compile it inside every run.
+    cargo build -q -p claudine-gen || exit 1
     logs="$(git rev-parse --show-toplevel)/.claudine/tmp/research-runs/{{topic}}/$(date +%Y-%m-%dT%H%M%S)"
     mkdir -p "$logs"
     echo "▶ researching {{topic}}; logs in $logs"

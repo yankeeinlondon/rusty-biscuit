@@ -399,7 +399,7 @@ pub(crate) struct FrontmatterShellExpansionReport {
     pub approvals_used: usize,
     /// Warnings emitted.
     pub warnings: Vec<ComposeWarning>,
-    /// Unknown-root reads by a ternary's condition and selected branch, each
+    /// Absent-property reads by a ternary's condition and selected branch, each
     /// with its frontmatter key. The unselected branch is prepared but not
     /// part of the result, so its reads are dropped.
     pub missing_roots: Vec<(String, MissingRoot)>,
@@ -1621,7 +1621,7 @@ pub(crate) fn directive_reachable_pipelines(
 /// [`ShellExpansionError::ExpressionEvaluation`], both tagged with the
 /// frontmatter key.
 ///
-/// The condition is a gate, like `when=`: a bare unknown root in it is
+/// The condition is a gate, like `when=`: a bare absent property in it is
 /// recorded in `missing`, not treated as an absence check.
 fn evaluate_ternary_condition(
     condition_source: &str,

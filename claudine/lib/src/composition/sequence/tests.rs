@@ -1986,6 +1986,27 @@ mod dynamic_sources {
         }
     }
 
+    /// An evaluation failure keeps Darkmatter's typed error as the cause, so a
+    /// library caller can tell an unknown function from a parse failure.
+    #[test]
+    fn a_failing_evaluation_keeps_the_typed_darkmatter_cause() {
+        use crate::composition::SequenceExpressionCause;
+        use darkmatter::markdown::compose::expression::ExpressionError;
+
+        let error = plan_from_frontmatter(&[("sequence", json!("{{ no_such_fn() }}"))]).unwrap_err();
+        let CompositionError::SequenceExpressionFailed { source, .. } = &error else {
+            panic!("expected SequenceExpressionFailed, got {error:?}");
+        };
+        assert!(
+            matches!(source, SequenceExpressionCause::Evaluate(cause)
+                if matches!(cause.as_ref(), ExpressionError::UnknownFunction { .. })),
+            "{source:?}"
+        );
+        let chained = std::error::Error::source(&error)
+            .and_then(|cause| cause.downcast_ref::<SequenceExpressionCause>());
+        assert!(chained.is_some(), "reachable through Error::source");
+    }
+
     #[test]
     fn a_failing_expression_is_a_typed_error() {
         let error = plan_from_frontmatter(&[("sequence", json!("{{ nope( }}"))]).unwrap_err();

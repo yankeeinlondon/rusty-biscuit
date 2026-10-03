@@ -130,17 +130,6 @@ fn make_guard<'a>(
     LifecycleRunGuard::new(config, ctx, emitter)
 }
 
-fn fm_from_json(value: serde_json::Value) -> darkmatter::markdown::Frontmatter {
-    let mut fm = darkmatter::markdown::Frontmatter::new();
-    if let serde_json::Value::Object(map) = value {
-        for (key, val) in map {
-            fm.insert(&key, val).unwrap();
-        }
-    }
-    fm
-}
-
-
 mod action_shape_control;
 mod audio_emission;
 mod diagnostics;

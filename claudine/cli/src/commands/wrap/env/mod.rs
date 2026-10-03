@@ -23,6 +23,7 @@ pub(crate) use package_context::{
 };
 pub(crate) use sanitize::{
     admits_sensitive_key, ambient_sensitive_env, is_sensitive_key, redact_sensitive_args,
+    sensitive_arg_values,
     sanitize_process_env, validate_include_names,
 };
 

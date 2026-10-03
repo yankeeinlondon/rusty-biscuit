@@ -21,8 +21,10 @@
 //! Composition provider-argument forwarding is **not** a normalization rule.
 //! It is a separate ownership partition ([`partition_composition_tail`]) that
 //! runs after normalization and splits the argv into the Claudine argv (for
-//! clap) and the agent tail (for execution). It replaced the former Rule 3,
-//! whose synthetic `--` separator collided with authored provider boundaries.
+//! clap) and the arguments after the file, which type-aware ownership divides
+//! into setters, positionals, and the agent tail once the file is read. It
+//! replaced the former Rule 3, whose synthetic `--` separator collided with
+//! authored provider boundaries.
 //!
 //! ## Pass-through guarantees
 //!
@@ -46,7 +48,7 @@ mod rule1_provider_bool;
 mod rule2_canonicalize;
 mod rule4_help_hoist;
 
-pub(crate) use partition::{ProviderArgs, partition_composition_tail};
+pub(crate) use partition::{OwnedFlags, partition_composition_tail};
 pub(crate) use rule1_provider_bool::provider_for_boolean_flag;
 pub(crate) use rule2_canonicalize::is_fuzzy_provider_value;
 pub(crate) use rule4_help_hoist::hoist_composition_help;
@@ -57,7 +59,8 @@ pub(crate) const WRAPPER_SUBCOMMANDS: &[&str] = &[
 ];
 
 /// Composition subcommands that collect positional args plus `key=value`
-/// setters in any order. Rule 3 only fires on these subcommands.
+/// setters in any order. Rules 1 and 4 and the ownership partition fire only
+/// on these subcommands.
 pub(crate) const COMPOSITION_SUBCOMMANDS: &[&str] = &["compose", "inline-compose", "sequence"];
 
 /// Claudine root-level global long flags that consume the following token as
@@ -67,8 +70,8 @@ const GLOBAL_FLAGS_WITH_VALUE: &[&str] = &["--debug"];
 /// Normalize raw argv before clap parses it.
 ///
 /// Applies Rules 1 and 2 left-to-right, stopping at the first literal `--`,
-/// then Rule 3 and Rule 4 on the rewritten argv. See [the module docs](self)
-/// for pass-through guarantees.
+/// then Rule 4 on the rewritten argv. See [the module docs](self) for
+/// pass-through guarantees.
 pub(crate) fn normalize(raw: Vec<OsString>) -> Vec<OsString> {
     normalize_inner(raw, completion_mode_active())
 }
@@ -86,6 +89,13 @@ pub(crate) fn normalize_with_completion(
     completion_active: bool,
 ) -> Vec<OsString> {
     normalize_inner(raw, completion_active)
+}
+
+/// [`normalize`] for the completion engine, which classifies the argv a
+/// shell hands to `claudine __complete` (where `COMPLETE` may be set) the way
+/// a real invocation would be read.
+pub(crate) fn normalize_for_completion(raw: Vec<OsString>) -> Vec<OsString> {
+    normalize_inner(raw, false)
 }
 
 /// Shared core of [`normalize`] and the test-only
@@ -270,26 +280,16 @@ pub(crate) fn is_global_flag_with_value(token: &str) -> bool {
     GLOBAL_FLAGS_WITH_VALUE.contains(&token)
 }
 
-/// True when `token` matches the composition shorthand-setter key pattern
-/// `^[A-Za-z_][A-Za-z0-9_-]*=`.
+/// True when `token` has the composition shorthand-setter shape
+/// `^[A-Za-z_][A-Za-z0-9_-]*=` ([`claudine::composition::setter_key`]).
 ///
-/// This is the same key validation used by
-/// `crate::commands::compose`'s `parse_compose_setter`; keeping them in lockstep
-/// guarantees the ownership partition classifies a token the same way the
-/// downstream positional parser will.
+/// Shape alone decides ownership only before the composition file, where a
+/// setter-shaped token leaves the file unclaimed. After the file, type-aware
+/// ownership decides: a declared `$schema` parameter is always Claudine's
+/// (rule 2), and any other setter goes to a provider only as the first value
+/// of a string or variadic switch (rule 3).
 pub(crate) fn looks_like_setter(token: &str) -> bool {
-    let Some(eq_pos) = token.find('=') else {
-        return false;
-    };
-    let key = &token[..eq_pos];
-    let mut chars = key.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    if !first.is_ascii_alphabetic() && first != '_' {
-        return false;
-    }
-    chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+    claudine::composition::setter_key(token).is_some()
 }
 
 #[cfg(test)]

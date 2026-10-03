@@ -135,7 +135,9 @@ impl DryRunRender {
             area,
             document_path: request.prepared.resolved_path.clone(),
             deferred_lifecycle_keys: request.prepared.deferred_lifecycle_keys.clone(),
-            provider_args: crate::commands::wrap::env::redact_sensitive_args(&request.provider_args),
+            provider_args: crate::commands::wrap::env::redact_sensitive_args(
+                request.provider_tail.launch_args(),
+            ),
         }
     }
 }

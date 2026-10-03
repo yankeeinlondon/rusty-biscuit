@@ -8,7 +8,7 @@ mod engine;
 
 use std::path::PathBuf;
 
-use engine::{Exception, Kind, Rule, Site};
+use engine::{Exception, FixtureBin, Kind, Rule, Site};
 
 #[test]
 fn production_source_canonicalizes_only_through_the_shared_helper() {
@@ -388,7 +388,9 @@ fn a_rule_the_package_does_not_take_is_not_reported() {
 
 #[test]
 fn a_manifest_declared_root_and_the_build_script_are_scanned() {
-    let manifest = format!("{MANIFEST}\n[[bin]]\nname = \"tool\"\npath = \"tools/tool/main.rs\"\n\n[[bin]]\nname = \"fake\"\npath = \"tests/bin/fake.rs\"\n");
+    let manifest = format!(
+        "{MANIFEST}\n[[bin]]\nname = \"tool\"\npath = \"tools/tool/main.rs\"\n\n[[bin]]\nname = \"fake\"\npath = \"tests/bin/fake.rs\"\nrequired-features = [\"test-fixtures\"]\n"
+    );
     let fixture = Fixture::new(
         &manifest,
         &[
@@ -398,7 +400,8 @@ fn a_manifest_declared_root_and_the_build_script_are_scanned() {
             ("build.rs", "fn main() {\n    let _ = std::path::Path::new(\".\").canonicalize();\n}\n"),
         ],
     );
-    let (sources, problems) = engine::package_sources(PACKAGE, &fixture.root);
+    let fixtures = [FixtureBin { name: "fake", reason: "driven by an integration test" }];
+    let (sources, problems) = engine::package_sources_with_fixtures(PACKAGE, &fixture.root, &fixtures);
     assert!(problems.is_empty(), "{problems:?}");
     let sites = engine::scan(&sources, &[Rule::Canonicalize]);
     let locations = sites.iter().map(|site| format!("{}:{}", site.path, site.line)).collect::<Vec<_>>();
@@ -423,4 +426,535 @@ fn a_missing_root_or_an_empty_scan_fails() {
     let fixture = Fixture::lib(SAME_FILE);
     let problems = engine::problems("fixture/cli", &fixture.root, &[Rule::Canonicalize], &[]);
     assert!(problems[0].ends_with("is not the package directory `fixture/cli`"), "{problems:#?}");
+}
+
+/// One row per guarded provider: the rule, the module or type path that
+/// provides the function, and the arguments a call takes.
+const PROVIDERS: [(Rule, &str, &str); 8] = [
+    (Rule::Canonicalize, "std::fs", "(path)"),
+    (Rule::Canonicalize, "tokio::fs", "(path)"),
+    (Rule::Canonicalize, "dunce", "(path)"),
+    (Rule::Canonicalize, "std::path::Path", "(path)"),
+    (Rule::Canonicalize, "std::path::PathBuf", "(path)"),
+    (Rule::HomeLookup, "std::env", "()"),
+    (Rule::HomeLookup, "dirs", "()"),
+    (Rule::HomeLookup, "home", "()"),
+];
+
+fn function_name(rule: Rule) -> &'static str {
+    match rule {
+        Rule::Canonicalize => "canonicalize",
+        Rule::HomeLookup => "home_dir",
+    }
+}
+
+#[test]
+fn every_provider_is_found_through_every_import_form() {
+    // The scan is lexical, so type providers (`Path`, `PathBuf`) go through
+    // the same import forms as modules even where rustc would reject them.
+    let forms: [(&str, &str, &str); 9] = [
+        ("qualified call", "", "{module}::{name}{args}"),
+        ("qualified reference", "", "{module}::{name}"),
+        ("direct alias call", "use {module}::{name} as invoke;", "invoke{args}"),
+        ("chained alias call", "use {module} as provider;\nuse provider::{name} as invoke;", "invoke{args}"),
+        ("chained alias reference", "use {module} as provider;\nuse provider::{name} as invoke;", "invoke"),
+        ("module alias call", "use {module} as provider;", "provider::{name}{args}"),
+        ("alias of an alias", "use {module}::{name} as first;\nuse first as invoke;", "invoke{args}"),
+        ("grouped alias", "use {{{module}::{{{name} as invoke}}}};", "invoke{args}"),
+        ("glob import", "use {module}::*;", "{name}{args}"),
+    ];
+    let mut failures = Vec::new();
+    for (rule, module, args) in PROVIDERS {
+        let name = function_name(rule);
+        for (form, imports, expression) in forms {
+            let expand = |template: &str| {
+                template.replace("{{", "\u{1}").replace("}}", "\u{2}").replace("{module}", module).replace("{name}", name)
+                    .replace("{args}", args).replace('\u{1}', "{").replace('\u{2}', "}")
+            };
+            let source = format!(
+                "{}\n\npub fn probe(path: &std::path::Path) {{\n    let _ = {};\n}}\n",
+                expand(imports),
+                expand(expression)
+            );
+            let fixture = Fixture::lib(&source);
+            let sites = fixture.sites(&[rule]);
+            let reported = fixture.problems(&[rule], &[]);
+            let found = sites.len() == 1 && sites[0].3 && sites[0].1 == "probe";
+            let rejected = reported.len() == 1 && reported[0].starts_with(&format!("new {rule} call"));
+            if !(found && rejected) {
+                failures.push(format!("{module} {form}: sites {sites:?}, problems {reported:?}\n{source}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{} of {} cells failed:\n{}", failures.len(), PROVIDERS.len() * forms.len(), failures.join("\n"));
+}
+
+#[test]
+fn a_name_imported_from_an_unknown_module_is_an_unresolved_candidate() {
+    let source = "\
+use other::canonicalize as invoke;
+use other::home_dir as home;
+use elsewhere as provider;
+use provider::home_dir;
+use crate::util::canonicalize;
+
+pub fn probe(path: &std::path::Path) {
+    let _ = invoke(path);
+    let _ = invoke;
+    let _ = home();
+    let _ = home_dir();
+    let _ = canonicalize(path);
+}
+";
+    let fixture = Fixture::lib(source);
+    assert_eq!(
+        fixture.sites(&[Rule::Canonicalize, Rule::HomeLookup]),
+        vec![
+            site("canonicalize (imported util::canonicalize)", "probe", 12, false),
+            site("invoke (alias of other::canonicalize)", "probe", 8, false),
+            site("invoke (alias of other::canonicalize)", "probe", 9, false),
+            site("home_dir (imported elsewhere::home_dir)", "probe", 11, false),
+            site("home (alias of other::home_dir)", "probe", 10, false),
+        ]
+    );
+
+    let problems = fixture.problems(&[Rule::Canonicalize, Rule::HomeLookup], &[]);
+    assert_eq!(problems.len(), 4, "{problems:#?}");
+    assert!(problems.iter().all(|problem| problem.starts_with("unresolved ")), "{problems:#?}");
+
+    let reviewed = |rule, operation, count| Exception {
+        rule,
+        kind: Kind::Reviewed,
+        path: "fixture/lib/src/lib.rs",
+        item: "probe",
+        operation,
+        count,
+        reason: "reviewed: names what it calls",
+    };
+    let exceptions = [
+        reviewed(Rule::Canonicalize, "canonicalize (imported util::canonicalize)", 1),
+        reviewed(Rule::Canonicalize, "invoke (alias of other::canonicalize)", 2),
+        reviewed(Rule::HomeLookup, "home_dir (imported elsewhere::home_dir)", 1),
+        reviewed(Rule::HomeLookup, "home (alias of other::home_dir)", 1),
+    ];
+    assert_eq!(fixture.problems(&[Rule::Canonicalize, Rule::HomeLookup], &exceptions), Vec::<String>::new());
+}
+
+#[test]
+fn an_import_applies_only_to_its_own_module_or_function() {
+    let source = "\
+use dirs::home_dir as user_home;
+
+mod approved {
+    use biscuit_file::home_dir;
+
+    pub fn home() -> Option<std::path::PathBuf> {
+        home_dir()
+    }
+}
+
+mod unrelated {
+    use unknown::home_dir;
+
+    pub fn home() -> Option<std::path::PathBuf> {
+        home_dir()
+    }
+}
+
+mod unimported {
+    pub fn home(user_home: Option<std::path::PathBuf>) -> Option<std::path::PathBuf> {
+        user_home.or_else(|| home_dir())
+    }
+}
+
+pub fn local() -> Option<std::path::PathBuf> {
+    use std::env::home_dir;
+    home_dir()
+}
+
+pub fn outside() -> Option<std::path::PathBuf> {
+    user_home()
+}
+";
+    assert_eq!(
+        Fixture::lib(source).sites(&[Rule::HomeLookup]),
+        vec![
+            site("home_dir (imported unknown::home_dir)", "unrelated::home", 15, false),
+            site("home_dir", "unimported::home", 21, false),
+            site("home_dir (imported env::home_dir)", "local", 27, true),
+            site("user_home (alias of dirs::home_dir)", "outside", 31, true),
+        ]
+    );
+}
+
+#[test]
+fn glob_and_in_file_module_paths_are_followed() {
+    let source = "\
+use std::fs as filesystem;
+
+mod inner {
+    use super::*;
+
+    pub fn raw(path: &std::path::Path) {
+        let _ = filesystem::canonicalize(path);
+    }
+}
+
+mod style {
+    pub fn canonicalize(raw: &str) -> &str {
+        raw
+    }
+
+    pub use std::fs::canonicalize as real;
+}
+
+pub fn names() {
+    let _ = style::canonicalize(\"page.margin\");
+    let _ = self::style::canonicalize(\"page.margin\");
+}
+
+pub fn reexported(path: &std::path::Path) {
+    let _ = style::real(path);
+}
+";
+    assert_eq!(
+        Fixture::lib(source).sites(&[Rule::Canonicalize]),
+        vec![
+            site("filesystem::canonicalize", "inner::raw", 7, true),
+            site("style::real", "reexported", 25, true),
+        ]
+    );
+}
+
+/// What the guard reports for one manifest cell.
+#[derive(Clone, Copy, Debug)]
+enum Expect {
+    /// Exactly one problem, the cell's unapproved call, which an exception
+    /// keyed on the file's normalized path then accepts.
+    RejectsCall,
+    NoProblem,
+    /// Problems naming this manifest field or condition, and no call.
+    Manifest(&'static str),
+}
+
+#[test]
+fn manifest_target_fields_are_read_as_cargo_reads_them() {
+    // `(cell, before [package], inside [package], after [dependencies], file
+    // holding the call, expect)`: one edit to a Cargo-generated library
+    // manifest whose `src/lib.rs`, `build.rs`, and `production/main.rs` are
+    // safe except for the file named. `cargo metadata --no-deps --offline`
+    // selects `production/main.rs` for every valid alternate spelling below.
+    use Expect::{Manifest, NoProblem, RejectsCall};
+    const MAIN: &str = "production/main.rs";
+    const LIB: &str = "src/lib.rs";
+    const BUILD: &str = "build.rs";
+    let invalid = "Cargo.toml is not valid TOML";
+    let lib = "`[lib].path`";
+    let bin = "`[[bin]].path` of `tool`";
+    let build = "`[package].build`";
+    let cells: &[(&str, &str, &str, &str, &str, Expect)] = &[
+        ("lib: double-quoted", "", "", "[lib]\npath = \"production/main.rs\"\n", MAIN, RejectsCall),
+        ("lib: single-quoted", "", "", "[lib]\npath = 'production/main.rs'\n", MAIN, RejectsCall),
+        ("lib: spaced header", "", "", "[ lib ]\npath = \"production/main.rs\"\n", MAIN, RejectsCall),
+        ("lib: inline table", "lib = { path = \"production/main.rs\" }\n", "", "", MAIN, RejectsCall),
+        ("lib: dotted key", "lib.path = 'production/main.rs'\n", "", "", MAIN, RejectsCall),
+        ("lib: dot-prefixed", "", "", "[lib]\npath = \"./production/main.rs\"\n", MAIN, RejectsCall),
+        ("lib: parent segment", "", "", "[lib]\npath = \"production/../production/main.rs\"\n", MAIN, RejectsCall),
+        ("lib: absent path scans src/lib.rs", "", "", "[lib]\nname = \"fixture\"\n", LIB, RejectsCall),
+        ("lib: absolute", "", "", "[lib]\npath = \"/production/main.rs\"\n", MAIN, Manifest(lib)),
+        ("lib: null", "", "", "[lib]\npath = null\n", MAIN, Manifest(invalid)),
+        ("lib: integer", "", "", "[lib]\npath = 123\n", MAIN, Manifest(lib)),
+        ("lib: one wrong element", "", "", "[lib]\npath = [\"production/main.rs\", 123]\n", MAIN, Manifest(lib)),
+        ("lib: every element wrong", "", "", "[lib]\npath = [123]\n", MAIN, Manifest(lib)),
+        ("lib: empty array", "", "", "[lib]\npath = []\n", MAIN, Manifest(lib)),
+        ("lib: empty string", "", "", "[lib]\npath = \"\"\n", MAIN, Manifest(lib)),
+        (
+            "lib: duplicate key",
+            "",
+            "",
+            "[lib]\npath = \"production/main.rs\"\npath = \"src/lib.rs\"\n",
+            MAIN,
+            Manifest(invalid),
+        ),
+        ("lib: trailing garbage", "", "", "[lib]\npath = \"production/main.rs\" garbage\n", MAIN, Manifest(invalid)),
+        ("bin: double-quoted", "", "", "[[bin]]\nname = \"tool\"\npath = \"production/main.rs\"\n", MAIN, RejectsCall),
+        ("bin: single-quoted", "", "", "[[bin]]\nname = \"tool\"\npath = 'production/main.rs'\n", MAIN, RejectsCall),
+        ("bin: spaced header", "", "", "[[ bin ]]\nname = \"tool\"\npath = \"production/main.rs\"\n", MAIN, RejectsCall),
+        ("bin: inline array", "bin = [{ name = \"tool\", path = 'production/main.rs' }]\n", "", "", MAIN, RejectsCall),
+        ("bin: dot-prefixed", "", "", "[[bin]]\nname = \"tool\"\npath = \"./production/main.rs\"\n", MAIN, RejectsCall),
+        (
+            "bin: same file as lib, other spelling",
+            "",
+            "",
+            "[lib]\npath = \"production/main.rs\"\n\n[[bin]]\nname = \"tool\"\npath = \"./production/../production/main.rs\"\n",
+            MAIN,
+            RejectsCall,
+        ),
+        (
+            "bin: absent path",
+            "",
+            "",
+            "[[bin]]\nname = \"tool\"\n",
+            MAIN,
+            Manifest("`tool` has no `path` and none of its inferred sources"),
+        ),
+        ("bin: neither name nor path", "", "", "[[bin]]\n", MAIN, Manifest("has neither `name` nor `path`")),
+        ("bin: null", "", "", "[[bin]]\nname = \"tool\"\npath = null\n", MAIN, Manifest(invalid)),
+        ("bin: integer", "", "", "[[bin]]\nname = \"tool\"\npath = 123\n", MAIN, Manifest(bin)),
+        (
+            "bin: one wrong element",
+            "",
+            "",
+            "[[bin]]\nname = \"tool\"\npath = [\"production/main.rs\", 123]\n",
+            MAIN,
+            Manifest(bin),
+        ),
+        ("bin: every element wrong", "", "", "[[bin]]\nname = \"tool\"\npath = [123]\n", MAIN, Manifest(bin)),
+        ("bin: empty array", "", "", "[[bin]]\nname = \"tool\"\npath = []\n", MAIN, Manifest(bin)),
+        ("bin: empty string", "", "", "[[bin]]\nname = \"tool\"\npath = \"\"\n", MAIN, Manifest(bin)),
+        (
+            "bin: duplicate key",
+            "",
+            "",
+            "[[bin]]\nname = \"tool\"\npath = \"production/main.rs\"\npath = \"src/lib.rs\"\n",
+            MAIN,
+            Manifest(invalid),
+        ),
+        (
+            "bin: trailing garbage",
+            "",
+            "",
+            "[[bin]]\nname = \"tool\"\npath = \"production/main.rs\" garbage\n",
+            MAIN,
+            Manifest(invalid),
+        ),
+        ("build: double-quoted", "", "build = \"production/main.rs\"\n", "", MAIN, RejectsCall),
+        ("build: single-quoted", "", "build = 'production/main.rs'\n", "", MAIN, RejectsCall),
+        ("build: dot-prefixed", "", "build = \"./build.rs\"\n", "", BUILD, RejectsCall),
+        ("build: absent scans build.rs", "", "", "", BUILD, RejectsCall),
+        ("build: true scans build.rs", "", "build = true\n", "", BUILD, RejectsCall),
+        ("build: false skips build.rs", "", "build = false\n", "", BUILD, NoProblem),
+        ("build: null", "", "build = null\n", "", MAIN, Manifest(invalid)),
+        ("build: integer", "", "build = 123\n", "", MAIN, Manifest(build)),
+        ("build: one wrong element", "", "build = [\"production/main.rs\", 123]\n", "", MAIN, Manifest(build)),
+        ("build: every element wrong", "", "build = [123]\n", "", MAIN, Manifest(build)),
+        ("build: empty array", "", "build = []\n", "", MAIN, Manifest(build)),
+        ("build: empty string", "", "build = \"\"\n", "", MAIN, Manifest(build)),
+        ("build: duplicate key", "", "build = \"production/main.rs\"\nbuild = \"build.rs\"\n", "", MAIN, Manifest(invalid)),
+        ("build: trailing garbage", "", "build = \"production/main.rs\" garbage\n", "", MAIN, Manifest(invalid)),
+    ];
+
+    const CALL: &str = "fn main() {\n    let _ = std::fs::canonicalize(\".\");\n}\n";
+    let mut failures = Vec::new();
+    for &(cell, before, inside, after, call_in, expect) in cells {
+        let manifest = format!(
+            "{before}[package]\nname = \"fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n{inside}\n[dependencies]\n{after}"
+        );
+        let files = [LIB, BUILD, MAIN].map(|path| (path, if path == call_in { CALL } else { "pub fn nothing() {}\n" }));
+        let fixture = Fixture::new(&manifest, &files);
+        let problems = fixture.problems(&[Rule::Canonicalize], &[]);
+        let holds = match expect {
+            RejectsCall => {
+                // `Exception` holds static strings; one small leak per cell.
+                let path: &'static str = format!("fixture/lib/{call_in}").leak();
+                let excepted = Exception {
+                    rule: Rule::Canonicalize,
+                    kind: Kind::Invariant,
+                    path,
+                    item: "main",
+                    operation: "std::fs::canonicalize",
+                    count: 1,
+                    reason: "keyed on the normalized path",
+                };
+                problems.len() == 1
+                    && problems[0].starts_with(&format!("new canonicalize call `std::fs::canonicalize` in main at {path}:2;"))
+                    && problems[0].contains("count: 1")
+                    && fixture.problems(&[Rule::Canonicalize], &[excepted]).is_empty()
+            }
+            NoProblem => problems.is_empty(),
+            Manifest(field) => {
+                problems.iter().any(|problem| problem.starts_with("fixture/lib/Cargo.toml") && problem.contains(field))
+                    && !problems.iter().any(|problem| problem.contains("canonicalize call"))
+            }
+        };
+        if !holds {
+            failures.push(format!("{cell}: expected {expect:?}, got {problems:#?}\n{manifest}"));
+        }
+    }
+    assert!(failures.is_empty(), "{} of {} cells failed:\n{}", failures.len(), cells.len(), failures.join("\n"));
+}
+
+#[test]
+fn source_discovery_follows_the_compiled_module_tree() {
+    // `(cell, manifest after [package], files, listed fixtures, expected
+    // problem fragments)`. Every file not named holds no call; a call is
+    // reported as `in <item> at <path>:<line>;`.
+    const MAIN: &str = "fn main() {\n    let _ = std::fs::canonicalize(\".\");\n}\n";
+    const MODULE: &str = "pub fn f() {\n    let _ = std::fs::canonicalize(\".\");\n}\n";
+    const SAFE: &str = "pub fn nothing() {}\n";
+    const APP: &str = "[[bin]]\nname = \"app\"\npath = \"tools/app/main.rs\"\n";
+    const TEST_BIN: &str = "[[bin]]\nname = \"app\"\npath = \"tests/bin/app.rs\"\n";
+    const GATED_TEST_BIN: &str = "[[bin]]\nname = \"app\"\npath = \"tests/bin/app.rs\"\nrequired-features = [\"test-fixtures\"]\n";
+    const LISTED: &[FixtureBin] = &[FixtureBin { name: "app", reason: "fake provider driven by an integration test" }];
+    type Cell<'a> = (&'a str, &'a str, &'a [(&'a str, &'a str)], &'a [FixtureBin], &'a [&'a str]);
+    let cells: &[Cell<'_>] = &[
+        (
+            "bin under tests/, not listed",
+            TEST_BIN,
+            &[("src/lib.rs", SAFE), ("tests/bin/app.rs", MAIN)],
+            &[],
+            &["in main at fixture/lib/tests/bin/app.rs:2;"],
+        ),
+        (
+            "bin under tests/ with required-features, not listed",
+            GATED_TEST_BIN,
+            &[("src/lib.rs", SAFE), ("tests/bin/app.rs", MAIN)],
+            &[],
+            &["in main at fixture/lib/tests/bin/app.rs:2;"],
+        ),
+        ("listed fixture bin", GATED_TEST_BIN, &[("src/lib.rs", SAFE), ("tests/bin/app.rs", MAIN)], LISTED, &[]),
+        (
+            "listed fixture bin without required-features",
+            TEST_BIN,
+            &[("src/lib.rs", SAFE), ("tests/bin/app.rs", MAIN)],
+            LISTED,
+            &["fixture bin `app` of fixture/lib declares no `required-features`"],
+        ),
+        (
+            "listed fixture bin outside tests/",
+            "[[bin]]\nname = \"app\"\npath = \"tools/app/main.rs\"\nrequired-features = [\"test-fixtures\"]\n",
+            &[("src/lib.rs", SAFE), ("tools/app/main.rs", MAIN)],
+            LISTED,
+            &["fixture bin `app` of fixture/lib is at tools/app/main.rs, not under tests/"],
+        ),
+        ("stale fixture listing", "", &[("src/lib.rs", SAFE)], LISTED, &["stale fixture bin `app` of fixture/lib"]),
+        (
+            "inferred library root with an external #[path] module",
+            "",
+            &[("src/lib.rs", "#[path = \"../production/main.rs\"]\nmod external;\n"), ("production/main.rs", MODULE)],
+            &[],
+            &["in f at fixture/lib/production/main.rs:2;"],
+        ),
+        (
+            "declared library root with an external #[path] module",
+            "[lib]\npath = \"src/lib.rs\"\n",
+            &[("src/lib.rs", "#[path = \"../production/main.rs\"]\npub mod external;\n"), ("production/main.rs", MODULE)],
+            &[],
+            &["in f at fixture/lib/production/main.rs:2;"],
+        ),
+        (
+            "nested module in a non-mod-rs file",
+            APP,
+            &[("src/lib.rs", SAFE), ("tools/app/main.rs", "mod a;\nfn main() {}\n"), ("tools/app/a.rs", "mod b;\n"), ("tools/app/a/b.rs", MODULE)],
+            &[],
+            &["in f at fixture/lib/tools/app/a/b.rs:2;"],
+        ),
+        (
+            "nested module in a mod.rs file",
+            APP,
+            &[("src/lib.rs", SAFE), ("tools/app/main.rs", "mod a;\nfn main() {}\n"), ("tools/app/a/mod.rs", "pub(crate) mod b;\n"), ("tools/app/a/b.rs", MODULE)],
+            &[],
+            &["in f at fixture/lib/tools/app/a/b.rs:2;"],
+        ),
+        (
+            "#[path] inside an inline module of a non-mod-rs file",
+            APP,
+            &[
+                ("src/lib.rs", SAFE),
+                ("tools/app/main.rs", "mod a;\nfn main() {}\n"),
+                ("tools/app/a.rs", "mod inner {\n    #[path = \"deep.rs\"]\n    mod deep;\n}\n"),
+                ("tools/app/a/inner/deep.rs", MODULE),
+            ],
+            &[],
+            &["in f at fixture/lib/tools/app/a/inner/deep.rs:2;"],
+        ),
+        (
+            "every cfg_attr path branch",
+            APP,
+            &[
+                ("src/lib.rs", SAFE),
+                (
+                    "tools/app/main.rs",
+                    "#[cfg_attr(windows, path = \"win.rs\")]\n#[cfg_attr(not(windows), path = \"unix.rs\")]\nmod imp;\nfn main() {}\n",
+                ),
+                ("tools/app/win.rs", MODULE),
+                ("tools/app/unix.rs", MODULE),
+            ],
+            &[],
+            &["in f at fixture/lib/tools/app/unix.rs:2;", "in f at fixture/lib/tools/app/win.rs:2;"],
+        ),
+        (
+            "cfg_attr path and the default file",
+            APP,
+            &[
+                ("src/lib.rs", SAFE),
+                ("tools/app/main.rs", "#[cfg_attr(windows, path = \"win.rs\")]\nmod imp;\nfn main() {}\n"),
+                ("tools/app/win.rs", MODULE),
+                ("tools/app/imp.rs", MODULE),
+            ],
+            &[],
+            &["in f at fixture/lib/tools/app/imp.rs:2;", "in f at fixture/lib/tools/app/win.rs:2;"],
+        ),
+        (
+            "test-only modules and items",
+            APP,
+            &[
+                ("src/lib.rs", SAFE),
+                (
+                    "tools/app/main.rs",
+                    "#[cfg(test)]\nmod t;\n#[cfg(test)]\nmod absent;\n#[cfg(test)]\nmod inline {\n    fn g() { let _ = std::fs::canonicalize(\".\"); }\n}\n#[cfg(all(test, unix))]\nfn h() { let _ = std::fs::canonicalize(\".\"); }\nfn main() {}\n",
+                ),
+                ("tools/app/t.rs", MODULE),
+            ],
+            &[],
+            &[],
+        ),
+        (
+            "missing declared module",
+            APP,
+            &[("src/lib.rs", SAFE), ("tools/app/main.rs", "mod gone;\nfn main() {}\n")],
+            &[],
+            &["production module `gone` declared at fixture/lib/tools/app/main.rs:1 has no source"],
+        ),
+        (
+            "missing cfg_attr path",
+            APP,
+            &[("src/lib.rs", SAFE), ("tools/app/main.rs", "#[cfg_attr(windows, path = \"win.rs\")]\nmod imp;\nfn main() {}\n")],
+            &[],
+            &["production source fixture/lib/tools/app/win.rs is unreadable"],
+        ),
+        (
+            "root at the package top",
+            "[[bin]]\nname = \"app\"\npath = \"main.rs\"\n",
+            &[
+                ("src/lib.rs", SAFE),
+                ("main.rs", "mod helper;\nfn main() {}\n"),
+                ("helper.rs", MODULE),
+                ("orphan.rs", MODULE),
+                ("tests/integration.rs", MAIN),
+            ],
+            &[],
+            &["in f at fixture/lib/helper.rs:2;"],
+        ),
+        (
+            "files under src/ no root declares",
+            "",
+            &[("src/lib.rs", "mod declared;\n"), ("src/declared.rs", MODULE), ("src/orphan.rs", MODULE)],
+            &[],
+            &["in f at fixture/lib/src/declared.rs:2;", "in f at fixture/lib/src/orphan.rs:2;"],
+        ),
+    ];
+
+    let mut failures = Vec::new();
+    for &(cell, targets, files, fixtures, expected) in cells {
+        let manifest = format!("[package]\nname = \"fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n{targets}");
+        let fixture = Fixture::new(&manifest, files);
+        let problems = engine::problems_with_fixtures(PACKAGE, &fixture.root, &[Rule::Canonicalize], &[], fixtures);
+        let holds = problems.len() == expected.len()
+            && expected.iter().all(|fragment| problems.iter().any(|problem| problem.contains(fragment)));
+        if !holds {
+            failures.push(format!("{cell}: expected {expected:#?}, got {problems:#?}"));
+        }
+    }
+    assert!(failures.is_empty(), "{} of {} cells failed:\n{}", failures.len(), cells.len(), failures.join("\n"));
 }

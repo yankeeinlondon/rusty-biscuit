@@ -184,7 +184,7 @@ changes require both a passive shipped-artifact corpus test and an end-to-end
 test through the normal invocation path. Persisted values require a repeated
 read/write/read round trip.
 
-Expression grammar, inserted-text, failure-policy, unknown-identifier, and
+Expression grammar, inserted-text, failure-policy, undeclared-property, host-binding, and
 warning-identity rules are in [expressions.md](expressions.md); read it
 before changing the lexer, an evaluation surface, or a warning family.
 Fixture rules (`CliProcessFixture`, `git init` for repositories), the

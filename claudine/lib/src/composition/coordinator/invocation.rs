@@ -81,11 +81,8 @@ pub struct InvocationInputsDraft {
     pub explicit_provider: Option<Provider>,
     /// Model fixed by `--model`.
     pub model: Option<String>,
-    /// Raw arguments forwarded to the provider binary.
-    pub provider_args: Vec<String>,
-    /// Whether the caller supplied [`provider_args`](Self::provider_args)
-    /// explicitly, as opposed to them being derived.
-    pub provider_args_explicit: bool,
+    /// Arguments forwarded to the provider binary.
+    pub provider_tail: crate::composition::ProviderTail,
     /// Providers excluded from automatic selection.
     pub excluded: BTreeSet<Provider>,
     /// Whether the provider session is interactive.
@@ -150,8 +147,7 @@ impl InvocationInputsDraft {
             },
             explicit_provider: None,
             model: None,
-            provider_args: Vec::new(),
-            provider_args_explicit: false,
+            provider_tail: crate::composition::ProviderTail::default(),
             excluded: BTreeSet::new(),
             session_interactive: false,
             session_interactive_source: SessionInteractivitySource::Default,

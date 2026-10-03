@@ -140,14 +140,15 @@ grammatical.
 
 DMLS parses with the same `parse_spanned` / `parse_condition_spanned` entry
 points, so the editor's AST is byte-for-byte the compose pipeline's AST. It
-reports two diagnostics over that AST:
+reports three diagnostics over that AST:
 
 | Diagnostic code | Severity | Fires on |
 | --- | --- | --- |
 | `dm.expression.malformed` | Warning | a `ParseError`, ranged from the error position to the end of the interpolation |
-| `dm.expression.unknown_identifier` | Warning | a variable whose root matches no frontmatter key, schema property, reserved namespace, or runtime context name |
+| `dm.expression.undeclared_property` | Warning (advisory) | a variable whose root is an undeclared document property: no frontmatter key, schema property, or function names it, and it is not a reserved namespace (a runtime-context name such as `repo` is a document property, not `ctx.repo`) |
+| `dm.expression.unknown_function` | Error | a call to a function outside the closed function catalog, in any branch |
 
-The unknown-identifier check visits **every** variable in the expression, each
+The undeclared-property check visits **every** variable in the expression, each
 at its own span: a bare variable, the root of a member or index chain, a binary
 operand, both ternary branches, a function argument, and a fallback's right-hand
 side. It runs over body interpolations and over Expression-typed frontmatter
@@ -165,5 +166,6 @@ rewrites it to a reference the grammar can read, such as `doc['foo--bar']`.
 
 These editor diagnostics are the earliest place an authoring mistake surfaces.
 They are not the last: a malformed or unevaluatable expression also fails
-composition on every surface, and an unknown identifier also warns at compose
-time — see [index.md § Failure handling](./index.md#failure-handling).
+composition on every surface, and an undeclared property also raises the
+`dm.expression.undeclared_property` advisory at compose time — see
+[index.md § Failure handling](./index.md#failure-handling).

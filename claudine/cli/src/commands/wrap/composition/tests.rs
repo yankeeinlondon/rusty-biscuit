@@ -1339,7 +1339,7 @@ fn emit_preflight_blocked_and_finalize_propagates_err_msg_into_blocked_stack() {
 }
 
 /// A late-binding evaluation error raised by the `blocked` stack (here a
-/// `when:` guard referencing an undefined root under DM2 strict mode) takes
+/// `when:` guard calling an unknown function) takes
 /// precedence over the original pre-flight failure: the helper surfaces the
 /// typed `LifecycleEvaluationError` for the `blocked` event and runs
 /// `finalize` carrying the evaluation error as `err` (proven by the
@@ -1355,13 +1355,13 @@ fn emit_preflight_blocked_and_finalize_surfaces_blocked_evaluation_error() {
     let dir = tempfile::tempdir().unwrap();
     let source_path = dir.path().join("test.md");
     let log_path = dir.path().join("events.log");
-    // The `blocked` stack's `when:` references an undefined root, so it
+    // The `blocked` stack's `when:` calls an unknown function, so it
     // *raises* at event time rather than evaluating cleanly to false. The
     // `failure` and `finalize` stacks each append a marker so we can prove
     // both events fired carrying the evaluation error as `err`.
     let fm = json!({
         "blocked": {
-            "stack": [{"when": "missing_root == true", "action": {"stderr": "unreachable"}}]
+            "stack": [{"when": "missing_root() == true", "action": {"stderr": "unreachable"}}]
         },
         "failure": {
             "stack": [{"when": "err", "action": {"append_line": ["events.log", "failure-saw-err"]}}]
@@ -1461,20 +1461,20 @@ fn emit_preflight_blocked_and_finalize_blocked_raise_then_finalize_raise_surface
     let dir = tempfile::tempdir().unwrap();
     let source_path = dir.path().join("test.md");
     let log_path = dir.path().join("events.log");
-    // The `blocked` stack's `when:` raises (undefined root), triggering the
+    // The `blocked` stack's `when:` raises (an unknown function), triggering the
     // catch path (failure + finalize). The `failure` stack is clean so we
     // isolate the precedence to blocked-raise vs finalize-raise. The
     // `finalize` stack's `when:` also raises, so the surfaced error must name
     // `finalize`.
     let fm = json!({
         "blocked": {
-            "stack": [{"when": "missing_root == true", "action": {"stderr": "unreachable"}}]
+            "stack": [{"when": "missing_root() == true", "action": {"stderr": "unreachable"}}]
         },
         "failure": {
             "stack": [{"when": "err", "action": {"append_line": ["events.log", "failure-ran"]}}]
         },
         "finalize": {
-            "stack": [{"when": "also_missing == true", "action": {"stderr": "unreachable"}}]
+            "stack": [{"when": "also_missing() == true", "action": {"stderr": "unreachable"}}]
         }
     });
     let config = parse_lifecycle_config(&fm, &source_path).unwrap();
@@ -1554,7 +1554,7 @@ fn emit_preflight_blocked_and_finalize_surfaces_finalize_evaluation_error_withou
             "stack": [{"action": {"append_line": ["events.log", "blocked-ran"]}}]
         },
         "finalize": {
-            "stack": [{"when": "missing_root == true", "action": {"stderr": "unreachable"}}]
+            "stack": [{"when": "missing_root() == true", "action": {"stderr": "unreachable"}}]
         }
     });
     let config = parse_lifecycle_config(&fm, &source_path).unwrap();

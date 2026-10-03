@@ -1185,6 +1185,31 @@ lists it, by file, enclosing function, and operation, with the invariant that
 makes it private. The failure message names the file and line and prints an
 entry to paste. The same guard rejects a direct `dirs::home_dir` or
 `std::env::home_dir` in Claudine; use `biscuit_file::home_dir()` there.
+A call is found however the file spells it: qualified, imported, renamed, or
+through a chain of aliases (`use std::fs as f; use f::canonicalize as c;`
+then `c(path)`), each import counting only in the module or function that
+declares it. A `canonicalize` or `home_dir` imported from a module the guard
+cannot place (`use other::home_dir as h;`) is reported for review, never
+skipped. Production code is every file under `src/` plus everything the
+library, binary, and build-script roots compile in. The roots are the ones the
+package's `Cargo.toml` selects, read the way Cargo reads them
+(`path = 'x.rs'`, `[ lib ]`, and `lib = { path = "x.rs" }` all count;
+`./x.rs` and `src/../x.rs` name the same file as `x.rs`, so one exception
+covers it), plus `src/lib.rs`, `src/main.rs`, and `src/bin/*`. From each root
+the guard follows `mod` declarations as the compiler does, so a module loaded
+with `#[path = "../shared/io.rs"]` is scanned wherever it lives, and both
+files of `#[cfg_attr(windows, path = "win.rs")] mod imp;` (`win.rs` and
+`imp.rs`) are scanned. Code under `#[cfg(test)]` is skipped, along with the
+module files it declares. Nothing outside `src/` is scanned unless a root
+reaches it: a binary at `main.rs` does not pull in `tests/`. A `[[bin]]` under
+`tests/` is still production code. Only a binary that the guard call lists as a
+test fixture is skipped, and a listed binary must live under `tests/` and
+declare `required-features`, so a default build and `cargo install` never
+compile it. A manifest that is not valid TOML, a target `path` or `build` value
+of the wrong type, empty, or absolute, a target whose source file is missing,
+or a `mod x;` with no `x.rs` or `x/mod.rs` fails the guard instead of shrinking
+what it scans. Modules declared by a macro, and files pulled in with
+`include!`, are not followed.
 
 ## Glob References: `GlobReference`
 

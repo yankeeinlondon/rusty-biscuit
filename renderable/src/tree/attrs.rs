@@ -733,6 +733,11 @@ pub struct TableTerminalHints {
     /// form when `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub highlight_row: Option<TableRowHighlight>,
+    /// The narrowest outer width, in cells and borders included, the table
+    /// is drawn at. The last column absorbs the extra width; the available
+    /// width still caps it. Omitted from the serialized form when `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_width: Option<u32>,
 }
 
 /// A terminal-only highlight for one data row of a [`NodeKind::Table`] node.
@@ -3189,6 +3194,7 @@ mod tests {
                 row: 2,
                 bg: crate::color::Color::BasicColor(crate::color::BasicColor::Black),
             }),
+            min_width: Some(60),
         });
         let hints = attrs.table_terminal_hints();
         assert!(hints.prefer_cursor_alignment);
@@ -3202,6 +3208,7 @@ mod tests {
         );
         assert_eq!(hints.stripe_text, None);
         assert_eq!(hints.highlight_row.map(|h| h.row), Some(2));
+        assert_eq!(hints.min_width, Some(60));
     }
 
     #[test]

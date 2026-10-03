@@ -46,7 +46,7 @@ pub(crate) fn run_structured_stream_session(
     status_reporter: super::session_report::StatusReporter,
     control: Option<std::sync::Arc<dyn exec::control::StdioControl>>,
     steering: Option<claudine::steering::controller::SteeringController>,
-) -> Result<(i32, Option<String>)> {
+) -> Result<crate::output::native_exit::NativeExit> {
     let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
     let parser_config = claudine::stream::ParserConfig {
         model: args.model.clone(),
@@ -210,6 +210,9 @@ pub(crate) fn run_structured_stream_session(
         args.model.as_deref(),
     );
 
-    let stderr_text = summary.stderr_text.clone();
-    Ok((summary.exit_code, stderr_text))
+    Ok(exec::structured_native_exit(
+        summary.exit_code,
+        stream_result.termination,
+        stream_result.stream_tails.as_ref(),
+    ))
 }

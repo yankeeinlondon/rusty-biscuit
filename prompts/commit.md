@@ -11,13 +11,8 @@ timeout: 30m
 step_timeout: 12m
 show_system_prompt: false
 operation: commit
-agent: opencode
-model: |-
-    {{
-        agent == "opencode" && !model
-            ? "minimax/MiniMax-M3"
-            : model
-    }} 
+agent: claude
+model: sonnet
 resides_in: |-
     {{
         length(ctx.dirty_package_areas) == 1
@@ -30,12 +25,12 @@ initialize:
         # snapshot, which predates any staging an earlier stage of the same run did.
         - when: "length(current.staged_files) == 0"
           action:
-              - message: "🤨  there were no staged files to commit in {{ctx.repo}}!"
-              - stop
+              - message: "🤨  there were no staged files to commit in {{ctx.repo}}; skipping git commit operation"
+              - skip
 start:
     message: |-
-        🗳️  starting **git commits** in {{ ctx.repo }} -> **{{ctx.branch}}** 
-        {{ ctx.is_monorepo ? '\n  **packages impacted:** _' + as_csv(ctx.dirty_packages) + '_' : '' }}
+        🗳️  starting **git commits** in {{ ctx.repo }} -> **{{ctx.branch}}** (_<dim>using </dim>{{agent}}/{{model}}_)
+        {{ ctx.is_monorepo ? '&nbsp;&nbsp;**packages impacted:** ' + as_unordered_list(ctx.dirty_packages) : '' }}
 success:
     message: |-
         🗳️  staged files in {{ctx.area || ctx.repo }}'s **{{ctx.branch}}** branch, have been **committed to git** (_but not pushed_)

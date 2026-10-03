@@ -360,6 +360,11 @@ fn resolve_fields(
             extract_catalog_value(entry, inputs, artifact, &mut skips, &mut offering_join);
         let (value, provenance) = match inputs.overrides.get(entry.field) {
             Some(over) => {
+                // An override skips the coercion, so the coercion's rules
+                // still judge it.
+                if entry.coercion == Coercion::CliSwitchRecords {
+                    coerce::check_cli_switch_catalog(&over.value)?;
+                }
                 let suppressed = source_value.ok();
                 let stale = suppressed.as_ref() == Some(&over.value);
                 (
@@ -396,6 +401,23 @@ fn extract_catalog_value(
     skips: &mut Vec<CoercionSkip>,
     offering_join: &mut OfferingJoinReport,
 ) -> Result<Value, GenError> {
+    // The whole topic frontmatter as authored: its revision decides whether
+    // switch records exist at all, and Darkmatter's coercion would hide a
+    // wrong-typed element or an explicit null in one of them.
+    if entry.coercion == Coercion::CliSwitchRecords {
+        let DeclaredSource::Research { topic, .. } = entry.source else {
+            unreachable!("CliSwitchRecords is declared with a research source")
+        };
+        let authored =
+            inputs
+                .research_authored
+                .get(topic)
+                .ok_or_else(|| GenError::MissingValue {
+                    field: entry.field,
+                    message: format!("no research loaded for topic `{topic}`"),
+                })?;
+        return coerce::cli_switch_catalog(authored);
+    }
     let raw = match entry.source {
         DeclaredSource::Roster { key } => match inputs.roster.get(key) {
             Some(value) => value.clone(),

@@ -609,7 +609,7 @@ fn shipped_commit_prompt_composes_resides_in_and_fires_success_cleanly() {
 
     let delivered = fixture.cwd().join("delivered.txt");
     write_executable(
-        &fixture.bin_dir().join("opencode"),
+        &fixture.bin_dir().join("claude"),
         "#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$CLAUDINE_PROMPT_CAPTURE\"\n/bin/cat >> \"$CLAUDINE_PROMPT_CAPTURE\"\nexit 0\n",
     );
     let output = fixture

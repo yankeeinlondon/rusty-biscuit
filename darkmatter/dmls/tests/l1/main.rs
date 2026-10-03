@@ -24,4 +24,5 @@ mod stdio_subprocess;
 mod strict_mode_recovery_spike;
 mod suggest_constraint_phase1;
 mod test_layout;
+mod undeclared_property;
 mod zed_extension_contract;

@@ -252,6 +252,7 @@ fn exhausted_remediation_fails_finalize_and_preserves_findings() {
     let file_resolution_context = biscuit_file::FileResolutionContext::new(dir.path());
     let context = |signal| StackExecutionContext {
         signal,
+        scope: None,
         frontmatter,
         live_frontmatter: None,
         runtime_state: None,

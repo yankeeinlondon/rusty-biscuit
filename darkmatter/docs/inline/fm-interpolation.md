@@ -312,8 +312,9 @@ Frontmatter interpolation uses the same expression grammar and evaluator as body
 
 That means:
 
-- missing variables resolve to the empty string, and a root that nothing
-  defines warns with `dm.expression.unknown_identifier` (see
+- missing variables are absent properties: `null` as a whole value and the
+  empty string in mixed text, and a root that nothing declares raises the
+  advisory `dm.expression.undeclared_property` (see
   [Interpolation § Missing Variables](./interpolation.md#missing-variables)).
   A candidate from pass 1 is only reported if the name is still unknown after
   schema validation and pass 2, so a key that shell expansion or the schema
@@ -339,8 +340,8 @@ state, not text:
   `serde_json::Value` result is preserved (so `{{ false }}` stays the boolean
   `false`, a numeric expression stays a number, and an array/object result keeps
   its type).
-- Undefined variables are not an error: a whole-value `{{ missing }}` resolves
-  to `null` (and warns as described above).
+- An absent document property is not an error: a whole-value `{{ missing }}`
+  resolves to `null` (and warns as described above).
 
 Mixed text (`"a {{ x }}"`) and strings holding more than one expression
 interpolate to a string instead.

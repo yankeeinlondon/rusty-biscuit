@@ -243,12 +243,14 @@ fn request_owned_identity_is_fixed_even_for_current() {
     assert!(provider.calls().is_empty(), "{:?}", provider.calls());
 }
 
-/// The reserved roots cannot be shadowed by an injected global of the same
-/// name: subtree compose resolves them through the request, not the caller's
-/// map.
+/// A reserved root cannot be registered as a global at all: subtree compose
+/// refuses the registration before anything is evaluated, so neither the
+/// global nor the request's provider is read.
 #[test]
 fn an_injected_global_cannot_shadow_a_reserved_root() {
+    use crate::markdown::compose::expression::{BindingError, ExpressionError};
     use crate::markdown::compose::subtree::{InjectedGlobal, SubtreeCompose};
+    use crate::markdown::types::MarkdownError;
 
     let provider = ScriptedRefresh::new([("branch", serde_json::json!("from-the-request"))]);
     let state = EffectiveStateBuilder::new()
@@ -259,16 +261,23 @@ fn an_injected_global_cannot_shadow_a_reserved_root() {
         .build()
         .unwrap();
 
-    let resolved = SubtreeCompose::new(&serde_json::json!("{{ current.branch }}"), &state)
+    let error = SubtreeCompose::new(&serde_json::json!("{{ current.branch }}"), &state)
         .with_global(
             "current",
             InjectedGlobal::eager(serde_json::json!({ "branch": "from-the-global" })),
         )
         .compose()
-        .unwrap();
+        .expect_err("a reserved root is not a valid global");
 
-    assert_eq!(resolved, serde_json::json!("from-the-request"));
-    assert_eq!(provider.calls(), ["branch"]);
+    let MarkdownError::Interpolation { cause, .. } = &error else {
+        panic!("expected a typed interpolation error, got {error:?}");
+    };
+    assert!(matches!(
+        cause.as_ref(),
+        ExpressionError::Binding(binding)
+            if matches!(binding.as_ref(), BindingError::ReservedName { root } if root == "current")
+    ));
+    assert!(provider.calls().is_empty(), "{:?}", provider.calls());
 }
 
 /// A frontmatter key named `current` cannot shadow the reserved root either.

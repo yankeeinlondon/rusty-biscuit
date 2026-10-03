@@ -69,7 +69,7 @@ pub(super) enum PreflightBlockedOutcome {
 /// `blocked.stack` can reference `{{ err.msg }}` meaningfully.
 ///
 /// A late-binding evaluation error raised by the `blocked` or `finalize`
-/// stack (a crashed `when:` guard, an unknown root under DM2 strict mode)
+/// stack (a crashed `when:` guard, an unknown function)
 /// takes precedence over the original pre-flight failure: it is routed
 /// through `failure` + `finalize` carrying the evaluation error as `err`
 /// (when raised by `blocked`) and returned as a typed
@@ -103,6 +103,7 @@ pub(super) fn emit_preflight_blocked_and_finalize(
 
     let blocked_ctx = StackExecutionContext {
         signal: LifecycleSignal::Blocked,
+        scope: None,
         frontmatter,
         // Single pre-flight `blocked` event — no later event shares this state.
         live_frontmatter: None,

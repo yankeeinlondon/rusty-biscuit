@@ -10,7 +10,7 @@ The primary public modules are below; the shared `error` type and flat
 |--------|----------------|
 | `actions` | Hook action types and responses |
 | `badges` | Styled terminal badge constants |
-| `composition` | Markdown frontmatter composition (direct/inline/sequence) plus the loop engine |
+| `composition` | Markdown frontmatter composition (direct/inline/sequence) plus the loop engine; `ownership` decides who owns each argument after the file and checks the tail per launch |
 | `config` | Agent detection, hook registration, atomic writes, backups |
 | `diagnostics` | Typed diagnostic facets, discovery, effective selection, and snapshots |
 | `dispatch` | Event processing pipeline, templates, matchers, expression bridge |

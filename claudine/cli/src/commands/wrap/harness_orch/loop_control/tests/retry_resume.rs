@@ -639,6 +639,7 @@ fn a_resume_whose_only_moved_facet_is_the_overlay_is_refused() {
         .unwrap();
     let launch = crate::commands::wrap::harness_orch::AttemptLaunch {
         args: Vec::new(),
+        provider_tail: claudine::composition::ProviderTail::default(),
         env: std::collections::HashMap::new(),
         stdin_seed: None,
         wire_prompt: None,

@@ -466,6 +466,10 @@ struct ExecutedHarnessAttempt {
     provider: Provider,
     /// The profile paired with [`Self::provider`], from the same bundle.
     profile: &'static dyn crate::commands::wrap::profile::WrapperProfile,
+    /// The provider process exit as the failure report classifies it.
+    native_exit: crate::output::native_exit::NativeExit,
+    /// The forwarded tail this attempt launched with, from the same bundle.
+    provider_tail: claudine::composition::ProviderTail,
 }
 
 enum PhaseResult<T> {
@@ -1783,6 +1787,7 @@ fn execute_attempt_phase(
         provider,
         profile,
         base_args,
+        &rebuilt.provider_tail,
         base_env,
         resume_session.as_deref(),
         &materialized,
@@ -1983,7 +1988,7 @@ fn execute_attempt_phase(
     // `resolve_guard_inputs`/`compile_for_model`) or while delivering the
     // prompt. This is still post-`start`, so route through the typed
     // failure + finalize stacks (with `err`) before propagating.
-    let (outcome, perf, iteration_signals) = attempt_result
+    let (outcome, perf, iteration_signals, native_exit) = attempt_result
     .map_err(|e| {
         let err_info = LifecycleErrorInfo::from_error_or_action("harness_attempt", e.as_ref());
         rollback_inline_document(inline.as_mut(), term);
@@ -2034,6 +2039,8 @@ fn execute_attempt_phase(
         iteration_signals,
         provider,
         profile,
+        native_exit,
+        provider_tail: rebuilt.provider_tail.clone(),
     })
 }
 
@@ -2069,6 +2076,8 @@ fn classify_attempt_phase(
         iteration_signals,
         provider,
         profile,
+        native_exit,
+        provider_tail,
     } = executed;
     if outcome.termination == claudine::harness::ProcessTermination::Interrupted {
         // Surface the interrupt to the user before we let the guard
@@ -2207,6 +2216,23 @@ fn classify_attempt_phase(
                 );
             }
             TerminalRecovery::Completed => {}
+        }
+        // Recovery is exhausted, so this is the terminal failure: the one
+        // place a provider's rejection of the forwarded tail is reported.
+        // Other causes keep the failure reporting above.
+        let native_exit = if show_checks {
+            native_exit.with_shown_headline(&message)
+        } else {
+            native_exit
+        };
+        let native = crate::output::error_report::AgentErrorReport::for_native_exit(
+            provider,
+            &native_exit,
+            &provider_tail,
+            None,
+        );
+        if native.correlated {
+            native.report.render(term);
         }
         // For provider-level failures, preserve the exit code at the
         // boundary rather than converting it into an `eyre` error. This

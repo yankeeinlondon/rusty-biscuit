@@ -177,6 +177,8 @@ biscuit-test-harness = { path = "../../biscuit-test-harness" }
 test-toolkit = { path = "../../tools/test-toolkit" }
 tempfile = "3"
 wiremock = "0.6"
+# The shared path lookup guard reads target roots from `Cargo.toml`.
+toml = "1.0"
 
 [[example]]
 name = "html_to_png"

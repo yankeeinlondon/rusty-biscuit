@@ -23,8 +23,9 @@ Because composition flows through the same execution path as `claudine claude` /
 
 ### Positional Arguments
 
-Each command accepts exactly one file reference plus zero or more `key=value`
-setters, in any order:
+Each command takes one file reference plus any number of `key=value` setters
+and bare words. The first bare word that is not a setter is the file; it must
+come before any provider switch:
 
 ```sh
 claudine compose @prompts/review.md review=review.md
@@ -35,39 +36,263 @@ claudine inline-compose draft=false @notes/update.md
 A token is a setter when it contains `=` and its key starts with an ASCII
 letter or `_` and contains only letters, digits, `_`, or `-`. Dot-paths and
 path-like tokens (for example `foo.bar=baz`) are not setters and are treated
-as file-reference candidates.
+as file-reference candidates (or, after the file, as positional arguments).
+
+Every bare word after the file that no provider switch takes becomes the
+`argv` frontmatter property, an array of strings in the order typed:
+
+```sh
+claudine compose plan.md alpha --codex -c x=y beta phase=2
+# argv: ["alpha", "beta"]   phase: 2   provider tail: -c x=y
+```
+
+```markdown
+Arguments: {{ argv }}
+```
+
+- Values are strings, never JSON5-parsed (`1` stays `"1"`); an empty argument
+  stays an empty string. The file is not in `argv`, and neither is anything
+  after an authored `--`.
+- With at least one positional, `argv` overrides an authored `argv`, like a
+  setter. With none, an authored `argv` is left alone.
+- `argv` is reserved: an `argv=…` setter, or a `--set` object holding `argv`,
+  is an error before `--` (with or without positionals). Pass the values as
+  bare words instead.
+- `sequence` applies `argv` to every step, and it stays caller input through
+  retries and `proxy` hand-offs. `inline-compose` never writes it into the
+  document.
+- A document that declares `argv` in its `$schema` validates the effective
+  array like any other value (declare it as `string[]`).
 
 Setter values are parsed as JSON5 first and fall back to strings when JSON5
 parsing fails, so `count=3`, `enabled=true`, `tags=["a","b"]`, and
-`review=review.md` all resolve to their natural types.
+`review=review.md` all resolve to their natural types. The value is split at
+the first `=`, so `label=a=b` sets `label` to `a=b`, and `phase=` sets an
+empty string.
 
-Inline setters override matching keys from `--set`. For `sequence`, reserved
-per-step overlay keys still win over both `--set` and shorthand setters.
+Setters can sit anywhere after the file, including after provider switches
+(see [Setters after a provider switch](#setters-after-a-provider-switch)).
+When a key is repeated, the last occurrence wins. Inline setters override
+matching keys from `--set` wherever either is written (`--set` is accepted
+once per command). For `sequence`, reserved per-step overlay keys still win
+over both `--set` and shorthand setters.
 
 ### Provider Argument Forwarding
 
 Any CLI switch Claudine does not own is forwarded to the underlying agent,
-mirroring the direct-wrapper contract. The first non-Claudine switch **after
-the composition file** starts an agent tail; every token from there is passed
-through verbatim:
+mirroring the direct-wrapper contract. No `--` is needed. Which tokens after
+the file belong to the agent is decided per token from the switch's researched
+type in Claudine's compiled catalog:
 
 ```sh
-# `-c model_reasoning_effort=low` is forwarded to Codex; the setter-shaped
-# value is NOT applied as a frontmatter override.
-claudine sequence fleet.md --codex -c model_reasoning_effort=low
+# Codex's -c takes one value, so the setter-shaped value is forwarded and
+# not applied as a frontmatter override; phase=2 is Claudine's setter.
+claudine sequence fleet.md --codex -c model_reasoning_effort=low phase=2
+
+# Claude's --add-dir takes a list: a and b are forwarded; x=y is a setter.
+claudine compose plan.md --claude --add-dir a b x=y
 ```
 
-No `--` is required. An explicit `--` after the file still works and forwards
-its tail opaquely (no Claudine flag is extracted from it). Claudine-owned flags
-always win before a `--` — a colliding native switch (e.g. Codex's own `-m`)
-must be placed after `--`. The composition file must come first: an unowned
-switch (or a `--`) before the file is an error with ordering guidance.
+- A `key=value` the document's `$schema` declares is always Claudine's, even
+  directly after a provider switch.
+- Any other `key=value` goes to the agent only as the first value of a switch
+  that takes a string or a list; otherwise it is a setter.
+- A bare word a switch does not take is a positional argument (`argv`), so a
+  provider operand needs `--`.
+- The types come from the provider named on the command line, else the
+  document's literal `agent`, else every provider. When those providers read a
+  word differently (Claude's `-c` takes nothing, Codex's takes a value),
+  Claudine asks which agent the arguments are for in an interactive session,
+  and otherwise fails with `ambiguous provider argument`. Naming the provider
+  (`--codex`) or using `--` settles it.
+- Ownership reads the document **as authored**: a caller `agent=…` or `--set`
+  changes the run, not who owns a token.
+- Before every launch the implicit switches are checked against the provider
+  that actually runs, at the command it runs (including a resume entrypoint).
+  A value the switch does not take, or a missing required value, fails before
+  the spawn.
 
-A generic INFO status names the forwarded switches (values redacted); `--dry-run`
-shows the forwarded tail in its metadata table so a launch can be audited.
-Because unknown switches are always forwarded, a genuinely invalid one may be
-rejected by the agent at startup. See the mechanism in
+An explicit `--` after the file still works and forwards its tail opaquely:
+nothing after it is classified or checked. Claudine-owned flags always win
+before a `--` — a colliding native switch (e.g. Codex's own `-m`) must be
+placed after `--`. The composition file must come first: an unowned switch
+(or a `--`) before the file is an error with ordering guidance. The full rules
+are in [argv-normalization.md → Type-aware ownership](argv-normalization.md#type-aware-ownership).
+
+#### Setters after a provider switch
+
+A `key=value` written after a provider switch is still a setter: it changes
+the prompt's frontmatter and is never sent to the agent. The only exception
+is the switch's own value. Claudine knows how many values each provider
+switch takes, so it can tell the two apart:
+
+```sh
+# -c takes one value: x=y is Codex's, phase=2 is a setter.
+claudine compose plan.md --codex -c x=y phase=2
+#   frontmatter: phase: 2        agent receives: -c x=y
+
+# The attached form carries its value, so phase=2 is a setter.
+claudine compose plan.md --codex --config=x=y phase=2
+#   frontmatter: phase: 2        agent receives: --config=x=y
+
+# --add-dir takes a list: the run of bare words ends at the setter.
+claudine compose plan.md --claude --add-dir a b phase=2
+#   frontmatter: phase: 2        agent receives: --add-dir a b
+
+# A list switch takes at most one key=value, and only as its first value.
+claudine compose plan.md --claude --add-dir x=y phase=2
+#   frontmatter: phase: 2        agent receives: --add-dir x=y
+
+# A Claudine option (-m) between the words ends the switch's run.
+claudine compose plan.md --codex -c x=y -m gpt5 phase=2
+#   model: gpt5   frontmatter: phase: 2   agent receives: -c x=y
+```
+
+A switch that takes no value, or one Claudine has no record of, never takes
+a `key=value`, so a setter right after it stays a setter. Values the agent
+receives are unchanged strings: in `-c count=3 count=3` the first `count=3`
+reaches Codex as text and the second sets `count` to the number `3`.
+
+The per-token decision, including the cases above, is drawn in the
+flowchart under
+[argv-normalization.md → Type-aware ownership](argv-normalization.md#type-aware-ownership).
+
+**A declared parameter is never a switch's value.** If the document's
+`$schema` declares `phase`, then `phase=2` is a setter even directly after
+`-c`. That leaves `-c` with no value, so the command fails before any agent
+starts. The words after it never move up to fill the gap, so
+`--codex -c phase=2 x=y` fails the same way:
+
+```text
+Error: provider argument `-c` takes a value for Codex (at its `exec` command), but none was
+forwarded with it: the `phase` setter after it is a parameter the document declares, so it
+stays Claudine's and is never the switch's value.
+Give `-c` a separate provider value, or put intentional provider arguments after `--`.
+```
+
+The message names the switch, the parameter, and the provider, but never the
+setter's value. When the `$schema` is written as an expression, its parameter
+names are not known before it runs, so a `key=value` a switch could take is
+an error asking you to put the provider value after `--` or pass the setter
+with `--set`.
+
+**`--` keeps provider data away from the prompt.** Every word after an
+authored `--` goes to the agent untouched, even one shaped like a declared
+parameter:
+
+```sh
+claudine compose plan.md --codex -- -c x=y phase=2
+#   frontmatter: unchanged       agent receives: -c x=y phase=2
+```
+
+The same setter applies to every launch of the command: each `sequence`
+step, a lifecycle `retry`, `resume`, or `proxy` target. `inline-compose` uses
+it for the run and never writes it into the document.
+
+> **Behavior change.** Earlier releases forwarded every token after the first
+> provider switch Claudine did not own, so a trailing `phase=2` reached the
+> agent and the prompt silently kept its default. Setters are now applied
+> wherever they appear. If you meant a `key=value` as provider data, put it
+> after `--`.
+
+Before launch, one INFO status says what is forwarded. It names switches only,
+never values, and describes a tail after `--` as opaque. Each switch before
+the `--` is then explained from Claudine's compiled switch catalog:
+
+```text
+ℹ Forwarding provider arguments to Codex: -c
+- -c is Codex's --config switch (override one configuration value for this run); forwarding to Codex.
+
+ℹ Forwarding an opaque argument tail to Codex (passed after --).
+```
+
+The notice appears once per distinct provider and tail for the whole command,
+so a `sequence` whose steps and parallel tasks all launch Codex with the same
+tail shows it once. `--quiet` and `--silent` suppress it. A switch the catalog
+does not establish is still forwarded, and its sentence says so. Claudine
+makes no claim about whether the agent accepts a forwarded switch, so a genuinely
+invalid one may be rejected by the agent at startup (see
+[When the agent rejects the tail](#when-the-agent-rejects-the-tail)).
+
+`--dry-run` shows the forwarded tail in its metadata table, with secret-shaped
+values (`--api-key ****`, `--token=****`, `-c****` for a credential attached
+to a short switch) masked, so a launch can be audited. The `AGENT_PARAMS`
+variable the agent's environment carries is masked the same way. The agent
+itself receives the original tokens. An argument after the file that is not
+valid UTF-8 is refused before anything runs, because Claudine will not change
+its bytes.
+See the mechanism in
 [argv-normalization.md → Provider-argument partition](argv-normalization.md#provider-argument-partition).
+
+#### Every launch carries the tail once
+
+The tail is fixed for the whole command. Each launch the command makes gets
+it exactly once, token for token: the first attempt, a lifecycle `retry`, a
+`proxy` target, every `sequence` step (whichever provider the step launches),
+and a lifecycle `resume`.
+
+A resume launches the provider's resume entrypoint instead of the original
+argv. Claudine appends the tail right after that entrypoint, then re-adds
+only its own transport flags (such as Codex's `--json` or OpenCode's
+`--format json`):
+
+```text
+first attempt:  codex exec --add-dir a --add-dir a --json …
+resume:         codex exec resume <session> --add-dir a --add-dir a --json
+```
+
+Repeated switches keep their order and count. A flag you forwarded yourself
+(the `--json` above) is not dropped and is not doubled by Claudine's own copy.
+Claudine does not filter the tail per entrypoint, so a resume entrypoint that
+does not accept a forwarded switch rejects it like any other launch.
+
+#### When the agent rejects the tail
+
+When a launch that forwarded a tail fails because the agent rejected its
+arguments, Claudine prints one report after recovery is exhausted (a failure
+the lifecycle `retry`s or `resume`s away reports nothing):
+
+```text
+Agent Error (Goose, exit 2)
+Goose rejected its arguments. This was likely caused by the forwarded
+arguments: --bogus.
+error: unexpected argument '--bogus' found
+Check Goose's usage for the forwarded arguments.
+```
+
+The report names forwarded switches without values, or says the tail was
+opaque when it came after `--`. It quotes the agent's own diagnostic line with
+recognized secrets masked, including a forwarded secret the agent echoed back
+without its flag. A line you already saw (streamed live by a structured run, or
+printed as the run's failure line) is not repeated; the report points at it
+instead. `--quiet` and `--silent` never hide the report, and it changes
+nothing else: exit code, lifecycle `failure`/`finalize`, and retry policy are
+the same as without it.
+
+Claudine classifies the agent's exit from its termination, exit code, and the
+last ten lines of both stdout and stderr, in this order; the first match wins:
+
+```mermaid
+flowchart TD
+    A[agent exited] --> B{interrupted?}
+    B -- yes --> X[interrupted: not attributed]
+    B -- no --> C{timed out?}
+    C -- yes --> Y[timeout: not attributed]
+    C -- no --> D{missing binary, auth, API error, unknown model?}
+    D -- yes --> Z[that cause: not attributed]
+    D -- no --> E{argument rejected?}
+    E -- no --> W[missing argument or unclassified: not attributed]
+    E -- yes --> F{tail non-empty, and any switch the message names is in the tail?}
+    F -- no --> V[generic argument error]
+    F -- yes --> R[correlated report]
+```
+
+A rejection that names one of Claudine's own injected switches (for example
+`--output-last-message`) is reported as an ordinary agent error, not blamed on
+the tail. A rejection that names no switch is attributed to a non-empty tail,
+including an explicit tail of operands only. A launch path that hands the
+terminal to the agent (an interactive session) captures nothing, so its
+failures are never classified.
 
 ### Shell Completion
 
@@ -461,9 +686,9 @@ effective frontmatter as raw expansion syntax.
   successfully. A parse failure (e.g. the malformed `spec_path: "{{ dirname(review) + '/spec.md') }}"`)
   or an evaluation failure aborts composition with a precise
   `Interpolation parse failed` / `Interpolation evaluation failed` diagnostic
-  naming the frontmatter key — **even when `fail_fast` is off**. Undefined
-  variables remain lenient: a bare `{{ missing }}` still resolves to `null`
-  rather than aborting.
+  naming the frontmatter key — **even when `fail_fast` is off**. An absent
+  document property is not a failure: a bare `{{ missing }}` resolves to
+  `null`, and no `||` fallback is needed to make it legal.
 - **Whole-value `$(...)` shell expansion** must parse and expand when
   frontmatter shell expansion is enabled. If shell expansion is explicitly
   disabled, the `$(...)` value is deferred unchanged. When enabled, a value
@@ -769,14 +994,21 @@ Each lifecycle property interpolates **when its event fires**, not during the in
 
 Claudine renders `{{ … }}` templates on two frontmatter surfaces: **loop action values** (`set`/`append`/`prepend`/`merge`, via `looping::actions::render_action_value`) and **lifecycle event text** (via the Darkmatter DM2 substrate `SubtreeCompose`). The loop/capability API keeps the positional spelling `set(key, value)`; Claudine lifecycle YAML uses only `set: {property: value}`. Both consume the *same* Darkmatter expression core — `parse` / `evaluate` / `ExpressionFinder` / `scalar_string` over an `EvaluationLookup` — so the loop renderer is **not** a second expression engine; it is a loop-specific value renderer sharing that core. A [shared conformance matrix](../../lib/src/composition/interpolation_conformance.rs) pins the overlap: literal/mixed strings, whole-value typed expansion, arrays/objects, the `doc` namespace, functions, string-literal escaping, and malformed-expression fail-closed behavior all resolve **identically** from the same input and state.
 
-Two semantic differences are deliberate and keep the two renderers separate rather than merging the loop path into DM2:
+Two differences remain between the renderers:
 
 | Concern | Loop action renderer | Lifecycle DM2 (`SubtreeCompose`) |
 |---------|----------------------|-----------------------------------|
-| Error on a malformed/invalid template | Contextual `CompositionError::InvalidAction` carrying iteration + action index (`InvalidAction at iteration N, action M of K`) | Generic `MarkdownError::Transform` |
-| Unknown variable root in a mixed string (e.g. `"x={{typo}}"`) | Lenient → resolves empty (`"x="`), matching loop **condition** evaluation | Strict / fail-closed → typed error before any side effect dispatches |
+| Error on a malformed/invalid template | Contextual `CompositionError::LoopActionExpressionInvalid` carrying iteration + action index | Typed `MarkdownError::Interpolation` |
+| A `{{{ … }}}` escape | Not recognized; the text passes through unchanged | Renders the literal `{{ … }}` |
 
-Both keep a mixed string such as `"{{a}}{{b}}"` (with `a=1, b=2`) as the string `"12"`: the inserted values are data, so the result is never re-parsed as JSON. The loop renderer's leniency serves state mutation (a loop action writes frontmatter, where an empty result is the natural outcome and mirrors `while`/`until` evaluation), while DM2 strict mode serves side-effect dispatch (a lifecycle message must never reach Discord/TTS/stderr carrying an unresolved reference). Both engines are held to the shared matrix so the overlap cannot silently drift.
+Everything else is shared, and the matrix holds both engines (and the sequence
+source renderer) to one missing-property table: an absent property is `null` as
+a whole value and empty in a mixed string (`"x={{typo}}"` renders `"x="`), a
+ternary over it takes the falsy branch, a fallback chooses the next operand, and
+a bare name never reads `ctx`. Both keep a mixed string such as `"{{a}}{{b}}"`
+(with `a=1, b=2`) as the string `"12"`: the inserted values are data, so the
+result is never re-parsed as JSON. A malformed span or unknown function fails in
+both before anything is written or dispatched.
 
 ### Loop Execution
 

@@ -15,7 +15,7 @@
 
 use claudine_gen::{EXCLUDED_SERIALIZED_FIELDS, REGISTRY};
 
-/// The serialized `ProviderInfo` field list (45 keys, describe order).
+/// The serialized `ProviderInfo` field list (46 keys, describe order).
 const SERIALIZED_PROVIDER_INFO_FIELDS: &[&str] = &[
     "provider",
     "display_name",
@@ -62,6 +62,7 @@ const SERIALIZED_PROVIDER_INFO_FIELDS: &[&str] = &[
     "unmapped_native_events",
     "overlay_selector",
     "overlay_capabilities",
+    "cli_switches",
 ];
 
 #[test]

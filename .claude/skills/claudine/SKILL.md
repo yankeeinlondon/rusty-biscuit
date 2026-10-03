@@ -75,6 +75,9 @@ command that enqueued the job, so without them an L1 test that composes such a
 prompt leaks two `claudine` processes per run and plays a sound on the host.
 `detached_audio.rs`, whose subject is that worker, is the one file that opts
 back in.
+To assert the exact child argv or the composed prompt (providers read it on
+stdin), install a recording stub provider with `common::launch_recorder`
+(`install`/`launches`/`prompts`, Unix-only) rather than writing another one.
 A test whose subject *is* the running child — a signal, a deadline, a streaming
 read, `CREATE_NEW_PROCESS_GROUP`, an `expectrl` session — uses `command_std()`
 (or `command_builder()…build_std()`), which is the same policy on a
@@ -111,8 +114,8 @@ control-variable seed. Share its live state with catch handlers and retain
 `set` writes in the invocation RuntimeState for subsequent preparations.
 Mapping `set` destinations absent from the pre-write snapshot are known null
 bindings; this permits copying an optional value before resetting it. Existing
-values still win over those null defaults, and unrelated unknown roots remain
-errors.
+values still win over those null defaults, and any other absent property reads
+as `null`.
 
 `initialize` runs before preflight and is shell-free. Reject shell actions and
 `set` values written as a whole-value `$( … )` even in dead branches
@@ -187,7 +190,7 @@ of a topic doc.
 - [Messaging](topics/messaging.md) — outbound routes (Discord/Slack/Signal/WhatsApp), the config-TUI route manager, webhook redaction invariants, the desktop-notification boundary
 - [Traces and Logging](topics/traces-and-logging.md), [Log Reporting](topics/log-reporting.md)
 - [CLI Pre-Parsing](topics/cli-pre-parsing.md) — argv normalization pipeline; rule-by-rule reference in [argv-normalization.md](topics/argv-normalization.md)
-- [Shell Completions](topics/completions/shell-completions.md) — dynamic completion engine, per-mode pipelines, and shared `@`/`&`/`^`/implicit file-reference resolution
+- [Shell Completions](topics/completions/shell-completions.md) — dynamic completion engine, per-mode pipelines, shared `@`/`&`/`^`/implicit file-reference resolution, and completion after the file through type-aware ownership (`composition::owner_of_last_argument`; nothing for the agent's words, never a prompt)
 
 ## Research on Agentic CLI Platforms
 
