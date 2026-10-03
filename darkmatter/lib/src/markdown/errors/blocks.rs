@@ -275,7 +275,8 @@ pub(crate) fn caller_file_classification_changed_block(property: &str) -> Status
 /// expression is located ([`SourceRef::OnDiskSpan`]), then a focused
 /// `$schema`/key excerpt for a frontmatter key or a numbered excerpt around a
 /// body line — or the resolved text plus origin key for the late-binding path
-/// ([`SourceRef::Effective`]).
+/// ([`SourceRef::Effective`]). A glob-reference cause (`find_files()`) ends
+/// with the `failure: <class>` row every file-reference failure carries.
 ///
 /// [`MarkdownError::Interpolation`]: crate::markdown::MarkdownError::Interpolation
 pub(crate) fn interpolation_block(
@@ -414,6 +415,9 @@ pub(crate) fn interpolation_block(
                 Prose::escape_text(&other.to_string())
             ))];
             push_on_disk_locus(&mut body, key, expression, source);
+            if let ExpressionError::GlobReference { source, .. } = other {
+                body.push(crate::markdown::errors::resolution_failure_row(source.resolution_failure()));
+            }
             StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("MarkdownError", "interpolation failed"))
                 .body(body)
@@ -867,6 +871,29 @@ mod tests {
         assert!(out.contains("doc.md"), "must name the file: {out}");
         assert!(out.contains("Expression at line: 4, column: 13"), "must name the position: {out}");
         assert!(out.contains("> 4 │ {{ title }} {{ > invalid }}"), "must mark the line: {out}");
+    }
+
+    /// A glob-reference failure carries the stable `failure` row its class
+    /// names, as a `::file-links` block for the same glob does.
+    #[test]
+    fn interpolation_block_glob_reference_cause_renders_the_failure_row() {
+        let error = biscuit_file::GlobReference::new(["&*.md"])
+            .unwrap()
+            .list_files(&biscuit_file::FileResolutionContext::from_snapshot(
+                "/no-repository",
+                None,
+                std::collections::HashMap::new(),
+            ))
+            .expect_err("`&` needs a repository");
+        let block = interpolation_block(
+            None,
+            "find_files('&*.md')",
+            &SourceRef::OnDisk(SourceContext::new(PathBuf::from("/doc.md"), PathBuf::from("doc.md"), "")),
+            &ExpressionError::GlobReference { function: "find_files", source: std::sync::Arc::new(error) },
+        );
+
+        let out = strip_escape_codes(block.render_optimistic(Some(80)));
+        assert!(out.contains("failure: missing-context"), "{out}");
     }
 
     /// A mixed-text frontmatter failure links the file, names the authored

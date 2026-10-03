@@ -91,6 +91,21 @@ A **schema `file` value**, both in `md compose`'s error block and in
 A **tolerated failure**, where composition replaced the content with a
 notice and carried on, prints the same row under its warning on stderr.
 
+A **glob reference** reports the class its pattern's prefix would give a
+single file reference. `::file-links <glob>` prints the row under its
+warning, and a `find_files()` expression ends its error block with it:
+
+```text
+⤫ MarkdownError: interpolation failed
+┃
+┃ A document expression failed to evaluate `find_files('../../**/*.md')`:
+┃
+┃ find_files(): glob reference `../../**/*.md` leaves file tree `/work/repo`
+┃ through `/work`
+┃ …
+┃ failure: invalid-reference
+```
+
 A `::toc-linking` chain reports the class of its first (authored) target.
 A failure inside a nested transclusion reports the class of the reference
 that actually failed, however deep it is.
