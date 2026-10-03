@@ -6,24 +6,16 @@ use std::process::Command;
 use biscuit_terminal::discovery::detection::ImageSupport;
 use biscuit_terminal::terminal::Terminal;
 use worktree::git::recorder;
-use worktree::pull_requests::OpenPrSource;
 use worktree::worktree::{list_worktrees, parse_worktree_state};
 
 use crate::commands::git_graph;
 
-/// These repositories have no origin, so the PR stage returns at once
-/// without asking for a source.
-fn no_prs(origin: &str) -> Box<dyn OpenPrSource> {
-    panic!("no request expected without an origin, got one for {origin}")
-}
-
-/// Without an origin nothing is launched either.
+/// These repositories have no origin, so nothing is launched.
 fn no_launch(main: &Path, _: &super::LaunchArgs) -> std::io::Result<super::WorkerHandle> {
     panic!("no worker expected without an origin, got one for {}", main.display())
 }
 
 const NO_PRS: super::ListSeams = super::ListSeams {
-    connect: no_prs,
     launch: no_launch,
     wait_budget: super::ORDINARY_BUDGET,
     forced_budget: super::FORCED_BUDGET,
@@ -503,32 +495,39 @@ fn perf_subprocess_counts_meet_sla() {
     eprintln!("base view gather: {base_elapsed:.2?}, {} git calls", base_calls.len());
 }
 
-/// `gather_remote` against a real repository and stores, with counting seams
-/// in place of the PR provider and the worker. A stub worker "runs" at launch:
-/// it writes its attempt (and, when asked, a PR answer) to the real stores.
+/// `gather_remote` against a real repository and stores, with a counting stub
+/// in place of the worker. The stub "runs" at launch: it writes its attempt,
+/// a PR answer through the real `refresh` when asked, and its receipt, to the
+/// real stores.
 mod gather {
     use std::path::{Path, PathBuf};
     use std::sync::Mutex;
     use std::time::{Duration, Instant};
 
     use worktree::pull_requests::{
-        CachedPrs, OpenPrSource, OpenPullRequest, PrListing, RefreshOutcome, fetch_and_publish, origin_digest, refresh,
-        select_cached, unix_now,
+        OpenPrSource, OpenPullRequest, PrListing, PrRequestError, RefreshOutcome, origin_digest, refresh, unix_now,
     };
-    use worktree::remote_head::{Attempt, Outcome, PrFailure, begin_attempt, finish_attempt};
+    use worktree::remote_head::{
+        Attempt, HeadStatus, Outcome, PrFailure, PrStatus, Receipt, begin_attempt, finish_attempt,
+        receipt_path_beside, write_receipt,
+    };
 
-    use super::super::wait::WaitEnd;
-    use super::super::{LaunchArgs, ListFlags, ListSeams, RemoteAnswers, Stores, WorkerHandle, gather_remote};
+    use super::super::list_table::PrOutcome;
+    use super::super::wait::{HeadEnd, PrEnd};
+    use super::super::{
+        LaunchArgs, ListFlags, ListSeams, RemoteAnswers, Stores, WorkerHandle, gather_remote, observed_pr_failure,
+        pr_outcome,
+    };
     use super::{recorder, run_git, temp_repo};
 
     const ORIGIN: &str = "https://prs.example.invalid/owner/repo.git";
+    const ELSEWHERE: &str = "https://prs.example.invalid/other/repo.git";
     /// Long enough for any stub; a silent worker is waited for this long.
     const BUDGET: Duration = Duration::from_millis(300);
 
-    /// Every seam call, in order: `connect`, `fetch` (the request itself),
-    /// and `launch`.
-    static EVENTS: Mutex<Vec<Event>> = Mutex::new(Vec::new());
-    /// What the stub worker writes.
+    /// Every launch, by main checkout, in order.
+    static LAUNCHES: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+    /// What the stub worker does.
     static WORKER: Mutex<Option<StubWorker>> = Mutex::new(None);
 
     #[derive(Clone)]
@@ -536,34 +535,21 @@ mod gather {
         head_store: PathBuf,
         pr_store: PathBuf,
         repo: PathBuf,
-        /// A PR number to publish before finishing, if any.
-        publishes: Option<u64>,
+        /// An answer to publish before finishing, if any: PR `n`, or no PRs.
+        publishes: Option<Option<u64>>,
+        /// The PR half's status in the receipt.
+        prs: PrStatus,
+        /// `origin` is set to this after publishing, as if changed meanwhile.
+        moves_origin_to: Option<&'static str>,
     }
 
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    enum Event {
-        Connect,
-        Fetch,
-        Launch { main: PathBuf, force: bool },
+    fn record(main: &Path) {
+        LAUNCHES.lock().unwrap_or_else(|e| e.into_inner()).push(main.to_path_buf());
     }
 
-    fn record(event: Event) {
-        EVENTS.lock().unwrap_or_else(|e| e.into_inner()).push(event);
+    fn launches() -> Vec<PathBuf> {
+        LAUNCHES.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
-
-    fn events() -> Vec<Event> {
-        EVENTS.lock().unwrap_or_else(|e| e.into_inner()).clone()
-    }
-
-    fn requests() -> usize {
-        events().iter().filter(|event| **event == Event::Fetch).count()
-    }
-
-    fn launches() -> Vec<Event> {
-        events().into_iter().filter(|event| matches!(event, Event::Launch { .. })).collect()
-    }
-
-    struct Answer(Result<u64, PrFailure>);
 
     fn open_pr(number: u64) -> Vec<OpenPullRequest> {
         vec![OpenPullRequest {
@@ -575,75 +561,72 @@ mod gather {
         }]
     }
 
-    impl OpenPrSource for Answer {
-        fn source_repo(&self) -> Option<String> {
-            Some("owner/repo".into())
-        }
-        fn fetch(&self) -> Result<Vec<OpenPullRequest>, PrFailure> {
-            record(Event::Fetch);
-            self.0.clone().map(open_pr)
-        }
-    }
-
-    /// A seeding source, which records nothing.
-    struct Seed(u64);
+    /// Answers PR `number`, or no PRs for `None`.
+    struct Seed(Option<u64>);
 
     impl OpenPrSource for Seed {
         fn source_repo(&self) -> Option<String> {
             Some("owner/repo".into())
         }
-        fn fetch(&self) -> Result<Vec<OpenPullRequest>, PrFailure> {
-            Ok(open_pr(self.0))
+        fn fetch(&self) -> Result<Vec<OpenPullRequest>, PrRequestError> {
+            Ok(self.0.map(open_pr).unwrap_or_default())
         }
     }
 
-    fn answering(_origin: &str) -> Box<dyn OpenPrSource> {
-        record(Event::Connect);
-        Box::new(Answer(Ok(7)))
-    }
-
-    fn failing(_origin: &str) -> Box<dyn OpenPrSource> {
-        record(Event::Connect);
-        Box::new(Answer(Err(PrFailure::CredentialsRejected { key: Some("GITHUB_TOKEN".into()) })))
+    /// Publishes `answer` through the worker's own writer, stamped `age`
+    /// seconds ago.
+    fn publish(store: &Path, repo: &Path, age: u64, answer: Option<u64>) {
+        let outcome = refresh(store, repo, || unix_now() - age, |_| Box::new(Seed(answer)) as Box<dyn OpenPrSource>);
+        assert_eq!(outcome, RefreshOutcome::Refreshed);
     }
 
     /// A worker that finishes its attempt in sync at once (publishing a PR
-    /// answer first when asked) and exits.
+    /// answer first when asked), writes its receipt, and exits.
     fn finishing_launch(main: &Path, args: &LaunchArgs) -> std::io::Result<WorkerHandle> {
-        record(Event::Launch { main: main.to_path_buf(), force: args.force });
+        record(main);
         let worker = WORKER.lock().unwrap_or_else(|e| e.into_inner()).clone().expect("fixture");
-        if let Some(number) = worker.publishes {
-            fetch_and_publish(&worker.pr_store, &worker.repo, ORIGIN, unix_now(), &Seed(number))
-                .expect("published")
-                .expect("same origin");
+        if let Some(answer) = worker.publishes {
+            publish(&worker.pr_store, &worker.repo, 0, answer);
+        }
+        if let Some(origin) = worker.moves_origin_to {
+            run_git(&worker.repo, &["remote", "set-url", "origin", origin]);
         }
         let attempt = Attempt::begin(args.attempt.clone(), origin_digest(ORIGIN), "main".into(), unix_now());
         begin_attempt(&worker.head_store, &attempt).expect("attempt");
         finish_attempt(&worker.head_store, &args.attempt, Outcome::InSync, None).expect("outcome");
+        let receipt = Receipt {
+            attempt_id: args.attempt.clone(),
+            origin_digest: origin_digest(ORIGIN),
+            branch: "main".into(),
+            finished_at: unix_now(),
+            head: HeadStatus::Ok,
+            prs: worker.prs,
+        };
+        write_receipt(&receipt_path_beside(&worker.head_store, &args.attempt).expect("path"), &receipt).expect("receipt");
         Ok(WorkerHandle::new(|| true))
     }
 
     /// A worker that runs past any budget without recording anything.
-    fn silent_launch(main: &Path, args: &LaunchArgs) -> std::io::Result<WorkerHandle> {
-        record(Event::Launch { main: main.to_path_buf(), force: args.force });
+    fn silent_launch(main: &Path, _: &LaunchArgs) -> std::io::Result<WorkerHandle> {
+        record(main);
         Ok(WorkerHandle::new(|| false))
     }
 
-    fn failing_launch(main: &Path, args: &LaunchArgs) -> std::io::Result<WorkerHandle> {
-        record(Event::Launch { main: main.to_path_buf(), force: args.force });
+    fn failing_launch(main: &Path, _: &LaunchArgs) -> std::io::Result<WorkerHandle> {
+        record(main);
         Err(std::io::Error::new(std::io::ErrorKind::NotFound, "no wt"))
     }
 
     struct Fixture {
         repo: tempfile::TempDir,
-        _cache: tempfile::TempDir,
+        cache: tempfile::TempDir,
         store: PathBuf,
         head_store: PathBuf,
     }
 
     impl Fixture {
         fn new() -> Self {
-            EVENTS.lock().unwrap_or_else(|e| e.into_inner()).clear();
+            LAUNCHES.lock().unwrap_or_else(|e| e.into_inner()).clear();
             let repo = temp_repo();
             run_git(repo.path(), &["remote", "add", "origin", ORIGIN]);
             let cache = tempfile::tempdir().expect("cache dir");
@@ -654,14 +637,15 @@ mod gather {
                 pr_store: store.clone(),
                 repo: repo.path().to_path_buf(),
                 publishes: None,
+                prs: PrStatus::Ok,
+                moves_origin_to: None,
             });
-            Self { repo, _cache: cache, store, head_store }
+            Self { repo, cache, store, head_store }
         }
 
-        /// The stub worker also publishes PR `number`.
-        fn worker_publishes(&self, number: u64) {
+        fn worker(&self, change: impl FnOnce(&mut StubWorker)) {
             if let Some(worker) = WORKER.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
-                worker.publishes = Some(number);
+                change(worker);
             }
         }
 
@@ -669,218 +653,142 @@ mod gather {
             self.repo.path()
         }
 
-        /// Stores PR `number` for the current origin, fetched `age` seconds ago.
-        fn seed(&self, age: u64, number: u64) {
-            fetch_and_publish(&self.store, self.main(), ORIGIN, unix_now() - age, &Seed(number))
-                .expect("seeded answer")
-                .expect("origin is unchanged");
+        /// Stores PR `number` (or no PRs) for the current origin, fetched
+        /// `age` seconds ago.
+        fn seed(&self, age: u64, number: Option<u64>) {
+            publish(&self.store, self.main(), age, number);
         }
 
-        fn gather_with(
-            &self,
-            connect: super::super::PrConnect,
-            launch: super::super::WorkerLaunch,
-            flags: ListFlags,
-        ) -> RemoteAnswers {
-            let seams = ListSeams { connect, launch, wait_budget: BUDGET, forced_budget: BUDGET };
+        fn gather_with(&self, launch: super::super::WorkerLaunch, flags: ListFlags) -> RemoteAnswers {
+            let seams = ListSeams { launch, wait_budget: BUDGET, forced_budget: BUDGET };
             let stores = Stores { prs: &self.store, head: &self.head_store };
             gather_remote(stores, self.main(), "main", flags, seams).expect("gathered")
         }
 
-        fn gather(&self, connect: super::super::PrConnect) -> RemoteAnswers {
-            self.gather_with(connect, finishing_launch, ListFlags::default())
+        fn gather(&self) -> RemoteAnswers {
+            self.gather_with(finishing_launch, ListFlags::default())
         }
 
-        fn gather_prs(&self, connect: super::super::PrConnect) -> PrListing {
-            self.gather(connect).prs
+        /// The receipt files left beside the stores.
+        fn receipts_left(&self) -> Vec<String> {
+            std::fs::read_dir(self.cache.path())
+                .expect("cache dir")
+                .map(|entry| entry.expect("entry").file_name().to_string_lossy().into_owned())
+                .filter(|name| name.contains("receipt"))
+                .collect()
         }
-    }
-
-    /// The git calls `gather` made: a cache hit costs exactly the origin
-    /// lookup that binds both stored answers to the current `origin`.
-    fn git_calls_of<T>(gather: impl FnOnce() -> T) -> (T, Vec<Vec<String>>) {
-        recorder::start_recording();
-        let answer = gather();
-        (answer, recorder::finish_recording())
-    }
-
-    fn origin_lookup() -> Vec<Vec<String>> {
-        vec![["remote", "get-url", "origin"].map(String::from).to_vec()]
     }
 
     fn numbers(listing: &PrListing) -> Vec<u64> {
         listing.pull_requests.iter().map(|pr| pr.number).collect()
     }
 
-    fn outcome(answers: &RemoteAnswers) -> Option<Outcome> {
-        match &answers.waited.as_ref().expect("launched").end {
-            WaitEnd::Finished { attempt, .. } => attempt.outcome,
-            _ => None,
-        }
+    fn head(answers: &RemoteAnswers) -> &HeadEnd {
+        &answers.waited.as_ref().expect("launched").head
+    }
+
+    fn prs(answers: &RemoteAnswers) -> &PrEnd {
+        &answers.waited.as_ref().expect("launched").prs
+    }
+
+    fn in_sync(answers: &RemoteAnswers) -> bool {
+        matches!(head(answers), HeadEnd::Finished(attempt) if attempt.outcome == Some(Outcome::InSync))
+    }
+
+    /// The origin lookup before the launch and the recheck after the wait:
+    /// the foreground makes no other git call, no `ls-remote` or fetch.
+    fn origin_lookups() -> Vec<Vec<String>> {
+        vec![["remote", "get-url", "origin"].map(String::from).to_vec(); 2]
     }
 
     #[test]
     #[serial_test::serial]
-    fn every_listing_with_an_origin_launches_once_and_waits_for_the_outcome() {
+    fn every_listing_with_an_origin_launches_once_and_waits_for_both_halves() {
         let fixture = Fixture::new();
-        fixture.seed(10, 99);
+        fixture.seed(10, Some(99));
 
-        let (answers, git_calls) = git_calls_of(|| fixture.gather(answering));
+        recorder::start_recording();
+        let answers = fixture.gather();
+        let git_calls = recorder::finish_recording();
 
-        assert_eq!(git_calls, origin_lookup(), "no ls-remote or fetch in the foreground");
-        assert_eq!(launches(), [Event::Launch { main: fixture.main().to_path_buf(), force: false }]);
-        assert_eq!(requests(), 0, "a fresh PR answer is not requested");
-        assert_eq!(outcome(&answers), Some(Outcome::InSync), "the attempt's outcome was waited for");
+        assert_eq!(git_calls, origin_lookups());
+        assert_eq!(launches(), [fixture.main().to_path_buf()], "a fresh answer still launches the worker");
+        assert!(in_sync(&answers), "the head outcome was waited for");
+        assert_eq!(prs(&answers), &PrEnd::Published, "and the receipt");
+        assert!(!answers.waited.as_ref().unwrap().timed_out);
+        assert_eq!(pr_outcome(&answers), Some(PrOutcome::Published));
         assert_eq!(numbers(&answers.prs), [99]);
-    }
-
-    #[test]
-    #[serial_test::serial]
-    fn a_stale_answer_is_shown_and_the_parent_never_writes_it() {
-        let fixture = Fixture::new();
-        fixture.seed(12 * 60, 99);
-        let stored = std::fs::read(&fixture.store).expect("store");
-
-        let listing = fixture.gather_prs(answering);
-
-        assert_eq!(numbers(&listing), [99], "the stored badges, not a new answer");
-        assert!(listing.is_stale_at(unix_now()), "shown with its age");
-        assert_eq!(requests(), 0, "no request in the foreground");
-        assert_eq!(launches().len(), 1);
-        assert_eq!(std::fs::read(&fixture.store).expect("store"), stored, "the parent writes nothing");
-    }
-
-    #[test]
-    #[serial_test::serial]
-    fn a_stale_empty_answer_is_still_an_answer() {
-        let fixture = Fixture::new();
-        struct Empty;
-        impl OpenPrSource for Empty {
-            fn source_repo(&self) -> Option<String> {
-                Some("owner/repo".into())
-            }
-            fn fetch(&self) -> Result<Vec<OpenPullRequest>, PrFailure> {
-                Ok(Vec::new())
-            }
-        }
-        fetch_and_publish(&fixture.store, fixture.main(), ORIGIN, unix_now() - 120, &Empty)
-            .expect("seeded")
-            .expect("origin is unchanged");
-
-        let listing = fixture.gather_prs(answering);
-
-        assert!(listing.pull_requests.is_empty());
-        assert!(listing.is_stale_at(unix_now()));
-        assert_eq!(requests(), 0, "an empty answer is not a miss");
+        assert!(fixture.receipts_left().is_empty(), "the receipt is discarded: {:?}", fixture.receipts_left());
     }
 
     #[test]
     #[serial_test::serial]
     fn a_pr_answer_the_worker_publishes_during_the_wait_is_shown() {
         let fixture = Fixture::new();
-        fixture.seed(12 * 60, 99);
-        fixture.worker_publishes(8);
+        fixture.seed(12 * 60, Some(99));
+        fixture.worker(|worker| worker.publishes = Some(Some(8)));
 
-        let listing = fixture.gather_prs(answering);
+        let answers = fixture.gather();
 
-        assert_eq!(numbers(&listing), [8]);
-        assert!(!listing.is_stale_at(unix_now()));
+        assert_eq!(numbers(&answers.prs), [8]);
+        assert!(!answers.prs.is_stale_at(unix_now()));
+        assert_eq!(pr_outcome(&answers), Some(PrOutcome::Published));
     }
 
-    /// Answers PR 7 only after a forced worker (another listing's `wt -r`)
-    /// has stored PR 8 under the refresh lock.
-    struct Overtaken;
-
-    impl OpenPrSource for Overtaken {
-        fn source_repo(&self) -> Option<String> {
-            Some("owner/repo".into())
-        }
-        fn fetch(&self) -> Result<Vec<OpenPullRequest>, PrFailure> {
-            record(Event::Fetch);
-            let worker = WORKER.lock().unwrap_or_else(|e| e.into_inner()).clone().expect("fixture");
-            let outcome = refresh(&worker.pr_store, &worker.repo, unix_now, true, |_| {
-                Box::new(Seed(8)) as Box<dyn OpenPrSource>
-            });
-            assert_eq!(outcome, RefreshOutcome::Refreshed);
-            Ok(open_pr(7))
-        }
-    }
-
-    fn overtaken(_origin: &str) -> Box<dyn OpenPrSource> {
-        record(Event::Connect);
-        Box::new(Overtaken)
-    }
-
-    /// Review 3: the miss request's older answer must not replace the one a
-    /// forced worker published while it was in flight.
     #[test]
     #[serial_test::serial]
-    fn a_miss_answer_overtaken_by_a_forced_worker_leaves_the_newer_answer_shown_and_stored() {
+    fn an_empty_answer_published_during_the_wait_clears_the_badges() {
         let fixture = Fixture::new();
+        fixture.seed(12 * 60, Some(99));
+        fixture.worker(|worker| worker.publishes = Some(None));
 
-        let listing = fixture.gather_prs(overtaken);
+        let answers = fixture.gather();
 
-        assert_eq!(requests(), 1);
-        assert_eq!(numbers(&listing), [8], "the listing shows the newer answer");
-        let CachedPrs::Fresh(stored) = select_cached(&fixture.store, Some(ORIGIN), unix_now()) else {
-            panic!("an answer is stored");
-        };
-        assert_eq!(numbers(&stored), [8], "and the store keeps it");
+        assert!(answers.prs.pull_requests.is_empty(), "{:?}", answers.prs);
+        assert!(answers.prs.fetched_at.is_some(), "an empty answer is an answer");
+        assert_eq!(pr_outcome(&answers), Some(PrOutcome::Published));
     }
 
     #[test]
     #[serial_test::serial]
-    fn a_pr_miss_settles_before_the_worker_is_launched() {
-        let fixture = Fixture::new();
-
-        let listing = fixture.gather_prs(answering);
-
-        assert_eq!(numbers(&listing), [7]);
-        assert_eq!(
-            events(),
-            [Event::Connect, Event::Fetch, Event::Launch { main: fixture.main().to_path_buf(), force: false }],
-            "the foreground PR request finishes before the worker starts"
-        );
-        // The next run reads the stored answer without a request.
-        assert_eq!(numbers(&fixture.gather_prs(answering)), [7]);
-        assert_eq!(requests(), 1);
-    }
-
-    #[test]
-    #[serial_test::serial]
-    fn a_failed_miss_shows_no_badges_stores_nothing_and_is_this_runs_failure() {
-        let fixture = Fixture::new();
-
-        let answers = fixture.gather(failing);
-
-        assert_eq!(answers.prs, PrListing::default(), "an unavailable answer has no badges and no age");
-        assert_eq!(
-            answers.pr_failure,
-            Some(PrFailure::CredentialsRejected { key: Some("GITHUB_TOKEN".into()) }),
-            "kept for the credentials line"
-        );
-        assert_eq!(requests(), 1);
-        assert!(!fixture.store.exists(), "a failure is never stored");
-        assert_eq!(launches().len(), 1, "the update still runs");
-    }
-
-    #[test]
-    #[serial_test::serial]
-    fn a_forced_listing_leaves_a_pr_miss_to_its_forced_worker() {
-        for flags in [
-            ListFlags { refresh: true, ..ListFlags::default() },
-            ListFlags { fast_forward: true, ..ListFlags::default() },
-        ] {
+    fn a_failed_refresh_keeps_the_stored_answer_and_is_this_runs_failure() {
+        let rejected = PrFailure::CredentialsRejected { key: Some("GITHUB_TOKEN".into()) };
+        for seeded in [Some(Some(99)), Some(None), None] {
             let fixture = Fixture::new();
+            if let Some(answer) = seeded {
+                fixture.seed(10, answer);
+            }
+            let stored = std::fs::read(&fixture.store).ok();
+            let failure = rejected.clone();
+            fixture.worker(move |worker| worker.prs = PrStatus::Failed { failure });
 
-            let answers = fixture.gather_with(answering, finishing_launch, flags);
+            let answers = fixture.gather();
 
-            assert_eq!(
-                events(),
-                [Event::Launch { main: fixture.main().to_path_buf(), force: true }],
-                "no foreground request ({flags:?})"
-            );
-            assert_eq!(answers.pr_failure, None);
+            assert_eq!(pr_outcome(&answers), Some(PrOutcome::Failed), "{seeded:?}");
+            assert_eq!(observed_pr_failure(&answers), Some(&rejected), "kept for the credentials line");
+            assert_eq!(numbers(&answers.prs), seeded.flatten().into_iter().collect::<Vec<_>>(), "{seeded:?}");
+            assert_eq!(answers.prs.fetched_at.is_some(), seeded.is_some(), "an empty answer is still an answer");
+            assert_eq!(std::fs::read(&fixture.store).ok(), stored, "the parent writes nothing");
+            assert!(in_sync(&answers), "the head outcome is independent");
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn an_ignored_or_unsupported_pr_half_is_this_runs_outcome_and_no_failure() {
+        for (status, expected) in [(PrStatus::Ignored, PrOutcome::Ignored), (PrStatus::Unsupported, PrOutcome::Unsupported)] {
+            let fixture = Fixture::new();
+            fixture.seed(10, Some(99));
+            let worker_status = status.clone();
+            fixture.worker(move |worker| worker.prs = worker_status);
+
+            let answers = fixture.gather();
+
+            assert_eq!(launches().len(), 1, "the worker is launched and decides: {status:?}");
+            assert_eq!(pr_outcome(&answers), Some(expected), "{status:?}");
+            assert_eq!(observed_pr_failure(&answers), None, "{status:?} is not a failure");
+            assert!(in_sync(&answers), "the head half still answers: {status:?}");
+            assert!(!answers.waited.as_ref().unwrap().timed_out, "{status:?}");
         }
     }
 
@@ -888,57 +796,84 @@ mod gather {
     #[serial_test::serial]
     fn a_changed_origin_never_shows_the_old_answers() {
         let fixture = Fixture::new();
-        fixture.seed(12 * 60, 99);
-        run_git(fixture.main(), &["remote", "set-url", "origin", "https://prs.example.invalid/other/repo.git"]);
+        fixture.seed(12 * 60, Some(99));
+        run_git(fixture.main(), &["remote", "set-url", "origin", ELSEWHERE]);
 
-        let answers = fixture.gather_with(failing, silent_launch, ListFlags::default());
+        let answers = fixture.gather();
 
         assert_eq!(answers.prs, PrListing::default(), "the old answer belongs to another origin");
-        assert_eq!(requests(), 1, "a miss for the new origin requests");
         assert_eq!(launches().len(), 1);
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn an_origin_changed_during_the_wait_shows_neither_its_badges_nor_its_failure() {
+        let fixture = Fixture::new();
+        fixture.seed(12 * 60, Some(99));
+        fixture.worker(|worker| {
+            worker.publishes = Some(Some(8));
+            worker.prs = PrStatus::Failed { failure: PrFailure::CredentialsRejected { key: None } };
+            worker.moves_origin_to = Some(ELSEWHERE);
+        });
+
+        let answers = fixture.gather();
+
+        assert!(answers.origin_changed);
+        assert_eq!(answers.prs, PrListing::default(), "the old origin's answer is not shown");
+        assert_eq!(pr_outcome(&answers), None, "nor its PR item");
+        assert_eq!(observed_pr_failure(&answers), None, "nor its credentials line");
+        assert_eq!(launches().len(), 1, "no second refresh for the new origin");
     }
 
     #[test]
     #[serial_test::serial]
     fn a_worker_that_cannot_launch_is_unavailable_without_a_wait() {
         let fixture = Fixture::new();
-        fixture.seed(10, 99);
+        fixture.seed(10, Some(99));
 
         let started = Instant::now();
-        let answers = fixture.gather_with(answering, failing_launch, ListFlags::default());
+        let answers = fixture.gather_with(failing_launch, ListFlags::default());
 
-        assert!(matches!(answers.waited.as_ref().map(|waited| &waited.end), Some(WaitEnd::Unavailable)));
+        assert_eq!(head(&answers), &HeadEnd::Unavailable);
+        assert_eq!(prs(&answers), &PrEnd::Failed(PrFailure::Other));
         assert!(started.elapsed() < BUDGET, "{:?}", started.elapsed());
         assert_eq!(numbers(&answers.prs), [99], "stored answers stay shown");
+        assert_eq!(pr_outcome(&answers), Some(PrOutcome::Failed));
     }
 
     #[test]
     #[serial_test::serial]
     fn a_silent_worker_is_waited_for_only_until_the_budget() {
-        let fixture = Fixture::new();
-        fixture.seed(10, 99);
+        for flags in [ListFlags::default(), ListFlags { refresh: true, ..ListFlags::default() }] {
+            let fixture = Fixture::new();
+            fixture.seed(10, Some(99));
 
-        let started = Instant::now();
-        let answers = fixture.gather_with(answering, silent_launch, ListFlags::default());
+            let started = Instant::now();
+            let answers = fixture.gather_with(silent_launch, flags);
 
-        let elapsed = started.elapsed();
-        assert!(matches!(answers.waited.as_ref().map(|waited| &waited.end), Some(WaitEnd::TimedOut { last: None })));
-        assert!(elapsed >= BUDGET && elapsed < BUDGET * 4, "{elapsed:?}");
+            let elapsed = started.elapsed();
+            let waited = answers.waited.as_ref().expect("launched");
+            assert_eq!((&waited.head, &waited.prs, waited.timed_out), (&HeadEnd::Running { last: None }, &PrEnd::Pending, true));
+            assert!(elapsed >= BUDGET && elapsed < BUDGET * 4, "{elapsed:?}");
+            assert_eq!(pr_outcome(&answers), Some(PrOutcome::Pending));
+            assert_eq!(numbers(&answers.prs), [99], "the stored answer as of the timeout");
+        }
     }
 
     #[test]
     #[serial_test::serial]
-    fn without_an_origin_stored_answers_are_ignored_and_nothing_is_requested_or_launched() {
+    fn without_an_origin_stored_answers_are_ignored_and_nothing_is_launched() {
         let fixture = Fixture::new();
-        fixture.seed(12 * 60, 99);
+        fixture.seed(12 * 60, Some(99));
         run_git(fixture.main(), &["remote", "remove", "origin"]);
 
-        let answers = fixture.gather(answering);
+        let answers = fixture.gather();
 
         assert_eq!(answers.prs, PrListing::default());
         assert!(answers.origin.is_none());
         assert!(answers.waited.is_none());
-        assert!(events().is_empty(), "no connect and no launch: {:?}", events());
+        assert_eq!(pr_outcome(&answers), None);
+        assert!(launches().is_empty(), "no launch: {:?}", launches());
     }
 }
 
@@ -951,7 +886,7 @@ mod observations {
     };
 
     use super::super::list_table::{CredentialCondition, LastKnown, RemoteStatus};
-    use super::super::wait::WaitEnd;
+    use super::super::wait::HeadEnd;
     use super::super::{credential_line, fallback_notice, remote_status};
 
     const GITHUB: &str = "https://github.com/owner/repo.git";
@@ -966,8 +901,8 @@ mod observations {
         }
     }
 
-    fn finished(outcome: Outcome) -> WaitEnd {
-        WaitEnd::Finished { attempt: attempt(Phase::Checking, Some(outcome), None), receipt: None }
+    fn finished(outcome: Outcome) -> HeadEnd {
+        HeadEnd::Finished(attempt(Phase::Checking, Some(outcome), None))
     }
 
     fn note(condition: ApiCondition, key: Option<&str>, fallback_answered: bool) -> Option<ApiNote> {
@@ -976,7 +911,7 @@ mod observations {
 
     #[test]
     fn every_ending_maps_to_its_caption_row() {
-        let status = |end: &WaitEnd| remote_status(end, || LAST);
+        let status = |head: &HeadEnd| remote_status(head, || LAST);
         assert_eq!(status(&finished(Outcome::InSync)), RemoteStatus::CheckedNow);
         assert_eq!(status(&finished(Outcome::Fetched)), RemoteStatus::Fetched);
         assert_eq!(status(&finished(Outcome::Absent)), RemoteStatus::Absent);
@@ -993,14 +928,14 @@ mod observations {
             RemoteStatus::CheckFailed { reason: CheckFailure::Other, last: LAST },
             "a discarded answer reads as an unavailable check"
         );
-        assert_eq!(status(&WaitEnd::Unavailable), RemoteStatus::CheckFailed { reason: CheckFailure::Other, last: LAST });
+        assert_eq!(status(&HeadEnd::Unavailable), RemoteStatus::CheckFailed { reason: CheckFailure::Other, last: LAST });
         assert_eq!(
-            status(&WaitEnd::TimedOut { last: Some(attempt(Phase::Fetching, None, None)) }),
+            status(&HeadEnd::Running { last: Some(attempt(Phase::Fetching, None, None)) }),
             RemoteStatus::StillPulling
         );
         let fallback = Phase::CheckingFallback { reason: FallbackReason::NoKey };
         for last in [None, Some(attempt(Phase::Checking, None, None)), Some(attempt(fallback, None, None))] {
-            assert_eq!(status(&WaitEnd::TimedOut { last }), RemoteStatus::StillChecking { last: LAST });
+            assert_eq!(status(&HeadEnd::Running { last }), RemoteStatus::StillChecking { last: LAST });
         }
     }
 
@@ -1076,12 +1011,40 @@ mod observations {
         for silent in [PrFailure::CredentialsRequired, PrFailure::NotFoundOrNotPermitted, PrFailure::Other] {
             assert_eq!(line(silent.clone()), None, "{silent:?}");
         }
-        // Nothing observed this run, nothing said: a worker's later failure
-        // reaches only the next listing's store.
+        // Nothing observed this run (no receipt by the end of the wait),
+        // nothing said.
         assert_eq!(credential_line(GITHUB, None, None), None);
         // A remote that is no supported provider has no line at all.
         let rejected = PrFailure::CredentialsRejected { key: None };
         assert_eq!(credential_line("/srv/git/repo.git", None, Some(&rejected)), None);
+    }
+
+    #[test]
+    fn a_confirmed_head_condition_outranks_this_runs_pr_failure() {
+        let answered = Some(Outcome::InSync);
+        let failed = Some(Outcome::CheckFailed { reason: CheckFailure::Other });
+        let pr = PrFailure::RateLimited { authenticated: true, key: Some("GH_TOKEN".into()) };
+        let line = |outcome, api| {
+            credential_line(GITHUB, Some(&attempt(Phase::Checking, outcome, api)), Some(&pr))
+                .map(|line| (line.condition, line.key))
+        };
+
+        assert_eq!(
+            line(answered, note(ApiCondition::CredentialsRejected, Some("GITHUB_TOKEN"), true)),
+            Some((CredentialCondition::Rejected, "GITHUB_TOKEN".into())),
+            "the head's confirmed condition is the one line"
+        );
+        assert_eq!(
+            line(failed, note(ApiCondition::CredentialsRequired, None, false)),
+            Some((CredentialCondition::NotVisible, "GH_TOKEN or GITHUB_TOKEN".into()))
+        );
+        let from_pr = Some((CredentialCondition::RateLimited { authenticated: true }, "GH_TOKEN".into()));
+        assert_eq!(line(answered, None), from_pr, "no head note: the PR failure speaks");
+        assert_eq!(
+            line(answered, note(ApiCondition::NotFoundOrNotPermitted, Some("GITHUB_TOKEN"), true)),
+            from_pr,
+            "an ambiguous head note asserts nothing, so the PR failure speaks"
+        );
     }
 
     #[test]
