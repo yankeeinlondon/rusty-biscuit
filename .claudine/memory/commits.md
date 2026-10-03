@@ -97,6 +97,13 @@ or a fix; a rule that needs an example to be understood is not a rule yet.
 - Parallel groups need disjoint paths. Producer commits before consumer; a
   consumer whose brief names a sibling's commit polls `git log --oneline`
   for it before committing rather than assuming it landed.
+- When `.git/MERGE_HEAD` exists and nothing is unmerged (`git diff
+  --diff-filter=U` empty, no marker lines in the staged blobs), the staged set
+  is a resolved merge, not a batch to split. Skip grouping and sub-agents,
+  conclude it with a plain `git commit --no-edit` (git's prepared
+  `MERGE_MSG`), then `git verify-commit HEAD` and confirm two parents.
+  Splitting is impossible (pathspec commits are refused) and would lose the
+  second parent.
 - A new variant on a non-`#[non_exhaustive]` enum couples the producer with
   every matching consumer across package areas; that is one commit with no
   scope.
