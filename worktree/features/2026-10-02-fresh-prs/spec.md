@@ -31,25 +31,34 @@ related:
     - 2026-09-25-list-remove-performance
 human_review: false
 message_to_agent: |-
-    Phase 1 (library only) is done; `cargo nextest run -p worktree` (305 tests) and `just _lint worktree` pass.
-    The `worktree-cli` crate does NOT compile yet, as the plan expects. The library API changes it must absorb:
+    Phase 3 was verification: Phase 2 had already wired `list.rs`. Phase 3 added two L1 tests in `cli/src/commands/list/tests.rs`
+    (`gather::an_ignored_or_unsupported_pr_half_is_this_runs_outcome_and_no_failure`,
+    `observations::a_confirmed_head_condition_outranks_this_runs_pr_failure`) and changed no production code.
+    `just test` (827 passed) and `just lint` pass in `worktree/`. Read the `## Phase 2` and `## Phase 3` log sections first.
 
-    - `pull_requests::refresh(store, main, clock, connect)`: the `force` argument is gone, and it asks whenever it wins the lock.
-    - `RefreshOutcome::AlreadyFresh` is gone; `RefreshOutcome::Unsupported` is new and must map to the new `PrStatus::Unsupported`.
-    - `PrStatus::SkippedFresh` is gone (a receipt carrying `skipped-fresh` now reads as missing).
-    - `OpenPrSource::fetch` returns `Result<_, PrRequestError>` (`Unsupported` or `Failed(PrFailure)`). Test stubs can write `Err(PrFailure::Other.into())`.
-      `PrFailure::from_unavailable` is private now; `PrRequestError::from_unavailable` is the public entry and keeps sniff's `Unsupported` out of `PrFailure`.
-    - `stored_publication` returns `Option<String>` (the id). `Publication`, `Writer`, `fetch_and_publish`, and `LIST_DEADLINE` are deleted.
-    - Store format is 5 with no `writer`. The reader is strict: every field must be present, including `source_repo` and each PR's `url`
-      and `source_repo` (null is fine, a missing key is a miss), and `publication` must be 32 lowercase hex. Unknown keys are ignored, so the
-      hand-written stores in `cli/tests/perf_support`, `level2_list_verbose.rs`, and `list_remote_head.rs` still read; drop their `writer` anyway.
-    - A receipt's `key` field inside a credentials failure must be present too (`null` allowed).
+    Phase 4 must fix these failures; all are caused by the intended change and are unchanged since Phase 2:
+    - `just test-l2` (3, all in `level2_list_verbose.rs`): `level2_list_credentials_warning_is_a_dim_line_beneath_the_caption_in_tmux` and
+      `level2_list_clears_the_spinner_before_the_caption_and_shows_a_dim_hint_in_tmux` assert `requests == 0` for a fresh answer
+      (now 1). `level2_list_styles_follow_the_design_in_tmux` asserts no age line, but its PR request now fails against the refused proxy
+      and shows `(couldn't refresh)`. Give that fixture a PR answer that succeeds, or assert the new item.
+    - `just test-perf` (2): `perf_list_meets_sla_when_the_pr_request_hits_its_deadline` (remove it) and
+      `perf_list_meets_sla_with_a_stale_answer_and_a_failing_refresh` (update it).
+    - Already rewritten minimally so `just test` stays green; extend them, don't redo them: `list_prs` (`a_fresh_pr_store_is_asked_again_…`,
+      `concurrent_lists_…_the_next_worker_asks_again`, `a_detached_workers_answer_…`, `an_origin_change_during_the_wait_…`),
+      `list_flags::refresh_waits_for_both_halves_and_asks_again_like_every_listing`, and
+      `list_remote_head::a_worker_records_the_given_attempt_and_a_receipt_for_both_halves`.
+    - Still unproven at the binary level, and planned for Phase 4's `list_prs` track: `--ff` with a **failing** PR half still
+      fast-forwards. `list_flags::fast_forward_*` use a local bare origin, so their PR half is `unsupported`, not failed.
+      The code path is independent (`fast_forward_default` runs after the wait and reads nothing from `waited.prs`).
 
-    Not done here, on purpose: the `Receipt`/`PrStatus`/`HeadStatus` docs and the `remote_head` module doc still say receipts are written only
-    for forced attempts. That is still true until the worker changes, so fix them in Phase 2 with the worker.
-
-    Shell gotcha: in this session the shell sometimes started in the main checkout (`/Volumes/coding/personal/rusty-biscuit`), so a relative
-    `cd worktree` edited the wrong tree once. Use absolute paths under `/Volumes/coding/wt/rusty-biscuit/fix-wt-touchup`.
+    Other facts:
+    - The surface: `wait::wait` returns `WaitEnd { head: HeadEnd, prs: PrEnd, timed_out }`; `LaunchArgs { attempt }` has no `force`;
+      `list_table::PrOutcome`, `TableFacts { pr_outcome, timed_out }`; `ListSeams { launch, wait_budget, forced_budget }`.
+    - A listing makes two `git remote get-url origin` calls (before the launch, and the recheck after the wait).
+    - `.claude/skills/worktree/SKILL.md` still names the perf gate `perf_list_meets_sla_with_a_stale_answer_and_a_failing_refresh`
+      (300 ms `pr gather`). Fix that sentence in the same change that alters the gate.
+    - Shell gotcha (still true): use absolute paths under `/Volumes/coding/wt/rusty-biscuit/fix-wt-touchup`. The shell's directory
+      sometimes resets between commands.
 ---
 
 # Refresh open pull requests on every `wt list` run

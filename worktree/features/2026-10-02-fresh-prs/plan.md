@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-10-02
-phase: 1
+phase: 3
 agent: claude/sonnet
 yolo: true
 source_files_during_phase_1:
@@ -10,8 +10,35 @@ source_files_during_phase_1:
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+    - worktree/lib/src/remote_head.rs
+    - worktree/cli/src/args.rs
+    - worktree/cli/src/main.rs
+    - worktree/cli/src/commands/refresh_worker.rs
+    - worktree/cli/src/commands/list.rs
+    - worktree/cli/src/commands/list/wait.rs
+    - worktree/cli/src/commands/list/wait/tests.rs
+    - worktree/cli/src/commands/list/tests.rs
+    - worktree/cli/src/commands/list_table.rs
+    - worktree/cli/tests/list_table.rs
+    - worktree/cli/tests/snapshots/list_table__pr_presentation_every_row.snap
+    - worktree/cli/tests/list_prs.rs
+    - worktree/cli/tests/list_flags.rs
+    - worktree/cli/tests/list_remote_head.rs
+    - worktree/cli/tests/level2_list_verbose.rs
+    - worktree/cli/tests/perf_support/mod.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/worktree/SKILL.md
+source_files_during_phase_3:
+    - worktree/cli/src/commands/list/tests.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 packages:
     - worktree
+    - worktree-cli
 ---
 
 # Plan: refresh open pull requests on every `wt list` run
@@ -111,13 +138,13 @@ Goal: the three CLI pieces that sit on the library surface, built in parallel ag
 
 ### Wave 2 (three concurrent tracks; disjoint files)
 
-- [ ] **Worker writes every receipt** (`cli/src/commands/refresh_worker.rs`, `cli/src/main.rs`/clap definition of `internal-refresh`)
+- [x] **Worker writes every receipt** (`cli/src/commands/refresh_worker.rs`, `cli/src/main.rs`/clap definition of `internal-refresh`)
     - Write the receipt after both halves join on every attempt; contents unchanged (`head`, `prs`, bound to attempt id, origin digest, branch).
     - Remove `force` from `LaunchArgs` and `--force` from the hidden command and its parser; update all callers.
     - Run `remove_stale_receipts` (older than `ATTEMPT_MAX_AGE`) before writing, for ordinary and forced attempts; never remove another active attempt's receipt.
     - Halves still join separately; a panic in one becomes a recorded failure and never suppresses the other. A receipt write failure must neither hang the wait nor turn a successful store write into an empty PR answer (the store, not the receipt, is the evidence of success).
     - Tests: receipt present with no `--force` carrying `prs: Ok`, `Failed`, `Contended`, `Ignored`, `Unsupported`; panic isolation; sweep of old receipts only.
-- [ ] **Ordinary wait covers both halves** (`cli/src/commands/list/wait.rs`; pure over `WaitEnv`)
+- [x] **Ordinary wait covers both halves** (`cli/src/commands/list/wait.rs`; pure over `WaitEnv`)
     - Ends at the first of: head outcome **and** PR result resolved from our receipt; our worker exited without a usable receipt and no matching head attempt is still running; the 3 s `ORDINARY_BUDGET` (one monotonic budget started before launch; adoption, contention, and retries never reset it).
     - Replace the `if !request.force { return … Finished … }` early exit in `Follow::run`; keep forced-versus-ordinary only as budget and retry policy.
     - Contention: record the usable publication id before launch; after the receipt reports `Contended`, wait within the budget for the lock, then reread the id. A nonempty id different from the pre-launch id (same timestamp or empty answer included) proves success. Released lock alone proves nothing. No new id: ordinary reports PR failure; forced relaunches once (fresh id), a second contention is generic `Failed`. Probe the lock only after the worker reported `Contended` or exited.
@@ -126,7 +153,7 @@ Goal: the three CLI pieces that sit on the library surface, built in parallel ag
     - Independent outcomes: the wait result carries the head outcome and any PR result (receipt, or a changed publication id) even on timeout or when no head attempt was recorded. Missing/malformed receipt: process exit is read before the final store and receipt reads; retain verified head outcome and a new publication; otherwise generic PR failure, no invented credentials reason; never wait past the budget.
     - Cleanup: `discard_receipt` for every launched id (including a retry, not an adopted head's receipt), for ordinary and forced waits.
     - Tests (scripted `WaitEnv`): every bullet in the spec's `wait::wait` list, including that a probe cannot contend with our just-launched worker and that retries share the budget; plus the receipt matrix test.
-- [ ] **Status-list rendering** (`cli/src/commands/list_table.rs`, `cli/tests/list_table.rs`)
+- [x] **Status-list rendering** (`cli/src/commands/list_table.rs`, `cli/tests/list_table.rs`)
     - Introduce the pure per-run PR presentation (`PrOutcome` with the §5 rows: observed success, ignored, unsupported, still running, failed with stored answer, failed with nothing stored) and render it through `Prose` and `UnorderedList` (dim, stderr, after graph/legend, before verbose; PR item before hint). No raw escape sequences.
     - `- PRs as of <age> ago` at ≥ 60 s while still running; `(couldn't refresh)` at any age on failure; `- couldn't get open PRs` with nothing stored; pending with nothing stored shows only the hint. Use the existing age formatter.
     - The hint condition becomes "the wait timed out". Caption follows the head half only: completed or failed caption when PRs caused the timeout; "still checking/pulling" only while the followed head is unfinished.
@@ -140,18 +167,18 @@ Goal: `list.rs` consumes the new wait result, the stored answer, and the receipt
 
 ### Wave 3 (sequential: touches `list.rs` and its seams)
 
-- [ ] **Remove the foreground request** (`cli/src/commands/list.rs`)
+- [x] **Remove the foreground request** (`cli/src/commands/list.rs`)
     - `gather_remote` no longer requests on a miss. Delete `ListSeams::connect`, `origin_pr_source`, `RemoteAnswers::pr_failure`; keep `ListSeams { launch, wait_budget, forced_budget }` so tests stub the launched worker.
     - Always launch exactly one worker when there is an `origin` (skip for `--ignore-api`'s provider query only inside the worker); no origin: no worker, PR item, or hint.
-- [ ] **Post-wait answer selection**
+- [x] **Post-wait answer selection**
     - Reread the PR store after the wait on every exit path (timeout, worker failure). A successful empty answer clears badges and counts as success. Keep source-repository filtering for table badges and graph tags.
     - Recheck the current origin before selecting the answer; if it changed or disappeared, discard the old origin's badges and the receipt-derived PR diagnosis and do not start another refresh.
     - Map wait result + store + receipt to `PrOutcome` (§5 table, rulings 3 and 4). Pending PR failure that is unobservable at timeout shows the pending presentation.
-- [ ] **Credentials and spinner**
+- [x] **Credentials and spinner**
     - `list::credential_line` reads the PR failure from the receipt in every mode (ordinary too); precedence unchanged (confirmed head API condition beats PR condition; ambiguous 404/timeout/unsupported/lock/write never asserts a bad key; never print key values, URLs, or raw provider text). The status item does not repeat the reason.
     - Clear the spinner on every exit path; while only PRs are pending use the generic `updating` text, not a retained fetch/fallback message.
-- [ ] **`--ff` and `-r`** keep their 75 s budget and local fast-forward rules; a PR failure never blocks a permitted fast-forward.
-- [ ] **Comment/doc pass in code** for `list.rs`, `wait.rs`, `refresh_worker.rs`: remove claims that fresh answers skip requests, that PR requests never delay the foreground, or that only forced attempts write receipts.
+- [x] **`--ff` and `-r`** keep their 75 s budget and local fast-forward rules; a PR failure never blocks a permitted fast-forward.
+- [x] **Comment/doc pass in code** for `list.rs`, `wait.rs`, `refresh_worker.rs`: remove claims that fresh answers skip requests, that PR requests never delay the foreground, or that only forced attempts write receipts.
 
 Validation checkpoint 3: whole workspace compiles; `just test` and `just lint` pass in `worktree/`; `grep -rn "fetch_and_publish\|LIST_DEADLINE\|AlreadyFresh\|SkippedFresh\|origin_pr_source\|Writer" worktree/` returns nothing outside history/spec text.
 
