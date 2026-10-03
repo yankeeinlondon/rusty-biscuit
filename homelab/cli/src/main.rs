@@ -1,7 +1,8 @@
 //! Homelab automation CLI.
 
 use biscuit_terminal::prelude::{
-    Prose, Table, TableCellContent, TableColumn, Terminal, TerminalRenderable, UnorderedList,
+    InlineProse, LineBreaks, Prose, Table, TableCellContent, TableColumn, Terminal,
+    TerminalRenderable, UnorderedList,
 };
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::CompleteEnv;
@@ -16,7 +17,7 @@ use homelab::samsung_tv::{
     SamsungTv,
 };
 use homelab::sony_receiver::{
-    GenericSettingResult, SonyError, SonyReceiver, SonyReceiverEndpoints,
+    GenericSettingResult, MethodSignature, SonyError, SonyReceiver, SonyReceiverEndpoints,
 };
 use serde_json::json;
 
@@ -1048,7 +1049,7 @@ async fn run_arcam_action(
                 )
             };
 
-            println!("{}", styled(format!("<b>Arcam Amp</b> probe {suffix}\n")));
+            println!("{}\n", styled(format!("<b>Arcam Amp</b> probe {suffix}")));
 
             // System model query
             let model_cmd = [0x21, 0x01, 0x5E, 0x01, 0xF0, 0x0D];
@@ -3547,6 +3548,21 @@ async fn handle_sony_native(
     Ok(())
 }
 
+/// One `sony debug methods` list item: the method name and version, with its
+/// params and returns each on a line of its own.
+fn sony_method_item(method: &MethodSignature) -> Prose {
+    let mut parts = format!("<b>{}</b> <dim>(v{})</dim>", method.name, method.version);
+    if !method.params.is_empty() {
+        let params = method.params.join(", ");
+        parts.push_str(&format!("\n  <dim>params:</dim> {params}"));
+    }
+    if !method.returns.is_empty() {
+        let returns = method.returns.join(", ");
+        parts.push_str(&format!("\n  <dim>returns:</dim> {returns}"));
+    }
+    Prose::new(parts).with_line_breaks(LineBreaks::Hard)
+}
+
 async fn handle_sony_debug(
     receiver: &SonyReceiver,
     action: SonyDebugAction,
@@ -3564,18 +3580,8 @@ async fn handle_sony_debug(
                     styled(format!("<b>Sony Receiver</b> supported methods {suffix}"))
                 );
                 let mut list = UnorderedList::empty();
-                for method in methods {
-                    let mut parts =
-                        format!("<b>{}</b> <dim>(v{})</dim>", method.name, method.version);
-                    if !method.params.is_empty() {
-                        let params = method.params.join(", ");
-                        parts.push_str(&format!("\n  <dim>params:</dim> {params}"));
-                    }
-                    if !method.returns.is_empty() {
-                        let returns = method.returns.join(", ");
-                        parts.push_str(&format!("\n  <dim>returns:</dim> {returns}"));
-                    }
-                    list.add(Prose::new(parts));
+                for method in &methods {
+                    list.add(sony_method_item(method));
                 }
                 print!("{}", list.display(&Terminal::default()));
             }
@@ -3601,7 +3607,7 @@ async fn handle_sony_debug(
                         "<red>[ERR]</red>".to_string()
                     };
                     table.add_row(vec![
-                        TableCellContent::Text(Prose::new(marker).render_optimistic(None)),
+                        TableCellContent::Text(InlineProse::new(marker).render_optimistic(None)),
                         result.path.as_str().into(),
                         result.detail.as_str().into(),
                     ]);
@@ -3611,4 +3617,28 @@ async fn handle_sony_debug(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use biscuit_terminal::prelude::strip_escape_codes;
+
+    #[test]
+    fn sony_method_item_keeps_params_and_returns_on_separate_lines() {
+        let method = MethodSignature {
+            name: "getPowerStatus".to_string(),
+            params: vec!["string".to_string()],
+            returns: vec!["{\"status\":\"string\"}".to_string()],
+            version: "1.1".to_string(),
+        };
+
+        let rendered = strip_escape_codes(sony_method_item(&method).render_optimistic(None));
+
+        let lines: Vec<&str> = rendered.lines().map(str::trim_end).collect();
+        assert_eq!(lines.len(), 3, "got: {rendered:?}");
+        assert!(lines[0].starts_with("getPowerStatus (v1.1)"), "got: {rendered:?}");
+        assert!(lines[1].trim_start().starts_with("params: string"), "got: {rendered:?}");
+        assert!(lines[2].trim_start().starts_with("returns:"), "got: {rendered:?}");
+    }
 }
