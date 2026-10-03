@@ -1,5 +1,5 @@
-//! The wait protocol over a scripted store, scripted locks, and a fake clock
-//! that advances only when the wait sleeps.
+//! The wait protocol over a scripted store, receipt, and locks, and a fake
+//! clock that advances only when the wait sleeps.
 
 use std::cell::{Cell, RefCell};
 use std::io::Write;
@@ -19,7 +19,7 @@ const OURS: &str = "0000000000000000000000000000000a";
 const SECOND: &str = "0000000000000000000000000000000b";
 const OTHER: &str = "ffffffffffffffffffffffffffffffff";
 const STARTED: u64 = 1_790_000_000;
-/// PR store publication ids: the answer stored at launch, and a holder's.
+/// PR store publication ids: the answer stored at launch, and a new one.
 const SEEDED: &str = "5eeded00000000000000000000000000";
 const PUBLISHED: &str = "fedcba9876543210fedcba9876543210";
 
@@ -65,6 +65,10 @@ fn launches() -> Vec<LaunchArgs> {
     LAUNCHES.with(|launches| launches.borrow().clone())
 }
 
+fn launched(id: &str) -> LaunchArgs {
+    LaunchArgs { attempt: id.into() }
+}
+
 type Script<T> = Box<dyn Fn(Duration) -> T>;
 type ReceiptScript = Box<dyn Fn(Duration, &Attempt) -> Option<Receipt>>;
 
@@ -79,6 +83,8 @@ struct Fake {
     ids: RefCell<Vec<&'static str>>,
     /// Head-lock probes made while a worker of ours was still running.
     early_probes: Cell<usize>,
+    /// PR-lock probes, with the time of each.
+    pr_probes: RefCell<Vec<Duration>>,
     /// Whether the current worker has exited, as the probe sees it.
     worker_alive: Box<dyn Fn() -> bool>,
     /// A real PR store (and its `origin`) read the way [`StoreEnv`] reads it,
@@ -100,6 +106,7 @@ impl Fake {
             pr_answer: Box::new(|_| None),
             ids: RefCell::new(vec![OURS, SECOND]),
             early_probes: Cell::new(0),
+            pr_probes: RefCell::new(Vec::new()),
             worker_alive: Box::new(|| {
                 let launched = LAUNCHES.with(|launches| launches.borrow().len());
                 let exit = EXITS.with(|exits| exits.borrow().get(launched.wrapping_sub(1)).copied().flatten());
@@ -163,6 +170,7 @@ impl WaitEnv for Fake {
     }
 
     fn pr_lock_held(&self) -> bool {
+        self.pr_probes.borrow_mut().push(now());
         match &self.real_prs {
             Some((store, _)) => pr_lock_held(store),
             None => (self.pr_lock)(now()),
@@ -171,7 +179,7 @@ impl WaitEnv for Fake {
 
     fn pr_publication(&self) -> Option<String> {
         match &self.real_prs {
-            Some((store, origin)) => refresh_publication(store, origin),
+            Some((store, origin)) => stored_publication(store, origin, unix_now()),
             None => (self.pr_answer)(now()).map(str::to_string),
         }
     }
@@ -198,6 +206,14 @@ fn attempt(id: &str, phase: Phase, outcome: Option<Outcome>) -> Attempt {
     Attempt { phase, outcome, ..Attempt::begin(id.into(), DIGEST.into(), BRANCH.into(), STARTED) }
 }
 
+fn finished(id: &str, phase: Phase, outcome: Outcome) -> HeadEnd {
+    HeadEnd::Finished(attempt(id, phase, Some(outcome)))
+}
+
+fn in_sync(id: &str) -> HeadEnd {
+    finished(id, Phase::Checking, Outcome::InSync)
+}
+
 fn with(attempt: Attempt) -> StoreState {
     StoreState { answer: None, attempt: Some(attempt) }
 }
@@ -217,6 +233,23 @@ fn receipt(id: &str, head: HeadStatus, prs: PrStatus) -> Receipt {
     }
 }
 
+/// Our receipt from `at` on, with `prs`.
+fn receipt_at(at: Duration, prs: PrStatus) -> impl Fn(Duration, &Attempt) -> Option<Receipt> {
+    move |t, for_attempt| (t >= at).then(|| receipt(&for_attempt.id, HeadStatus::Ok, prs.clone()))
+}
+
+fn ended(head: HeadEnd, prs: PrEnd) -> WaitEnd {
+    WaitEnd { head, prs, timed_out: false }
+}
+
+fn timed_out(head: HeadEnd, prs: PrEnd) -> WaitEnd {
+    WaitEnd { head, prs, timed_out: true }
+}
+
+fn other() -> PrEnd {
+    PrEnd::Failed(PrFailure::Other)
+}
+
 fn request(force: bool) -> WaitRequest<'static> {
     WaitRequest {
         main: Path::new("/repo"),
@@ -230,12 +263,18 @@ fn request(force: bool) -> WaitRequest<'static> {
 /// Runs the wait; returns its end, the phases it reported, and when it ended.
 fn run(fake: &Fake, force: bool, launch: WorkerLaunch) -> (WaitEnd, Vec<Phase>, Duration) {
     let mut phases = Vec::new();
-    let waited = wait(request(force), fake, launch, &mut |phase| phases.push(phase));
-    (waited.end, phases, now())
+    let end = wait(request(force), fake, launch, &mut |phase| phases.push(phase));
+    (end, phases, now())
 }
 
+fn within_the_budget(at: Duration, budget: Duration) -> bool {
+    at >= budget && at < budget + ms(50)
+}
+
+// Both halves.
+
 #[test]
-fn our_attempt_is_followed_through_every_phase_to_its_outcome() {
+fn our_attempt_is_followed_through_every_phase_to_both_results() {
     let fake = Fake::new(|t| {
         let fallback = Phase::CheckingFallback { reason: FallbackReason::NoKey };
         match t {
@@ -245,82 +284,47 @@ fn our_attempt_is_followed_through_every_phase_to_its_outcome() {
             t if t < ms(600) => with(attempt(OURS, Phase::Fetching, None)),
             _ => with(attempt(OURS, Phase::Fetching, Some(Outcome::Fetched))),
         }
-    });
-
-    let (end, phases, at) = run(&fake, false, launching);
-
-    assert_eq!(
-        end,
-        WaitEnd::Finished { attempt: attempt(OURS, Phase::Fetching, Some(Outcome::Fetched)), receipt: None }
-    );
-    assert_eq!(
-        phases,
-        [Phase::Checking, Phase::CheckingFallback { reason: FallbackReason::NoKey }, Phase::Fetching]
-    );
-    assert!(at >= ms(600) && at < ms(700), "ends at the outcome: {at:?}");
-    assert_eq!(launches(), [LaunchArgs { attempt: OURS.into(), force: false }], "one launch");
-    assert_eq!(fake.early_probes.get(), 0, "the lock is never probed while our worker may take it");
-}
-
-#[test]
-fn a_running_attempt_is_adopted_with_no_second_launch() {
-    let fake = Fake::new(|t| {
-        let outcome = (t >= ms(900)).then_some(Outcome::InSync);
-        with(attempt(OTHER, Phase::Checking, outcome))
     })
-    .exits(&[Some(ms(20))])
-    .head_lock(|t| t < ms(900));
+    .receipts(receipt_at(ms(600), PrStatus::Ok))
+    .exits(&[Some(ms(600))]);
 
     let (end, phases, at) = run(&fake, false, launching);
 
-    assert_eq!(
-        end,
-        WaitEnd::Finished { attempt: attempt(OTHER, Phase::Checking, Some(Outcome::InSync)), receipt: None }
-    );
-    assert_eq!(phases, [Phase::Checking]);
-    assert!(at >= ms(900), "{at:?}");
-    assert_eq!(launches().len(), 1);
-    assert_eq!(fake.early_probes.get(), 0, "adoption probes only after our worker exited");
+    assert_eq!(end, ended(finished(OURS, Phase::Fetching, Outcome::Fetched), PrEnd::Published));
+    assert_eq!(phases, [Phase::Checking, Phase::CheckingFallback { reason: FallbackReason::NoKey }, Phase::Fetching]);
+    assert!(at >= ms(600) && at < ms(700), "ends once both are in: {at:?}");
+    assert_eq!(launches(), [launched(OURS)], "one launch, with no --force");
+    assert_eq!(fake.early_probes.get(), 0, "the head lock is never probed while our worker may take it");
+    assert!(fake.pr_probes.borrow().is_empty(), "nor the PR lock, without contention");
 }
 
 #[test]
-fn a_contender_that_exits_early_is_never_a_finished_check() {
-    // Another attempt finished before this run; ours exits without an
-    // attempt, and nothing holds the lock.
-    for stored in [
-        with(attempt(OTHER, Phase::Checking, Some(Outcome::InSync))),
-        with(attempt(OTHER, Phase::Checking, None)),
-        empty(),
-    ] {
-        let fake = Fake::new(move |_| stored.clone()).exits(&[Some(ms(30))]);
+fn an_ordinary_wait_does_not_end_on_a_head_outcome_alone() {
+    let fake = Fake::new(|t| {
+        let outcome = (t >= ms(100)).then_some(Outcome::InSync);
+        with(attempt(OURS, Phase::Fetching, outcome))
+    })
+    .receipts(receipt_at(ms(1_200), PrStatus::Ok))
+    .exits(&[Some(ms(1_200))]);
 
-        let (end, _, at) = run(&fake, false, launching);
+    let (end, phases, at) = run(&fake, false, launching);
 
-        assert_eq!(end, WaitEnd::Unavailable);
-        assert!(at < ms(100), "rendered at once: {at:?}");
-    }
+    assert_eq!(end, ended(finished(OURS, Phase::Fetching, Outcome::InSync), PrEnd::Published));
+    assert!(at >= ms(1_200) && at < ms(1_300), "waits for the receipt: {at:?}");
+    assert_eq!(phases, [Phase::Fetching, Phase::Checking], "the spinner says only `updating` once the head is done");
+    assert!(fake.pr_probes.borrow().is_empty());
 }
 
 #[test]
-fn a_spawn_failure_is_unavailable_at_once() {
-    let fake = Fake::new(|_| with(attempt(OTHER, Phase::Checking, None))).head_lock(|_| true);
+fn the_budget_ends_the_wait_with_the_head_finished_and_the_pr_half_running() {
+    let fake = Fake::new(|_| with(attempt(OURS, Phase::Checking, Some(Outcome::InSync))));
 
-    let (end, phases, at) = run(&fake, false, failing_launch);
+    let (end, phases, at) = run(&fake, false, launching);
 
-    assert_eq!(end, WaitEnd::Unavailable);
-    assert!(phases.is_empty());
-    assert_eq!(at, Duration::ZERO, "no wait at all");
-}
-
-#[test]
-fn a_worker_that_stops_mid_attempt_is_unavailable() {
-    let fake = Fake::new(|t| if t < ms(40) { empty() } else { with(attempt(OURS, Phase::Checking, None)) })
-        .exits(&[Some(ms(100))]);
-
-    let (end, _, at) = run(&fake, false, launching);
-
-    assert_eq!(end, WaitEnd::Unavailable);
-    assert!(at < ms(200), "{at:?}");
+    assert_eq!(end, timed_out(in_sync(OURS), PrEnd::Pending), "the completed head outcome is kept");
+    assert!(within_the_budget(at, ORDINARY_BUDGET), "{at:?}");
+    assert_eq!(phases, [Phase::Checking, Phase::Checking]);
+    assert_eq!(discarded(), [OURS], "an ordinary wait discards the receipt it launched");
 }
 
 #[test]
@@ -330,9 +334,95 @@ fn the_budget_ends_the_wait_with_the_last_phase_seen() {
 
         let (end, _, at) = run(&fake, false, launching);
 
-        assert_eq!(end, WaitEnd::TimedOut { last: Some(attempt(OURS, phase, None)) });
-        assert!(at >= ORDINARY_BUDGET && at < ORDINARY_BUDGET + ms(50), "{at:?}");
+        assert_eq!(end, timed_out(HeadEnd::Running { last: Some(attempt(OURS, phase, None)) }, PrEnd::Pending));
+        assert!(within_the_budget(at, ORDINARY_BUDGET), "{at:?}");
     }
+}
+
+#[test]
+fn a_publication_while_the_head_is_held_is_kept_at_the_timeout() {
+    let fake = Fake::new(|_| with(attempt(OURS, Phase::Checking, None)))
+        .pr_answer(|t| Some(if t < ms(500) { SEEDED } else { PUBLISHED }));
+
+    let (end, phases, at) = run(&fake, false, launching);
+
+    let head = HeadEnd::Running { last: Some(attempt(OURS, Phase::Checking, None)) };
+    assert_eq!(end, timed_out(head, PrEnd::Published), "no combined receipt needed");
+    assert!(within_the_budget(at, ORDINARY_BUDGET), "{at:?}");
+    assert_eq!(phases, [Phase::Checking], "the head is still being checked");
+}
+
+/// The store is the authority on whether a publication happened: a receipt
+/// that later says the attempt failed, or a store that later reads as a
+/// miss, does not undo it.
+#[test]
+fn an_observed_publication_outranks_a_later_failed_receipt() {
+    // Our worker's head half was contended, so the head is another run's
+    // attempt, still running when our receipt arrives.
+    let fake = Fake::new(|t| {
+        let outcome = (t >= ms(800)).then_some(Outcome::InSync);
+        with(attempt(OTHER, Phase::Checking, outcome))
+    })
+    .head_lock(|t| t < ms(800))
+    .pr_answer(|t| match t {
+        t if t < ms(200) => Some(SEEDED),
+        t if t < ms(400) => Some(PUBLISHED),
+        _ => None,
+    })
+    .receipts(|t, _| {
+        let failed = PrStatus::Failed { failure: PrFailure::CredentialsRejected { key: None } };
+        (t >= ms(500)).then(|| receipt(OURS, HeadStatus::AdoptedElsewhere, failed))
+    })
+    .exits(&[Some(ms(500))]);
+
+    let (end, _, at) = run(&fake, false, launching);
+
+    assert_eq!(end, ended(in_sync(OTHER), PrEnd::Published));
+    assert!(at >= ms(800) && at < ms(900), "{at:?}");
+}
+
+#[test]
+fn the_receipt_reports_each_pr_status() {
+    let rejected = PrFailure::CredentialsRejected { key: Some("GITHUB_TOKEN".into()) };
+    for (status, expected) in [
+        (PrStatus::Ok, PrEnd::Published),
+        (PrStatus::Failed { failure: rejected.clone() }, PrEnd::Failed(rejected.clone())),
+        (PrStatus::Ignored, PrEnd::Ignored),
+        (PrStatus::Unsupported, PrEnd::Unsupported),
+    ] {
+        let fake = Fake::new(|_| with(attempt(OURS, Phase::Checking, Some(Outcome::InSync))))
+            .receipts(receipt_at(ms(300), status.clone()))
+            .exits(&[Some(ms(300))]);
+
+        let (end, _, at) = run(&fake, false, launching);
+
+        assert_eq!(end, ended(in_sync(OURS), expected), "{status:?}");
+        assert!(at < ms(400), "{at:?}");
+    }
+}
+
+#[test]
+fn a_worker_that_exits_without_a_receipt_is_a_generic_pr_failure() {
+    for force in [false, true] {
+        let fake =
+            Fake::new(|_| with(attempt(OURS, Phase::Checking, Some(Outcome::InSync)))).exits(&[Some(ms(200))]);
+
+        let (end, _, at) = run(&fake, force, launching);
+
+        assert_eq!(end, ended(in_sync(OURS), other()), "no invented reason (force: {force})");
+        assert!(at < ms(300), "a missing receipt is bounded: {at:?}");
+    }
+}
+
+#[test]
+fn a_worker_that_exits_without_a_receipt_keeps_a_new_publication() {
+    let fake = Fake::new(|_| with(attempt(OURS, Phase::Checking, Some(Outcome::InSync))))
+        .pr_answer(|t| (t >= ms(150)).then_some(PUBLISHED))
+        .exits(&[Some(ms(200))]);
+
+    let (end, _, _) = run(&fake, false, launching);
+
+    assert_eq!(end, ended(in_sync(OURS), PrEnd::Published), "a first answer into an empty store counts");
 }
 
 #[test]
@@ -347,32 +437,234 @@ fn an_outcome_for_another_attempt_branch_or_origin_is_never_taken() {
 
         let (end, phases, _) = run(&fake, false, launching);
 
-        assert_eq!(end, WaitEnd::TimedOut { last: None }, "{:?}", fake.store());
+        assert_eq!(end, timed_out(HeadEnd::Running { last: None }, PrEnd::Pending), "{:?}", fake.store());
         assert!(phases.is_empty());
     }
 }
 
+// Launch failures and adoption.
+
 #[test]
-fn a_forced_wait_follows_the_outcome_to_the_receipt() {
+fn a_contender_that_exits_early_is_never_a_finished_check() {
+    // Another attempt finished before this run; ours exits without an
+    // attempt or a receipt, and nothing holds the lock.
+    for stored in [
+        with(attempt(OTHER, Phase::Checking, Some(Outcome::InSync))),
+        with(attempt(OTHER, Phase::Checking, None)),
+        empty(),
+    ] {
+        let fake = Fake::new(move |_| stored.clone()).exits(&[Some(ms(30))]);
+
+        let (end, _, at) = run(&fake, false, launching);
+
+        assert_eq!(end, ended(HeadEnd::Unavailable, other()));
+        assert!(at < ms(100), "rendered at once: {at:?}");
+    }
+}
+
+#[test]
+fn a_spawn_failure_is_unavailable_at_once() {
+    let fake = Fake::new(|_| with(attempt(OTHER, Phase::Checking, None))).head_lock(|_| true);
+
+    let (end, phases, at) = run(&fake, false, failing_launch);
+
+    assert_eq!(end, ended(HeadEnd::Unavailable, other()));
+    assert!(phases.is_empty());
+    assert_eq!(at, Duration::ZERO, "no wait at all");
+    assert!(discarded().is_empty(), "nothing was launched");
+}
+
+#[test]
+fn a_worker_that_stops_mid_attempt_is_unavailable() {
+    let fake = Fake::new(|t| if t < ms(40) { empty() } else { with(attempt(OURS, Phase::Checking, None)) })
+        .exits(&[Some(ms(100))]);
+
+    let (end, _, at) = run(&fake, false, launching);
+
+    assert_eq!(end, ended(HeadEnd::Unavailable, other()));
+    assert!(at < ms(200), "{at:?}");
+}
+
+#[test]
+fn a_running_attempt_is_adopted_and_our_receipt_still_read() {
+    let fake = Fake::new(|t| {
+        let outcome = (t >= ms(900)).then_some(Outcome::InSync);
+        with(attempt(OTHER, Phase::Checking, outcome))
+    })
+    .receipts(|t, for_attempt| {
+        assert_eq!(for_attempt.id, OURS, "the receipt is looked up by our launched id");
+        (t >= ms(20)).then(|| receipt(OURS, HeadStatus::AdoptedElsewhere, PrStatus::Ok))
+    })
+    .exits(&[Some(ms(20))])
+    .head_lock(|t| t < ms(900));
+
+    let (end, phases, at) = run(&fake, false, launching);
+
+    assert_eq!(end, ended(in_sync(OTHER), PrEnd::Published));
+    assert_eq!(phases, [Phase::Checking]);
+    assert!(at >= ms(900), "{at:?}");
+    assert_eq!(launches().len(), 1);
+    assert_eq!(fake.early_probes.get(), 0, "adoption probes only after our worker exited");
+    assert_eq!(discarded(), [OURS], "only our own receipt, never the adopted run's");
+}
+
+#[test]
+fn a_holder_that_finished_before_adoption_is_followed_only_on_our_receipts_word() {
+    let finished_holder = attempt(OTHER, Phase::Fetching, Some(Outcome::Fetched));
+    let rejected = PrFailure::RateLimited { authenticated: false, key: None };
+    let stored = finished_holder.clone();
+    let fake = Fake::new(move |_| with(stored.clone()))
+        .receipts(move |t, _| {
+            (t >= ms(20)).then(|| receipt(OURS, HeadStatus::AdoptedElsewhere, PrStatus::Failed { failure: rejected.clone() }))
+        })
+        .exits(&[Some(ms(20))]);
+
+    let (end, _, _) = run(&fake, false, launching);
+
+    let rejected = PrFailure::RateLimited { authenticated: false, key: None };
+    assert_eq!(end, ended(HeadEnd::Finished(finished_holder), PrEnd::Failed(rejected)));
+}
+
+#[test]
+fn an_ordinary_wait_never_relaunches_for_another_branchs_holder() {
+    let trunk = Attempt { branch: "trunk".into(), ..attempt(OTHER, Phase::Checking, None) };
+    let fake = Fake::new(move |_| with(trunk.clone()))
+        .receipts(|t, _| (t >= ms(20)).then(|| receipt(OURS, HeadStatus::AdoptedElsewhere, PrStatus::Ok)))
+        .head_lock(|_| true)
+        .exits(&[Some(ms(20))]);
+
+    let (end, _, _) = run(&fake, false, launching);
+
+    assert_eq!(end, ended(HeadEnd::Unavailable, PrEnd::Published));
+    assert_eq!(launches().len(), 1);
+}
+
+#[test]
+fn a_forced_wait_relaunches_after_a_holder_for_another_branch_finishes() {
+    let trunk = Attempt { branch: "trunk".into(), ..attempt(OTHER, Phase::Checking, None) };
+    let fake = Fake::new(move |t| {
+        if t < ms(1_000) {
+            with(trunk.clone())
+        } else {
+            with(attempt(SECOND, Phase::Checking, Some(Outcome::InSync)))
+        }
+    })
+    .receipts(|_, for_attempt| {
+        Some(match for_attempt.id.as_str() {
+            OURS => receipt(OURS, HeadStatus::AdoptedElsewhere, PrStatus::Ok),
+            _ => receipt(SECOND, HeadStatus::Ok, PrStatus::Ok),
+        })
+    })
+    .head_lock(|t| t < ms(800))
+    .exits(&[Some(ms(20)), Some(ms(1_100))]);
+
+    let (end, _, at) = run(&fake, true, launching);
+
+    assert_eq!(launches(), [launched(OURS), launched(SECOND)]);
+    assert_eq!(end, ended(in_sync(SECOND), PrEnd::Published));
+    assert!(at >= ms(1_000), "{at:?}");
+    assert_eq!(discarded(), [OURS, SECOND], "a retry's receipt is discarded too");
+}
+
+#[test]
+fn a_forced_wait_adopts_a_matching_attempt_its_worker_reported() {
+    let fake = Fake::new(|t| {
+        let outcome = (t >= ms(700)).then_some(Outcome::Fetched);
+        with(attempt(OTHER, Phase::Fetching, outcome))
+    })
+    .receipts(|_, _| Some(receipt(OURS, HeadStatus::AdoptedElsewhere, PrStatus::Ok)))
+    .head_lock(|t| t < ms(700))
+    .exits(&[Some(ms(20))]);
+
+    let (end, _, _) = run(&fake, true, launching);
+
+    assert_eq!(end, ended(finished(OTHER, Phase::Fetching, Outcome::Fetched), PrEnd::Published));
+    assert_eq!(launches().len(), 1);
+}
+
+#[test]
+fn a_forced_wait_follows_the_outcome_to_the_receipt_past_the_ordinary_budget() {
     let fake = Fake::new(|t| {
         let outcome = (t >= ms(100)).then_some(Outcome::InSync);
         with(attempt(OURS, Phase::Checking, outcome))
     })
-    .receipts(|t, for_attempt| {
-        assert_eq!(for_attempt.id, OURS, "the receipt is looked up by our token");
-        (t >= ms(5_000)).then(|| receipt(OURS, HeadStatus::Ok, PrStatus::Ok))
-    })
+    .receipts(receipt_at(ms(5_000), PrStatus::Ok))
     .exits(&[Some(ms(5_000))]);
 
     let (end, _, at) = run(&fake, true, launching);
 
-    let expected = receipt(OURS, HeadStatus::Ok, PrStatus::Ok);
-    assert_eq!(
-        end,
-        WaitEnd::Finished { attempt: attempt(OURS, Phase::Checking, Some(Outcome::InSync)), receipt: Some(expected) }
-    );
+    assert_eq!(end, ended(in_sync(OURS), PrEnd::Published));
     assert!(at >= ms(5_000) && at > ORDINARY_BUDGET, "the 3 s limit does not apply: {at:?}");
-    assert_eq!(launches(), [LaunchArgs { attempt: OURS.into(), force: true }]);
+    assert_eq!(launches(), [launched(OURS)]);
+    assert_eq!(discarded(), [OURS]);
+}
+
+#[test]
+fn an_attempt_that_fails_its_fetch_still_waits_for_the_receipt() {
+    for force in [false, true] {
+        let failed = Outcome::FetchFailed { reason: FetchFailure::Timeout };
+        let fake = Fake::new(move |_| with(attempt(OURS, Phase::Fetching, Some(failed))))
+            .receipts(|t, _| (t >= ms(300)).then(|| receipt(OURS, HeadStatus::Failed, PrStatus::Ok)))
+            .exits(&[Some(ms(300))]);
+
+        let (end, _, at) = run(&fake, force, launching);
+
+        assert_eq!(end, ended(finished(OURS, Phase::Fetching, failed), PrEnd::Published), "force: {force}");
+        assert!(at >= ms(300), "{at:?}");
+    }
+}
+
+// PR contention.
+
+#[test]
+fn an_ordinary_contended_pr_half_waits_for_the_lock_and_fails_without_a_new_answer() {
+    let fake = Fake::new(|_| with(attempt(OURS, Phase::Checking, Some(Outcome::InSync))))
+        .receipts(receipt_at(ms(300), PrStatus::Contended))
+        .pr_lock(|t| t < ms(1_000))
+        .pr_answer(|_| Some(SEEDED))
+        .exits(&[Some(ms(300))]);
+
+    let (end, _, at) = run(&fake, false, launching);
+
+    assert_eq!(end, ended(in_sync(OURS), other()), "a released lock alone proves nothing");
+    assert!(at >= ms(1_000) && at < ms(1_100), "the holder's lock was waited for: {at:?}");
+    assert_eq!(launches().len(), 1, "an ordinary wait never relaunches");
+    assert!(
+        fake.pr_probes.borrow().iter().all(|&probe| probe >= ms(300)),
+        "the PR lock is probed only once our receipt reports contention: {:?}",
+        fake.pr_probes.borrow()
+    );
+}
+
+#[test]
+fn an_ordinary_contended_pr_half_takes_the_holders_answer() {
+    // Same-second and first answers carry only a new id.
+    for (before, after) in [(Some(SEEDED), PUBLISHED), (None, PUBLISHED)] {
+        let fake = Fake::new(|_| with(attempt(OURS, Phase::Checking, Some(Outcome::InSync))))
+            .receipts(receipt_at(ms(10), PrStatus::Contended))
+            .pr_lock(|t| t < ms(500))
+            .pr_answer(move |t| if t < ms(500) { before } else { Some(after) })
+            .exits(&[Some(ms(10))]);
+
+        let (end, _, _) = run(&fake, false, launching);
+
+        assert_eq!(end, ended(in_sync(OURS), PrEnd::Published), "{before:?}");
+        assert_eq!(launches().len(), 1);
+    }
+}
+
+#[test]
+fn contention_never_extends_the_ordinary_budget() {
+    let fake = Fake::new(|_| with(attempt(OURS, Phase::Checking, Some(Outcome::InSync))))
+        .receipts(receipt_at(ms(300), PrStatus::Contended))
+        .pr_lock(|_| true)
+        .pr_answer(|_| Some(SEEDED))
+        .exits(&[Some(ms(300))]);
+
+    let (end, _, at) = run(&fake, false, launching);
+
+    assert_eq!(end, timed_out(in_sync(OURS), PrEnd::Pending), "the holder is still asking");
+    assert!(within_the_budget(at, ORDINARY_BUDGET), "{at:?}");
 }
 
 #[test]
@@ -385,53 +677,13 @@ fn a_forced_wait_accepts_the_answer_a_contending_holder_published() {
 
     let (end, _, at) = run(&fake, true, launching);
 
-    let expected = receipt(OURS, HeadStatus::Ok, PrStatus::Contended);
-    assert_eq!(
-        end,
-        WaitEnd::Finished { attempt: attempt(OURS, Phase::Checking, Some(Outcome::InSync)), receipt: Some(expected) }
-    );
+    assert_eq!(end, ended(in_sync(OURS), PrEnd::Published));
     assert!(at >= ms(2_000), "the holder's lock was waited for: {at:?}");
     assert_eq!(launches().len(), 1, "a published answer needs no second request");
 }
 
-/// `fetched_at` is whole seconds, so a holder that replaces a young answer
-/// within its second leaves it unchanged; only the publication id proves
-/// the write, and the run must not ask again.
-#[test]
-fn a_forced_wait_accepts_a_holders_answer_published_within_the_same_second() {
-    let fake = Fake::new(|_| with(attempt(OURS, Phase::Checking, Some(Outcome::InSync))))
-        .receipts(|_, _| Some(receipt(OURS, HeadStatus::Ok, PrStatus::Contended)))
-        .pr_lock(|t| t < ms(500))
-        .pr_answer(|t| Some(if t < ms(500) { SEEDED } else { PUBLISHED }))
-        .exits(&[Some(ms(10))]);
-
-    let (end, _, _) = run(&fake, true, launching);
-
-    let expected = receipt(OURS, HeadStatus::Ok, PrStatus::Contended);
-    assert_eq!(
-        end,
-        WaitEnd::Finished { attempt: attempt(OURS, Phase::Checking, Some(Outcome::InSync)), receipt: Some(expected) }
-    );
-    assert_eq!(launches().len(), 1, "a new publication id is a published answer");
-}
-
-/// A holder that publishes into an empty store is published too.
-#[test]
-fn a_forced_wait_accepts_a_holders_first_answer() {
-    let fake = Fake::new(|_| with(attempt(OURS, Phase::Checking, Some(Outcome::InSync))))
-        .receipts(|_, _| Some(receipt(OURS, HeadStatus::Ok, PrStatus::Contended)))
-        .pr_lock(|t| t < ms(500))
-        .pr_answer(|t| (t >= ms(500)).then_some(PUBLISHED))
-        .exits(&[Some(ms(10))]);
-
-    let (end, _, _) = run(&fake, true, launching);
-
-    assert!(matches!(end, WaitEnd::Finished { receipt: Some(Receipt { prs: PrStatus::Contended, .. }), .. }), "{end:?}");
-    assert_eq!(launches().len(), 1);
-}
-
-/// The holder's request failed or was skipped, so the store kept the answer
-/// (and publication id) it had at launch: the run asks again itself.
+/// The holder's request failed, so the store kept the answer (and
+/// publication id) it had at launch: the run asks again itself.
 #[test]
 fn a_forced_wait_relaunches_once_when_a_contending_holder_published_nothing() {
     let fake = Fake::new(|t| {
@@ -450,27 +702,10 @@ fn a_forced_wait_relaunches_once_when_a_contending_holder_published_nothing() {
 
     let (end, _, at) = run(&fake, true, launching);
 
-    let expected = receipt(SECOND, HeadStatus::Ok, PrStatus::Ok);
-    assert_eq!(
-        end,
-        WaitEnd::Finished { attempt: attempt(SECOND, Phase::Checking, Some(Outcome::InSync)), receipt: Some(expected) }
-    );
+    assert_eq!(end, ended(in_sync(SECOND), PrEnd::Published));
     assert!(at >= ms(2_000), "{at:?}");
-    assert_eq!(
-        launches(),
-        [LaunchArgs { attempt: OURS.into(), force: true }, LaunchArgs { attempt: SECOND.into(), force: true }]
-    );
+    assert_eq!(launches(), [launched(OURS), launched(SECOND)]);
     assert_eq!(discarded(), [OURS, SECOND], "each launched attempt's receipt is discarded once the wait ends");
-}
-
-#[test]
-fn an_ordinary_wait_discards_no_receipt() {
-    let fake = Fake::new(|_| with(attempt(OURS, Phase::Checking, Some(Outcome::InSync)))).exits(&[Some(ms(10))]);
-
-    let (end, _, _) = run(&fake, false, launching);
-
-    assert!(matches!(end, WaitEnd::Finished { receipt: None, .. }), "{end:?}");
-    assert!(discarded().is_empty());
 }
 
 #[test]
@@ -488,35 +723,51 @@ fn a_forced_wait_reports_a_pr_failure_when_the_relaunch_is_contended_too() {
 
     let (end, _, at) = run(&fake, true, launching);
 
-    let failed = PrStatus::Failed { failure: PrFailure::Other };
-    assert_eq!(
-        end,
-        WaitEnd::Finished {
-            attempt: attempt(SECOND, Phase::Checking, Some(Outcome::InSync)),
-            receipt: Some(receipt(SECOND, HeadStatus::Ok, failed)),
-        }
-    );
+    assert_eq!(end, ended(in_sync(SECOND), other()));
     assert!(at >= ms(3_000), "the second holder was waited for too: {at:?}");
     assert_eq!(launches().len(), 2, "one relaunch, no more");
+    assert!(
+        fake.pr_probes.borrow().iter().all(|&probe| probe <= ms(1_000) || probe >= ms(1_100)),
+        "no probe while the relaunched worker had not reported: {:?}",
+        fake.pr_probes.borrow()
+    );
 }
 
-/// A real PR store for the contended-holder race: a repository whose
-/// `origin` the store binds to, and the writers a launch stub runs.
-mod racing_writers {
+#[test]
+fn a_forced_relaunch_shares_the_original_budget() {
+    let fake = Fake::new(|t| {
+        let id = if t < ms(1_000) { OURS } else { SECOND };
+        with(attempt(id, Phase::Checking, Some(Outcome::InSync)))
+    })
+    .receipts(|_, for_attempt| (for_attempt.id == OURS).then(|| receipt(OURS, HeadStatus::Ok, PrStatus::Contended)))
+    .pr_lock(|t| t < ms(1_000))
+    .pr_answer(|_| Some(SEEDED))
+    .exits(&[Some(ms(10)), None]);
+
+    let (end, _, at) = run(&fake, true, launching);
+
+    assert_eq!(end, timed_out(in_sync(SECOND), PrEnd::Pending));
+    assert!(within_the_budget(at, FORCED_BUDGET), "the relaunch did not restart the clock: {at:?}");
+    assert_eq!(launches().len(), 2);
+}
+
+/// Real PR stores for the contended-holder rule: a repository whose
+/// `origin` the store binds to, a store seeded before launch, and launch
+/// stubs that act as a holder finishing before our worker's receipt.
+mod stored_prs {
     use std::process::Command;
 
-    use worktree::pull_requests::{
-        CachedPrs, OpenPrSource, OpenPullRequest, RefreshOutcome, Writer, fetch_and_publish, refresh, select_cached,
-        stored_publication,
-    };
+    use worktree::pull_requests::{OpenPrSource, OpenPullRequest, PrRequestError, RefreshOutcome, origin_digest, refresh};
 
     use super::*;
 
     pub(super) const ORIGIN: &str = "https://prs.example.invalid/owner/repo.git";
 
     thread_local! {
-        /// The store and repository the launch stubs write through.
+        /// The store and repository the launch stubs write through, and what
+        /// the store holds after the holder.
         static REAL: RefCell<Option<(PathBuf, PathBuf)>> = const { RefCell::new(None) };
+        static AFTER: RefCell<Option<String>> = const { RefCell::new(None) };
     }
 
     pub(super) struct Repo {
@@ -524,7 +775,8 @@ mod racing_writers {
         pub(super) store: PathBuf,
     }
 
-    pub(super) fn repo() -> Repo {
+    /// A repository whose store holds `SEEDED`, stored at `fetched_at`.
+    pub(super) fn repo(fetched_at: u64) -> Repo {
         let dir = tempfile::tempdir().expect("temp dir");
         let root = dir.path().join("repo");
         std::fs::create_dir_all(&root).expect("repo dir");
@@ -533,25 +785,40 @@ mod racing_writers {
             assert!(status.success(), "git {args:?}");
         }
         let store = dir.path().join("cache").join("abc.prs.json");
+        std::fs::create_dir_all(store.parent().unwrap()).unwrap();
+        std::fs::write(&store, store_json(SEEDED, fetched_at, &origin_digest(ORIGIN), "[]")).unwrap();
         REAL.with(|real| *real.borrow_mut() = Some((store.clone(), root)));
         Repo { _dir: dir, store }
     }
 
-    /// Answers `answer`, running `during` inside the request.
-    struct Source {
-        answer: Result<u64, PrFailure>,
-        during: Option<Box<dyn Fn()>>,
+    /// A format-5 store as the worker writes it.
+    pub(super) fn store_json(publication: &str, fetched_at: u64, digest: &str, pull_requests: &str) -> String {
+        format!(
+            r#"{{"format_version":5,"origin_digest":"{digest}","fetched_at":{fetched_at},"publication":"{publication}","source_repo":"owner/repo","pull_requests":{pull_requests}}}"#
+        )
     }
+
+    /// The holder leaves the store holding `contents`.
+    pub(super) fn after_the_holder(contents: String) {
+        AFTER.with(|after| *after.borrow_mut() = Some(contents));
+    }
+
+    pub(super) fn holder_writes(main: &Path, args: &LaunchArgs) -> std::io::Result<WorkerHandle> {
+        let (store, _) = REAL.with(|real| real.borrow().clone()).expect("stored_prs::repo()");
+        if let Some(contents) = AFTER.with(|after| after.borrow().clone()) {
+            std::fs::write(&store, contents).unwrap();
+        }
+        launching(main, args)
+    }
+
+    struct Source(Result<u64, PrFailure>);
 
     impl OpenPrSource for Source {
         fn source_repo(&self) -> Option<String> {
             Some("owner/repo".into())
         }
-        fn fetch(&self) -> Result<Vec<OpenPullRequest>, PrFailure> {
-            if let Some(during) = &self.during {
-                during();
-            }
-            self.answer.clone().map(|number| {
+        fn fetch(&self) -> Result<Vec<OpenPullRequest>, PrRequestError> {
+            self.0.clone().map_err(PrRequestError::from).map(|number| {
                 vec![OpenPullRequest {
                     number,
                     url: None,
@@ -563,44 +830,202 @@ mod racing_writers {
         }
     }
 
-    /// A holder's forced refresh answering `answer` runs inside an ordinary
-    /// listing's miss request, which then returns PR 1: the holder takes the
-    /// lock after the listing began and releases it before the listing
-    /// stores. Then the worker is launched as [`launching`] launches it.
-    fn with_holder_inside_a_listing(
-        main: &Path,
-        args: &LaunchArgs,
-        answer: Result<u64, PrFailure>,
-    ) -> std::io::Result<WorkerHandle> {
-        let (store, root) = REAL.with(|real| real.borrow().clone()).expect("racing_writers::repo()");
-        let (holder_store, holder_root) = (store.clone(), root.clone());
-        let listing = Source {
-            answer: Ok(1),
-            during: Some(Box::new(move || {
-                let holder = Source { answer: answer.clone(), during: None };
-                let outcome =
-                    refresh(&holder_store, &holder_root, unix_now, true, |_| Box::new(holder) as Box<dyn OpenPrSource>);
-                assert!(matches!(outcome, RefreshOutcome::Refreshed | RefreshOutcome::Failed(_)), "{outcome:?}");
-            })),
-        };
-        fetch_and_publish(&store, &root, ORIGIN, unix_now(), &listing).expect("answered").expect("same origin");
+    /// The real `refresh` as a holder, answering `answer`, then our launch.
+    fn holder_refreshes(main: &Path, args: &LaunchArgs, answer: Result<u64, PrFailure>) -> std::io::Result<WorkerHandle> {
+        let (store, root) = REAL.with(|real| real.borrow().clone()).expect("stored_prs::repo()");
+        let outcome = refresh(&store, &root, unix_now, |_| Box::new(Source(answer)) as Box<dyn OpenPrSource>);
+        assert!(matches!(outcome, RefreshOutcome::Refreshed | RefreshOutcome::Failed(_)), "{outcome:?}");
         launching(main, args)
     }
 
-    pub(super) fn holder_fails_inside_a_listing(main: &Path, args: &LaunchArgs) -> std::io::Result<WorkerHandle> {
-        with_holder_inside_a_listing(main, args, Err(PrFailure::Other))
+    pub(super) fn holder_fails(main: &Path, args: &LaunchArgs) -> std::io::Result<WorkerHandle> {
+        holder_refreshes(main, args, Err(PrFailure::Other))
     }
 
-    pub(super) fn holder_answers_inside_a_listing(main: &Path, args: &LaunchArgs) -> std::io::Result<WorkerHandle> {
-        with_holder_inside_a_listing(main, args, Ok(2))
+    pub(super) fn holder_answers(main: &Path, args: &LaunchArgs) -> std::io::Result<WorkerHandle> {
+        holder_refreshes(main, args, Ok(2))
+    }
+}
+
+fn contended_after(fake: Fake) -> Fake {
+    fake.receipts(|_, for_attempt| Some(receipt(&for_attempt.id, HeadStatus::Ok, PrStatus::Contended)))
+}
+
+#[test]
+fn a_contending_holders_real_refresh_is_followed_by_its_publication_id() {
+    for force in [false, true] {
+        let repo = stored_prs::repo(unix_now());
+        let fake = contended_after(Fake::new(|_| with(attempt(OURS, Phase::Checking, Some(Outcome::InSync)))))
+            .real_pr_store(&repo.store, stored_prs::ORIGIN)
+            .exits(&[Some(ms(10))]);
+
+        let (end, _, _) = run(&fake, force, stored_prs::holder_answers);
+
+        assert_eq!(end, ended(in_sync(OURS), PrEnd::Published), "force: {force}");
+        assert_eq!(launches().len(), 1, "the holder's answer needs no second request");
+    }
+}
+
+#[test]
+fn a_contending_holders_failed_real_refresh_is_never_a_publication() {
+    let repo = stored_prs::repo(unix_now());
+    let fake = contended_after(Fake::new(|_| with(attempt(OURS, Phase::Checking, Some(Outcome::InSync)))))
+        .real_pr_store(&repo.store, stored_prs::ORIGIN)
+        .exits(&[Some(ms(10))]);
+
+    let (end, _, _) = run(&fake, false, stored_prs::holder_fails);
+
+    assert_eq!(end, ended(in_sync(OURS), other()));
+
+    let repo = stored_prs::repo(unix_now());
+    let fake = contended_after(Fake::new(|_| latest_launch_in_sync()))
+        .real_pr_store(&repo.store, stored_prs::ORIGIN)
+        .exits(&[Some(ms(10)), Some(ms(10))]);
+
+    let (end, _, _) = run(&fake, true, stored_prs::holder_fails);
+
+    assert_eq!(end, ended(in_sync(SECOND), other()), "forced: one relaunch, then a failure");
+    assert_eq!(launches().len(), 2);
+}
+
+/// What a holder leaves in the store, and whether that is a publication
+/// this run may take: a new id counts even within the same second or for an
+/// empty answer; an unchanged id, an unreadable store, a future date, and
+/// another origin never do.
+#[test]
+fn only_a_new_usable_publication_id_counts_for_a_contended_half() {
+    use worktree::pull_requests::origin_digest;
+
+    // In the past, so a later stamp is not in the future.
+    let seeded_at = unix_now() - 10;
+    let ours = origin_digest(stored_prs::ORIGIN);
+    let one_pr = r#"[{"number":2,"url":null,"source_repo":"owner/repo","source_branch":"feat","target_branch":"main"}]"#;
+    let cells: Vec<(&str, String, bool)> = vec![
+        ("control: a new id", stored_prs::store_json(PUBLISHED, seeded_at + 1, &ours, one_pr), true),
+        ("a new id in the same second", stored_prs::store_json(PUBLISHED, seeded_at, &ours, one_pr), true),
+        ("a new id for an empty answer", stored_prs::store_json(PUBLISHED, seeded_at, &ours, "[]"), true),
+        ("the same id rewritten", stored_prs::store_json(SEEDED, seeded_at + 1, &ours, one_pr), false),
+        ("corrupt", "{not json".to_string(), false),
+        ("future-dated", stored_prs::store_json(PUBLISHED, seeded_at + 3_600, &ours, one_pr), false),
+        ("another origin", stored_prs::store_json(PUBLISHED, seeded_at, &origin_digest("https://elsewhere.invalid/x.git"), one_pr), false),
+        ("an older format", stored_prs::store_json(PUBLISHED, seeded_at, &ours, one_pr).replace(r#""format_version":5"#, r#""format_version":4"#), false),
+    ];
+    for (label, contents, counts) in cells {
+        let repo = stored_prs::repo(seeded_at);
+        stored_prs::after_the_holder(contents);
+        let fake = contended_after(Fake::new(|_| with(attempt(OURS, Phase::Checking, Some(Outcome::InSync)))))
+            .real_pr_store(&repo.store, stored_prs::ORIGIN)
+            .exits(&[Some(ms(10))]);
+
+        let (end, _, _) = run(&fake, false, stored_prs::holder_writes);
+
+        let expected = if counts { PrEnd::Published } else { other() };
+        assert_eq!(end, ended(in_sync(OURS), expected), "{label}");
+    }
+}
+
+/// The attempt of the latest launch, finished in sync.
+fn latest_launch_in_sync() -> StoreState {
+    let id = launches().last().map_or_else(|| OURS.to_string(), |args| args.attempt.clone());
+    with(attempt(&id, Phase::Checking, Some(Outcome::InSync)))
+}
+
+/// Receipts over the real store files: a receipt for another id, origin, or
+/// branch, an older one, or a malformed file is missing, and a missing
+/// receipt is a bounded generic failure.
+mod receipt_files {
+    use worktree::pull_requests::origin_digest;
+    use worktree::remote_head::{begin_attempt, finish_attempt, receipt_path_beside, write_receipt};
+
+    use super::*;
+
+    pub(super) const ORIGIN: &str = "https://github.com/owner/repo.git";
+
+    /// Spoils the receipt our worker writes, or writes its file itself.
+    pub(super) type Spoil = fn(&mut Receipt, &Path);
+
+    thread_local! {
+        static HEAD: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+        /// How the stub worker spoils its receipt.
+        static SPOIL: RefCell<Option<Spoil>> = const { RefCell::new(None) };
     }
 
-    pub(super) fn stored(repo: &Repo) -> (Vec<u64>, Option<Writer>) {
-        let CachedPrs::Fresh(listing) = select_cached(&repo.store, Some(ORIGIN), unix_now()) else {
-            panic!("an answer is stored");
+    fn head() -> PathBuf {
+        HEAD.with(|head| head.borrow().clone()).expect("receipt_files::run")
+    }
+
+    /// Our worker: checks in sync and writes its receipt, as `SPOIL` says.
+    fn worker(_main: &Path, args: &LaunchArgs) -> std::io::Result<WorkerHandle> {
+        let head = head();
+        let attempt = Attempt::begin(args.attempt.clone(), origin_digest(ORIGIN), BRANCH.into(), unix_now());
+        begin_attempt(&head, &attempt).expect("attempt");
+        finish_attempt(&head, &args.attempt, Outcome::InSync, None).expect("outcome");
+        let path = receipt_path_beside(&head, &args.attempt).expect("path");
+        let mut receipt = Receipt {
+            attempt_id: args.attempt.clone(),
+            origin_digest: origin_digest(ORIGIN),
+            branch: BRANCH.into(),
+            finished_at: unix_now(),
+            head: HeadStatus::Ok,
+            prs: PrStatus::Failed { failure: PrFailure::CredentialsRejected { key: None } },
         };
-        let writer = stored_publication(&repo.store, ORIGIN, unix_now()).map(|publication| publication.writer);
-        (listing.pull_requests.iter().map(|pr| pr.number).collect(), writer)
+        let spoil = SPOIL.with(|spoil| *spoil.borrow());
+        if let Some(spoil) = spoil {
+            spoil(&mut receipt, &path);
+        }
+        if !path.exists() {
+            write_receipt(&path, &receipt).expect("receipt");
+        }
+        Ok(WorkerHandle::new(|| true))
+    }
+
+    /// Runs one ordinary wait over real stores; returns its end and the
+    /// receipts left behind.
+    pub(super) fn run(spoil: Option<Spoil>) -> (WaitEnd, Vec<String>) {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let head = dir.path().join("abc.remote-head.json");
+        HEAD.with(|stored| *stored.borrow_mut() = Some(head.clone()));
+        SPOIL.with(|stored| *stored.borrow_mut() = spoil);
+        let digest = origin_digest(ORIGIN);
+        let request = WaitRequest { main: Path::new("/repo"), origin_digest: &digest, branch: BRANCH, force: false, budget: ORDINARY_BUDGET };
+        let env = StoreEnv::new(head, dir.path().join("abc.prs.json"), ORIGIN.into());
+        let end = wait(request, &env, worker, &mut |_| {});
+        let left = std::fs::read_dir(dir.path())
+            .expect("dir")
+            .map(|entry| entry.expect("entry").file_name().to_string_lossy().into_owned())
+            .filter(|name| name.contains("receipt"))
+            .collect();
+        (end, left)
+    }
+}
+
+#[test]
+fn a_real_receipt_is_read_and_discarded_by_an_ordinary_wait() {
+    let (end, left) = receipt_files::run(None);
+
+    let PrEnd::Failed(failure) = &end.prs else {
+        panic!("the receipt's failure: {end:?}");
+    };
+    assert_eq!(failure, &PrFailure::CredentialsRejected { key: None });
+    assert!(matches!(end.head, HeadEnd::Finished(_)), "{end:?}");
+    assert!(left.is_empty(), "the wait deletes the receipt it launched: {left:?}");
+}
+
+#[test]
+fn a_receipt_for_another_attempt_or_a_malformed_one_is_missing() {
+    let spoilers: [(&str, receipt_files::Spoil); 5] = [
+        ("another origin", |receipt, _| receipt.origin_digest = "another".into()),
+        ("another branch", |receipt, _| receipt.branch = "trunk".into()),
+        ("another attempt id", |receipt, _| receipt.attempt_id = OTHER.into()),
+        ("finished before the attempt began", |receipt, _| receipt.finished_at = 1),
+        ("malformed", |_, path| std::fs::write(path, "{\"format_version\": 1, \"attempt_id\":").unwrap()),
+    ];
+    for (label, spoil) in spoilers {
+        let (end, _) = receipt_files::run(Some(spoil));
+
+        assert_eq!(end.prs, other(), "{label}: a generic failure, never the receipt's reason");
+        assert!(matches!(end.head, HeadEnd::Finished(_)), "{label}: the head outcome is kept: {end:?}");
+        assert!(!end.timed_out, "{label}: bounded by the worker's exit");
     }
 }
 
@@ -660,7 +1085,7 @@ mod overlapping_runs {
         let digest = origin_digest(ORIGIN);
         let env = StoreEnv::new(head, prs, ORIGIN.into());
         let b = wait(forced(&digest), &env, run_b_worker, &mut |_| {});
-        B_END.with(|end| *end.borrow_mut() = Some(b.end));
+        B_END.with(|end| *end.borrow_mut() = Some(b));
         Ok(WorkerHandle::new(|| true))
     }
 
@@ -689,7 +1114,7 @@ mod overlapping_runs {
             .map(|entry| entry.expect("entry").file_name().to_string_lossy().into_owned())
             .filter(|name| name.contains("receipt"))
             .collect();
-        (a.end, b, left)
+        (a, b, left)
     }
 }
 
@@ -697,159 +1122,23 @@ mod overlapping_runs {
 fn overlapping_forced_runs_each_read_their_own_receipt() {
     let (a, b, left) = overlapping_runs::run();
 
-    let WaitEnd::Finished { attempt: followed_by_a, receipt: Some(a_receipt) } = a else {
-        panic!("run A read no receipt: {a:?}");
+    let HeadEnd::Finished(followed_by_a) = &a.head else {
+        panic!("run A followed no attempt: {a:?}");
     };
-    assert_eq!(a_receipt.prs, PrStatus::Failed { failure: overlapping_runs::credentials_rejected() });
-    let failure = match &a_receipt.prs {
-        PrStatus::Failed { failure } => failure,
-        other => panic!("{other:?}"),
-    };
+    assert_eq!(a.prs, PrEnd::Failed(overlapping_runs::credentials_rejected()));
     assert!(
-        super::super::credential_line(overlapping_runs::ORIGIN, None, Some(failure)).is_some(),
+        super::super::credential_line(overlapping_runs::ORIGIN, None, Some(&overlapping_runs::credentials_rejected()))
+            .is_some(),
         "run A still gets its PR failure line"
     );
 
-    let WaitEnd::Finished { attempt: followed_by_b, receipt: Some(b_receipt) } = b else {
-        panic!("run B read no receipt: {b:?}");
+    let HeadEnd::Finished(followed_by_b) = &b.head else {
+        panic!("run B followed no attempt: {b:?}");
     };
-    assert_eq!((b_receipt.head, b_receipt.prs), (HeadStatus::AdoptedElsewhere, PrStatus::Ok));
-    assert_ne!(b_receipt.attempt_id, a_receipt.attempt_id);
+    assert_eq!(b.prs, PrEnd::Published, "B's own receipt, not A's failure");
     assert_eq!(followed_by_b.id, followed_by_a.id, "B followed A's attempt");
 
     assert!(left.is_empty(), "each run deletes its own receipt: {left:?}");
-}
-
-/// The attempt of the latest launch, finished in sync.
-fn latest_launch_in_sync() -> StoreState {
-    let id = launches().last().map_or_else(|| OURS.to_string(), |args| args.attempt.clone());
-    with(attempt(&id, Phase::Checking, Some(Outcome::InSync)))
-}
-
-/// Review 3: the holder's request fails, and an ordinary listing whose
-/// request overlapped it stores its answer once the lock is free. That
-/// publication is not the holder's, so it never completes the PR half.
-#[test]
-fn a_forced_wait_never_takes_a_listings_answer_for_a_contending_holders() {
-    let repo = racing_writers::repo();
-    let fake = Fake::new(|_| latest_launch_in_sync())
-        .receipts(|_, for_attempt| Some(receipt(&for_attempt.id, HeadStatus::Ok, PrStatus::Contended)))
-        .real_pr_store(&repo.store, racing_writers::ORIGIN)
-        .exits(&[Some(ms(10)), Some(ms(10))]);
-
-    let (end, _, _) = run(&fake, true, racing_writers::holder_fails_inside_a_listing);
-
-    assert_eq!(
-        racing_writers::stored(&repo),
-        (vec![1], Some(worktree::pull_requests::Writer::Listing)),
-        "the listing's answer was stored after each failed holder"
-    );
-    let failed = PrStatus::Failed { failure: PrFailure::Other };
-    assert_eq!(
-        end,
-        WaitEnd::Finished {
-            attempt: attempt(SECOND, Phase::Checking, Some(Outcome::InSync)),
-            receipt: Some(receipt(SECOND, HeadStatus::Ok, failed)),
-        },
-        "a listing's publication is not the holder's success"
-    );
-    assert_eq!(launches().len(), 2, "one relaunch, no more");
-}
-
-/// Control: when the holder does publish, the overlapping listing's older
-/// answer is not stored over it, and the wait takes the holder's answer.
-#[test]
-fn a_forced_wait_takes_a_contending_holders_answer_that_an_overlapping_listing_left_alone() {
-    let repo = racing_writers::repo();
-    let fake = Fake::new(|_| latest_launch_in_sync())
-        .receipts(|_, for_attempt| Some(receipt(&for_attempt.id, HeadStatus::Ok, PrStatus::Contended)))
-        .real_pr_store(&repo.store, racing_writers::ORIGIN)
-        .exits(&[Some(ms(10))]);
-
-    let (end, _, _) = run(&fake, true, racing_writers::holder_answers_inside_a_listing);
-
-    assert_eq!(racing_writers::stored(&repo), (vec![2], Some(worktree::pull_requests::Writer::Refresh)));
-    assert!(matches!(end, WaitEnd::Finished { receipt: Some(Receipt { prs: PrStatus::Contended, .. }), .. }), "{end:?}");
-    assert_eq!(launches().len(), 1, "the holder's answer needs no second request");
-}
-
-#[test]
-fn a_forced_worker_that_exits_without_a_receipt_ends_the_wait() {
-    let fake = Fake::new(|_| with(attempt(OURS, Phase::Checking, Some(Outcome::InSync)))).exits(&[Some(ms(200))]);
-
-    let (end, _, at) = run(&fake, true, launching);
-
-    assert_eq!(
-        end,
-        WaitEnd::Finished { attempt: attempt(OURS, Phase::Checking, Some(Outcome::InSync)), receipt: None }
-    );
-    assert!(at < ms(300), "a failed publication is bounded: {at:?}");
-}
-
-#[test]
-fn a_forced_wait_adopts_a_matching_attempt_its_worker_reported() {
-    let fake = Fake::new(|t| {
-        let outcome = (t >= ms(700)).then_some(Outcome::Fetched);
-        with(attempt(OTHER, Phase::Fetching, outcome))
-    })
-    .receipts(|_, _| Some(receipt(OURS, HeadStatus::AdoptedElsewhere, PrStatus::SkippedFresh)))
-    .head_lock(|t| t < ms(700))
-    .exits(&[Some(ms(20))]);
-
-    let (end, _, _) = run(&fake, true, launching);
-
-    let expected = receipt(OURS, HeadStatus::AdoptedElsewhere, PrStatus::SkippedFresh);
-    assert_eq!(
-        end,
-        WaitEnd::Finished { attempt: attempt(OTHER, Phase::Fetching, Some(Outcome::Fetched)), receipt: Some(expected) }
-    );
-    assert_eq!(launches().len(), 1);
-}
-
-#[test]
-fn a_forced_wait_relaunches_after_a_holder_for_another_branch_finishes() {
-    let trunk = Attempt { branch: "trunk".into(), ..attempt(OTHER, Phase::Checking, None) };
-    let fake = Fake::new(move |t| {
-        if t < ms(1_000) {
-            with(trunk.clone())
-        } else {
-            with(attempt(SECOND, Phase::Checking, Some(Outcome::InSync)))
-        }
-    })
-    .receipts(|_, for_attempt| {
-        Some(match for_attempt.id.as_str() {
-            OURS => receipt(OURS, HeadStatus::AdoptedElsewhere, PrStatus::Ok),
-            _ => receipt(SECOND, HeadStatus::Ok, PrStatus::Ok),
-        })
-    })
-    .head_lock(|t| t < ms(800))
-    .exits(&[Some(ms(20)), Some(ms(1_100))]);
-
-    let (end, _, at) = run(&fake, true, launching);
-
-    assert_eq!(
-        launches(),
-        [LaunchArgs { attempt: OURS.into(), force: true }, LaunchArgs { attempt: SECOND.into(), force: true }]
-    );
-    match end {
-        WaitEnd::Finished { attempt, receipt: Some(receipt) } => {
-            assert_eq!(attempt.id, SECOND);
-            assert_eq!(receipt.attempt_id, SECOND);
-        }
-        other => panic!("{other:?}"),
-    }
-    assert!(at >= ms(1_000), "{at:?}");
-}
-
-#[test]
-fn an_ordinary_wait_never_relaunches_for_another_branchs_holder() {
-    let trunk = Attempt { branch: "trunk".into(), ..attempt(OTHER, Phase::Checking, None) };
-    let fake = Fake::new(move |_| with(trunk.clone())).head_lock(|_| true).exits(&[Some(ms(20))]);
-
-    let (end, _, _) = run(&fake, false, launching);
-
-    assert_eq!(end, WaitEnd::Unavailable);
-    assert_eq!(launches().len(), 1);
 }
 
 #[test]
@@ -928,14 +1217,3 @@ fn a_launched_process_reports_its_exit() {
     assert!(handle.has_exited(), "exit stays reported");
 }
 
-#[test]
-fn a_forced_attempt_that_fails_its_fetch_still_waits_for_the_receipt() {
-    let failed = Outcome::FetchFailed { reason: FetchFailure::Timeout };
-    let fake = Fake::new(move |_| with(attempt(OURS, Phase::Fetching, Some(failed))))
-        .receipts(|t, _| (t >= ms(300)).then(|| receipt(OURS, HeadStatus::Failed, PrStatus::Ok)))
-        .exits(&[Some(ms(300))]);
-
-    let (end, _, _) = run(&fake, true, launching);
-
-    assert!(matches!(end, WaitEnd::Finished { receipt: Some(Receipt { head: HeadStatus::Failed, .. }), .. }), "{end:?}");
-}

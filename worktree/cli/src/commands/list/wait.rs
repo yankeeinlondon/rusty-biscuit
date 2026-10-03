@@ -1,39 +1,40 @@
-//! The foreground half of `wt list`'s update flow (spec §3, plan Rule 6):
-//! launch the worker, or adopt the one already running, and follow its
-//! attempt through the remote-head store until it has an outcome or the
-//! budget runs out.
+//! The foreground half of `wt list`'s update flow: launch the worker, or
+//! adopt the head attempt already running, and follow both of its halves
+//! until each has a result or the budget runs out.
 //!
-//! An attempt is identified by its id plus the origin digest and default
-//! branch, so an outcome from another id, repository, or branch is never
-//! taken as this run's. A contender that exits without recording an attempt
-//! is never a finished check: it is adopted only when another attempt is
-//! running under the lock, and is otherwise [`WaitEnd::Unavailable`].
+//! The head half is followed through the remote-head store. An attempt is
+//! identified by its id plus the origin digest and default branch, so an
+//! outcome from another id, repository, or branch is never taken as this
+//! run's. A contender that exits without recording an attempt is never a
+//! finished check: it is adopted only when another attempt is running under
+//! the lock, or when this run's receipt proves the head lock was held.
 //!
-//! A forced run's contended PR half is complete only when a refresh
-//! published an answer after launch, which the stored answer's publication
-//! id and writer show (`fetched_at` is whole seconds and can repeat): a
-//! released lock proves only that the holder's request ended, and a failed
-//! or skipped request stores nothing. An ordinary listing's miss answer does
-//! not count: it can be stored whenever the lock is momentarily free, such as
-//! just after a failed holder releases it, and its request may predate this
-//! run. Without a refresh's answer the run relaunches once; a second such
-//! contention ends as a PR failure.
+//! The PR half is followed through this run's own completion receipt, which
+//! the worker writes on every attempt once both halves are done, and through
+//! the PR store's publication id: an id that differs from the one stored at
+//! launch proves a successful publication (`fetched_at` is whole seconds and
+//! can repeat), and outranks whatever the receipt later says. A contended PR
+//! half is complete only when such an id appears once the holder's lock is
+//! released, since a failed holder stores nothing. Without one an ordinary
+//! wait reports a PR failure, and a forced wait relaunches once; a second
+//! such contention is a PR failure too.
 //!
-//! The core ([`wait`]) is pure over [`WaitEnv`], so tests script the store,
-//! the locks, and the clock.
+//! The two results are kept apart, so a timeout caused by one half never
+//! hides the other's. The core ([`wait`]) is pure over [`WaitEnv`], so tests
+//! script the stores, the receipt, the locks, and the clock.
 
 use std::path::{Path, PathBuf};
 use std::process::Child;
 use std::time::{Duration, Instant};
 
 use biscuit_terminal::components::spinner::{Spinner, SpinnerHandle};
-use worktree::pull_requests::{Writer, pr_lock_held, stored_publication, unix_now};
+use worktree::pull_requests::{pr_lock_held, stored_publication, unix_now};
 use worktree::remote_head::{
     ATTEMPT_MAX_AGE, Attempt, FallbackReason, HeadStatus, Phase, PrFailure, PrStatus, Receipt, StoreState,
     load_receipt, new_attempt_id, read_store, receipt_path_beside, refresh_lock_held,
 };
 
-/// How long ordinary listing waits for the attempt (Decision 1).
+/// How long ordinary listing waits for both halves.
 pub const ORDINARY_BUDGET: Duration = Duration::from_secs(3);
 /// How long `--refresh` and `--ff` wait: the worker's 10 s check, 60 s
 /// fetch, and publication allowance.
@@ -46,7 +47,6 @@ const SPINNER_DELAY: Duration = Duration::from_millis(150);
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LaunchArgs {
     pub attempt: String,
-    pub force: bool,
 }
 
 /// A launched worker, polled for exit and never joined or killed.
@@ -81,7 +81,8 @@ pub struct WaitRequest<'a> {
     pub main: &'a Path,
     pub origin_digest: &'a str,
     pub branch: &'a str,
-    /// `--refresh`/`--ff`: launch with `--force` and wait for the receipt.
+    /// `--refresh`/`--ff`: retry a PR half whose contending holder published
+    /// nothing, and a head attempt held for another origin or branch.
     pub force: bool,
     pub budget: Duration,
 }
@@ -92,17 +93,16 @@ pub trait WaitEnv {
     /// The completion receipt for `attempt`, if one matches it.
     fn receipt(&self, attempt: &Attempt) -> Option<Receipt>;
     /// Deletes attempt `attempt_id`'s receipt, if any; called once the wait
-    /// is over for every forced attempt it launched.
+    /// is over for every attempt it launched.
     fn discard_receipt(&self, attempt_id: &str);
     /// Takes the lock for an instant: probe only when no worker of ours can
     /// be about to take it.
     fn head_lock_held(&self) -> bool;
     /// As [`WaitEnv::head_lock_held`], for the PR lock.
     fn pr_lock_held(&self) -> bool;
-    /// The publication id of the stored PR answer for the current `origin`
-    /// (`worktree::pull_requests::stored_publication`) when a refresh wrote
-    /// it, and `None` for a listing's answer or no answer. It changes with
-    /// every successful write, whereas `fetched_at` can repeat within a
+    /// The publication id of the usable stored PR answer for the current
+    /// `origin` (`worktree::pull_requests::stored_publication`). It changes
+    /// with every successful write, whereas `fetched_at` can repeat within a
     /// second.
     fn pr_publication(&self) -> Option<String>;
     /// Time since the wait began.
@@ -112,46 +112,61 @@ pub trait WaitEnv {
     fn new_attempt_id(&self) -> Option<String>;
 }
 
-/// How the wait ended.
+/// How the wait ended: each half's result, kept apart.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum WaitEnd {
-    /// The followed attempt has an outcome. Under `force`, `receipt` is this
-    /// run's completion receipt, or `None` when the worker exited without
-    /// writing one. A PR half left contended after the one relaunch reads
-    /// as [`PrStatus::Failed`] with [`PrFailure::Other`].
-    Finished { attempt: Attempt, receipt: Option<Receipt> },
-    /// The budget ran out; `last` is the followed attempt as last seen.
-    TimedOut { last: Option<Attempt> },
-    /// The worker could not be launched, or exited with no attempt to follow.
+pub struct WaitEnd {
+    pub head: HeadEnd,
+    pub prs: PrEnd,
+    /// The budget ran out before both halves had a result.
+    pub timed_out: bool,
+}
+
+/// What the wait learned of the followed head attempt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HeadEnd {
+    /// The followed attempt has an outcome.
+    Finished(Attempt),
+    /// The budget ran out first; `last` is the followed attempt as last seen.
+    Running { last: Option<Attempt> },
+    /// The worker could not be launched, stopped mid-attempt, or exited with
+    /// no attempt to follow.
     Unavailable,
 }
 
-/// The wait's result, with the launched worker for the caller to ask
-/// whether it is still running.
-pub struct Waited {
-    pub end: WaitEnd,
-    pub worker: Option<WorkerHandle>,
+/// What the wait learned of this run's PR half. A contended half never ends
+/// as such: it resolves to [`PrEnd::Published`], [`PrEnd::Failed`], or
+/// [`PrEnd::Pending`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PrEnd {
+    /// A new usable publication appeared during the wait (this run's, or a
+    /// contending holder's), or the receipt reported success.
+    Published,
+    /// The repository is in `~/.wt.json`.
+    Ignored,
+    /// `origin` has no provider to ask.
+    Unsupported,
+    /// The request failed, the worker exited or could not start without a
+    /// receipt or a new publication, or a contending holder published
+    /// nothing. Only a receipt carries a specific reason.
+    Failed(PrFailure),
+    /// The budget ran out with no result.
+    Pending,
 }
 
 /// Launches the worker and follows its attempt; `on_phase` sees every phase
-/// the followed attempt enters, including the first.
+/// the followed head attempt enters, including the first, and
+/// [`Phase::Checking`] once the head half is done while the PR half is not.
 ///
-/// Under `force`, the receipt of every attempt it launched is discarded
-/// before it returns: each is read only by this run.
-pub fn wait(
-    request: WaitRequest<'_>,
-    env: &dyn WaitEnv,
-    launch: WorkerLaunch,
-    on_phase: &mut dyn FnMut(Phase),
-) -> Waited {
+/// The receipt of every attempt it launched is discarded before it returns:
+/// each is read only by this run. An adopted attempt's receipt belongs to its
+/// own run.
+pub fn wait(request: WaitRequest<'_>, env: &dyn WaitEnv, launch: WorkerLaunch, on_phase: &mut dyn FnMut(Phase)) -> WaitEnd {
     let mut launched = Vec::new();
-    let waited = launch_and_follow(request, env, launch, on_phase, &mut launched);
-    if request.force {
-        for attempt_id in &launched {
-            env.discard_receipt(attempt_id);
-        }
+    let end = launch_and_follow(request, env, launch, on_phase, &mut launched);
+    for attempt_id in &launched {
+        env.discard_receipt(attempt_id);
     }
-    waited
+    end
 }
 
 /// [`wait`], recording each launched attempt id in `launched`.
@@ -161,26 +176,26 @@ fn launch_and_follow(
     launch: WorkerLaunch,
     on_phase: &mut dyn FnMut(Phase),
     launched: &mut Vec<String>,
-) -> Waited {
-    let mut follow = Follow { request, env, on_phase, last: None, pr_retried: false };
-    let mut worker = None;
+) -> WaitEnd {
+    // Read once, before the first launch: any later id is a publication made
+    // during this wait, whichever launch caused it.
+    let pr_before = env.pr_publication();
+    let mut follow =
+        Follow { request, env, on_phase, last: None, pr_before, pr_published: false, pr_retried: false, pr_only: false };
     loop {
         let Some(token) = env.new_attempt_id() else {
-            return Waited { end: WaitEnd::Unavailable, worker };
+            return follow.unavailable();
         };
         let launched_at = env.unix_now();
-        let pr_before = env.pr_publication();
-        let args = LaunchArgs { attempt: token.clone(), force: request.force };
-        match launch(request.main, &args) {
+        let mut worker = match launch(request.main, &LaunchArgs { attempt: token.clone() }) {
             Ok(handle) => {
                 launched.push(token.clone());
-                worker = Some(handle);
+                handle
             }
-            Err(_) => return Waited { end: WaitEnd::Unavailable, worker },
-        }
-        let handle = worker.as_mut().expect("just launched");
-        if let Some(end) = follow.run(handle, &token, launched_at, pr_before) {
-            return Waited { end, worker };
+            Err(_) => return follow.unavailable(),
+        };
+        if let Some(end) = follow.run(&mut worker, &token, launched_at) {
+            return end;
         }
     }
 }
@@ -190,89 +205,147 @@ struct Follow<'r, 'e> {
     env: &'e dyn WaitEnv,
     on_phase: &'e mut dyn FnMut(Phase),
     last: Option<Attempt>,
+    /// [`WaitEnv::pr_publication`] before the first launch.
+    pr_before: Option<String>,
+    /// A new publication was seen; nothing the receipt says undoes that.
+    pr_published: bool,
     /// A contended PR half has already cost one relaunch.
     pr_retried: bool,
+    /// The spinner was told that only the PR half is left.
+    pr_only: bool,
+}
+
+/// The PR half's state at one poll.
+enum PrState {
+    Resolved(PrEnd),
+    Waiting,
+    /// Contended, and the holder published nothing: relaunch once the head
+    /// half allows it.
+    Retry,
 }
 
 impl Follow<'_, '_> {
-    /// Follows `token`'s attempt, or the one it adopts, for one launch.
-    /// `None` asks for a new launch: a forced run found the lock held for
-    /// another origin or branch, and that holder has finished; or its PR
-    /// half was contended and the holder published nothing.
-    ///
-    /// `pr_before` is [`WaitEnv::pr_publication`] at launch; a contending
-    /// holder published only if a refresh's id is stored and differs once
-    /// its lock opens.
-    fn run(
-        &mut self,
-        worker: &mut WorkerHandle,
-        token: &str,
-        launched_at: u64,
-        pr_before: Option<String>,
-    ) -> Option<WaitEnd> {
+    /// Follows `token`'s attempt, or the head attempt it adopts, for one
+    /// launch. `None` asks for a new launch: a forced run found the head lock
+    /// held for another origin or branch, and that holder has finished; or
+    /// its PR half was contended and the holder published nothing.
+    fn run(&mut self, worker: &mut WorkerHandle, token: &str, launched_at: u64) -> Option<WaitEnd> {
         let request = self.request;
         let ours = Attempt::begin(token.to_string(), request.origin_digest.to_string(), request.branch.to_string(), launched_at);
         let mut followed = token.to_string();
         loop {
-            // Exit is read before the store, so an outcome written just
-            // before the worker exited is always seen.
+            // Exit is read before the stores and the receipt, so anything
+            // written just before the worker exited is always seen.
             let exited = worker.has_exited();
             let current = self.current();
             if let Some(attempt) = current.as_ref().filter(|attempt| attempt.id == followed) {
                 self.observe(attempt.clone());
             }
-            let seen = self.last.as_ref().filter(|attempt| attempt.id == followed);
-            let finished = seen.filter(|attempt| attempt.outcome.is_some()).cloned();
+            // Always our own launched id, even while following another's.
+            let receipt = self.env.receipt(&ours);
 
-            if let Some(attempt) = finished {
-                if !request.force {
-                    return Some(WaitEnd::Finished { attempt, receipt: None });
-                }
-                match self.env.receipt(&ours) {
-                    Some(receipt) if receipt.prs == PrStatus::Contended => {
-                        if !self.env.pr_lock_held() {
-                            let after = self.env.pr_publication();
-                            let published = after.is_some() && after != pr_before;
-                            if published {
-                                return Some(WaitEnd::Finished { attempt, receipt: Some(receipt) });
-                            }
-                            if !self.pr_retried {
-                                self.pr_retried = true;
-                                return None;
-                            }
-                            let prs = PrStatus::Failed { failure: PrFailure::Other };
-                            return Some(WaitEnd::Finished { attempt, receipt: Some(Receipt { prs, ..receipt }) });
-                        }
-                    }
-                    Some(receipt) => {
-                        return Some(WaitEnd::Finished { attempt, receipt: Some(receipt) });
-                    }
-                    None if exited => return Some(WaitEnd::Finished { attempt, receipt: None }),
-                    None => {}
-                }
-            } else if exited && followed == token {
+            let seen = self.last.as_ref().filter(|attempt| attempt.id == followed);
+            let mut head = seen.filter(|attempt| attempt.outcome.is_some()).cloned().map(HeadEnd::Finished);
+            if head.is_none() && exited && followed == token {
                 if seen.is_some() {
                     // Our worker stopped mid-attempt: a failed store write.
-                    return Some(WaitEnd::Unavailable);
-                }
-                // Our worker never recorded an attempt: another held the lock.
-                match self.adoption(current, &ours) {
-                    Adoption::Follow(attempt) => {
-                        followed = attempt.id.clone();
-                        self.observe(attempt);
-                        continue;
+                    head = Some(HeadEnd::Unavailable);
+                } else {
+                    // Our worker never recorded an attempt: another held the lock.
+                    match self.adoption(current, receipt.as_ref()) {
+                        Adoption::Follow(attempt) => {
+                            followed = attempt.id.clone();
+                            self.observe(attempt);
+                            continue;
+                        }
+                        Adoption::Relaunch => return None,
+                        Adoption::None => head = Some(HeadEnd::Unavailable),
                     }
-                    Adoption::Relaunch => return None,
-                    Adoption::None => return Some(WaitEnd::Unavailable),
                 }
             }
 
-            if self.env.elapsed() >= request.budget {
-                let last = self.last.clone().filter(|attempt| attempt.id == followed);
-                return Some(WaitEnd::TimedOut { last });
+            let mut retry = false;
+            let prs = match self.pr_state(receipt.as_ref(), exited) {
+                PrState::Resolved(prs) => Some(prs),
+                PrState::Waiting => None,
+                PrState::Retry if head.is_some() => {
+                    self.pr_retried = true;
+                    return None;
+                }
+                PrState::Retry => {
+                    retry = true;
+                    None
+                }
+            };
+
+            match (head, prs) {
+                (Some(head), Some(prs)) => return Some(WaitEnd { head, prs, timed_out: false }),
+                (head, prs) => {
+                    if head.is_some() && !self.pr_only {
+                        // The head's last phase no longer describes the wait.
+                        self.pr_only = true;
+                        (self.on_phase)(Phase::Checking);
+                    }
+                    if self.env.elapsed() >= request.budget {
+                        let head = head.unwrap_or_else(|| HeadEnd::Running {
+                            last: self.last.clone().filter(|attempt| attempt.id == followed),
+                        });
+                        // A holder that published nothing has finished: not pending.
+                        let unresolved = if retry { PrEnd::Failed(PrFailure::Other) } else { PrEnd::Pending };
+                        return Some(WaitEnd { head, prs: prs.unwrap_or(unresolved), timed_out: true });
+                    }
+                }
             }
             self.env.sleep(POLL_INTERVAL);
         }
+    }
+
+    /// The end when no worker can be launched: no head attempt, and no PR
+    /// result unless a publication was already seen.
+    fn unavailable(&self) -> WaitEnd {
+        let prs = if self.pr_published { PrEnd::Published } else { PrEnd::Failed(PrFailure::Other) };
+        WaitEnd { head: HeadEnd::Unavailable, prs, timed_out: false }
+    }
+
+    /// A usable publication id other than the one stored before launch.
+    fn published(&mut self) -> bool {
+        if !self.pr_published {
+            let now = self.env.pr_publication();
+            self.pr_published = now.is_some() && now != self.pr_before;
+        }
+        self.pr_published
+    }
+
+    /// The PR half as of this poll. The PR lock is probed only once our
+    /// receipt reports contention, so the probe can never take the lock
+    /// ahead of our own worker's PR half.
+    fn pr_state(&mut self, receipt: Option<&Receipt>, exited: bool) -> PrState {
+        if self.published() {
+            return PrState::Resolved(PrEnd::Published);
+        }
+        let resolved = match receipt.map(|receipt| &receipt.prs) {
+            Some(PrStatus::Contended) => {
+                if self.env.pr_lock_held() {
+                    return PrState::Waiting;
+                }
+                // Read after the probe: the holder publishes before releasing.
+                if self.published() {
+                    PrEnd::Published
+                } else if self.request.force && !self.pr_retried {
+                    return PrState::Retry;
+                } else {
+                    PrEnd::Failed(PrFailure::Other)
+                }
+            }
+            Some(PrStatus::Ok) => PrEnd::Published,
+            Some(PrStatus::Failed { failure }) => PrEnd::Failed(failure.clone()),
+            Some(PrStatus::Ignored) => PrEnd::Ignored,
+            Some(PrStatus::Unsupported) => PrEnd::Unsupported,
+            // Exited without a usable receipt: no reason can be told.
+            None if exited => PrEnd::Failed(PrFailure::Other),
+            None => return PrState::Waiting,
+        };
+        PrState::Resolved(resolved)
     }
 
     fn current(&self) -> Option<Attempt> {
@@ -294,16 +367,15 @@ impl Follow<'_, '_> {
     /// What to do once our worker has exited without an attempt of its own.
     ///
     /// Its lock is released, so probing cannot take it from our worker.
-    fn adoption(&self, current: Option<Attempt>, ours: &Attempt) -> Adoption {
-        let receipt = self.request.force.then(|| self.env.receipt(ours)).flatten();
-        let adopted_elsewhere = receipt.as_ref().is_some_and(|receipt| receipt.head == HeadStatus::AdoptedElsewhere);
+    fn adoption(&self, current: Option<Attempt>, receipt: Option<&Receipt>) -> Adoption {
+        let adopted_elsewhere = receipt.is_some_and(|receipt| receipt.head == HeadStatus::AdoptedElsewhere);
         match current {
             // Another worker is checking this origin and branch now.
             Some(attempt) if attempt.outcome.is_none() && self.env.head_lock_held() => Adoption::Follow(attempt),
-            // A forced worker's receipt proves the lock was held when it
-            // tried, so that attempt ran alongside this run.
+            // Our receipt proves the lock was held when our worker tried, so
+            // that attempt ran alongside this run.
             Some(attempt) if adopted_elsewhere => Adoption::Follow(attempt),
-            None if adopted_elsewhere => {
+            None if adopted_elsewhere && self.request.force => {
                 // Held for another origin or branch: wait for that holder,
                 // then try again within the same budget.
                 while self.env.head_lock_held() {
@@ -325,7 +397,7 @@ enum Adoption {
     None,
 }
 
-/// The spinner's text for `phase` (spec §3 step 3).
+/// The spinner's text for `phase`.
 pub fn phase_text(phase: Phase) -> &'static str {
     match phase {
         Phase::CheckingFallback { reason: FallbackReason::NoKey | FallbackReason::NotVisible } => {
@@ -404,7 +476,7 @@ impl WaitEnv for StoreEnv {
     }
 
     fn pr_publication(&self) -> Option<String> {
-        refresh_publication(&self.pr_store, &self.origin)
+        stored_publication(&self.pr_store, &self.origin, unix_now())
     }
 
     fn elapsed(&self) -> Duration {
@@ -422,13 +494,6 @@ impl WaitEnv for StoreEnv {
     fn new_attempt_id(&self) -> Option<String> {
         new_attempt_id().ok()
     }
-}
-
-/// [`WaitEnv::pr_publication`] over the PR store at `pr_store`.
-fn refresh_publication(pr_store: &Path, origin: &str) -> Option<String> {
-    stored_publication(pr_store, origin, unix_now())
-        .filter(|publication| publication.writer == Writer::Refresh)
-        .map(|publication| publication.id)
 }
 
 #[cfg(test)]
