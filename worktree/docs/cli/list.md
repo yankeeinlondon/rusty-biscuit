@@ -2,7 +2,7 @@
 
 Lists all git worktrees along with their status. This is the default command -- running `wt` with no subcommand is equivalent to `wt list`.
 
-Before it lists anything, `wt list` checks whether `origin/<default>` is current and fetches it when it is not; see [Checking origin](#checking-origin). The output is then, in order: a caption, an optional credentials warning, the worktree table, a two-line legend, an optional PR age line, the git graph (image-capable terminals only), an optional refresh hint, the verbose section (`-v` only), and, after a blank line, any closing notes. Everything is written to stderr.
+Before it lists anything, `wt list` checks whether `origin/<default>` is current and fetches it when it is not; see [Checking origin](#checking-origin). The output is then, in order: a caption, an optional credentials warning, the worktree table, a two-line legend, the git graph (image-capable terminals only), a status list holding the optional PR age line and refresh hint, the verbose section (`-v` only), and, after a blank line, any closing notes. Everything is written to stderr.
 
 ## Output
 
@@ -24,7 +24,7 @@ Before it lists anything, `wt list` checks whether `origin/<default>` is current
 └───────────────────┴──────────────────────────────────┴──────────────────────┴───────────────────────────┘
 
  Worktree   ○ clean    ● uncommitted files    ● uncommitted source files
- Branch     └─ merges cleanly into parent    └─ conflicts with parent    └┄ parent deleted
+ Branch     └─ merges cleanly into parent     └─ conflicts with parent    └┄ parent deleted
 
  - main is 7 commits behind origin/main; run wt --ff to fast-forward it.
 ```
@@ -87,6 +87,8 @@ When `origin` is a supported provider and this run's API request failed for a co
 
 Nothing is printed when the request succeeded, with or without a key, or when no key was set and `ls-remote` answered (the closing notice below covers that). A 404 on its own is ambiguous and produces no line. Only failures this listing observed count; a background refresh that fails after the listing rendered never adds a line to it.
 
+The table is never narrower than the legend beneath it; a table with short content widens its last column to match. In the legend the `conflicts` sample sits in the same column as the source-files dot above it.
+
 ### Columns
 
 - **Worktree** -- a status dot and the directory name; the main checkout is `base repo`. The current worktree's name is bold and its whole row is highlighted.
@@ -120,7 +122,7 @@ Open pull requests on `origin` whose source is this repository show as a green `
 
 A PR from a fork with a same-named branch is never shown. In terminals that support OSC 8 hyperlinks the badge links to the PR; elsewhere it shows the number only, with no visible URL, so the table always fits.
 
-A successful answer is stored with the `origin` it came from, and `wt list` shows a stored answer for the current `origin` whatever its age. Once it is 60 seconds old a dim `PRs as of N min ago` line follows the legend, and the same background process that checks `origin` (see [Checking origin](#checking-origin)) asks again and replaces the stored answer. The two run independently, and neither blocks the other. An answer that arrives during the 3 s wait is shown in this listing; a later one is shown by the next. At most one PR refresh makes a request at a time, and a refresh that fails leaves the stored answer as it was.
+A successful answer is stored with the `origin` it came from, and `wt list` shows a stored answer for the current `origin` whatever its age. Once it is 60 seconds old a dim `- PRs as of N min ago` item opens the status list after the graph (see [Status list](#status-list)), and the same background process that checks `origin` (see [Checking origin](#checking-origin)) asks again and replaces the stored answer. The two run independently, and neither blocks the other. An answer that arrives during the 3 s wait is shown in this listing; a later one is shown by the next. At most one PR refresh makes a request at a time, and a refresh that fails leaves the stored answer as it was.
 
 With no stored answer for the current `origin` (the first run, a cleared cache, or a changed or removed `origin`), `wt list` makes the request itself before starting the background process, and gives it 300 ms. Its answer is stored only when nothing else stored an answer while the request was in flight and no background refresh is storing one at that moment; otherwise the newer stored answer is kept, and this listing shows it after its wait. So when two listings overlap, say `wt list` in one terminal and `wt -r` in another, the slower request can never put older badges back. Under `-r` and `--ff` it leaves that request to the background process, which it waits for. An answer stored for a different `origin` is never shown. A failure is never stored, and with no network and no usable stored answer the table shows no badges. A repository listed in `~/.wt.json` (see `--ignore-api`) makes no PR request and shows no badges.
 
@@ -146,11 +148,15 @@ There is no minimum terminal width: the graph is sized from its natural width an
 
 `-w` / `--width` sets the graph's width directly (`70`, `70ch`, or `50%` of the terminal); the graph is then never trimmed to fit.
 
-### Refresh hint
+### Status list
 
-When the listing rendered while work was still unfinished (the 3 s wait ran out, or a PR refresh is still running), one dim line follows the graph (or the PR age line when no graph is drawn), before the verbose section:
+A Markdown-style list of dim items follows the graph (or the legend when no graph is drawn), before the verbose section. It is left out when it has no items:
+
+- the PR age, when the shown PR badges are at least 60 seconds old (see [PR badges](#pr-badges))
+- the refresh hint, when the listing rendered while work was still unfinished (the 3 s wait ran out, or a PR refresh is still running)
 
 ```text
+- PRs as of 12 min ago
 - running this command again will provide updated metrics; alternatively use the --refresh / -r flags to force refresh immediately
 ```
 

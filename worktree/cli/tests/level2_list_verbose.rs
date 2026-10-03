@@ -775,7 +775,8 @@ fn level2_list_width_flag_leaves_the_counts_in_tmux() {
 }
 
 /// A stale stored answer in a real terminal: its badge still shows, and the
-/// dim age line follows the legend. The detached refresh `wt list` starts
+/// dim age line is the first status item, which follows the legend when, as
+/// in tmux, there is no graph. The detached refresh `wt list` starts
 /// sends its requests to a hanging local proxy, which the test then closes so
 /// the worker fails, stores nothing, and exits before the fixture is removed.
 #[test]
@@ -796,7 +797,7 @@ fn level2_list_stale_pr_answer_shows_a_dim_age_line_in_tmux() {
     let legend_end = screen.row_with(&["Branch", "parent deleted"]);
     let age = screen.row_with(&["PRs as of"]);
     assert_eq!(age, legend_end + 1, "the age line follows the legend:\n{plain}");
-    assert_eq!(screen.text(age).trim(), "PRs as of 12 min ago", "{plain}");
+    assert_eq!(screen.text(age).trim(), "- PRs as of 12 min ago", "{plain}");
     screen.assert_span(age, "PRs as of 12 min ago", "dim", |s| s.dim);
 
     // The worker's requests reached the stub, not the network: one from its

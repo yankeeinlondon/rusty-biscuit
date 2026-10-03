@@ -1,6 +1,6 @@
 //! The `wt list` output rendered from listing facts: caption variants, the
 //! credentials line, every cell kind, badge placement, the legend, row
-//! emphasis, the PR age line, the refresh hint, the closing notes, and the
+//! emphasis, the status list (PR age line and refresh hint), the closing notes, and the
 //! order of every section.
 //!
 //! The tree comes from the library's real `build_tree`; only the git answers
@@ -415,10 +415,30 @@ fn the_legend_explains_both_columns() {
         lines[legend].trim_end(),
         " Worktree   ○ clean    ● uncommitted files    ● uncommitted source files"
     );
+    let column = |line: &str, glyph: char, nth: usize| line.chars().enumerate().filter(|(_, c)| *c == glyph).nth(nth).map(|(i, _)| i);
+    assert_eq!(
+        column(lines[legend + 1], '└', 1),
+        column(lines[legend], '●', 1),
+        "the conflicts elbow sits under the source-files dot"
+    );
     assert_eq!(
         lines[legend + 1].trim_end(),
-        " Branch     └─ merges cleanly into parent    └─ conflicts with parent    └┄ parent deleted"
+        " Branch     └─ merges cleanly into parent     └─ conflicts with parent    └┄ parent deleted"
     );
+}
+
+#[test]
+fn a_narrow_table_is_as_wide_as_the_legend() {
+    let example = Example::new();
+    let facts = TableFacts { tree: &example.tree[..1], ..example.facts() };
+    let rendered = list_table::render(&facts, &plain_terminal(), NOW);
+    let width = |line: &str| line.trim_end().chars().count();
+    let branch_legend = rendered.lines().find(|line| line.starts_with(" Branch ")).expect("legend");
+    let table_lines: Vec<&str> = rendered.lines().filter(|line| line.starts_with(['┌', '│', '├', '└'])).collect();
+    assert_eq!(table_lines.len(), 5, "{rendered}");
+    for line in table_lines {
+        assert_eq!(width(line), width(branch_legend), "{line:?} in:\n{rendered}");
+    }
 }
 
 #[test]
@@ -426,15 +446,16 @@ fn the_pr_age_line_appears_once_the_badges_are_60_seconds_old() {
     let with = |fetched_at: Option<u64>| {
         let mut example = Example::new();
         example.prs.fetched_at = fetched_at;
-        plain(&example).lines().last().unwrap().trim().to_string()
+        assert!(!plain(&example).contains("PRs as of"), "the age line is not beneath the legend");
+        list_table::render_status(&example.facts(), &plain_terminal(), NOW).map(|status| status.trim().to_string())
     };
-    assert_eq!(with(Some(NOW - (12 * 60 + 30))), "PRs as of 12 min ago");
-    assert_eq!(with(Some(NOW - 60)), "PRs as of 1 min ago");
-    assert_eq!(with(Some(NOW - 3 * 3600)), "PRs as of 3 h ago");
-    assert_eq!(with(Some(NOW - 5 * 86_400)), "PRs as of 5 days ago");
-    assert!(with(Some(NOW - 59)).starts_with("Branch"), "fresh badges need no age line");
-    assert!(with(Some(NOW + 60)).starts_with("Branch"), "a future fetch time has no age");
-    assert!(with(None).starts_with("Branch"), "no answer has no age");
+    assert_eq!(with(Some(NOW - (12 * 60 + 30))).as_deref(), Some("- PRs as of 12 min ago"));
+    assert_eq!(with(Some(NOW - 60)).as_deref(), Some("- PRs as of 1 min ago"));
+    assert_eq!(with(Some(NOW - 3 * 3600)).as_deref(), Some("- PRs as of 3 h ago"));
+    assert_eq!(with(Some(NOW - 5 * 86_400)).as_deref(), Some("- PRs as of 5 days ago"));
+    assert_eq!(with(Some(NOW - 59)), None, "fresh badges need no age line");
+    assert_eq!(with(Some(NOW + 60)), None, "a future fetch time has no age");
+    assert_eq!(with(None), None, "no answer has no age");
 }
 
 #[test]
@@ -444,13 +465,15 @@ fn a_stored_empty_answer_shows_no_badges_but_keeps_its_age() {
     example.prs.fetched_at = Some(NOW - 5 * 60);
     let rendered = plain(&example);
     assert!(!rendered.contains("PR #"), "{rendered}");
-    assert_eq!(rendered.lines().last().unwrap().trim(), "PRs as of 5 min ago");
+    let status = list_table::render_status(&example.facts(), &plain_terminal(), NOW).expect("age");
+    assert_eq!(status.trim(), "- PRs as of 5 min ago");
 
     // An unavailable first answer (nothing stored, the request failed) is
     // not an empty answer: no badges and no age.
     example.prs = Default::default();
     let rendered = plain(&example);
-    assert!(!rendered.contains("PR #") && !rendered.contains("PRs as of"), "{rendered}");
+    assert!(!rendered.contains("PR #"), "{rendered}");
+    assert_eq!(list_table::render_status(&example.facts(), &plain_terminal(), NOW), None);
 }
 
 fn plain_at(width: u32, example: &Example) -> String {
@@ -930,12 +953,12 @@ fn the_credentials_line_is_dim_and_directly_follows_the_caption() {
 #[test]
 fn the_hint_appears_only_with_unfinished_work() {
     let example = Example::new();
-    assert_eq!(list_table::render_hint(&example.facts(), &plain_terminal()), None);
+    assert_eq!(list_table::render_status(&example.facts(), &plain_terminal(), NOW), None);
     let facts = TableFacts { unfinished: true, ..example.facts() };
-    let hint = list_table::render_hint(&facts, &plain_terminal()).expect("hint");
+    let hint = list_table::render_status(&facts, &plain_terminal(), NOW).expect("hint");
     let words = hint.split_whitespace().collect::<Vec<_>>().join(" ");
     assert_eq!(words, format!("- {}", list_table::REFRESH_HINT), "wrapped, never split: {hint:?}");
-    let colored = list_table::render_hint(&facts, &color_terminal()).expect("hint");
+    let colored = list_table::render_status(&facts, &color_terminal(), NOW).expect("hint");
     assert!(colored.contains("\u{1b}[2m"), "dim: {colored:?}");
 }
 
@@ -1010,7 +1033,7 @@ fn output_order_snapshot() {
         ..example.facts()
     };
     let table = list_table::render(&facts, &terminal, NOW);
-    let hint = list_table::render_hint(&facts, &terminal);
+    let status = list_table::render_status(&facts, &terminal, NOW);
     let notes = list_table::render_notes(&facts, &terminal);
     let graph = "<the git graph>\n";
     let verbose = "<the verbose section>\n";
@@ -1018,7 +1041,7 @@ fn output_order_snapshot() {
         list_table::assemble(Sections {
             table: &table,
             graph,
-            hint: hint.as_deref(),
+            status: status.as_deref(),
             verbose,
             notes: notes.as_deref(),
         })

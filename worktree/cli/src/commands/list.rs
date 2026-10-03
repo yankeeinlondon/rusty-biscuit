@@ -469,14 +469,14 @@ fn run_pipeline(
         }
         text
     });
-    let hint = list_table::render_hint(&facts, terminal);
+    let status = list_table::render_status(&facts, terminal, now);
     let notes = list_table::render_notes(&facts, terminal);
     eprint!(
         "{}",
         list_table::assemble(Sections {
             table: &table,
             graph: graph.as_deref(),
-            hint: hint.as_deref(),
+            status: status.as_deref(),
             verbose: verbose_text.as_deref(),
             notes: notes.as_deref(),
         })

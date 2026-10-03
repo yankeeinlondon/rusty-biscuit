@@ -1,6 +1,6 @@
 //! The `wt list` output around the git work: the caption, the credentials
-//! line, the table, the legend, the PR age line, the refresh hint, and the
-//! closing notes, plus [`assemble`], which puts them and the graph and
+//! line, the table, the legend, the status list (the PR age line and the
+//! refresh hint), and the closing notes, plus [`assemble`], which puts them and the graph and
 //! verbose sections in their order.
 //!
 //! Rendering is pure over the library's listing facts and an explicit `now`,
@@ -23,6 +23,7 @@ use biscuit_terminal::components::renderable::TerminalRenderable as _;
 use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
 use biscuit_terminal::discovery::detection::ColorMode;
 use biscuit_terminal::terminal::Terminal;
+use biscuit_terminal::utils::block_constraint::visible_width;
 use biscuit_terminal::utils::color::{BasicColor, Color, RgbColor};
 use biscuit_terminal::utils::wrap_policy::WordWrap;
 use worktree::default_target::DefaultTarget;
@@ -167,10 +168,10 @@ impl<'a> TableFacts<'a> {
     }
 }
 
-/// The caption, the §5 line, the table, the legend, and the PR age line,
-/// each separated as printed.
+/// The caption, the §5 line, the table, and the legend, each separated as
+/// printed.
 ///
-/// `now` is Unix seconds, for the PR and remote-observation ages.
+/// `now` is Unix seconds, for the remote-observation ages.
 pub fn render(facts: &TableFacts<'_>, terminal: &Terminal, now: u64) -> String {
     let prose = |markup: String| Prose::new(markup).render(terminal);
     let wrapped = |markup: String| {
@@ -194,15 +195,19 @@ pub fn render(facts: &TableFacts<'_>, terminal: &Terminal, now: u64) -> String {
     for line in legend_markup() {
         out.push_str(&format!(" {}\n", prose(line).trim_end()));
     }
-    if let Some(age) = pr_age_markup(facts.prs, now) {
-        out.push_str(&format!(" {}\n", prose(age).trim_end()));
-    }
     out
 }
 
-/// The §6 hint, when the listing rendered with work unfinished.
-pub fn render_hint(facts: &TableFacts<'_>, terminal: &Terminal) -> Option<String> {
-    facts.unfinished.then(|| notes_list([format!("<dim>{REFRESH_HINT}</dim>")], terminal))
+/// The status list: the PR age line, then the §6 hint when the listing
+/// rendered with work unfinished; `None` when neither applies.
+///
+/// `now` is Unix seconds, for the PR age.
+pub fn render_status(facts: &TableFacts<'_>, terminal: &Terminal, now: u64) -> Option<String> {
+    let lines: Vec<String> = pr_age_markup(facts.prs, now)
+        .into_iter()
+        .chain(facts.unfinished.then(|| format!("<dim>{REFRESH_HINT}</dim>")))
+        .collect();
+    (!lines.is_empty()).then(|| notes_list(lines, terminal))
 }
 
 /// The closing notes: the `--ff` result or the §9 suggestion, then the §8
@@ -250,17 +255,18 @@ pub struct Sections<'s> {
     /// [`render`]'s output.
     pub table: &'s str,
     pub graph: Option<&'s str>,
-    pub hint: Option<&'s str>,
+    /// [`render_status`]'s output.
+    pub status: Option<&'s str>,
     pub verbose: Option<&'s str>,
     pub notes: Option<&'s str>,
 }
 
-/// The whole listing: the table, the graph, the hint (so it follows the
-/// graph, or the PR age line without one), the verbose section, then a blank
+/// The whole listing: the table, the graph, the status list (so it follows
+/// the graph, or the legend without one), the verbose section, then a blank
 /// line and the notes.
 pub fn assemble(sections: Sections<'_>) -> String {
     let mut out = sections.table.to_string();
-    for part in [sections.graph, sections.hint, sections.verbose].into_iter().flatten() {
+    for part in [sections.graph, sections.status, sections.verbose].into_iter().flatten() {
         out.push_str(part);
     }
     if let Some(notes) = sections.notes {
@@ -422,6 +428,7 @@ pub fn age_text(seconds: u64) -> String {
 }
 
 /// The two legend lines, one each for the Worktree and Branch column glyphs.
+/// The `conflicts` sample sits in the column of the source-files dot above it.
 pub fn legend_markup() -> [String; 2] {
     [
         format!(
@@ -431,7 +438,7 @@ pub fn legend_markup() -> [String; 2] {
             dirty_dot(DirtyStatus::DirtySource),
         ),
         format!(
-            "Branch     {} <dim>merges cleanly into parent</dim>    {} <dim>conflicts with parent</dim>    {} <dim>parent deleted</dim>",
+            "Branch     {} <dim>merges cleanly into parent</dim>     {} <dim>conflicts with parent</dim>    {} <dim>parent deleted</dim>",
             connector_markup("└─", Some(MergeState::Clean), false),
             connector_markup("└─", Some(MergeState::Conflicts), false),
             connector_markup("└┄", None, true),
@@ -450,8 +457,9 @@ pub fn pr_age_markup(prs: &PrListing, now: u64) -> Option<String> {
 }
 
 /// The table, one row per tree row, with the current worktree's row
-/// highlighted. The target columns carry ahead/behind counts only when
-/// `terminal` is at least [`METRICS_MIN_WIDTH`] columns wide.
+/// highlighted, and never narrower than the legend beneath it. The target
+/// columns carry ahead/behind counts only when `terminal` is at least
+/// [`METRICS_MIN_WIDTH`] columns wide.
 pub fn table(facts: &TableFacts<'_>, terminal: &Terminal) -> Table {
     let prose_cell = |markup: String| -> TableCellContent { Prose::new(markup).render(terminal).into() };
     let target_header = match facts.target {
@@ -465,7 +473,10 @@ pub fn table(facts: &TableFacts<'_>, terminal: &Terminal) -> Table {
         TableColumn::new(Prose::new(format!("-> {target_header}")).render(terminal)),
         TableColumn::new("-> parent"),
     ];
-    let mut table = Table::new().with_columns(columns).prefer_cursor_alignment();
+    let mut table = Table::new()
+        .with_columns(columns)
+        .with_min_width(legend_width(terminal))
+        .prefer_cursor_alignment();
 
     let show_metrics = terminal.width() >= METRICS_MIN_WIDTH;
     let mut current_row = None;
@@ -487,6 +498,15 @@ pub fn table(facts: &TableFacts<'_>, terminal: &Terminal) -> Table {
         Some(row) => table.highlight_row(row, row_emphasis(terminal)),
         None => table,
     }
+}
+
+/// The widest legend line as printed, with its one-cell indent.
+fn legend_width(terminal: &Terminal) -> u32 {
+    legend_markup()
+        .into_iter()
+        .map(|line| 1 + visible_width(Prose::new(line).render(terminal).trim_end()))
+        .max()
+        .unwrap_or(0)
 }
 
 /// A very subtle background for the current worktree's row.
