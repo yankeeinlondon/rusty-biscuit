@@ -136,6 +136,8 @@ fn refresh_waits_for_both_halves_and_asks_again_like_every_listing() {
     assert!(output.status.success());
     assert!(wait_for_refresh_workers(fixture.main(), 0, WORKER_WAIT).is_empty());
     assert_eq!(gitea.requests(), 1, "a young answer is requested again");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("PR #7"), "and shown by the listing that waited for it");
+    assert_eq!(receipts_beside(&fixture.pr_store(), "prs.json"), [], "every attempt's receipt is deleted by its wait");
     let checks = gitea.branch_requests();
 
     let output = fixture.wt_command_via_gitea(&gitea).args(["-r"]).env("NO_COLOR", "1").output().expect("wt -r");
@@ -305,6 +307,8 @@ mod ignore_api {
     fn the_repository_is_recorded_before_the_run_and_no_provider_is_asked() {
         let fixture = MixedFixture::new().with_github_origin();
         let _cleanup = RemoveOnDrop(fixture.pr_store());
+        // A young stored answer, from before the repository was ignored.
+        fixture.seed_pr_store(Duration::from_secs(10), 99, "divergent-0");
         let proxy = ProxyStub::closing_after(Duration::ZERO);
 
         let output =
@@ -325,13 +329,17 @@ mod ignore_api {
         assert_eq!(proxy.connections(), 0, "no PR request and no branch-head request");
         assert!(!stderr.contains("ls-remote"), "no fallback notice: {stderr}");
         assert!(!stderr.contains("GITHUB_TOKEN"), "no credentials line: {stderr}");
-        assert!(!stderr.contains("PR #"), "no badges without the API: {stderr}");
+        assert!(!stderr.contains("PR #"), "no badges without the API, not even stored ones: {stderr}");
+        assert!(!stderr.contains("PRs as of") && !stderr.contains("couldn't get open PRs"), "no PR item: {stderr}");
+        assert!(!stderr.contains("running this command again"), "{stderr}");
 
         // The choice persists without the flag.
-        let output = fixture.wt_command_via(&proxy).arg("list").output().expect("wt list");
-        assert!(output.status.success());
+        let output = fixture.wt_command_via(&proxy).arg("list").env("NO_COLOR", "1").output().expect("wt list");
+        let stderr = collapsed(&String::from_utf8_lossy(&output.stderr));
+        assert!(output.status.success(), "{stderr}");
         assert!(wait_for_refresh_workers(fixture.main(), 0, WORKER_WAIT).is_empty());
         assert_eq!(proxy.connections(), 0);
+        assert!(!stderr.contains("PR #") && !stderr.contains("PRs as of"), "{stderr}");
     }
 
     #[test]

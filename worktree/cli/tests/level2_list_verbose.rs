@@ -3,8 +3,11 @@
 //! Verifies that the status table and verbose commit section render correctly
 //! in a real terminal (tmux), both on a plain terminal and when the
 //! image-capable graph path is exercised. The design test checks the table's
-//! colors and emphasis cell by cell in a styled tmux capture, and the stale
-//! scene checks the dim PR age line beneath the legend. Two scenes resize the
+//! colors and emphasis cell by cell in a styled tmux capture. The stale scene
+//! holds the worker's PR request past the 3 s wait and checks the dim age
+//! item and hint beneath the legend, the cleared spinner, and a caption that
+//! is no longer "still checking"; the failed-refresh scene checks the dim
+//! `(couldn't refresh)` item. Two scenes resize the
 //! pane to exactly 99 and 100 columns to prove the counts' width gate on the
 //! terminal's own width, including a `-> parent` cell against a non-default
 //! parent. Two scenes point `origin` at a local Gitea stand-in: one proves the
@@ -25,18 +28,18 @@ mod styled_capture;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use assert_cmd::cargo::cargo_bin;
 use biscuit_test_harness::tmux::TmuxHarness;
 use biscuit_test_harness::CapturedFrame;
 use biscuit_test_harness::TerminalHarness;
-use perf_support::{FakeGitea, GitHold, GiteaReply, NoRequest, ProxyStub, wait_for_refresh_workers};
+use perf_support::{FakeGitea, GitHold, GiteaReply, NoRequest, wait_for_refresh_workers};
 use serial_test::serial;
 use styled_capture::{Color, StyledScreen};
 use test_toolkit::{Backend, Level, require_level};
 use worktree::fork_origin::{ForkOrigin, ForkOriginStore, fork_origin_path};
-use worktree::pull_requests::{RefreshOutcome, pr_lock_path, pr_store_path, refresh, unix_now};
+use worktree::pull_requests::{RefreshOutcome, pr_store_path, refresh, unix_now};
 use worktree::remote_head::{refresh_lock_held, remote_head_store_path};
 
 fn run_git(repo: &std::path::Path, args: &[&str]) {
@@ -301,10 +304,17 @@ impl DesignFixture {
     }
 
     /// [`Self::new`] with `origin` at [`FakeGitea::ORIGIN`]; pair it with a
-    /// pane whose proxy is a [`FakeGitea`]. The stored PR answer names no
-    /// branch of `o/r`, so no badge shows.
+    /// pane whose proxy is a [`FakeGitea`]. The listing's worker asks Gitea
+    /// for open PRs, so the stored answer's badge shows only until Gitea
+    /// answers.
     fn with_gitea_origin() -> Self {
-        Self::build(Duration::ZERO, false, FakeGitea::ORIGIN)
+        Self::with_gitea_pr_age(Duration::ZERO)
+    }
+
+    /// [`Self::with_gitea_origin`] whose stored PR answer was fetched
+    /// `pr_age` ago.
+    fn with_gitea_pr_age(pr_age: Duration) -> Self {
+        Self::build(pr_age, false, FakeGitea::ORIGIN)
     }
 
     /// [`Self::with_gitea_origin`] plus a bare `o/r.git` whose `main` is one
@@ -460,14 +470,15 @@ impl DesignFixture {
             .save_atomic(&self.store_path(fork_origin_path(main).expect("fork-origin path")))
             .expect("write fork-origin store");
 
-        // Bound to this origin; a fresh answer makes `wt` send no request.
+        // Bound to this origin and naming its repository.
         let fetched_at = unix_now() - pr_age.as_secs();
         let origin = worktree::pull_requests::origin_url(main).expect("the fixture has an origin");
+        let source_repo = if origin == FakeGitea::ORIGIN { "o/r" } else { "owner/repo" };
         let pr = |number: u32, source: &str, target: &str| {
             serde_json::json!({
                 "number": number,
-                "url": format!("https://github.com/owner/repo/pull/{number}"),
-                "source_repo": "owner/repo",
+                "url": format!("https://example.invalid/{source_repo}/pull/{number}"),
+                "source_repo": source_repo,
                 "source_branch": source,
                 "target_branch": target,
             })
@@ -481,7 +492,7 @@ impl DesignFixture {
             "origin_digest": worktree::pull_requests::origin_digest(&origin),
             "fetched_at": fetched_at,
             "publication": worktree::remote_head::new_attempt_id().expect("a publication id"),
-            "source_repo": "owner/repo",
+            "source_repo": source_repo,
             "pull_requests": pull_requests,
         });
         fs::write(self.pr_store(), serde_json::to_vec(&prs).unwrap()).expect("write PR store");
@@ -512,8 +523,8 @@ impl DesignFixture {
     /// reliably empty a tmux pane, so a reused pane can still show an earlier
     /// run's legend and satisfy this run's wait.
     fn list_in(&self, colorfgbg: &str) -> StyledScreen {
-        // A refused proxy keeps any request off the network; the fresh store
-        // means none is made.
+        // A refused proxy keeps every request off the network, and fails
+        // the worker's PR request at once.
         self.list_until("list", colorfgbg, "http://127.0.0.1:9", "parent deleted")
     }
 
@@ -733,7 +744,11 @@ fn level2_list_styles_follow_the_design_in_tmux() {
     // Legend: the dim ring, both dots, and the Branch connectors.
     let legend = screen.row_with(&["Worktree", "uncommitted source files"]);
     screen.assert_span(legend, "○", "dim", |s| s.dim);
-    assert!(!plain.contains("PRs as of"), "a fresh answer has no age line:\n{plain}");
+    // The worker's PR request was refused, so this run dates the stored
+    // answer it shows; the item is the PR status, not part of the legend.
+    let item = screen.row_with(&["PRs as of"]);
+    assert_eq!(screen.text(item).trim(), "- PRs as of less than 1 min ago (couldn't refresh)", "{plain}");
+    assert_eq!(item, screen.row_with(&["Branch", "parent deleted"]) + 1, "{plain}");
     let dots: Vec<_> = screen.rows[legend].iter().filter(|c| c.ch == '●').collect();
     assert!(dots.len() == 2 && dots[0].style.fg_is(YELLOW) && dots[1].style.fg_is(RED), "{dots:?}");
     let branch_legend = screen.row_with(&["Branch", "conflicts with parent"]);
@@ -773,21 +788,32 @@ fn level2_list_width_flag_leaves_the_counts_in_tmux() {
     screen.assert_span(feature, "+1", "dim green", |s| s.dim && s.fg_is(GREEN));
 }
 
-/// A stale stored answer in a real terminal: its badge still shows, and the
-/// dim age line is the first status item, which follows the legend when, as
-/// in tmux, there is no graph. The detached refresh `wt list` starts
-/// sends its requests to a hanging local proxy, which the test then closes so
-/// the worker fails, stores nothing, and exits before the fixture is removed.
+/// A stale stored answer in a real terminal while the worker's PR request is
+/// still held at the 3 s wait: its badge still shows, the dim age item is the
+/// first status item (it follows the legend when, as in tmux, there is no
+/// graph), and the dim refresh hint follows it. Only the PR half was left, so
+/// the spinner said `updating`, is gone, and the caption says the check
+/// ended rather than "still checking". Released, the request fails and the
+/// worker stores nothing.
 #[test]
 #[serial(level2_terminal)]
 fn level2_list_stale_pr_answer_shows_a_dim_age_line_in_tmux() {
+    use biscuit_terminal::components::spinner::FRAMES;
+
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
-    let fixture = DesignFixture::with_pr_age(Duration::from_secs(12 * 60 + 5));
+    let fixture = DesignFixture::with_gitea_pr_age(Duration::from_secs(12 * 60 + 5));
     let seeded = fs::read(fixture.pr_store()).expect("seeded store");
-    let proxy = ProxyStub::hanging();
+    // Plain HTTP reaches the stand-in at once, so no connect timeout races
+    // the listing's 3 s wait.
+    let gitea = FakeGitea::new(GiteaReply::Status(503));
+    gitea.hold();
 
-    let screen = fixture.list_until("list", "15;0", &proxy.url(), "PRs as of");
+    let mut harness = fixture.start_in_pane(None, "list", "15;0", &gitea.url());
+    let during = wait_for_pane(&mut harness, |plain| plain.contains("updating"));
+    assert!(FRAMES.iter().any(|glyph| during.plain.contains(glyph)), "the spinner drew a frame:\n{}", during.plain);
+    let screen =
+        StyledScreen::parse(&wait_for_pane(&mut harness, |plain| unwrapped(plain).contains("force refresh immediately")).raw);
     let plain = screen.plain();
 
     let feature = screen.row_with(&["● wt-feature", "│"]);
@@ -798,23 +824,53 @@ fn level2_list_stale_pr_answer_shows_a_dim_age_line_in_tmux() {
     assert_eq!(age, legend_end + 1, "the age line follows the legend:\n{plain}");
     assert_eq!(screen.text(age).trim(), "- PRs as of 12 min ago", "{plain}");
     screen.assert_span(age, "PRs as of 12 min ago", "dim", |s| s.dim);
+    let hint = screen.row_with(&["running this command again"]);
+    assert_eq!(hint, age + 1, "the hint follows the PR item:\n{plain}");
+    screen.assert_span(hint, "running this command again", "dim", |s| s.dim);
 
-    // The worker's requests reached the stub, not the network: one from its
-    // PR half and one from its live-head half (the provider's branch-head
-    // API; git's own fallback is refused). Unblock them and wait until the
-    // worker released both locks and exited.
-    let deadline = Instant::now() + Duration::from_secs(20);
-    assert!(proxy.wait_for_connections(2, Duration::from_secs(20)), "the worker never made its requests");
-    let lock = pr_lock_path(&fixture.pr_store());
-    while !lock.exists() || probe_refresh(&fixture) == RefreshOutcome::Contended || head_lock_held(&fixture) {
-        proxy.close_held();
-        assert!(Instant::now() < deadline, "the worker never released its lock");
-        std::thread::sleep(Duration::from_millis(20));
+    for glyph in FRAMES {
+        assert!(!plain.contains(glyph), "a spinner frame is left on the pane:\n{plain}");
     }
-    let left = wait_for_refresh_workers(&fixture.main, 0, Duration::from_secs(20));
-    assert!(left.is_empty(), "the worker outlived its request: {left:?}");
-    assert!(!head_lock_held(&fixture), "the live-head lock is free");
-    assert_eq!(proxy.connections(), 2, "one worker request per half, none in the foreground");
+    assert!(!plain.contains("updating"), "the spinner's text is left on the pane:\n{plain}");
+    let sentences = unwrapped(&plain);
+    assert!(sentences.contains("(couldn't check origin;"), "the head half had ended:\n{plain}");
+    assert!(!sentences.contains("still checking"), "{plain}");
+
+    // The request is still held after the listing returned; fail it and
+    // wait until the worker released both locks and exited.
+    assert_eq!(gitea.waiting(), 1, "the PR request is still held:\n{plain}");
+    gitea.release(GiteaReply::Status(503));
+    assert_worker_gone(&fixture);
+    assert_ne!(probe_refresh(&fixture), RefreshOutcome::Contended, "the PR lock is free");
+    assert_eq!(gitea.requests(), 1, "one PR request, from the worker");
+    assert_eq!(fs::read(fixture.pr_store()).expect("store"), seeded, "a failed refresh is never stored");
+}
+
+/// A PR request that fails inside the wait leaves the stored badge and dates
+/// it with one dim `(couldn't refresh)` item beneath the legend, and no hint:
+/// both halves ended.
+#[test]
+#[serial(level2_terminal)]
+fn level2_list_failed_pr_refresh_shows_a_dim_couldnt_refresh_item_in_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+
+    let fixture = DesignFixture::with_gitea_pr_age(Duration::from_secs(12 * 60 + 5));
+    let seeded = fs::read(fixture.pr_store()).expect("seeded store");
+    let gitea = FakeGitea::new(GiteaReply::Status(500));
+
+    let screen = fixture.list_until("list", "15;0", &gitea.url(), "couldn't refresh");
+    let plain = screen.plain();
+
+    let feature = screen.row_with(&["● wt-feature", "│"]);
+    screen.assert_span(feature, " PR #99 ", "a PR badge", |s| s.bg_is(PR_BADGE));
+    let item = screen.row_with(&["PRs as of"]);
+    assert_eq!(item, screen.row_with(&["Branch", "parent deleted"]) + 1, "the item follows the legend:\n{plain}");
+    assert_eq!(screen.text(item).trim(), "- PRs as of 12 min ago (couldn't refresh)", "{plain}");
+    screen.assert_span(item, "PRs as of 12 min ago (couldn't refresh)", "dim", |s| s.dim);
+    assert!(!unwrapped(&plain).contains("running this command again"), "both halves ended:\n{plain}");
+
+    assert_worker_gone(&fixture);
+    assert_eq!(gitea.requests(), 1);
     assert_eq!(fs::read(fixture.pr_store()).expect("store"), seeded, "a failed refresh is never stored");
 }
 
@@ -960,9 +1016,11 @@ fn level2_list_credentials_warning_is_a_dim_line_beneath_the_caption_in_tmux() {
     assert!(!sentences.contains("running this command again"), "the worker finished, so no hint:\n{plain}");
     assert!(!plain.contains("GITEA_TOKEN="), "a variable is named, never assigned:\n{plain}");
 
+    assert!(!sentences.contains("PRs as of") && !sentences.contains("couldn't get"), "the PRs answered:\n{plain}");
+
     assert_worker_gone(&fixture);
     assert!(gitea.branch_requests() >= 1, "the worker asked Gitea for the branch head");
-    assert_eq!(gitea.requests(), 0, "a fresh PR answer makes no PR request");
+    assert_eq!(gitea.requests(), 1, "and, like every listing, for open PRs");
 }
 
 /// With `origin`'s answer held past the 3 s wait, the spinner draws on the
@@ -1005,7 +1063,7 @@ fn level2_list_clears_the_spinner_before_the_caption_and_shows_a_dim_hint_in_tmu
 
     gitea.release(GiteaReply::Open(Vec::new()));
     assert_worker_gone(&fixture);
-    assert_eq!(gitea.requests(), 0, "a fresh PR answer makes no PR request");
+    assert_eq!(gitea.requests(), 1, "like every listing, it asked for open PRs");
 }
 
 /// The spinner's texts (spec §3 step 3).

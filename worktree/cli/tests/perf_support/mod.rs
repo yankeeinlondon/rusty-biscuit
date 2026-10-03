@@ -204,6 +204,50 @@ impl MixedFixture {
         command
     }
 
+    /// Makes [`FakeGitea::ORIGIN`] a real repository that `gitea` serves to
+    /// git through `git http-backend`: a bare `o/r.git` under `HOME` whose
+    /// `main` is one commit past this checkout's `main`, which the tracking
+    /// ref names too, so the worker's check finds a new tip and fetches it.
+    /// Pair it with [`MixedFixture::with_gitea_origin`] and
+    /// [`MixedFixture::wt_command_via_gitea_git`]. Returns the commit only
+    /// `origin` has.
+    pub fn serve_gitea_origin_one_commit_ahead(&self, gitea: &FakeGitea) -> String {
+        let root = self.home.path().join("gitea");
+        let bare = root.join("o").join("r.git");
+        fs::create_dir_all(&bare).expect("create the served repository");
+        run_git(&bare, &["init", "--bare", "--quiet", "-b", "main"]);
+        run_git(&self.main, &["push", "--quiet", bare.to_str().unwrap(), "main:refs/heads/main"]);
+        run_git(&self.main, &["update-ref", "refs/remotes/origin/main", "main"]);
+        let output = Command::new("git")
+            .current_dir(&bare)
+            .args(["-c", "user.name=Someone Else", "-c", "user.email=else@example.com"])
+            .args(["commit-tree", "main^{tree}", "-p", "main", "-m", "pushed by someone else"])
+            .output()
+            .expect("git commit-tree");
+        assert!(output.status.success(), "commit-tree: {output:?}");
+        let pushed = String::from_utf8(output.stdout).expect("utf-8").trim().to_string();
+        run_git(&bare, &["update-ref", "refs/heads/main", &pushed]);
+        gitea.serve_repositories(&root);
+        pushed
+    }
+
+    /// [`MixedFixture::wt_command_via_gitea`] whose git also reaches `gitea`
+    /// (`http.proxy`), with no user or system git configuration, for a
+    /// fixture built with [`MixedFixture::serve_gitea_origin_one_commit_ahead`].
+    pub fn wt_command_via_gitea_git(&self, gitea: &FakeGitea) -> Command {
+        let global = self.home.path().join("empty.gitconfig");
+        fs::write(&global, "").expect("write an empty global git config");
+        let mut command = self.wt_command_via_gitea(gitea);
+        command
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", global)
+            .env("GIT_CONFIG_KEY_0", "http.proxy")
+            .env("GIT_CONFIG_VALUE_0", gitea.url())
+            .env("GIT_CONFIG_KEY_1", "protocol.http.allow")
+            .env("GIT_CONFIG_VALUE_1", "always");
+        command
+    }
+
     /// `wt internal-refresh <main>`, as `wt list` starts it, but owned by
     /// the test: it can be waited for or killed.
     pub fn refresh_worker_via_gitea(&self, gitea: &FakeGitea) -> Command {
@@ -277,8 +321,8 @@ impl MixedFixture {
     /// Writes a live head of `main` for the current `origin`, checked `age`
     /// ago: `sha` is its object ID, or `None` for a verified absence.
     ///
-    /// A fresh one isolates a test from the worker's live-head half: `wt list`
-    /// launches no worker for it, and a worker skips its request.
+    /// A fresh one gives the caption an answer to date; `wt list` still
+    /// launches its worker, and the worker's check still runs.
     pub fn seed_remote_head_store(&self, age: Duration, sha: Option<&str>) {
         let origin = worktree::pull_requests::origin_url(&self.main).expect("the fixture has an origin");
         let store = self.remote_head_store();
@@ -854,9 +898,9 @@ impl FakeGitea {
     /// Runs `action` for every later request after it is received and before
     /// it is answered, while the requester waits.
     ///
-    /// A foreground `wt list` request gives up after its 300 ms deadline, too
-    /// short for the test thread to observe a held request, act, and release
-    /// it; `action` runs on the server thread instead.
+    /// The action happens exactly between the worker's request and its
+    /// answer, while the test thread is blocked in the listing; `action` runs
+    /// on the server thread for that reason.
     pub fn before_reply(&self, action: impl Fn() + Send + 'static) {
         *self.before_reply.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Box::new(action));
     }

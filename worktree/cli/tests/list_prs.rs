@@ -1,8 +1,15 @@
 //! `wt list`'s PR badges through the real binary, with every request sent to
 //! a local stand-in: every listing's detached `wt internal-refresh` asks for
-//! open PRs whatever the stored answer's age, the listing waits for that
-//! answer within its 3 s budget, and a failed or refused request shows the
-//! stored badges (or none) and stores nothing.
+//! open PRs whatever the stored answer's age, and the listing waits for that
+//! answer within its 3 s budget. An answer that arrives in time is shown with
+//! no status item (an empty one clears the badges); a failed or refused
+//! request stores nothing and shows the stored badges dated `(couldn't
+//! refresh)`, or `couldn't get open PRs` with none stored; a request still
+//! held at 3 s ends the wait with the refresh hint. No origin, a local-path,
+//! or an unsupported origin shows no PR badges or item (an ignored one is
+//! `list_flags.rs`'s, which covers `--ignore-api`). A
+//! rejected key on the PR request names the key in an ordinary listing, and
+//! a PR failure never blocks `--ff`.
 //!
 //! Git's own HTTP transport is refused (see `perf_support`), so the worker's
 //! live-head half fails fast once its provider request does. That request
@@ -33,7 +40,7 @@ use perf_support::{
 };
 use serial_test::serial;
 use worktree::pull_requests::{CachedPrs, RefreshOutcome, pr_lock_path, select_cached, unix_now};
-use worktree::remote_head::{CheckFailure, Outcome, Phase, read_store, remote_head_lock_path};
+use worktree::remote_head::{AnswerSource, CheckFailure, Outcome, Phase, read_store, remote_head_lock_path};
 
 /// How long a test waits for the detached worker to act before failing.
 const WORKER_WAIT: Duration = Duration::from_secs(20);
@@ -155,6 +162,19 @@ fn stored(fixture: &MixedFixture) -> Vec<u8> {
     fs::read(fixture.pr_store()).expect("store")
 }
 
+/// Whitespace collapsed, so wrapped lines read as one.
+fn collapsed(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// No PR status item and no refresh hint.
+fn assert_no_pr_item_or_hint(stderr: &str) {
+    let text = collapsed(stderr);
+    for item in ["PRs as of", "couldn't refresh", "couldn't get open PRs", "running this command again"] {
+        assert!(!text.contains(item), "{item:?} is shown:\n{stderr}");
+    }
+}
+
 #[test]
 #[serial]
 fn a_fresh_pr_store_is_asked_again_and_a_failed_request_keeps_its_badges() {
@@ -203,7 +223,7 @@ fn a_stale_store_shows_its_badges_and_its_workers_failed_request_stores_nothing(
     assert!(stderr.contains("PRs as of 12 min ago"), "{stderr}");
     // A foreground request would be a third connection. Its duration is
     // `perf_pr_request.rs`'s to bound: parallel L1 load on Windows pushes
-    // even a no-request `pr gather` past the 300 ms deadline.
+    // even a no-request `pr gather` past that file's 300 ms stage bound.
     assert_eq!(proxy.connections(), 2, "one worker, one request per half, none in the foreground");
     assert_eq!(fs::read(fixture.pr_store()).expect("store"), stored, "a failed refresh is never stored");
 }
@@ -372,7 +392,7 @@ fn a_detached_workers_answer_replaces_the_stale_one_on_the_next_list() {
     let (_, stderr) = list_with(fixture.wt_command_via_gitea(&gitea));
     assert!(row(&stderr, "divergent-1").contains("PR #7"), "{stderr}");
     assert!(!stderr.contains("PR #99"), "{stderr}");
-    assert!(!stderr.contains("PRs as of"), "a fresh answer has no age line:\n{stderr}");
+    assert!(!stderr.contains("PRs as of"), "this run's published answer has no PR item:\n{stderr}");
     assert!(wait_for_refresh_workers(fixture.main(), 0, WORKER_WAIT).is_empty(), "its worker finished");
     assert_eq!(gitea.requests(), 2, "the next listing asks again");
 }
@@ -459,7 +479,13 @@ fn a_failed_or_unauthorized_refresh_keeps_the_stored_answer() {
         assert_eq!(stored(&fixture), seeded, "HTTP {status} is never stored, not even as no PRs");
         let (_, stderr) = list_with(fixture.wt_command_via_gitea(&gitea));
         assert!(row(&stderr, "divergent-0").contains("PR #99"), "HTTP {status}:\n{stderr}");
-        assert!(stderr.contains("PRs as of 12 min ago"), "HTTP {status}:\n{stderr}");
+        // That listing's own worker failed the same way, inside its wait.
+        assert!(stderr.contains("PRs as of 12 min ago (couldn't refresh)"), "HTTP {status}:\n{stderr}");
+        assert!(!collapsed(&stderr).contains("running this command again"), "HTTP {status}:\n{stderr}");
+        // Without a key, the PR half's 401 names no condition a key would
+        // fix (the head half's 404 still asks for one).
+        assert!(!stderr.contains("didn't accept"), "HTTP {status}:\n{stderr}");
+        assert_eq!(stored(&fixture), seeded, "HTTP {status}: still nothing stored");
     }
 }
 
@@ -597,4 +623,234 @@ fn a_held_live_head_check_holds_the_listing_only_until_its_deadline() {
     assert_eq!(head.answer, None, "no answer stored yet");
     let attempt = head.attempt.expect("the attempt is recorded before its request");
     assert_eq!((attempt.phase, attempt.outcome), (Phase::Checking, None), "still checking");
+}
+
+#[test]
+#[serial]
+fn two_sequential_listings_each_make_one_pr_query_and_show_the_answer_they_waited_for() {
+    let fixture = MixedFixture::new().with_gitea_origin();
+    let _cleanup = RemoveOnDrop(fixture.pr_store());
+    fixture.seed_pr_store(Duration::from_secs(10), 99, "divergent-0");
+    seed_fresh_head(&fixture);
+    let gitea = FakeGitea::new(GiteaReply::Status(503));
+    let _reaper = Reaper { fixture: &fixture, gitea: &gitea };
+
+    // A one-page answer is one request; the second listing's store is the
+    // first one's answer, seconds old.
+    for (listing, (number, branch)) in [(7, "divergent-1"), (8, "divergent-2")].into_iter().enumerate() {
+        gitea.release(GiteaReply::Open(vec![(number, branch)]));
+        let (_, stderr) = list_with(fixture.wt_command_via_gitea(&gitea));
+        assert!(wait_for_refresh_workers(fixture.main(), 0, WORKER_WAIT).is_empty(), "the worker finished");
+
+        assert_eq!(gitea.requests(), listing + 1, "one PR query per listing, however fresh the store");
+        assert!(row(&stderr, branch).contains(&format!("PR #{number}")), "this run's answer:\n{stderr}");
+        assert!(!stderr.contains("PR #99"), "{stderr}");
+        assert_no_pr_item_or_hint(&stderr);
+    }
+}
+
+#[test]
+#[serial]
+fn a_failed_refresh_with_nothing_stored_says_it_couldnt_get_open_prs() {
+    let fixture = MixedFixture::new().with_gitea_origin();
+    let _cleanup = RemoveOnDrop(fixture.pr_store());
+    seed_fresh_head(&fixture);
+    let gitea = FakeGitea::new(GiteaReply::Status(500));
+    let _reaper = Reaper { fixture: &fixture, gitea: &gitea };
+
+    let (_, stderr) = list_with(fixture.wt_command_via_gitea(&gitea));
+    assert!(wait_for_refresh_workers(fixture.main(), 0, WORKER_WAIT).is_empty(), "the worker finished");
+
+    let text = collapsed(&stderr);
+    assert_eq!(gitea.requests(), 1);
+    assert!(!stderr.contains("PR #"), "{stderr}");
+    assert!(text.contains("- couldn't get open PRs"), "{stderr}");
+    assert!(!text.contains("PRs as of") && !text.contains("running this command again"), "{stderr}");
+    assert!(!fixture.pr_store().exists(), "a failure is never stored as no PRs");
+}
+
+#[test]
+#[serial]
+fn a_held_pr_request_with_nothing_stored_ends_at_the_budget_with_only_the_hint() {
+    let fixture = MixedFixture::new().with_gitea_origin();
+    let _cleanup = RemoveOnDrop(fixture.pr_store());
+    seed_fresh_head(&fixture);
+    let gitea = FakeGitea::new(GiteaReply::Status(503));
+    gitea.hold();
+    let _reaper = Reaper { fixture: &fixture, gitea: &gitea };
+
+    let started = Instant::now();
+    let (_, stderr) = list_with(fixture.wt_command_via_gitea(&gitea));
+    let elapsed = started.elapsed();
+
+    assert!(gitea.wait_for_waiting(1, Duration::ZERO), "the PR request is still held");
+    assert!(elapsed >= Duration::from_secs(3) && elapsed < Duration::from_secs(5), "{elapsed:?}");
+    let text = collapsed(&stderr);
+    assert!(text.contains("running this command again"), "the wait timed out:\n{stderr}");
+    for item in ["PRs as of", "couldn't refresh", "couldn't get open PRs"] {
+        assert!(!text.contains(item), "nothing stored, nothing failed:\n{stderr}");
+    }
+    assert!(!text.contains("still checking"), "the head half had finished:\n{stderr}");
+    assert!(!stderr.contains("PR #"), "{stderr}");
+}
+
+#[test]
+#[serial]
+fn an_empty_answer_clears_the_stored_badges_and_shows_no_item() {
+    let (fixture, _cleanup, _) = stale_gitea_fixture();
+    let gitea = FakeGitea::new(GiteaReply::Open(Vec::new()));
+    let _reaper = Reaper { fixture: &fixture, gitea: &gitea };
+
+    let (_, stderr) = list_with(fixture.wt_command_via_gitea(&gitea));
+    assert!(wait_for_refresh_workers(fixture.main(), 0, WORKER_WAIT).is_empty(), "the worker finished");
+
+    assert_eq!(gitea.requests(), 1);
+    assert!(!stderr.contains("PR #"), "the empty answer replaced PR #99:\n{stderr}");
+    assert_no_pr_item_or_hint(&stderr);
+    match select_cached(&fixture.pr_store(), Some(FakeGitea::ORIGIN), unix_now()) {
+        CachedPrs::Fresh(listing) => assert!(listing.pull_requests.is_empty(), "{listing:?}"),
+        other => panic!("the empty answer is stored as an answer: {other:?}"),
+    }
+}
+
+#[test]
+#[serial]
+fn without_an_origin_nothing_is_asked_and_no_pr_item_or_hint_shows() {
+    let fixture = MixedFixture::new();
+    let proxy = ProxyStub::closing_after(Duration::ZERO);
+
+    let (_, stderr) = list(&fixture, &proxy);
+
+    assert!(row(&stderr, "divergent-0").contains("divergent-0"));
+    assert!(refresh_workers(fixture.main()).is_empty(), "no worker was launched");
+    assert_eq!(proxy.connections(), 0, "no request");
+    assert!(!stderr.contains("PR #"), "{stderr}");
+    assert_no_pr_item_or_hint(&stderr);
+}
+
+#[test]
+#[serial]
+fn local_path_and_unsupported_origins_keep_the_head_check_and_show_no_pr_badges_or_item() {
+    // A host no provider recognizes: its stored answer (left from when it
+    // was supported, say) is not shown, and the head check still runs.
+    let unsupported = MixedFixture::new().with_origin("https://git.example.invalid/o/r.git");
+    let _cleanup = RemoveOnDrop(unsupported.pr_store());
+    unsupported.seed_pr_store(Duration::from_secs(12 * 60 + 5), 99, "divergent-0");
+    let seeded = stored(&unsupported);
+    let proxy = ProxyStub::closing_after(Duration::ZERO);
+
+    let (_, stderr) = list(&unsupported, &proxy);
+    finish_worker(&unsupported, &proxy);
+
+    assert!(!stderr.contains("PR #"), "an unsupported origin shows no badges:\n{stderr}");
+    assert_no_pr_item_or_hint(&stderr);
+    assert_eq!(proxy.connections(), 0, "no provider request from either half");
+    assert_eq!(stored(&unsupported), seeded, "nothing stored");
+    let attempt = read_store(&unsupported.remote_head_store()).attempt.expect("the head check ran");
+    // Git's HTTPS transport is refused here, so the check fails; it ran.
+    assert_eq!(attempt.outcome, Some(Outcome::CheckFailed { reason: CheckFailure::Other }), "{attempt:?}");
+
+    // A local path: the head check answers through Git.
+    let local = MixedFixture::new().with_local_origin();
+    let _cleanup = RemoveOnDrop(local.pr_store());
+    let (_, stderr) = list_with(local.wt_command_direct());
+    assert!(local.wait_until_unlocked(WORKER_WAIT, || {}), "the worker finished");
+
+    assert!(!stderr.contains("PR #"), "{stderr}");
+    assert_no_pr_item_or_hint(&stderr);
+    assert!(!local.pr_store().exists(), "nothing stored for a local path");
+    let answer = read_store(&local.remote_head_store()).answer.expect("the head check answered");
+    assert_eq!(answer.source, AnswerSource::Git, "{answer:?}");
+}
+
+/// A key the provider rejects on the PR request is named in an ordinary
+/// listing, never its value, and the PR item does not repeat the reason. The
+/// head half's 404 with a key is ambiguous, so it asserts nothing. When
+/// `origin` changes during the wait, the old origin's rejection is not shown.
+#[test]
+#[serial]
+fn a_rejected_key_on_the_pr_request_shows_the_credentials_line_in_an_ordinary_listing() {
+    const SECRET: &str = "secret-token-value";
+    let (fixture, _cleanup, seeded) = stale_gitea_fixture();
+    let gitea = FakeGitea::new(GiteaReply::Status(401));
+    let _reaper = Reaper { fixture: &fixture, gitea: &gitea };
+    let listing = || {
+        let mut command = fixture.wt_command_via_gitea(&gitea);
+        command.env("GITEA_TOKEN", SECRET);
+        let (_, stderr) = list_with(command);
+        assert!(wait_for_refresh_workers(fixture.main(), 0, WORKER_WAIT).is_empty(), "the worker finished");
+        stderr
+    };
+
+    let stderr = listing();
+    let text = collapsed(&stderr);
+    assert!(
+        text.contains("Gitea didn't accept GITEA_TOKEN; it may be invalid, expired, or revoked."),
+        "{stderr}"
+    );
+    assert!(!stderr.contains(SECRET), "the key's value is never printed:\n{stderr}");
+    let item = stderr.lines().find(|line| line.contains("PRs as of")).expect("the PR item");
+    assert_eq!(item.trim(), "- PRs as of 12 min ago (couldn't refresh)", "the item gives no reason:\n{stderr}");
+    assert!(!text.contains("did not show this repository"), "an ambiguous 404 asserts nothing:\n{stderr}");
+    assert_eq!(stored(&fixture), seeded);
+
+    let main = fixture.main().to_path_buf();
+    gitea.before_reply(move || {
+        let status = Command::new("git")
+            .current_dir(&main)
+            .args(["remote", "set-url", "origin", "http://gitea.example.invalid/o/other.git"])
+            .status()
+            .expect("git");
+        assert!(status.success());
+    });
+    let stderr = listing();
+    assert_eq!(gitea.requests(), 2);
+    assert!(!stderr.contains("didn't accept"), "the old origin's rejection is not shown:\n{stderr}");
+    assert!(!stderr.contains("PR #"), "{stderr}");
+    assert_no_pr_item_or_hint(&stderr);
+}
+
+/// A confirmed condition from the head half outranks the PR half's.
+#[test]
+#[serial]
+fn a_rejected_key_on_the_head_check_outranks_the_pr_requests_rate_limit() {
+    let (fixture, _cleanup, _) = stale_gitea_fixture();
+    let gitea = FakeGitea::new(GiteaReply::Status(429));
+    gitea.answer_branch_heads_with(401);
+    let _reaper = Reaper { fixture: &fixture, gitea: &gitea };
+
+    let mut command = fixture.wt_command_via_gitea(&gitea);
+    command.env("GITEA_TOKEN", "secret-token-value");
+    let (_, stderr) = list_with(command);
+    assert!(wait_for_refresh_workers(fixture.main(), 0, WORKER_WAIT).is_empty(), "the worker finished");
+
+    let text = collapsed(&stderr);
+    assert!(text.contains("Gitea didn't accept GITEA_TOKEN"), "{stderr}");
+    assert!(!text.contains("rate limited"), "one line, the head half's:\n{stderr}");
+    assert!(text.contains("PRs as of 12 min ago (couldn't refresh)"), "{stderr}");
+}
+
+/// `--ff` keeps its forced wait and its local rules when the PR half fails:
+/// the fetched tip is fast-forwarded to, and the failure is the PR item.
+#[test]
+#[serial]
+fn a_pr_failure_never_blocks_a_permitted_fast_forward() {
+    let fixture = MixedFixture::new().with_gitea_origin();
+    let _cleanup = RemoveOnDrop(fixture.pr_store());
+    let gitea = FakeGitea::new(GiteaReply::Status(500));
+    let _reaper = Reaper { fixture: &fixture, gitea: &gitea };
+    let pushed = fixture.serve_gitea_origin_one_commit_ahead(&gitea);
+
+    let output = fixture.wt_command_via_gitea_git(&gitea).arg("--ff").env("NO_COLOR", "1").output().expect("wt --ff");
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    assert!(output.status.success(), "{stderr}");
+    assert!(wait_for_refresh_workers(fixture.main(), 0, WORKER_WAIT).is_empty(), "the worker finished");
+
+    let main = Command::new("git").current_dir(fixture.main()).args(["rev-parse", "main"]).output().expect("git");
+    assert_eq!(String::from_utf8_lossy(&main.stdout).trim(), pushed, "main moved to the fetched tip:\n{stderr}");
+    let text = collapsed(&stderr);
+    assert!(text.contains("main is in sync with origin/main (updated from origin just now)"), "{stderr}");
+    assert!(text.contains("- couldn't get open PRs"), "{stderr}");
+    assert!(!text.contains("running this command again"), "{stderr}");
+    assert_eq!(gitea.requests(), 1);
 }
