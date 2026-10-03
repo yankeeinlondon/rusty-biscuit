@@ -3266,7 +3266,7 @@ fn render_god_analysis(term: &Terminal, plain: bool, analysis: &GodAnalysis) {
             term,
             plain,
             2,
-            &format!("- <dim>note: {}</dim>", Prose::escape_text(note)),
+            &format!("- <dim>note: {}</dim>", Prose::escape_text_outside_code_spans(note)),
         );
     }
 
@@ -3331,7 +3331,7 @@ fn render_symbol_block(term: &Terminal, plain: bool, block: &SymbolBlock) {
         None => String::new(),
     };
     let doc = match &block.doc_summary {
-        Some(summary) => format!(" <dim>— {}</dim>", Prose::escape_text(summary)),
+        Some(summary) => format!(" <dim>— {}</dim>", Prose::escape_text_outside_code_spans(summary)),
         None => String::new(),
     };
 
