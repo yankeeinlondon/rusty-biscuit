@@ -236,7 +236,7 @@ fn nested_links_are_normalized_once_at_the_root() {
     let temp = tempfile::tempdir().unwrap();
     let home_link = format!(
         "[home]({})",
-        biscuit_file::to_portable_string(&dirs::home_dir().unwrap().join("notes.md"))
+        biscuit_file::to_portable_string(&biscuit_file::home_dir().unwrap().join("notes.md"))
     );
     let body = format!("{{{{ as_markdown(\"{home_link}\") }}}}\n");
     let (path, file_document) = root_document(temp.path(), "root.md", &body);
