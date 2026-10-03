@@ -383,7 +383,7 @@ pub fn new_attempt_id() -> Result<String, WorktreeError> {
     crate::remove::handoff::new_token()
 }
 
-fn is_attempt_id(id: &str) -> bool {
+pub(crate) fn is_attempt_id(id: &str) -> bool {
     id.len() == 32 && id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
@@ -553,9 +553,15 @@ fn write_json(path: &Path, value: &impl Serialize) -> Result<(), WorktreeError> 
     atomic_write(path, &serde_json::to_vec_pretty(value)?)
 }
 
+/// An `Option` field that must be spelled out: `null` is `None`, while a
+/// missing key is an error rather than serde's silent `None`.
+pub(crate) fn present<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<String>, D::Error> {
+    Option::<String>::deserialize(deserializer)
+}
+
 /// A PR request's failure, typed so this run's failure can produce a spec §5
 /// line: a mirror of sniff's credentials variants plus `Other`. It lives here
-/// for the receipt; `pull_requests` reuses it for the foreground request.
+/// for the receipt; `pull_requests::refresh` reports it.
 /// Serialized as `{"kind": "credentials-rejected", "key": "GITHUB_TOKEN"}`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
@@ -563,13 +569,16 @@ pub enum PrFailure {
     CredentialsRequired,
     CredentialsRejected {
         /// The name of the variable used; never its value.
+        #[serde(deserialize_with = "present")]
         key: Option<String>,
     },
     CredentialsInsufficient {
+        #[serde(deserialize_with = "present")]
         key: Option<String>,
     },
     RateLimited {
         authenticated: bool,
+        #[serde(deserialize_with = "present")]
         key: Option<String>,
     },
     NotFoundOrNotPermitted,
@@ -604,9 +613,11 @@ pub enum HeadStatus {
 pub enum PrStatus {
     Ok,
     Failed { failure: PrFailure },
-    SkippedFresh,
     /// The repository is in `~/.wt.json`, so no PR request was made.
     Ignored,
+    /// `origin` has no provider to ask (a local path or an unsupported
+    /// host), so no PR request was made. Not a failure.
+    Unsupported,
     /// Another worker held the PR lock.
     Contended,
 }
@@ -645,7 +656,7 @@ impl Receipt {
             && !self.branch.is_empty()
             && match &self.prs {
                 PrStatus::Failed { failure } => failure.is_valid(),
-                PrStatus::Ok | PrStatus::SkippedFresh | PrStatus::Ignored | PrStatus::Contended => true,
+                PrStatus::Ok | PrStatus::Ignored | PrStatus::Unsupported | PrStatus::Contended => true,
             }
     }
 }
@@ -1264,7 +1275,7 @@ mod tests {
             PrFailure::NotFoundOrNotPermitted,
             PrFailure::Other,
         ];
-        let prs = [PrStatus::Ok, PrStatus::SkippedFresh, PrStatus::Ignored, PrStatus::Contended]
+        let prs = [PrStatus::Ok, PrStatus::Ignored, PrStatus::Unsupported, PrStatus::Contended]
             .into_iter()
             .chain(failures.into_iter().map(|failure| PrStatus::Failed { failure }));
         for (head, prs) in heads.into_iter().cycle().zip(prs) {
@@ -1378,5 +1389,108 @@ mod tests {
 
         let refused = Receipt { attempt_id: "short".into(), ..receipt() };
         assert!(write_receipt(&path, &refused).is_err());
+    }
+
+    /// The Input Robustness Matrix for the receipt: every load-bearing field
+    /// in every shape, one edit per row, from a file written by
+    /// [`write_receipt`]. Every row is a missing receipt, never a default
+    /// outcome.
+    #[test]
+    fn the_receipt_reader_walks_the_input_robustness_matrix() {
+        use serde_json::{Value, json};
+        let (dir, _) = temp_store();
+        let path = dir.path().join("abc.refresh-receipt.json");
+        write_receipt(&path, &receipt()).unwrap();
+        let written = raw_json(&path);
+        let read = |bytes: &[u8]| {
+            fs::write(&path, bytes).unwrap();
+            load_receipt(&path, &attempt(NOW))
+        };
+        assert_eq!(read(&serde_json::to_vec(&written).unwrap()), Some(receipt()), "control");
+
+        let set = |pointer: &str, value: Option<Value>| {
+            let mut document = written.clone();
+            let (parent, key) = pointer.rsplit_once('/').unwrap();
+            let target = if parent.is_empty() { &mut document } else { document.pointer_mut(parent).unwrap() };
+            let map = target.as_object_mut().unwrap();
+            match value {
+                Some(value) => {
+                    map.insert(key.to_string(), value);
+                }
+                None => assert!(map.remove(key).is_some(), "{pointer} exists"),
+            }
+            serde_json::to_vec(&document).unwrap()
+        };
+        let compact = serde_json::to_string(&written).unwrap();
+        let prefixed = |member: &str| compact.replacen('{', &format!("{{{member},"), 1).into_bytes();
+
+        let mut misses = Vec::new();
+        for field in ["/format_version", "/attempt_id", "/origin_digest", "/branch", "/finished_at", "/head", "/prs"] {
+            misses.push(set(field, None));
+            misses.push(set(field, Some(Value::Null)));
+            misses.push(set(field, Some(json!([]))));
+            misses.push(set(field, Some(json!({}))));
+        }
+        for (field, wrong) in [
+            ("/format_version", json!("1")),
+            ("/format_version", json!(2)),
+            ("/attempt_id", json!(1)),
+            ("/attempt_id", json!("")),
+            ("/attempt_id", json!(OTHER_ID)),
+            ("/origin_digest", json!(1)),
+            ("/origin_digest", json!("")),
+            ("/origin_digest", json!("another-digest")),
+            ("/branch", json!(1)),
+            ("/branch", json!("")),
+            ("/branch", json!("trunk")),
+            ("/finished_at", json!("later")),
+            ("/finished_at", json!(-1)),
+            ("/finished_at", json!(NOW - 1)),
+            ("/head", json!(1)),
+            ("/head", json!("")),
+            ("/head", json!("moved")),
+            ("/prs", json!("failed")),
+            ("/prs", json!({ "kind": "skipped-fresh" })),
+            ("/prs", json!({ "kind": "" })),
+            ("/prs", json!({ "kind": 1 })),
+            ("/prs/failure", Value::Null),
+            ("/prs/failure", json!("other")),
+            ("/prs/failure/kind", json!("credentials-lost")),
+            ("/prs/failure/key", json!(1)),
+            ("/prs/failure/key", json!("a token")),
+            ("/prs/failure/key", json!("")),
+        ] {
+            misses.push(set(field, Some(wrong)));
+        }
+        for field in ["/prs/kind", "/prs/failure", "/prs/failure/kind", "/prs/failure/key"] {
+            misses.push(set(field, None));
+        }
+        for member in [
+            "\"format_version\":1".to_string(),
+            format!("\"attempt_id\":\"{ID}\""),
+            format!("\"origin_digest\":\"{DIGEST}\""),
+            "\"branch\":\"main\"".to_string(),
+            format!("\"finished_at\":{}", NOW + 30),
+            "\"head\":\"ok\"".to_string(),
+            "\"prs\":{\"kind\":\"ok\"}".to_string(),
+        ] {
+            misses.push(prefixed(&member));
+        }
+        misses.push(compact.replacen("\"kind\":\"failed\"", "\"kind\":\"failed\",\"kind\":\"ok\"", 1).into_bytes());
+        misses.push(compact.replacen("\"key\":", "\"key\":\"GH_TOKEN\",\"key\":", 1).into_bytes());
+        misses.push(format!("{compact}garbage").into_bytes());
+        misses.push(format!("{compact}{{}}").into_bytes());
+        for bytes in misses {
+            assert_eq!(read(&bytes), None, "{}", String::from_utf8_lossy(&bytes));
+        }
+
+        // A null key is a failure that names no variable, not a miss.
+        let unnamed = read(&set("/prs/failure/key", Some(Value::Null)));
+        assert_eq!(
+            unnamed.map(|receipt| receipt.prs),
+            Some(PrStatus::Failed { failure: PrFailure::CredentialsRejected { key: None } })
+        );
+        // `ok` with no store publication is still the receipt's answer.
+        assert_eq!(read(&set("/prs", Some(json!({ "kind": "ok" })))).map(|receipt| receipt.prs), Some(PrStatus::Ok));
     }
 }
