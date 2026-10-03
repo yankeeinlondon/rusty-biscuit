@@ -3,7 +3,7 @@ use std::sync::LazyLock;
 
 use serde::{Deserialize, Serialize};
 
-use crate::components::prose::Prose;
+use crate::components::prose::InlineProse;
 use crate::components::renderable::TerminalRenderable;
 use crate::discovery::detection::{ColorDepth, ColorMode};
 use crate::terminal::Terminal;
@@ -430,8 +430,10 @@ static ICON_LOOKUP: LazyLock<HashMap<(StatusTheme, StatusState), StatusIconDef>>
 /// block owns the box and `Status`'s content flows inline within it.
 ///
 /// The bespoke terminal render path (`to_terminal`) honors icon color from
-/// `StatusState::default_color` and routes the description through `Prose`
-/// when `use_prose = true`, so inherited `color` and `emphasis` flow through.
+/// `StatusState::default_color` and routes the description through
+/// [`InlineProse`] when `use_prose = true`, so inherited `color` and
+/// `emphasis` flow through. The description is phrasing content: a blank
+/// line in it is an ordinary break, never a paragraph.
 /// Only `Layout::word_wrap` is applied by [`TerminalRenderable::render`];
 /// margins, alignment, `max_width`, `width`, and `padding` are ignored.
 ///
@@ -440,7 +442,7 @@ static ICON_LOOKUP: LazyLock<HashMap<(StatusTheme, StatusState), StatusIconDef>>
 /// | `Layout::word_wrap` | **Honored** | Wraps the full status line (icon + description) using the configured strategy. Default `WrapProse` with a 2-cell hanging indent for the plain constructor; `WrapProse(Some(8), Some(2))` for `from_prose`. |
 /// | `Layout::margin` / `alignment` / `max_width` / `width` / `padding` | **N/A** | Inline badge — no block box. Compose inside a `Section` / `Compose` for block placement. |
 /// | `Style::color` | **Honored** (via the state's `default_color` and the Tailwind icon palette) | The icon color flows from `StatusState::default_color`; the description inherits the terminal's current color. |
-/// | `Style::emphasis` | **Honored** (via `Prose` when `use_prose = true`) | The `from_prose` constructor enables markup like `<b>` / `<red>` which lowers to `emphasis` / `color`. |
+/// | `Style::emphasis` | **Honored** (via `InlineProse` when `use_prose = true`) | The `from_prose` constructor enables markup like `<b>` / `<red>` which lowers to `emphasis` / `color`. |
 /// | `Style::background` | **N/A** | Inline background has no padding box; the icon glyph and description are the inline content. |
 /// | `Style::border` | **N/A** | No inline-border design exists; the status glyph is its own visual terminator. |
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -483,7 +485,7 @@ impl Status {
 
     /// Create a new status item with a prose-formatted description.
     ///
-    /// The description is rendered through [`Prose`] at render time,
+    /// The description is rendered through [`InlineProse`] at render time,
     /// enabling markup like `<b>bold</b>` and `<red>color</red>`.
     pub fn from_prose<T: Into<String>>(desc: T) -> Self {
         Self {
@@ -546,7 +548,7 @@ impl Status {
         };
 
         let desc = if self.use_prose {
-            Prose::new(&self.description).render(term)
+            InlineProse::new(&self.description).render(term)
         } else {
             self.description.clone()
         };

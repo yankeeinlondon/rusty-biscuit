@@ -17,8 +17,8 @@
 //! - color/background/dim/blink/underline/inverse → `NodeKind::Span` with a
 //!   [`Style`] attached on `attrs` so the terminal renderer's
 //!   `render_inline_node` path lowers it to SGR via `text_appearance_sgr`.
-//! - links → `NodeKind::Link` with un-resolved `href` (each target re-resolves
-//!   per its own rules).
+//! - links → `NodeKind::Link` whose `href` the parser already resolved: a
+//!   file path becomes a `file://` URL on every target (`styles::resolve_href`).
 //! - code spans → `NodeKind::InlineCode`
 //! - fenced code blocks → `NodeKind::Code` in `Prose`, `NodeKind::InlineCode`
 //!   in `InlineProse`.

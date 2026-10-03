@@ -13,6 +13,14 @@ const PROSE_EXAMPLE_CMD: &str =
     r#"bt prose "<b>Deploy status:</b> <green>healthy</green> after _3 checks_""#;
 
 /// Render prose text with inline styling tags
+///
+/// CONTENT is block prose: a blank line starts a new paragraph, a single
+/// newline is a soft break (it reflows as a space), and a `\` before a newline
+/// is a hard break. Backtick code spans render as inline code, and fenced
+/// code blocks as code blocks. Layout flags apply on every target: margins as
+/// spaces and blank lines on the terminal and as CSS with `--html`;
+/// `--md`/`--md-plus` carry the left and right margins as `style:`
+/// frontmatter.
 #[derive(ClapArgs, Debug, Clone)]
 pub struct ProseArgs {
     /// Render an example and show the command used
@@ -80,14 +88,24 @@ impl Run for ProseArgs {
         if let Some(align) = self.layout.alignment {
             prose = prose.alignment(align);
         }
+        // Vertical margins are rows on the terminal and `lh` in HTML;
+        // Markdown has no vertical spacing and drops them.
+        if let Some(top) = self.layout.margin_top {
+            prose.layout_mut().margin.top = TargetValue::universal(Length::ch(top));
+        }
+        if let Some(bottom) = self.layout.margin_bottom {
+            prose.layout_mut().margin.bottom = TargetValue::universal(Length::ch(bottom));
+        }
 
         // Cross-target output: HTML fragment or portable Markdown. Terminal
-        // capability detection does not apply to these targets; layout flags
-        // are preserved as target-native metadata/CSS.
+        // capability detection does not apply to these targets. `Prose`
+        // renders its own layout as CSS (alignment aside, see
+        // `render_html_with_alignment`); Markdown carries the horizontal
+        // margins as `style:` frontmatter.
         if self.html {
             println!(
                 "{}",
-                render_html_with_layout(&prose.render_html_fragment().render(), &self.layout)
+                render_html_with_alignment(&prose.render_html_fragment().render(), &self.layout)
             );
             return Ok(());
         }
@@ -134,10 +152,7 @@ impl Run for ProseArgs {
             eprintln!("{hex}");
         }
 
-        emit_vertical_margins(&self.layout, || {
-            println!("{}", output);
-            Ok(())
-        })?;
+        println!("{}", output);
 
         if self.example {
             print_example_command(PROSE_EXAMPLE_CMD);
@@ -145,28 +160,4 @@ impl Run for ProseArgs {
 
         Ok(())
     }
-}
-
-/// Wraps a Prose HTML fragment in a `<div>` carrying the vertical margins.
-///
-/// `Prose` renders its own horizontal margins and alignment as CSS. Vertical
-/// margins are applied by the CLI on every target (blank lines on the
-/// terminal), and `Layout` has no line-height length to carry them, so the
-/// HTML path expresses them here.
-fn render_html_with_layout(fragment: &str, layout: &LayoutArgs) -> String {
-    let Some(style) = vertical_margin_css(layout) else {
-        return fragment.to_string();
-    };
-    format!("<div style=\"{style}\">{fragment}</div>")
-}
-
-fn vertical_margin_css(layout: &LayoutArgs) -> Option<String> {
-    let mut declarations = Vec::new();
-    if let Some(top) = layout.margin_top {
-        declarations.push(format!("margin-top: {top}lh"));
-    }
-    if let Some(bottom) = layout.margin_bottom {
-        declarations.push(format!("margin-bottom: {bottom}lh"));
-    }
-    (!declarations.is_empty()).then(|| declarations.join("; "))
 }

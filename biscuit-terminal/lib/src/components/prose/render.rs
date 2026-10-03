@@ -61,7 +61,9 @@ impl Prose {
         match &self.layout.word_wrap {
             WordWrap::None => output,
             strategy => {
-                let lines = output.lines().map(String::from).collect();
+                // `split`, not `lines`: trailing empty rows are the bottom
+                // margin and must survive the wrap pass.
+                let lines = output.split('\n').map(String::from).collect();
                 let width = term.width();
                 let wrapped = wrap_lines(lines, strategy, width);
                 let sanitized = sanitize_wrapped_lines(wrapped);

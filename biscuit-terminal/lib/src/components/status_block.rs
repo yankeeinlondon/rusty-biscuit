@@ -14,7 +14,7 @@ use renderable::tree::{RenderNode, RenderStrictness, TreeRenderable};
 use crate::{
     components::{
         block_quote::BlockQuote,
-        prose::Prose,
+        prose::{InlineProse, Prose},
         renderable::{BrowserRenderable, RenderableTerminalContent, TerminalRenderable},
         status::{Status, StatusState},
     },
@@ -236,19 +236,19 @@ impl StatusBlock {
         }
     }
 
-    /// Plain-text projection of a prose source string.
+    /// Plain-text projection of a prose component.
     ///
-    /// Renders the prose through a deliberately uncolored, non-Nerd terminal
-    /// and strips any residual escape codes so bracketed tags such as
-    /// `<b>Bold</b>` flatten to `Bold` rather than leaking the markup into
+    /// Renders the component through a deliberately uncolored, non-Nerd
+    /// terminal and strips any residual escape codes so bracketed tags such
+    /// as `<b>Bold</b>` flatten to `Bold` rather than leaking the markup into
     /// Markdown or Browser output.
-    fn prose_plain_text(prose_src: &str) -> String {
+    fn prose_plain_text(prose: &dyn TerminalRenderable) -> String {
         let mut term = Terminal::builder()
             .width(80)
             .color_depth(ColorDepth::None)
             .build();
         term.is_nerd_font = Some(false);
-        strip_ansi_codes(&Prose::new(prose_src).render(&term))
+        strip_ansi_codes(&prose.render(&term))
     }
 
     /// Builds the canonical projection of this status block.
@@ -280,7 +280,9 @@ impl StatusBlock {
 
         if let Some(header_text) = &self.header {
             let icon = Self::severity_icon(&self.severity);
-            let header_plain = Self::prose_plain_text(header_text);
+            // The header shares a line with the severity icon, so it is
+            // inline: a blank line in it must not open a paragraph.
+            let header_plain = Self::prose_plain_text(&InlineProse::new(header_text));
             let header_text = format!("{icon} {header_plain}");
             let mut node = RenderNode::paragraph(vec![RenderNode::text(header_text)]);
             node.attrs.classes = vec!["status-block__header".into()];
@@ -306,7 +308,7 @@ impl StatusBlock {
                     String::new(),
                 )]));
 
-                let hint = Self::prose_plain_text(hint_text);
+                let hint = Self::prose_plain_text(&Prose::new(hint_text));
 
                 let mut hint_node = RenderNode::paragraph(vec![RenderNode::emphasis(vec![
                     RenderNode::text(hint),
@@ -344,7 +346,7 @@ impl StatusBlock {
             });
             children.push(node);
         } else if let Some(hint_text) = self.non_blank_hint() {
-            let hint = Self::prose_plain_text(hint_text);
+            let hint = Self::prose_plain_text(&Prose::new(hint_text));
             let mut node = RenderNode::paragraph(vec![RenderNode::text(hint)]);
             node.attrs.classes = vec!["status-block__hint".into()];
             children.push(node);

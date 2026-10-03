@@ -10,7 +10,7 @@ use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::discovery::detection::ColorDepth;
 use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node};
 use biscuit_terminal::terminal::Terminal;
-use biscuit_terminal::utils::layout::{Length, TargetValue};
+use biscuit_terminal::utils::layout::{Length, TargetValue, WordWrap};
 use renderable::browser::BrowserRenderable;
 use renderable::markdown::MarkdownRenderable;
 use renderable::tree::{
@@ -469,6 +469,20 @@ fn left_margin_renders_in_terminal_and_html() {
     assert_eq!(out.matches("margin-left").count(), 1, "{out}");
     assert!(out.contains("margin-left:4ch"), "{out}");
     assert!(out.contains("<p>hi</p>"), "{out}");
+}
+
+#[test]
+fn vertical_margins_survive_word_wrap_on_the_terminal() {
+    // The trailing empty rows are the bottom margin; the word-wrap pass once
+    // dropped them while `WordWrap::None` kept them.
+    for wrap in [WordWrap::None, WordWrap::WrapProse(None, None)] {
+        let mut prose = Prose::new("one\n\ntwo").with_word_wrap(wrap.clone());
+        prose.layout_mut().margin.top = TargetValue::universal(Length::ch(1));
+        prose.layout_mut().margin.bottom = TargetValue::universal(Length::ch(2));
+        assert_eq!(prose.render(&plain_term()), "\none\n\ntwo\n\n", "{wrap:?}");
+        let out = html(&prose);
+        assert!(out.contains("margin-top:1lh;margin-bottom:2lh"), "{out}");
+    }
 }
 
 #[test]

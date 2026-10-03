@@ -1831,6 +1831,86 @@ fn test_prose_html_without_margin_renders_a_paragraph() {
 }
 
 #[test]
+fn test_prose_html_layout_is_one_element_with_every_margin() {
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
+        .args([
+            "prose", "one\n\ntwo", "--margin-left", "3", "--margin-top", "2",
+            "--margin-bottom", "1", "--html",
+        ])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // No CLI wrapper: the vertical margins ride on the same element as the
+    // horizontal ones.
+    assert_eq!(stdout.matches("<div").count(), 1, "stdout: {stdout}");
+    assert_eq!(stdout.matches("margin-left").count(), 1, "stdout: {stdout}");
+    assert!(stdout.contains("margin-top:2lh;margin-bottom:1lh;margin-left:3ch"), "stdout: {stdout}");
+    assert!(stdout.contains("<p>one</p><p>two</p>"), "stdout: {stdout}");
+    assert!(!stdout.contains("class=\"prose\""), "stdout: {stdout}");
+}
+
+#[test]
+fn test_prose_html_alignment_is_text_align_and_margins_stay_on_prose() {
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
+        .args(["prose", "x", "--alignment", "center", "--margin-left", "2", "--html"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.starts_with("<div style=\"text-align: center\"><div style=\"margin-top:0;"), "stdout: {stdout}");
+    assert_eq!(stdout.matches("margin-left").count(), 1, "stdout: {stdout}");
+    assert!(stdout.contains("<p>x</p>"), "stdout: {stdout}");
+}
+
+#[test]
+fn test_prose_terminal_vertical_margins_match_with_and_without_wrap() {
+    for wrap_flag in [None, Some("--no-wrap")] {
+        let mut cmd = assert_cmd::Command::cargo_bin("bt").unwrap();
+        cmd.env("NO_COLOR", "1")
+            .args(["prose", "hello", "--margin-top", "1", "--margin-bottom", "2"]);
+        if let Some(flag) = wrap_flag {
+            cmd.arg(flag);
+        }
+        let output = cmd.output().expect("Failed to execute command");
+        assert!(output.status.success());
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "\nhello\n\n\n",
+            "{wrap_flag:?}"
+        );
+    }
+}
+
+#[test]
+fn test_prose_code_span_renders_as_inline_code_on_html_and_markdown() {
+    let run = |content: &str, target: &str| {
+        let output = assert_cmd::Command::cargo_bin("bt").unwrap()
+            .args(["prose", content, target])
+            .output()
+            .expect("Failed to execute command");
+        assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    };
+
+    let html = run("run `md hash` now", "--html");
+    assert!(html.contains("<p>run <code>md hash</code> now</p>"), "html: {html}");
+    assert!(!html.contains('`'), "html: {html}");
+    assert_eq!(run("run `md hash` now", "--md"), "run `md hash` now\n");
+
+    // A code span is opaque: Markdown link syntax inside it stays literal.
+    let html = run("`[desc](https://example.com)`", "--html");
+    assert!(html.contains("<code>[desc](https://example.com)</code>"), "html: {html}");
+    assert!(!html.contains("<a "), "html: {html}");
+    assert_eq!(
+        run("`[desc](https://example.com)`", "--md"),
+        "`[desc](https://example.com)`\n"
+    );
+}
+
+#[test]
 fn test_quote_empty_errors_to_stderr() {
     let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("quote")
@@ -3324,6 +3404,20 @@ fn test_section_html_emits_section_element() {
     assert!(stdout.contains("</section>"), "section close: {stdout}");
     assert!(stdout.contains("<h3"), "h3 tag matches --level: {stdout}");
     assert!(stdout.contains("Title"), "title text: {stdout}");
+}
+
+#[test]
+fn test_section_html_renders_each_content_item_as_a_paragraph() {
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
+        .args(["section", "Title", "--html", "-c", "First body", "-c", "run `md hash`"])
+        .output()
+        .expect("Failed to execute command");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("<p>First body</p><p>run <code>md hash</code></p></section>"),
+        "each item is its own Prose paragraph: {stdout}"
+    );
 }
 
 #[test]
