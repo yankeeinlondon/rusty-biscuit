@@ -54,6 +54,7 @@ Convenience `From` implementations allow using `&str`, `String`, `i64`, `f64`, a
 | `.alternate_background_color()` / `.with_stripe_bg(Color)` | Stripe odd-indexed data rows (1, 3, 5, …) with a background tint |
 | `.alternate_text_color()` / `.with_stripe_text(Color)` | Stripe the same rows with a text tint |
 | `.highlight_row(row: usize, color: Color)` | Paint one data row's background (see below) |
+| `.with_min_width(cells: u32)` | Never draw the table narrower than `cells`, borders included (see below) |
 
 ### Row Highlight
 
@@ -87,6 +88,28 @@ let table = Table::new()
 - **Other targets:** the highlight is a terminal-only appearance carried on
   `TableTerminalHints`. Browser and Markdown output ignore it, as they ignore
   striping.
+
+### Minimum Width
+
+`with_min_width(cells)` sets the narrowest the whole table is drawn, borders
+included. Use it to line a short table up with something printed beside it,
+such as a legend:
+
+```rust
+let table = Table::new()
+    .with_columns(vec![TableColumn::new("A"), TableColumn::new("B")])
+    .with_min_width(30);
+assert_eq!(table.plan_widths(80).unwrap().table_width, 30);
+```
+
+- **Where the width goes:** the last visible column takes all of it, the same
+  column that grows when a `width: 100%` table fills its line, and it stops at
+  that column's `max_width`. The other columns keep their natural widths.
+- **Limits:** a table already wider is unchanged, and the available width
+  still caps the minimum, so it never causes wrapping or overflow.
+- **Render paths:** it applies on the tree, the space-padded, and the
+  cursor-positioned paths. It is carried on `TableTerminalHints`; Browser and
+  Markdown output ignore it.
 
 ### Column Configuration
 

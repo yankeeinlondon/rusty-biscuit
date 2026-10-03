@@ -40,6 +40,7 @@ println!("{}", table.render_optimistic(Some(120)));
 | `columns` | `Vec<TableColumn>` | Column definitions (header text + width constraints) |
 | `data` | `Vec<Vec<TableCellContent>>` | Row data as a 2D grid of cell values |
 | `layout` | `Layout` | Controls margins, alignment, word-wrap, row-fill |
+| `min_width` | `Option<usize>` | Narrowest outer width (borders included); the last visible column absorbs the difference (`with_min_width`) |
 | `prefer_cursor_alignment` | `bool` | Use ANSI cursor positioning instead of space-based padding for cell alignment (helps when glyphs render narrower than computed Unicode width) |
 | `alternate_background_color` | `bool` | Apply subtle background color to even data rows (requires true color) |
 | `alternate_text_color` | `bool` | Apply subtle text color shift to even data rows (requires true color) |

@@ -1227,3 +1227,53 @@ fn table_highlight_row_with_striping_snapshot() {
 
     insta::assert_snapshot!(rendered);
 }
+
+// ---------------------------------------------------------------------------
+// Minimum width
+// ---------------------------------------------------------------------------
+
+fn line_widths(rendered: &str) -> Vec<usize> {
+    strip_ansi(rendered)
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| line.trim_end().chars().count())
+        .collect()
+}
+
+#[test]
+fn render_tree_node_carries_min_width() {
+    let node = sample_table().with_min_width(40).render_tree_node().expect("tree node");
+    assert_eq!(node.attrs.table_terminal_hints().min_width, Some(40));
+    assert_eq!(sample_table().render_tree_node().expect("tree node").attrs.table_terminal_hints().min_width, None);
+}
+
+#[test]
+fn min_width_widens_a_narrow_table_on_both_paths() {
+    let table = sample_table().with_min_width(40);
+    let natural = sample_table().plan_widths(80).expect("plan");
+    let plan = table.plan_widths(80).expect("plan");
+    assert_eq!(plan.table_width, 40);
+    let resolved = |plan: &biscuit_terminal::components::table::width::TableWidthPlan| {
+        plan.columns.iter().map(|column| column.resolved_width).collect::<Vec<_>>()
+    };
+    let natural_widths = resolved(&natural);
+    let widths = resolved(&plan);
+    assert_eq!(widths[0], natural_widths[0], "only the last column grows");
+    assert_eq!(widths[1], natural_widths[1] + (40 - natural.table_width));
+
+    let mut term = test_terminal(80);
+    term.is_tty = false;
+    for (path, rendered) in [("tree", table.render(&term)), ("bespoke", table.render_bespoke(&term))] {
+        let widths = line_widths(&rendered);
+        assert!(widths.iter().all(|&w| w == 40), "{path}: every line is 40 wide: {widths:?}\n{rendered}");
+    }
+}
+
+#[test]
+fn min_width_never_narrows_or_overflows() {
+    let natural = sample_table().plan_widths(80).expect("plan").table_width;
+    let smaller = sample_table().with_min_width(3).plan_widths(80).expect("plan");
+    assert_eq!(smaller.table_width, natural, "a wider table is unchanged");
+    let capped = sample_table().with_min_width(200).plan_widths(60).expect("plan");
+    assert_eq!(capped.table_width, 60, "the available width caps the minimum");
+}
