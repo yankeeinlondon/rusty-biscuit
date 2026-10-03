@@ -14480,6 +14480,7 @@ dependencies = [
  "ignore",
  "owo-colors",
  "predicates",
+ "renderable",
  "serde",
  "serde_json",
  "serial_test",

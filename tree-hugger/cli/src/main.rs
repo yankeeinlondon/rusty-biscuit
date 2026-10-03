@@ -3388,8 +3388,8 @@ fn format_refactor_hint(hint: &RefactorHint) -> String {
     match hint {
         RefactorHint::DominatedBySingleSymbol { name, share } => {
             format!(
-                "likely refactor: `{}` holds {:.0}% of the code — split by responsibility",
-                Prose::escape_text(name),
+                "likely refactor: {} holds {:.0}% of the code — split by responsibility",
+                renderable::markdown::code_span(name),
                 share * 100.0
             )
         }
