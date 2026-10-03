@@ -62,8 +62,9 @@ The `biscuit-terminal` package area contains both a Library and CLI which focus 
     - [`Status`](./docs/components/status.md)
     - `StatusBlock`
     - [`Table`](./docs/components/table.md) — typed cell content including
-      `StyledProse` cells that embed capability-aware inline Prose (links,
-      emphasis, color) without pre-rendering to terminal bytes; see
+      `StyledInlineProse` cells that embed capability-aware `InlineProse`
+      (links, emphasis, color, inline code) without pre-rendering to terminal
+      bytes; see
       [Prose in table cells](./docs/components/prose.md#prose-in-table-cells)
     - [`TerminalImage`](./docs/components/terminal_image.md)
     - [`TextBlock`](./docs/components/text_block.md)
@@ -91,12 +92,16 @@ let block = StatusBlock::new(StatusState::Error)
     .hint("Check the template syntax and retry.");
 ```
 
-`StatusBlock::body` accepts a `Vec<Prose>` (or anything `Into<Vec<Prose>>`).
-Each item is rendered through Prose individually and stacked vertically with
-one blank line between items. This guarantees that markup tokens like
+`StatusBlock::body` accepts a `Vec<Prose>` (or a single `Prose`, `&str`, or
+`String`). The body is block content: each item contributes its own paragraphs
+and fenced code blocks, with one blank line between blocks, and keeps its
+inline styling and its line-break mode on every target. Markup tokens like
 `<dim>`, `<cyan>`, and `<inverse>` are always parsed by Prose rather than
-leaked as literal text. Use `.body_line(...)` for the common single-paragraph
-case, or pass a `vec![Prose::new(...), ...]` for multi-section bodies.
+leaked as literal text. A body whose lines are separated by a single `\n` must
+use `.with_line_breaks(LineBreaks::Hard)` to keep one line per `\n`; otherwise
+a single newline is a soft break. Use `.body_line(...)` for the common
+single-paragraph case, or pass a `vec![Prose::new(...), ...]` for
+multi-section bodies.
 
 Default behavior:
 

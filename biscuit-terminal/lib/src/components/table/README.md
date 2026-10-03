@@ -93,20 +93,23 @@ Enum representing cell values with five active variants:
 | `Integer(i64)` | `i64` | Thousands separators (e.g., `1,234`) |
 | `Float(f64)` | `f64` | Two decimal places with thousands separators (e.g., `1,234.56`) |
 | `Currency(Currency, f64)` | `Currency` + `f64` | Symbol prefix with thousands separators (e.g., `$1,234.56`) |
-| `StyledProse(Box<Prose>)` | `Prose` | Inline styles, links, and emphasis preserved (see below) |
+| `StyledInlineProse(Box<InlineProse>)` | `InlineProse` | Inline styles, links, emphasis, and inline code preserved (see below) |
 
-`From` impls are provided for `String`, `&str`, `i64`, `f64`, and `Prose`:
+`From` impls are provided for `String`, `&str`, `i64`, `f64`, and `InlineProse`:
 
 ```rust
 vec!["Alice".into(), 30i64.into(), TableCellContent::Currency(Currency::USD, 99.95)]
 ```
 
-#### `StyledProse` cells
+#### `StyledInlineProse` cells
 
-A `StyledProse` cell embeds a [`Prose`](../../../../docs/components/prose.md) value
-so callers can place styled, capability-aware inline content (bold, emphasis,
-strikethrough, links, colors) in a cell without pre-rendering to terminal bytes
-during construction. Build one with `Prose::new(...).into()`:
+A `StyledInlineProse` cell embeds an
+[`InlineProse`](../../../../docs/components/prose.md) value so callers can place
+styled, capability-aware inline content (bold, emphasis, strikethrough, links,
+colors, inline code) in a cell without pre-rendering to terminal bytes during
+construction. A table cell is phrasing content, so it takes the inline
+component rather than the block `Prose`. Build one with
+`InlineProse::new(...).into()`:
 
 ```rust
 use biscuit_terminal::prelude::*;
@@ -119,8 +122,8 @@ let table = Table::new()
     ])
     .with_data(vec![
         vec![
-            Prose::new("**Bold** feature").into(),
-            Prose::new("[docs](https://example.com) — _ready_").into(),
+            InlineProse::new("**Bold** feature").into(),
+            InlineProse::new("[docs](https://example.com) — _ready_").into(),
         ],
         vec!["Plain feature".into(), TableCellContent::Text("pending".into())],
     ]);
@@ -131,17 +134,18 @@ println!("{}", table.render(&Terminal::default()));
 Resolution differs by render path:
 
 - **Render tree** (Browser/Markdown and the terminal tree path) — the cell
-  projects Prose's parsed inline `RenderNode` children (`Strong`, `Emphasis`,
-  `Delete`, `Link`, `Span`, …) directly, so semantic structure survives to each
-  target. Any top-level fenced-code child degrades to escaped literal text.
-- **Terminal bespoke path** — every `StyledProse` cell is resolved to
+  projects the parsed inline `RenderNode` children (`Strong`, `Emphasis`,
+  `Delete`, `Link`, `Span`, `InlineCode`, …) directly, so semantic structure
+  survives to each target. A fenced block in the cell is one `InlineCode`
+  value with its line endings turned into spaces.
+- **Terminal bespoke path** — every `StyledInlineProse` cell is resolved to
   `Text(prose.render(term))` **once**, before width planning, so the ANSI-aware
   table machinery measures visible width and styles never bleed into borders or
   padding.
 
-The cell's hint records `kind == "styled_prose"` with a null `raw_value`. Prose's
-own outer `Layout` is **not** applied as nested cell layout — the table owns cell
-geometry. See [Prose: inline Prose in table cells](../../../../docs/components/prose.md#prose-in-table-cells).
+The cell's hint records `kind == "styled_inline_prose"` with a null `raw_value`.
+A layout set on the `InlineProse` is **not** applied as nested cell layout — the
+table owns cell geometry. See [Prose: inline Prose in table cells](../../../../docs/components/prose.md#prose-in-table-cells).
 
 ### `Conditional`
 
