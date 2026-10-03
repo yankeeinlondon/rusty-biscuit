@@ -1,15 +1,22 @@
-//! Styled prose rendering with bracketed-tag (`<red>…</red>`) and Markdown-subset
+//! Styled prose with a bracketed-tag (`<red>…</red>`) and Markdown-subset
 //! grammar, rendered to Terminal, Browser, and Markdown targets.
+//!
+//! Two components share one grammar: [`Prose`] is block content (paragraphs
+//! and fenced code), [`InlineProse`] is phrasing content.
 //!
 //! The module is split along grammar / styling / rendering axes:
 //!
-//! - [`prose`] — the public [`Prose`] struct, builder API, and target trait impls
-//! - [`markdown`] — the Markdown-subset pre-processor
+//! - [`prose`] — the public [`Prose`] struct, [`ProseTag`], builder API, and target trait impls
+//! - [`inline_prose`] — the public [`InlineProse`] struct and its target trait impls
+//! - [`blocks`] — [`LineBreaks`], the paragraph splitter, and the grammar entry points
+//! - [`markdown`] — the Markdown-subset pre-processor and lifted-content table
 //! - [`tokens`] — the bracketed-tag parser that builds render-tree nodes
 //! - [`styles`] — color-name lookups, href resolution, and the `ProseStyle` struct
-//! - [`tree`] — `TreeRenderable` impl and `Prose` → `RenderNode` projection
-//! - [`render`] — the [`TerminalRenderable`](crate::components::renderable::TerminalRenderable) impl
+//! - [`tree`] — `TreeRenderable` impls and the render-tree projection
+//! - [`render`] — the `Prose` [`TerminalRenderable`](crate::components::renderable::TerminalRenderable) impl
 
+mod blocks;
+mod inline_prose;
 mod markdown;
 #[allow(clippy::module_inception)]
 mod prose;
@@ -24,7 +31,9 @@ mod tree;
 #[cfg(test)]
 mod parity;
 
-pub use self::prose::{IntoProseVec, Prose};
+pub use self::blocks::LineBreaks;
+pub use self::inline_prose::InlineProse;
+pub use self::prose::{IntoProseVec, Prose, ProseTag};
 
 #[cfg(test)]
 mod tests {
@@ -42,22 +51,32 @@ mod tests {
 
     #[test]
     fn description_with_underscored_file_names_keeps_every_character() {
+        // The single newline is a soft break. The code span adds nothing over
+        // the inherited dim, so it keeps a backtick fence to stay marked.
         let description = "1. **_pr/open.md** opens it.\n2. **_pr/triage.md** triages it.\n\nSee `_pr/_report.md`.";
         let rendered = plain(&format!("<i><dim>{description}</dim></i>"));
         assert_eq!(
             rendered,
-            "1. _pr/open.md opens it.\n2. _pr/triage.md triages it.\n\nSee `_pr/_report.md`."
+            "1. _pr/open.md opens it. 2. _pr/triage.md triages it.\n\nSee `_pr/_report.md`."
         );
     }
 
     #[test]
     fn escaped_author_text_renders_verbatim() {
-        let description = "1. **_pr/open.md** opens it.\n2. **_pr/triage.md** triages it.\n\nSee `_pr/_report.md`. </i> {x}";
+        let description = "1. **_pr/open.md** opens it. </i> {x} [a](b)";
         let rendered = plain(&format!(
             "<i><dim>{}</dim></i>",
             Prose::escape_text(description)
         ));
         assert_eq!(rendered, description);
+    }
+
+    #[test]
+    fn escaped_text_inside_a_code_span_keeps_its_backslashes() {
+        // Code spans are literal, so text placed between backticks must not be
+        // passed through `escape_text`.
+        let rendered = plain(&format!("See `{}`.", Prose::escape_text("_a_")));
+        assert_eq!(rendered, "See \\_a\\_.");
     }
 
     #[test]
@@ -648,16 +667,6 @@ mod tests {
     }
 
     #[test]
-    fn code_span_wrapping_a_link_emits_osc8_with_code_text() {
-        let term = Terminal::builder().osc_link_support(true).build();
-        let result = Prose::new("The `[plan.md](https://example.com/plan.md)` plan").render(&term);
-        assert!(
-            result.contains("\x1b]8;;https://example.com/plan.md\x1b\\`plan.md`\x1b]8;;\x1b\\"),
-            "got: {result:?}"
-        );
-    }
-
-    #[test]
     fn test_osc8_link_unsupported_emits_markdown_fallback() {
         let term = Terminal::builder().osc_link_support(false).build();
         let prose = Prose::new("<a href=\"https://example.com\">click here</a>");
@@ -768,7 +777,7 @@ mod tests {
         let result = prose.render_optimistic(None);
         assert_eq!(
             result,
-            "\x1b[31mbefore\n\x1b[0m\n\n\x1b[2m```\x1b[0m\n\x1b[2mcode\x1b[0m\n\x1b[2m```\x1b[0m\n\n\x1b[31m\nafter\x1b[0m"
+            "\x1b[31mbefore\x1b[0m\n\n\x1b[2m```\x1b[0m\n\x1b[2mcode\x1b[0m\n\x1b[2m```\x1b[0m\n\n\x1b[31mafter\x1b[0m"
         );
     }
 

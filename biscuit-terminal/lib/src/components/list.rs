@@ -1223,7 +1223,7 @@ mod tests {
         // Bespoke parity behavior: an explicit `WordWrap::WrapProse(_, Some(4))`
         // on a Prose item produced 4-space continuation indent on the
         // bespoke path. After the render-tree migration, the projection
-        // extracts Prose's inline structure (via `to_render_nodes`) but does
+        // extracts Prose's inline structure (via `interim_container_nodes`) but does
         // not carry the per-Prose `word_wrap` field — the list renderer
         // wraps using only the list's bullet width (2 spaces by default for
         // `- `). This is an accepted divergence documented in `KNOWN_DRIFT`,

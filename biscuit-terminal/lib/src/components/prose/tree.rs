@@ -1,18 +1,15 @@
-//! Prose → render-tree projection and the [`TreeRenderable`] impl.
+//! [`Prose`] and [`InlineProse`] → render-tree projection and the
+//! [`TreeRenderable`] impls.
 //!
-//! Prose parses its bracket-tag grammar **directly** into the canonical
-//! [`RenderNode`] shape used by [`renderable::tree`] (see
-//! [`parse_render_nodes`](super::tokens::parse_render_nodes)); there is no
-//! intervening `ProseDocument` on this path. Containers that embed a
-//! [`Prose`] component (today:
-//! [`BlockQuote`](crate::components::block_quote::BlockQuote)) call
-//! [`Prose::to_render_nodes`] for the inline node sequence, and Prose's own
-//! [`TreeRenderable::render_tree`] wraps that sequence into a document-shaped
-//! root.
+//! Both components parse the shared grammar ([`super::blocks`]) straight into
+//! canonical [`RenderNode`]s; there is no intervening component-local IR.
+//! `Prose` projects to a `Root` of `Paragraph` and `Code` blocks carrying its
+//! layout; `InlineProse` projects to one neutral `Span` of phrasing nodes.
 //!
-//! The tag → node mapping (applied by the parser via
-//! [`project_span`] and the `RenderNode` constructors):
+//! The tag → node mapping (applied by the parser via [`project_span`] and the
+//! `RenderNode` constructors):
 //! - literal text → `NodeKind::Text`
+//! - newlines → `NodeKind::SoftBreak` / `NodeKind::HardBreak`
 //! - bold/italic/strikethrough only → semantic `NodeKind::Strong` /
 //!   `NodeKind::Emphasis` / `NodeKind::Delete` wrappers (nested in that order
 //!   so a single span carrying multiple emphasis flags still expresses each
@@ -22,7 +19,9 @@
 //!   `render_inline_node` path lowers it to SGR via `text_appearance_sgr`.
 //! - links → `NodeKind::Link` with un-resolved `href` (each target re-resolves
 //!   per its own rules).
-//! - code blocks → `NodeKind::Code` (block-level).
+//! - code spans → `NodeKind::InlineCode`
+//! - fenced code blocks → `NodeKind::Code` in `Prose`, `NodeKind::InlineCode`
+//!   in `InlineProse`.
 //!
 //! `<inverse>` / `<reverse>` carry `TextEmphasis::inverse`. `<hidden>` has no
 //! semantic peer and is dropped by the parser to inert literal text, so it
@@ -31,41 +30,64 @@
 use renderable::color::Color;
 use renderable::layout::{Layout, TargetValue};
 use renderable::style::{PaintColor, PerMode, Style, TextEmphasis};
+use renderable::browser::fragment::{BrowserFragment, Ready};
+use renderable::tree::render::{BrowserRenderOptions, render_browser_node};
 use renderable::tree::{NodeKind, RenderNode, TreeRenderable};
 
+use super::inline_prose::InlineProse;
 use super::prose::Prose;
 use super::styles::ProseStyle;
 
 impl Prose {
-    /// Projects this prose into a sequence of inline [`RenderNode`]s.
+    /// The block nodes of this prose: a `Paragraph` per paragraph (carrying
+    /// the [`ProseTag`](super::ProseTag) element) and a `Code` per fenced block.
+    pub(crate) fn block_nodes(&self) -> Vec<RenderNode> {
+        let element = self.tag.into();
+        let mut blocks = super::blocks::parse_blocks(self.content(), self.line_breaks);
+        for block in &mut blocks {
+            if matches!(block.kind, NodeKind::Paragraph { .. }) {
+                block.attrs.browser_mut_or_default().block_element = element;
+                block.attrs.retain_non_default_browser();
+            }
+        }
+        blocks
+    }
+
+    /// Interim bridge for containers that still expect a flat inline
+    /// sequence: each paragraph's children, consecutive paragraphs joined by
+    /// a literal blank line, and fenced blocks as block-level `Code` nodes
+    /// for the container's own folding.
     ///
-    /// Use this when embedding `Prose` content inside a container
-    /// component's render-tree projection so the canonical render tree
-    /// carries the styled inline structure (and the terminal tree
-    /// renderer lowers it back to SGR) instead of a flattened plain-text
-    /// blob.
-    #[must_use]
-    pub fn to_render_nodes(&self) -> Vec<RenderNode> {
-        let pre = super::markdown::preprocess_markdown(self.content());
-        super::tokens::parse_render_nodes(&pre.text, &pre.code_blocks)
+    /// Containers are re-typed onto `InlineProse` or block children (with
+    /// layout transfer) next; this goes away with that change.
+    pub(crate) fn interim_container_nodes(&self) -> Vec<RenderNode> {
+        let mut out = Vec::new();
+        let mut previous_was_paragraph = false;
+        for block in super::blocks::parse_blocks(self.content(), self.line_breaks) {
+            match block.kind {
+                NodeKind::Paragraph { children } => {
+                    if previous_was_paragraph {
+                        out.push(RenderNode::text("\n\n"));
+                    }
+                    out.extend(children);
+                    previous_was_paragraph = true;
+                }
+                _ => {
+                    out.push(block);
+                    previous_was_paragraph = false;
+                }
+            }
+        }
+        out
     }
 }
 
 impl TreeRenderable for Prose {
-    /// Projects the prose into a document-shaped canonical render tree.
-    ///
-    /// Contiguous top-level inline nodes are wrapped in a `Paragraph`; any
-    /// top-level `Code` block stays a direct block-level child of the root.
-    /// This satisfies `TreeRenderable`'s single-node contract and render-tree
-    /// validation (a `Root` of block-level children) while leaving the inline
-    /// embedding shape returned by [`Prose::to_render_nodes`] unchanged for
-    /// containers.
+    /// Projects the prose into a `Root` of `Paragraph` and `Code` blocks,
+    /// with the prose layout on the root. Empty and whitespace-only content
+    /// gives a `Root` with no children.
     fn render_tree(&self) -> RenderNode {
-        let blocks = crate::render_tree::projection::fold_prose_nodes_into_blocks(
-            self.to_render_nodes(),
-        );
-
-        let mut root = RenderNode::root(blocks);
+        let mut root = RenderNode::root(self.block_nodes());
         if self.layout != Layout::default() {
             root.attrs.set_layout(&self.layout);
         }
@@ -73,14 +95,39 @@ impl TreeRenderable for Prose {
     }
 
     /// Surfaces Prose's layout (margins, alignment, word wrap) to the tree
-    /// renderers so [`Prose::with_layout`](super::Prose) and the margin /
-    /// word-wrap helpers keep affecting rendered output through the tree path.
+    /// renderers.
     fn tree_layout(&self) -> Option<Layout> {
         if self.layout != Layout::default() {
             Some(self.layout.clone())
         } else {
             None
         }
+    }
+}
+
+/// Render each node with the shared browser renderer and concatenate the
+/// results with no outer element.
+pub(super) fn concat_html(component: &'static str, nodes: Vec<RenderNode>) -> BrowserFragment<Ready> {
+    let opts = BrowserRenderOptions::default();
+    let mut html = String::new();
+    for node in nodes {
+        match render_browser_node(&node, &opts) {
+            Ok(rendered) => html.push_str(&rendered.output.render()),
+            Err(error) => tracing::error!(
+                component,
+                error = %error,
+                "render_browser_node failed; skipping node"
+            ),
+        }
+    }
+    BrowserFragment::new().define_as_raw_html(html).finalize()
+}
+
+impl TreeRenderable for InlineProse {
+    /// Projects the inline content into one neutral `Span` holding its
+    /// phrasing nodes, also when the content is empty.
+    fn render_tree(&self) -> RenderNode {
+        RenderNode::span(Vec::new(), self.to_render_nodes())
     }
 }
 
@@ -230,7 +277,7 @@ mod tests {
 
     #[test]
     fn plain_text_projects_to_text_node() {
-        let nodes = Prose::new("hello world").to_render_nodes();
+        let nodes = InlineProse::new("hello world").to_render_nodes();
         assert_eq!(nodes.len(), 1);
         match &nodes[0].kind {
             NodeKind::Text { value } => assert_eq!(value, "hello world"),
@@ -240,25 +287,25 @@ mod tests {
 
     #[test]
     fn bold_tag_projects_to_strong_node() {
-        let nodes = Prose::new("<b>x</b>").to_render_nodes();
+        let nodes = InlineProse::new("<b>x</b>").to_render_nodes();
         assert!(matches!(first(&nodes).kind, NodeKind::Strong { .. }));
     }
 
     #[test]
     fn italic_tag_projects_to_emphasis_node() {
-        let nodes = Prose::new("<i>x</i>").to_render_nodes();
+        let nodes = InlineProse::new("<i>x</i>").to_render_nodes();
         assert!(matches!(first(&nodes).kind, NodeKind::Emphasis { .. }));
     }
 
     #[test]
     fn strikethrough_tag_projects_to_delete_node() {
-        let nodes = Prose::new("<~>x</~>").to_render_nodes();
+        let nodes = InlineProse::new("<~>x</~>").to_render_nodes();
         assert!(matches!(first(&nodes).kind, NodeKind::Delete { .. }));
     }
 
     #[test]
     fn red_color_projects_to_styled_span() {
-        let nodes = Prose::new("<red>x</red>").to_render_nodes();
+        let nodes = InlineProse::new("<red>x</red>").to_render_nodes();
         assert!(matches!(first(&nodes).kind, NodeKind::Span { .. }));
         let style = first(&nodes).attrs.style().expect("style attached");
         assert_eq!(
@@ -271,7 +318,7 @@ mod tests {
 
     #[test]
     fn tailwind_color_projects_to_styled_span() {
-        let nodes = Prose::new("<red-500>x</red-500>").to_render_nodes();
+        let nodes = InlineProse::new("<red-500>x</red-500>").to_render_nodes();
         assert!(matches!(first(&nodes).kind, NodeKind::Span { .. }));
         let style = first(&nodes).attrs.style().expect("style attached");
         assert!(matches!(
@@ -285,7 +332,7 @@ mod tests {
 
     #[test]
     fn link_projects_to_link_node() {
-        let nodes = Prose::new("<a href=\"https://example.com\">go</a>").to_render_nodes();
+        let nodes = InlineProse::new("<a href=\"https://example.com\">go</a>").to_render_nodes();
         match &first(&nodes).kind {
             NodeKind::Link { url, .. } => assert_eq!(url, "https://example.com"),
             other => panic!("expected link node, got {other:?}"),
@@ -294,7 +341,7 @@ mod tests {
 
     #[test]
     fn nested_bold_italic_nests_strong_then_emphasis() {
-        let nodes = Prose::new("<b><i>x</i></b>").to_render_nodes();
+        let nodes = InlineProse::new("<b><i>x</i></b>").to_render_nodes();
         match &first(&nodes).kind {
             NodeKind::Strong { children } => {
                 assert!(matches!(children[0].kind, NodeKind::Emphasis { .. }))
@@ -305,7 +352,7 @@ mod tests {
 
     #[test]
     fn mixed_text_and_styled_run_preserves_order() {
-        let nodes = Prose::new("plain <b>bold</b> tail").to_render_nodes();
+        let nodes = InlineProse::new("plain <b>bold</b> tail").to_render_nodes();
         assert_eq!(nodes.len(), 3);
         assert!(matches!(nodes[0].kind, NodeKind::Text { .. }));
         assert!(matches!(nodes[1].kind, NodeKind::Strong { .. }));

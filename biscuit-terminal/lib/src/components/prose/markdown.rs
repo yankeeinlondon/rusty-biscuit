@@ -1,30 +1,43 @@
-//! Markdown pre-processing for [`Prose`](super::Prose) input.
+//! Markdown pre-processing for [`Prose`](super::Prose) and
+//! [`InlineProse`](super::InlineProse) input.
 //!
-//! Converts a curated subset of Markdown syntax into the existing block-tag
-//! grammar that [`super::tokens::parse_tokens_inner`] already understands:
+//! Converts a curated subset of Markdown syntax into the block-tag grammar
+//! that [`super::tokens::parse_render_nodes`] understands:
 //!
 //! | Markdown          | Pre-processed form                |
 //! |-------------------|-----------------------------------|
 //! | `[desc](ref)`     | `<a href="ref">desc</a>`          |
 //! | `**text**`        | `<b>text</b>`                     |
 //! | `_text_`          | `<i>text</i>`                     |
-//! | `` `code` ``      | `` `code` `` with its contents escaped |
-//! | `` `[desc](ref)` `` | `` [`desc`](ref) ``, then as a link |
+//! | `` `code` ``      | a lifted-content placeholder resolved to `InlineCode` |
 //!
-//! The conversion order is fixed: fenced code blocks → code spans → links →
-//! bold → italics. Each phase respects backslash escapes (`\*`, `\_`, `\[`,
-//! `\]`, `\(`, `\)`) so literal Markdown characters survive untouched and
-//! reach the token parser as-is.
+//! Fenced code blocks are lifted once for the whole input
+//! ([`lift_fences`]), before paragraphs are split. Each paragraph then runs
+//! the inline phases in a fixed order ([`preprocess_inline`]): code spans →
+//! links → bold → italics. Each phase respects backslash escapes (`\*`,
+//! `\_`, `\[`, `\]`, `\(`, `\)`) so literal Markdown characters survive
+//! untouched and reach the token parser as-is.
 //!
-//! An inline code span keeps its backticks and is otherwise opaque: its
-//! unescaped contents are backslash-escaped, so no emphasis, link, or tag
-//! syntax inside it is ever interpreted. Unlike CommonMark, a Prose backslash
-//! escape still applies inside a code span, so escaped text never gains a
-//! second backslash.
+//! ## Lifted content
 //!
-//! One exception, also unlike CommonMark: a code span whose entire content
-//! is a single `[desc](ref)` link becomes a link whose text is the code span,
-//! `` [`desc`](ref) ``, so a template can wrap a generated link in backticks.
+//! Fenced code blocks and code spans are opaque. Each is moved into a
+//! [`Lifted`] table and replaced by a `\u{0002}<n>\u{0002}` placeholder that
+//! survives every later phase (the sentinel is non-word punctuation) and is
+//! resolved by the token parser straight into a `Code` or `InlineCode` node,
+//! never re-expanded into string markup.
+//!
+//! Literal sentinel characters in user input are backslash-escaped by
+//! [`lift_fences`] before anything else runs, so an unescaped sentinel is
+//! always one the parser issued and input can never impersonate a lifted
+//! reference or a link-target placeholder.
+//!
+//! ## Code spans
+//!
+//! A backtick run opens a span only when a later run of the same length
+//! closes it, before the next blank line; an unmatched run is literal. The
+//! span's value follows CommonMark: backslashes are literal, line endings
+//! become spaces, and one space is stripped from each side when the content
+//! both begins and ends with a space and is not all spaces.
 //!
 //! Emphasis delimiters follow the CommonMark left- and right-flanking rules
 //! (`_` additionally may not open or close inside a word, and `**` keeps the
@@ -127,17 +140,20 @@ fn neighbours(chars: &[char], start: usize, len: usize) -> (Option<char>, Option
     (prev, chars.get(start + len).copied())
 }
 
-/// Sentinel character marking a lifted fenced code block. It is a C0
-/// control character that never appears in real Prose input, so the
-/// `\u{0002}CODE<n>\u{0002}` placeholder cannot collide with user code —
-/// see [`super::tokens::parse_nodes`], which consumes it directly.
-pub(super) const CODE_BLOCK_PLACEHOLDER_MARK: char = '\u{0002}';
+/// Sentinel character delimiting a lifted-content placeholder
+/// (`\u{0002}<n>\u{0002}`, an index into the [`Lifted`] table). It is a C0
+/// control character; a literal one in user input is backslash-escaped by
+/// [`lift_fences`], so an unescaped occurrence is always parser-issued.
+pub(super) const LIFT_MARK: char = '\u{0002}';
+
+/// Whether `c` is one of the parser's placeholder sentinels.
+pub(super) fn is_sentinel(c: char) -> bool {
+    c == LIFT_MARK || c == HREF_PLACEHOLDER_MARK
+}
 
 /// A fenced code block lifted out of the input during pre-processing.
 ///
-/// The body is opaque: no Prose markup is ever parsed from it. The token
-/// parser turns the matching placeholder straight into a
-/// `Code` render-tree node.
+/// The body is opaque: no Prose markup is ever parsed from it.
 #[derive(Debug, Clone)]
 pub(super) struct FencedCode {
     /// Language hint from the opening fence (may be empty).
@@ -146,33 +162,47 @@ pub(super) struct FencedCode {
     pub body: String,
 }
 
-/// Result of [`preprocess_markdown`]: the converted text — still carrying
-/// opaque `\u{0002}CODE<n>\u{0002}` placeholders for fenced code blocks —
-/// plus the lifted code blocks indexed by placeholder number.
-///
-/// Code blocks are deliberately *not* restored into the string grammar:
-/// re-injecting a body that itself contained a closing tag would let the
-/// tag scanner terminate the block early. The token parser instead
-/// resolves each placeholder against `code_blocks` directly.
-pub(super) struct Preprocessed {
-    /// Pre-processed text with code-block placeholders intact.
-    pub text: String,
-    /// Lifted fenced code blocks, indexed by placeholder number.
-    pub code_blocks: Vec<FencedCode>,
+/// Opaque content moved out of the text stream; placeholders index into a
+/// `Vec<Lifted>` shared by every paragraph of one input.
+#[derive(Debug, Clone)]
+pub(super) enum Lifted {
+    /// A fenced code block.
+    Fence(FencedCode),
+    /// A code span's final value (CommonMark adjustments already applied).
+    Span(String),
 }
 
-/// Phase 0: lift fenced code blocks (` ```lang\n...\n``` `) into opaque
-/// placeholders so that inner backticks, asterisks, and underscores are
-/// never interpreted as Markdown.
+/// Placeholder text referring to `lifted[index]`.
+fn lift_placeholder(index: usize) -> String {
+    format!("{LIFT_MARK}{index}{LIFT_MARK}")
+}
+
+/// Parse a lifted-content placeholder starting at `chars[start]` (which must
+/// be [`LIFT_MARK`]). Returns the index and the position just past the
+/// closing mark.
+pub(super) fn parse_lift_placeholder(chars: &[char], start: usize) -> Option<(usize, usize)> {
+    debug_assert_eq!(chars[start], LIFT_MARK);
+    let digits_end = start + 1 + chars[start + 1..].iter().take_while(|c| c.is_ascii_digit()).count();
+    if digits_end == start + 1 || chars.get(digits_end) != Some(&LIFT_MARK) {
+        return None;
+    }
+    let index: String = chars[start + 1..digits_end].iter().collect();
+    Some((index.parse().ok()?, digits_end + 1))
+}
+
+/// Stage 0 for the whole input: normalize line endings, lift fenced code
+/// blocks (` ```lang\n...\n``` `) into placeholders, and backslash-escape
+/// every literal sentinel character outside them (rule R1).
 ///
-/// Returns the text with placeholders and the lifted code blocks. The
-/// placeholders survive every later phase untouched (the sentinel is a
-/// non-word, non-escapable character) and are resolved by the token
-/// parser, never re-expanded back into string markup.
-fn convert_fenced_code_blocks(input: &str) -> (String, Vec<FencedCode>) {
-    let lines: Vec<&str> = input.lines().collect();
-    let mut output_lines: Vec<String> = Vec::new();
-    let mut code_blocks: Vec<FencedCode> = Vec::new();
+/// CRLF and lone CR become LF first, so the paragraph and break rules see
+/// the same structure whatever platform produced the text. A fence opens on
+/// a line starting (after indentation) with three backticks; an unclosed
+/// fence consumes the rest of the input. Fence bodies are lifted verbatim.
+pub(super) fn lift_fences(input: &str) -> (String, Vec<Lifted>) {
+    let normalized = input.replace("\r\n", "\n").replace('\r', "\n");
+    let lines: Vec<&str> = normalized.split('\n').collect();
+    let mut output_lines: Vec<String> = Vec::with_capacity(lines.len());
+    let mut lifted: Vec<Lifted> = Vec::new();
     let mut i = 0;
 
     while i < lines.len() {
@@ -194,54 +224,47 @@ fn convert_fenced_code_blocks(input: &str) -> (String, Vec<FencedCode>) {
                 i += 1;
             }
 
-            let placeholder = format!(
-                "{m}CODE{n}{m}",
-                m = CODE_BLOCK_PLACEHOLDER_MARK,
-                n = code_blocks.len()
-            );
-            code_blocks.push(FencedCode {
+            output_lines.push(lift_placeholder(lifted.len()));
+            lifted.push(Lifted::Fence(FencedCode {
                 lang,
                 body: body_lines.join("\n"),
-            });
-            output_lines.push(placeholder);
+            }));
         } else {
-            output_lines.push(line.to_string());
+            let mut escaped = String::with_capacity(line.len());
+            for c in line.chars() {
+                if is_sentinel(c) {
+                    escaped.push('\\');
+                }
+                escaped.push(c);
+            }
+            output_lines.push(escaped);
             i += 1;
         }
     }
 
-    (output_lines.join("\n"), code_blocks)
+    (output_lines.join("\n"), lifted)
 }
 
-/// Apply the full Markdown pre-processing pipeline.
+/// Apply the inline Markdown phases to one paragraph of fence-lifted text.
 ///
-/// Order: fenced code blocks → code spans → links → bold → italics. The text output is
-/// fed into the block-tag parser; the lifted code blocks are handed to it
-/// alongside so it can resolve placeholders without ever re-parsing a
-/// code body as markup. Backslash escapes for `*`, `_`, `[`, `]`, `(`,
-/// `)` are preserved end-to-end so the downstream parser converts them to
-/// literal characters via Phase 1's escape handling.
-pub(super) fn preprocess_markdown(input: &str) -> Preprocessed {
-    let (with_code, code_blocks) = convert_fenced_code_blocks(input);
-    let with_spans = escape_code_spans(&with_code);
+/// Order: code spans → links → bold → italics. Code spans are appended to
+/// `lifted`; the returned text keeps their placeholders (and any fence
+/// placeholders) for the token parser.
+pub(super) fn preprocess_inline(paragraph: &str, lifted: &mut Vec<Lifted>) -> String {
+    let with_spans = lift_code_spans(paragraph, lifted);
     let (with_links, hrefs) = convert_links(&with_spans);
     let with_bold = convert_bold(&with_links);
     let with_italics = convert_italics(&with_bold);
-    Preprocessed {
-        text: restore_hrefs(&with_italics, &hrefs),
-        code_blocks,
-    }
+    restore_hrefs(&with_italics, &hrefs)
 }
 
-/// Phase 0b: make every inline code span opaque by backslash-escaping each
-/// escapable character inside it. The backticks stay as literal text.
+/// Lift every inline code span into `lifted`, leaving a placeholder.
 ///
 /// A backtick run opens a span only when a later run of the same length
-/// closes it; an unmatched run is literal. Tag declarations outside a span
-/// and existing escapes anywhere are copied through untouched. A span that
-/// is exactly one link is turned inside out into `` [`desc`](ref) `` for the
-/// link phase.
-fn escape_code_spans(input: &str) -> String {
+/// closes it before the next blank line; an unmatched run is literal. Tag
+/// declarations and existing escapes outside a span are copied through
+/// untouched.
+fn lift_code_spans(input: &str, lifted: &mut Vec<Lifted>) -> String {
     let chars: Vec<char> = input.chars().collect();
     let mut output = String::with_capacity(input.len());
     let mut i = 0;
@@ -267,21 +290,8 @@ fn escape_code_spans(input: &str) -> String {
             let run = backtick_run_len(&chars, i);
             match closing_backtick_run(&chars, i + run, run) {
                 Some(close) => {
-                    let ticks = &chars[i..i + run];
-                    if let Some(desc_end) = whole_span_link(&chars, i + run, close) {
-                        // `` `[desc](ref)` `` is a link whose text is code:
-                        // rewrite it as `` [`desc`](ref) `` so the link phase
-                        // still sees the link and only its text stays opaque.
-                        output.push('[');
-                        output.extend(ticks);
-                        push_escaped_code(&chars[i + run + 1..desc_end], &mut output);
-                        output.extend(ticks);
-                        output.extend(&chars[desc_end..close]);
-                    } else {
-                        output.extend(ticks);
-                        push_escaped_code(&chars[i + run..close], &mut output);
-                        output.extend(ticks);
-                    }
+                    output.push_str(&lift_placeholder(lifted.len()));
+                    lifted.push(Lifted::Span(code_span_value(&chars[i + run..close])));
                     i = close + run;
                 }
                 None => {
@@ -299,37 +309,61 @@ fn escape_code_spans(input: &str) -> String {
     output
 }
 
-/// Backslash-escapes every escapable character of a code span's contents.
-fn push_escaped_code(contents: &[char], output: &mut String) {
+/// The CommonMark value of a code span's raw contents.
+///
+/// Backslashes are literal, except the one [`lift_fences`] put in front of
+/// each sentinel, which is removed again. Line endings become spaces, and
+/// one space is stripped from each side when the content begins and ends
+/// with a space and is not all spaces.
+fn code_span_value(contents: &[char]) -> String {
+    let mut value = String::with_capacity(contents.len());
     let mut j = 0;
     while j < contents.len() {
-        let inner = contents[j];
-        // An existing escape is kept as is, so text that
-        // `Prose::escape_text` already escaped is not escaped twice.
-        if inner == '\\' && j + 1 < contents.len() && is_escapable(contents[j + 1]) {
-            output.push(inner);
-            output.push(contents[j + 1]);
+        let c = contents[j];
+        if c == '\\' && contents.get(j + 1).is_some_and(|&n| is_sentinel(n)) {
+            value.push(contents[j + 1]);
             j += 2;
             continue;
         }
-        if is_escapable(inner) {
-            output.push('\\');
-        }
-        output.push(inner);
+        value.push(if c == '\n' { ' ' } else { c });
         j += 1;
     }
+    if value.len() >= 2 && value.starts_with(' ') && value.ends_with(' ') && !value.chars().all(|c| c == ' ') {
+        value = value[1..value.len() - 1].to_string();
+    }
+    value
 }
 
-/// When the code span contents `chars[start..end]` are exactly one
-/// `[desc](ref)` link, returns the index of the `]` closing `desc`.
-fn whole_span_link(chars: &[char], start: usize, end: usize) -> Option<usize> {
-    if chars.get(start) != Some(&'[') {
-        return None;
+/// Index just past a run of two or more newlines starting at `start`
+/// (`chars[start]` must be `\n`) separated only by spaces or tabs, or `None`
+/// when the newline at `start` stands alone. Trailing spaces after the last
+/// newline are not part of the run.
+pub(super) fn blank_run_end(chars: &[char], start: usize) -> Option<usize> {
+    let (count, end) = newline_run(chars, start);
+    (count >= 2).then_some(end)
+}
+
+/// The number of newlines in the run starting at `chars[start]` (which must
+/// be `\n`), separated only by spaces or tabs, and the index just past the
+/// last newline of the run.
+pub(super) fn newline_run(chars: &[char], start: usize) -> (usize, usize) {
+    debug_assert_eq!(chars[start], '\n');
+    let mut count = 1;
+    let mut end = start + 1;
+    let mut j = end;
+    loop {
+        while j < chars.len() && matches!(chars[j], ' ' | '\t') {
+            j += 1;
+        }
+        if j < chars.len() && chars[j] == '\n' {
+            count += 1;
+            j += 1;
+            end = j;
+        } else {
+            break;
+        }
     }
-    let (desc, _, link_end) = try_parse_link(&chars[..end], start)?;
-    // `try_parse_link` keeps escapes in `desc` verbatim, so its length is
-    // the length of the raw description.
-    (link_end == end).then(|| start + 1 + desc.chars().count())
+    (count, end)
 }
 
 /// Length of the backtick run starting at `start`.
@@ -337,10 +371,15 @@ fn backtick_run_len(chars: &[char], start: usize) -> usize {
     chars[start..].iter().take_while(|&&c| c == '`').count()
 }
 
-/// Index of the first backtick run of exactly `len` at or after `start`.
+/// Index of the first backtick run of exactly `len` at or after `start`,
+/// searching no further than the next blank line (a span never crosses a
+/// paragraph boundary).
 fn closing_backtick_run(chars: &[char], start: usize, len: usize) -> Option<usize> {
     let mut i = start;
     while i < chars.len() {
+        if chars[i] == '\n' && blank_run_end(chars, i).is_some() {
+            return None;
+        }
         if chars[i] == '`' {
             let run = backtick_run_len(chars, i);
             if run == len {
@@ -356,12 +395,13 @@ fn closing_backtick_run(chars: &[char], start: usize, len: usize) -> Option<usiz
 
 /// Characters that participate in backslash escape sequences during
 /// Markdown pre-processing. Mirrors the set recognised by
-/// [`super::tokens::parse_tokens_inner`].
-fn is_escapable(c: char) -> bool {
+/// [`super::tokens::parse_render_nodes`]; the sentinels are included because
+/// [`lift_fences`] escapes literal ones.
+pub(super) fn is_escapable(c: char) -> bool {
     matches!(
         c,
         '*' | '_' | '[' | ']' | '(' | ')' | '<' | '>' | '{' | '\\'
-    )
+    ) || is_sentinel(c)
 }
 
 /// Copy a block-tag declaration `<…>` from the input to the output
@@ -484,7 +524,10 @@ fn try_parse_link(chars: &[char], start: usize) -> Option<(String, String, usize
     while j < chars.len() {
         let ch = chars[j];
 
-        if ch == '\\' && j + 1 < chars.len() && (chars[j + 1] == '(' || chars[j + 1] == ')') {
+        if ch == '\\'
+            && j + 1 < chars.len()
+            && (chars[j + 1] == '(' || chars[j + 1] == ')' || is_sentinel(chars[j + 1]))
+        {
             href.push(chars[j + 1]);
             j += 2;
             continue;
@@ -730,27 +773,87 @@ fn scan_past_tag_declaration(chars: &[char], start: usize) -> Option<usize> {
 
 /// Final phase: replace each `\u{0001}HREF<n>\u{0001}` placeholder with
 /// the corresponding stored href value.
+///
+/// A single left-to-right pass, skipping escape pairs, so neither an
+/// escaped literal sentinel nor a restored href value is ever read as a
+/// placeholder.
 fn restore_hrefs(input: &str, hrefs: &[String]) -> String {
     if hrefs.is_empty() {
         return input.to_string();
     }
-    let mut output = input.to_string();
-    for (i, href) in hrefs.iter().enumerate() {
-        let placeholder = format!("{m}HREF{i}{m}", m = HREF_PLACEHOLDER_MARK);
-        output = output.replace(&placeholder, href);
+    let chars: Vec<char> = input.chars().collect();
+    let mut output = String::with_capacity(input.len());
+    let mut i = 0;
+    while i < chars.len() {
+        let ch = chars[i];
+        if ch == '\\' && i + 1 < chars.len() && is_escapable(chars[i + 1]) {
+            output.push(ch);
+            output.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if ch == HREF_PLACEHOLDER_MARK
+            && let Some((href, next)) = href_placeholder(&chars, i, hrefs)
+        {
+            output.push_str(href);
+            i = next;
+            continue;
+        }
+        output.push(ch);
+        i += 1;
     }
     output
+}
+
+/// Resolve the `\u{0001}HREF<n>\u{0001}` placeholder at `chars[start]`.
+fn href_placeholder<'a>(chars: &[char], start: usize, hrefs: &'a [String]) -> Option<(&'a str, usize)> {
+    let prefix = ['H', 'R', 'E', 'F'];
+    if chars.get(start + 1..start + 5)? != prefix {
+        return None;
+    }
+    let digits_start = start + 5;
+    let digits_end = digits_start + chars[digits_start..].iter().take_while(|c| c.is_ascii_digit()).count();
+    if digits_end == digits_start || chars.get(digits_end) != Some(&HREF_PLACEHOLDER_MARK) {
+        return None;
+    }
+    let index: usize = chars[digits_start..digits_end].iter().collect::<String>().parse().ok()?;
+    Some((hrefs.get(index)?.as_str(), digits_end + 1))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Run the pre-processor and return only the converted text. Tests
-    /// that care about lifted fenced code blocks inspect `code_blocks`
-    /// via [`preprocess_markdown`] directly instead.
+    /// Run the pre-processor and return only the converted text.
     fn pp(input: &str) -> String {
-        preprocess_markdown(input).text
+        let (text, mut lifted) = lift_fences(input);
+        preprocess_inline(&text, &mut lifted)
+    }
+
+    /// Run the pre-processor and return the text plus every lifted span value.
+    fn pp_spans(input: &str) -> (String, Vec<String>) {
+        let (text, mut lifted) = lift_fences(input);
+        let out = preprocess_inline(&text, &mut lifted);
+        let spans = lifted
+            .into_iter()
+            .filter_map(|l| match l {
+                Lifted::Span(v) => Some(v),
+                Lifted::Fence(_) => None,
+            })
+            .collect();
+        (out, spans)
+    }
+
+    fn fences(input: &str) -> (String, Vec<FencedCode>) {
+        let (text, lifted) = lift_fences(input);
+        let blocks = lifted
+            .into_iter()
+            .filter_map(|l| match l {
+                Lifted::Fence(f) => Some(f),
+                Lifted::Span(_) => None,
+            })
+            .collect();
+        (text, blocks)
     }
 
     #[test]
@@ -1044,44 +1147,47 @@ mod tests {
         // The fence is lifted out as an opaque code block; the converted
         // text keeps only the sentinel placeholder, never a `<code-block>`
         // tag re-injected into the string grammar.
-        let pre = preprocess_markdown("```yaml\nkey: value\n```");
-        assert_eq!(pre.code_blocks.len(), 1);
-        assert_eq!(pre.code_blocks[0].lang, "yaml");
-        assert_eq!(pre.code_blocks[0].body, "key: value");
-        assert!(pre.text.contains(CODE_BLOCK_PLACEHOLDER_MARK));
-        assert!(!pre.text.contains("<code-block"));
+        let (text, blocks) = fences("```yaml\nkey: value\n```");
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].lang, "yaml");
+        assert_eq!(blocks[0].body, "key: value");
+        assert_eq!(text, format!("{LIFT_MARK}0{LIFT_MARK}"));
     }
 
     #[test]
     fn fenced_code_block_no_lang() {
-        let pre = preprocess_markdown("```\nplain text\n```");
-        assert_eq!(pre.code_blocks.len(), 1);
-        assert_eq!(pre.code_blocks[0].lang, "");
-        assert_eq!(pre.code_blocks[0].body, "plain text");
+        let (_, blocks) = fences("```\nplain text\n```");
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].lang, "");
+        assert_eq!(blocks[0].body, "plain text");
     }
 
     #[test]
     fn fenced_code_block_preserves_inner_markdown() {
-        // Asterisks and underscores inside code blocks must NOT be
-        // interpreted as emphasis — the body is lifted out verbatim and
-        // never touched by the bold/italics phases.
-        let pre = preprocess_markdown("```\n**not bold**\n_not italic_\n```");
-        assert!(!pre.text.contains("<b>"));
-        assert!(!pre.text.contains("<i>"));
-        assert_eq!(pre.code_blocks.len(), 1);
-        assert_eq!(pre.code_blocks[0].body, "**not bold**\n_not italic_");
+        let (text, blocks) = fences("```\n**not bold**\n_not italic_\n```");
+        assert!(!pp(&text).contains("<b>"));
+        assert_eq!(blocks[0].body, "**not bold**\n_not italic_");
     }
 
     #[test]
     fn fenced_code_block_with_closing_tag_in_body_is_opaque() {
-        // Regression: a code body containing the parser's own synthetic
-        // closing tag must stay verbatim in `code_blocks` and never leak
-        // into the converted text as markup.
-        let pre = preprocess_markdown("```\n</code-block><red>x</red>\n```");
-        assert_eq!(pre.code_blocks.len(), 1);
-        assert_eq!(pre.code_blocks[0].body, "</code-block><red>x</red>");
-        assert!(!pre.text.contains("<red>"));
-        assert!(!pre.text.contains("</code-block>"));
+        let (text, blocks) = fences("```\n</code-block><red>x</red>\n```");
+        assert_eq!(blocks[0].body, "</code-block><red>x</red>");
+        assert!(!text.contains("<red>"));
+    }
+
+    #[test]
+    fn line_endings_are_normalized_before_fences_are_found() {
+        let (text, blocks) = fences("a\r\n```\r\nx\ry\r\n```\rb");
+        assert_eq!(blocks[0].body, "x\ny");
+        assert_eq!(text, format!("a\n{LIFT_MARK}0{LIFT_MARK}\nb"));
+    }
+
+    #[test]
+    fn literal_sentinels_are_escaped_outside_fences_only() {
+        let (text, blocks) = fences("a\u{0002}0\u{0002}\u{0001}\n```\n\u{0002}\n```");
+        assert_eq!(text, format!("a\\\u{0002}0\\\u{0002}\\\u{0001}\n{LIFT_MARK}0{LIFT_MARK}"));
+        assert_eq!(blocks[0].body, "\u{0002}");
     }
 
     // ── CommonMark flanking, code spans, and tag balance ─────────────
@@ -1114,45 +1220,78 @@ mod tests {
         assert_eq!(pp("\"_quoted_\""), "\"<i>quoted</i>\"");
     }
 
-    #[test]
-    fn code_span_contents_are_escaped_and_backticks_kept() {
-        assert_eq!(pp("See `_pr/_report.md`."), r"See `\_pr/\_report.md`.");
-        assert_eq!(pp("`**x** <red>y</red>`"), r"`\*\*x\*\* \<red\>y\</red\>`");
+    fn ph(n: usize) -> String {
+        format!("{LIFT_MARK}{n}{LIFT_MARK}")
     }
 
     #[test]
-    fn code_span_keeps_existing_escapes() {
-        assert_eq!(pp(r"`\_a_`"), r"`\_a\_`");
+    fn code_span_is_lifted_with_literal_contents() {
+        let (text, spans) = pp_spans("See `_pr/_report.md`.");
+        assert_eq!(text, format!("See {}.", ph(0)));
+        assert_eq!(spans, ["_pr/_report.md"]);
+        let (_, spans) = pp_spans("`**x** <red>y</red>`");
+        assert_eq!(spans, ["**x** <red>y</red>"]);
+    }
+
+    #[test]
+    fn code_span_backslashes_are_literal() {
+        assert_eq!(pp_spans(r"`a\_b`").1, [r"a\_b"]);
+        assert_eq!(pp_spans(r"`a\\`").1, [r"a\\"]);
+    }
+
+    #[test]
+    fn code_span_value_follows_commonmark_spacing() {
+        assert_eq!(pp_spans("`` `a` ``").1, ["`a`"]);
+        assert_eq!(pp_spans("` a `").1, ["a"]);
+        assert_eq!(pp_spans("`  `").1, ["  "]);
+        assert_eq!(pp_spans("`  a  `").1, [" a "]);
+        assert_eq!(pp_spans("` a`").1, [" a"]);
+        assert_eq!(pp_spans("`a\nb`").1, ["a b"]);
     }
 
     #[test]
     fn code_span_needs_matching_backtick_run() {
-        assert_eq!(pp("``a`b``"), r"``a`b``");
+        assert_eq!(pp_spans("``a`b``").1, ["a`b"]);
         assert_eq!(pp("`unclosed _x_"), "`unclosed <i>x</i>");
     }
 
     #[test]
-    fn code_span_wrapping_a_whole_link_becomes_a_link_with_code_text() {
-        assert_eq!(
-            pp("The `[a_b.md](/x/a_b.md)` plan"),
-            "The <a href=\"/x/a_b.md\">`a\\_b.md`</a> plan"
-        );
-        assert_eq!(
-            pp("`[p.md](<file:///a b/p.md>)`"),
-            "<a href=\"<file:///a b/p.md>\">`p.md`</a>"
-        );
-        assert_eq!(pp(r"``[a\]b](u)``"), "<a href=\"u\">``a\\]b``</a>");
+    fn code_span_never_crosses_a_blank_line() {
+        assert_eq!(pp_spans("`a\n\nb`").1, Vec::<String>::new());
+        assert_eq!(pp_spans("`a\n  \nb").1, Vec::<String>::new());
+        // An unmatched opener stays literal, so a later run may pair up.
+        assert_eq!(pp_spans("`a\n\nb` c`").1, [" c"]);
     }
 
     #[test]
-    fn code_span_with_text_beside_a_link_stays_opaque() {
-        assert_eq!(pp("`see [a](u)`"), r"`see \[a\]\(u\)`");
-        assert_eq!(pp("`[a](u) more`"), r"`\[a\]\(u\) more`");
+    fn code_span_holding_a_link_stays_literal() {
+        let (text, spans) = pp_spans("The `[a_b.md](/x/a_b.md)` plan");
+        assert_eq!(text, format!("The {} plan", ph(0)));
+        assert_eq!(spans, ["[a_b.md](/x/a_b.md)"]);
+    }
+
+    #[test]
+    fn code_span_inside_link_text_survives_as_placeholder() {
+        let (text, spans) = pp_spans("[`x_y`](u)");
+        assert_eq!(text, format!("<a href=\"u\">{}</a>", ph(0)));
+        assert_eq!(spans, ["x_y"]);
+    }
+
+    #[test]
+    fn escaped_sentinel_inside_code_span_is_restored() {
+        assert_eq!(pp_spans("`a\u{0002}b`").1, ["a\u{0002}b"]);
+        assert_eq!(pp_spans("`a\\\u{0002}b`").1, ["a\\\u{0002}b"]);
+    }
+
+    #[test]
+    fn literal_href_placeholder_is_not_restored() {
+        let input = "[a](u) \u{0001}HREF0\u{0001}";
+        assert_eq!(pp(input), "<a href=\"u\">a</a> \\\u{0001}HREF0\\\u{0001}");
     }
 
     #[test]
     fn code_span_shields_emphasis_delimiters_from_outer_pairing() {
-        assert_eq!(pp("_a `b_` c_"), r"<i>a `b\_` c</i>");
+        assert_eq!(pp("_a `b_` c_"), format!("<i>a {} c</i>", ph(0)));
     }
 
     #[test]

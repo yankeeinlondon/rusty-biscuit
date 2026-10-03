@@ -1116,6 +1116,15 @@ impl Writer<'_> {
                     None => child_effective.emphasis.dim = true,
                 }
                 let open = style::text_appearance_sgr(&child_effective, term);
+                // When the code appearance emits nothing beyond what the
+                // enclosing run already carries (no color, no dim support),
+                // the code would be unmarked; keep a Markdown backtick fence
+                // instead. Comparing the full appearances, not `open.is_empty()`,
+                // matters because `open` repeats any inherited styling.
+                if open == style::text_appearance_sgr(effective, term) {
+                    let fenced = renderable::markdown::code_span(value);
+                    return Ok(apply_classes(&fenced, &node.attrs.classes, effective, term));
+                }
                 let close = style::appearance_close(&open, effective, term);
                 Ok(apply_classes(&format!("{open}{value}{close}"), &node.attrs.classes, effective, term))
             }

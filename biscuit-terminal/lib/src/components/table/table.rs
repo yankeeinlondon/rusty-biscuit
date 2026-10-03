@@ -1566,7 +1566,7 @@ impl Table {
     /// data row. Most cells carry the readable pre-formatted text as a single
     /// [`NodeKind::Text`] child; a [`TableCellContent::StyledProse`] cell
     /// instead projects its parsed inline children
-    /// ([`Prose::to_render_nodes`](crate::components::prose::Prose::to_render_nodes))
+    /// (`Prose::interim_container_nodes`)
     /// directly, degrading any top-level
     /// fenced-code child to escaped literal text. Every cell also carries
     /// [`TableCellHints`] recording the cell kind, the original typed value as
@@ -1619,7 +1619,7 @@ impl Table {
                 .map(|(col_idx, content)| {
                     let children = match content {
                         TableCellContent::StyledProse(prose) => {
-                            degrade_code_nodes(prose.to_render_nodes())
+                            degrade_code_nodes(prose.interim_container_nodes())
                         }
                         _ => vec![RenderNode::text(content.to_string())],
                     };

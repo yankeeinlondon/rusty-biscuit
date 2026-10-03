@@ -3,7 +3,7 @@ use crate::commands::shared::*;
 use crate::commands::{CliContext, Run};
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
-use biscuit_terminal::utils::layout::{Alignment, Length, TargetValue, WordWrap};
+use biscuit_terminal::utils::layout::{Length, TargetValue, WordWrap};
 use clap::Args as ClapArgs;
 use renderable::browser::BrowserRenderable;
 use renderable::markdown::MarkdownRenderable;
@@ -147,46 +147,26 @@ impl Run for ProseArgs {
     }
 }
 
-/// Wraps a Prose HTML fragment in the layout `<div>`.
+/// Wraps a Prose HTML fragment in a `<div>` carrying the vertical margins.
 ///
-/// The CLI is the **single source of layout** for `bt prose --html`:
-/// [`Prose::render_html_fragment`](biscuit_terminal::components::prose::Prose)
-/// deliberately emits a layout-free inline `<span class="prose">`, so this
-/// wrapper owns margins/alignment without double-applying them. This split is
-/// interim — see the doc note on `Prose::render_html_fragment` and
-/// `renderable/features/2026-06-04-style-based-alignment`: once layout lowers
-/// to CSS via the `renderable` style primitives, revisit whether the fragment
-/// should carry its own layout and this wrapper retire.
+/// `Prose` renders its own horizontal margins and alignment as CSS. Vertical
+/// margins are applied by the CLI on every target (blank lines on the
+/// terminal), and `Layout` has no line-height length to carry them, so the
+/// HTML path expresses them here.
 fn render_html_with_layout(fragment: &str, layout: &LayoutArgs) -> String {
-    let Some(style) = layout_css_style(layout) else {
+    let Some(style) = vertical_margin_css(layout) else {
         return fragment.to_string();
     };
     format!("<div style=\"{style}\">{fragment}</div>")
 }
 
-fn layout_css_style(layout: &LayoutArgs) -> Option<String> {
+fn vertical_margin_css(layout: &LayoutArgs) -> Option<String> {
     let mut declarations = Vec::new();
-
-    if let Some(left) = layout.margin_left {
-        declarations.push(format!("margin-left: {left}ch"));
-    }
-    if let Some(right) = layout.margin_right {
-        declarations.push(format!("margin-right: {right}ch"));
-    }
     if let Some(top) = layout.margin_top {
         declarations.push(format!("margin-top: {top}lh"));
     }
     if let Some(bottom) = layout.margin_bottom {
         declarations.push(format!("margin-bottom: {bottom}lh"));
     }
-    if let Some(alignment) = layout.alignment {
-        let text_align = match alignment {
-            Alignment::Left => "left",
-            Alignment::Center => "center",
-            Alignment::Right => "right",
-        };
-        declarations.push(format!("text-align: {text_align}"));
-    }
-
     (!declarations.is_empty()).then(|| declarations.join("; "))
 }

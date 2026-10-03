@@ -3,34 +3,47 @@
 use std::any::Any;
 
 use renderable::browser::{BrowserRenderable, PageOptions};
-use renderable::browser::fragment::{BrowserFragment, ComposableNode, Ready};
+use renderable::browser::fragment::{BrowserFragment, Ready};
 use renderable::html::HtmlPage;
-use renderable::html::tag::BlockTag;
 use renderable::markdown::MarkdownRenderable;
-use renderable::tree::render::{
-    BrowserRenderOptions, MarkdownDialect, MarkdownRenderOptions, render_browser_node,
-    render_markdown_node,
-};
+use renderable::tree::BlockElement;
+use renderable::tree::render::{MarkdownDialect, MarkdownRenderOptions, render_markdown_node};
 use renderable::tree::TreeRenderable;
 
+use super::LineBreaks;
 use crate::{
+    render_tree::BrowserTreeComponent,
     utils::layout::{Layout, Length, TargetValue},
     utils::wrap_policy::WordWrap,
 };
 
-/// Styled text with token and block tag support for rich terminal output.
+/// Block prose: paragraphs and fenced code blocks parsed from the shared
+/// Prose grammar (bracketed style tags plus a Markdown subset).
 ///
-/// This struct wraps text content that gets parsed for styling tokens and
-/// rendered with ANSI escape codes.
+/// `Prose` is block content on every target. Its render tree is a `Root` of
+/// `Paragraph` and `Code` blocks, and it carries a [`Layout`] (margins,
+/// alignment, word wrap) that every target applies. Use [`InlineProse`] for
+/// phrasing content that sits inside a line, such as a table cell or a list
+/// label.
 ///
-/// ## Input Grammars
+/// ## Paragraphs and line breaks
 ///
-/// `Prose` accepts **bracketed tags** and a **Markdown subset**. The
-/// atomic-token grammar (`{{token}}`) has been removed — `{{…}}` now renders
-/// as ordinary literal text.
+/// Two or more newlines (with only spaces or tabs between them) separate
+/// paragraphs. A single newline is a soft break by default
+/// ([`LineBreaks::Soft`]); `\` immediately before a newline is a hard break.
+/// Trailing spaces are never a hard break. CRLF and lone CR count as LF.
 ///
-/// ### Block Tags (`<tag>content</tag>`)
-/// Self-closing tags that auto-reset:
+/// ```rust
+/// use biscuit_terminal::components::prose::Prose;
+/// use renderable::browser::BrowserRenderable;
+///
+/// let html = Prose::new("First paragraph.\n\nSecond,\nsame block.")
+///     .render_html_fragment()
+///     .render();
+/// assert_eq!(html, "<p>First paragraph.</p><p>Second, same block.</p>");
+/// ```
+///
+/// ## Style tags
 ///
 /// ```rust
 /// use biscuit_terminal::components::prose::Prose;
@@ -38,11 +51,11 @@ use crate::{
 ///
 /// let prose = Prose::new("<bold>This is bold</bold> and <red>this is red</red>");
 /// let rendered = prose.render_optimistic(None);
-/// // Both styles auto-reset after their content
 /// ```
 ///
 /// Supported tags: `<bold>`, `<italic>`, `<red>`, `<bg-coral>`, `<a href="url">link</a>`,
-/// `<rgb #ff0000>colored</rgb>`, etc.
+/// `<rgb #ff0000>colored</rgb>`, etc. A style that spans a blank line is
+/// reopened in each paragraph.
 ///
 /// ## Escaping
 ///
@@ -56,29 +69,61 @@ use crate::{
 /// assert!(prose.render_optimistic(None).contains("literal <angles>"));
 /// ```
 ///
-/// ## Layout & Style Contract
-///
-/// `Prose` has a dual-mode contract (spec C1/C7):
-///
-/// - **Block-container mode** (the public component API, i.e. calling
-///   `render()` / `render_tree()` directly): the root routes through the shared
-///   render-tree fold, so all applicable `Layout` box properties (`margin`,
-///   `padding`, `width`, `max_width`, `alignment`) and `Style` properties
-///   (`color`, `background`, `emphasis`, `border`) are honored via the fold
-///   (C1).
-/// - **Inline mode** (when `Prose` content is nested inside another component):
-///   the parsed inline spans carry no block box; the containing block owns the
-///   box. Inherited `color` / `emphasis` and inline `background` flow through
-///   (C7). Inline `background` paints only the inline content, not a padding
-///   box.
-///
-/// `word_wrap` is honored on text leaves (Decision D4).
-#[derive(Debug, Clone)]
+/// [`InlineProse`]: super::InlineProse
+#[derive(Debug, Clone, Default)]
 pub struct Prose {
     /// the raw content as received
     content: String,
     /// Layout configuration for margins, alignment, word wrap, etc.
     pub(super) layout: Layout,
+    pub(super) line_breaks: LineBreaks,
+    pub(super) tag: ProseTag,
+}
+
+/// The HTML element used for each paragraph of a [`Prose`].
+///
+/// The tag is browser presentation only: Markdown and terminal output have
+/// the same block shape whatever the tag. Code blocks are always
+/// `<pre><code>`.
+///
+/// ```rust
+/// use biscuit_terminal::components::prose::{Prose, ProseTag};
+/// use renderable::browser::BrowserRenderable;
+///
+/// let html = Prose::new("one\n\ntwo").with_tag(ProseTag::Div).render_html_fragment().render();
+/// assert_eq!(html, "<div>one</div><div>two</div>");
+/// ```
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum ProseTag {
+    /// `<p>`
+    #[default]
+    P,
+    /// `<div>`
+    Div,
+    /// `<section>`
+    Section,
+    /// `<article>`
+    Article,
+    /// `<aside>`
+    Aside,
+    /// `<header>`
+    Header,
+    /// `<footer>`
+    Footer,
+}
+
+impl From<ProseTag> for BlockElement {
+    fn from(tag: ProseTag) -> Self {
+        match tag {
+            ProseTag::P => BlockElement::P,
+            ProseTag::Div => BlockElement::Div,
+            ProseTag::Section => BlockElement::Section,
+            ProseTag::Article => BlockElement::Article,
+            ProseTag::Aside => BlockElement::Aside,
+            ProseTag::Header => BlockElement::Header,
+            ProseTag::Footer => BlockElement::Footer,
+        }
+    }
 }
 
 impl Prose {
@@ -86,13 +131,25 @@ impl Prose {
     pub fn new<T: Into<String>>(content: T) -> Self {
         Prose {
             content: content.into(),
-            layout: Layout::default(),
+            ..Prose::default()
         }
     }
 
     /// Returns the raw content as received.
     pub fn content(&self) -> &str {
         &self.content
+    }
+
+    /// Set what a single newline means in every paragraph.
+    pub fn with_line_breaks(mut self, line_breaks: LineBreaks) -> Self {
+        self.line_breaks = line_breaks;
+        self
+    }
+
+    /// Set the HTML element used for each paragraph.
+    pub fn with_tag(mut self, tag: ProseTag) -> Self {
+        self.tag = tag;
+        self
     }
 
     /// Set the word wrap strategy.
@@ -118,7 +175,9 @@ impl Prose {
     /// Escapes characters that have special meaning in the Prose grammar
     /// (`<`, `>`, `{`, `*`, `_`, `[`, `]`, `(`, `)`, `\`) by prefixing them
     /// with a backslash. Use this for any user-controlled string that is
-    /// interpolated into Prose content.
+    /// interpolated into Prose content, except inside a code span: a code
+    /// span is already opaque and shows its backslashes literally, so text
+    /// placed between backticks must not be escaped.
     ///
     /// ## ANSI escape pass-through
     ///
@@ -133,7 +192,8 @@ impl Prose {
     ///
     /// ```rust
     /// use biscuit_terminal::components::prose::Prose;
-    ////// Path with angle brackets stays literal
+    ///
+    /// // Path with angle brackets stays literal
     /// let escaped = Prose::escape_text("path/<weird>");
     /// assert_eq!(escaped, r"path/\<weird\>");
     /// ```
@@ -253,15 +313,6 @@ impl Prose {
 
 }
 
-impl Default for Prose {
-    fn default() -> Prose {
-        Prose {
-            content: "".to_string(),
-            layout: Layout::default(),
-        }
-    }
-}
-
 impl From<Prose> for Vec<Prose> {
     fn from(prose: Prose) -> Self {
         vec![prose]
@@ -342,56 +393,17 @@ impl MarkdownRenderable for Prose {
 }
 
 impl BrowserRenderable for Prose {
-    /// Renders the prose as a layout-free inline `<span class="prose">` HTML
-    /// fragment.
-    ///
-    /// ## Interim layout contract (revisit with style-based-alignment)
-    ///
-    /// The fragment deliberately carries **no** layout (margins, alignment,
-    /// width): it wraps the styled inline children in a single
-    /// `<span class="prose">` and stops there. Layout is owned by the caller —
-    /// the `bt prose` CLI wraps this fragment in its own `<div style="…">` (see
-    /// `biscuit-terminal/cli/src/commands/prose.rs::render_html_with_layout`).
-    ///
-    /// This splits the contract on purpose. Routing the fragment through
-    /// [`TreeRenderable::render_tree`] folds Prose's `Layout` into the fragment
-    /// (`<div style="margin-…"><p>…</p></div>`), which then **double-applies**
-    /// the margin against the CLI's own wrapper. Keeping the fragment inline and
-    /// letting the CLI own layout is the resolution chosen on 2026-06-04 for
-    /// that double-margin defect.
-    ///
-    /// It is an interim choice. Once
-    /// `renderable/features/2026-06-04-style-based-alignment` moves layout onto
-    /// CSS-Box-Layout `renderable::style`/`Layout` primitives that lower to CSS,
-    /// the component-owns-its-layout model becomes viable again and this split
-    /// should be reconsidered (fragment carries its layout; CLI stops wrapping).
-    /// Until then, do not re-route this through `render_tree`.
+    /// Renders the prose as block HTML from its render tree: one element per
+    /// paragraph (see [`ProseTag`]) and `<pre><code>` per code block. With no
+    /// layout the blocks are siblings with no wrapper; a layout renders as
+    /// CSS on the root's wrapping `<div>`.
     fn render_html_fragment(&self) -> BrowserFragment<Ready> {
-        // Render each projected node to its own HTML through the shared tree
-        // renderer, then concatenate the strings inside one `<span class="prose">`.
-        // Rendering per node (rather than wrapping the nodes in one inline Span
-        // tree) keeps a top-level block-level `Code` node valid — a fenced code
-        // block folds to `<pre><code>…</code></pre>` and only the final HTML
-        // string carries it inside the span, which the tree validator never sees.
-        let opts = BrowserRenderOptions::default();
-        let mut inner = String::new();
-        for child in self.to_render_nodes() {
-            match render_browser_node(&child, &opts) {
-                Ok(rendered) => inner.push_str(&rendered.output.render()),
-                Err(error) => tracing::error!(
-                    component = "Prose",
-                    error = %error,
-                    "render_browser_node failed; skipping node"
-                ),
-            }
+        if self.layout == Layout::default() {
+            return super::tree::concat_html("Prose", self.block_nodes());
         }
-        BrowserFragment::new()
-            .define_as_block_tag(BlockTag::Span, "prose")
-            .add_child(ComposableNode::RawHtml(inner))
-            .finalize()
+        BrowserTreeComponent::new(self.clone()).render_html_fragment()
     }
 
-    /// Wraps the HTML fragment in a complete [`HtmlPage`].
     fn render_html_page(&self, page: Option<PageOptions>) -> HtmlPage {
         let mut html_page = HtmlPage::from(self.render_html_fragment());
         if let Some(options) = page {

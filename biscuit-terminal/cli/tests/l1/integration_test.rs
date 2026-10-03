@@ -1787,7 +1787,7 @@ fn test_prose_markdown_plus_margin_left_emits_style_frontmatter() {
 }
 
 #[test]
-fn test_prose_html_margin_left_emits_layout_wrapper() {
+fn test_prose_html_margin_left_appears_once() {
     let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("prose")
         .arg("<b>bold</b>")
@@ -1803,14 +1803,15 @@ fn test_prose_html_margin_left_emits_layout_wrapper() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert_eq!(
-        stdout,
-        "<div style=\"margin-left: 4ch\"><span class=\"prose\"><strong>bold</strong></span></div>\n"
-    );
+    // `Prose` renders its own layout as CSS; the margin appears exactly once.
+    assert_eq!(stdout.matches("margin-left").count(), 1, "stdout: {stdout}");
+    assert!(stdout.contains("margin-left:4ch"), "stdout: {stdout}");
+    assert!(stdout.contains("<p><strong>bold</strong></p>"), "stdout: {stdout}");
+    assert!(!stdout.contains("class=\"prose\""), "stdout: {stdout}");
 }
 
 #[test]
-fn test_prose_html_without_layout_omits_layout_wrapper() {
+fn test_prose_html_without_margin_renders_a_paragraph() {
     let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("prose")
         .arg("<b>bold</b>")
@@ -1824,10 +1825,9 @@ fn test_prose_html_without_layout_omits_layout_wrapper() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert_eq!(
-        stdout,
-        "<span class=\"prose\"><strong>bold</strong></span>\n"
-    );
+    assert!(stdout.contains("<p><strong>bold</strong></p>"), "stdout: {stdout}");
+    assert!(stdout.contains("margin-left:0"), "stdout: {stdout}");
+    assert!(!stdout.contains("class=\"prose\""), "stdout: {stdout}");
 }
 
 #[test]

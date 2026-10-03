@@ -229,14 +229,15 @@ fn fenced_code_in_prose_degrades_to_text() {
 
     // Precondition: the raw Prose projection really does carry a fenced `Code`
     // node — otherwise the degradation below would be a no-op false positive.
-    let raw_nodes = prose.to_render_nodes();
-    let code = raw_nodes
+    let root = renderable::tree::TreeRenderable::render_tree(&prose);
+    let code = root
+        .children()
         .iter()
         .find_map(|c| match &c.kind {
             NodeKind::Code { lang, value, .. } => Some((lang.clone(), value.clone())),
             _ => None,
         })
-        .expect("Prose::to_render_nodes must contain a fenced Code node");
+        .expect("Prose::render_tree must contain a fenced Code block");
     assert_eq!(code.0.as_deref(), Some("rust"), "fence language is captured");
     assert!(
         code.1.contains("fn main()"),

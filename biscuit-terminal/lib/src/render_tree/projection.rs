@@ -220,7 +220,7 @@ pub(crate) enum ProjectionMode<'a> {
 ///   [`RenderNode::text`] regardless of mode.
 /// - [`RenderableTerminalContent::Component`]:
 ///   - If the component downcasts to [`Prose`], its inline structure is
-///     projected through [`Prose::to_render_nodes`] so bold/italic/colored
+///     projected through `Prose::interim_container_nodes` so bold/italic/colored
 ///     runs survive as structured inline nodes
 ///     (`Strong` / `Emphasis` / styled `Span`) — preserving the terminal SGR
 ///     lowering through the tree renderer.
@@ -291,7 +291,7 @@ pub(crate) fn project_renderable_content(
         RenderableTerminalContent::String(s) => vec![RenderNode::text(s)],
         RenderableTerminalContent::Component(component) => {
             if let Some(prose) = component.as_any().downcast_ref::<Prose>() {
-                return prose.to_render_nodes();
+                return prose.interim_container_nodes();
             }
             match mode {
                 ProjectionMode::InlineOnly => {
@@ -332,21 +332,16 @@ pub(crate) fn project_renderable_content(
 /// [`Code`](renderable::tree::NodeKind::Code) node — the only block-level node
 /// the Prose parser emits — is preserved as a block-level sibling.
 ///
-/// Containers that embed `Prose` via [`Prose::to_render_nodes`] must fold the
+/// Containers that embed `Prose` via `Prose::interim_container_nodes` must fold the
 /// sequence this way. Wrapping the whole sequence in one `Paragraph` nests a
 /// block-level `Code` inside phrasing content, which render-tree validation
 /// rejects (the terminal renderer then emits empty output and the Markdown /
 /// HTML renderers surface a validation error).
 ///
-/// This is the shared producer behind [`Prose`]'s own
-/// [`render_tree`](TreeRenderable::render_tree) split and the `BlockQuote` /
-/// list-item container projections, so all three stay in lockstep. When the
-/// sequence is purely inline (the common case) it returns a single
-/// `Paragraph`, matching the historical container shape exactly.
-///
-/// [`Prose`]: crate::components::prose::Prose
-/// [`Prose::to_render_nodes`]: crate::components::prose::Prose::to_render_nodes
-/// [`TreeRenderable::render_tree`]: renderable::tree::TreeRenderable::render_tree
+/// This is the shared producer behind the `BlockQuote` and list-item
+/// container projections, so both stay in lockstep. When the sequence is
+/// purely inline (the common case) it returns a single `Paragraph`, matching
+/// the historical container shape exactly.
 #[must_use]
 pub(crate) fn fold_prose_nodes_into_blocks(nodes: Vec<RenderNode>) -> Vec<RenderNode> {
     let mut blocks: Vec<RenderNode> = Vec::new();

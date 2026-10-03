@@ -1047,7 +1047,8 @@ mod tests {
 
     #[test]
     fn test_multiline_prose_in_block_quote() {
-        let prose = Prose::new("Line 1\nLine 2\nLine 3");
+        let prose = Prose::new("Line 1\nLine 2\nLine 3")
+            .with_line_breaks(crate::components::prose::LineBreaks::Hard);
         let quote = BlockQuote::from(prose);
         let result = quote.render_optimistic(None);
         // Each line should have a border
