@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{InlineProse, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::repo::{Package, RepoInfo};
@@ -99,7 +99,7 @@ pub fn render_repo_packages_formatted(
         .iter()
         .map(|pkg| {
             let markup = package_entry_markup(pkg, verbose);
-            Prose::new(markup).render(&term)
+            InlineProse::new(markup).render(&term)
         })
         .collect();
 

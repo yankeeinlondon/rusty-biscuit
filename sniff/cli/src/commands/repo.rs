@@ -342,6 +342,22 @@ pub(super) fn handle_repo_dependencies(
     Ok(())
 }
 
+/// The dimmed scope hint printed under a multi-manager result, as one
+/// newline-terminated line.
+fn distinct_package_managers_line(
+    hint: &str,
+    term: &biscuit_terminal::terminal::Terminal,
+) -> String {
+    use biscuit_terminal::components::prose::Prose;
+    use biscuit_terminal::components::renderable::TerminalRenderable;
+
+    // The terminator stays outside the markup: `Prose` drops trailing newlines.
+    format!(
+        "{}\n",
+        Prose::new(format!("<dim>distinct package managers{hint}</dim>")).render(term)
+    )
+}
+
 /// Handle `sniff repo package-manager`.
 ///
 /// Reports package manager usage for the current repo/package context using
@@ -435,10 +451,7 @@ pub(super) fn handle_repo_package_manager(
                     _ => "",
                 };
                 if !hint.is_empty() {
-                    rendered.push_str(
-                        &Prose::new(format!("<dim>distinct package managers{hint}</dim>\n"))
-                            .render(&term),
-                    );
+                    rendered.push_str(&distinct_package_managers_line(hint, &term));
                 }
             }
             rendered
@@ -816,4 +829,21 @@ pub(super) fn handle_file_list_command(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn distinct_package_managers_line_ends_with_one_newline() {
+        let term = biscuit_terminal::terminal::Terminal::new_optimistic(80);
+
+        let line = distinct_package_managers_line(" (across all packages)", &term);
+
+        assert_eq!(
+            biscuit_terminal::prelude::strip_escape_codes(line),
+            "distinct package managers (across all packages)\n"
+        );
+    }
 }

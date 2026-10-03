@@ -3,7 +3,7 @@ use std::path::Path;
 use std::rc::Rc;
 
 use biscuit_terminal::components::list::UnorderedList;
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{InlineProse, Prose};
 use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
 use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::git::BehindStatus;
@@ -93,13 +93,13 @@ pub(super) fn build_area_hierarchy(
 
 fn append_package_items(items: &mut Vec<RenderableTerminalContent>, pkg: &Package, verbose: u8) {
     let formatted = format_package_items(pkg, verbose);
-    let main = Prose::new(&formatted[0]).render_optimistic(None);
+    let main = InlineProse::new(&formatted[0]).render_optimistic(None);
     items.push(RenderableTerminalContent::String(main));
 
     if formatted.len() > 1 {
         let detail_items: Vec<String> = formatted[1..]
             .iter()
-            .map(|s| Prose::new(s).render_optimistic(None))
+            .map(|s| InlineProse::new(s).render_optimistic(None))
             .collect();
         let detail_list = UnorderedList::new(detail_items).with_bullet("  ");
         items.push(RenderableTerminalContent::Component(Rc::new(detail_list)));
@@ -113,7 +113,7 @@ fn append_area_section(
     area_children: &std::collections::HashMap<String, Vec<String>>,
     verbose: u8,
 ) {
-    let label = Prose::new(format!(
+    let label = InlineProse::new(format!(
         "<blue><b>{}</b></blue>",
         super::package_areas::area_display_label(area)
     ))
@@ -366,7 +366,7 @@ fn render_update_summary(
         let samples = summary
             .sample_transitions
             .iter()
-            .map(|sample| Prose::new(format!("<dim>{}</dim>", sample)).render(term))
+            .map(|sample| InlineProse::new(format!("<dim>{}</dim>", sample)).render(term))
             .collect::<Vec<_>>();
         let list = UnorderedList::new(samples);
         writeln!(out, "{}", list.render(term)).unwrap();
@@ -484,8 +484,8 @@ pub fn render_repo_section(
         let title = Prose::new("<b><u>Repository</u></b>");
         writeln!(out, "\n{}\n", title.render(&terminal)).unwrap();
         let items = vec![
-            Prose::new("<b>Type:</b> Single-package").render(&terminal),
-            Prose::new(format!("<b>Root:</b> {}", repo.root.display())).render(&terminal),
+            InlineProse::new("<b>Type:</b> Single-package").render(&terminal),
+            InlineProse::new(format!("<b>Root:</b> {}", repo.root.display())).render(&terminal),
         ];
         let list = UnorderedList::new(items);
         writeln!(out, "{}", list.render(&terminal)).unwrap();
@@ -960,12 +960,12 @@ pub fn render_filesystem_section(
             for pkg in packages {
                 let package_items = format_package_items(pkg, verbose);
                 items.push(RenderableTerminalContent::String(
-                    Prose::new(&package_items[0]).render_optimistic(None),
+                    InlineProse::new(&package_items[0]).render_optimistic(None),
                 ));
                 if package_items.len() > 1 {
                     let detail_items = package_items[1..]
                         .iter()
-                        .map(|item| Prose::new(item).render_optimistic(None))
+                        .map(|item| InlineProse::new(item).render_optimistic(None))
                         .collect::<Vec<_>>();
                     let detail_list = UnorderedList::new(detail_items).with_bullet("  ");
                     items.push(RenderableTerminalContent::Component(Rc::new(detail_list)));
