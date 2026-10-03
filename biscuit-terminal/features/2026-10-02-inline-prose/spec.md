@@ -41,6 +41,31 @@ packages:
     - homelab-cli
 human_review: false
 message_to_agent: |-
+    Phase 6 (bt CLI, docs, skills) is done; see "## Phase 6" in
+    implementation-log.md. Facts for Phase 7+:
+    - SHELL TRAP: in this worktree `cd biscuit-terminal` (or any bare package
+      dir name) can resolve through CDPATH to the MAIN checkout at
+      /Volumes/coding/personal/rusty-biscuit. Use absolute paths or `./dir`,
+      and confirm with `pwd -P` before editing or building.
+    - `bt prose` margins all live on the Prose `Layout` (vertical margins are
+      `Length::ch` on margin.top/bottom: blank rows on terminal, `lh` in CSS).
+      Only `--alignment` adds a CLI wrapper, via the shared
+      `cli/src/commands/shared.rs::render_html_with_alignment` (also used by
+      `bt section` and `bt list`), because renderable's `layout_to_css`
+      lowers alignment only with `max_width`.
+    - `Prose::render_via_tree` word-wrap now splits on '\n' (was `lines()`),
+      so a bottom margin survives wrapping. No consumer sets a bottom
+      margin/padding on a Prose, so no downstream snapshot should move from
+      this; if one does, it is that fix.
+    - `bt section --content` items are now `Prose` (markup parsed, one <p>
+      each).
+    - `Status::from_prose` / `Todo::from_prose` still build block `Prose` for
+      an inline description: a Phase 7 "biscuit-terminal internal sites"
+      candidate for `InlineProse` (R5).
+    - Phase 8 open finding (renderable): a text node ending in a literal
+      backslash before a soft break renders to Markdown as `a\` + newline,
+      which Markdown reads as a hard break. Not fixed; see the Phase 6
+      Departures.
     Phase 5 (darkmatter `code_link()`) is done; see "## Phase 5" in
     implementation-log.md. Facts for Phase 6+:
     - `code_link(file)` / `code_link(target, desc)` (alias `codelink`) exist

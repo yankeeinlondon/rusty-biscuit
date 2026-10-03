@@ -109,6 +109,28 @@ docs_updated_during_phase_5:
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
     - .claude/skills/darkmatter/compose.md
+source_files_during_phase_6:
+    - biscuit-terminal/cli/src/commands/prose.rs
+    - biscuit-terminal/cli/src/commands/section.rs
+    - biscuit-terminal/cli/src/commands/list.rs
+    - biscuit-terminal/cli/src/commands/shared.rs
+    - biscuit-terminal/cli/tests/l1/integration_test.rs
+    - biscuit-terminal/lib/src/components/prose/render.rs
+    - biscuit-terminal/lib/src/components/prose/tree.rs
+    - biscuit-terminal/lib/tests/l1/prose_grammar.rs
+docs_updated_during_phase_6:
+    - biscuit-terminal/docs/components/prose.md
+    - biscuit-terminal/docs/components/index.md
+    - biscuit-terminal/docs/components/section.md
+    - biscuit-terminal/docs/components/table.md
+    - biscuit-terminal/lib/src/components/table/README.md
+    - biscuit-terminal/README.md
+    - renderable/docs/components.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/biscuit-terminal/styling.md
+    - .claude/skills/biscuit-terminal/components.md
+    - .claude/skills/biscuit-terminal/cli.md
 packages:
     - renderable
     - biscuit-terminal
@@ -616,19 +638,19 @@ Depends on Phases 3–4; can overlap Phase 5.
 
 ### Wave 1 — CLI
 
-- [ ] **`bt prose`** (`cli/src/commands/prose.rs`): stop wrapping the fragment
+- [x] **`bt prose`** (`cli/src/commands/prose.rs`): stop wrapping the fragment
   in its own `<div style>`; remove `render_html_with_layout` and its
   interim-contract doc comment; output comes from `Prose` with `Layout` as CSS
   (R7: no new flags); help text updated
-- [ ] **Other `bt` commands** that used `class="prose"` or the old shapes
+- [x] **Other `bt` commands** that used `class="prose"` or the old shapes
   (`section.rs`, `list.rs`): update to the new components
-- [ ] **CLI tests** (`cli/tests/l1/integration_test.rs`): `--margin-left`
+- [x] **CLI tests** (`cli/tests/l1/integration_test.rs`): `--margin-left`
   output carries the margin exactly once; no `class="prose"`; code span
   example with `--html` and `--md` output (AC 10, 11)
 
 ### Wave 2 — documentation (parallel with Wave 1; one writer per file)
 
-- [ ] **`docs/components/prose.md`** — every Documentation-table row, section
+- [x] **`docs/components/prose.md`** — every Documentation-table row, section
   by section (intro; Rendering Model with the Mermaid diagram grammar → block
   split → inline parse → render tree → three targets; Programmatic Use;
   new Paragraphs and Line Breaks, Block Tag, Layout sections; Markdown Subset
@@ -637,19 +659,19 @@ Depends on Phases 3–4; can overlap Phase 5.
   Components/Table Cells; Key API; CLI). Audience: a developer new to the
   repo; lead with what the reader can do, one example per rule. Do not link to
   or name a spec/feature
-- [ ] Decide whether `InlineProse` warrants `docs/components/inline-prose.md`;
+- [x] Decide whether `InlineProse` warrants `docs/components/inline-prose.md`;
   if so link it from `prose.md` and keep the grammar documented once in
   `prose.md`
-- [ ] Other component pages (`table.md`, `list.md`, `block_quote.md`,
+- [x] Other component pages (`table.md`, `list.md`, `block_quote.md`,
   `two_column.md`, `inline_content.md`, `status.md`, `index.md`,
   `browser-renderable-trait.md`) updated for accepted types and removed
   `<span class="prose">`
-- [ ] **Skills**: `.claude/skills/biscuit-terminal/SKILL.md`, `styling.md`,
+- [x] **Skills**: `.claude/skills/biscuit-terminal/SKILL.md`, `styling.md`,
   `components.md`, `cli.md`: name `InlineProse` and when to use it; code spans
   as inline code; `renderable` skill and `darkmatter` skill for the hard-break
   and `code_link` changes
-- [ ] README and `docs/dependencies.md` only if crates changed (expected: no)
-- [ ] Module docs in `markdown.rs` and `tree.rs` match the new behavior; the
+- [x] README and `docs/dependencies.md` only if crates changed (expected: no)
+- [x] Module docs in `markdown.rs` and `tree.rs` match the new behavior; the
   `prose.md` doc must contain no sentence describing the old behavior (inline-
   only Prose, `<span class="prose">`, uninterpreted newlines, fenced code
   degrading to plain text in cells, visible backticks, `` `[desc](ref)` `` as

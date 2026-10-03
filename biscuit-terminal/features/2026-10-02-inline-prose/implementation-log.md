@@ -108,6 +108,28 @@ docs_updated_during_phase_5:
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
     - .claude/skills/darkmatter/compose.md
+source_files_during_phase_6:
+    - biscuit-terminal/cli/src/commands/prose.rs
+    - biscuit-terminal/cli/src/commands/section.rs
+    - biscuit-terminal/cli/src/commands/list.rs
+    - biscuit-terminal/cli/src/commands/shared.rs
+    - biscuit-terminal/cli/tests/l1/integration_test.rs
+    - biscuit-terminal/lib/src/components/prose/render.rs
+    - biscuit-terminal/lib/src/components/prose/tree.rs
+    - biscuit-terminal/lib/tests/l1/prose_grammar.rs
+docs_updated_during_phase_6:
+    - biscuit-terminal/docs/components/prose.md
+    - biscuit-terminal/docs/components/index.md
+    - biscuit-terminal/docs/components/section.md
+    - biscuit-terminal/docs/components/table.md
+    - biscuit-terminal/lib/src/components/table/README.md
+    - biscuit-terminal/README.md
+    - renderable/docs/components.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/biscuit-terminal/styling.md
+    - .claude/skills/biscuit-terminal/components.md
+    - .claude/skills/biscuit-terminal/cli.md
 packages:
     - renderable
     - biscuit-terminal
@@ -957,3 +979,193 @@ owns them.
 are outside the repository and still use `` `{{link(x)}}` ``. Replace each with
 `{{code_link(x)}}` (no backticks). Until then, those lines show the literal
 `[text](url)` as code.
+
+## Phase 6
+
+Phase 6 brings the `bt` CLI and the documentation into line with the code.
+Validation ran on macOS.
+
+### What Changed
+
+- **`bt prose`** (`cli/src/commands/prose.rs`). `render_html_with_layout`
+  and `vertical_margin_css` are deleted. Every margin flag now sets the
+  `Prose`'s own `Layout`: `--margin-top`/`--margin-bottom` set
+  `layout.margin.top`/`.bottom` as `Length::ch`, which the browser renderer
+  lowers to `lh` and the terminal renderer emits as blank rows. The terminal
+  path no longer calls `emit_vertical_margins`, so each margin is applied
+  once on every target. `--html` output is `Prose`'s own fragment (one
+  `<div style>` from its layout, `<p>` per paragraph, no `class="prose"`).
+  The help text (`--help`) describes block prose, newline rules, code spans,
+  and how the layout flags apply per target. No flags were added (R7).
+- **`--alignment` in HTML** (`cli/src/commands/shared.rs`). The three
+  identical alignment-only wrappers in `prose.rs`, `section.rs`, and
+  `list.rs` became one helper, `render_html_with_alignment`, which adds a
+  `<div style="text-align: …">` only when `--alignment` is set. See
+  Departures.
+- **`bt section`** (`cli/src/commands/section.rs`). Each `--content` item is
+  now a `Prose` (after `unescape_shell_escapes`, as `bt list` and `bt prose`
+  do). Before, items were literal strings and `--html` ran them together
+  (`<section><h2>…</h2>Follow these steps to deploy.Verify the build passes.</section>`);
+  now each is a `<p>`. Terminal and Markdown output for plain text is
+  unchanged.
+- **`bt list`** needed no shape change: its items were already `Prose`, and
+  `--html` already gives `<li><p>…</p></li>` with inline `<code>`.
+- **Library fix: bottom margin lost under word wrap**
+  (`lib/src/components/prose/render.rs`). `Prose::render_via_tree`'s
+  word-wrap pass split the tree output with `str::lines`, which drops the
+  trailing empty rows a bottom margin produces. `bt prose` (which wraps by
+  default) printed `--margin-bottom 2` as one blank line, and any `Prose`
+  with a bottom margin and a wrapping `WordWrap` lost it. It now splits on
+  `'\n'`, so wrapped and unwrapped output have the same rows. Found while
+  moving the vertical margins onto `Prose`.
+- **Docs.** `docs/components/prose.md` is rewritten section by section to
+  the spec's Documentation table (intro with both components; Rendering
+  Model with a Mermaid diagram and a two-component table; Programmatic Use
+  with the choosing rule; new Paragraphs and Line Breaks, Block Tag, and
+  Layout sections; Markdown Subset with the code-span value rules and the
+  link-with-code-text sentence; Escape Mechanism; Supported Tags; Cross-Target
+  Rendering; Prose in Other Components (container table); InlineProse in
+  Table Cells; Key API for both types; Graceful Degradation → Inline Code;
+  CLI with code-span and layout examples taken from real output). It names
+  no spec or feature. Other pages: `index.md` (InlineProse row; Prose
+  described as block), `section.md` (Prose content items; the stale "not
+  exposed as a CLI command" section replaced with `bt section`; sample output
+  corrected to show the blank line between items), and the
+  `#prose-in-table-cells` → `#inlineprose-in-table-cells` anchor in
+  `table.md`, `lib/src/components/table/README.md`, and the crate README.
+  `renderable/docs/components.md` gains an `InlineProse` row, marks `Prose`
+  as Block, and renames `StyledProse` to `StyledInlineProse`.
+- **`inline-prose.md` not created.** `InlineProse` is a thin type over the
+  shared grammar (`new`, `content`, `with_line_breaks`, `to_render_nodes`,
+  escape helpers); `prose.md` documents both side by side, so the grammar is
+  documented once and nothing needs a second page.
+- **Skills.** `biscuit-terminal/styling.md` (both components, a Newlines
+  table, code spans as `InlineCode`, no escaping inside code spans, the stale
+  `Prose` struct sketch replaced with the real builders), `components.md`
+  (catalog rows for `InlineProse` and block `Prose`), `cli.md` (block prose,
+  code-span example, the `--html` shape and the alignment wrapper).
+  `SKILL.md`, the `renderable` skill (hard break, `code_span`), and the
+  `darkmatter` skill (`code_link`) were already current from Phases 2–5.
+- **Module docs.** `markdown.rs`, `prose.rs`, and `inline_prose.rs` were
+  already current. `tree.rs` said links keep an "un-resolved `href`" that
+  each target re-resolves; the parser resolves it (see Drift Notes).
+- README and `docs/dependencies.md`: no crate changes, so no dependency
+  edits (the README change is the anchor only).
+
+### Requirement-to-Test Mapping
+
+All new tests are L1 and live in files already declared by their binaries
+(`lib/tests/l1/prose_grammar.rs` in the lib's `l1`; `cli/tests/l1/integration_test.rs`
+in the CLI's `l1`). No path segment carries a tier marker.
+
+| Requirement | Test(s) |
+| --- | --- |
+| `bt prose --margin-left 4 --html`: margin exactly once, `<p>`, no `class="prose"` (AC 10, 11) | `integration_test::test_prose_html_margin_left_appears_once`, `…::test_prose_html_without_margin_renders_a_paragraph` (Phase 3, still green) |
+| `--html` with all margins: one element, every margin on it, no CLI wrapper, paragraphs as `<p>`, no `class="prose"` (AC 10, 11) | `integration_test::test_prose_html_layout_is_one_element_with_every_margin` |
+| `--alignment` still reaches HTML; margins stay on `Prose`, once | `integration_test::test_prose_html_alignment_is_text_align_and_margins_stay_on_prose` |
+| Terminal vertical margins are identical with and without word wrap (CLI) | `integration_test::test_prose_terminal_vertical_margins_match_with_and_without_wrap` |
+| Library regression: bottom margin survives the word-wrap pass; vertical margins lower to `lh` (fails with `lines()`, verified by reverting the fix) | `prose_grammar::vertical_margins_survive_word_wrap_on_the_terminal` |
+| Code span with `--html` and `--md`; `` `[desc](ref)` `` literal on both (AC 10/11 CLI half, AC 16) | `integration_test::test_prose_code_span_renders_as_inline_code_on_html_and_markdown` |
+| `bt section` content items are `Prose` paragraphs with inline code | `integration_test::test_section_html_renders_each_content_item_as_a_paragraph` |
+
+### Validation
+
+- `biscuit-terminal` `just test`: 3464 passed, 57 skipped (lib and CLI).
+- `biscuit-terminal` `just lint`: clean (lib and CLI).
+- `biscuit-terminal` `just test-l2`: 2 + 76 passed; no window took focus
+  (the harness backends run unfocused).
+- Docs grep over `biscuit-terminal/docs`, the crate README, lib and CLI
+  sources, the `biscuit-terminal`/`renderable`/`darkmatter` skills, and
+  `renderable/docs` for `class="prose"`, `<span class="prose">`, "Styled
+  inline text component", visible-backtick wording, "exactly one link",
+  "including inside a code span", "degrades to escaped literal",
+  `render_html_with_layout`, `Prose::to_render_nodes`, `whole_span_link`,
+  `StyledProse`: no hits apart from tests asserting their absence.
+- OS risk: the changes are string and layout logic with no `cfg`, paths, or
+  filesystem access; the CLI tests compare `\n`-only output, which Rust does
+  not translate on Windows. No `just cross-check` was run.
+
+### Snapshot Review
+
+No snapshot moved in this phase; no `.snap.new` files were left in
+`biscuit-terminal`.
+
+### Known-Red Ledger (Phase 6)
+
+Phase 6 adds no red; `biscuit-terminal` is green. The darkmatter and
+claudine entries from Phase 5 are unchanged (no source outside
+`biscuit-terminal` changed). The word-wrap fix affects only `Prose` output
+that ends in blank rows (a bottom margin or padding with a wrapping
+`WordWrap`); a workspace search found no consumer that sets either on a
+`Prose`.
+
+### Drift Notes
+
+- `prose/tree.rs` module docs said links carry an "un-resolved `href`
+  (each target re-resolves per its own rules)". `tokens.rs` resolves every
+  link target through `styles::resolve_href` while parsing, so a file path
+  is already a `file://` URL in the tree. The comment now says so.
+- The Phase 3 log (Departures, "`bt prose --html`") said vertical margins
+  needed a CLI wrapper because `Layout` "has no line-height unit". It has
+  one in effect: `Length::Ch` on a vertical side lowers to `lh`. The wrapper
+  is gone.
+- `docs/components/section.md` said `Section` was "not directly exposed as a
+  standalone CLI command"; `bt section` exists. Its sample output also
+  omitted the blank line the renderer puts between content items.
+- `renderable/docs/components.md` described `Prose` as Inline and table
+  cells as `StyledProse`.
+
+### Departures
+
+- **`--alignment` keeps an alignment-only wrapper.** The plan says `bt prose`
+  stops wrapping its fragment. Phase 3 removed the alignment declaration
+  along with the margins, so `bt prose --alignment center --html` lost its
+  centering (`main` emitted `text-align`). `renderable`'s `layout_to_css`
+  expresses alignment only as auto margins on a box with `max_width`
+  (documented in `renderable/docs/layout-and-style.md`), while the terminal
+  centers the lines of a full-width block. Changing that contract is a
+  `renderable` design change outside this phase, so `bt prose` uses the same
+  alignment-only wrapper `bt section` and `bt list` already used, now one
+  shared helper. Margins never go on the wrapper. If `renderable` later
+  lowers alignment without `max_width` to `text-align`, the helper and its
+  three callers can be deleted.
+- **`bt section` content is markup now.** The plan names `section.rs` for
+  "old shapes"; making each `--content` item a `Prose` is the change that
+  gives each item its own paragraph in HTML. A `--content` value containing
+  `_`, `**`, `<tag>`, or backticks is now parsed as markup, as `bt list` and
+  `bt prose` arguments already were.
+- **Open finding for Phase 8, not fixed here (`renderable`).** A text node
+  ending in a literal backslash followed by a soft break (`Prose` input
+  `a\\` + newline + `b`, i.e. an escaped backslash before a newline) renders
+  to Markdown as `a\` + newline + `b`, which Markdown reads as a hard break.
+  `renderable`'s Markdown text output does not escape a trailing backslash.
+  Terminal and HTML are correct (`a\ b`). This predates the feature (CommonMark
+  has always read backslash-newline as a hard break) but the spec's "Markdown
+  output preserves the resulting meaning" does not hold for this input.
+
+### Process Note
+
+Several early shell commands in this phase ran `cd biscuit-terminal` from
+the worktree root, and the shell's `CDPATH` resolved that to the **main
+checkout** (`/Volumes/coding/personal/rusty-biscuit/biscuit-terminal`). One
+edit to `cli/src/commands/prose.rs` landed there. It was confirmed to be
+the only change in that checkout, reverted with `git checkout --`, and
+reapplied in the worktree; the main checkout's `git status` is clean. Use
+absolute paths (or `./biscuit-terminal`) in this worktree.
+
+## Phase 7
+
+Phase 7 migrates every consumer's `Prose` call sites to the new shapes and
+reviews the snapshots they move. Validation ran on macOS.
+
+Phase 1 never produced the S1 call-site ledger (the "Scope Record"
+placeholder above). Phase 7 therefore classified sites per area as it went:
+each area agent applied rule R5 to its own crates and reported the sites it
+converted, the sites it kept as `Prose` because they were ambiguous, and
+every snapshot it moved. Inventory at the start of the phase (`Prose::new`
+occurrences, all code including tests): biscuit-terminal lib 352, claudine
+cli 310, sniff cli 201, darkmatter lib 129, biscuit-terminal cli 97,
+claudine lib 52, darkmatter cli 51, worktree cli 38, messenger cli 36,
+model-citizen cli 19, playa cli 16, homelab cli 9, unchained-ai cli 6,
+repo scripts 28, claudine gen 4, biscuit-icon 7, biscuit-tui 2,
+tree-hugger cli 1, dmls 1.
