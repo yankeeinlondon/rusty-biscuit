@@ -21,8 +21,106 @@ docs_updated_during_phase_2:
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
   - .claude/skills/biscuit-file/references/file-references.md
+source_files_during_phase_3:
+  - darkmatter/cli/tests/common/path_lookup_guard.rs
+  - darkmatter/cli/tests/common/source_scan.rs
+  - darkmatter/cli/tests/l1/path_lookup_guard.rs
+  - darkmatter/cli/tests/l1/main.rs
+  - darkmatter/lib/tests/l1/path_lookup_guard.rs
+  - darkmatter/lib/tests/l1/main.rs
+  - darkmatter/lib/Cargo.toml
+  - biscuit-file/lib/src/path_text.rs
+  - biscuit-file/lib/tests/l1/path_lookup_guard.rs
+  - biscuit-file/lib/tests/l1/main.rs
+  - biscuit-file/lib/Cargo.toml
+  - biscuit-file/cli/tests/cli_tests.rs
+  - biscuit-file/cli/Cargo.toml
+  - claudine/lib/tests/l1/path_lookup_guard.rs
+  - claudine/lib/tests/l1/main.rs
+  - claudine/lib/Cargo.toml
+  - claudine/cli/tests/l1/path_lookup_guard.rs
+  - claudine/cli/tests/l1/main.rs
+  - claudine/cli/Cargo.toml
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/biscuit-file/SKILL.md
+  - .claude/skills/os/windows.md
+source_files_during_phase_4:
+  - biscuit-file/lib/src/file_reference/context.rs
+  - biscuit-file/lib/src/file_reference/resolve.rs
+  - biscuit-file/lib/Cargo.toml
+  - biscuit-file/lib/tests/l1/resolution_context.rs
+  - biscuit-file/cli/Cargo.toml
+  - biscuit-file/cli/tests/cli_tests.rs
+  - Cargo.lock
+  - claudine/lib/Cargo.toml
+  - claudine/lib/src/config/antigravity.rs
+  - claudine/lib/src/config/backup.rs
+  - claudine/lib/src/config/claude.rs
+  - claudine/lib/src/config/codex.rs
+  - claudine/lib/src/config/gemini.rs
+  - claudine/lib/src/config/goose.rs
+  - claudine/lib/src/config/kilo.rs
+  - claudine/lib/src/config/kimicode.rs
+  - claudine/lib/src/config/mod.rs
+  - claudine/lib/src/config/opencode.rs
+  - claudine/lib/src/config/pi.rs
+  - claudine/lib/src/config/qwen.rs
+  - claudine/lib/src/dispatch/loader.rs
+  - claudine/lib/src/linking/paths.rs
+  - claudine/lib/src/mcp/import.rs
+  - claudine/lib/src/mcp/types.rs
+  - claudine/lib/src/messaging/resolve.rs
+  - claudine/lib/src/model_catalog/cache.rs
+  - claudine/lib/src/permissions/context.rs
+  - claudine/lib/src/protect/path.rs
+  - claudine/lib/src/protect/scrub.rs
+  - claudine/lib/src/protect/service.rs
+  - claudine/lib/src/protect/service/tests.rs
+  - claudine/lib/src/provider/claude/behavior.rs
+  - claudine/lib/src/provider/codex/behavior.rs
+  - claudine/lib/src/provider/gemini/behavior.rs
+  - claudine/lib/src/provider/opencode/behavior.rs
+  - claudine/lib/src/reporting/paths.rs
+  - claudine/lib/src/system_prompt/resolve/tests.rs
+  - claudine/lib/tests/l1/context_construction_guard.rs
+  - claudine/lib/tests/l1/path_lookup_guard.rs
+  - claudine/cli/src/commands/uninstall.rs
+  - claudine/cli/src/commands/wrap/composition/timeouts.rs
+  - claudine/cli/src/commands/wrap/exec/stream_capture.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/requeue.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/mod.rs
+  - claudine/cli/src/commands/wrap/profile/gemini.rs
+  - claudine/cli/src/commands/wrap/profile/opencode.rs
+  - claudine/cli/src/completion/scopes/tests.rs
+  - claudine/cli/tests/l1/context_construction_guard.rs
+  - claudine/cli/tests/l1/path_lookup_guard.rs
+  - claudine/cli/tests/l1/home_lookup_round_trip.rs
+  - claudine/cli/tests/l1/main.rs
+  - claudine/cli/tests/level2/level2_provider_overlay_capture.rs
+  - darkmatter/lib/src/markdown/compose/context/request.rs
+  - darkmatter/lib/tests/l1/context_construction_guard.rs
+  - darkmatter/lib/tests/l1/nested_composition.rs
+  - darkmatter/cli/tests/common/path_lookup_guard.rs
+docs_updated_during_phase_4:
+  - biscuit-file/docs/topics/file-references.md
+  - biscuit-file/docs/dependencies.md
+  - claudine/docs/topics/repo-isolation.md
+  - claudine/docs/topics/system-prompt.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/biscuit-file/SKILL.md
+  - .claude/skills/biscuit-file/references/file-references.md
+  - .claude/skills/os/windows.md
+  - .claude/skills/os/macos.md
 packages:
   - biscuit-file
+  - biscuit-file-cli
+  - claudine
+  - claudine-cli
+  - darkmatter
+  - darkmatter-cli
 ---
 
 # Plan: path spelling tests, canonicalization guard, and consistent home lookup
@@ -222,7 +320,7 @@ independent of the scanner.
 
 ### Tasks
 
-- [ ] **Helper contract tests (Wave 1).** In biscuit-file, with
+- [x] **Helper contract tests (Wave 1).** In biscuit-file, with
       `file-reference` disabled, test `canonicalize_simplified` on an existing
       temporary directory: absolute, usable for I/O, accepted by
       `try_portable_string`, equal to the real canonical target (macOS
@@ -232,7 +330,7 @@ independent of the scanner.
       available (skip otherwise). Add a refeed test: an unsimplifiable result
       fed back to the file-reference grammar yields the existing explicit
       error, not a panic.
-- [ ] **Scanner core (Wave 1).** Write the scanner as a shared module placed
+- [x] **Scanner core (Wave 1).** Write the scanner as a shared module placed
       where it can be included by `#[path]` from the host test targets
       (follow `darkmatter/cli/tests/common/source_scan.rs`; reuse it if it
       already blanks comments, strings, and `#[cfg(test)]` bodies). It must:
@@ -244,31 +342,31 @@ independent of the scanner.
       `dunce::canonicalize`; report unresolved-receiver candidates for
       explicit review; fail when a required root is missing or the scan is
       empty.
-- [ ] **Exception model (Wave 2).** Exceptions are keyed by repository-relative
+- [x] **Exception model (Wave 2).** Exceptions are keyed by repository-relative
       path + enclosing item + operation, with exact occurrence count and a
       reason naming the private-comparison invariant. Line numbers appear only
       in diagnostics. Fail on new calls and unused/stale exceptions. The
       helper's own `dunce::canonicalize` is the one allowed direct call.
-- [ ] **Home-lookup rule (Wave 2, activated in Phase 4).** Add the rule that
+- [x] **Home-lookup rule (Wave 2, activated in Phase 4).** Add the rule that
       rejects `dirs::home_dir` and `std::env::home_dir` in Claudine (aliases
       and function references included), with the single biscuit-file
       capture point excepted. Land the rule disabled or with the current
       call sites listed as temporary exceptions, then remove exceptions in
       Phase 4 so the guard goes red-to-green with the migration.
-- [ ] **Scanner fixtures (Wave 2).** Small source fixtures for: new call,
+- [x] **Scanner fixtures (Wave 2).** Small source fixtures for: new call,
       alias, allowed call, moved line (still passes), deleted exception
       (fails), inline `#[cfg(test)]` module, string and comment lookalikes,
       missing root (fails), and diagnostics containing `file:line`.
-- [ ] **Register in a Level 1 target (Wave 2).** Put the guard in an existing
+- [x] **Register in a Level 1 target (Wave 2).** Put the guard in an existing
       L1 test binary (candidate: `claudine/cli/tests/l1/main.rs`, which
       already includes cross-package scanner code); do not add a new binary.
-- [ ] **Declare source inputs (Wave 3).** Spell repository reads in the forms
+- [x] **Declare source inputs (Wave 3).** Spell repository reads in the forms
       `rust-testing` can index; add the cross-package files to
       `[package.metadata.ci.tests] source-inputs` in the host package's
       `Cargo.toml`. No compile-time absolute checkout paths; the guard never
       skips when inputs are absent. Verify with `just ci-local --plan` that
       the narrowed cell is scheduled and an archive run has the inputs.
-- [ ] **Document limitations.** Add a module comment on macro-expansion
+- [x] **Document limitations.** Add a module comment on macro-expansion
       limits (a source guard, not proof about compiled code).
 
 Validation checkpoint: with the exception list seeded from the Phase 1 audit,
@@ -291,20 +389,20 @@ recommended option.
 
 ### Tasks
 
-- [ ] **Shared helper (Wave 1).** Change `biscuit_file::home_dir()` to
+- [x] **Shared helper (Wave 1).** Change `biscuit_file::home_dir()` to
       `std::env::home_dir().filter(|h| h.is_absolute())`. A relative selected
       home yields `None` with no second lookup. No canonicalization, no
       existence check, no rebasing. Keep `Option<PathBuf>`, non-Unicode
       support, and the `file-reference` feature gate. Update its doc comment
       (drift rule) and unit-test: relative home returns `None`, absolute is
       passed through.
-- [ ] **Claudine lib paths (Wave 2).** Replace `dirs::home_dir()` in
+- [x] **Claudine lib paths (Wave 2).** Replace `dirs::home_dir()` in
       `config/{mod,backup,claude,codex,gemini,goose,kilo,kimicode,opencode,pi,qwen,antigravity}.rs`
       and `provider/*/behavior.rs`, `mcp/{types,import}.rs`. Preserve
       explicitly configured provider roots, storage overrides, and injected
       homes; an explicitly cleared home stays cleared (no fallback to the
       real profile).
-- [ ] **Claudine lib infrastructure (Wave 2).** Same for
+- [x] **Claudine lib infrastructure (Wave 2).** Same for
       `reporting/paths.rs`, `model_catalog/cache.rs`, `signals/harvest.rs`
       (via `claudine_home_dir`), `protect/{path,scrub}.rs`,
       `permissions/context.rs`, and replace `std::env::home_dir` in
@@ -312,20 +410,20 @@ recommended option.
       paths use the same captured home; add a doc note that process
       environment is an input, not proof of a trusted boundary. Do not touch
       `#[cfg(test)]` uses except where the test asserts the changed behavior.
-- [ ] **Claudine CLI (Wave 2).** Same for `commands/init/mod.rs`,
+- [x] **Claudine CLI (Wave 2).** Same for `commands/init/mod.rs`,
       `uninstall.rs`, `wrap/{harness_orch/loop_control/requeue,composition/timeouts,profile/opencode,profile/gemini,exec/stream_capture,live_semantic_sink/mod}.rs`.
       Capture the home once per request and thread it; do not re-read the
       environment mid-request.
-- [ ] **XDG/OS folder audit (Wave 2).** For each affected flow that also uses
+- [x] **XDG/OS folder audit (Wave 2).** For each affected flow that also uses
       `dirs::config_dir`, `cache_dir`, or `data_dir` (e.g. `requeue.rs`,
       `opencode.rs`), verify the primary write destination lands inside the
       fixture. Where an OS-folder policy is intentional, keep it and seed
       its fixture directory explicitly in tests; document it instead of
       calling it home-based.
-- [ ] **Darkmatter (Wave 2).** Replace `std::env::home_dir().filter(..)` in
+- [x] **Darkmatter (Wave 2).** Replace `std::env::home_dir().filter(..)` in
       `RequestSnapshot::from_process` with `biscuit_file::home_dir()` and
       rewrite the doc comment that explains two readers (now obsolete).
-- [ ] **Round-trip tests (Wave 3).** Using `tools/test-toolkit` and the
+- [x] **Round-trip tests (Wave 3).** Using `tools/test-toolkit` and the
       existing child-process fixtures (`claudine/cli/tests/l1/agent_cwd.rs`,
       `cli_process_fixture.rs`): set `HOME` and `USERPROFILE` in the child
       environment, run production config load and save, assert the written
@@ -335,7 +433,7 @@ recommended option.
       parent environment changes. Environment changes only in child
       processes; no process-env mutation in multithreaded tests. Headless;
       no window focus.
-- [ ] **Activate guard rule (Wave 3).** Remove the temporary home exceptions
+- [x] **Activate guard rule (Wave 3).** Remove the temporary home exceptions
       seeded in Phase 3, leaving no direct `dirs::home_dir` /
       `std::env::home_dir` in Claudine. Guard passes.
 
