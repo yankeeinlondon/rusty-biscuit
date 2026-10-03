@@ -112,11 +112,11 @@ fn render_include_report(terminal: &Terminal, include: &IncludeOutcome) {
         has_warnings = true;
     }
     for (path, reason) in &include.failed {
-        warnings.add(Prose::new(format!("Could not copy {}: {}", display_include_path(path), Prose::escape_text(reason))));
+        warnings.add(Prose::new(format!("Could not copy {}: {}", display_include_path(path), Prose::escape_text_outside_code_spans(reason))));
         has_warnings = true;
     }
     for warning in &include.warnings {
-        warnings.add(Prose::new(Prose::escape_text(warning)));
+        warnings.add(Prose::new(Prose::escape_text_outside_code_spans(warning)));
         has_warnings = true;
     }
     if has_warnings { eprintln!("{}", warnings.render(terminal)); }

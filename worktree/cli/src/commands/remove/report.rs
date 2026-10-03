@@ -17,8 +17,10 @@ use crate::commands::dirty_tree;
 /// Above this many entries a list becomes a count.
 pub const LIST_LIMIT: usize = 10;
 
+/// Escape text for Prose markup, leaving the code spans it marks with
+/// backticks literal.
 fn esc(text: &str) -> String {
-    Prose::escape_text(text)
+    Prose::escape_text_outside_code_spans(text)
 }
 
 pub fn visible_include_path(path: &Path) -> String {

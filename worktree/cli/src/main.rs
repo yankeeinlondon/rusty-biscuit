@@ -119,48 +119,7 @@ fn reject_listing_flags(cli: &Cli) {
 /// Backtick spans in `message` stay code spans, so their contents are passed
 /// through unescaped: a code span shows backslashes literally.
 fn error_markup(message: &str) -> String {
-    format!("<red><b>Error:</b></red> {}", escape_outside_code_spans(message))
-}
-
-/// [`Prose::escape_text`] for everything outside a closed backtick span.
-fn escape_outside_code_spans(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut plain_start = 0;
-    let mut i = 0;
-    while i < text.len() {
-        if !text[i..].starts_with('`') {
-            i += text[i..].chars().next().map_or(1, char::len_utf8);
-            continue;
-        }
-        let run = text[i..].len() - text[i..].trim_start_matches('`').len();
-        let after = i + run;
-        match closing_run(&text[after..], run) {
-            Some(close) => {
-                out.push_str(&Prose::escape_text(&text[plain_start..i]));
-                let end = after + close + run;
-                out.push_str(&text[i..end]);
-                plain_start = end;
-                i = end;
-            }
-            None => i = after,
-        }
-    }
-    out.push_str(&Prose::escape_text(&text[plain_start..]));
-    out
-}
-
-/// The offset in `rest` of the next backtick run exactly `len` long.
-fn closing_run(rest: &str, len: usize) -> Option<usize> {
-    let mut i = 0;
-    while let Some(found) = rest[i..].find('`') {
-        let start = i + found;
-        let run = rest[start..].len() - rest[start..].trim_start_matches('`').len();
-        if run == len {
-            return Some(start);
-        }
-        i = start + run;
-    }
-    None
+    format!("<red><b>Error:</b></red> {}", Prose::escape_text_outside_code_spans(message))
 }
 
 #[cfg(test)]
@@ -188,11 +147,5 @@ mod tests {
         let plain = biscuit_terminal::utils::escape_codes::strip_escape_codes(rendered);
 
         assert_eq!(plain, "Error: feat_x already exists, so --from <base> would be ignored.");
-    }
-
-    #[test]
-    fn an_unclosed_backtick_is_plain_text() {
-        assert_eq!(escape_outside_code_spans("a ` b_c"), r"a ` b\_c");
-        assert_eq!(escape_outside_code_spans("``x` y_z"), r"``x` y\_z");
     }
 }

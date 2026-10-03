@@ -42,8 +42,10 @@ use worktree::worktree::{WorktreeEntry, default_branch, find_worktree, parse_wor
 pub use policy::Flags;
 use policy::{Actions, BranchStep, Decision, Question, Refusal, Situation};
 
+/// Escape text for Prose markup, leaving the code spans it marks with
+/// backticks literal.
 fn esc(text: &str) -> String {
-    Prose::escape_text(text)
+    Prose::escape_text_outside_code_spans(text)
 }
 
 /// Prints one message to stderr; each `\n` in `markup` starts a new line.
