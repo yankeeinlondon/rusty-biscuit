@@ -34,7 +34,7 @@ mod source;
 mod validate;
 
 pub use attrs::{
-    AriaAttrName, BrowserAttrNameError, BrowserAttrs, CodeRenderHints, ColumnConditional,
+    AriaAttrName, BlockElement, BrowserAttrNameError, BrowserAttrs, CodeRenderHints, ColumnConditional,
     ColumnWidthKind, ColumnsHints, ComponentHints, DataAttrName, DisclosureStyleHints,
     HintNamespace, HrAlignment, HrKind, HrWeight, ImageBrowserAttrs, ImageDecoding, ImageLoading,
     LinkBrowserAttrs, LinkRelation, LinkTarget, ListMarkerPolicy, ListRenderHints, NodeAttrs,

@@ -295,10 +295,12 @@ impl Writer<'_> {
             NodeKind::Span { children } => self.render_span(node, children),
             NodeKind::InlineCode { value } => Ok(if self.table_cell_depth > 0 {
                 // A literal pipe inside inline code still breaks a GFM table
-                // cell, so it is escaped even though the run is code.
-                format!("`{}`", value.replace('|', "\\|"))
+                // cell, so it is escaped even though the run is code. The
+                // escape goes in before fencing so the fence sees the final
+                // content.
+                crate::markdown::code_span(&value.replace('|', "\\|"))
             } else {
-                format!("`{value}`")
+                crate::markdown::code_span(value)
             }),
             NodeKind::Link {
                 url,
@@ -327,12 +329,14 @@ impl Writer<'_> {
             } else {
                 "\n".to_string()
             }),
-            // A hard break is two trailing spaces followed by a newline.
-            // Inside a table cell it becomes `<br>` so the row stays valid.
+            // A hard break is a backslash followed by a newline, the visible
+            // CommonMark form (trailing spaces are invisible and are stripped
+            // by editors). Inside a table cell it becomes `<br>` so the row
+            // stays valid.
             NodeKind::HardBreak => Ok(if self.table_cell_depth > 0 {
                 "<br>".to_string()
             } else {
-                "  \n".to_string()
+                "\\\n".to_string()
             }),
             NodeKind::Html { value, block } => self.render_html(node, value, *block),
             NodeKind::Extended {
@@ -1260,7 +1264,7 @@ mod tests {
     #[test]
     fn soft_and_hard_breaks() {
         assert_eq!(render(&RenderNode::soft_break()).output, "\n");
-        assert_eq!(render(&RenderNode::hard_break()).output, "  \n");
+        assert_eq!(render(&RenderNode::hard_break()).output, "\\\n");
     }
 
     #[test]
@@ -1746,6 +1750,30 @@ mod tests {
     }
 
     #[test]
+    fn paragraph_block_element_does_not_change_markdown() {
+        let plain = RenderNode::root(vec![
+            RenderNode::paragraph(vec![RenderNode::text("one")]),
+            RenderNode::paragraph(vec![RenderNode::text("two")]),
+        ]);
+        for dialect in [MarkdownDialect::Markdown, MarkdownDialect::MarkdownPlus] {
+            let opts = MarkdownRenderOptions {
+                dialect,
+                ..Default::default()
+            };
+            let expected = render_markdown_node(&plain, &opts).unwrap().output;
+            for element in crate::tree::BlockElement::ALL {
+                let mut tagged = plain.clone();
+                for child in tagged.children_mut().unwrap() {
+                    child.attrs.browser_mut_or_default().block_element = element;
+                }
+                let rendered = render_markdown_node(&tagged, &opts).unwrap();
+                assert_eq!(rendered.output, expected, "{dialect:?} {element:?}");
+                assert!(rendered.diagnostics.is_empty(), "{dialect:?} {element:?}");
+            }
+        }
+    }
+
+    #[test]
     fn table_cell_escapes_literal_pipe() {
         let table = one_cell_table(RenderNode::text("a | b"));
         let out = render(&table).output;
@@ -1792,6 +1820,82 @@ mod tests {
         let table = one_cell_table(RenderNode::inline_code("a|b"));
         let out = render(&table).output;
         assert!(out.contains(r"`a\|b`"), "{out}");
+    }
+
+    /// `(value, outside a table, inside a table cell)` for directly constructed
+    /// inline-code nodes. The table column applies the pipe escape before the
+    /// fence is chosen.
+    const INLINE_CODE_FENCES: &[(&str, &str, &str)] = &[
+        ("plain", "`plain`", "`plain`"),
+        ("a`b", "``a`b``", "``a`b``"),
+        ("`a`", "`` `a` ``", "`` `a` ``"),
+        ("a``b", "```a``b```", "```a``b```"),
+        (" a ", "`  a  `", "`  a  `"),
+        (" a", "` a`", "` a`"),
+        ("  ", "`  `", "`  `"),
+        ("a|b", "`a|b`", r"`a\|b`"),
+        ("|`|", "``|`|``", r"``\|`\|``"),
+        ("`|", "`` `| ``", r"`` `\| ``"),
+        ("one\ntwo", "`one two`", "`one two`"),
+        ("one\r\ntwo", "`one two`", "`one two`"),
+        ("", "", ""),
+        (r"a\_b", r"`a\_b`", r"`a\_b`"),
+    ];
+
+    #[test]
+    fn inline_code_uses_a_safe_fence_in_both_dialects() {
+        for dialect in [MarkdownDialect::Markdown, MarkdownDialect::MarkdownPlus] {
+            let opts = opts(dialect, RenderStrictness::Warn);
+            for (value, outside, in_cell) in INLINE_CODE_FENCES {
+                let node = RenderNode::inline_code(*value);
+                assert_eq!(render_with(&node, &opts).output, *outside, "{dialect:?} {value:?}");
+
+                let para = RenderNode::paragraph(vec![
+                    RenderNode::text("see "),
+                    RenderNode::inline_code(*value),
+                    RenderNode::text(" here"),
+                ]);
+                assert_eq!(
+                    render_with(&para, &opts).output,
+                    format!("see {outside} here"),
+                    "{dialect:?} {value:?}"
+                );
+
+                let table = render_with(&one_cell_table(node), &opts).output;
+                let row = table.lines().last().unwrap();
+                let expected_row = if in_cell.is_empty() {
+                    "|  |".to_string()
+                } else {
+                    format!("| {in_cell} |")
+                };
+                assert_eq!(row, expected_row, "{dialect:?} {value:?}\n{table}");
+            }
+        }
+    }
+
+    #[test]
+    fn hard_break_uses_backslash_outside_tables_and_br_inside() {
+        for dialect in [MarkdownDialect::Markdown, MarkdownDialect::MarkdownPlus] {
+            let opts = opts(dialect, RenderStrictness::Warn);
+            let broken = || {
+                vec![
+                    RenderNode::text("first"),
+                    RenderNode::hard_break(),
+                    RenderNode::text("second"),
+                ]
+            };
+            let para = render_with(&RenderNode::paragraph(broken()), &opts).output;
+            assert_eq!(para, "first\\\nsecond", "{dialect:?}");
+            // Never the trailing-space form.
+            assert!(!para.contains("  \n"), "{dialect:?}");
+
+            let cell = render_with(&one_cell_table(RenderNode::span(vec![], broken())), &opts);
+            assert_eq!(
+                cell.output.lines().last().unwrap(),
+                "| first<br>second |",
+                "{dialect:?}"
+            );
+        }
     }
 
     #[test]

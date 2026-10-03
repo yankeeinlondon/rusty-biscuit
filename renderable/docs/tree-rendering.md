@@ -177,6 +177,55 @@ buffer instead of building an intermediate fragment per node. Its bytes are
 identical to composing through `render_browser_document`; reach for it when a
 caller already owns a `Document` and only needs the final string.
 
+### Markdown spellings
+
+The Markdown renderer picks one spelling for constructs CommonMark can write
+several ways, in both dialects:
+
+| Node | Markdown | Inside a table cell |
+|------|----------|---------------------|
+| `HardBreak` | `first\` then a newline, then `second` | `first<br>second` |
+| `SoftBreak` | a newline | a space |
+| `InlineCode` | a code span with a safe backtick fence | the same, with each pipe escaped by a backslash before the fence is chosen |
+
+A hard break uses the visible backslash form; two trailing spaces are never
+emitted. An inline-code value is literal, so the renderer chooses a fence that
+cannot be closed early by the value:
+
+| Value | Markdown |
+|-------|----------|
+| `plain` | `` `plain` `` |
+| ``a`b`` | ```` ``a`b`` ```` |
+| `` `a` `` | ```` `` `a` `` ```` |
+| `` a `` (space on both sides) | `` `  a  ` `` |
+
+The rule is CommonMark's: the fence is one backtick longer than the longest
+backtick run in the value, and one space of padding is added when the value
+begins or ends with a backtick, or begins and ends with a space without being
+all spaces. Two values cannot be spelled faithfully: a line ending becomes a
+space, and an empty value renders as nothing. The same rule is public as
+`renderable::markdown::code_span`, so any other producer of a code span
+spells it identically.
+
+### Choosing a paragraph's HTML element
+
+A `Paragraph` renders as `<p>` in the browser unless its `BrowserAttrs`
+names another element with `block_element`:
+
+```rust
+use renderable::tree::{BlockElement, RenderNode};
+
+let mut para = RenderNode::paragraph(vec![RenderNode::text("x")]);
+para.attrs.browser_mut_or_default().block_element = BlockElement::Div;
+// browser: <div>x</div>   markdown: x   terminal: x
+```
+
+The choices are `P` (the default), `Div`, `Section`, `Article`, `Aside`,
+`Header`, and `Footer`. The element is browser presentation only: Markdown and
+terminal output are unchanged, and the validator rejects a non-default element
+on any node other than a `Paragraph`. A default `P` is never serialized, so a
+tree written before the field existed reads back unchanged.
+
 ### The rendering contract
 
 Every renderer follows the same shape, which is the same shape across all three

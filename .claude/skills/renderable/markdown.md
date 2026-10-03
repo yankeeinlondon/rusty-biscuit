@@ -81,3 +81,18 @@ impl MarkdownRenderable for MyComponent {
     }
 }
 ```
+
+## Tree Renderer Spellings
+
+`render_markdown_node` (both dialects) makes two spelling choices other
+producers must match:
+
+- **Hard break** → `\` + newline (never two trailing spaces); `<br>` inside
+  a table cell.
+- **Inline code** → `renderable::markdown::code_span(value)`: a backtick fence
+  one longer than the longest run in the value, one space of padding when the
+  value starts/ends with a backtick or starts *and* ends with a space (and is
+  not all spaces). Line endings become spaces; an empty value is `""` with no
+  fence. Inside a table cell `|` is escaped to `\|` *before* fencing. Use
+  `code_span` anywhere a code span is spelled (the terminal backtick fallback,
+  darkmatter `code_link()`) instead of hand-wrapping the value in single backticks.

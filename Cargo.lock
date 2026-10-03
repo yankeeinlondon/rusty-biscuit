@@ -10786,6 +10786,7 @@ dependencies = [
  "clap 4.6.1",
  "criterion",
  "proptest",
+ "pulldown-cmark",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
