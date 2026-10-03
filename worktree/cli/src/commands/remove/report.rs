@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use biscuit_terminal::components::list::UnorderedList;
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable as _;
 use biscuit_terminal::terminal::Terminal;
 use worktree::remove::Inventory;
@@ -39,11 +39,13 @@ pub struct ReportInput<'a> {
     pub remote: Option<&'a RemoteState>,
 }
 
-/// The whole report, rendered. It ends without a blank line, so each question
-/// can start after exactly one.
+/// The whole report, rendered. It starts with a blank line and ends without
+/// one, so each question can start after exactly one.
 pub fn render(terminal: &Terminal, input: &ReportInput<'_>) -> String {
-    let mut blocks = vec![Prose::new(heading_markup(input)).render(terminal)];
-    blocks.push(Prose::new(files_markup(input.inventory)).render(terminal));
+    // The markup builders lay their text out one line per `\n`.
+    let lines = |markup: String| Prose::new(markup).with_line_breaks(LineBreaks::Hard).render(terminal);
+    let mut blocks = vec![lines(heading_markup(input))];
+    blocks.push(lines(files_markup(input.inventory)));
     match (input.branch, input.safety) {
         (Some(branch), Some(safety)) => {
             let mut block = Prose::new(format!("<b>Branch</b> <blue>{}</blue>", esc(branch)))
@@ -57,13 +59,14 @@ pub fn render(terminal: &Terminal, input: &ReportInput<'_>) -> String {
         ),
     }
     if let Some(remote) = input.remote {
-        blocks.push(Prose::new(remote_markup(remote)).render(terminal));
+        blocks.push(lines(remote_markup(remote)));
     }
-    blocks
+    let report = blocks
         .iter()
         .map(|block| block.trim_end_matches('\n'))
         .collect::<Vec<_>>()
-        .join("\n\n")
+        .join("\n\n");
+    format!("\n{report}")
 }
 
 fn render_list(terminal: &Terminal, items: Vec<String>) -> String {
@@ -76,7 +79,7 @@ fn render_list(terminal: &Terminal, items: Vec<String>) -> String {
 
 pub fn heading_markup(input: &ReportInput<'_>) -> String {
     format!(
-        "\n<b>Removing</b> worktree <blue>{}</blue> <dim>at {}</dim>",
+        "<b>Removing</b> worktree <blue>{}</blue> <dim>at {}</dim>",
         esc(input.display_name),
         esc(&input.path.display().to_string())
     )

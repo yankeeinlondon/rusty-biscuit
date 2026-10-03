@@ -6,7 +6,7 @@ mod perf;
 mod shell_integration;
 
 use args::{Cli, Commands};
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable as _;
 use biscuit_terminal::terminal::Terminal;
 use clap::{CommandFactory, Parser};
@@ -21,15 +21,17 @@ fn main() {
         let terminal = Terminal::default();
         let msg = match &e {
             worktree::WorktreeError::Cancelled => "<dim>Cancelled.</dim>".to_string(),
-            // These carry their own Prose markup and heading.
+            // These carry their own Prose markup and heading, and are printed
+            // after one blank line.
             worktree::WorktreeError::RefusedToLoseWork(markup)
-            | worktree::WorktreeError::BlockedByEnvironment(markup) => markup.clone(),
-            _ => format!(
-                "<red><b>Error:</b></red> {}",
-                Prose::escape_text(&e.to_string())
-            ),
+            | worktree::WorktreeError::BlockedByEnvironment(markup) => {
+                eprintln!();
+                markup.clone()
+            }
+            _ => error_markup(&e.to_string()),
         };
-        eprintln!("{}", Prose::new(msg).render(&terminal));
+        let rendered = Prose::new(msg).with_line_breaks(LineBreaks::Hard).render(&terminal);
+        eprintln!("{rendered}");
         std::process::exit(exit::exit_code(&e));
     }
 }
@@ -109,5 +111,88 @@ fn reject_listing_flags(cli: &Cli) {
                 format!("{flag} applies only to listing (`wt` or `wt list`), not to `wt {command}`"),
             )
             .exit();
+    }
+}
+
+/// The markup for a plain error message.
+///
+/// Backtick spans in `message` stay code spans, so their contents are passed
+/// through unescaped: a code span shows backslashes literally.
+fn error_markup(message: &str) -> String {
+    format!("<red><b>Error:</b></red> {}", escape_outside_code_spans(message))
+}
+
+/// [`Prose::escape_text`] for everything outside a closed backtick span.
+fn escape_outside_code_spans(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut plain_start = 0;
+    let mut i = 0;
+    while i < text.len() {
+        if !text[i..].starts_with('`') {
+            i += text[i..].chars().next().map_or(1, char::len_utf8);
+            continue;
+        }
+        let run = text[i..].len() - text[i..].trim_start_matches('`').len();
+        let after = i + run;
+        match closing_run(&text[after..], run) {
+            Some(close) => {
+                out.push_str(&Prose::escape_text(&text[plain_start..i]));
+                let end = after + close + run;
+                out.push_str(&text[i..end]);
+                plain_start = end;
+                i = end;
+            }
+            None => i = after,
+        }
+    }
+    out.push_str(&Prose::escape_text(&text[plain_start..]));
+    out
+}
+
+/// The offset in `rest` of the next backtick run exactly `len` long.
+fn closing_run(rest: &str, len: usize) -> Option<usize> {
+    let mut i = 0;
+    while let Some(found) = rest[i..].find('`') {
+        let start = i + found;
+        let run = rest[start..].len() - rest[start..].trim_start_matches('`').len();
+        if run == len {
+            return Some(start);
+        }
+        i = start + run;
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn error_markup_leaves_code_spans_unescaped_and_escapes_the_rest() {
+        let message = "HEAD is detached, so there is no current branch to fork `fix/f_x` from. \
+            Pass `--from <branch>` to choose the branch it starts from. a_b <c>";
+
+        let markup = error_markup(message);
+
+        assert!(markup.contains("`fix/f_x`"), "{markup}");
+        assert!(markup.contains("`--from <branch>`"), "{markup}");
+        assert!(markup.ends_with(r"a\_b \<c\>"), "{markup}");
+    }
+
+    #[test]
+    fn error_markup_renders_code_span_contents_without_backslashes() {
+        let terminal = Terminal::new_optimistic(200);
+        let message = "`feat_x` already exists, so `--from <base>` would be ignored.";
+
+        let rendered = Prose::new(error_markup(message)).render(&terminal);
+        let plain = biscuit_terminal::utils::escape_codes::strip_escape_codes(rendered);
+
+        assert_eq!(plain, "Error: feat_x already exists, so --from <base> would be ignored.");
+    }
+
+    #[test]
+    fn an_unclosed_backtick_is_plain_text() {
+        assert_eq!(escape_outside_code_spans("a ` b_c"), r"a ` b\_c");
+        assert_eq!(escape_outside_code_spans("``x` y_z"), r"``x` y\_z");
     }
 }

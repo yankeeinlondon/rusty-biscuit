@@ -50,13 +50,14 @@ pub enum WorktreeError {
     },
 
     /// The command stopped because continuing would lose work; nothing was
-    /// changed. The message is Prose markup explaining what to do.
+    /// changed. The message is Prose markup, one line per `\n`, explaining
+    /// what to do.
     #[error("{0}")]
     RefusedToLoseWork(String),
 
     /// The environment prevents the command (for example, no shell wrapper to
     /// move the caller); nothing was changed and no `--force-*` flag helps.
-    /// The message is Prose markup explaining what to do.
+    /// The message is Prose markup, one line per `\n`, explaining what to do.
     #[error("{0}")]
     BlockedByEnvironment(String),
 
