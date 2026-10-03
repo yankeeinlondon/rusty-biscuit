@@ -188,7 +188,7 @@ Strict subset — `__bold__` and `*italics*` are **not** recognised; both pass t
 | `**_pr/a.md** **_pr/b.md**` | `<b>_pr/a.md</b> <b>_pr/b.md</b>` | No valid closer for either `_` |
 | `<dim>=OPENCODE_CONFIG_CONTENT</dim>` | unchanged | Tag wrapper preserved; intra-word `_` not triggered inside body |
 
-**Practical consequence for callers:** author text, identifiers, paths, and error messages spliced into a Prose format string go through `Prose::escape_text` (attribute values through `Prose::quoted_attr`). Do not hand-roll a partial escaper; one that skips `_`, `*`, or `[` lets `_draft_` become italics. **Never** escape text placed inside a code span: the span is opaque, so the escape's backslashes would show.
+**Practical consequence for callers:** author text, identifiers, paths, and error messages spliced into a Prose format string go through `Prose::escape_text` (attribute values through `Prose::quoted_attr`). Do not hand-roll a partial escaper; one that skips `_`, `*`, or `[` lets `_draft_` become italics. **Never** escape text placed inside a code span: the span is opaque, so the escape's backslashes would show. Fence a dynamic value with `renderable::markdown::code_span(value)` instead of hand-written backticks; it widens the fence when the value holds a backtick.
 
 #### Escape mechanism
 

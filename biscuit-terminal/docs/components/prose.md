@@ -132,6 +132,8 @@ Newlines follow Markdown. One rule per row:
   not a break.
 - **Escaped backslash.** `"a\\\\\nb"` (two backslashes, then a newline) is a
   literal backslash followed by the mode's ordinary break.
+  Markdown output writes that backslash doubled (`a\\`, then the break), so
+  a Markdown reader also sees a literal backslash rather than a hard break.
 - **Not a hard break.** A backslash before a blank line or at the end of the
   input stays literal. Trailing spaces never make a hard break; CommonMark's
   two-space form is deliberately unsupported, so other Markdown renderers may
@@ -315,6 +317,10 @@ messages spliced into a Prose format string must pass through
 make identifier-shaped values safe, but text such as `_draft_` or `**note**`
 would still be read as emphasis. Do **not** escape text placed inside a code
 span: the span is already opaque, and the escape's backslashes would show.
+To put a dynamic value in a code span, fence it with
+`renderable::markdown::code_span(value)` instead of writing the backticks by
+hand: the fence grows when the value holds a backtick, so the value still
+renders as one span.
 For a value placed in a tag attribute, use `Prose::quoted_attr` instead.
 
 ```rust
