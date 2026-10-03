@@ -34,8 +34,9 @@
 //!   readers take no lock and never see a partial document.
 //! - Every attempt's completion receipt ([`Receipt`]) is its own file,
 //!   `<repo hash>.refresh-receipt.<attempt id>.json`, so overlapping runs
-//!   never replace each other's. Its run deletes it once the wait ends; one
-//!   left behind (a run that timed out) is deleted by the next worker once
+//!   never replace each other's. Its run tries once to delete it as the wait
+//!   ends; one written after that (the run timed out, or succeeded before
+//!   its worker wrote the receipt) is deleted by the next worker once
 //!   older than [`ATTEMPT_MAX_AGE`] ([`remove_stale_receipts`]).
 
 use std::fs;
@@ -49,6 +50,7 @@ use crate::cache::{atomic_write, repo_cache_file, try_lock_sidecar};
 use crate::error::WorktreeError;
 use crate::live_remote::is_object_id;
 use crate::pull_requests::{FRESHNESS_WINDOW, origin_digest};
+use crate::strict_json;
 
 pub const REMOTE_HEAD_FORMAT_VERSION: u32 = 2;
 
@@ -437,17 +439,17 @@ pub fn select_attempt(
 }
 
 /// Both halves of the store at `store`, validated independently; a missing or
-/// unreadable file, or another format, is empty.
+/// unreadable file, another format, or a repeated top-level key is empty, and
+/// a half that repeats a key is invalid ([`crate::strict_json`]).
 pub fn read_store(store: &Path) -> StoreState {
-    let Some(document) = fs::read(store).ok().and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
-    else {
+    let Some(document) = fs::read(store).ok().and_then(|bytes| strict_json::members(&bytes)) else {
         return StoreState::default();
     };
-    match document.get("format_version").and_then(serde_json::Value::as_u64) {
-        Some(LEGACY_FORMAT_VERSION) => StoreState { answer: legacy_answer(document), attempt: None },
+    match document.get::<u64>("format_version") {
+        Some(LEGACY_FORMAT_VERSION) => StoreState { answer: document.into_value().and_then(legacy_answer), attempt: None },
         Some(version) if version == u64::from(REMOTE_HEAD_FORMAT_VERSION) => StoreState {
-            answer: half::<Answer>(&document, "answer").filter(Answer::is_valid),
-            attempt: half::<Attempt>(&document, "attempt").filter(Attempt::is_valid),
+            answer: document.get::<Answer>("answer").filter(Answer::is_valid),
+            attempt: document.get::<Attempt>("attempt").filter(Attempt::is_valid),
         },
         _ => StoreState::default(),
     }
@@ -463,10 +465,6 @@ fn legacy_answer(document: serde_json::Value) -> Option<Answer> {
         source: AnswerSource::Git,
     };
     answer.is_valid().then_some(answer)
-}
-
-fn half<T: serde::de::DeserializeOwned>(document: &serde_json::Value, key: &str) -> Option<T> {
-    document.get(key).and_then(|value| T::deserialize(value).ok())
 }
 
 /// Records `attempt` as the current one, replacing any other, and keeps the
@@ -612,7 +610,10 @@ pub enum HeadStatus {
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum PrStatus {
     Ok,
-    Failed { failure: PrFailure },
+    Failed {
+        #[serde(deserialize_with = "strict_json::nested")]
+        failure: PrFailure,
+    },
     /// The repository is in `~/.wt.json`, so no PR request was made.
     Ignored,
     /// `origin` has no provider to ask (a local path or an unsupported
@@ -641,11 +642,18 @@ struct ReceiptFileOut<'a> {
     receipt: &'a Receipt,
 }
 
+// Spelled out rather than `#[serde(flatten)]`: flattening buffers the input,
+// and serde's buffer reads an integer `kind` as a variant index, so
+// `"prs": {"kind": 1}` was a failure never recorded.
 #[derive(Deserialize)]
 struct ReceiptFileIn {
     format_version: u32,
-    #[serde(flatten)]
-    receipt: Receipt,
+    attempt_id: String,
+    origin_digest: String,
+    branch: String,
+    finished_at: u64,
+    head: HeadStatus,
+    prs: PrStatus,
 }
 
 impl Receipt {
@@ -675,7 +683,14 @@ pub fn write_receipt(path: &Path, receipt: &Receipt) -> Result<(), WorktreeError
 pub fn load_receipt(path: &Path, attempt: &Attempt) -> Option<Receipt> {
     let bytes = fs::read(path).ok()?;
     let file = serde_json::from_slice::<ReceiptFileIn>(&bytes).ok()?;
-    let receipt = file.receipt;
+    let receipt = Receipt {
+        attempt_id: file.attempt_id,
+        origin_digest: file.origin_digest,
+        branch: file.branch,
+        finished_at: file.finished_at,
+        head: file.head,
+        prs: file.prs,
+    };
     (file.format_version == RECEIPT_FORMAT_VERSION
         && receipt.is_valid()
         && receipt.attempt_id == attempt.id
@@ -1238,6 +1253,171 @@ mod tests {
         assert_ne!(first, second);
     }
 
+    /// What a store edit leaves of the attempt.
+    enum AttemptExpect {
+        Kept,
+        Dropped,
+        Changed(fn(&mut Attempt)),
+    }
+
+    /// The Input Robustness Matrix for the store: every load-bearing field of
+    /// both halves in every shape, one edit per cell, from a file the real
+    /// writers wrote, read through [`select_cached_head`] and
+    /// [`select_attempt`]. An invalid half is dropped and the other kept.
+    #[test]
+    fn the_store_reader_walks_the_input_robustness_matrix() {
+        use serde_json::{Value, json};
+        use AttemptExpect::*;
+        use JsonEdit::*;
+        let origin = "https://heads.example.invalid/o/r.git";
+        let digest = origin_digest(origin);
+        let (_dir, store) = temp_store();
+        let answered = Answer { origin_digest: digest.clone(), ..answer(Some(SHA), NOW, AnswerSource::Git) };
+        publish_answer(&store, &answered).unwrap();
+        begin_attempt(&store, &Attempt { origin_digest: digest.clone(), ..attempt(NOW) }).unwrap();
+        set_phase(&store, ID, Phase::CheckingFallback { reason: FallbackReason::RateLimited }, Some(note())).unwrap();
+        finish_attempt(&store, ID, Outcome::FetchFailed { reason: FetchFailure::Timeout }, None).unwrap();
+        let written = raw_json(&store);
+        let control = read_store(&store).attempt.expect("the written attempt");
+        let read = |bytes: &[u8]| {
+            fs::write(&store, bytes).unwrap();
+            (
+                select_cached_head(&store, Some(origin), Some("main"), NOW + 1),
+                select_attempt(&store, Some(origin), Some("main"), NOW + 1),
+            )
+        };
+        let fresh = CachedRemoteHead::Fresh(head(Some(SHA), NOW));
+        assert_eq!(read(&serde_json::to_vec(&written).unwrap()), (fresh.clone(), Some(control.clone())), "control");
+
+        let set = |pointer: &str, value: Option<Value>| Set(pointer.to_string(), value);
+        let mut cells: Vec<(JsonEdit, bool, AttemptExpect)> = Vec::new();
+        // Every field: absent, `[]`, `{}`, a wrong whole type, and a repeated
+        // key spoil the half that holds it.
+        let fields: [(&str, Value); 20] = [
+            ("/answer/origin_digest", json!(1)),
+            ("/answer/branch", json!(1)),
+            ("/answer/sha", json!(1)),
+            ("/answer/checked_at", json!("1790000000")),
+            ("/answer/source", json!(1)),
+            ("/attempt/id", json!(1)),
+            ("/attempt/origin_digest", json!(1)),
+            ("/attempt/branch", json!(1)),
+            ("/attempt/started_at", json!("1790000000")),
+            ("/attempt/phase", json!("checking")),
+            ("/attempt/phase/kind", json!(1)),
+            ("/attempt/phase/reason", json!(1)),
+            ("/attempt/outcome", json!("fetch-failed")),
+            ("/attempt/outcome/kind", json!(3)),
+            ("/attempt/outcome/reason", json!(0)),
+            ("/attempt/api", json!("rate-limited")),
+            ("/attempt/api/condition", json!("rate-limited")),
+            ("/attempt/api/condition/kind", json!(3)),
+            ("/attempt/api/condition/authenticated", json!("false")),
+            ("/attempt/api/fallback_answered", json!("true")),
+        ];
+        for (pointer, wrong) in fields {
+            let in_answer = pointer.starts_with("/answer");
+            let spoil = |cells: &mut Vec<(JsonEdit, bool, AttemptExpect)>, edit| {
+                cells.push((edit, !in_answer, if in_answer { Kept } else { Dropped }));
+            };
+            for shape in [None, Some(json!([])), Some(json!({})), Some(wrong)] {
+                spoil(&mut cells, set(pointer, shape));
+            }
+            spoil(&mut cells, Dup(pointer.to_string()));
+        }
+        // Explicit null: a verified absence, a running attempt, no note, and a
+        // note naming no variable are valid; null anywhere else spoils its
+        // half.
+        for pointer in [
+            "/answer/origin_digest",
+            "/answer/branch",
+            "/answer/checked_at",
+            "/answer/source",
+            "/attempt/id",
+            "/attempt/origin_digest",
+            "/attempt/branch",
+            "/attempt/started_at",
+            "/attempt/phase",
+            "/attempt/phase/kind",
+            "/attempt/phase/reason",
+            "/attempt/outcome/kind",
+            "/attempt/outcome/reason",
+            "/attempt/api/condition",
+            "/attempt/api/condition/kind",
+            "/attempt/api/condition/authenticated",
+            "/attempt/api/fallback_answered",
+        ] {
+            let in_answer = pointer.starts_with("/answer");
+            cells.push((set(pointer, Some(Value::Null)), !in_answer, if in_answer { Kept } else { Dropped }));
+        }
+        cells.push((set("/attempt/outcome", Some(Value::Null)), true, Changed(|attempt| attempt.outcome = None)));
+        cells.push((set("/attempt/api", Some(Value::Null)), true, Changed(|attempt| attempt.api = None)));
+        cells.push((set("/attempt/api/key", Some(Value::Null)), true, Changed(|attempt| attempt.api.as_mut().unwrap().key = None)));
+        // `key`: anything but a variable name or null spoils the attempt.
+        for shape in [None, Some(json!([])), Some(json!({})), Some(json!(1)), Some(json!("")), Some(json!("a token"))] {
+            cells.push((set("/attempt/api/key", shape), true, Dropped));
+        }
+        cells.push((Dup("/attempt/api/key".into()), true, Dropped));
+        // Empty strings: an empty binding or id is invalid.
+        for pointer in ["/answer/origin_digest", "/answer/branch", "/answer/sha", "/answer/source"] {
+            cells.push((set(pointer, Some(json!(""))), false, Kept));
+        }
+        for pointer in ["/attempt/id", "/attempt/origin_digest", "/attempt/branch", "/attempt/phase/kind", "/attempt/outcome/kind"] {
+            cells.push((set(pointer, Some(json!(""))), true, Dropped));
+        }
+        // Stale, future, and misbound halves are not served.
+        cells.push((set("/answer/checked_at", Some(json!(NOW + 2))), false, Kept));
+        cells.push((set("/answer/origin_digest", Some(json!(origin_digest("https://heads.example.invalid/o/other.git")))), false, Kept));
+        cells.push((set("/answer/branch", Some(json!("trunk"))), false, Kept));
+        cells.push((set("/attempt/started_at", Some(json!(NOW + 2))), true, Dropped));
+        cells.push((set("/attempt/started_at", Some(json!(NOW - ATTEMPT_MAX_AGE.as_secs()))), true, Dropped));
+        cells.push((set("/attempt/origin_digest", Some(json!(origin_digest("https://heads.example.invalid/o/other.git")))), true, Dropped));
+        cells.push((set("/attempt/branch", Some(json!("trunk"))), true, Dropped));
+        // The envelope: either half absent or null is only that half.
+        cells.push((set("/answer", None), false, Kept));
+        cells.push((set("/answer", Some(Value::Null)), false, Kept));
+        cells.push((set("/attempt", None), true, Dropped));
+        cells.push((set("/attempt", Some(Value::Null)), true, Dropped));
+        cells.push((set("/answer", Some(json!([]))), false, Kept));
+        cells.push((set("/attempt", Some(json!(1))), true, Dropped));
+        for shape in [None, Some(Value::Null), Some(json!("2")), Some(json!([])), Some(json!({})), Some(json!(3))] {
+            cells.push((set("/format_version", shape), false, Dropped));
+        }
+        for pointer in ["/format_version", "/answer", "/attempt"] {
+            cells.push((Dup(pointer.into()), false, Dropped));
+        }
+        // Unknown fields are ignored; trailing content loses both halves.
+        cells.push((set("/extra", Some(json!(1))), true, Kept));
+        cells.push((set("/answer/extra", Some(json!(1))), true, Kept));
+        cells.push((set("/attempt/phase/extra", Some(json!(1))), true, Kept));
+        cells.push((Append("garbage"), false, Dropped));
+        cells.push((Append("{}"), false, Dropped));
+
+        let mut wrong = Vec::new();
+        for (edit, answer_kept, attempt) in &cells {
+            let bytes = edit.apply(&written);
+            let want_attempt = match attempt {
+                Kept => Some(control.clone()),
+                Dropped => None,
+                Changed(change) => {
+                    let mut changed = control.clone();
+                    change(&mut changed);
+                    Some(changed)
+                }
+            };
+            let want = (if *answer_kept { fresh.clone() } else { CachedRemoteHead::Miss }, want_attempt);
+            let got = read(&bytes);
+            if got != want {
+                wrong.push(format!("{}: {got:?}, expected {want:?}", String::from_utf8_lossy(&bytes)));
+            }
+        }
+        assert!(wrong.is_empty(), "{} of {} cells read wrong:\n{}", wrong.len(), cells.len(), wrong.join("\n"));
+
+        // A null `sha` is a verified absence, not a miss.
+        let absent = set("/answer/sha", Some(Value::Null)).apply(&written);
+        assert_eq!(read(&absent), (CachedRemoteHead::Fresh(head(None, NOW)), Some(control)));
+    }
+
     fn receipt() -> Receipt {
         Receipt {
             attempt_id: ID.into(),
@@ -1389,107 +1569,175 @@ mod tests {
         let refused = Receipt { attempt_id: "short".into(), ..receipt() };
         assert!(write_receipt(&path, &refused).is_err());
     }
+    /// One edit to a document the real writer wrote.
+    enum JsonEdit {
+        /// Repeat the key at a JSON pointer, with its written value, in the
+        /// same object.
+        Dup(String),
+        /// Replace (or, with `None`, remove) the value at a JSON pointer.
+        Set(String, Option<serde_json::Value>),
+        Append(&'static str),
+    }
 
-    /// The Input Robustness Matrix for the receipt: every load-bearing field
-    /// in every shape, one edit per row, from a file written by
-    /// [`write_receipt`]. Every row is a missing receipt, never a default
-    /// outcome.
-    #[test]
-    fn the_receipt_reader_walks_the_input_robustness_matrix() {
-        use serde_json::{Value, json};
-        let (dir, _) = temp_store();
-        let path = dir.path().join("abc.refresh-receipt.json");
-        write_receipt(&path, &receipt()).unwrap();
-        let written = raw_json(&path);
-        let read = |bytes: &[u8]| {
-            fs::write(&path, bytes).unwrap();
-            load_receipt(&path, &attempt(NOW))
-        };
-        assert_eq!(read(&serde_json::to_vec(&written).unwrap()), Some(receipt()), "control");
-
-        let set = |pointer: &str, value: Option<Value>| {
+    impl JsonEdit {
+        fn apply(&self, written: &serde_json::Value) -> Vec<u8> {
             let mut document = written.clone();
-            let (parent, key) = pointer.rsplit_once('/').unwrap();
-            let target = if parent.is_empty() { &mut document } else { document.pointer_mut(parent).unwrap() };
-            let map = target.as_object_mut().unwrap();
-            match value {
-                Some(value) => {
-                    map.insert(key.to_string(), value);
+            match self {
+                Self::Set(pointer, value) => {
+                    let (parent, key) = pointer.rsplit_once('/').unwrap();
+                    let target = if parent.is_empty() { &mut document } else { document.pointer_mut(parent).unwrap() };
+                    let map = target.as_object_mut().unwrap_or_else(|| panic!("{pointer} is not in an object"));
+                    match value {
+                        Some(value) => {
+                            map.insert(key.to_string(), value.clone());
+                        }
+                        None => assert!(map.remove(key).is_some(), "{pointer} exists"),
+                    }
+                    serde_json::to_vec(&document).unwrap()
                 }
-                None => assert!(map.remove(key).is_some(), "{pointer} exists"),
+                Self::Dup(pointer) => {
+                    let (parent, key) = pointer.rsplit_once('/').unwrap();
+                    let target = if parent.is_empty() { &mut document } else { document.pointer_mut(parent).unwrap() };
+                    let map = target.as_object_mut().unwrap_or_else(|| panic!("{pointer} is not in an object"));
+                    let value = map.get(key).unwrap_or_else(|| panic!("{pointer} exists")).clone();
+                    map.insert("__repeat__".into(), value);
+                    serde_json::to_string(&document).unwrap().replacen("\"__repeat__\"", &format!("\"{key}\""), 1).into_bytes()
+                }
+                Self::Append(tail) => {
+                    let mut bytes = serde_json::to_vec(&document).unwrap();
+                    bytes.extend_from_slice(tail.as_bytes());
+                    bytes
+                }
             }
-            serde_json::to_vec(&document).unwrap()
-        };
-        let compact = serde_json::to_string(&written).unwrap();
-        let prefixed = |member: &str| compact.replacen('{', &format!("{{{member},"), 1).into_bytes();
+        }
+    }
 
-        let mut misses = Vec::new();
+    /// The failures that carry fields, as the matrix's positive controls.
+    fn field_bearing_failures() -> [PrFailure; 3] {
+        [
+            PrFailure::CredentialsRejected { key: Some("GITHUB_TOKEN".into()) },
+            PrFailure::CredentialsInsufficient { key: Some("GH_TOKEN".into()) },
+            PrFailure::RateLimited { authenticated: true, key: Some("GITHUB_TOKEN".into()) },
+        ]
+    }
+
+    /// The receipt matrix's cells for a receipt whose PR half failed with
+    /// `failure`: each edit, and the PR half the receipt then reports, `None`
+    /// for a missing receipt. The same table is walked through `wt list`'s
+    /// wait in `worktree-cli` (`commands::list::wait::tests`).
+    fn receipt_cells(failure: &PrFailure) -> Vec<(JsonEdit, Option<PrStatus>)> {
+        use serde_json::{Value, json};
+        use JsonEdit::*;
+        let set = |pointer: &str, value: Option<Value>| Set(pointer.to_string(), value);
+        let failed = |failure: PrFailure| Some(PrStatus::Failed { failure });
+        let mut cells = Vec::new();
+
+        // Envelope: absent, null, `[]`, `{}`, empty, a repeated key, a wrong
+        // type, and a wrong binding are each a missing receipt.
         for field in ["/format_version", "/attempt_id", "/origin_digest", "/branch", "/finished_at", "/head", "/prs"] {
-            misses.push(set(field, None));
-            misses.push(set(field, Some(Value::Null)));
-            misses.push(set(field, Some(json!([]))));
-            misses.push(set(field, Some(json!({}))));
+            for shape in [None, Some(Value::Null), Some(json!([])), Some(json!({})), Some(json!(""))] {
+                cells.push((set(field, shape), None));
+            }
+            cells.push((Dup(field.to_string()), None));
         }
         for (field, wrong) in [
             ("/format_version", json!("1")),
             ("/format_version", json!(2)),
             ("/attempt_id", json!(1)),
-            ("/attempt_id", json!("")),
             ("/attempt_id", json!(OTHER_ID)),
+            ("/attempt_id", json!(ID.to_uppercase())),
             ("/origin_digest", json!(1)),
-            ("/origin_digest", json!("")),
             ("/origin_digest", json!("another-digest")),
             ("/branch", json!(1)),
-            ("/branch", json!("")),
             ("/branch", json!("trunk")),
             ("/finished_at", json!("later")),
             ("/finished_at", json!(-1)),
-            ("/finished_at", json!(NOW - 1)),
+            ("/finished_at", json!(1)),
             ("/head", json!(1)),
-            ("/head", json!("")),
             ("/head", json!("moved")),
             ("/prs", json!("failed")),
             ("/prs", json!({ "kind": "skipped-fresh" })),
-            ("/prs", json!({ "kind": "" })),
-            ("/prs", json!({ "kind": 1 })),
-            ("/prs/failure", Value::Null),
-            ("/prs/failure", json!("other")),
-            ("/prs/failure/kind", json!("credentials-lost")),
-            ("/prs/failure/key", json!(1)),
-            ("/prs/failure/key", json!("a token")),
-            ("/prs/failure/key", json!("")),
         ] {
-            misses.push(set(field, Some(wrong)));
-        }
-        for field in ["/prs/kind", "/prs/failure", "/prs/failure/kind", "/prs/failure/key"] {
-            misses.push(set(field, None));
-        }
-        for member in [
-            "\"format_version\":1".to_string(),
-            format!("\"attempt_id\":\"{ID}\""),
-            format!("\"origin_digest\":\"{DIGEST}\""),
-            "\"branch\":\"main\"".to_string(),
-            format!("\"finished_at\":{}", NOW + 30),
-            "\"head\":\"ok\"".to_string(),
-            "\"prs\":{\"kind\":\"ok\"}".to_string(),
-        ] {
-            misses.push(prefixed(&member));
-        }
-        misses.push(compact.replacen("\"kind\":\"failed\"", "\"kind\":\"failed\",\"kind\":\"ok\"", 1).into_bytes());
-        misses.push(compact.replacen("\"key\":", "\"key\":\"GH_TOKEN\",\"key\":", 1).into_bytes());
-        misses.push(format!("{compact}garbage").into_bytes());
-        misses.push(format!("{compact}{{}}").into_bytes());
-        for bytes in misses {
-            assert_eq!(read(&bytes), None, "{}", String::from_utf8_lossy(&bytes));
+            cells.push((set(field, Some(wrong)), None));
         }
 
-        // A null key is a failure that names no variable, not a miss.
-        let unnamed = read(&set("/prs/failure/key", Some(Value::Null)));
-        assert_eq!(
-            unnamed.map(|receipt| receipt.prs),
-            Some(PrStatus::Failed { failure: PrFailure::CredentialsRejected { key: None } })
-        );
+        // `prs.kind`, `prs.failure`, and `prs.failure.kind`: every shape is a
+        // missing receipt, never a default or another failure.
+        for field in ["/prs/kind", "/prs/failure", "/prs/failure/kind"] {
+            for shape in [None, Some(Value::Null), Some(json!([])), Some(json!({})), Some(json!("")), Some(json!(1))] {
+                cells.push((set(field, shape), None));
+            }
+            cells.push((Dup(field.to_string()), None));
+        }
+        cells.push((set("/prs/kind", Some(json!("skipped-fresh"))), None));
+        cells.push((set("/prs/failure", Some(json!("other"))), None));
+        cells.push((set("/prs/failure/kind", Some(json!("credentials-lost"))), None));
+
+        // `key`: null is a failure that names no variable; anything but a
+        // variable name is a missing receipt.
+        let unnamed = match failure.clone() {
+            PrFailure::CredentialsRejected { .. } => PrFailure::CredentialsRejected { key: None },
+            PrFailure::CredentialsInsufficient { .. } => PrFailure::CredentialsInsufficient { key: None },
+            PrFailure::RateLimited { authenticated, .. } => PrFailure::RateLimited { authenticated, key: None },
+            other => panic!("{other:?} carries no key"),
+        };
+        cells.push((set("/prs/failure/key", Some(Value::Null)), failed(unnamed)));
+        for shape in [None, Some(json!([])), Some(json!({})), Some(json!("")), Some(json!(1)), Some(json!("a token")), Some(json!("1TOKEN"))] {
+            cells.push((set("/prs/failure/key", shape), None));
+        }
+        cells.push((Dup("/prs/failure/key".into()), None));
+
+        // The rate limit's `authenticated`: only a boolean.
+        if let PrFailure::RateLimited { key, .. } = failure {
+            cells.push((set("/prs/failure/authenticated", Some(json!(false))), failed(PrFailure::RateLimited { authenticated: false, key: key.clone() })));
+            for shape in [None, Some(Value::Null), Some(json!([])), Some(json!({})), Some(json!("")), Some(json!("true")), Some(json!(1))] {
+                cells.push((set("/prs/failure/authenticated", shape), None));
+            }
+            cells.push((Dup("/prs/failure/authenticated".into()), None));
+        }
+
+        // Unknown fields are ignored; trailing content is a missing receipt.
+        cells.push((set("/extra", Some(json!(1))), failed(failure.clone())));
+        cells.push((set("/prs/failure/extra", Some(json!(1))), failed(failure.clone())));
+        cells.push((Append("garbage"), None));
+        cells.push((Append("{}"), None));
+        cells
+    }
+
+    /// The Input Robustness Matrix for the receipt: every load-bearing field
+    /// in every shape, for every failure that carries fields, one edit per
+    /// cell from a file written by [`write_receipt`]. A rejected cell is a
+    /// missing receipt, never a default outcome.
+    #[test]
+    fn the_receipt_reader_walks_the_input_robustness_matrix() {
+        let (dir, _) = temp_store();
+        let path = dir.path().join("abc.refresh-receipt.json");
+        let mut wrong = Vec::new();
+        let mut walked = 0;
+        for failure in field_bearing_failures() {
+            let control = Receipt { prs: PrStatus::Failed { failure: failure.clone() }, ..receipt() };
+            write_receipt(&path, &control).unwrap();
+            let written = raw_json(&path);
+            let read = |bytes: &[u8]| {
+                fs::write(&path, bytes).unwrap();
+                load_receipt(&path, &attempt(NOW))
+            };
+            assert_eq!(read(&serde_json::to_vec(&written).unwrap()), Some(control.clone()), "control: {failure:?}");
+
+            for (edit, prs) in receipt_cells(&failure) {
+                let bytes = edit.apply(&written);
+                let want = prs.map(|prs| Receipt { prs, ..control.clone() });
+                let got = read(&bytes);
+                if got != want {
+                    wrong.push(format!("{}: {got:?}, expected {want:?}", String::from_utf8_lossy(&bytes)));
+                }
+                walked += 1;
+            }
+        }
+        assert!(wrong.is_empty(), "{} of {walked} cells read wrong:\n{}", wrong.len(), wrong.join("\n"));
+
         // `ok` with no store publication is still the receipt's answer.
-        assert_eq!(read(&set("/prs", Some(json!({ "kind": "ok" })))).map(|receipt| receipt.prs), Some(PrStatus::Ok));
+        write_receipt(&path, &Receipt { prs: PrStatus::Ok, ..receipt() }).unwrap();
+        assert_eq!(load_receipt(&path, &attempt(NOW)).map(|receipt| receipt.prs), Some(PrStatus::Ok));
     }
 }

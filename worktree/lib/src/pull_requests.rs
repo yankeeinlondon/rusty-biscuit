@@ -597,7 +597,7 @@ mod tests {
         assert_eq!(select_cached(&store.with_file_name("absent.prs.json"), Some(ORIGIN), NOW), CachedPrs::Miss);
     }
 
-    /// One edit to a store the real writer wrote, and what reading it gives.
+    /// One edit to a store the real writer wrote.
     enum Edit {
         /// Replace (or, with `None`, remove) the value at a JSON pointer.
         Set(&'static str, Option<serde_json::Value>),
@@ -606,8 +606,20 @@ mod tests {
         Append(&'static str),
     }
 
-    /// The Input Robustness Matrix for the store: every load-bearing field in
-    /// every shape, one edit per row, from a file written by [`refresh`].
+    /// What reading an edited store gives through [`select_cached`] and
+    /// [`stored_publication`].
+    enum Expect {
+        Miss,
+        /// A fresh answer under the written publication id: the written
+        /// listing with this change.
+        Answer(fn(&mut PrListing)),
+        /// The same, but at least [`FRESHNESS_WINDOW`] old.
+        Stale(fn(&mut PrListing)),
+    }
+
+    /// The Input Robustness Matrix for the store: every load-bearing field of
+    /// the envelope and of a PR element in every shape, one edit per cell,
+    /// from a file written by [`refresh`], read through the public results.
     #[test]
     fn the_store_reader_walks_the_input_robustness_matrix() {
         use serde_json::{Value, json};
@@ -615,6 +627,7 @@ mod tests {
         seed(&store, &root, NOW, vec![pr(99, Some("o/r"), "fix/x", "main")]);
         let written: Value = serde_json::from_slice(&fs::read(&store).unwrap()).unwrap();
         let id = written["publication"].as_str().unwrap().to_string();
+        let element = written["pull_requests"][0].clone();
         let expected = PrListing {
             source_repo: Some("o/r".into()),
             pull_requests: vec![pr(99, Some("o/r"), "fix/x", "main")],
@@ -661,100 +674,171 @@ mod tests {
 
         // Control: the unedited file, re-serialized the way every edit is.
         assert_eq!(read(&serde_json::to_vec(&written).unwrap()), (CachedPrs::Fresh(expected.clone()), Some(id.clone())));
+        // The same file is a miss for another origin, or none.
+        assert_eq!(select_cached(&store, Some("https://prs.example.invalid/o/other.git"), NOW), CachedPrs::Miss);
+        assert_eq!(stored_publication(&store, "https://prs.example.invalid/o/other.git", NOW), None);
+        assert_eq!(select_cached(&store, None, NOW), CachedPrs::Miss);
 
         use Edit::*;
-        let misses = [
+        use Expect::*;
+        let null = || Some(Value::Null);
+        // Duplicates are inserted at the start of their object, so the text
+        // they find is unambiguous whatever order the keys were written in;
+        // each repeats the written value, so only the repetition can reject it.
+        let cells: Vec<(Edit, Expect)> = vec![
             // format_version
-            Set("/format_version", None),
-            Set("/format_version", Some(Value::Null)),
-            Set("/format_version", Some(json!("5"))),
-            Set("/format_version", Some(json!(""))),
-            Set("/format_version", Some(json!(4))),
-            Set("/format_version", Some(json!(6))),
-            Text("{", "{\"format_version\":5,"),
+            (Set("/format_version", None), Miss),
+            (Set("/format_version", null()), Miss),
+            (Set("/format_version", Some(json!("5"))), Miss),
+            (Set("/format_version", Some(json!(true))), Miss),
+            (Set("/format_version", Some(json!([]))), Miss),
+            (Set("/format_version", Some(json!({}))), Miss),
+            (Set("/format_version", Some(json!(""))), Miss),
+            (Set("/format_version", Some(json!(4))), Miss),
+            (Set("/format_version", Some(json!(6))), Miss),
+            (Text("{", "{\"format_version\":5,"), Miss),
             // publication
-            Set("/publication", None),
-            Set("/publication", Some(Value::Null)),
-            Set("/publication", Some(json!(123))),
-            Set("/publication", Some(json!(""))),
-            Set("/publication", Some(json!("not-an-id"))),
-            Text("{", "{\"publication\":\"0123456789abcdef0123456789abcdef\","),
+            (Set("/publication", None), Miss),
+            (Set("/publication", null()), Miss),
+            (Set("/publication", Some(json!(123))), Miss),
+            (Set("/publication", Some(json!([]))), Miss),
+            (Set("/publication", Some(json!({}))), Miss),
+            (Set("/publication", Some(json!(""))), Miss),
+            (Set("/publication", Some(json!("not-an-id"))), Miss),
+            (Set("/publication", Some(json!("0123456789ABCDEF0123456789ABCDEF"))), Miss),
+            (Text("{", "{\"publication\":\"0123456789abcdef0123456789abcdef\","), Miss),
             // origin_digest
-            Set("/origin_digest", None),
-            Set("/origin_digest", Some(Value::Null)),
-            Set("/origin_digest", Some(json!(123))),
-            Set("/origin_digest", Some(json!(""))),
-            Set("/origin_digest", Some(json!(origin_digest("https://prs.example.invalid/o/other.git")))),
-            Text("{", "{\"origin_digest\":\"x\","),
+            (Set("/origin_digest", None), Miss),
+            (Set("/origin_digest", null()), Miss),
+            (Set("/origin_digest", Some(json!(123))), Miss),
+            (Set("/origin_digest", Some(json!([]))), Miss),
+            (Set("/origin_digest", Some(json!({}))), Miss),
+            (Set("/origin_digest", Some(json!(""))), Miss),
+            (Set("/origin_digest", Some(json!(origin_digest("https://prs.example.invalid/o/other.git")))), Miss),
+            (Text("{", "{\"origin_digest\":\"x\","), Miss),
             // fetched_at
-            Set("/fetched_at", None),
-            Set("/fetched_at", Some(Value::Null)),
-            Set("/fetched_at", Some(json!("1790000000"))),
-            Set("/fetched_at", Some(json!(-1))),
-            Set("/fetched_at", Some(json!(NOW + 1))),
-            Text("{", "{\"fetched_at\":1,"),
-            // source_repo (null is a valid "unknown", below)
-            Set("/source_repo", None),
-            Set("/source_repo", Some(json!(123))),
-            Text("{", "{\"source_repo\":\"o/r\","),
+            (Set("/fetched_at", None), Miss),
+            (Set("/fetched_at", null()), Miss),
+            (Set("/fetched_at", Some(json!("1790000000"))), Miss),
+            (Set("/fetched_at", Some(json!([]))), Miss),
+            (Set("/fetched_at", Some(json!({}))), Miss),
+            (Set("/fetched_at", Some(json!(""))), Miss),
+            (Set("/fetched_at", Some(json!(-1))), Miss),
+            (Set("/fetched_at", Some(json!(NOW + 1))), Miss),
+            (Set("/fetched_at", Some(json!(NOW - 600))), Stale(|listing| listing.fetched_at = Some(NOW - 600))),
+            (Text("{", "{\"fetched_at\":1790000000,"), Miss),
+            // source_repo: null is a valid "unknown", "" a repository no PR
+            // can match
+            (Set("/source_repo", None), Miss),
+            (Set("/source_repo", null()), Answer(|listing| listing.source_repo = None)),
+            (Set("/source_repo", Some(json!(123))), Miss),
+            (Set("/source_repo", Some(json!([]))), Miss),
+            (Set("/source_repo", Some(json!({}))), Miss),
+            (Set("/source_repo", Some(json!(""))), Answer(|listing| listing.source_repo = Some(String::new()))),
+            (Text("{", "{\"source_repo\":\"o/r\","), Miss),
             // pull_requests, the answer list
-            Set("/pull_requests", None),
-            Set("/pull_requests", Some(Value::Null)),
-            Set("/pull_requests", Some(json!(123))),
-            Set("/pull_requests", Some(json!({}))),
-            Set("/pull_requests/0", Some(json!(123))),
-            Set("/pull_requests/0", Some(Value::Null)),
-            Text("{", "{\"pull_requests\":[],"),
-            // one element
-            Set("/pull_requests/0/number", None),
-            Set("/pull_requests/0/number", Some(Value::Null)),
-            Set("/pull_requests/0/number", Some(json!("99"))),
-            Set("/pull_requests/0/url", None),
-            Set("/pull_requests/0/url", Some(json!(1))),
-            Set("/pull_requests/0/source_repo", None),
-            Set("/pull_requests/0/source_branch", None),
-            Set("/pull_requests/0/source_branch", Some(Value::Null)),
-            Set("/pull_requests/0/target_branch", Some(json!(["main"]))),
-            Text("\"number\":99", "\"number\":99,\"number\":98"),
+            (Set("/pull_requests", None), Miss),
+            (Set("/pull_requests", null()), Miss),
+            (Set("/pull_requests", Some(json!(123))), Miss),
+            (Set("/pull_requests", Some(json!({}))), Miss),
+            (Set("/pull_requests", Some(json!(""))), Miss),
+            (Set("/pull_requests", Some(json!([]))), Answer(|listing| listing.pull_requests.clear())),
+            (Text("{", "{\"pull_requests\":[],"), Miss),
+            // ... an invalid element among valid ones is never filtered out,
+            // and invalid elements never become an empty answer
+            (Set("/pull_requests/0", Some(json!(123))), Miss),
+            (Set("/pull_requests/0", null()), Miss),
+            (Set("/pull_requests/0", Some(json!([]))), Miss),
+            (Set("/pull_requests/0", Some(json!({}))), Miss),
+            (Set("/pull_requests", Some(json!([element.clone(), 123]))), Miss),
+            (Set("/pull_requests", Some(json!([123, element.clone()]))), Miss),
+            (Set("/pull_requests", Some(json!([element.clone(), { "number": 98 }]))), Miss),
+            (Set("/pull_requests", Some(json!([123, null]))), Miss),
+            (
+                Set("/pull_requests", Some(json!([element.clone(), element.clone()]))),
+                Answer(|listing| listing.pull_requests.push(listing.pull_requests[0].clone())),
+            ),
+            // number
+            (Set("/pull_requests/0/number", None), Miss),
+            (Set("/pull_requests/0/number", null()), Miss),
+            (Set("/pull_requests/0/number", Some(json!("99"))), Miss),
+            (Set("/pull_requests/0/number", Some(json!([]))), Miss),
+            (Set("/pull_requests/0/number", Some(json!({}))), Miss),
+            (Set("/pull_requests/0/number", Some(json!(""))), Miss),
+            (Set("/pull_requests/0/number", Some(json!(-1))), Miss),
+            (Set("/pull_requests/0/number", Some(json!(1.5))), Miss),
+            (Text("[{", "[{\"number\":99,"), Miss),
+            // url: null is a valid "no link", "" a link with no text
+            (Set("/pull_requests/0/url", None), Miss),
+            (Set("/pull_requests/0/url", null()), Answer(|listing| listing.pull_requests[0].url = None)),
+            (Set("/pull_requests/0/url", Some(json!(1))), Miss),
+            (Set("/pull_requests/0/url", Some(json!([]))), Miss),
+            (Set("/pull_requests/0/url", Some(json!({}))), Miss),
+            (Set("/pull_requests/0/url", Some(json!(""))), Answer(|listing| listing.pull_requests[0].url = Some(String::new()))),
+            (Text("[{", "[{\"url\":\"https://github.com/o/r/pull/99\","), Miss),
+            // source_repo of a PR: null is a valid "unknown"
+            (Set("/pull_requests/0/source_repo", None), Miss),
+            (Set("/pull_requests/0/source_repo", null()), Answer(|listing| listing.pull_requests[0].source_repo = None)),
+            (Set("/pull_requests/0/source_repo", Some(json!(1))), Miss),
+            (Set("/pull_requests/0/source_repo", Some(json!([]))), Miss),
+            (Set("/pull_requests/0/source_repo", Some(json!({}))), Miss),
+            (
+                Set("/pull_requests/0/source_repo", Some(json!(""))),
+                Answer(|listing| listing.pull_requests[0].source_repo = Some(String::new())),
+            ),
+            (Text("[{", "[{\"source_repo\":\"o/r\","), Miss),
+            // source_branch: "" is a string, so an answer no branch matches
+            (Set("/pull_requests/0/source_branch", None), Miss),
+            (Set("/pull_requests/0/source_branch", null()), Miss),
+            (Set("/pull_requests/0/source_branch", Some(json!(1))), Miss),
+            (Set("/pull_requests/0/source_branch", Some(json!([]))), Miss),
+            (Set("/pull_requests/0/source_branch", Some(json!({}))), Miss),
+            (
+                Set("/pull_requests/0/source_branch", Some(json!(""))),
+                Answer(|listing| listing.pull_requests[0].source_branch = String::new()),
+            ),
+            (Text("[{", "[{\"source_branch\":\"fix/x\","), Miss),
+            // target_branch: likewise
+            (Set("/pull_requests/0/target_branch", None), Miss),
+            (Set("/pull_requests/0/target_branch", null()), Miss),
+            (Set("/pull_requests/0/target_branch", Some(json!(1))), Miss),
+            (Set("/pull_requests/0/target_branch", Some(json!(["main"]))), Miss),
+            (Set("/pull_requests/0/target_branch", Some(json!({}))), Miss),
+            (
+                Set("/pull_requests/0/target_branch", Some(json!(""))),
+                Answer(|listing| listing.pull_requests[0].target_branch = String::new()),
+            ),
+            (Text("[{", "[{\"target_branch\":\"main\","), Miss),
+            // Unknown fields are ignored, as in every earlier format, including
+            // a leftover format-4 `writer` (a format-4 file itself is a miss).
+            (Set("/writer", Some(json!("listing"))), Answer(|_| {})),
+            (Set("/pull_requests/0/draft", Some(json!(true))), Answer(|_| {})),
             // trailing or invalid content
-            Append("garbage"),
-            Append("{}"),
-            Text("{", "{{"),
+            (Append("garbage"), Miss),
+            (Append("{}"), Miss),
+            (Append(","), Miss),
+            (Text("{", "{{"), Miss),
         ];
-        for edit in &misses {
-            let bytes = apply(edit);
-            assert_eq!(read(&bytes), (CachedPrs::Miss, None), "{}", String::from_utf8_lossy(&bytes));
-        }
-        // One wrong element among valid ones is never filtered out.
-        let mut two = written.clone();
-        two["pull_requests"].as_array_mut().unwrap().push(json!(123));
-        assert_eq!(read(&serde_json::to_vec(&two).unwrap()), (CachedPrs::Miss, None), "one wrong element of two");
-        two["pull_requests"][1] = two["pull_requests"][0].clone();
-        let CachedPrs::Fresh(both) = read(&serde_json::to_vec(&two).unwrap()).0 else {
-            panic!("two valid elements are an answer");
-        };
-        assert_eq!(numbers(&both), [99, 99]);
 
-        // Valid shapes that are answers, not misses.
-        let empty = apply(&Set("/pull_requests", Some(json!([]))));
-        assert_eq!(
-            read(&empty),
-            (CachedPrs::Fresh(PrListing { pull_requests: Vec::new(), ..expected.clone() }), Some(id.clone())),
-            "an empty list is an answer"
-        );
-        let unknown_repo = apply(&Set("/source_repo", Some(Value::Null)));
-        assert_eq!(read(&unknown_repo), (CachedPrs::Fresh(PrListing { source_repo: None, ..expected.clone() }), Some(id.clone())));
-        let no_url = apply(&Set("/pull_requests/0/url", Some(Value::Null)));
-        let CachedPrs::Fresh(listing) = read(&no_url).0 else {
-            panic!("a PR without a URL is still an answer");
-        };
-        assert_eq!(listing.pull_requests[0].url, None);
-        // Unknown fields are ignored, as in every earlier format, including a
-        // leftover format-4 `writer` (a format-4 file itself is a miss above).
-        let writer = apply(&Set("/writer", Some(json!("listing"))));
-        assert_eq!(read(&writer), (CachedPrs::Fresh(expected.clone()), Some(id.clone())));
-        let stale = apply(&Set("/fetched_at", Some(json!(NOW - 600))));
-        assert!(matches!(read(&stale).0, CachedPrs::Stale(_)), "an old answer is stale, not a miss");
+        // Every cell runs, so a failure names each one it affects.
+        let mut wrong = Vec::new();
+        for (edit, expect) in &cells {
+            let bytes = apply(edit);
+            let want = match expect {
+                Miss => (CachedPrs::Miss, None),
+                Answer(change) | Stale(change) => {
+                    let mut listing = expected.clone();
+                    change(&mut listing);
+                    let cached = if matches!(expect, Stale(_)) { CachedPrs::Stale(listing) } else { CachedPrs::Fresh(listing) };
+                    (cached, Some(id.clone()))
+                }
+            };
+            let got = read(&bytes);
+            if got != want {
+                wrong.push(format!("{}: {got:?}, expected {want:?}", String::from_utf8_lossy(&bytes)));
+            }
+        }
+        assert!(wrong.is_empty(), "{} of {} cells read wrong:\n{}", wrong.len(), cells.len(), wrong.join("\n"));
     }
 
     #[test]

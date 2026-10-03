@@ -16,11 +16,15 @@
 //! can repeat), and outranks whatever the receipt later says. A contended PR
 //! half is complete only when such an id appears once the holder's lock is
 //! released, since a failed holder stores nothing. Without one an ordinary
-//! wait reports a PR failure, and a forced wait relaunches once; a second
-//! such contention is a PR failure too.
+//! wait reports a PR failure, and a forced wait relaunches once, if the
+//! budget has not run out; a second such contention is a PR failure too.
 //!
 //! The two results are kept apart, so a timeout caused by one half never
-//! hides the other's. The core ([`wait`]) is pure over [`WaitEnv`], so tests
+//! hides the other's. A relaunch (for either half) also runs the other half
+//! again, so each half's result from an earlier launch is retained: a
+//! finished head check, and a PR result the earlier receipt reported. The
+//! replacement's own result supersedes it; a replacement that cannot start,
+//! stops, times out, or exits without a receipt leaves it standing. The core ([`wait`]) is pure over [`WaitEnv`], so tests
 //! script the stores, the receipt, the locks, and the clock.
 
 use std::path::{Path, PathBuf};
@@ -92,8 +96,8 @@ pub trait WaitEnv {
     fn store(&self) -> StoreState;
     /// The completion receipt for `attempt`, if one matches it.
     fn receipt(&self, attempt: &Attempt) -> Option<Receipt>;
-    /// Deletes attempt `attempt_id`'s receipt, if any; called once the wait
-    /// is over for every attempt it launched.
+    /// Deletes attempt `attempt_id`'s receipt, if it exists yet; called once,
+    /// as the wait returns, for every attempt it launched.
     fn discard_receipt(&self, attempt_id: &str);
     /// Takes the lock for an instant: probe only when no worker of ours can
     /// be about to take it.
@@ -129,7 +133,8 @@ pub enum HeadEnd {
     /// The budget ran out first; `last` is the followed attempt as last seen.
     Running { last: Option<Attempt> },
     /// The worker could not be launched, stopped mid-attempt, or exited with
-    /// no attempt to follow.
+    /// no attempt to follow, and no earlier launch of this wait finished the
+    /// check (a retry keeps that one as [`HeadEnd::Finished`]).
     Unavailable,
 }
 
@@ -147,7 +152,8 @@ pub enum PrEnd {
     Unsupported,
     /// The request failed, the worker exited or could not start without a
     /// receipt or a new publication, or a contending holder published
-    /// nothing. Only a receipt carries a specific reason.
+    /// nothing. Only a receipt carries a specific reason; one from an
+    /// earlier launch stands until a replacement's receipt reports again.
     Failed(PrFailure),
     /// The budget ran out with no result.
     Pending,
@@ -155,11 +161,16 @@ pub enum PrEnd {
 
 /// Launches the worker and follows its attempt; `on_phase` sees every phase
 /// the followed head attempt enters, including the first, and
-/// [`Phase::Checking`] once the head half is done while the PR half is not.
+/// [`Phase::Checking`] once the head half is done while the PR half is not;
+/// again after a relaunched or adopted head showed a phase and finished.
 ///
-/// The receipt of every attempt it launched is discarded before it returns:
-/// each is read only by this run. An adopted attempt's receipt belongs to its
-/// own run.
+/// The receipt of every attempt it launched is deleted, once, as it returns
+/// (each is read only by this run), so a receipt written later survives until
+/// a worker's age sweep (`worktree::remote_head::remove_stale_receipts`). That
+/// happens after a timeout, and after an early success: a new publication, or
+/// a result retained from a replaced launch, plus a finished head can end the
+/// wait before the last worker writes its receipt. An adopted attempt's
+/// receipt belongs to its own run.
 pub fn wait(request: WaitRequest<'_>, env: &dyn WaitEnv, launch: WorkerLaunch, on_phase: &mut dyn FnMut(Phase)) -> WaitEnd {
     let mut launched = Vec::new();
     let end = launch_and_follow(request, env, launch, on_phase, &mut launched);
@@ -180,8 +191,18 @@ fn launch_and_follow(
     // Read once, before the first launch: any later id is a publication made
     // during this wait, whichever launch caused it.
     let pr_before = env.pr_publication();
-    let mut follow =
-        Follow { request, env, on_phase, last: None, pr_before, pr_published: false, pr_retried: false, pr_only: false };
+    let mut follow = Follow {
+        request,
+        env,
+        on_phase,
+        last: None,
+        pr_before,
+        pr_published: false,
+        pr_retried: false,
+        pr_only: false,
+        head_retained: None,
+        pr_retained: None,
+    };
     loop {
         let Some(token) = env.new_attempt_id() else {
             return follow.unavailable();
@@ -211,8 +232,16 @@ struct Follow<'r, 'e> {
     pr_published: bool,
     /// A contended PR half has already cost one relaunch.
     pr_retried: bool,
-    /// The spinner was told that only the PR half is left.
+    /// The spinner was told that only the PR half is left, and no head phase
+    /// has been shown since: a replacement or adopted head's phase clears it,
+    /// so that head finishing tells the spinner again.
     pr_only: bool,
+    /// The finished head attempt of an earlier launch, kept while a PR
+    /// retry runs the head half again.
+    head_retained: Option<Attempt>,
+    /// The PR result an earlier launch's receipt reported, kept while a head
+    /// retry runs the PR half again.
+    pr_retained: Option<PrEnd>,
 }
 
 /// The PR half's state at one poll.
@@ -228,7 +257,9 @@ impl Follow<'_, '_> {
     /// Follows `token`'s attempt, or the head attempt it adopts, for one
     /// launch. `None` asks for a new launch: a forced run found the head lock
     /// held for another origin or branch, and that holder has finished; or
-    /// its PR half was contended and the holder published nothing.
+    /// its PR half was contended and the holder published nothing. Either is
+    /// asked only while [`Follow::may_relaunch`] allows; past it, the wait
+    /// ends here as a timeout.
     fn run(&mut self, worker: &mut WorkerHandle, token: &str, launched_at: u64) -> Option<WaitEnd> {
         let request = self.request;
         let ours = Attempt::begin(token.to_string(), request.origin_digest.to_string(), request.branch.to_string(), launched_at);
@@ -249,7 +280,7 @@ impl Follow<'_, '_> {
             if head.is_none() && exited && followed == token {
                 if seen.is_some() {
                     // Our worker stopped mid-attempt: a failed store write.
-                    head = Some(HeadEnd::Unavailable);
+                    head = Some(self.head_or_retained(HeadEnd::Unavailable));
                 } else {
                     // Our worker never recorded an attempt: another held the lock.
                     match self.adoption(current, receipt.as_ref()) {
@@ -258,8 +289,14 @@ impl Follow<'_, '_> {
                             self.observe(attempt);
                             continue;
                         }
-                        Adoption::Relaunch => return None,
-                        Adoption::None => head = Some(HeadEnd::Unavailable),
+                        Adoption::Relaunch => {
+                            self.retain_pr(receipt.as_ref());
+                            return None;
+                        }
+                        // Left unresolved, so the budget check below ends it
+                        // as a timeout.
+                        Adoption::Wait => {}
+                        Adoption::None => head = Some(self.head_or_retained(HeadEnd::Unavailable)),
                     }
                 }
             }
@@ -268,10 +305,15 @@ impl Follow<'_, '_> {
             let prs = match self.pr_state(receipt.as_ref(), exited) {
                 PrState::Resolved(prs) => Some(prs),
                 PrState::Waiting => None,
-                PrState::Retry if head.is_some() => {
+                PrState::Retry if head.is_some() && self.may_relaunch() => {
                     self.pr_retried = true;
+                    if let Some(HeadEnd::Finished(attempt)) = head {
+                        self.head_retained = Some(attempt);
+                    }
                     return None;
                 }
+                // Wait for the head half, or end at the budget: the holder
+                // published nothing either way.
                 PrState::Retry => {
                     retry = true;
                     None
@@ -287,11 +329,14 @@ impl Follow<'_, '_> {
                         (self.on_phase)(Phase::Checking);
                     }
                     if self.env.elapsed() >= request.budget {
-                        let head = head.unwrap_or_else(|| HeadEnd::Running {
-                            last: self.last.clone().filter(|attempt| attempt.id == followed),
+                        let head = head.unwrap_or_else(|| {
+                            self.head_or_retained(HeadEnd::Running {
+                                last: self.last.clone().filter(|attempt| attempt.id == followed),
+                            })
                         });
                         // A holder that published nothing has finished: not pending.
-                        let unresolved = if retry { PrEnd::Failed(PrFailure::Other) } else { PrEnd::Pending };
+                        let unresolved =
+                            if retry { self.pr_unknown() } else { self.pr_retained.clone().unwrap_or(PrEnd::Pending) };
                         return Some(WaitEnd { head, prs: prs.unwrap_or(unresolved), timed_out: true });
                     }
                 }
@@ -300,11 +345,48 @@ impl Follow<'_, '_> {
         }
     }
 
-    /// The end when no worker can be launched: no head attempt, and no PR
-    /// result unless a publication was already seen.
-    fn unavailable(&self) -> WaitEnd {
-        let prs = if self.pr_published { PrEnd::Published } else { PrEnd::Failed(PrFailure::Other) };
-        WaitEnd { head: HeadEnd::Unavailable, prs, timed_out: false }
+    /// The end when no worker can be launched: what earlier launches of this
+    /// wait established, if any, and otherwise no head attempt and a generic
+    /// PR failure.
+    fn unavailable(&mut self) -> WaitEnd {
+        let prs = if self.published() { PrEnd::Published } else { self.pr_unknown() };
+        WaitEnd { head: self.head_or_retained(HeadEnd::Unavailable), prs, timed_out: false }
+    }
+
+    /// The gate for every replacement launch. The budget is shared, so a
+    /// launch at or past it starts work this wait cannot include: the wait
+    /// ends as a timeout instead, with the results it already has.
+    fn may_relaunch(&self) -> bool {
+        self.env.elapsed() < self.request.budget
+    }
+
+    /// `end`, unless an earlier launch finished the head check: a head that
+    /// did not finish this time is no newer evidence than one that did.
+    fn head_or_retained(&self, end: HeadEnd) -> HeadEnd {
+        self.head_retained.clone().map_or(end, HeadEnd::Finished)
+    }
+
+    /// The PR result when this launch gave no usable one: a publication
+    /// seen, else an earlier receipt's report, else a generic failure.
+    fn pr_unknown(&self) -> PrEnd {
+        if self.pr_published {
+            return PrEnd::Published;
+        }
+        self.pr_retained.clone().unwrap_or(PrEnd::Failed(PrFailure::Other))
+    }
+
+    /// Keeps what `receipt` (of the launch being replaced) reported of the
+    /// PR half. A success counts as a publication, which no later receipt
+    /// undoes; a contention makes the relaunch this wait's one PR retry too.
+    fn retain_pr(&mut self, receipt: Option<&Receipt>) {
+        let Some(status) = receipt.map(|receipt| &receipt.prs) else {
+            return;
+        };
+        match reported(status) {
+            Some(PrEnd::Published) => self.pr_published = true,
+            Some(prs) => self.pr_retained = Some(prs),
+            None => self.pr_retried = true,
+        }
     }
 
     /// A usable publication id other than the one stored before launch.
@@ -334,15 +416,12 @@ impl Follow<'_, '_> {
                 } else if self.request.force && !self.pr_retried {
                     return PrState::Retry;
                 } else {
-                    PrEnd::Failed(PrFailure::Other)
+                    self.pr_unknown()
                 }
             }
-            Some(PrStatus::Ok) => PrEnd::Published,
-            Some(PrStatus::Failed { failure }) => PrEnd::Failed(failure.clone()),
-            Some(PrStatus::Ignored) => PrEnd::Ignored,
-            Some(PrStatus::Unsupported) => PrEnd::Unsupported,
-            // Exited without a usable receipt: no reason can be told.
-            None if exited => PrEnd::Failed(PrFailure::Other),
+            Some(status) => reported(status).unwrap_or_else(|| self.pr_unknown()),
+            // Exited without a usable receipt: no new reason can be told.
+            None if exited => self.pr_unknown(),
             None => return PrState::Waiting,
         };
         PrState::Resolved(resolved)
@@ -359,6 +438,7 @@ impl Follow<'_, '_> {
     fn observe(&mut self, attempt: Attempt) {
         let changed = self.last.as_ref().is_none_or(|last| last.id != attempt.id || last.phase != attempt.phase);
         if changed {
+            self.pr_only = false;
             (self.on_phase)(attempt.phase);
         }
         self.last = Some(attempt);
@@ -375,16 +455,10 @@ impl Follow<'_, '_> {
             // Our receipt proves the lock was held when our worker tried, so
             // that attempt ran alongside this run.
             Some(attempt) if adopted_elsewhere => Adoption::Follow(attempt),
+            // Held for another origin or branch: wait for that holder, then
+            // try again if the budget still allows a launch.
             None if adopted_elsewhere && self.request.force => {
-                // Held for another origin or branch: wait for that holder,
-                // then try again within the same budget.
-                while self.env.head_lock_held() {
-                    if self.env.elapsed() >= self.request.budget {
-                        return Adoption::None;
-                    }
-                    self.env.sleep(POLL_INTERVAL);
-                }
-                Adoption::Relaunch
+                if !self.env.head_lock_held() && self.may_relaunch() { Adoption::Relaunch } else { Adoption::Wait }
             }
             _ => Adoption::None,
         }
@@ -394,7 +468,22 @@ impl Follow<'_, '_> {
 enum Adoption {
     Follow(Attempt),
     Relaunch,
+    /// A forced run's holder for another origin or branch still holds the
+    /// lock, or released it too late to relaunch: poll again, or time out.
+    Wait,
     None,
+}
+
+/// The PR result a receipt reports by itself; `None` for a contention,
+/// which only the publication id and the PR lock can resolve.
+fn reported(status: &PrStatus) -> Option<PrEnd> {
+    match status {
+        PrStatus::Ok => Some(PrEnd::Published),
+        PrStatus::Failed { failure } => Some(PrEnd::Failed(failure.clone())),
+        PrStatus::Ignored => Some(PrEnd::Ignored),
+        PrStatus::Unsupported => Some(PrEnd::Unsupported),
+        PrStatus::Contended => None,
+    }
 }
 
 /// The spinner's text for `phase`.
