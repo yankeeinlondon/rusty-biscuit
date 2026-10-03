@@ -120,7 +120,10 @@ focus-stealing tests could run, and they do not run on CI at all. Details in
   `2026-09-24-ux-improvements` ran against the main checkout this way. The
   giveaways were a first log line naming `/Users/ken/coding/...` and
   test counts that did not match the branch. In scripts, `unset CDPATH` and
-  `cd` to absolute paths (or `./area`), and log `pwd` first.
+  `cd` to absolute paths (or `./area`), and log `pwd` first. It redirects
+  edits too: on 2026-10-03 a `cd darkmatter/lib/src && sed -i …` issued while
+  the shell was already inside that directory wrote into the main checkout.
+  After any relative-`cd` edit, check `git -C <main checkout> status`.
 - **Claudine currently shadows the login home for agent sessions on this
   host.** An agent can inherit `HOME=/Users/ken/.claudine` even though the
   login home and OpenPGP keyring are under `/Users/ken`. A signed Git command

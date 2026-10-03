@@ -54,19 +54,17 @@ helper that resolves it is named so it is not re-derived.
    Bash), so a fixture that relocates the home for a Python tool such as
    `scripts/ci/constraints.py` must set both `HOME` and `USERPROFILE`; a
    shell `$HOME` literal is a Unix-only spelling.
-   Claudine's provider overlay still resolves through the known folder, so a
-   Windows launch test names its roots instead: the provider selector (e.g.
-   `CODEX_HOME`) for the source and `CLAUDINE_OVERLAY_DIR` for overlay
-   storage (`level2_provider_overlay_capture.rs`, 2026-09-16).
-   A request context does not have this trap: `RequestSnapshot::from_process()`
-   takes its home from `std::env::home_dir()` (since 2026-10-01; it used
-   `biscuit_file::home_dir()`, the known folder), so an `md` or `claudine`
-   `CliProcessFixture` child's `USERPROFILE` is its `~` and its `@` home
-   tier, and the entry-point parity runners run every cell on Windows.
-   `biscuit_file::home_dir()` itself still asks the known folder, so any
-   other default that reads it reaches the real profile on Windows only
-   (2026-10-01, 11 CLI tests red on build-win-native before `md` pinned
-   `policy_root` to the launch directory).
+   Since 2026-10-03 every home read in Claudine and Darkmatter, including
+   `RequestSnapshot::from_process()` and Claudine's overlays, config, logs,
+   and MCP state, goes through `biscuit_file::home_dir()`, so a
+   `CliProcessFixture` child's `USERPROFILE` is its `~`, its `@` home tier,
+   and its `~/.claudine`. Tests once gated `cfg(unix)` / `cfg(not(windows))`
+   "because the fixture home cannot replace the known folder" were re-enabled
+   then; do not add that gate again. A test helper that spawns a child with
+   only `HOME` set (no `USERPROFILE`) still reaches the real profile on
+   Windows: set both. Before that date, `biscuit_file::home_dir()` asked the
+   known folder, which is why older notes and logs report Windows-only
+   real-profile reads (2026-10-01, 11 CLI tests on build-win-native).
    `dirs::cache_dir()` is the same (`%LOCALAPPDATA%` from the known folder),
    so a Windows test that seeds a cache file writes to the real per-user
    path, keyed by its temporary repository, and deletes what it seeded
