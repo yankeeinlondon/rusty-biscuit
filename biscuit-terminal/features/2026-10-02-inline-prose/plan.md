@@ -47,10 +47,77 @@ docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/biscuit-terminal/SKILL.md
+source_files_during_phase_4:
+    - biscuit-terminal/lib/src/components/prose/tree.rs
+    - biscuit-terminal/lib/src/components/prose/render.rs
+    - biscuit-terminal/lib/src/render_tree/projection.rs
+    - biscuit-terminal/lib/src/render_tree/render.rs
+    - biscuit-terminal/lib/src/components/list.rs
+    - biscuit-terminal/lib/src/components/block_quote.rs
+    - biscuit-terminal/lib/src/components/two_column.rs
+    - biscuit-terminal/lib/src/components/status_block.rs
+    - biscuit-terminal/lib/src/components/inline_content.rs
+    - biscuit-terminal/lib/src/components/compose.rs
+    - biscuit-terminal/lib/src/components/table/cell.rs
+    - biscuit-terminal/lib/src/components/table/column.rs
+    - biscuit-terminal/lib/src/components/table/table.rs
+    - biscuit-terminal/lib/tests/l1/main.rs
+    - biscuit-terminal/lib/tests/l1/prose_containers.rs
+    - biscuit-terminal/lib/tests/l1/prose_cells_parity.rs
+    - biscuit-terminal/lib/tests/l1/status_block_parity.rs
+    - biscuit-terminal/lib/tests/l1/unordered_list_parity.rs
+    - biscuit-terminal/lib/tests/l1/ordered_list_parity.rs
+    - biscuit-terminal/lib/tests/l1/render_tree_component_parity.rs
+    - biscuit-terminal/lib/tests/l1/inline_content_matrix.rs
+    - biscuit-terminal/lib/tests/inline_content_matrix_support/mod.rs
+    - biscuit-terminal/cli/src/commands/table.rs
+    - biscuit-terminal/cli/tests/level2/prose_cells.rs
+    - renderable/src/tree/attrs.rs
+    - biscuit-icon/cli/src/commands.rs
+    - biscuit-icon/cli/src/sets_table.rs
+    - darkmatter/cli/src/commands/schema/about.rs
+    - claudine/cli/src/commands/steer/render.rs
+docs_updated_during_phase_4:
+    - biscuit-terminal/docs/components/table.md
+    - biscuit-terminal/docs/components/inline_content.md
+    - biscuit-terminal/docs/components/list.md
+    - biscuit-terminal/docs/components/block_quote.md
+    - biscuit-terminal/docs/components/two_column.md
+    - biscuit-terminal/lib/src/components/table/README.md
+    - biscuit-terminal/README.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/biscuit-terminal/SKILL.md
+    - .claude/skills/biscuit-terminal/components.md
+source_files_during_phase_5:
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/paths.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/parser.rs
+    - darkmatter/docs/schemas/expression-functions.yaml
+    - darkmatter/lib/tests/l1/code_link.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__link__unrecognized_format.snap
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - darkmatter/dmls/tests/fixtures/mapping_only_corpus/_reviews__review-spec-inline.md
+    - claudine/cli/tests/l1/context_command.rs
+    - claudine/cli/tests/fixtures/nested_span_regression/review-spec-inline.md
+    - prompts/plan.md
+    - prompts/_reviews/review-spec-inline.md
+docs_updated_during_phase_5:
+    - darkmatter/docs/topics/darkmatter-expressions.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/darkmatter/compose.md
 packages:
     - renderable
     - biscuit-terminal
     - biscuit-terminal-cli
+    - biscuit-icon-cli
+    - darkmatter-cli
+    - claudine-cli
+    - darkmatter
+    - dmls
 ---
 
 # Plan: `Prose` Is a Block, `InlineProse` Is Inline, and Code Spans Are Code
@@ -449,22 +516,22 @@ Goal: each container accepts the shape in the spec's table. Package:
 
 ### Wave 1 — one task per container (parallel; shared file `render_tree/projection.rs` is edited by one task only)
 
-- [ ] **Table** (`components/table/table.rs`): header labels and cells take
+- [x] **Table** (`components/table/table.rs`): header labels and cells take
   `InlineProse`; string conversions use `InlineProse`; `StyledProse` →
   `StyledInlineProse` (R4); remove `degrade_code_nodes` on Prose content;
   fenced code in a cell becomes inline code (AC 28 table half)
-- [ ] **`InlineContent`**: takes `InlineProse`; update `From` impls, helper
+- [x] **`InlineContent`**: takes `InlineProse`; update `From` impls, helper
   traits, downcasts
-- [ ] **Lists** (`components/list.rs`): `UnorderedList`/`OrderedList` items
+- [x] **Lists** (`components/list.rs`): `UnorderedList`/`OrderedList` items
   take `Prose`; drop `fold_prose_nodes_into_blocks`; nested word wrap and
   `Prose` content ergonomics preserved; layout transfer per R3
-- [ ] **`BlockQuote`** (`components/block_quote.rs`): takes `Prose`; drop
+- [x] **`BlockQuote`** (`components/block_quote.rs`): takes `Prose`; drop
   folding; layout transfer per R3
-- [ ] **`TwoColumn`**: columns take `Prose` (each a block region); drop its
+- [x] **`TwoColumn`**: columns take `Prose` (each a block region); drop its
   text-to-paragraph grouping; layout transfer per R3
-- [ ] **`StatusBlock::body` / `body_line`**: take `Prose`; keep `IntoProseVec`
+- [x] **`StatusBlock::body` / `body_line`**: take `Prose`; keep `IntoProseVec`
   only if still needed
-- [ ] **Projection** (`render_tree/projection.rs`): remove the
+- [x] **Projection** (`render_tree/projection.rs`): remove the
   `to_render_nodes`/fold paths; embed `Prose` as root children with layout on a
   valid enclosing block (no nested `Root`, layout exactly once) (AC 31)
 
@@ -475,11 +542,11 @@ signatures.
 
 ### Wave 2 — tests (parallel with Wave 1 per container after its edit lands)
 
-- [ ] Update `prose_cells_parity.rs`, `unordered_list_parity.rs`,
+- [x] Update `prose_cells_parity.rs`, `unordered_list_parity.rs`,
   `ordered_list_parity.rs`, `render_tree_component_parity.rs`,
   `table_parity.rs`, `two_column_parity.rs`, `status_block_parity.rs`,
   `inline_content_matrix.rs` for the new shapes
-- [ ] Assert: `fold_prose_nodes_into_blocks` / `degrade_code_nodes` no longer
+- [x] Assert: `fold_prose_nodes_into_blocks` / `degrade_code_nodes` no longer
   exist or run on Prose content (AC 12); embedded layout exactly once and no
   nested `Root` (AC 31); multiline fence in a table cell → one inline code
   value (AC 28)
@@ -498,40 +565,40 @@ Can start after Phase 2 (helper); rendering assertions need Phase 3.
 
 ### Wave 1 (parallel)
 
-- [ ] **Factor label/destination resolution** out of `link_fn`
+- [x] **Factor label/destination resolution** out of `link_fn`
   (`darkmatter/lib/src/markdown/compose/expression/functions/mod.rs`) into a
   shared internal; `link` behavior and error text unchanged; `code_link`
   reports errors under its own function name with the same underlying cause
-- [ ] **Bind `code_link`** beside `link` in `functions/paths.rs`:
+- [x] **Bind `code_link`** beside `link` in `functions/paths.rs`:
   `code_link(file)` (portable relative path as text) and
   `code_link(target, desc)`; label goes in a backtick fence via the Phase 2
   helper; `[`/`]` not escaped; backslashes as is; line endings → spaces; empty
   label → `[](dest)`; same destination spelling/quoting as `link()`
-- [ ] **Catalog entry** in `darkmatter/docs/schemas/expression-functions.yaml`
+- [x] **Catalog entry** in `darkmatter/docs/schemas/expression-functions.yaml`
   beside `link`, both overloads, description, one `display-only` example each;
   add `code_link(file)` and `code_link(target, desc)` to the expected-signature
   list in `expression/catalog/mod.rs`; parity test
   `catalog_and_runtime_bindings_have_bidirectional_canonical_parity` passes
-- [ ] **Docs**: `darkmatter/docs/topics/darkmatter-expressions.md` function
+- [x] **Docs**: `darkmatter/docs/topics/darkmatter-expressions.md` function
   table and "Link Helpers" with one example each and the bracket note
 
 ### Wave 2 (after Wave 1)
 
-- [ ] **Template migration**: `prompts/plan.md:30`,
+- [x] **Template migration**: `prompts/plan.md:30`,
   `prompts/_reviews/review-spec-inline.md:18`,
   `claudine/cli/tests/fixtures/nested_span_regression/review-spec-inline.md`,
   `darkmatter/dmls/tests/fixtures/mapping_only_corpus/_reviews__review-spec-inline.md`:
   `` `{{link(x)}}` `` → `{{code_link(x)}}`; `~/.claudine/prompts/` copies are
   out of repo, listed in the final report as a manual step for Ken
-- [ ] **Snapshot**: restore `l1__error_snapshots__link__unrecognized_format.snap`
+- [x] **Snapshot**: restore `l1__error_snapshots__link__unrecognized_format.snap`
   to literal `[text](href)` (renders without backticks as inline code; review
   the diff, AC 20)
-- [ ] **Tests** (AC 22, 23): `code_link("plans/foo.md")` label and destination
+- [x] **Tests** (AC 22, 23): `code_link("plans/foo.md")` label and destination
   match `link()`; `code_link(url, "a]b")`; `code_link(url, r"a\_b")` shows
   `a\_b` in Prose and in darkmatter's Markdown parser; `code_link(url, "")`;
   backtick in text gets a longer fence; the four templates render a link with
   an inline-code label on every target
-- [ ] **Surfaces**: `claudine context --expressions` lists both in the
+- [x] **Surfaces**: `claudine context --expressions` lists both in the
   Filesystem group beside `link` (add or extend a claudine CLI test); DMLS
   completion offers `code_link`
 

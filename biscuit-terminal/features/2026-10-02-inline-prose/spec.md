@@ -41,34 +41,57 @@ packages:
     - homelab-cli
 human_review: false
 message_to_agent: |-
-    Phase 3 (grammar + components) is done; see "## Phase 3" in
-    implementation-log.md. biscuit-terminal `just test`/`just lint` are green.
-    Facts for Phase 4+:
-    - `Prose::to_render_nodes` is gone. Containers currently call a crate-private
-      INTERIM bridge, `Prose::interim_container_nodes()` (prose/tree.rs), from
-      `render_tree/projection.rs::project_renderable_content` and
-      `table/table.rs` (with `degrade_code_nodes`). Phase 4 must delete it and
-      move containers onto `InlineProse::to_render_nodes()` (tables,
-      InlineContent) or `Prose::block_nodes()` (pub(crate); the root's block
-      children, Paragraph+Code, tag applied) with the root layout transferred
-      per R3.
-    - `Prose` has NO `render_tree_node` override yet (returning its Root would
-      nest a Root); decide that alongside the layout transfer in Phase 4.
-      `InlineProse::render_tree_node` returns its neutral Span.
-    - `Prose::render_html_fragment` with default layout concatenates block
-      siblings (no wrapper); with layout it renders the Root (`<div style>`).
-      Shared helper: `prose::tree::concat_html`.
-    - Grammar entry points: `prose::blocks::{parse_blocks, parse_inline}`;
-      `LineBreaks` lives in `prose/blocks.rs`. Literal sentinels are escaped
-      with a backslash by `markdown::lift_fences` (R1).
-    - Downstream darkmatter (50 fail + 1 timeout, 2 unrelated pre-existing) and
-      claudine (33 fail + 1 timeout) are red as expected from newline/code-span
-      semantics; the ledger is in the log. Phase 7 clears them.
-    - `bt prose --html` already stopped double-wrapping (Phase 6 overlap);
-      its help text and code-span examples are still Phase 6 work.
-    - Open conflict for review/Phase 8: Prose resolves relative link hrefs to
-      file:// URLs at tree-build time (pre-existing), so AC 1's literal
-      `href="plan.md"` cannot hold; tests use absolute URLs. See Departures.
+    Phase 5 (darkmatter `code_link()`) is done; see "## Phase 5" in
+    implementation-log.md. Facts for Phase 6+:
+    - `code_link(file)` / `code_link(target, desc)` (alias `codelink`) exist
+      in darkmatter, the catalog (order 78), DMLS completion, and `claudine
+      context --expressions`. The four templates are migrated. The manual
+      step for Ken is still open: `~/.claudine/prompts/plan.md` and
+      `~/.claudine/prompts/_reviews/review-spec-inline.md` still use
+      `` `{{link(x)}}` ``; replace with `{{code_link(x)}}`. Phase 8 must list
+      this in the final report.
+    - Phase 6 doc work: `biscuit-terminal/docs/components/prose.md:93` still
+      describes the removed "code span holding exactly one link is a link"
+      rewrite and recommends `` `{{link(plan)}}` ``; rewrite it to say a code
+      span is opaque and point at `code_link()`.
+    - Phase 7 snapshot ledger: `error_snapshots::link::missing_href` and
+      `error_snapshots::image_ref::*` moved for the same reason as
+      `unrecognized_format` (backticks around a code span are gone under ANSI
+      strip). They were left unaccepted because they are Phase 7's. Their
+      `.snap.new` files are untracked and regenerate on any run.
+    - Known-red after Phase 5: darkmatter area 49 fail + 2 timeouts. The
+      second timeout is `entry_point_parity` under load; it passes alone.
+      claudine `nested_span_error_renders_property_literal_rewrite_and_escape_hint`
+      is an AC 17 `escape_text` site (line 15, `success.say`).
+    Phase 4 facts (still current):
+    biscuit-terminal `just test`/`just lint` are green and the whole workspace
+    compiles (`cargo check --workspace --all-targets`).
+    Facts for Phase 5+:
+    - Containers: table cells, `TableColumn::header_prose`, and InlineContent
+      take `InlineProse` only (no `From<Prose>`; variant
+      `TableCellContent::StyledInlineProse`, hint token `styled_inline_prose`;
+      `InlineContent::add_inline_prose`). Lists, BlockQuote, TwoColumn,
+      StatusBlock body, Section and Compose embed `Prose` as its own blocks via
+      `Prose::embedded_nodes()` (prose/tree.rs), special-cased in
+      `render_tree/projection.rs`; no nested Root; layout moves onto the Prose
+      blocks (never the container node). `Prose::is_block_level()` is true.
+    - StatusBlock body is now STRUCTURAL (each item's blocks, inline styling,
+      and its LineBreaks mode), so Phase 7's `LineBreaks::Hard` on single-`\n`
+      body sites will take effect; header and hint are still plain text.
+    - Compose inserts a "\n\n" Text between blocks of one Prose part.
+      Trailing-`\n` Prose parts no longer produce a newline: move the newline
+      to `.add_text("\n")` (done for three lib tests).
+    - Four downstream cell sites were migrated type-only so the workspace
+      compiles: darkmatter-cli schema/about.rs `prose_cell`, biscuit-icon-cli
+      (commands.rs x2, sets_table.rs), claudine-cli steer/render.rs `cell()`.
+      biscuit-icon-cli is a consumer missing from this spec's packages list.
+    - Known-red unchanged from Phase 3: darkmatter 50 fail + 1 timeout (2
+      pre-existing `current_root_*`), claudine 33 fail. NOTE: `just test` in
+      claudine ran only 7359 tests in this worktree; measure claudine with
+      `cargo nextest run -p claudine -p claudine-cli -p claudine-gen
+      -p claudine-contract -p claudine-catalog-types --no-fail-fast` (8045).
+    - Phase 5 can rely on `renderable::markdown::code_span` (Phase 2) and on
+      darkmatter compiling; darkmatter snapshot reds remain Phase 7's.
 clarified: false
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol

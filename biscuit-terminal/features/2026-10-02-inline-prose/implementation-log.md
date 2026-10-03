@@ -46,10 +46,77 @@ docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/biscuit-terminal/SKILL.md
+source_files_during_phase_4:
+    - biscuit-terminal/lib/src/components/prose/tree.rs
+    - biscuit-terminal/lib/src/components/prose/render.rs
+    - biscuit-terminal/lib/src/render_tree/projection.rs
+    - biscuit-terminal/lib/src/render_tree/render.rs
+    - biscuit-terminal/lib/src/components/list.rs
+    - biscuit-terminal/lib/src/components/block_quote.rs
+    - biscuit-terminal/lib/src/components/two_column.rs
+    - biscuit-terminal/lib/src/components/status_block.rs
+    - biscuit-terminal/lib/src/components/inline_content.rs
+    - biscuit-terminal/lib/src/components/compose.rs
+    - biscuit-terminal/lib/src/components/table/cell.rs
+    - biscuit-terminal/lib/src/components/table/column.rs
+    - biscuit-terminal/lib/src/components/table/table.rs
+    - biscuit-terminal/lib/tests/l1/main.rs
+    - biscuit-terminal/lib/tests/l1/prose_containers.rs
+    - biscuit-terminal/lib/tests/l1/prose_cells_parity.rs
+    - biscuit-terminal/lib/tests/l1/status_block_parity.rs
+    - biscuit-terminal/lib/tests/l1/unordered_list_parity.rs
+    - biscuit-terminal/lib/tests/l1/ordered_list_parity.rs
+    - biscuit-terminal/lib/tests/l1/render_tree_component_parity.rs
+    - biscuit-terminal/lib/tests/l1/inline_content_matrix.rs
+    - biscuit-terminal/lib/tests/inline_content_matrix_support/mod.rs
+    - biscuit-terminal/cli/src/commands/table.rs
+    - biscuit-terminal/cli/tests/level2/prose_cells.rs
+    - renderable/src/tree/attrs.rs
+    - biscuit-icon/cli/src/commands.rs
+    - biscuit-icon/cli/src/sets_table.rs
+    - darkmatter/cli/src/commands/schema/about.rs
+    - claudine/cli/src/commands/steer/render.rs
+docs_updated_during_phase_4:
+    - biscuit-terminal/docs/components/table.md
+    - biscuit-terminal/docs/components/inline_content.md
+    - biscuit-terminal/docs/components/list.md
+    - biscuit-terminal/docs/components/block_quote.md
+    - biscuit-terminal/docs/components/two_column.md
+    - biscuit-terminal/lib/src/components/table/README.md
+    - biscuit-terminal/README.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/biscuit-terminal/SKILL.md
+    - .claude/skills/biscuit-terminal/components.md
+source_files_during_phase_5:
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/paths.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/parser.rs
+    - darkmatter/docs/schemas/expression-functions.yaml
+    - darkmatter/lib/tests/l1/code_link.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__link__unrecognized_format.snap
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - darkmatter/dmls/tests/fixtures/mapping_only_corpus/_reviews__review-spec-inline.md
+    - claudine/cli/tests/l1/context_command.rs
+    - claudine/cli/tests/fixtures/nested_span_regression/review-spec-inline.md
+    - prompts/plan.md
+    - prompts/_reviews/review-spec-inline.md
+docs_updated_during_phase_5:
+    - darkmatter/docs/topics/darkmatter-expressions.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/darkmatter/compose.md
 packages:
     - renderable
     - biscuit-terminal
     - biscuit-terminal-cli
+    - biscuit-icon-cli
+    - darkmatter-cli
+    - claudine-cli
+    - darkmatter
+    - dmls
 ---
 
 # Implementation Log for 2026-10-02-inline-prose (8 phases)
@@ -497,3 +564,396 @@ snapshot review:
   Meeting AC 1 literally means moving resolution to the terminal target
   only. That is a design decision for review, and Phase 8 should not
   silently accept it.
+
+## Phase 4
+
+Phase 4 moves every container onto the shape the spec assigns it. Validation
+ran on macOS.
+
+### What Changed
+
+- **Embedding `Prose`** (`prose/tree.rs`). The interim bridge
+  `Prose::interim_container_nodes` is deleted. Its replacement,
+  `Prose::embedded_nodes()` (crate-private), returns the root's `Paragraph`
+  and `Code` blocks and never a `Root`. A non-default layout moves onto those
+  blocks:
+  - one block carries the whole layout;
+  - several blocks each carry the horizontal box (left and right margin and
+    padding, width, max width, alignment, word wrap), the first keeps the
+    top margin and padding, and the last keeps the bottom ones.
+- **One funnel** (`render_tree/projection.rs`). `project_renderable_content`
+  and `RenderableTerminalContent::to_tree_nodes` both special-case `Prose`
+  and return `embedded_nodes()`. `fold_prose_nodes_into_blocks` is deleted,
+  and so is the `ProjectionMode::InlineOnly` variant, which had no remaining
+  caller. `InlineProse` needs no special case: its `render_tree_node` is
+  its neutral `Span`.
+- **`Prose::is_block_level()` is `true`**. Lists only add a hanging-indent
+  word wrap to non-block components, and that wrap never affected the tree
+  path. Without this change it would have become a non-default layout and
+  been moved onto every list item's paragraph.
+- **Lists**: a `Prose` item's blocks are the `ListItem`'s children, with no
+  folding.
+- **`BlockQuote`**: a `String` becomes one `Paragraph`. Every component,
+  `Prose` included, projects structurally, and only an all-inline
+  projection is wrapped in a `Paragraph`. `paragraph_children` is deleted.
+- **`TwoColumn`**: unchanged code. A `Prose` column now reaches the funnel's
+  special case instead of the ANSI-stripped `Text` fallback it hit before
+  (it had no `render_tree_node`). Strings and inline content are still
+  grouped into a paragraph.
+- **`StatusBlock`**: the body is structural. Each `Prose` item contributes
+  its `embedded_nodes()`, so it keeps its inline styling and **its
+  `LineBreaks` mode**. Before, `body_plain_text` re-parsed
+  `Prose::new(p.content())`, which dropped the item's mode, so Phase 7's
+  `LineBreaks::Hard` migrations of single-`\n` body sites would have had no
+  effect. `body_plain_text` is deleted; the header and hint are unchanged.
+- **`Compose`**: places a `"\n\n"` `Text` between consecutive blocks of one
+  `Prose` part, because its `SequenceJoin::None` sequence has no separator
+  (without it `one\n\ntwo` rendered `onetwo` on terminal and Markdown).
+- **Table** (R4): `TableCellContent::StyledInlineProse(Box<InlineProse>)`
+  replaces `StyledProse`; `From<InlineProse>` replaces `From<Prose>`;
+  `TableColumn::header_prose: Option<InlineProse>`; `degrade_code_nodes` is
+  deleted (an `InlineProse` fence is already `InlineCode`); the cell hint
+  token is `styled_inline_prose` (writer in `table.rs`, reader in
+  `render_tree/render.rs`, doc in `renderable/src/tree/attrs.rs`).
+- **`InlineContent`**: `From<InlineProse>` replaces `From<Prose>`;
+  `add_inline_prose(InlineProse)` replaces `add_prose(Prose)`.
+- **`bt table`**: `--prose-row` and `--mixed-row` cells are
+  `InlineProse` with `LineBreaks::Hard`, so the documented "`\n` → hard line
+  break" behavior holds (Phase 3's soft single newline had broken it). Help
+  text renamed.
+- **Compile-only downstream migrations**. Removing `From<Prose>` broke four
+  cell sites outside biscuit-terminal. Each was migrated by type only, so the
+  workspace compiles for Phase 5:
+  - `darkmatter/cli/src/commands/schema/about.rs` `prose_cell`: now an
+    `InlineProse`. The `with_word_wrap(WrapProse(6))` it set was never
+    applied to a cell, and the columns set their own wrap.
+  - `biscuit-icon/cli/src/{commands.rs,sets_table.rs}`: three icon/title
+    cells.
+  - `claudine/cli/src/commands/steer/render.rs`: `cell()` now returns
+    `InlineProse` built from a shared `cell_markup()`. The narrow stacked
+    summary line, which also used `cell()`, renders through `line()` (block
+    `Prose` with wrap) so it keeps wrapping. The first attempt lost that
+    wrap; `steer::tests::a_narrow_terminal_wraps_details_instead_of_hiding_them`
+    caught it.
+
+### Requirement-to-Test Mapping
+
+All tests are L1. The new module `lib/tests/l1/prose_containers.rs` is
+declared in `tests/l1/main.rs`, and no path segment carries a tier marker.
+
+| Requirement (AC) | Test(s) |
+| --- | --- |
+| Block containers embed each `Prose` paragraph as its own block, keep bold and inline code structural, no nested `Root`, valid tree (AC 12): `UnorderedList`, `OrderedList`, `BlockQuote`, `TwoColumn`, `StatusBlock`, `Section`, `Compose` | `prose_containers::block_containers_embed_each_prose_paragraph_as_its_own_block` |
+| Fenced code stays a sibling `Code` block in every block container (AC 12, 27) | `prose_containers::block_containers_keep_fenced_code_as_a_sibling_block` |
+| Paragraph separation on every target (`BlockQuote` terminal, Markdown, and HTML; `Compose` terminal and Markdown; list Markdown) | `prose_containers::embedded_paragraphs_stay_apart_on_every_target` |
+| Embedded layout appears exactly once, on the `Prose` paragraph, never a nested `Root`, never on the container node (AC 31) | `prose_containers::embedded_prose_layout_appears_exactly_once_on_its_paragraph` |
+| Multi-block layout keeps one outer box (top edge first, bottom edge last, horizontal box on each) (AC 31) | `prose_containers::embedded_multi_block_layout_keeps_one_outer_box` |
+| Transferred margin renders inside the quote border (terminal) and once, on the `<p>` (HTML) | `prose_containers::embedded_prose_margin_renders_inside_the_container` |
+| `InlineContent` takes `InlineProse`; styling kept; a fence in it is one inline code value (AC 12, 28) | `prose_containers::inline_content_takes_inline_prose`, `prose_containers::inline_content_fence_is_one_inline_code_value` |
+| Table header label is `InlineProse` | `prose_containers::table_header_label_is_inline_prose` |
+| `TwoColumn` `Prose` column is structural, not stripped text | `prose_containers::two_column_prose_column_projects_structurally` |
+| Multiline fence in a table cell becomes one `InlineCode` (`fn main() {} let x = 1;`) with no `Code`, no hard break, no fence or language on terminal, Markdown, and HTML (AC 28, table half) | `prose_cells_parity::multiline_fence_in_a_cell_is_one_inline_code_value` (replaces `fenced_code_in_prose_degrades_to_text`) |
+| `From<InlineProse>` produces `StyledInlineProse`; hint `styled_inline_prose` (R4) | `prose_cells_parity::inline_prose_into_produces_styled_inline_prose`, `…::inline_prose_into_boxed_correctly`, `…::styled_inline_prose_cell_hints`, `…::mixed_type_row_retains_formatting_and_alignment` |
+| `StatusBlock` body keeps inline structure; items are sibling paragraphs on tree, Markdown, and HTML; the item's `LineBreaks` mode survives | `status_block::tests::body_prose_keeps_its_inline_structure`, `…::multiple_body_items_are_sibling_paragraphs`, `…::body_line_breaks_mode_survives_projection`, `status_block_parity::multiple_body_items_keep_blank_line_separation_in_block_quote` (rewritten) |
+| List `Prose` items keep semantic emphasis in Markdown | `unordered_list_parity::prose_item_keeps_semantic_emphasis_in_markdown`, `ordered_list_parity::prose_item_keeps_semantic_emphasis_in_markdown` (replace the misnamed `…_degrades_in_markdown`) |
+| `BlockQuote` `Prose` keeps emphasis in Markdown and HTML | `block_quote::tests::test_render_markdown_from_prose_keeps_semantic_emphasis`, `…::test_browser_renderable_fragment_from_prose` |
+| `Compose` trailing-`\n` spacing moved outside the component | `compose::tests::test_add_file_system_with_prose`, `…::test_add_table_with_prose`, `…::test_mixed_all_types` (now pin the line break) |
+
+`fold_prose_nodes_into_blocks`, `degrade_code_nodes`,
+`interim_container_nodes`, `StyledProse`, and `styled_prose` have zero
+hits in `biscuit-terminal/lib`, `biscuit-terminal/cli`, and
+`renderable/src`.
+
+### Validation
+
+- `biscuit-terminal`: `just test` gives 3458 passed and 57 skipped (lib and
+  CLI). `just lint` is clean. Lib doc tests give 203 passed with
+  `--features image` (the same as Phase 3). `just test-browser` gives 56
+  passed. `cargo check --all-targets` passes for the lib with
+  `terminal-tests,browser-tests,image` and for the CLI with
+  `terminal-tests`. L2 was not run (the plan defers it to Phase 6).
+- `bt table --columns "Msg,Note" --prose-row '<b>line one\nline two</b>,```sh\nmd hash\n```'`
+  renders a two-line `Msg` cell and `md hash` as one inline code value.
+- `cargo check --workspace --all-targets --keep-going` is clean.
+- `biscuit-icon`: `just test` gives 228 passed. claudine-cli `steer` tests:
+  50 passed.
+- OS risk: the changes are pure tree logic with no `cfg` and no filesystem
+  access. No `just cross-check` was run; CI covers Linux.
+
+### Snapshot Review
+
+No snapshot moved in this phase. No `.snap.new` files were left behind.
+
+### Known-Red Ledger (Phase 4)
+
+Phase 4 adds no red. biscuit-terminal is green.
+
+- **darkmatter** (`just test --no-fail-fast`): 8885 run, 50 failed,
+  1 timed out. These are the same counts as Phase 3, and they include the two
+  unrelated `current_root_*` failures that existed before this feature.
+  `darkmatter-cli::l1 schema_about::schema_about_verbose_prints_advanced_sections_as_readable_lists`
+  is one of them. `detail_list` builds items as `"…\n  - Details: …"`, and
+  Phase 3 made that single `\n` soft. Phase 7 migrates it to
+  `LineBreaks::Hard`.
+- **claudine**: in this worktree, `just test` ran only 7359 tests and showed
+  1 failure, so it is not a complete measure here. A direct
+  `cargo nextest run -p claudine -p claudine-cli -p claudine-gen -p claudine-contract -p claudine-catalog-types --no-fail-fast`
+  gives 8045 run and 33 failed. That matches Phase 3's 33, in the same
+  categories (composition error blocks, lifecycle hints, magic-miss reports,
+  authored-text headers, compose validation messages, wrap help and
+  watchdog, PTY sequence tests). Spot checks:
+  - `lifecycle_short_form_removed_status_block_is_escape_free_at_none` is an
+    `escape_text`-in-backticks site (AC 17, Phase 7).
+  - `shell_expansion_failed_plain_terminal_has_no_escape_bytes` emits no
+    escape byte and fails on line structure.
+- **Unrelated and not counted**:
+  `claudine-cli completion::composition::tests::compose_magic_does_not_emit_a_nested_file_without_its_scope`
+  failed once in the `just test` run (`["@plan.md"]` flattened). It is a
+  magic-path completion test with no Prose involvement, and it did not fail
+  in the direct run.
+- Still not run: `sniff`, `messenger`, `worktree`, `model-citizen`,
+  `playa`, `homelab`. They compile.
+
+### Scope Record (R10)
+
+- **`biscuit-icon-cli`** consumes `TableCellContent`/`Prose` and is not in
+  the spec's `packages:` list. Its three cell sites are migrated (above), and
+  Phase 7 and Phase 8 should treat it as a consumer.
+- `tree-hugger-cli` builds `Prose` with layout builders (found by the
+  Phase 4 grep). It compiles unchanged, but it is not in the spec's list
+  either.
+
+### Drift Notes
+
+These comments described behavior that no longer exists, or never did. Each
+was corrected in the same change; the code was taken as correct.
+
+- `OrderedList` and `UnorderedList` `render_markdown` rustdoc, and the
+  list parity module docs and test names, said a `Prose` item's `<b>`
+  "degrades to plain text" in Markdown. It was already `**…**` before this
+  feature, and those tests passed only because they asserted
+  `!contains("<b>")`.
+- `BlockQuote::render_markdown_plus` rustdoc and two `block_quote.rs`
+  tests said `render_tree()` "flattens Prose styling". It did not.
+- Module and helper docs in `projection.rs`, `list.rs`, `block_quote.rs`,
+  `two_column.rs`, `table.rs`, `status_block.rs`, `compose.rs`,
+  `render_tree_component_parity.rs`, and the L2 `prose_cells.rs` named the
+  interim bridge, the fold, `Prose::to_render_nodes`, or `StyledProse`.
+  Each was rewritten to the current behavior.
+
+### Departures
+
+- **R3, the layout target.** R3 preferred the container's own block node
+  (`ListItem`, `BlockQuote`) for the layout. That node is the wrong box:
+  - a margin on the `ListItem` would move the marker, which sits outside the
+    Prose's box;
+  - the `BlockQuote` node already carries the quote's own layout (the
+    border-gap padding).
+
+  The layout therefore goes on the Prose's own blocks. With one block (the
+  common case) it appears exactly once, as AC 31 requires. With several
+  blocks, the horizontal box is repeated on each block and the vertical
+  edges are split, which keeps one visual box without adding a
+  neutral-block `NodeKind`. A new kind would have rippled into darkmatter's
+  exhaustive matches.
+- **Terminal list renderer and layout.** The terminal list renderer
+  renders a `ListItem`'s paragraphs inline itself, so a layout moved onto a
+  list-item paragraph applies in the browser and Markdown output but not on
+  the terminal. Before this phase the interim projection dropped that layout
+  on every target. The behavior is documented in `docs/components/list.md`.
+- **`Prose::render_tree_node` stays `None`.** The hook returns one node,
+  and the only single node that can hold several blocks is the `Root`,
+  which cannot nest. Embedding goes through the projection funnel, which
+  shares `block_nodes()` (the same parse and break mode) with
+  `render_tree`. Nothing outside biscuit-terminal calls `render_tree_node`
+  on a `Prose`.
+- **Strings stay literal.** The spec's "strings converted by a table or
+  `InlineContent` use `InlineProse`; by a block container use `Prose`" is
+  read as covering existing string-to-Prose conversions
+  (`TableColumn::new_with_bold`, `IntoProseVec for &str` in `StatusBlock`).
+  It does not turn `RenderableTerminalContent::String` or
+  `TableCellContent::Text` into parsed markup, which would reinterpret `_`,
+  `*`, and `<` in every plain cell and list item in the workspace.
+- **Compile-only migrations outside biscuit-terminal** (four sites, above)
+  happened in Phase 4 rather than Phase 7 so the workspace builds for
+  Phase 5. They are type-only and are listed for Phase 7's review.
+- **Component docs.** Checkpoint 4 asks for the container pages, and
+  Phase 6 lists them again. `table.md`, `inline_content.md`, `list.md`,
+  `block_quote.md`, `two_column.md`, the table README, and the crate README
+  `StatusBlock` section now state the accepted types. `prose.md`,
+  `index.md`, and `browser-renderable-trait.md` remain Phase 6 work.
+
+## Phase 5
+
+Phase 5 adds darkmatter's `code_link()` expression function and moves the
+templates that wrapped `{{link(x)}}` in backticks onto it. Validation ran on
+macOS.
+
+### What Changed
+
+- **Shared resolution** (`darkmatter/lib/src/markdown/compose/expression/functions/mod.rs`):
+  `resolve_link_parts(function, args, ctx)` now holds everything `link_fn`
+  did before it spelled the label: arity, null propagation, string checks,
+  the one-argument URL rejection, file resolution, the relative label, and
+  the destination. It returns the raw label and destination (`LinkParts`),
+  or `None` for a null result. Every error names the `function` it was given,
+  and `portable_destination` takes the name too. `link_fn` and the new
+  `code_link_fn` are thin wrappers, so `link()`'s output and error text are
+  byte-for-byte unchanged (`link(): link() …`). `code_link()` reports the same
+  cause as `code_link(): code_link() …`.
+- **Label spelling**: `format_markdown_link` (escapes `\`, `[`, `]`) and the
+  new `format_markdown_code_link` share `markdown_destination` (angle-bracket
+  wrapping). The code label goes through `renderable::markdown::code_span`,
+  the Phase 2 helper, with no other escaping. That helper already turns line
+  endings into spaces and returns `""` for an empty value, which gives
+  `[](dest)`.
+- **Binding** (`functions/paths.rs`): `code_link`, alias `codelink`, beside
+  `link`. The underscore-free alias follows the module's convention
+  (`find_files`/`findfiles`, `has_skill`/`hasskill`).
+- **Catalog** (`darkmatter/docs/schemas/expression-functions.yaml`):
+  `code_link` with order 78 (the free slot between `link` 77 and 79), two
+  overloads, and a `display-only` example each. The expected-signature list
+  in `catalog/mod.rs` gains both signatures. The registration baseline in
+  `catalog/parser.rs` goes from 112 functions and 119 overloads to 113 and
+  121.
+- **Docs**: the generated function table in
+  `darkmatter/docs/topics/darkmatter-expressions.md` was regenerated with
+  `cargo run -p darkmatter --example expression_doc_generator -- --write`
+  (two rows added). "Link Helpers" gains `code_link`, with examples, the
+  bracket note, the fence rule, the empty case, and the reason to prefer it
+  over a backtick-wrapped `link()`.
+- **Templates**: `prompts/plan.md:30`, `prompts/_reviews/review-spec-inline.md:18`,
+  `claudine/cli/tests/fixtures/nested_span_regression/review-spec-inline.md:18`,
+  and `darkmatter/dmls/tests/fixtures/mapping_only_corpus/_reviews__review-spec-inline.md:18`
+  now use `{{code_link(x)}}` / `{{ code_link(spec) }}` with no backticks.
+  Line numbers are unchanged, and every test that reads the two fixtures
+  (claudine `nested_span`, `wrap_compose_validation`, `shipped_prompt_contract`;
+  darkmatter `lint.rs`, `parser.rs`, DMLS `nested_span_tests`,
+  `frontmatter_inventory_tests`) passes, apart from one existing red listed
+  below.
+- **Snapshot (AC 20)**: `l1__error_snapshots__link__unrecognized_format.snap`
+  moved from ``Input did not look like an HTML `<a>` tag or a Markdown `text` link.``
+  to `Input did not look like an HTML <a> tag or a Markdown [text](href) link.`.
+  Reviewed: `[text](href)` is now literal inline code, and the snapshot strips
+  its styling, so no backticks remain. This is the expected category. A stale
+  `.snap.new` from an earlier run was replaced by a fresh run before it was
+  accepted.
+- **Skill**: `.claude/skills/darkmatter/compose.md` helper list gains two
+  `code_link` lines.
+
+### Requirement-to-Test Mapping
+
+| Requirement (AC) | Test(s) | Tier / target |
+| --- | --- | --- |
+| `code_link("plans/foo.md")`: label `plans/foo.md` as one code span; destination spelling and quoting identical to `link()`, including angle-bracket wrapping (AC 22) | `functions::tests::fn_phase5::code_link_one_arg_matches_link_destination_with_a_code_label` | L1, darkmatter lib unit |
+| Two-argument file, `https`, and uppercase-scheme destinations match `link()` | `…::code_link_two_arg_file_and_url_destinations_match_link` | L1 unit |
+| `code_link(url, "a]b")` keeps `]` (and `[`) unescaped, and a CommonMark parser reads one code span (AC 22) | `…::code_link_keeps_brackets_unescaped_inside_the_code_span` | L1 unit |
+| `code_link(url, r"a\_b")` emits `a\_b` as is (AC 22) | `…::code_link_emits_backslashes_as_is` | L1 unit |
+| A backtick in the text gets a longer fence; edge backticks and edge spaces are padded; round-trip through pulldown-cmark (AC 22) | `…::code_link_fences_backticks_and_pads_edges` | L1 unit |
+| `\n`, `\r\n`, and lone `\r` become spaces | `…::code_link_turns_line_endings_into_spaces` | L1 unit |
+| `code_link(url, "")` gives `[](url)`, the same as `link(url, "")` (AC 22) | `…::code_link_empty_label_is_an_ordinary_empty_link` | L1 unit |
+| Null propagation matches `link()` for all three null shapes | `…::code_link_null_propagates_like_link` | L1 unit |
+| Errors carry `link()`'s cause under `code_link`; `link()` error text is unchanged (URL in one-argument form, both arity errors, unparseable and malformed targets, wrong types) | `…::code_link_errors_name_code_link_with_the_link_cause` | L1 unit |
+| Dispatch by `code_link` and `codelink` | `…::code_link_is_dispatched_by_name_and_alias` | L1 unit |
+| Catalog and runtime parity, expected signatures, registration baseline (AC 23) | `catalog::tests::catalog_and_runtime_bindings_have_bidirectional_canonical_parity`, `catalog::tests::…expected…` signature list, `catalog::parser::tests::authored_catalog_matches_registration_baseline`, `narrative_doc_function_table_matches_catalog` | L1 unit |
+| The four migrated templates' real `code_link` lines (read with `include_str!`) compose, through the normal compose path, to `` [`plans/foo.md`](…) `` and render as a link whose only child is `InlineCode` on every target: darkmatter tree, Markdown, HTML (`<code>…</code></a>`), terminal (OSC 8, no fence when styled), and the same four through `Prose` (AC 22) | `darkmatter::l1 code_link::migrated_templates_render_an_inline_code_link_on_every_target` | L1, `darkmatter/lib/tests/l1/code_link.rs` (declared in `main.rs`) |
+| Composed `code_link()` and `link()` share a destination; a backtick-wrapped `{{link(x)}}` is now opaque code with no link (AC 16, 22) | `code_link::code_link_matches_link_and_a_backticked_link_is_literal_code` | L1 |
+| `a\_b` from frontmatter composes literally and renders as `a\_b` in darkmatter's parser and in `Prose` on every target (AC 22) | `code_link::code_link_backslash_text_is_literal_in_prose_and_darkmatter` | L1 |
+| `a]b` and `` a`b `` survive compose and both parsers | `code_link::code_link_brackets_and_backticks_survive_compose_and_render` | L1 |
+| Empty text composes to `[](url)` | `code_link::code_link_empty_text_is_an_empty_link` | L1 |
+| `unrecognized_format` snapshot shows `[text](href)` (AC 20) | `darkmatter::l1 error_snapshots::link::unrecognized_format_mentions_html_and_markdown` | L1 |
+| `claudine context --expressions` lists `code_link(file)` and `code_link(target, desc)` once each, in the Filesystem group, directly after `link()`'s two rows (AC 23) | `claudine-cli::l1 context_command::context_expressions_lists_code_link_beside_link_in_the_filesystem_group` (the existing `context_expressions_includes_every_function` also covers them now) | L1, real CLI process |
+| DMLS offers `code_link` as a completion with the catalog signature, typed detail, description, and bare-name `textEdit` (AC 23) | `dmls::l1 lsp_session::function_completion_offers_code_link` | L1, real LSP session |
+
+No new name segment carries a tier marker. `code_link.rs` is declared in
+`darkmatter/lib/tests/l1/main.rs`, and `test_layout` passes. The
+`include_str!` reads of `prompts/` and the two fixtures make those files test
+inputs that CI can see.
+
+### Validation
+
+- darkmatter area `just test --no-fail-fast`: 8901 run, 8850 passed,
+  49 failed, 2 timed out, 12 skipped. Phase 4 had 8885 run, 50 failed, and
+  1 timed out. The one fewer failure is `error_snapshots::link::unrecognized_format`
+  (fixed here). The one extra timeout is
+  `darkmatter-cli::l1 entry_point_parity::md_entry_points_agree_on_every_reference`.
+  Both `entry_point_parity` tests pass in isolation (19 passed), so this is
+  load at the 30 s limit, not a regression. Every remaining failure is in
+  the existing ledger categories (Prose error blocks and error snapshots,
+  `schema_about`, the two `current_root_*` tests, and the zed-dmls-cli
+  `doctor` text). None involves `link`, `code_link`, the catalog, or the
+  migrated files.
+- Targeted runs: darkmatter lib `fn_phase5` 34/34 (10 new) and the catalog
+  and registration tests; `darkmatter::l1 code_link::` 5/5; DMLS
+  `function_completion` 2/2; claudine `context_command::` 28/28;
+  claudine `shipped_prompt_contract::` 12/12.
+- claudine fixture readers (`nested_span`, `wrap_compose_validation`,
+  `shipped_prompt_contract`, `context_command`): 58 run, 57 passed. The
+  failure, `composition::lifecycle::tests::nested_span::nested_span_error_renders_property_literal_rewrite_and_escape_hint`,
+  renders `\{\{ctx.area}}` with visible backslashes. It concerns line 15
+  (`success.say`), not the migrated line 18. This is the AC 17
+  `escape_text`-in-backticks category that Phase 7 owns.
+- `just lint`: darkmatter, claudine, and biscuit-terminal are all clean.
+- biscuit-terminal `just test`: 3458 passed and 57 skipped, the same as
+  Phase 4. Phase 5 changed no biscuit-terminal code.
+- OS risk: the new code is string formatting over `link()`'s existing
+  resolution, with no `cfg` and no new filesystem access. The tests use
+  `tempfile` directories and `str::lines`, which also strips CRLF from a
+  Windows checkout. No `just cross-check` was run; CI covers Linux and
+  macOS on the pull request and Windows on `main`.
+
+### Snapshot Review
+
+- `l1__error_snapshots__link__unrecognized_format.snap`: accepted (AC 20,
+  diff above).
+- Moved, not accepted, and left for Phase 7 (same category: a code span is
+  no longer wrapped in backticks once styling is stripped):
+  `error_snapshots::link::missing_href_has_href_hint`
+  (``Link has no `href`/`url` attribute.`` → `Link has no href/url attribute.`),
+  and the `error_snapshots::image_ref::*` snapshots.
+
+### Known-Red Ledger (Phase 5)
+
+Phase 5 adds no red. It removes `error_snapshots::link::unrecognized_format_mentions_html_and_markdown`
+from the darkmatter list. The rest of the darkmatter list (49 failures; the
+second timeout is load) and the claudine list are unchanged, and Phase 7
+owns them.
+
+### Drift Notes
+
+- `darkmatter-expressions.md` "Link Helpers" said `link()` destinations are
+  "wrapped in angle brackets or percent-encoded", and that link text escapes
+  only `[` and `]`. The code never percent-encodes, and it also escapes `\`.
+  The paragraph now describes the code.
+- `link_fn`'s one-argument and two-argument `invalid URL` branch cannot be
+  reached: `is_remote_url` returns true only for a target that already
+  parsed as an `http(s)` URL. A target that does not parse fails as a file
+  path. The branch is kept in the shared resolver so `link()`'s behavior
+  is unchanged. The error test asserts the reachable shapes
+  (`http://[::1` → "invalid file path", and a URL with a space → a
+  file-reference error).
+
+### Departures
+
+- **No claudine end-to-end assertion on the `review-spec-inline.md`
+  `success.message`.** The `message` channel posts to the external messenger,
+  so nothing reaches the compose output that `shipped_prompt_contract` can
+  observe. A first attempt asserted on it and was reverted. The
+  template-to-render proof is in darkmatter's `code_link::migrated_templates_render_an_inline_code_link_on_every_target`,
+  which composes each template's real `code_link` line.
+- **Prose resolves a relative destination to `file://`.** Compose normalizes
+  a `code_link()` destination relative to the document (`./plans/foo.md`, the
+  same as `link()`). `Prose` then turns that into a `file://` URL against the
+  process directory. This is existing `Prose` link behavior that Phase 5 did
+  not change. The end-to-end test compares the path tail on the `Prose` side.
+- The catalog `description` for `code_link` is one paragraph on both
+  overloads, which is how `link` is written. The bracket note is in the
+  description because `claudine context --expressions` and DMLS hover show
+  only that text.
+
+### Manual Step (for Ken)
+
+`~/.claudine/prompts/plan.md` and `~/.claudine/prompts/_reviews/review-spec-inline.md`
+are outside the repository and still use `` `{{link(x)}}` ``. Replace each with
+`{{code_link(x)}}` (no backticks). Until then, those lines show the literal
+`[text](url)` as code.
