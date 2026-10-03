@@ -13,6 +13,11 @@ helper that resolves it is named so it is not re-derived.
    spellings outright. Route through `biscuit_file::canonicalize_simplified`
    (dunce-backed). Raw `canonicalize` is only safe inside a closed key space
    that never leaves the process.
+   In biscuit-file, Claudine, and Darkmatter a source guard
+   (`darkmatter/cli/tests/common/path_lookup_guard.rs`) fails on a new direct
+   call; a private comparison stays only as a listed exception naming its
+   invariant. The same guard rejects direct `dirs::home_dir` /
+   `std::env::home_dir` in Claudine (trap 2).
 
    Two concrete instances live in `cargo nextest`'s own argument grammar
    (found 2026-09-14, `scripts/ci-build-archive.rs`): `--tool-config-file` is
@@ -39,8 +44,11 @@ helper that resolves it is named so it is not re-derived.
    The worktree copy fallback recognizes that form and byte-copies instead.
 2. **`dirs::home_dir()` on Windows uses the known-folder API and ignores
    `USERPROFILE` and `HOME`.** Hermetic test homes silently do not apply, so
-   a Windows test reads the machine's real `~/.claudine`. Use
-   `std::env::home_dir()` (un-deprecated, environment-first on Rust ≥ 1.97).
+   a Windows test reads the machine's real `~/.claudine`. In biscuit-file,
+   Claudine, and Darkmatter use `biscuit_file::home_dir()`, which is
+   `std::env::home_dir()` (un-deprecated, environment-first on Rust ≥ 1.97:
+   `USERPROFILE`, then the profile API; never `HOME`) filtered to absolute
+   paths. A Windows fixture relocates home with `USERPROFILE`.
    Python's `Path.home()` is environment-first but reads `USERPROFILE` on
    Windows and ignores `HOME` (which native Windows does not set outside Git
    Bash), so a fixture that relocates the home for a Python tool such as

@@ -197,7 +197,7 @@ Which of the two layouts applies is decided once, from the `repo_root` resolved 
 Gemini has no native append flag for `GEMINI_SYSTEM_MD`, so Claudine pre-composes the user's persistent `GEMINI.md` with the overlay before writing the merged file:
 
 ```rust
-let real_gemini_md = dirs::home_dir()
+let real_gemini_md = biscuit_file::home_dir()
     .map(|h| h.join(".gemini").join("GEMINI.md"))
     .filter(|p| p.is_file());
 let merged = match real_gemini_md {

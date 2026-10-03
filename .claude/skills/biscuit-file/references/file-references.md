@@ -84,7 +84,7 @@ let target = FileReference::new("prompts/next.md")?
 ```
 
 `FileResolutionContext::new(cwd)` snapshots the process environment and
-cross-platform home once. Supply a validated repository scope catalog,
+home once. Supply a validated repository scope catalog,
 and override the snapshot with `with_env()`, `with_home_dir()`, or
 `without_home_dir()` when the caller has authoritative values. `with_env()`
 replaces the whole environment (it does not merge); non-Unicode variables are
@@ -100,8 +100,11 @@ be absolute. Builders and derivations never fail; `validate()` (run first by eve
 resolver entry point and `PortablePath`) returns
 `RelativeContextDirectory { anchor: ContextAnchor, path }`, trusted
 derivations included. Relative env values, magic roots, and vault roots keep
-their own rules and stay supported. `home_dir()` reports a relative `$HOME` as
-`None`.
+their own rules and stay supported. `home_dir()` is `std::env::home_dir()` (`HOME` on POSIX,
+`USERPROFILE` on native Windows, platform fallback when unset) and reports a
+relative home as `None` with no second lookup; it never canonicalizes or
+checks existence. It is the workspace's one home reader: Claudine and
+Darkmatter call it rather than `dirs::home_dir`/`std::env::home_dir`.
 
 Use `for_source(source)` for each in-repository nested file-backed document. It
 sets the source and changes the authoring `cwd` to `source.parent()`, while

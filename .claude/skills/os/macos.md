@@ -46,7 +46,9 @@ conditions that masquerade as repository defects.
   command. Detach the image and remove it afterward. These commands need no
   administrator prompt or foreground window.
 - `dirs::home_dir()` honors `HOME` here, which is why a hermetic-home test can
-  be green on macOS and read the real home directory on Windows.
+  be green on macOS and read the real home directory on Windows. The shared
+  `biscuit_file::home_dir()` follows `USERPROFILE` on Windows instead, so a
+  fixture setting both variables lands in the same place on every OS.
 - A Unix socket path holds at most 104 bytes (`sun_path`), and the per-user
   `$TMPDIR` (`/private/var/folders/xx/…/T/`) spends about half of that. A
   test that starts a socket-binding daemon under a `tempfile` directory can
