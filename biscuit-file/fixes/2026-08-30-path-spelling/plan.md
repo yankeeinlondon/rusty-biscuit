@@ -156,6 +156,34 @@ docs_updated_during_phase_5:
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
   - .claude/skills/os/macos.md
+source_files_during_phase_6:
+  - biscuit-file/lib/tests/l1/implicit_relative.rs
+  - claudine/lib/src/provider_overlay/selector.rs
+  - claudine/lib/src/provider_overlay/tests.rs
+  - claudine/cli/tests/common/completion.rs
+  - claudine/cli/tests/l1/completion_compose.rs
+  - claudine/cli/tests/l1/compose_prompt_tiers.rs
+  - claudine/cli/tests/l1/level1_provider_overlay_home.rs
+  - claudine/cli/tests/l1/mcp_cli.rs
+  - claudine/cli/tests/l1/propagated_context_fixtures.rs
+  - claudine/cli/tests/level2/level2_provider_overlay_capture.rs
+  - darkmatter/lib/Cargo.toml
+  - darkmatter/lib/src/markdown/compose/link_normalization.rs
+  - darkmatter/lib/src/markdown/compose/expression/path_projection.rs
+  - darkmatter/lib/tests/l1/link_interpolation_integration.rs
+  - Cargo.lock
+docs_updated_during_phase_6:
+  - biscuit-file/docs/topics/file-references.md
+  - biscuit-file/README.md
+  - claudine/docs/topics/file-referencing.md
+  - darkmatter/docs/topics/compose-requests.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - .claude/skills/biscuit-file/references/api.md
+  - .claude/skills/biscuit-file/references/architecture.md
+  - .claude/skills/claudine/SKILL.md
+  - .claude/skills/darkmatter/SKILL.md
+  - .claude/skills/os/windows.md
 packages:
   - biscuit-file
   - biscuit-file-cli
@@ -163,6 +191,136 @@ packages:
   - claudine-cli
   - darkmatter
   - darkmatter-cli
+source_code:
+  - biscuit-file/lib/src/file_reference/portable/path_identity.rs
+  - biscuit-file/lib/src/file_reference/portable/path_identity/tests.rs
+  - biscuit-file/lib/src/file_reference/portable/mod.rs
+  - biscuit-file/lib/src/file_reference/resolve.rs
+  - biscuit-file/lib/tests/l1/magic_local_roots.rs
+  - biscuit-file/lib/tests/l1/repository_scope_catalog.rs
+  - biscuit-file/lib/tests/l1/finalized_reference_resolution.rs
+  - darkmatter/cli/tests/common/path_lookup_guard.rs
+  - darkmatter/cli/tests/common/source_scan.rs
+  - darkmatter/cli/tests/l1/path_lookup_guard.rs
+  - darkmatter/cli/tests/l1/main.rs
+  - darkmatter/lib/tests/l1/path_lookup_guard.rs
+  - darkmatter/lib/tests/l1/main.rs
+  - darkmatter/lib/Cargo.toml
+  - biscuit-file/lib/src/path_text.rs
+  - biscuit-file/lib/tests/l1/path_lookup_guard.rs
+  - biscuit-file/lib/tests/l1/main.rs
+  - biscuit-file/lib/Cargo.toml
+  - biscuit-file/cli/tests/cli_tests.rs
+  - biscuit-file/cli/Cargo.toml
+  - claudine/lib/tests/l1/path_lookup_guard.rs
+  - claudine/lib/tests/l1/main.rs
+  - claudine/lib/Cargo.toml
+  - claudine/cli/tests/l1/path_lookup_guard.rs
+  - claudine/cli/tests/l1/main.rs
+  - claudine/cli/Cargo.toml
+  - biscuit-file/lib/src/file_reference/context.rs
+  - biscuit-file/lib/tests/l1/resolution_context.rs
+  - Cargo.lock
+  - claudine/lib/src/config/antigravity.rs
+  - claudine/lib/src/config/backup.rs
+  - claudine/lib/src/config/claude.rs
+  - claudine/lib/src/config/codex.rs
+  - claudine/lib/src/config/gemini.rs
+  - claudine/lib/src/config/goose.rs
+  - claudine/lib/src/config/kilo.rs
+  - claudine/lib/src/config/kimicode.rs
+  - claudine/lib/src/config/mod.rs
+  - claudine/lib/src/config/opencode.rs
+  - claudine/lib/src/config/pi.rs
+  - claudine/lib/src/config/qwen.rs
+  - claudine/lib/src/dispatch/loader.rs
+  - claudine/lib/src/linking/paths.rs
+  - claudine/lib/src/mcp/import.rs
+  - claudine/lib/src/mcp/types.rs
+  - claudine/lib/src/messaging/resolve.rs
+  - claudine/lib/src/model_catalog/cache.rs
+  - claudine/lib/src/permissions/context.rs
+  - claudine/lib/src/protect/path.rs
+  - claudine/lib/src/protect/scrub.rs
+  - claudine/lib/src/protect/service.rs
+  - claudine/lib/src/protect/service/tests.rs
+  - claudine/lib/src/provider/claude/behavior.rs
+  - claudine/lib/src/provider/codex/behavior.rs
+  - claudine/lib/src/provider/gemini/behavior.rs
+  - claudine/lib/src/provider/opencode/behavior.rs
+  - claudine/lib/src/reporting/paths.rs
+  - claudine/lib/src/system_prompt/resolve/tests.rs
+  - claudine/lib/tests/l1/context_construction_guard.rs
+  - claudine/cli/src/commands/uninstall.rs
+  - claudine/cli/src/commands/wrap/composition/timeouts.rs
+  - claudine/cli/src/commands/wrap/exec/stream_capture.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/requeue.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/mod.rs
+  - claudine/cli/src/commands/wrap/profile/gemini.rs
+  - claudine/cli/src/commands/wrap/profile/opencode.rs
+  - claudine/cli/src/completion/scopes/tests.rs
+  - claudine/cli/tests/l1/context_construction_guard.rs
+  - claudine/cli/tests/l1/home_lookup_round_trip.rs
+  - claudine/cli/tests/level2/level2_provider_overlay_capture.rs
+  - darkmatter/lib/src/markdown/compose/context/request.rs
+  - darkmatter/lib/tests/l1/context_construction_guard.rs
+  - darkmatter/lib/tests/l1/nested_composition.rs
+  - biscuit-file/lib/src/file_reference/glob/roots.rs
+  - claudine/cli/src/commands/compose/interrupt.rs
+  - claudine/cli/src/completion/autocomplete_ui.rs
+  - claudine/lib/src/composition/error/render/mod.rs
+  - claudine/lib/src/composition/schema/status_render.rs
+  - claudine/lib/src/invocation_context.rs
+  - claudine/lib/src/mcp/state.rs
+  - claudine/lib/src/provider_overlay/tests.rs
+  - claudine/lib/src/provider_overlay/write_back.rs
+  - claudine/lib/src/render/prompt/system.rs
+  - claudine/lib/src/render/prompt/system/tests.rs
+  - darkmatter/cli/tests/l1/compose_transclusion.rs
+  - darkmatter/lib/src/markdown/compose/cache/hashing.rs
+  - darkmatter/lib/src/markdown/compose/context/report.rs
+  - darkmatter/lib/src/markdown/compose/expression/path_projection.rs
+  - darkmatter/lib/src/markdown/compose/file_links/discovery.rs
+  - darkmatter/lib/src/markdown/compose/link_resolve.rs
+  - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+  - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+  - darkmatter/lib/src/markdown/compose/preflight/mod.rs
+  - darkmatter/lib/src/markdown/compose/tests/frontmatter.rs
+  - darkmatter/lib/src/markdown/compose/transclusion/resolver.rs
+  - darkmatter/lib/src/markdown/mod.rs
+  - darkmatter/lib/src/markdown/schemas/resolve.rs
+  - darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
+  - darkmatter/lib/tests/l1/suggest_constraint_phase4.rs
+  - darkmatter/lib/tests/l1/unknown_identifier_warning.rs
+  - darkmatter/lib/tests/level2/level2_render_tree_terminal/file_links.rs
+  - biscuit-file/lib/tests/l1/implicit_relative.rs
+  - claudine/lib/src/provider_overlay/selector.rs
+  - claudine/cli/tests/common/completion.rs
+  - claudine/cli/tests/l1/completion_compose.rs
+  - claudine/cli/tests/l1/compose_prompt_tiers.rs
+  - claudine/cli/tests/l1/level1_provider_overlay_home.rs
+  - claudine/cli/tests/l1/mcp_cli.rs
+  - claudine/cli/tests/l1/propagated_context_fixtures.rs
+  - darkmatter/lib/src/markdown/compose/link_normalization.rs
+  - darkmatter/lib/tests/l1/link_interpolation_integration.rs
+documentation:
+  - biscuit-file/docs/topics/file-references.md
+  - .claude/skills/biscuit-file/references/file-references.md
+  - .claude/skills/biscuit-file/SKILL.md
+  - .claude/skills/os/windows.md
+  - biscuit-file/docs/dependencies.md
+  - claudine/docs/topics/repo-isolation.md
+  - claudine/docs/topics/system-prompt.md
+  - .claude/skills/os/macos.md
+  - biscuit-file/README.md
+  - claudine/docs/topics/file-referencing.md
+  - darkmatter/docs/topics/compose-requests.md
+  - .claude/skills/biscuit-file/references/api.md
+  - .claude/skills/biscuit-file/references/architecture.md
+  - .claude/skills/claudine/SKILL.md
+  - .claude/skills/darkmatter/SKILL.md
+completed_phase: 6
+implemented: true
 ---
 
 # Plan: path spelling tests, canonicalization guard, and consistent home lookup
@@ -200,7 +358,7 @@ Current-state facts the plan relies on (verified 2026-10-03):
 
 **Done means:**
 
-- [ ] Every row of the spec's lexical table has a test that runs on all hosts
+- [x] Every row of the spec's lexical table has a test that runs on all hosts
       through production code, plus an ordering/provenance test that fails
       when one comparison rule is deliberately broken.
 - [x] No unlisted `canonicalize` or `dunce::canonicalize` call, and no
@@ -208,12 +366,17 @@ Current-state facts the plan relies on (verified 2026-10-03):
       approved capture boundary, survives in the five packages; the guard
       enforces this and its fixtures prove it fails on violations and stale
       exceptions.
-- [ ] A child-process round trip proves Claudine config load and save both
+- [x] A child-process round trip proves Claudine config load and save both
       land under a fixture `HOME`/`USERPROFILE`.
-- [ ] Docs, READMEs, and skills describe the new lookup and the
+- [x] Docs, READMEs, and skills describe the new lookup and the
       `USERPROFILE` rule; the implementation log records out-of-scope findings.
-- [ ] `just test` and `just lint` pass in `biscuit-file`, `claudine`, and
+- [x] `just test` and `just lint` pass in `biscuit-file`, `claudine`, and
       `darkmatter`; platform evidence gaps are stated explicitly.
+      (Darkmatter `just test` keeps its 2 pre-existing Phase 1 baseline
+      failures, which read unrelated `.claude/skills/claudine/` content, and
+      the `md_entry_points_agree_on_every_reference` 30 s timeout; native
+      Windows evidence is missing because of build-win-native's storage
+      floor. Both are in the Phase 6 log.)
 
 ## Phase 1: Rulings and baseline
 
@@ -558,12 +721,12 @@ Depends on Phases 2-5.
       delete `///`/`//!` and inline comments that no longer match; the
       Darkmatter `from_process` comment is the known one. Report any drift
       found and how it was resolved.
-- [ ] **Final verification (Wave 2).** Run `just test`, `just lint` in each
+- [x] **Final verification (Wave 2).** Run `just test`, `just lint` in each
       touched area, plus `just test-l2` only for affected existing L2 tests.
       Run `just ci-local --plan` and review the cells. Reuse qualifying
       passing evidence; list every environment (Windows, WSL2) where
       behavioral evidence is missing instead of claiming it.
-- [ ] **Implementation log (Wave 2).** Finish `implementation-log.md`:
+- [x] **Implementation log (Wave 2).** Finish `implementation-log.md`:
       rulings, deviations from the spec (with docs corrected, spec left as
       is), mutation-check result, out-of-scope findings, and evidence gaps.
       Terminal state is "implementation complete, ready for review"; do not

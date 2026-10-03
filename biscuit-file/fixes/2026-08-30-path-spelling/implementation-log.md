@@ -155,6 +155,34 @@ docs_updated_during_phase_5:
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
   - .claude/skills/os/macos.md
+source_files_during_phase_6:
+  - biscuit-file/lib/tests/l1/implicit_relative.rs
+  - claudine/lib/src/provider_overlay/selector.rs
+  - claudine/lib/src/provider_overlay/tests.rs
+  - claudine/cli/tests/common/completion.rs
+  - claudine/cli/tests/l1/completion_compose.rs
+  - claudine/cli/tests/l1/compose_prompt_tiers.rs
+  - claudine/cli/tests/l1/level1_provider_overlay_home.rs
+  - claudine/cli/tests/l1/mcp_cli.rs
+  - claudine/cli/tests/l1/propagated_context_fixtures.rs
+  - claudine/cli/tests/level2/level2_provider_overlay_capture.rs
+  - darkmatter/lib/Cargo.toml
+  - darkmatter/lib/src/markdown/compose/link_normalization.rs
+  - darkmatter/lib/src/markdown/compose/expression/path_projection.rs
+  - darkmatter/lib/tests/l1/link_interpolation_integration.rs
+  - Cargo.lock
+docs_updated_during_phase_6:
+  - biscuit-file/docs/topics/file-references.md
+  - biscuit-file/README.md
+  - claudine/docs/topics/file-referencing.md
+  - darkmatter/docs/topics/compose-requests.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - .claude/skills/biscuit-file/references/api.md
+  - .claude/skills/biscuit-file/references/architecture.md
+  - .claude/skills/claudine/SKILL.md
+  - .claude/skills/darkmatter/SKILL.md
+  - .claude/skills/os/windows.md
 packages:
   - biscuit-file
   - biscuit-file-cli
@@ -162,6 +190,136 @@ packages:
   - claudine-cli
   - darkmatter
   - darkmatter-cli
+source_code:
+  - biscuit-file/lib/src/file_reference/portable/path_identity.rs
+  - biscuit-file/lib/src/file_reference/portable/path_identity/tests.rs
+  - biscuit-file/lib/src/file_reference/portable/mod.rs
+  - biscuit-file/lib/src/file_reference/resolve.rs
+  - biscuit-file/lib/tests/l1/magic_local_roots.rs
+  - biscuit-file/lib/tests/l1/repository_scope_catalog.rs
+  - biscuit-file/lib/tests/l1/finalized_reference_resolution.rs
+  - darkmatter/cli/tests/common/path_lookup_guard.rs
+  - darkmatter/cli/tests/common/source_scan.rs
+  - darkmatter/cli/tests/l1/path_lookup_guard.rs
+  - darkmatter/cli/tests/l1/main.rs
+  - darkmatter/lib/tests/l1/path_lookup_guard.rs
+  - darkmatter/lib/tests/l1/main.rs
+  - darkmatter/lib/Cargo.toml
+  - biscuit-file/lib/src/path_text.rs
+  - biscuit-file/lib/tests/l1/path_lookup_guard.rs
+  - biscuit-file/lib/tests/l1/main.rs
+  - biscuit-file/lib/Cargo.toml
+  - biscuit-file/cli/tests/cli_tests.rs
+  - biscuit-file/cli/Cargo.toml
+  - claudine/lib/tests/l1/path_lookup_guard.rs
+  - claudine/lib/tests/l1/main.rs
+  - claudine/lib/Cargo.toml
+  - claudine/cli/tests/l1/path_lookup_guard.rs
+  - claudine/cli/tests/l1/main.rs
+  - claudine/cli/Cargo.toml
+  - biscuit-file/lib/src/file_reference/context.rs
+  - biscuit-file/lib/tests/l1/resolution_context.rs
+  - Cargo.lock
+  - claudine/lib/src/config/antigravity.rs
+  - claudine/lib/src/config/backup.rs
+  - claudine/lib/src/config/claude.rs
+  - claudine/lib/src/config/codex.rs
+  - claudine/lib/src/config/gemini.rs
+  - claudine/lib/src/config/goose.rs
+  - claudine/lib/src/config/kilo.rs
+  - claudine/lib/src/config/kimicode.rs
+  - claudine/lib/src/config/mod.rs
+  - claudine/lib/src/config/opencode.rs
+  - claudine/lib/src/config/pi.rs
+  - claudine/lib/src/config/qwen.rs
+  - claudine/lib/src/dispatch/loader.rs
+  - claudine/lib/src/linking/paths.rs
+  - claudine/lib/src/mcp/import.rs
+  - claudine/lib/src/mcp/types.rs
+  - claudine/lib/src/messaging/resolve.rs
+  - claudine/lib/src/model_catalog/cache.rs
+  - claudine/lib/src/permissions/context.rs
+  - claudine/lib/src/protect/path.rs
+  - claudine/lib/src/protect/scrub.rs
+  - claudine/lib/src/protect/service.rs
+  - claudine/lib/src/protect/service/tests.rs
+  - claudine/lib/src/provider/claude/behavior.rs
+  - claudine/lib/src/provider/codex/behavior.rs
+  - claudine/lib/src/provider/gemini/behavior.rs
+  - claudine/lib/src/provider/opencode/behavior.rs
+  - claudine/lib/src/reporting/paths.rs
+  - claudine/lib/src/system_prompt/resolve/tests.rs
+  - claudine/lib/tests/l1/context_construction_guard.rs
+  - claudine/cli/src/commands/uninstall.rs
+  - claudine/cli/src/commands/wrap/composition/timeouts.rs
+  - claudine/cli/src/commands/wrap/exec/stream_capture.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/requeue.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/mod.rs
+  - claudine/cli/src/commands/wrap/profile/gemini.rs
+  - claudine/cli/src/commands/wrap/profile/opencode.rs
+  - claudine/cli/src/completion/scopes/tests.rs
+  - claudine/cli/tests/l1/context_construction_guard.rs
+  - claudine/cli/tests/l1/home_lookup_round_trip.rs
+  - claudine/cli/tests/level2/level2_provider_overlay_capture.rs
+  - darkmatter/lib/src/markdown/compose/context/request.rs
+  - darkmatter/lib/tests/l1/context_construction_guard.rs
+  - darkmatter/lib/tests/l1/nested_composition.rs
+  - biscuit-file/lib/src/file_reference/glob/roots.rs
+  - claudine/cli/src/commands/compose/interrupt.rs
+  - claudine/cli/src/completion/autocomplete_ui.rs
+  - claudine/lib/src/composition/error/render/mod.rs
+  - claudine/lib/src/composition/schema/status_render.rs
+  - claudine/lib/src/invocation_context.rs
+  - claudine/lib/src/mcp/state.rs
+  - claudine/lib/src/provider_overlay/tests.rs
+  - claudine/lib/src/provider_overlay/write_back.rs
+  - claudine/lib/src/render/prompt/system.rs
+  - claudine/lib/src/render/prompt/system/tests.rs
+  - darkmatter/cli/tests/l1/compose_transclusion.rs
+  - darkmatter/lib/src/markdown/compose/cache/hashing.rs
+  - darkmatter/lib/src/markdown/compose/context/report.rs
+  - darkmatter/lib/src/markdown/compose/expression/path_projection.rs
+  - darkmatter/lib/src/markdown/compose/file_links/discovery.rs
+  - darkmatter/lib/src/markdown/compose/link_resolve.rs
+  - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+  - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+  - darkmatter/lib/src/markdown/compose/preflight/mod.rs
+  - darkmatter/lib/src/markdown/compose/tests/frontmatter.rs
+  - darkmatter/lib/src/markdown/compose/transclusion/resolver.rs
+  - darkmatter/lib/src/markdown/mod.rs
+  - darkmatter/lib/src/markdown/schemas/resolve.rs
+  - darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
+  - darkmatter/lib/tests/l1/suggest_constraint_phase4.rs
+  - darkmatter/lib/tests/l1/unknown_identifier_warning.rs
+  - darkmatter/lib/tests/level2/level2_render_tree_terminal/file_links.rs
+  - biscuit-file/lib/tests/l1/implicit_relative.rs
+  - claudine/lib/src/provider_overlay/selector.rs
+  - claudine/cli/tests/common/completion.rs
+  - claudine/cli/tests/l1/completion_compose.rs
+  - claudine/cli/tests/l1/compose_prompt_tiers.rs
+  - claudine/cli/tests/l1/level1_provider_overlay_home.rs
+  - claudine/cli/tests/l1/mcp_cli.rs
+  - claudine/cli/tests/l1/propagated_context_fixtures.rs
+  - darkmatter/lib/src/markdown/compose/link_normalization.rs
+  - darkmatter/lib/tests/l1/link_interpolation_integration.rs
+documentation:
+  - biscuit-file/docs/topics/file-references.md
+  - .claude/skills/biscuit-file/references/file-references.md
+  - .claude/skills/biscuit-file/SKILL.md
+  - .claude/skills/os/windows.md
+  - biscuit-file/docs/dependencies.md
+  - claudine/docs/topics/repo-isolation.md
+  - claudine/docs/topics/system-prompt.md
+  - .claude/skills/os/macos.md
+  - biscuit-file/README.md
+  - claudine/docs/topics/file-referencing.md
+  - darkmatter/docs/topics/compose-requests.md
+  - .claude/skills/biscuit-file/references/api.md
+  - .claude/skills/biscuit-file/references/architecture.md
+  - .claude/skills/claudine/SKILL.md
+  - .claude/skills/darkmatter/SKILL.md
+completed_phase: 6
+implemented: true
 ---
 
 # Implementation Log for 2026-08-30-path-spelling (6 phases)
@@ -1091,3 +1249,193 @@ confirmed to contain only those edits and were reverted with
 `git checkout --`; the main checkout's `git status` is clean. The edits were
 then re-applied in the worktree with absolute paths. The skill gained one
 sentence noting that the trap redirects edits as well as test runs.
+
+## Phase 6
+
+Phase 6 brings the docs, READMEs, and skills in line with the code from Phases
+2-5, runs a comment-drift pass over the changed symbols, and does the final
+verification. The drift pass turned up stale Windows test gates, which were
+re-enabled (see "Re-enabled Windows tests"). That is the only change in this
+phase that alters test behavior.
+
+### Docs
+
+- `biscuit-file/docs/topics/file-references.md`
+  - **Home section:** a Mermaid flow for `home_dir()` (OS → `HOME` /
+    `USERPROFILE` → profile fallback → absolute check → home or
+    `MissingHomeContext`), why `dirs::home_dir()` is not used, and an example
+    of capturing the home once per request.
+  - **New "Canonicalizing Paths" section:** what the verbatim `\\?\` form
+    breaks, `canonicalize_simplified` with an example, the
+    "leaves the comparison → helper" rule with a private-comparison example,
+    the cache-key rule (every producer, including fallbacks), a Mermaid
+    decision flow, and what the `path_lookup_guard` source guard enforces.
+    No feature or fix directory is named.
+- `darkmatter/docs/topics/compose-requests.md`: `from_process` reads
+  `biscuit_file::home_dir()`; a relative home is no home. The examples were
+  checked against the built `md`: with a fixture `HOME`, `::file ~/x.md`
+  transcludes the file, and with `HOME=relative` it fails with
+  `missing-context`.
+- `claudine/docs/topics/file-referencing.md`: the home behind `~` is the
+  same one Claudine uses for its own files (`HOME`, `USERPROFILE` on Windows,
+  relative → none), with a `USERPROFILE` round-trip example and a link to
+  biscuit-file's Home section.
+- `biscuit-file/README.md`: new "Canonical Paths and the Home Directory"
+  section. The Claudine and Darkmatter READMEs do not describe home lookup or
+  canonicalization, so they are unchanged. No dependency changed in a way
+  `docs/dependencies.md` records (see the `dirs` note below), so it is
+  unchanged.
+
+### Skills
+
+- `.claude/skills/biscuit-file/references/api.md`: new "Canonicalization and
+  home" subsection (signatures, rule, `home_dir` contract).
+- `.claude/skills/biscuit-file/references/architecture.md`: **drift fixed.**
+  The `file-reference` feature row listed `dirs`, which Phase 4 removed; it
+  now lists `gix`, `walkdir`, `globset`, `url`, matching `Cargo.toml`.
+- `.claude/skills/claudine/SKILL.md`: home and canonicalization rules,
+  the guards, and "do not gate fixture-home tests `cfg(unix)`".
+- `.claude/skills/darkmatter/SKILL.md`: the same rules for Darkmatter.
+- `.claude/skills/os/windows.md` trap 2: **drift fixed.** It still said
+  "`biscuit_file::home_dir()` itself still asks the known folder" and
+  "Claudine's provider overlay still resolves through the known folder".
+  Both stopped being true in Phase 4. It now states the current behavior, says
+  the stale gates were re-enabled, and warns that a helper setting only `HOME`
+  still reaches the real profile on Windows.
+
+### Comment drift (code is right, comments were stale)
+
+| Site | Stale claim | Resolution |
+| --- | --- | --- |
+| `claudine/lib/src/provider_overlay/selector.rs` `OVERLAY_DIR_ENV` | exists "because native Windows ... ignores `USERPROFILE`" | rewritten: it keeps overlays out of the home without moving the home |
+| `claudine/lib/src/provider_overlay/tests.rs` (override test doc) | same claim | rewritten |
+| `claudine/cli/tests/l1/level1_provider_overlay_home.rs` | "the known-folder home ignores its fixture `USERPROFILE`" | removed the reason; the explicit roots stay as their own coverage |
+| `claudine/cli/tests/level2/level2_provider_overlay_capture.rs` | "The known-folder profile would otherwise supply both roots" | rewritten (comment only; L2 test unchanged) |
+| `biscuit-file/lib/tests/l1/implicit_relative.rs` ×2 | Windows "known-folder API", "shared cross-platform provider" | now: Windows reads `USERPROFILE`, never `HOME`; `home_dir()` falls back to the platform profile lookup |
+| Darkmatter `RequestSnapshot::from_process` | (the known one from the plan) | already fixed in Phase 4; re-checked, accurate |
+
+`claudine/cli/src/commands/init/mod.rs` still calls `dirs::home_dir()`, but
+only inside `#[cfg(test)]` code, which the guard excludes by design (R3). It
+is unchanged. The `requeue.rs` and `shell_expansion/probe.rs` known-folder
+comments are about `%APPDATA%` and the Documents folder, not the home, and
+are still correct.
+
+### Re-enabled Windows tests (deviation: test behavior, not only docs)
+
+Before Phase 4 these tests were turned off on Windows with the reason "fixture
+home cannot replace the known folder". Since Phase 4, every Claudine home read
+honors `USERPROFILE`, and `CliProcessFixture` sets both `HOME` and
+`USERPROFILE`. The stated reason is therefore false, and leaving tests off
+for a false reason is debt. Gates with an independent reason were kept.
+
+| File | Change |
+| --- | --- |
+| `claudine/cli/tests/l1/compose_prompt_tiers.rs` | 7 `cfg(not(windows))` gates and the `rendered_search_roots` helper gate removed; module doc rewritten; the symlink test keeps `cfg(unix)` for its Unix symlink API only |
+| `claudine/cli/tests/l1/completion_compose.rs` | `compose_path_shaped_magic_offers_user_tier_from_plain_repo_under_home` ungated |
+| `claudine/cli/tests/common/completion.rs` | `run_complete_with_home` now sets `USERPROFILE` as well as `HOME`. Without it the re-enabled test, and every `run_complete` caller, would read the real profile on Windows |
+| `claudine/cli/tests/l1/propagated_context_fixtures.rs` | `isolated_fixture_can_opt_in_to_user_prompt_discovery` ungated; its doc ("inertness is the specified native behavior") contradicted R1 and was deleted. The provider stub is already cross-platform (`.cmd` on Windows) |
+| `claudine/cli/tests/l1/mcp_cli.rs` | the 9 tests marked "requires Unix HOME isolation" are ungated, along with their seed helpers and imports. Tests using `#!/bin/sh` provider stubs keep `cfg(unix)` (an independent reason). The repo-key fixture now uses `canonicalize_simplified`, the spelling production keys use since Phase 5 |
+
+### Darkmatter test expectations and the `dirs` dependency
+
+Three Darkmatter tests built their expected home with `dirs::home_dir()`
+while the code under test uses `biscuit_file::home_dir()`:
+`link_normalization.rs` `a_target_under_home_is_home_rooted`,
+`path_projection.rs` `home_aliased_when_under_home`, and
+`tests/l1/link_interpolation_integration.rs` `test_home_dir_interpolation`.
+They now use the same reader, as Phase 4 did for `nested_composition.rs`.
+Those were the last uses of `dirs` in the Darkmatter library, so `dirs = "6"`
+was removed from `darkmatter/lib/Cargo.toml` (`Cargo.lock` loses one edge).
+`dirs` stays in the workspace (claudine-cli, zed-dmls-cli). The root
+`docs/dependencies.md` does not list per-crate edges for darkmatter lib, and
+`darkmatter/docs/dependencies.md` never listed `dirs` for the library, so
+neither doc changes.
+
+Side finding, unchanged: `test_home_dir_interpolation` writes
+`integration_test_home.txt` into the real home directory. It should use a
+captured fixture home. Recorded under "Separate work".
+
+### Requirement-to-test mapping (Phase 6)
+
+| Requirement | Evidence |
+| --- | --- |
+| Docs describe the home policy and the canonicalization rule | doc review above; Darkmatter examples checked against `target/debug/md` (fixture home transcludes; relative home → `missing-context`) |
+| Docs and skills that tests read still satisfy those tests | test-toolkit (460/461; its skill-reading units pass), and claudine and darkmatter `just test` (their doc and skill contract tests) |
+| Re-enabled tests still pass where they ran before | claudine `just test` on macOS: 8112/8112 |
+| Re-enabled tests compile for Windows | `cargo check --tests --target x86_64-pc-windows-gnu` (claudine-cli, darkmatter, biscuit-file): 0 errors; MSVC build and archive on build-win-native succeeded (below) |
+| Darkmatter expectations use the production reader | the three tests pass in darkmatter `just test` |
+| No new test target or tier marker | none added. Re-enabled tests live in existing `tests/l1/` modules declared in `main.rs`; `test_layout` / `test_placement` pass |
+
+### Results (macOS)
+
+| Area | `just test` | `just lint` |
+| --- | --- | --- |
+| biscuit-file | pass, 1087 run, 1087 passed | pass |
+| claudine | pass, 8112 run, 8112 passed, 9 skipped | pass |
+| darkmatter | 8903 run, 8900 passed. The 2 **pre-existing** failures (`current_root_documentation_contract`, `current_root_migration_guard`) are unchanged: they report the same missing `.claude/skills/claudine/` content as in Phase 1, and the paragraph added here does not affect them. `md_entry_points_agree_on_every_reference` timed out at 30 s, as in Phases 4 and 5 | pass (including the zed-dmls wasm check) |
+| test-toolkit (narrowed cell) | 461 run, 460 passed. The **pre-existing** `archive_path_guard` failure lists the same 8 `context_construction_guard.rs` sites as Phase 3 (claudine lib/cli/gen, darkmatter lib/cli/dmls, messenger lib/cli use `env!("CARGO_MANIFEST_DIR")`) | — |
+
+`just test-l2` was not run. The only L2 edit this phase is a comment in
+`level2_provider_overlay_capture.rs`, which `just lint` compiles.
+
+`just ci-local --plan`: 117 cells marked `execute ci`. The branch is 1429
+files ahead of `origin/main`, so almost every cell comes from earlier branch
+work. This phase adds narrowed cells for test inputs it touched: test-toolkit
+L1 (the skill files) and biscuit-terminal-cli / zed-dmls-cli test-input cells
+caused by earlier branch changes. Per the CLAUDE.md duration table, more than
+30 cells means about 60-100 min for the pull request run.
+
+### Evidence gaps
+
+- **Native Windows.** `just cross-check claudine-cli --os windows
+  compose_prompt_tiers mcp_cli completion_compose propagated_context_fixtures
+  level1_provider_overlay_home` compiled every re-enabled test with MSVC on
+  build-win-native and archived it (build `c183d58ee4fb2b2f`). The consume
+  step then stopped at the storage preflight: **33.6 GiB free** (Phase 5:
+  47.5), 50 GiB floor, automatic sweep freed 0. The floor was not overridden.
+  The re-enabled tests, and every Windows-only behavior from Phases 2-5, have
+  compiled but **not run** on Windows. If one fails on the `windows-latest`
+  cell (push to `main`, or the `ci:all-os` label), fix it forward; do not
+  re-gate it for the home reason.
+- **WSL2 / Linux:** not cross-checked. Nothing in this phase is OS-specific
+  on Linux, and the PR's `ubuntu-latest` cells run every changed test.
+
+### Separate work (outside this fix, unchanged)
+
+- `darkmatter/lib/tests/l1/link_interpolation_integration.rs`
+  `test_home_dir_interpolation` writes into the real home directory.
+- The 8 `env!("CARGO_MANIFEST_DIR")` sites the test-toolkit archive-path
+  guard rejects (Phase 3 finding). This keeps the `test-toolkit` lint cell
+  red on this branch; the fix is a one-line `manifest_dir!()` swap per file.
+- The two pre-existing darkmatter `current_root_*` failures, which need
+  `.claude/skills/claudine/` content from another workstream.
+- Claudine `user_config_path()` falls back to a literal relative
+  `~/.claudine/config.json` when there is no home (Phase 4 finding).
+- `darkmatter/dmls` and `zed-dmls-cli` canonicalize hits (Phase 1 list).
+
+### Incident: Phase 6 edits committed mid-phase
+
+At 13:18 a separate commit process (author identity) committed the working
+tree while this phase was running. Its commits (`7458c3a7a` through
+`e1ddcd346`, with Phase 5 messages) therefore include most Phase 6 edits:
+docs, skills, README, comment fixes, the re-enabled tests, and the `dirs`
+removal. They were verified intact at HEAD. Only the plan, log, and spec
+frontmatter updates written after that point are uncommitted. A reviewer
+reading those commits will find Phase 6 changes under Phase 5 subjects.
+
+### Rulings, deviations, and mutation checks (whole fix)
+
+- Rulings: R1-R7 as in Phase 1 (all defaults accepted, `yolo: true`).
+- Deviations from the spec or plan, with docs corrected and the spec left as
+  is: one guard per package instead of one cross-package guard (Phase 3); no
+  Claudine home wrapper, and CLI wrap sites read the shared reader at their
+  own point (Phase 4); `invocation_context::canonical_key` converted rather
+  than excepted (Phase 5); stale Windows test gates re-enabled and Darkmatter's
+  unused `dirs` dependency removed (Phase 6).
+- Mutation checks: last-wins dedupe and removed drive-letter folding (Phase
+  2); a reintroduced raw call fails the guard with `file:line` (Phases 3 and 5);
+  `home_dir()` reading only `USERPROFILE` fails both conflicting-variable
+  tests (Phase 4). Each mutated file was restored from a copy and the restore
+  checked with `git diff`.
+
+Status: implementation complete, ready for review.
