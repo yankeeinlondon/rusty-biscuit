@@ -440,4 +440,17 @@ mod tests {
         let dyn_err: &(dyn std::error::Error + 'static) = &err;
         assert!(as_block_error(dyn_err).is_none());
     }
+
+    #[test]
+    fn escaped_message_renders_its_code_span_without_backslashes() {
+        use biscuit_terminal::components::prose::Prose;
+        use biscuit_terminal::components::renderable::TerminalRenderable;
+
+        let rendered = strip_escape_codes(
+            Prose::new(Prose::escape_text_outside_code_spans("glob `docs/*.md` and *not* <this>")).render_optimistic(Some(80)),
+        );
+        assert!(rendered.contains("docs/*.md"), "{rendered}");
+        assert!(rendered.contains("*not* <this>"), "{rendered}");
+        assert!(!rendered.contains('\\'), "{rendered}");
+    }
 }

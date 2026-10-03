@@ -511,8 +511,10 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
                 StatusBlock::new(StatusState::Error)
                     .error_header(ErrorHeader::new("TransclusionError", "directive parse failed"))
                     .body(body)
+                    // The hint is Prose markup: `\` before the newline keeps
+                    // the two lines apart (a bare newline is a soft break).
                     .hint(format!(
-                        "Error: {message}\nCheck syntax: <cyan>::file path=\"...\"</cyan>"
+                        "Error: {message}\\\nCheck syntax: <cyan>::file path=\"...\"</cyan>"
                     ))
             }
 
@@ -634,7 +636,7 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
                         "condition evaluation failed",
                     ))
                     .body(body)
-                    .hint(format!("Error: {}", Prose::escape_text(&cause.to_string())))
+                    .hint(format!("Error: {}", Prose::escape_text_outside_code_spans(&cause.to_string())))
             }
 
             TransclusionError::ConditionParse {
@@ -654,12 +656,12 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
                 StatusBlock::new(StatusState::Error)
                     .error_header(ErrorHeader::new("TransclusionError", "condition parse failed"))
                     .body(body)
-                    .hint(format!("Error: {}", Prose::escape_text(message)))
+                    .hint(format!("Error: {}", Prose::escape_text_outside_code_spans(message)))
             }
 
             TransclusionError::Relevel(message) => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("TransclusionError", "re-leveling failed"))
-                .body(Prose::escape_text(message))
+                .body(Prose::escape_text_outside_code_spans(message))
                 .hint("Check that transcluded headings do not push past H6."),
 
             TransclusionError::UrlExecutionDisabled { url } => StatusBlock::new(StatusState::Error)
@@ -678,7 +680,7 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
                 .body(format!(
                     "Fetching <cyan>{}</cyan> failed: {}",
                     Prose::escape_text(url),
-                    Prose::escape_text(reason)
+                    Prose::escape_text_outside_code_spans(reason)
                 ))
                 .hint("Check the URL, the allowed-hosts policy, and network availability."),
 
@@ -703,7 +705,7 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
                         "invalid frontmatter assignment",
                     ))
                     .body(body)
-                    .hint(format!("Error: {}", Prose::escape_text(reason)))
+                    .hint(format!("Error: {}", Prose::escape_text_outside_code_spans(reason)))
             }
 
             TransclusionError::InvalidReassignedFrontmatterProperty { ctx, line, name } => {

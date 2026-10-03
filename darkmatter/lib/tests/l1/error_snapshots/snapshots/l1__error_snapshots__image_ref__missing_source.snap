@@ -1,9 +1,9 @@
 ---
-source: darkmatter/lib/tests/error_snapshots/image_ref.rs
+source: darkmatter/lib/tests/l1/error_snapshots/image_ref.rs
 expression: out
 ---
 ⤫ ImageRefError: missing source
 ┃ 
-┃ Image reference must define either `src` or `srcset`.
+┃ Image reference must define either src or srcset.
 ┃ 
 ┃ Set src="..." or srcset="..." on the image.

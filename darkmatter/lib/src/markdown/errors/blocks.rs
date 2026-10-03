@@ -364,7 +364,7 @@ pub(crate) fn interpolation_block(
             let mut body = vec![Prose::new(format!(
                 "{scope} failed to evaluate <dim>{}</dim>:\n\n{}",
                 code_span(expression),
-                Prose::escape_text(&cause.to_string())
+                Prose::escape_text_outside_code_spans(&cause.to_string())
             ))];
             match source {
                 SourceRef::OnDisk(ctx) if ctx.display != std::path::Path::new("unknown") => {
@@ -400,7 +400,7 @@ pub(crate) fn interpolation_block(
             let mut body = vec![Prose::new(format!(
                 "{scope} holds <dim>{}</dim>, which is not a valid literal token:\n\n{}",
                 code_span(expression),
-                Prose::escape_text(&reason.to_string())
+                Prose::escape_text_outside_code_spans(&reason.to_string())
             ))];
             push_on_disk_locus(&mut body, key, expression, source);
             StatusBlock::new(StatusState::Error)
@@ -416,7 +416,7 @@ pub(crate) fn interpolation_block(
             let mut body = vec![Prose::new(format!(
                 "{scope} failed to evaluate <dim>{}</dim>:\n\n{}",
                 code_span(expression),
-                Prose::escape_text(&other.to_string())
+                Prose::escape_text_outside_code_spans(&other.to_string())
             ))];
             push_on_disk_locus(&mut body, key, expression, source);
             if let ExpressionError::GlobReference { source, .. } = other {
@@ -590,7 +590,7 @@ pub(crate) fn malformed_stored_hash_block(property: &str, reason: &str) -> Statu
     let body = format!(
         "<dim>Property:</dim> <inverse>{}</inverse>\n{}",
         Prose::escape_text(property),
-        Prose::escape_text(reason),
+        Prose::escape_text_outside_code_spans(reason),
     );
     StatusBlock::new(StatusState::Error)
         .error_header(ErrorHeader::new("MarkdownError", "malformed stored hash"))
@@ -602,7 +602,7 @@ pub(crate) fn malformed_stored_hash_block(property: &str, reason: &str) -> Statu
 pub(crate) fn malformed_disclosure_block(reason: &str, range: &std::ops::Range<usize>) -> StatusBlock {
     let body = format!(
         "<dim>Reason:</dim> {}\n<dim>Range:</dim> {}..{}",
-        Prose::escape_text(reason),
+        Prose::escape_text_outside_code_spans(reason),
         range.start,
         range.end
     );
@@ -622,7 +622,7 @@ pub(crate) fn parameter_binding_block(
         "<dim>Property:</dim> <inverse>{}</inverse>\n<dim>Value:</dim> {}\n{}",
         Prose::escape_text(property),
         Prose::escape_text(provided),
-        Prose::escape_text(reason),
+        Prose::escape_text_outside_code_spans(reason),
     );
     StatusBlock::new(StatusState::Error)
         .error_header(ErrorHeader::new("MarkdownError", "parameter binding failed"))
@@ -656,7 +656,7 @@ pub(crate) fn schema_validation_failed_block(
 
     // Description line when present
     if let Some(desc) = description {
-        body_lines.push(format!("<i><dim>{}</dim></i>", Prose::escape_text(desc)));
+        body_lines.push(format!("<i><dim>{}</dim></i>", Prose::escape_text_outside_code_spans(desc)));
     }
 
     // Preparation failures arrive with an empty problem list; render the
@@ -675,7 +675,7 @@ pub(crate) fn schema_validation_failed_block(
         body_lines.push(format!(
             "<red>{}</red>: {}",
             Prose::escape_text(label),
-            Prose::escape_text(detail),
+            Prose::escape_text_outside_code_spans(detail),
         ));
 
         return StatusBlock::new(StatusState::Error)
@@ -722,11 +722,11 @@ pub(crate) fn schema_validation_failed_block(
             ),
             ValidationProblemKind::Type => format!(
                 "<red>type</red> <inverse>{target}</inverse>: {}{loc}{arm}",
-                Prose::escape_text(&problem.message)
+                Prose::escape_text_outside_code_spans(&problem.message)
             ),
             ValidationProblemKind::Invalid => format!(
                 "<red>invalid</red> <inverse>{target}</inverse>: {}{loc}{arm}",
-                Prose::escape_text(&problem.message)
+                Prose::escape_text_outside_code_spans(&problem.message)
             ),
         };
 
@@ -736,7 +736,7 @@ pub(crate) fn schema_validation_failed_block(
         // the document-level `description:` line above already uses. Enrichment
         // suppressed empty / message-equal descriptions, so a `Some` renders.
         if let Some(desc) = &problem.description {
-            body_lines.push(format!("<i><dim>{}</dim></i>", Prose::escape_text(desc)));
+            body_lines.push(format!("<i><dim>{}</dim></i>", Prose::escape_text_outside_code_spans(desc)));
         }
         if let Some(reference) = &problem.file_reference {
             body_lines.push(format!(
@@ -1158,10 +1158,9 @@ mod tests {
         let out = render_block(&theme_load_block("unknown theme `neon`"));
         assert!(out.contains("MarkdownError"), "missing header type: {out}");
         assert!(out.contains("theme load failed"), "missing summary: {out}");
-        assert!(
-            out.contains("unknown theme `neon`"),
-            "missing message: {out}"
-        );
+        // The message's code span renders as styled text; stripping the
+        // styling leaves the bare name.
+        assert!(out.contains("unknown theme neon"), "missing message: {out}");
     }
 
     #[test]

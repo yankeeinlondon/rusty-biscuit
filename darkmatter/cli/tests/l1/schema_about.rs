@@ -633,3 +633,21 @@ fn schema_about_emits_table_stripes_when_color_is_enabled() {
         "schema about tables should emit background stripes when color is enabled"
     );
 }
+
+/// A trigger grammar form sits in an inline code span, whose contents are
+/// literal, so its brackets must render without Markdown escapes.
+#[test]
+fn schema_about_trigger_grammar_forms_render_literally() {
+    let process = CliProcessFixture::new();
+    let output = process
+        .command()
+        .args(["schema", "about"])
+        .output()
+        .expect("run md schema about");
+    assert!(output.status.success(), "schema about should succeed");
+    let stdout = strip_ansi_codes(&String::from_utf8_lossy(&output.stdout));
+    for form in ["all: [condition, ...]", "match: [arm, ...]"] {
+        assert!(stdout.contains(form), "schema about must show `{form}` literally:\n{stdout}");
+    }
+    assert!(!stdout.contains(r"\["), "a Markdown escape leaked into a code span:\n{stdout}");
+}

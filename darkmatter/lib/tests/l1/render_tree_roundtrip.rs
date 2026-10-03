@@ -550,3 +550,62 @@ fn render_tree_document_json_surface() {
     let json = serde_json::to_string_pretty(&doc).expect("document must serialize");
     insta::assert_snapshot!("document_json_surface", json);
 }
+
+/// Returns the inline children of the document's first paragraph.
+fn first_paragraph_inlines(doc: &Document) -> &[RenderNode] {
+    let paragraph = &roots(doc)[0];
+    assert!(
+        matches!(paragraph.kind, NodeKind::Paragraph { .. }),
+        "expected a paragraph, got {:?}",
+        paragraph.kind
+    );
+    paragraph.children()
+}
+
+/// Counts the `(hard, soft)` line breaks among `nodes`.
+fn breaks(nodes: &[RenderNode]) -> (usize, usize) {
+    let hard = nodes.iter().filter(|node| matches!(node.kind, NodeKind::HardBreak)).count();
+    let soft = nodes.iter().filter(|node| matches!(node.kind, NodeKind::SoftBreak)).count();
+    (hard, soft)
+}
+
+/// A backslash before a newline is a hard break: it folds to `HardBreak`,
+/// renders back to Markdown as `\` + newline, and that output folds to the
+/// same hard break. A bare newline stays a soft break through the same trip.
+#[test]
+fn render_tree_backslash_newline_round_trips_as_hard_break() {
+    let input = "first line\\\nsecond line\nthird line\n";
+    let (doc, diags) = fold_markdown_to_document(SourceDescriptor::Virtual { name: "hard.md".into() }, input);
+    assert!(diags.is_empty(), "{diags:?}");
+    let inlines = first_paragraph_inlines(&doc);
+    assert_eq!(breaks(inlines), (1, 1), "{inlines:?}");
+
+    let markdown = render(&doc).output;
+    assert!(markdown.contains("first line\\\nsecond line"), "{markdown:?}");
+    assert!(!markdown.contains("first line  \n"), "{markdown:?}");
+
+    let (again, diags) =
+        fold_markdown_to_document(SourceDescriptor::Virtual { name: "again.md".into() }, &markdown);
+    assert!(diags.is_empty(), "{diags:?}");
+    let inlines = first_paragraph_inlines(&again);
+    assert_eq!(breaks(inlines), (1, 1), "{inlines:?}");
+}
+
+/// Markdown written by a hard-break `Prose` (its `\` + newline form) folds in
+/// Darkmatter to one hard break per line boundary.
+#[test]
+fn hard_break_prose_markdown_folds_to_hard_breaks() {
+    use biscuit_terminal::components::prose::{LineBreaks, Prose};
+    use renderable::markdown::MarkdownRenderable;
+
+    let markdown = Prose::new("<dim>Command:</dim> run\n<dim>Origin:</dim> body line 3")
+        .with_line_breaks(LineBreaks::Hard)
+        .render_markdown();
+    assert!(markdown.contains("\\\n"), "{markdown:?}");
+
+    let (doc, diags) =
+        fold_markdown_to_document(SourceDescriptor::Virtual { name: "prose.md".into() }, &markdown);
+    assert!(diags.is_empty(), "{diags:?}");
+    let inlines = first_paragraph_inlines(&doc);
+    assert_eq!(breaks(inlines), (1, 0), "{inlines:?}");
+}

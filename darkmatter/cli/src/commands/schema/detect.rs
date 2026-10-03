@@ -164,7 +164,8 @@ fn emit_json_error(message: &str) {
     eprintln!("{}", Prose::new(body).render(&terminal));
 }
 
-/// Escape text so it renders exactly as written inside Prose markup.
+/// Escape text so it renders exactly as written inside Prose markup; code
+/// spans it marks with backticks stay literal.
 fn escape_prose(input: &str) -> String {
-    Prose::escape_text(input)
+    Prose::escape_text_outside_code_spans(input)
 }

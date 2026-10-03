@@ -270,9 +270,11 @@ impl biscuit_terminal::errors::BlockError for ReferenceError {
                 StatusBlock::new(StatusState::Error)
                     .error_header(ErrorHeader::new("ReferenceError", "directive parse failed"))
                     .body(body)
+                    // The hint is Prose markup: `\` before the newline keeps
+                    // the two lines apart (a bare newline is a soft break).
                     .hint(format!(
-                        "Error: {}\nCheck syntax: <cyan>::file path=\"...\"</cyan>",
-                        Prose::escape_text(message)
+                        "Error: {}\\\nCheck syntax: <cyan>::file path=\"...\"</cyan>",
+                        Prose::escape_text_outside_code_spans(message)
                     ))
             }
 
@@ -293,13 +295,13 @@ impl biscuit_terminal::errors::BlockError for ReferenceError {
 
             ReferenceError::Validation(message) => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("ReferenceError", "validation failed"))
-                .body(Prose::escape_text(message))
+                .body(Prose::escape_text_outside_code_spans(message))
                 .hint("Review the reference graph and fix any reported cycles or dangling edges."),
 
             ReferenceError::ReferenceGraphMismatch(err) => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("ReferenceError", "graph out of date"))
                 .body(vec![
-                    Prose::new(Prose::escape_text(&err.headline())),
+                    Prose::new(Prose::escape_text_outside_code_spans(&err.headline())),
                     Prose::new(
                         "<dim>Note:</dim> the prebuilt graph no longer matches this document, its \
                          source, mode, options, or a transcluded child.",

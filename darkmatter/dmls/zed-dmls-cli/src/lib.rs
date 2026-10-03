@@ -721,7 +721,7 @@ pub fn render_lines(lines: &[ReportLine], plain: bool) -> String {
             };
             let text = format!("{prefix}: {}", line.text);
             let markup = if plain {
-                Prose::escape_text(&text)
+                Prose::escape_text_outside_code_spans(&text)
             } else {
                 let tag = match line.level {
                     ReportLevel::Success => "green",
@@ -729,7 +729,7 @@ pub fn render_lines(lines: &[ReportLine], plain: bool) -> String {
                     ReportLevel::Failure => "red",
                     ReportLevel::Info => "dim",
                 };
-                format!("<{tag}>{}</{tag}>", Prose::escape_text(&text))
+                format!("<{tag}>{}</{tag}>", Prose::escape_text_outside_code_spans(&text))
             };
             Prose::new(markup).render(&terminal)
         })

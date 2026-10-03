@@ -76,7 +76,7 @@ pub fn run_triggers(file: &Path, request: &MdRequest) -> Result<()> {
             } else {
                 format!(
                     "<red>defeated</red>: {}",
-                    Prose::escape_text(arm.defeat.as_deref().unwrap_or("condition did not match"))
+                    Prose::escape_text_outside_code_spans(arm.defeat.as_deref().unwrap_or("condition did not match"))
                 )
             };
             emit(&terminal, format!("  - arm {} — {result}", arm.index + 1));
