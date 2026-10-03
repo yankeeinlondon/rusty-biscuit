@@ -1,0 +1,13 @@
+diff --git a/darkmatter/lib/src/markdown/schemas/mod.rs b/darkmatter/lib/src/markdown/schemas/mod.rs
+index 0e676f767..9b5cd80ff 100644
+--- a/darkmatter/lib/src/markdown/schemas/mod.rs
++++ b/darkmatter/lib/src/markdown/schemas/mod.rs
+@@ -65,6 +65,8 @@ mod reference;
+ pub mod resolve;
+ pub mod rewrite;
+ pub mod simplified;
++#[cfg(test)]
++mod spike_engine;
+ pub mod triggers;
+ pub mod validate;
+ 

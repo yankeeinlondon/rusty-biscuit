@@ -301,7 +301,6 @@ fn path_matcher_classifies_representative_lifecycle_paths() {
     ];
     for path in &single_pass {
         assert!(lifecycle::is_single_pass_value(path), "{path:?}");
-        assert!(lifecycle::is_beneath_event(path), "{path:?}");
     }
     let not_single_pass = [
         vec![Key("success")],
@@ -320,25 +319,28 @@ fn path_matcher_classifies_representative_lifecycle_paths() {
     assert!(lifecycle::is_predicate(&[Key("loop"), Key("while")]));
     assert!(!lifecycle::is_predicate(&[Key("when")]));
     assert!(!lifecycle::is_predicate(&[Key("success"), Key("until")]));
-    assert!(!lifecycle::is_beneath_event(&[Key("success")]));
 }
 
-// ── Late-binding roots ──────────────────────────────────────────────────────
+// ── Host globals at the Darkmatter baseline ─────────────────────────────────
 
-fn unknown_identifiers(ctx: &DocumentContext) -> Vec<String> {
+fn undeclared_properties(ctx: &DocumentContext) -> Vec<String> {
     let mut all = crate::diagnostics::frontmatter::diagnostics(ctx);
     all.extend(crate::providers::dsl::diagnostics(ctx));
     all.into_iter()
         .filter(|d| {
-            matches!(&d.code, Some(NumberOrString::String(c)) if c == code::EXPRESSION_UNKNOWN_IDENTIFIER)
+            matches!(&d.code, Some(NumberOrString::String(c)) if c == code::EXPRESSION_UNDECLARED_PROPERTY)
         })
         .map(|d| d.message)
         .collect()
 }
 
+/// DMLS supplies no host descriptors (R7b; Claudine's are parked with R7c), so
+/// a Claudine lifecycle global is an undeclared document property wherever it
+/// appears, beneath a lifecycle event or not: one advisory, never an error.
+/// `current` is a Darkmatter reserved namespace, so it is never reported.
 #[test]
-fn late_binding_roots_are_known_beneath_lifecycle_keys() {
-    let text = concat!(
+fn host_globals_are_undeclared_properties_beneath_lifecycle_keys_and_elsewhere() {
+    let lifecycle = concat!(
         "---\n",
         "failure:\n",
         "    stack:\n",
@@ -350,12 +352,7 @@ fn late_binding_roots_are_known_beneath_lifecycle_keys() {
         "    while: current\n",
         "---\n\nbody\n",
     );
-    with_ctx(text, 1, |ctx| assert_eq!(unknown_identifiers(ctx), Vec::<String>::new()));
-}
-
-#[test]
-fn late_binding_roots_are_unknown_outside_lifecycle_keys() {
-    let text = concat!(
+    let elsewhere = concat!(
         "---\n",
         "$schema:\n",
         "    check: expression\n",
@@ -366,19 +363,19 @@ fn late_binding_roots_are_unknown_outside_lifecycle_keys() {
         "    when: timing\n",
         "---\n\n{{ current }}\n",
     );
-    with_ctx(text, 1, |ctx| {
-        let found = unknown_identifiers(ctx);
-        for root in ["err", "timing"] {
-            assert!(found.iter().any(|message| message.starts_with(&format!("`{root}`"))), "{root}: {found:#?}");
-        }
-        // `current` is a reserved lazy root wherever it appears (spec R29–R33):
-        // it resolves through the invocation's refresh authority, so it is
-        // never unknown, inside a lifecycle key or out.
-        assert!(
-            !found.iter().any(|message| message.starts_with("`current`")),
-            "current is reserved: {found:#?}"
-        );
-    });
+    for text in [lifecycle, elsewhere] {
+        with_ctx(text, 1, |ctx| {
+            let found = undeclared_properties(ctx);
+            for root in ["err", "timing"] {
+                let reports: Vec<_> =
+                    found.iter().filter(|message| message.starts_with(&format!("`{root}`"))).collect();
+                assert_eq!(reports.len(), 1, "{root}: {found:#?}");
+                assert!(reports[0].contains("is an undeclared document property"), "{reports:?}");
+            }
+            assert!(!found.iter().any(|message| message.starts_with("`current`")), "{found:#?}");
+            assert_eq!(found.len(), 2, "{found:#?}");
+        });
+    }
 }
 
 // ── Quick fix ───────────────────────────────────────────────────────────────

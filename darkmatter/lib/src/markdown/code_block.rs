@@ -125,6 +125,23 @@ impl CodeBlock {
         self
     }
 
+    /// Numbers the block's first line `start_line` instead of 1, for code
+    /// excerpted from a larger source. Highlight ranges use the same
+    /// absolute numbering.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use darkmatter::markdown::code_block::CodeBlock;
+    ///
+    /// let block = CodeBlock::yaml("a: 1\nb: 2").with_start_line(12);
+    /// assert_eq!(block.meta().first_line(), 12);
+    /// ```
+    pub fn with_start_line(mut self, start_line: usize) -> Self {
+        self.meta.start_line = Some(start_line);
+        self
+    }
+
     /// Sets the theme override used for this block. When `None` (the
     /// default), the block resolves themes through the page context
     /// (terminal mode or `DarkmatterPage` policy).
@@ -258,6 +275,13 @@ impl CodeBlock {
         });
         if self.layout != Layout::default() {
             node.attrs.set_layout(&self.layout);
+        }
+        if let Some(start_line) = self.meta.start_line {
+            node.attrs.set_hint(
+                crate::markdown::render_tree::code_renderer::CODE_HINTS,
+                crate::markdown::render_tree::code_renderer::START_LINE_HINT,
+                serde_json::Value::from(start_line),
+            );
         }
         node
     }
@@ -940,6 +964,45 @@ mod tests {
             plain.contains("Demo"),
             "expected title in terminal output: {plain:?}"
         );
+    }
+
+    fn excerpt_block() -> CodeBlock {
+        let mut meta = CodeBlockMeta {
+            line_numbering: true,
+            ..Default::default()
+        };
+        meta.highlight.add_line(14);
+        CodeBlock::yaml("a: 1\nb: 2\nc: 3").with_meta(meta).with_start_line(12)
+    }
+
+    /// `start_line` has no fence key, so it must survive the render-tree
+    /// projection through the node's extension hint.
+    #[test]
+    fn start_line_reaches_terminal_render() {
+        let out = TerminalRenderable::render(&excerpt_block(), &Terminal::new_optimistic(80));
+        let plain = crate::testing::strip_ansi_codes(&out);
+        let numbered: Vec<&str> = plain.lines().filter(|l| l.contains(" │ ")).collect();
+        assert_eq!(numbered.len(), 3, "{plain:?}");
+        assert!(numbered[0].trim_start().starts_with("12 │ a: 1"), "{plain:?}");
+        assert!(numbered[2].trim_start().starts_with("14 │ c: 3"), "{plain:?}");
+    }
+
+    #[test]
+    fn start_line_reaches_browser_render() {
+        let html = BrowserRenderable::render_html_fragment(&excerpt_block()).render();
+        assert!(html.contains(r#"<span class="ln">12</span>"#), "{html}");
+        assert!(
+            html.contains(r#"<tr class="highlighted"><td class="ln-gutter"><span class="ln">14</span>"#),
+            "{html}"
+        );
+    }
+
+    /// A block without a start line projects no extension hint, keeping the
+    /// default node identical to its pre-`start_line` shape.
+    #[test]
+    fn default_block_projects_no_start_line_hint() {
+        assert!(CodeBlock::yaml("a: 1").code_node().attrs.data.is_empty());
+        assert!(!excerpt_block().code_node().attrs.data.is_empty());
     }
 
     /// The browser fragment must wrap a rust block in `<pre><code class="language-rust">`.

@@ -175,9 +175,110 @@ No lexical `.`/`..` collapse happens; `dunce`'s refusal is authoritative.
 Lossy by design: non-Unicode data becomes U+FFFD (`Path::to_string_lossy`), and
 on Unix a literal `\` in a filename renders as `/`.
 
-Never use rendered text as a path-identity key — build a comparison
-representation instead. A short root can simplify while its long descendant
-cannot.
+Never use rendered text as a path-identity key — use `PathIdentity` (below).
+A short root can simplify while its long descendant cannot.
+
+## Path Identity
+Source: `biscuit-file/lib/src/file_reference/portable/path_identity.rs` (feature `file-reference`)
+
+```rust
+use std::path::Path;
+use biscuit_file::{PathIdentity, RelativeRoute};
+
+let root = PathIdentity::new(Path::new("/opt/config"));
+PathIdentity::new(Path::new("/opt/config-old/a")).starts_with(&root); // false: whole components
+let target = PathIdentity::new(Path::new("/repo/assets/logo.png"));
+let route: Option<RelativeRoute> = target.relative_from(&PathIdentity::new(Path::new("/repo/docs")));
+// route.parent_hops() == 1, route.forward() == ["assets", "logo.png"]; None across drives/shares
+```
+
+The single prefix/relative-route implementation (Darkmatter's link
+normalization uses it; never write another `ComparisonKey`). Lexical and
+lossless: collapses `.`/`..` on ordinary paths (never above a root; a relative
+path keeps leading `..`), keeps `.`/`..` literal under `\\?\`, equates a
+verbatim drive/share with its legacy spelling (even when too long for `dunce`),
+folds only the drive letter, and never canonicalizes or equates symlink aliases.
+`relative_from(dir)` always treats `dir` as a directory. The Windows grammar is
+a portable UTF-16 parser (`portable::path_identity::windows`), so its tests run
+on every host; a Windows-only test pins it to std's `Prefix` classification.
+
+Resolution and context selection normalize native paths through
+`resolve::normalize_components`, which applies the same rules
+(`portable::path_identity::normalize_native` shares `PathIdentity`'s `apply`)
+and then reduces a dot-free verbatim path with `dunce`. Never hand-roll another
+`..`-popping loop: `Vec::pop` on components removes the root, and
+`PathBuf::push` silently collapses `.`/`..` onto a verbatim buffer.
+`diff_paths` routes through `PathIdentity` after that normalization.
+
+Crate-internal: `portable::text::{render_reference, render_absolute}` is the
+generated-reference text seam. It renders through `try_portable_string`, then
+re-parses and rejects `Unrenderable` (non-Unicode), `ChangesComponents` (Unix
+`\`, literal verbatim dots, Windows names that change without `\\?\`),
+`GrammarMismatch` (`{{…}}` in a name, a leading sigil in a bare name), and
+`NoPortableSpelling`.
+
+## Portable References: `PortablePath`
+Source: `biscuit-file/lib/src/file_reference/portable/{evaluate,strategy,env_anchor,diagnostics}.rs` (feature `file-reference`)
+
+```rust
+use biscuit_file::{FileReference, PortabilityPreference as P, PortablePath, PortablePathError};
+
+let found = PortablePath::from_path("/repo/foo.md")          // or ::from_reference(FileReference)
+    .with_ctx(&ctx)                                          // clone; no discovery, no live reads
+    .with_portable_env(["CONFIG_DIR"])                       // names only; values from ctx env
+    .with_strategy(P::DEFAULT_STRATEGY.iter().cloned())      // replace; [] matches nothing
+    .file_reference()?;                                      // does real work (resolve + verify)
+found.reference();   // &FileReference (also AsRef / into_reference())
+found.strategy();    // &P that matched; P::AbsolutePath => caller warns
+found.attempts();    // &[Attempt { strategy, outcome, rejected }], one per preference tried
+found.findings();    // &[Finding] about the returned reference
+```
+
+- Default: `AuthoredIntent(ALL)`, `SameDirRelative`, `ChildDir`, `PeerDir`,
+  `ImmediateParentDir`, `RepoRoot(None)`, `EnvRootedPath`, `HomeDir`,
+  `AbsolutePath`. Opt-in: `ParentDir`, `ExternalRelativePath` (verified with
+  `allow_external_relative()`), `RepoMultiPath(filter)` (`^`), `MagicPath(filter)`
+  (`@`; a filter must name an `@` root and spellings come from it).
+- Filters are eligibility only (`RepoRoot(Some("docs"))` still writes `&docs/x.md`);
+  bad syntax is `InvalidConfiguration(InvalidFilter)` before any preference runs.
+- Reference inputs: intent forms (`~ @ ^ & vault:`, URL, `%`, leading portable
+  `{{VAR}}`) are kept by `AuthoredIntent`; position forms are resolved
+  (`resolve_detailed`) and rewritten. Minimal churn keeps `./x.md` / bare `x.md`
+  already in the chosen form; results are fixed points. A multi-candidate miss,
+  boundary escape, missing anchor, or probe failure is `UnresolvableInput`
+  (caller keeps the link); URL/`%` without `AuthoredIntent` is
+  `NormalizationUnsupported`.
+- Every candidate is rendered through the crate-internal `text` seam and
+  verified by resolving it in the same context; `@`/`^` need an existing file
+  found first (`Shadowed` otherwise), single-location forms may be missing.
+- Portable names: `PORTABLE_ENV_VARIABLES` (comma list in the evaluation's env)
+  ∪ `with_portable_env`; invalid names → `Finding::InvalidPortableVariableName`.
+  Value must be host-absolute and a whole-component prefix (`EnvAnchorProblem`);
+  deepest wins, then name order.
+- Errors are `Clone` (`ProbeError` keeps path, `ErrorKind`, OS code); every
+  variant has `attempts()` (empty before any preference ran) and `findings()`.
+  A candidate lookup that fails with I/O ends evaluation as `ProbeFailed`, but
+  the failing preference is still the last attempt, with outcome
+  `AttemptOutcome::ProbeFailed(error)` and its earlier `rejected` candidates;
+  a target probe failure has no such attempt.
+  The `reference` in `UnresolvableInput`/`NormalizationUnsupported` is boxed.
+- `with_ctx` + `with_cwd`/`with_base_dir` → `InvalidConfiguration`. Without a
+  context: capture cwd/home/env once, `find_git_root(cwd)`; `with_base_dir`
+  inside a repository must equal its root.
+- A relative directory → `InvalidConfiguration(RelativeDirectory { path })`
+  before any preference runs, from `with_cwd`/`with_base_dir` or from a
+  `with_ctx` context whose `validate()` returns `RelativeContextDirectory`.
+- PortablePath compares paths **lexically**. A caller holding canonical paths
+  (`/private/var/…`, `\\?\C:\…`) next to a context opened with another
+  spelling must re-spell the target first (Darkmatter's
+  `link_normalization::in_context_spelling`). A Windows variable whose value is
+  verbatim (`\\?\C:\…`) never anchors `{{VAR}}/…`: interpolation
+  concatenates text, so verification rejects it (`os` skill, windows.md).
+- Consumer pattern (Darkmatter compose finalization): split `#frag`/`?q`/`:line`
+  off the parsed destination (skip a `\\?\` prefix's `?`), `from_path` +
+  `with_ctx(&source_ctx)`, reattach the suffix; keep the destination and warn
+  on any error. Darkmatter writes an `EnvRootedPath` result as `{{{VAR}}}/…`
+  so recomposing its output is stable.
 
 ## File Detection
 Source: `biscuit-file/lib/src/detect.rs`

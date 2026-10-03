@@ -9,6 +9,7 @@ use darkmatter::markdown::compose::expression::{Expr, ExpressionFinder, parse};
 use serde_json::{Map, Value};
 
 use crate::composition::authored_order::AuthoredOrder;
+use crate::composition::sequence::task::TaskStage;
 
 /// One sequence step's preflight node.
 #[derive(Debug, Clone)]
@@ -60,6 +61,57 @@ pub struct PreflightTask {
     /// diagnostic. This is fixed during preflight because external groups and
     /// task files change both halves independently of the invoking sequence.
     pub diagnostic: TaskDiagnosticProvenance,
+    /// The `setup:`/`teardown:` shell commands sequence approval fixed, which
+    /// execution runs instead of re-evaluating the authored text.
+    pub approved_stack_commands: Vec<ApprovedCommand>,
+}
+
+/// Where a `setup:`/`teardown:` shell command was authored: its stage and its
+/// authored text. Two sites with the same text in the same stage resolve
+/// against the same state at the same moment, so they share bytes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandSiteId {
+    stage: TaskStage,
+    authored: String,
+}
+
+impl CommandSiteId {
+    pub fn new(stage: TaskStage, authored: impl Into<String>) -> Self {
+        Self {
+            stage,
+            authored: authored.into(),
+        }
+    }
+
+    pub fn stage(&self) -> TaskStage {
+        self.stage
+    }
+
+    pub fn authored(&self) -> &str {
+        &self.authored
+    }
+}
+
+/// A command whose exact bytes sequence approval fixed. Execution runs
+/// [`Self::command`]; the authored text is never evaluated again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApprovedCommand {
+    site: CommandSiteId,
+    bytes: String,
+}
+
+impl ApprovedCommand {
+    pub(crate) fn new(site: CommandSiteId, bytes: String) -> Self {
+        Self { site, bytes }
+    }
+
+    pub fn command(&self) -> &str {
+        &self.bytes
+    }
+
+    pub fn site(&self) -> &CommandSiteId {
+        &self.site
+    }
 }
 
 /// Authored source location for diagnostics raised while executing a task.
@@ -189,27 +241,11 @@ fn push_strings(value: &Value, out: &mut Vec<String>) {
     }
 }
 
-/// The first root in `roots` referenced by any `{{ … }}` span of `raw`.
-///
-/// `doc.*` is exempt from the walk for the same reason the lifecycle pre-flight
-/// exempts it: it reaches a literal frontmatter property, not a global.
-pub fn first_unavailable_root(raw: &str, roots: &[&str]) -> Option<String> {
-    for location in ExpressionFinder::find_all_plain(raw) {
-        let Ok(expr) = parse(&location.expression) else {
-            continue;
-        };
-        if let Some(root) = root_in_expr(&expr, roots) {
-            return Some(root);
-        }
-    }
-    None
-}
-
 /// The target-identity roots whose values do not exist when graph-phase shell
 /// commands are resolved, because per-task target selection has not run yet.
 ///
-/// Unlike [`first_unavailable_root`], these are canonical paths, not bare
-/// roots: `ctx` and `env` are legal in a graph-phase command, and only the
+/// Unlike the binding catalog's late globals, these are canonical paths, not
+/// bare roots: `ctx` and `env` are legal in a graph-phase command, and only the
 /// agent/model leaves of each are target-dependent. Static bracket access is
 /// canonicalized to the same path as dotted access before this policy is
 /// applied.
@@ -221,8 +257,8 @@ pub(crate) const TARGET_IDENTITY_ROOTS: &[&str] =
 /// A graph-phase shell command that references the resolved agent or model
 /// would expand a pre-selection value, and sequence preflight resolves bytes
 /// once — execution runs exactly those bytes — so the reference is rejected
-/// rather than expanded. See [`SHELL_UNAVAILABLE_ROOTS`][roots] for the bare
-/// late-binding roots.
+/// rather than expanded. The bare late-binding roots are the binding catalog's
+/// sequence approval scope.
 pub(crate) fn first_target_identity_root(raw: &str) -> Option<String> {
     for location in ExpressionFinder::find_all_plain(raw) {
         let Ok(expr) = parse(&location.expression) else {
@@ -308,45 +344,3 @@ fn member_root(expr: &Expr) -> Option<&str> {
     }
 }
 
-fn root_in_expr(expr: &Expr, roots: &[&str]) -> Option<String> {
-    match expr {
-        Expr::Variable(path) => {
-            let root = path.split('.').next().unwrap_or(path);
-            roots.contains(&root).then(|| root.to_string())
-        }
-        Expr::MemberAccess { base, .. } => {
-            if let Expr::Variable(base_path) = base.as_ref() {
-                let root = base_path.split('.').next().unwrap_or(base_path);
-                if root == "doc" {
-                    return None;
-                }
-            }
-            root_in_expr(base, roots)
-        }
-        Expr::UnaryNot(inner) | Expr::UnaryMinus(inner) | Expr::Paren(inner) => {
-            root_in_expr(inner, roots)
-        }
-        Expr::Binary { left, right, .. } | Expr::Comparison { left, right, .. } => {
-            root_in_expr(left, roots).or_else(|| root_in_expr(right, roots))
-        }
-        Expr::Index { base, index } => {
-            root_in_expr(base, roots).or_else(|| root_in_expr(index, roots))
-        }
-        Expr::FunctionCall { args, .. } => args.iter().find_map(|a| root_in_expr(a, roots)),
-        Expr::Fallback { primary, fallback } => {
-            root_in_expr(primary, roots).or_else(|| root_in_expr(fallback, roots))
-        }
-        Expr::Ternary {
-            condition,
-            then_branch,
-            else_branch,
-        } => root_in_expr(condition, roots)
-            .or_else(|| root_in_expr(then_branch, roots))
-            .or_else(|| root_in_expr(else_branch, roots)),
-        Expr::ArrayLiteral(items) => items.iter().find_map(|item| root_in_expr(item, roots)),
-        Expr::ObjectLiteral(entries) => entries
-            .iter()
-            .find_map(|(_, value)| root_in_expr(value, roots)),
-        Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => None,
-    }
-}

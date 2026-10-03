@@ -27,6 +27,7 @@ use crate::markdown::compose::transclusion::BlockDirective;
 /// registers network egress.
 const REMOTE_READ_FUNCTIONS: &[&str] = &[
     "frontmatter",
+    "try_frontmatter",
     "file_exists",
     "markdown_title",
     "markdown_body_empty",

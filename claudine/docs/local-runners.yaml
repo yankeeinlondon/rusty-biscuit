@@ -1,7 +1,7 @@
 kind: sequence
 template:
     desc: "{{name}} (_binary: {{binary}}, default port: {{default_port}}, site: {{site}}_)"
-list:
+sequence:
     - name: Ollama
       file: ollama.md
       binary: ollama

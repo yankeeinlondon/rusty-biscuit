@@ -158,11 +158,10 @@ const SUBTREE_COMPOSE_BASELINE: &[AllowedSite] = &[
 /// precisely what the rule asks for. Only the argument-less form is banned.
 ///
 /// **Empty, and it stays empty.** Phase 5 retired six ambient captures; the
-/// seventh — `sequence::jit::build_template_preflight_options` — was the last
-/// known R5 gap and review-3 finding 4 closed it: the sequence step now captures
-/// its context once with `capture_for_document(launch_cwd, &markdown)` and reuses
-/// that snapshot through the template shell preflight and the step's
-/// `PrepareOptions`, so the audited commands equal the executed commands even
+/// seventh was the sequence step's own template-preflight option builder. A
+/// sequence step now captures its context once, through its document epoch
+/// (`sequence::jit::step_prepare_options`), and audits and prepares with that
+/// one option set, so the audited commands equal the executed commands even
 /// after the wrapper moves the process CWD to the repo root.
 const AMBIENT_CONTEXT_CAPTURE_BASELINE: &[AllowedSite] = &[];
 
@@ -195,7 +194,7 @@ const PROXY_TRANSITION_SITE_BASELINE: &[AllowedSite] = &[
         calls: 1,
         reason: "PRODUCER — surfaces the single route's `initialize` proxy up to \
                  the composition command's active-document coordinator \
-                 (`compose::prep`) as `SingleCompositionOutcome::initialize_handoff` \
+                 (`compose::prep`) as `SingleCompositionOutcome::handoff` \
                  instead of committing it inside the provider harness, so loop \
                  recognition reruns for the target (R7)",
     },
@@ -307,12 +306,13 @@ struct Occurrence {
 /// allowlisted as such below.
 const PREPARED_CONTEXT_CAPTURE_BASELINE: &[AllowedSite] = &[
     AllowedSite {
-        site: "invocation_context::capture_launch_context",
+        site: "invocation_context::capture_launch_context_in",
         calls: 1,
         reason: "OWNER — the one invocation-owned launch capture: pairs the \
                  launch CWD anchor with the retained launch repository, \
                  topology, environment, and host evidence as a single \
-                 operation (D1/D2)",
+                 operation (D1/D2), and reads Git working state from the \
+                 composition run it is given",
     },
     AllowedSite {
         site: "composition::prepare::derive_compose_context",
@@ -357,12 +357,6 @@ const PREPARED_CONTEXT_CAPTURE_BASELINE: &[AllowedSite] = &[
         calls: 1,
         reason: "library compatibility branch when no shared session context \
                  exists; the session path supplies the launch capture",
-    },
-    AllowedSite {
-        site: "sequence::jit::build_template_preflight_options",
-        calls: 1,
-        reason: "library compatibility branch when no invocation owner was \
-                 supplied; the CLI branch uses the launch capture",
     },
     AllowedSite {
         site: "loop_control::target_launch::rebuild_target_launch",

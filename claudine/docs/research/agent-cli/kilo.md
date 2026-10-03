@@ -1,1121 +1,5352 @@
 ---
 $schema: ./_schema.yaml
+schema_revision: 2
+provider: kilo
 created: 2026-07-02
-last_updated: 2026-07-03
+last_updated: 2026-10-01
 agent: codex
-model: default
-latest_version: "7.4.1"
+model: gpt-6.1-sol
+reasoning_effort: medium
+latest_version: 7.8.3
+versions_examined:
+- 7.3.45
+- 7.8.3
+evidence:
+- claim: yargs-parser 22 defaults and parse/eatArray/defaultValue/extendAliases establish space, equals, restricted short attachments, camel-case aliases, boolean negation, and empty arrays.
+  id: parser-v22
+  limitations: Library source alone does not register Kilo options; Kilo package manifests and lockfiles pin yargs 18 and yargs-parser 22.
+  location: https://github.com/yargs/yargs-parser/blob/v22.0.0/lib/yargs-parser.ts
+  method: source_code
+  observed_on: 2026-10-01
+  version: unknown
+- claim: Registered command and switch declarations in src/index.ts establish spelling, declared type, aliases, and command scope.
+  id: src-index
+  limitations: Attachment behavior and omitted values are defined by yargs-parser; no paid or interactive handler was run.
+  location: https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/index.ts
+  method: source_code
+  observed_on: 2026-10-01
+  version: 7.8.3
+- claim: Registered command and switch declarations in src/cli/cmd/tui.ts establish spelling, declared type, aliases, and command scope.
+  id: src-cli-cmd-tui
+  limitations: Attachment behavior and omitted values are defined by yargs-parser; no paid or interactive handler was run.
+  location: https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/tui.ts
+  method: source_code
+  observed_on: 2026-10-01
+  version: 7.8.3
+- claim: Registered command and switch declarations in src/kilocode/cli/cmd/cloud.ts establish spelling, declared type, aliases, and command scope.
+  id: src-kilocode-cli-cmd-cloud
+  limitations: Attachment behavior and omitted values are defined by yargs-parser; no paid or interactive handler was run.
+  location: https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/kilocode/cli/cmd/cloud.ts
+  method: source_code
+  observed_on: 2026-10-01
+  version: 7.8.3
+- claim: Registered command and switch declarations in src/kilocode/cli/cmd/console.ts establish spelling, declared type, aliases, and command scope.
+  id: src-kilocode-cli-cmd-console
+  limitations: Attachment behavior and omitted values are defined by yargs-parser; no paid or interactive handler was run.
+  location: https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/kilocode/cli/cmd/console.ts
+  method: source_code
+  observed_on: 2026-10-01
+  version: 7.8.3
+- claim: Registered command and switch declarations in src/kilocode/cli/cmd/daemon.ts establish spelling, declared type, aliases, and command scope.
+  id: src-kilocode-cli-cmd-daemon
+  limitations: Attachment behavior and omitted values are defined by yargs-parser; no paid or interactive handler was run.
+  location: https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/kilocode/cli/cmd/daemon.ts
+  method: source_code
+  observed_on: 2026-10-01
+  version: 7.8.3
+- claim: Registered command and switch declarations in src/cli/cmd/db.ts establish spelling, declared type, aliases, and command scope.
+  id: src-cli-cmd-db
+  limitations: Attachment behavior and omitted values are defined by yargs-parser; no paid or interactive handler was run.
+  location: https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/db.ts
+  method: source_code
+  observed_on: 2026-10-01
+  version: 7.8.3
+- claim: Registered command and switch declarations in src/cli/cmd/debug/agent.ts establish spelling, declared type, aliases, and command scope.
+  id: src-cli-cmd-debug-agent
+  limitations: Attachment behavior and omitted values are defined by yargs-parser; no paid or interactive handler was run.
+  location: https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/debug/agent.ts
+  method: source_code
+  observed_on: 2026-10-01
+  version: 7.8.3
+- claim: Registered command and switch declarations in src/cli/cmd/debug/ripgrep.ts establish spelling, declared type, aliases, and command scope.
+  id: src-cli-cmd-debug-ripgrep
+  limitations: Attachment behavior and omitted values are defined by yargs-parser; no paid or interactive handler was run.
+  location: https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/debug/ripgrep.ts
+  method: source_code
+  observed_on: 2026-10-01
+  version: 7.8.3
+- claim: Registered command and switch declarations in src/cli/cmd/debug/ripgrep.ts establish spelling, declared type, aliases, and command scope.
+  id: src-old-cli-cmd-debug-ripgrep
+  limitations: Attachment behavior and omitted values are defined by yargs-parser; no paid or interactive handler was run.
+  location: https://github.com/Kilo-Org/kilocode/blob/67b815466c9ab3e022f16692988673712437b881/packages/opencode/src/cli/cmd/debug/ripgrep.ts
+  method: source_code
+  observed_on: 2026-10-01
+  version: 7.3.45
+- claim: Registered command and switch declarations in src/cli/cmd/export.ts establish spelling, declared type, aliases, and command scope.
+  id: src-cli-cmd-export
+  limitations: Attachment behavior and omitted values are defined by yargs-parser; no paid or interactive handler was run.
+  location: https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/export.ts
+  method: source_code
+  observed_on: 2026-10-01
+  version: 7.8.3
+- claim: Registered command and switch declarations in src/cli/cmd/github.ts establish spelling, declared type, aliases, and command scope.
+  id: src-cli-cmd-github
+  limitations: Attachment behavior and omitted values are defined by yargs-parser; no paid or interactive handler was run.
+  location: https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/github.ts
+  method: source_code
+  observed_on: 2026-10-01
+  version: 7.8.3
+- claim: Registered command and switch declarations in src/kilocode/help-command.ts establish spelling, declared type, aliases, and command scope.
+  id: src-kilocode-help-command
+  limitations: Attachment behavior and omitted values are defined by yargs-parser; no paid or interactive handler was run.
+  location: https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/kilocode/help-command.ts
+  method: source_code
+  observed_on: 2026-10-01
+  version: 7.8.3
+- claim: Registered command and switch declarations in src/cli/cmd/mcp.ts establish spelling, declared type, aliases, and command scope.
+  id: src-cli-cmd-mcp
+  limitations: Attachment behavior and omitted values are defined by yargs-parser; no paid or interactive handler was run.
+  location: https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/mcp.ts
+  method: source_code
+  observed_on: 2026-10-01
+  version: 7.8.3
+- claim: Registered command and switch declarations in src/cli/cmd/models.ts establish spelling, declared type, aliases, and command scope.
+  id: src-cli-cmd-models
+  limitations: Attachment behavior and omitted values are defined by yargs-parser; no paid or interactive handler was run.
+  location: https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/models.ts
+  method: source_code
+  observed_on: 2026-10-01
+  version: 7.8.3
+- claim: Registered command and switch declarations in src/cli/cmd/plug.ts establish spelling, declared type, aliases, and command scope.
+  id: src-cli-cmd-plug
+  limitations: Attachment behavior and omitted values are defined by yargs-parser; no paid or interactive handler was run.
+  location: https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/plug.ts
+  method: source_code
+  observed_on: 2026-10-01
+  version: 7.8.3
+- claim: Registered command and switch declarations in src/cli/cmd/pr.ts establish spelling, declared type, aliases, and command scope.
+  id: src-cli-cmd-pr
+  limitations: Attachment behavior and omitted values are defined by yargs-parser; no paid or interactive handler was run.
+  location: https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/pr.ts
+  method: source_code
+  observed_on: 2026-10-01
+  version: 7.8.3
+- claim: Registered command and switch declarations in src/kilocode/cli/cmd/profile.ts establish spelling, declared type, aliases, and command scope.
+  id: src-kilocode-cli-cmd-profile
+  limitations: Attachment behavior and omitted values are defined by yargs-parser; no paid or interactive handler was run.
+  location: https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/kilocode/cli/cmd/profile.ts
+  method: source_code
+  observed_on: 2026-10-01
+  version: 7.8.3
+- claim: Registered command and switch declarations in src/kilocode/cli/cmd/roll-call.ts establish spelling, declared type, aliases, and command scope.
+  id: src-kilocode-cli-cmd-roll-call
+  limitations: Attachment behavior and omitted values are defined by yargs-parser; no paid or interactive handler was run.
+  location: https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/kilocode/cli/cmd/roll-call.ts
+  method: source_code
+  observed_on: 2026-10-01
+  version: 7.8.3
+- claim: Registered command and switch declarations in src/cli/cmd/run.ts establish spelling, declared type, aliases, and command scope.
+  id: src-cli-cmd-run
+  limitations: Attachment behavior and omitted values are defined by yargs-parser; no paid or interactive handler was run.
+  location: https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/run.ts
+  method: source_code
+  observed_on: 2026-10-01
+  version: 7.8.3
+- claim: Registered command and switch declarations in src/cli/cmd/session.ts establish spelling, declared type, aliases, and command scope.
+  id: src-cli-cmd-session
+  limitations: Attachment behavior and omitted values are defined by yargs-parser; no paid or interactive handler was run.
+  location: https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/session.ts
+  method: source_code
+  observed_on: 2026-10-01
+  version: 7.8.3
+- claim: Registered command and switch declarations in src/cli/cmd/stats.ts establish spelling, declared type, aliases, and command scope.
+  id: src-cli-cmd-stats
+  limitations: Attachment behavior and omitted values are defined by yargs-parser; no paid or interactive handler was run.
+  location: https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/stats.ts
+  method: source_code
+  observed_on: 2026-10-01
+  version: 7.8.3
+- claim: Registered command and switch declarations in src/cli/cmd/uninstall.ts establish spelling, declared type, aliases, and command scope.
+  id: src-cli-cmd-uninstall
+  limitations: Attachment behavior and omitted values are defined by yargs-parser; no paid or interactive handler was run.
+  location: https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/uninstall.ts
+  method: source_code
+  observed_on: 2026-10-01
+  version: 7.8.3
+- claim: Replayed the extracted run option builder with the exact yargs 18 dependency graph, confirming greedy arrays, empty arrays, scalar omission/defaults, aliases, negation, and restricted short attachment without running any provider handler.
+  id: parser-replay
+  limitations: Parser-only fixture; arbitrary extra positional words are not mapped by a native run command registration in this fixture. Native missing-file probes separately confirm file consumption.
+  location: /tmp/kilo-cli-research-20261001/yargs-replay/results.json
+  method: disposable_test
+  observed_on: 2026-10-01
+  version: 7.8.3
+- claim: Recursive native command help confirms public spellings, aliases, command paths and displayed types for this exact released binary.
+  id: help-7-3-45
+  limitations: Help early exit does not establish value consumption; parser declarations and library source supply that evidence. Temporary artifact is local to this research session.
+  location: /tmp/kilo-cli-research-20261001/help-7.3.45.json
+  method: local_inspection
+  observed_on: 2026-10-01
+  version: 7.3.45
+- claim: Recursive native command help confirms public spellings, aliases, command paths and displayed types for this exact released binary.
+  id: help-7-8-3
+  limitations: Help early exit does not establish value consumption; parser declarations and library source supply that evidence. Temporary artifact is local to this research session.
+  location: /tmp/kilo-cli-research-20261001/help-7.8.3.json
+  method: local_inspection
+  observed_on: 2026-10-01
+  version: 7.8.3
 homepage: https://kilo.ai/
 repo: https://github.com/Kilo-Org/kilocode
 docs: https://kilo.ai/docs
 cli_docs: https://kilo.ai/docs/code-with-ai/platforms/cli-reference
 binaries:
-  - os: macos
-    binary: kilo
-    alt_binaries: ["kilocode"]
-    notes: "npm global install exposes both symlinks to @kilocode/cli/bin/kilo; standalone release assets are named kilo-*."
-  - os: linux
-    binary: kilo
-    alt_binaries: ["kilocode"]
-    notes: "npm global install exposes both package bins; standalone release assets are named kilo-*."
-  - os: windows
-    binary: kilo.cmd
-    alt_binaries: ["kilocode.cmd", "kilo.ps1", "kilocode.ps1", "kilo.exe"]
-    notes: "npm global installs normally expose .cmd/.ps1 shims; standalone release archives contain the platform binary."
+- alt_binaries:
+  - kilocode
+  binary: kilo
+  notes: npm bin mapping exposes kilo and kilocode; standalone release binary is kilo.
+  os: macos
+- alt_binaries:
+  - kilocode
+  binary: kilo
+  notes: npm bin mapping exposes kilo and kilocode; standalone release binary is kilo.
+  os: linux
+- alt_binaries:
+  - kilocode
+  - kilo.cmd
+  - kilocode.cmd
+  - kilo.ps1
+  - kilocode.ps1
+  - kilo.exe
+  binary: kilo
+  notes: npm bin mapping installs kilo and kilocode; standalone Windows artifact supplies kilo.exe.
+  os: windows
 install_methods:
-  - os: macos
-    method: npm
-    command: "npm install -g @kilocode/cli"
-    notes: "Official CLI docs and README list npm as the primary install method."
-  - os: linux
-    method: npm
-    command: "npm install -g @kilocode/cli"
-    notes: "Official CLI docs and README list npm as the primary install method."
-  - os: windows
-    method: npm
-    command: "npm install -g @kilocode/cli"
-    notes: "Official package manager method; creates Windows npm shims."
-  - os: macos
-    method: brew
-    command: "brew install Kilo-Org/tap/kilo"
-    notes: "README documents Homebrew for macOS and Linux."
-  - os: linux
-    method: brew
-    command: "brew install Kilo-Org/tap/kilo"
-    notes: "README documents Homebrew for macOS and Linux."
-  - os: macos
-    method: other
-    command: "curl -fsSL https://kilo.ai/cli/install | bash"
-    notes: "README documents curl installer."
-  - os: linux
-    method: other
-    command: "curl -fsSL https://kilo.ai/cli/install | bash"
-    notes: "README documents curl installer."
-  - os: macos
-    method: other
-    command: "pnpm add -g @kilocode/cli"
-    notes: "README documents pnpm global install."
-  - os: linux
-    method: other
-    command: "pnpm add -g @kilocode/cli"
-    notes: "README documents pnpm global install."
-  - os: windows
-    method: other
-    command: "pnpm add -g @kilocode/cli"
-    notes: "README documents pnpm global install."
-  - os: macos
-    method: other
-    command: "bun add -g @kilocode/cli"
-    notes: "README documents Bun global install."
-  - os: linux
-    method: other
-    command: "bun add -g @kilocode/cli"
-    notes: "README documents Bun global install."
-  - os: windows
-    method: other
-    command: "bun add -g @kilocode/cli"
-    notes: "README documents Bun global install."
-  - os: macos
-    method: standalone_binary
-    command: "download kilo-darwin-arm64.zip or kilo-darwin-x64.zip from GitHub Releases"
-    notes: "Use kilo-darwin-x64-baseline.zip for older x64 CPUs without AVX."
-  - os: linux
-    method: standalone_binary
-    command: "download kilo-linux-x64.tar.gz or kilo-linux-arm64.tar.gz from GitHub Releases"
-    notes: "README also notes musl builds for Alpine/minimal containers and baseline builds for older x64 CPUs."
-  - os: windows
-    method: standalone_binary
-    command: "download kilo-windows-x64.zip from GitHub Releases"
-    notes: "Use kilo-windows-x64-baseline.zip for older x64 CPUs without AVX."
-  - os: linux
-    method: other
-    command: "paru -S kilo-bin"
-    notes: "README documents Arch Linux AUR install."
+- command: npm install -g @kilocode/cli
+  method: npm
+  notes: Official package README; platform package supplies native executable.
+  os: macos
+- command: npx --package @kilocode/cli kilo
+  method: other
+  notes: Official README direct-run alternative; may download a package and prompt unless caller arranges non-interactive npm behavior.
+  os: macos
+- method: standalone_binary
+  notes: Download and extract the matching release asset; baseline x64 builds support older CPUs without AVX.
+  os: macos
+- command: brew install Kilo-Org/tap/kilo
+  method: brew
+  notes: Official package README Homebrew alternative.
+  os: macos
+- command: npm install -g @kilocode/cli
+  method: npm
+  notes: Official package README; platform package supplies native executable.
+  os: linux
+- command: npx --package @kilocode/cli kilo
+  method: other
+  notes: Official README direct-run alternative; may download a package and prompt unless caller arranges non-interactive npm behavior.
+  os: linux
+- method: standalone_binary
+  notes: Download and extract the matching release asset; baseline x64 builds support older CPUs without AVX.
+  os: linux
+- command: brew install Kilo-Org/tap/kilo
+  method: brew
+  notes: Official package README Homebrew alternative.
+  os: linux
+- command: npm install -g @kilocode/cli
+  method: npm
+  notes: Official package README; platform package supplies native executable.
+  os: windows
+- command: npx --package @kilocode/cli kilo
+  method: other
+  notes: Official README direct-run alternative; may download a package and prompt unless caller arranges non-interactive npm behavior.
+  os: windows
+- method: standalone_binary
+  notes: Download and extract the matching release asset; baseline x64 builds support older CPUs without AVX.
+  os: windows
 subcommands:
-  - name: "(default TUI)"
-    description: "Starts the Kilo terminal UI, optionally in a project path."
-    non_interactive: false
-    notes: "Usage is `kilo [project]`; first-time provider setup uses interactive `/connect`."
-  - name: completion
-    description: "Generates a yargs shell completion script."
-    non_interactive: true
-    notes: "Observed output is zsh-style and calls `kilo --get-yargs-completions`."
-  - name: acp
-    description: "Starts an Agent Client Protocol server."
-    non_interactive: true
-    notes: "Long-running server command."
-  - name: mcp
-    description: "Manages MCP servers and OAuth flows."
-    non_interactive: false
-    notes: "`mcp list` is inspectable; auth/debug flows can require OAuth/browser interaction."
-  - name: attach
-    description: "Attaches to a running Kilo server URL."
-    non_interactive: false
-    notes: "Requires a server and may attach to interactive session state."
-  - name: run
-    description: "Runs Kilo with a message."
-    non_interactive: true
-    notes: "Automation entry point; use `--auto` and usually `--format json`."
-  - name: debug
-    description: "Troubleshooting tools for config, paths, skills, provider catalog, files, LSP, ripgrep, agents, snapshots, and startup."
-    non_interactive: true
-    notes: "`debug wait` intentionally waits forever; most other debug commands print inspectable state."
-  - name: auth
-    description: "Lists, logs into, or logs out of AI providers and credentials."
-    non_interactive: false
-    notes: "`auth list` is inspectable; `auth login` prompts or launches provider flows."
-  - name: agent
-    description: "Creates or lists agents."
-    non_interactive: false
-    notes: "`agent list` is inspectable; `agent create` may prompt/generate and writes agent files."
-  - name: upgrade
-    description: "Upgrades Kilo to latest or a target version."
-    non_interactive: false
-    notes: "Can invoke package managers; target and `--method` can reduce prompting."
-  - name: uninstall
-    description: "Uninstalls Kilo and optionally removes config/data."
-    non_interactive: false
-    notes: "Use `--dry-run` for inspection and `--force` to avoid confirmation."
-  - name: serve
-    description: "Starts a headless Kilo HTTP server."
-    non_interactive: true
-    notes: "Long-running server command."
-  - name: web
-    description: "Starts a Kilo server and opens the web interface."
-    non_interactive: false
-    notes: "Browser/open side effect."
-  - name: models
-    description: "Lists available models, optionally filtered by provider."
-    non_interactive: true
-    notes: "`--verbose` emits JSON object blocks in text, but there is no JSON-array mode."
-  - name: stats
-    description: "Shows token usage and cost statistics."
-    non_interactive: true
-    notes: "Observed help exposes filters but no JSON mode."
-  - name: export
-    description: "Exports session data as JSON."
-    non_interactive: true
-    notes: "Use `--sanitize` to redact transcript/file data."
-  - name: import
-    description: "Imports session data from a JSON file or share URL."
-    non_interactive: false
-    notes: "Mutates local session storage."
-  - name: github
-    description: "Installs or runs the GitHub agent."
-    non_interactive: false
-    notes: "`github run` can take `--event` and `--token`; install mutates local config."
-  - name: pr
-    description: "Fetches and checks out a GitHub PR branch, then runs Kilo."
-    non_interactive: false
-    notes: "Mutates git working tree state."
-  - name: session
-    description: "Lists or deletes local sessions."
-    non_interactive: true
-    notes: "`session list --format json` is machine-readable; delete mutates storage."
-  - name: plugin
-    description: "Installs a plugin and updates config."
-    non_interactive: false
-    notes: "Runs package installation and mutates config; alias `plug`."
-  - name: db
-    description: "Runs database tools, prints DB path, or migrates JSON data to SQLite."
-    non_interactive: true
-    notes: "Bare `kilo db` opens sqlite shell; pass a query and `--format json` for automation."
-  - name: console
-    description: "Opens the local Kilo Console."
-    non_interactive: false
-    notes: "Browser/UI oriented; `console stop --json` exists in docs but was not present in 7.3.45 top help."
-  - name: roll-call
-    description: "Batch-tests text models matching a regex."
-    non_interactive: true
-    notes: "Machine-readable JSON is available, but it performs live model calls."
-  - name: profile
-    description: "Shows Kilo account profile."
-    non_interactive: true
-    notes: "`--json` exits non-zero when not authenticated."
-  - name: remote
-    description: "Enables remote connection for real-time session relay."
-    non_interactive: false
-    notes: "Requires Kilo Gateway authentication."
-  - name: daemon
-    description: "Starts, stops, restarts, or checks the local daemon."
-    non_interactive: true
-    notes: "`daemon status --json` is machine-readable."
-  - name: config
-    description: "Runs configuration tools."
-    non_interactive: true
-    notes: "`config check` prints warnings/errors."
-  - name: help
-    description: "Shows CLI reference."
-    non_interactive: true
-    notes: "Docs advertise `--all` and `--format`; local 7.3.45 `kilo help --all --format md` emitted only top-level help."
+- description: Start ACP (Agent Client Protocol) server.
+  name: acp
+  non_interactive: false
+  notes: Protocol server remains active; it does not run to completion.
+- description: Manage agents.
+  name: agent
+  non_interactive: false
+  notes: Command group; select a child path.
+- description: Create a new agent.
+  name: agent create
+  non_interactive: false
+  notes: Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: List all available agents.
+  name: agent list
+  non_interactive: true
+  notes: Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: Attach to a running kilo server.
+  name: attach
+  non_interactive: false
+  notes: Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: Manage providers and credentials.
+  name: auth
+  non_interactive: false
+  notes: Command group; select a child path.
+- description: List providers and credentials.
+  name: auth list
+  non_interactive: true
+  notes: Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: Log in to a provider.
+  name: auth login
+  non_interactive: false
+  notes: Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: Log out from a configured provider.
+  name: auth logout
+  non_interactive: true
+  notes: 7.8.3 accepts an explicit provider to avoid selection; 7.3.45 has an interactive provider picker.
+- description: List providers and credentials.
+  name: auth ls
+  non_interactive: true
+  notes: Alias of auth list. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: Run Cloud Agent tasks.
+  name: cloud
+  non_interactive: false
+  notes: Command group; select a child path.
+- description: Show a Cloud Agent task result.
+  name: cloud result
+  non_interactive: true
+  notes: 7.8.3 only; requires --session-id and --message-id and authenticated network access.
+- description: Send a follow-up prompt to a Cloud Agent task.
+  name: cloud send
+  non_interactive: true
+  notes: 7.8.3 only; sends a follow-up to a paid task, requiring --session-id and a prompt input. Not executed.
+- description: Start a Cloud Agent task.
+  name: cloud start
+  non_interactive: true
+  notes: 7.8.3 only; starts a paid remote task. Provide --prompt or --prompt-stdin; --stream follows JSONL events. Not executed.
+- description: Show Cloud Agent task status.
+  name: cloud status
+  non_interactive: true
+  notes: 7.8.3 only; requires --session-id and --message-id and authenticated network access.
+- description: Generate shell completion script.
+  name: completion
+  non_interactive: true
+  notes: Shell completion generator; internal --get-yargs-completions is a shell callback, not an agent session.
+- description: Configuration tools.
+  name: config
+  non_interactive: false
+  notes: Command group; select a child path.
+- description: Check configuration for warnings and errors.
+  name: config check
+  non_interactive: true
+  notes: Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: Open or stop the local Kilo Console (deprecated).
+  name: console
+  non_interactive: false
+  notes: Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: Stop the daemon behind Kilo Console.
+  name: console stop
+  non_interactive: true
+  notes: 7.8.3 only; stops the daemon behind the deprecated Console without opening a browser.
+- description: Manage the local kilo daemon.
+  name: daemon
+  non_interactive: true
+  notes: 7.8.3 defaults to starting a detached daemon and returns; --foreground/-f keeps the caller active. 7.3.45 required a child command.
+- description: Restart the local kilo daemon.
+  name: daemon restart
+  non_interactive: true
+  notes: Returns after restarting detached daemon; --foreground stays active. Mutates daemon state.
+- description: Start or reuse the detached local daemon.
+  name: daemon start
+  non_interactive: true
+  notes: Returns after starting/reusing a detached daemon; --foreground (7.8.3 alias -f) stays active. Mutates daemon state.
+- description: Show local kilo daemon status.
+  name: daemon status
+  non_interactive: true
+  notes: Reports daemon state; --json is suitable for wrappers.
+- description: Stop the local kilo daemon.
+  name: daemon stop
+  non_interactive: true
+  notes: Stops the daemon and returns; --json added in 7.8.3.
+- description: Database tools.
+  name: db
+  non_interactive: true
+  notes: Supply a nonempty SQL query; omission spawns the interactive sqlite3 shell. --format json is available.
+- description: Migrate JSON data to SQLite (merges with existing data).
+  name: db migrate
+  non_interactive: true
+  notes: 7.3.45 only; removed from the 7.8.3 registered command surface. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: Print the database path.
+  name: db path
+  non_interactive: true
+  notes: Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: Debugging and troubleshooting tools.
+  name: debug
+  non_interactive: false
+  notes: Command group; select a child path.
+- description: Show agent configuration details.
+  name: debug agent
+  non_interactive: true
+  notes: Prints agent configuration; --tool executes a real tool using --params and may mutate files.
+- description: Show resolved configuration.
+  name: debug config
+  non_interactive: true
+  notes: Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: File system debugging utilities.
+  name: debug file
+  non_interactive: false
+  notes: Command group; select a child path.
+- description: List files in a directory.
+  name: debug file list
+  non_interactive: true
+  notes: Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: Read file contents as JSON.
+  name: debug file read
+  non_interactive: true
+  notes: Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: Search files by query.
+  name: debug file search
+  non_interactive: true
+  notes: Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: Show file status information.
+  name: debug file status
+  non_interactive: true
+  notes: 7.3.45 only; removed from the 7.8.3 registered command surface. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: Show directory tree.
+  name: debug file tree
+  non_interactive: true
+  notes: 7.3.45 only; removed from the 7.8.3 registered command surface. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: Show debug information.
+  name: debug info
+  non_interactive: true
+  notes: Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: LSP debugging utilities.
+  name: debug lsp
+  non_interactive: false
+  notes: Command group; select a child path.
+- description: Get diagnostics for a file.
+  name: debug lsp diagnostics
+  non_interactive: true
+  notes: Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: Get symbols from a document.
+  name: debug lsp document-symbols
+  non_interactive: true
+  notes: Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: Search workspace symbols.
+  name: debug lsp symbols
+  non_interactive: true
+  notes: Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: Show global paths (data, config, cache, state).
+  name: debug paths
+  non_interactive: true
+  notes: Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: Ripgrep debugging utilities.
+  name: debug rg
+  non_interactive: false
+  notes: Command group; select a child path.
+- description: List files using ripgrep.
+  name: debug rg files
+  non_interactive: true
+  notes: Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: Search file contents using ripgrep.
+  name: debug rg search
+  non_interactive: true
+  notes: Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: Show file tree using ripgrep.
+  name: debug rg tree
+  non_interactive: true
+  notes: 7.3.45 only; removed from the 7.8.3 registered command surface. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: List all known projects.
+  name: debug scrap
+  non_interactive: true
+  notes: Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: List all available skills.
+  name: debug skill
+  non_interactive: true
+  notes: Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: Snapshot debugging utilities.
+  name: debug snapshot
+  non_interactive: false
+  notes: Command group; select a child path.
+- description: Show diff for a snapshot hash.
+  name: debug snapshot diff
+  non_interactive: true
+  notes: Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: Show patch for a snapshot hash.
+  name: debug snapshot patch
+  non_interactive: true
+  notes: Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: Track current snapshot state.
+  name: debug snapshot track
+  non_interactive: true
+  notes: Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: Print startup timing.
+  name: debug startup
+  non_interactive: true
+  notes: Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: Debug v2 catalog and built-in plugins.
+  name: debug v2
+  non_interactive: true
+  notes: Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: Wait indefinitely (for debugging).
+  name: debug wait
+  non_interactive: false
+  notes: Waits indefinitely (source sleeps for a day); excluded from completion-based automation.
+- description: Export session data as JSON.
+  name: export
+  non_interactive: true
+  notes: Supply sessionID; omission opens an interactive session picker when sessions exist.
+- description: Emit the HTTP OpenAPI description as JSON.
+  name: generate
+  non_interactive: true
+  notes: Registered but hidden from root help; emits HTTP OpenAPI JSON, not the CLI/configuration schema.
+- description: Manage GitHub agent.
+  name: github
+  non_interactive: false
+  notes: Command group; select a child path.
+- description: Install the GitHub agent.
+  name: github install
+  non_interactive: false
+  notes: Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: Run the GitHub agent.
+  name: github run
+  non_interactive: true
+  notes: Runs the CI GitHub agent with existing credentials/event context; may execute models and modify a checkout. Not executed.
+- description: Show full CLI reference.
+  name: help
+  non_interactive: true
+  notes: Source declares --all and --format md|text; both releases actually returned only root help in the tested full-reference invocation.
+- description: Import session data from JSON file or URL.
+  name: import
+  non_interactive: true
+  notes: Imports supplied file/share URL into session storage without a picker; writes local data.
+- description: Manage MCP (Model Context Protocol) servers.
+  name: mcp
+  non_interactive: false
+  notes: Command group; select a child path.
+- description: Add an MCP server.
+  name: mcp add
+  non_interactive: true
+  notes: 7.8.3 supports explicit name plus --url or a local command after -- without prompts; otherwise uses a setup wizard. Earlier version uses a wizard.
+- description: Authenticate with an OAuth-enabled MCP server.
+  name: mcp auth
+  non_interactive: false
+  notes: Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: List OAuth-capable MCP servers and their authentication state.
+  name: mcp auth list
+  non_interactive: true
+  notes: Text OAuth status report; does not perform the browser authorization flow.
+- description: List OAuth-capable MCP servers and their authentication state.
+  name: mcp auth ls
+  non_interactive: true
+  notes: Alias of mcp auth list. Text OAuth status report; does not perform the browser authorization flow.
+- description: Debug OAuth connection for an MCP server.
+  name: mcp debug
+  non_interactive: false
+  notes: Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: List MCP servers and their status.
+  name: mcp list
+  non_interactive: true
+  notes: Text status report; configured servers may be contacted or started.
+- description: Remove OAuth credentials for an MCP server.
+  name: mcp logout
+  non_interactive: true
+  notes: Supply a server name to avoid selection; removes OAuth credentials.
+- description: List MCP servers and their status.
+  name: mcp ls
+  non_interactive: true
+  notes: Alias of mcp list. Text status report; configured servers may be contacted or started.
+- description: List all available models.
+  name: models
+  non_interactive: true
+  notes: Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: Install plugin and update config.
+  name: plug
+  non_interactive: true
+  notes: Alias of plugin. Installs packages and edits configuration; no confirmation in the source handler. Alias plug.
+- description: Install plugin and update config.
+  name: plugin
+  non_interactive: true
+  notes: Installs packages and edits configuration; no confirmation in the source handler. Alias plug.
+- description: Manage pull requests.
+  name: pr
+  non_interactive: false
+  notes: 7.8.3 command group; 7.3.45 pr <number> checked out a branch and launched the TUI.
+- description: Fetch and checkout a GitHub PR branch, then run kilo.
+  name: pr checkout
+  non_interactive: false
+  notes: Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: Link a session to a pull request.
+  name: pr link
+  non_interactive: true
+  notes: 7.8.3 only; sets PR metadata for --session/-s or a resolved session.
+- description: Show a session's linked pull request.
+  name: pr status
+  non_interactive: true
+  notes: 7.8.3 only; reports linked PR metadata for --session/-s or a resolved session.
+- description: Clear a session's linked pull request.
+  name: pr unlink
+  non_interactive: true
+  notes: 7.8.3 only; clears PR metadata for --session/-s or a resolved session.
+- description: Show Kilo account profile.
+  name: profile
+  non_interactive: true
+  notes: --json emits JSON on success; unauthenticated state exits 1 with styled stderr.
+- description: Manage providers and credentials.
+  name: providers
+  non_interactive: false
+  notes: Alias of auth. Command group; select a child path.
+- description: List providers and credentials.
+  name: providers list
+  non_interactive: true
+  notes: Alias of auth list. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: Log in to a provider.
+  name: providers login
+  non_interactive: false
+  notes: Alias of auth login. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: Log out from a configured provider.
+  name: providers logout
+  non_interactive: true
+  notes: Alias of auth logout. 7.8.3 accepts an explicit provider to avoid selection; 7.3.45 has an interactive provider picker.
+- description: List providers and credentials.
+  name: providers ls
+  non_interactive: true
+  notes: Alias of auth list. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: Enable remote connection for real-time session relay.
+  name: remote
+  non_interactive: false
+  notes: Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: Batch-test text models matching a filter for connectivity and latency.
+  name: roll-call
+  non_interactive: true
+  notes: Runs live model calls and may incur charges; not executed during this research.
+- description: Run kilo with a message.
+  name: run
+  non_interactive: true
+  notes: One-shot mode with closed stdin; --interactive/-i requires a TTY. Resume via --continue/-c or --session/-s; no native resume subcommand.
+- description: Starts a headless kilo server.
+  name: serve
+  non_interactive: false
+  notes: HTTP server remains active until terminated.
+- description: Manage sessions.
+  name: session
+  non_interactive: false
+  notes: Command group; select a child path.
+- description: Delete a session.
+  name: session delete
+  non_interactive: true
+  notes: Deletes the explicitly named session without confirmation.
+- description: List sessions.
+  name: session list
+  non_interactive: true
+  notes: Use --format json or pipe stdout to avoid the table pager; an empty result is empty stdout, not [].
+- description: Show token usage and cost statistics.
+  name: stats
+  non_interactive: true
+  notes: Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: Uninstall kilo and remove all related files.
+  name: uninstall
+  non_interactive: true
+  notes: Use --dry-run or --force to avoid the confirmation prompt. Destructive without --dry-run.
+- description: Upgrade kilo to the latest or a specific version.
+  name: upgrade
+  non_interactive: false
+  notes: Pass --method to avoid install-method selection; package managers may still prompt or require elevated privileges.
+- description: Start kilo server and open web interface.
+  name: web
+  non_interactive: false
+  notes: 7.3.45 only; removed from the 7.8.3 registered command surface. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed.
+- description: Manage git worktrees.
+  name: worktree
+  non_interactive: false
+  notes: Command group; select a child path.
+- description: Create (or reuse) a git worktree by name.
+  name: worktree create
+  non_interactive: true
+  notes: 7.8.3 only; creates/reuses a named git worktree without a prompt.
+- description: List git worktrees for the current project.
+  name: worktree list
+  non_interactive: true
+  notes: 7.8.3 only; prints worktree state.
+- description: Remove a named git worktree and its branch.
+  name: worktree remove
+  non_interactive: true
+  notes: 7.8.3 only; removes the worktree and its branch without a confirmation. Not executed.
 cli_switches:
-  - flag: --help
-    value: ""
-    scope: ["global"]
-    default: "false"
-    description: "Shows help."
-    example: "kilo --help"
-    notes: "Short form `-h`."
-  - flag: --version
-    value: ""
-    scope: ["global"]
-    default: "false"
-    description: "Shows version number."
-    example: "kilo --version"
-    notes: "Short form `-v`."
-  - flag: --print-logs
-    value: ""
-    scope: ["global", "logging"]
-    default: "false"
-    description: "Prints logs to stderr."
-    example: "kilo --print-logs --help"
-    notes: "Observed help commands print INFO lifecycle logs even without this flag."
-  - flag: --log-level
-    value: "DEBUG | INFO | WARN | ERROR"
-    scope: ["global", "logging"]
-    default: "unknown"
-    description: "Sets log level."
-    example: "kilo --log-level DEBUG --help"
-    notes: ""
-  - flag: --pure
-    value: ""
-    scope: ["global", "plugins"]
-    default: "false"
-    description: "Runs without external plugins."
-    example: "kilo --pure run --auto 'summarize'"
-    notes: "Equivalent intent to `KILO_PURE=1`."
-  - flag: --port
-    value: "<number>"
-    scope: ["global", "acp", "serve", "web", "console", "server"]
-    default: "0"
-    description: "Sets server listen port."
-    example: "kilo serve --port 4096"
-    notes: "For `run`, local server port defaults to a random port if no value is provided."
-  - flag: --hostname
-    value: "<host>"
-    scope: ["global", "acp", "serve", "web", "console", "server"]
-    default: "127.0.0.1"
-    description: "Sets server listen host."
-    example: "kilo serve --hostname 127.0.0.1"
-    notes: ""
-  - flag: --mdns
-    value: ""
-    scope: ["global", "acp", "serve", "web", "console", "server"]
-    default: "false"
-    description: "Enables mDNS service discovery."
-    example: "kilo serve --mdns"
-    notes: "Help says this defaults hostname to 0.0.0.0."
-  - flag: --mdns-domain
-    value: "<domain>"
-    scope: ["global", "acp", "serve", "web", "console", "server"]
-    default: "kilo.local"
-    description: "Sets custom mDNS service domain."
-    example: "kilo serve --mdns-domain kilo.local"
-    notes: ""
-  - flag: --cors
-    value: "<domain>"
-    scope: ["global", "acp", "serve", "web", "console", "server"]
-    default: "[]"
-    description: "Adds allowed CORS domains."
-    example: "kilo serve --cors https://example.com"
-    notes: "Array/repeatable."
-  - flag: --model
-    value: "<provider/model>"
-    scope: ["global", "run", "model_selection"]
-    default: "config/provider default"
-    description: "Selects model in provider/model format."
-    example: "kilo run --model kilo/~anthropic/claude-haiku-latest --auto 'review'"
-    notes: "Short form `-m`; top-level help also exposes it."
-  - flag: --continue
-    value: ""
-    scope: ["global", "run", "attach", "sessions"]
-    default: "false"
-    description: "Continues the last session."
-    example: "kilo run --continue"
-    notes: "Short form `-c`; docs say it cannot be combined with autonomous mode or a prompt."
-  - flag: --session
-    value: "<id>"
-    scope: ["global", "run", "attach", "sessions"]
-    default: ""
-    description: "Session id to continue."
-    example: "kilo run --session ses_123"
-    notes: "Short form `-s`."
-  - flag: --fork
-    value: ""
-    scope: ["global", "run", "attach", "sessions"]
-    default: "false"
-    description: "Forks a session before continuing."
-    example: "kilo run --session ses_123 --fork"
-    notes: "Requires `--continue` or `--session`."
-  - flag: --cloud-fork
-    value: ""
-    scope: ["global", "run", "attach", "sessions"]
-    default: "false"
-    description: "Fetches a cloud session and continues it locally."
-    example: "kilo run --session ses_123 --cloud-fork"
-    notes: "Requires `--session`."
-  - flag: --prompt
-    value: "<text>"
-    scope: ["global", "roll-call"]
-    default: "roll-call: Hello"
-    description: "Top-level prompt to use, or roll-call prompt sent to each model."
-    example: "kilo --prompt 'inspect this repo'"
-    notes: "This is not a system-prompt delivery flag."
-  - flag: --agent
-    value: "<name>"
-    scope: ["global", "run"]
-    default: "config default"
-    description: "Selects active agent."
-    example: "kilo run --agent plan 'design migration'"
-    notes: ""
-  - flag: --command
-    value: "<command>"
-    scope: ["run"]
-    default: ""
-    description: "Runs a named command; message supplies args."
-    example: "kilo run --command review"
-    notes: ""
-  - flag: --share
-    value: ""
-    scope: ["run", "sessions"]
-    default: "false"
-    description: "Shares the session."
-    example: "kilo run --share 'summarize this repo'"
-    notes: ""
-  - flag: --format
-    value: "default | json"
-    scope: ["run"]
-    default: "default"
-    description: "Selects formatted output or raw JSON events."
-    example: "kilo run --format json --auto 'summarize this repo'"
-    notes: "Wrapper-grade event output; unsupported values exit 1 and print help."
-  - flag: --file
-    value: "<path>"
-    scope: ["run", "context"]
-    default: "[]"
-    description: "Attaches file(s) to the message."
-    example: "kilo run --file src/lib.rs 'explain this file'"
-    notes: "Short form `-f`; array/repeatable."
-  - flag: --title
-    value: "<title>"
-    scope: ["run", "sessions"]
-    default: "truncated prompt"
-    description: "Sets session title."
-    example: "kilo run --title 'CI review' 'review diff'"
-    notes: ""
-  - flag: --attach
-    value: "<url>"
-    scope: ["run", "server"]
-    default: ""
-    description: "Attaches a run to a running Kilo server."
-    example: "kilo run --attach http://localhost:4096 'continue work'"
-    notes: ""
-  - flag: --password
-    value: "<password>"
-    scope: ["run", "attach", "server_auth"]
-    default: "KILO_SERVER_PASSWORD"
-    description: "Basic auth password for server attachment."
-    example: "kilo attach http://localhost:4096 --password \"$KILO_SERVER_PASSWORD\""
-    notes: "Short form `-p`."
-  - flag: --username
-    value: "<username>"
-    scope: ["run", "attach", "server_auth"]
-    default: "KILO_SERVER_USERNAME or kilo"
-    description: "Basic auth username for server attachment."
-    example: "kilo attach http://localhost:4096 --username kilo"
-    notes: "Short form `-u`."
-  - flag: --dir
-    value: "<path>"
-    scope: ["run", "attach"]
-    default: "current directory"
-    description: "Directory to run in, or remote path when attaching."
-    example: "kilo run --dir /repo 'inspect this project'"
-    notes: ""
-  - flag: --variant
-    value: "<variant>"
-    scope: ["run", "model_selection"]
-    default: ""
-    description: "Selects provider-specific reasoning/model variant."
-    example: "kilo run --variant high 'solve this bug'"
-    notes: "Examples in help: high, max, minimal."
-  - flag: --thinking
-    value: ""
-    scope: ["run", "output"]
-    default: "false"
-    description: "Shows thinking blocks."
-    example: "kilo run --thinking 'debug this failure'"
-    notes: ""
-  - flag: --interactive
-    value: ""
-    scope: ["run"]
-    default: "false"
-    description: "Runs in direct interactive split-footer mode."
-    example: "kilo run --interactive 'start here'"
-    notes: "Short form `-i`."
-  - flag: --dangerously-skip-permissions
-    value: ""
-    scope: ["run", "permissions"]
-    default: "false"
-    description: "Auto-approves permissions not explicitly denied."
-    example: "kilo run --dangerously-skip-permissions 'fix lint'"
-    notes: "Dangerous for wrappers unless paired with restrictive config."
-  - flag: --auto
-    value: ""
-    scope: ["run", "automation", "permissions"]
-    default: "false"
-    description: "Auto-approves all permissions for autonomous/pipeline usage."
-    example: "kilo run --auto 'implement feature X'"
-    notes: "Official autonomous mode entry point."
-  - flag: --demo
-    value: ""
-    scope: ["run"]
-    default: "false"
-    description: "Enables direct interactive demo slash commands."
-    example: "kilo run --demo"
-    notes: ""
-  - flag: --cwd
-    value: "<path>"
-    scope: ["acp"]
-    default: "current directory"
-    description: "Sets ACP working directory."
-    example: "kilo acp --cwd /repo"
-    notes: ""
-  - flag: --provider
-    value: "<id-or-name>"
-    scope: ["auth login"]
-    default: ""
-    description: "Provider id or name to log into."
-    example: "kilo auth login --provider openai"
-    notes: "Short form `-p`."
-  - flag: --method
-    value: "curl | npm | pnpm | bun | brew | choco | scoop"
-    scope: ["auth login", "upgrade"]
-    default: ""
-    description: "Selects login method or upgrade install method."
-    example: "kilo upgrade --method npm"
-    notes: "Local upgrade help omits yarn from older draft research."
-  - flag: --keep-config
-    value: ""
-    scope: ["uninstall"]
-    default: "false"
-    description: "Keeps configuration files during uninstall."
-    example: "kilo uninstall --keep-config"
-    notes: "Short form `-c`."
-  - flag: --keep-data
-    value: ""
-    scope: ["uninstall"]
-    default: "false"
-    description: "Keeps session data and snapshots during uninstall."
-    example: "kilo uninstall --keep-data"
-    notes: "Short form `-d`."
-  - flag: --dry-run
-    value: ""
-    scope: ["uninstall"]
-    default: "false"
-    description: "Shows uninstall targets without removing them."
-    example: "kilo uninstall --dry-run"
-    notes: ""
-  - flag: --force
-    value: ""
-    scope: ["uninstall", "plugin"]
-    default: "false"
-    description: "Skips uninstall confirmation or replaces existing plugin version."
-    example: "kilo uninstall --force"
-    notes: "Short form `-f`."
-  - flag: --verbose
-    value: ""
-    scope: ["models", "roll-call"]
-    default: "false"
-    description: "Shows verbose output."
-    example: "kilo models --verbose"
-    notes: "For models, includes JSON object metadata per model."
-  - flag: --refresh
-    value: ""
-    scope: ["models"]
-    default: "false"
-    description: "Refreshes model cache from models.dev."
-    example: "kilo models --refresh"
-    notes: ""
-  - flag: --timeout
-    value: "<milliseconds>"
-    scope: ["roll-call"]
-    default: "25000"
-    description: "Timeout for each model call."
-    example: "kilo roll-call 'openai/.*' --timeout 10000"
-    notes: ""
-  - flag: --parallel
-    value: "<number>"
-    scope: ["roll-call"]
-    default: "5"
-    description: "Number of parallel model calls."
-    example: "kilo roll-call 'kilo/.*' --parallel 3"
-    notes: ""
-  - flag: --quiet
-    value: ""
-    scope: ["roll-call"]
-    default: "false"
-    description: "Suppresses progress and decoration."
-    example: "kilo roll-call 'kilo/.*' --output json --quiet"
-    notes: ""
-  - flag: --output
-    value: "table | json | md"
-    scope: ["roll-call"]
-    default: "table"
-    description: "Selects roll-call output format."
-    example: "kilo roll-call 'kilo/.*' --output json"
-    notes: ""
-  - flag: --json
-    value: ""
-    scope: ["profile", "daemon status"]
-    default: "false"
-    description: "Prints selected command output as JSON."
-    example: "kilo daemon status --json"
-    notes: "Local 7.3.45 observed this on profile and daemon status."
-  - flag: --days
-    value: "<number>"
-    scope: ["stats"]
-    default: "all time"
-    description: "Shows stats for last N days."
-    example: "kilo stats --days 7"
-    notes: ""
-  - flag: --tools
-    value: "<number-or-permissions>"
-    scope: ["stats", "agent create"]
-    default: "stats: all; agent create: all"
-    description: "Shows top N tools in stats, or aliases agent-create permissions."
-    example: "kilo stats --tools 10"
-    notes: "Context-dependent flag."
-  - flag: --models
-    value: "<number>"
-    scope: ["stats"]
-    default: "hidden"
-    description: "Shows model statistics, optionally top N."
-    example: "kilo stats --models 10"
-    notes: ""
-  - flag: --project
-    value: "<project>"
-    scope: ["stats"]
-    default: "all projects"
-    description: "Filters stats by project."
-    example: "kilo stats --project ''"
-    notes: "Empty string means current project."
-  - flag: --sanitize
-    value: ""
-    scope: ["export"]
-    default: "false"
-    description: "Redacts sensitive transcript and file data."
-    example: "kilo export ses_123 --sanitize"
-    notes: ""
-  - flag: --event
-    value: "<event>"
-    scope: ["github run"]
-    default: ""
-    description: "GitHub mock event to run the agent for."
-    example: "kilo github run --event pull_request"
-    notes: ""
-  - flag: --token
-    value: "<github_pat>"
-    scope: ["github run"]
-    default: ""
-    description: "GitHub token."
-    example: "kilo github run --token github_pat_..."
-    notes: "Credential-bearing flag; wrappers should avoid logging."
-  - flag: --max-count
-    value: "<number>"
-    scope: ["session list"]
-    default: ""
-    description: "Limits session list to N sessions."
-    example: "kilo session list --max-count 20 --format json"
-    notes: "Short form `-n`."
-  - flag: --search
-    value: "<text>"
-    scope: ["session list"]
-    default: ""
-    description: "Filters sessions by title."
-    example: "kilo session list --search migration"
-    notes: "Short form `-s`."
-  - flag: --all
-    value: ""
-    scope: ["session list", "help"]
-    default: "false"
-    description: "Includes all projects for session list, or all commands for help."
-    example: "kilo session list --all --format json"
-    notes: "In local 7.3.45, `kilo help --all --format md` still emitted only top-level help."
-  - flag: --foreground
-    value: ""
-    scope: ["daemon start", "daemon restart", "console"]
-    default: "false"
-    description: "Keeps command active until interrupted."
-    example: "kilo daemon start --foreground"
-    notes: "Short form `-f`."
-  - flag: --global
-    value: ""
-    scope: ["plugin"]
-    default: "false"
-    description: "Installs plugin in global config."
-    example: "kilo plugin @scope/plugin --global"
-    notes: "Short form `-g`."
-  - flag: --path
-    value: "<path>"
-    scope: ["agent create"]
-    default: ""
-    description: "Directory path where the agent file is generated."
-    example: "kilo agent create --path .kilo/agent"
-    notes: ""
-  - flag: --description
-    value: "<text>"
-    scope: ["agent create"]
-    default: ""
-    description: "Agent description."
-    example: "kilo agent create --description 'Reviews migrations'"
-    notes: ""
-  - flag: --mode
-    value: "all | primary | subagent"
-    scope: ["agent create"]
-    default: ""
-    description: "Sets agent mode."
-    example: "kilo agent create --mode subagent"
-    notes: ""
-  - flag: --permissions
-    value: "<permissions>"
-    scope: ["agent create"]
-    default: "all"
-    description: "Comma-separated permissions to allow."
-    example: "kilo agent create --permissions read,grep --mode subagent"
-    notes: "Alias: `--tools`."
-  - flag: --query
-    value: "<query>"
-    scope: ["debug rg files"]
-    default: ""
-    description: "Filters debug file listing by query."
-    example: "kilo debug rg files --query cli"
-    notes: ""
-  - flag: --glob
-    value: "<glob>"
-    scope: ["debug rg files", "debug rg search"]
-    default: ""
-    description: "Filters files/search by glob."
-    example: "kilo debug rg search TODO --glob '*.rs'"
-    notes: "Array for search."
-  - flag: --limit
-    value: "<number>"
-    scope: ["debug rg tree", "debug rg files", "debug rg search"]
-    default: ""
-    description: "Limits debug ripgrep output."
-    example: "kilo debug rg files --limit 100"
-    notes: ""
-  - flag: --tool
-    value: "<id>"
-    scope: ["debug agent"]
-    default: ""
-    description: "Tool id to execute while debugging an agent."
-    example: "kilo debug agent build --tool read"
-    notes: ""
-  - flag: --params
-    value: "<json-or-js-object>"
-    scope: ["debug agent"]
-    default: ""
-    description: "Tool params as JSON or JavaScript object literal."
-    example: "kilo debug agent build --tool read --params '{path:\"README.md\"}'"
-    notes: "Shell quoting is wrapper-sensitive."
-  - flag: --system-prompt
-    value: "<text-or-path>"
-    scope: ["run", "system-prompt"]
-    default: "unsupported"
-    description: "No supported system-prompt delivery flag was found in installed 7.3.45."
-    example: "kilo run --system-prompt 'x' 'task'"
-    notes: "Negative probe: `--system-prompt`, `--append-system-prompt`, and `--replace-system-prompt` all exited 1 and printed help. Defer semantics to the sibling system-prompt topic if Kilo adds these flags later."
+- aliases:
+  - -h
+  - --h
+  attachment: []
+  description: Show help.
+  evidence_ids:
+  - src-index
+  - parser-v22
+  - help-7-8-3
+  flag: --help
+  invocation_scope:
+  - applies_to: global
+  value_type: none
+- aliases:
+  - -v
+  - --v
+  attachment: []
+  description: Show version number.
+  evidence_ids:
+  - src-index
+  - parser-v22
+  - help-7-8-3
+  flag: --version
+  invocation_scope:
+  - applies_to: global
+  value_type: none
+- aliases:
+  - --printLogs
+  attachment: []
+  description: Print logs to stderr.
+  evidence_ids:
+  - src-index
+  - parser-v22
+  - help-7-8-3
+  flag: --print-logs
+  invocation_scope:
+  - applies_to: global
+  value_type: none
+- aliases:
+  - --logLevel
+  attachment:
+  - space
+  - equals
+  description: Set log level to DEBUG, INFO, WARN, or ERROR.
+  evidence_ids:
+  - src-index
+  - parser-v22
+  - help-7-8-3
+  flag: --log-level
+  invocation_scope:
+  - applies_to: global
+  value_optional: false
+  value_type: string
+- attachment: []
+  description: Run without external plugins.
+  evidence_ids:
+  - src-index
+  - parser-v22
+  - help-7-8-3
+  flag: --pure
+  invocation_scope:
+  - applies_to: global
+  value_type: none
+- attachment:
+  - space
+  - equals
+  description: port to listen on
+  evidence_ids:
+  - src-cli-cmd-tui
+  - parser-v22
+  - src-kilocode-cli-cmd-daemon
+  - help-7-8-3
+  flag: --port
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - completion
+  - applies_to: command
+    command:
+    - daemon
+  - applies_to: command
+    command:
+    - daemon
+    - restart
+  - applies_to: command
+    command:
+    - daemon
+    - start
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid.
+  value_optional: true
+  value_type: number
+- attachment:
+  - space
+  - equals
+  description: hostname to listen on
+  evidence_ids:
+  - src-cli-cmd-tui
+  - parser-v22
+  - src-kilocode-cli-cmd-daemon
+  - help-7-8-3
+  flag: --hostname
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - completion
+  - applies_to: command
+    command:
+    - daemon
+  - applies_to: command
+    command:
+    - daemon
+    - restart
+  - applies_to: command
+    command:
+    - daemon
+    - start
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid.
+  value_optional: true
+  value_type: string
+- attachment: []
+  description: enable mDNS service discovery (defaults hostname to 0.0.0.0)
+  evidence_ids:
+  - src-cli-cmd-tui
+  - parser-v22
+  - src-kilocode-cli-cmd-daemon
+  - help-7-8-3
+  flag: --mdns
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - completion
+  - applies_to: command
+    command:
+    - daemon
+  - applies_to: command
+    command:
+    - daemon
+    - restart
+  - applies_to: command
+    command:
+    - daemon
+    - start
+  value_type: none
+- aliases:
+  - --mdnsDomain
+  attachment:
+  - space
+  - equals
+  description: 'custom domain name for mDNS service (default: kilo.local)'
+  evidence_ids:
+  - src-cli-cmd-tui
+  - parser-v22
+  - src-kilocode-cli-cmd-daemon
+  - help-7-8-3
+  flag: --mdns-domain
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - completion
+  - applies_to: command
+    command:
+    - daemon
+  - applies_to: command
+    command:
+    - daemon
+    - restart
+  - applies_to: command
+    command:
+    - daemon
+    - start
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid.
+  value_optional: true
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: additional domains to allow for CORS
+  evidence_ids:
+  - src-cli-cmd-tui
+  - parser-v22
+  - src-kilocode-cli-cmd-daemon
+  - help-7-8-3
+  flag: --cors
+  gap: Source eatArray and a parser replay establish a minimum of zero (bare --cors produces []), but revision 2 allows only integers >=1. Recheck the same declaration and zero-value parse after the contract can represent zero; do not assume a minimum of one.
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - completion
+  - applies_to: command
+    command:
+    - daemon
+  - applies_to: command
+    command:
+    - daemon
+    - restart
+  - applies_to: command
+    command:
+    - daemon
+    - start
+  notes: Greedily consumes following non-option words even after --name=value; use -- before the prompt. Repeated occurrences concatenate arrays.
+  value_type: variadic
+  variadic_min: unknown
+- aliases:
+  - -m
+  - --m
+  attachment:
+  - space
+  - equals
+  - short_attached
+  description: model to use in the format of provider/model
+  evidence_ids:
+  - src-cli-cmd-tui
+  - parser-v22
+  - src-cli-cmd-run
+  - parser-replay
+  - help-7-8-3
+  flag: --model
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - completion
+  - applies_to: command
+    command:
+    - run
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid. Short attachment works for numeric or punctuation-leading values (for example -m123 or -f/path); alphabetic -mfoo is parsed as a short-option group and is not a general value form. Use -m foo or -m=foo.
+  value_optional: true
+  value_type: string
+- aliases:
+  - -c
+  - --c
+  attachment: []
+  description: continue the last session
+  evidence_ids:
+  - src-cli-cmd-tui
+  - parser-v22
+  - src-cli-cmd-run
+  - parser-replay
+  - help-7-8-3
+  flag: --continue
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - completion
+  - applies_to: command
+    command:
+    - run
+  value_type: none
+- aliases:
+  - -s
+  - --s
+  attachment:
+  - space
+  - equals
+  - short_attached
+  description: session id to continue
+  evidence_ids:
+  - src-cli-cmd-tui
+  - parser-v22
+  - src-cli-cmd-run
+  - parser-replay
+  - help-7-8-3
+  flag: --session
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - completion
+  - applies_to: command
+    command:
+    - run
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid. Short attachment works for numeric or punctuation-leading values (for example -m123 or -f/path); alphabetic -mfoo is parsed as a short-option group and is not a general value form. Use -m foo or -m=foo.
+  value_optional: true
+  value_type: string
+- attachment: []
+  description: fork the session when continuing (use with --continue or --session)
+  evidence_ids:
+  - src-cli-cmd-tui
+  - parser-v22
+  - help-7-8-3
+  flag: --fork
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - completion
+  value_type: none
+- aliases:
+  - --cloudFork
+  attachment: []
+  description: fetch session from cloud and continue locally (use with --session)
+  evidence_ids:
+  - src-cli-cmd-tui
+  - parser-v22
+  - src-cli-cmd-run
+  - parser-replay
+  - help-7-8-3
+  flag: --cloud-fork
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - completion
+  - applies_to: command
+    command:
+    - run
+  value_type: none
+- attachment:
+  - space
+  - equals
+  description: create (or reuse) a git worktree with this name and start kilo there
+  evidence_ids:
+  - src-cli-cmd-tui
+  - parser-v22
+  - help-7-8-3
+  flag: --worktree
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - completion
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid.
+  value_optional: true
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: prompt to use
+  evidence_ids:
+  - src-cli-cmd-tui
+  - parser-v22
+  - help-7-8-3
+  flag: --prompt
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - completion
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid.
+  value_optional: true
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: agent to use
+  evidence_ids:
+  - src-cli-cmd-tui
+  - parser-v22
+  - src-cli-cmd-run
+  - parser-replay
+  - help-7-8-3
+  flag: --agent
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - completion
+  - applies_to: command
+    command:
+    - run
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid.
+  value_optional: true
+  value_type: string
+- attachment: []
+  description: auto-approve permissions that are not explicitly denied (dangerous!)
+  evidence_ids:
+  - src-cli-cmd-tui
+  - parser-v22
+  - src-cli-cmd-run
+  - parser-replay
+  - help-7-8-3
+  flag: --auto
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - completion
+  - applies_to: command
+    command:
+    - run
+  value_type: none
+- attachment: []
+  description: start the minimal interactive interface
+  evidence_ids:
+  - src-cli-cmd-tui
+  - parser-v22
+  - help-7-8-3
+  flag: --mini
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - completion
+  notes: Run scope retains compatibility switches; mini/replay settings may be rejected by the handler outside interactive mode.
+  value_type: none
+- aliases:
+  - --noReplay
+  attachment: []
+  description: disable mini session history replay on resume and after resize
+  evidence_ids:
+  - src-cli-cmd-tui
+  - parser-v22
+  - help-7-8-3
+  flag: --no-replay
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Run scope retains compatibility switches; mini/replay settings may be rejected by the handler outside interactive mode.
+  value_type: none
+- aliases:
+  - --replayLimit
+  attachment:
+  - space
+  - equals
+  description: cap visible mini replay to the newest N messages
+  evidence_ids:
+  - src-cli-cmd-tui
+  - parser-v22
+  - help-7-8-3
+  flag: --replay-limit
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - completion
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid. Run scope retains compatibility switches; mini/replay settings may be rejected by the handler outside interactive mode.
+  value_optional: true
+  value_type: number
+- attachment: []
+  description: Compatibility permission bypass switch.
+  evidence_ids:
+  - src-cli-cmd-tui
+  - parser-v22
+  - src-cli-cmd-run
+  - parser-replay
+  - help-7-8-3
+  flag: --yolo
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - run
+  notes: Hidden but accepted by the 7.8.3 source parser.
+  value_type: none
+- aliases:
+  - --dangerouslySkipPermissions
+  attachment: []
+  description: Compatibility permission bypass switch.
+  evidence_ids:
+  - src-cli-cmd-tui
+  - parser-v22
+  - src-cli-cmd-run
+  - parser-replay
+  - help-7-8-3
+  flag: --dangerously-skip-permissions
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - run
+  notes: Hidden but accepted by the 7.8.3 source parser.
+  value_type: none
+- attachment: []
+  description: Control interactive history replay.
+  evidence_ids:
+  - src-cli-cmd-tui
+  - parser-v22
+  - src-cli-cmd-run
+  - parser-replay
+  - help-7-8-3
+  flag: --replay
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - run
+  notes: Hidden but accepted by the 7.8.3 source parser. Run scope retains compatibility switches; mini/replay settings may be rejected by the handler outside interactive mode.
+  value_type: none
+- attachment: []
+  description: Enable direct interactive demo slash commands.
+  evidence_ids:
+  - src-cli-cmd-tui
+  - parser-v22
+  - src-cli-cmd-run
+  - parser-replay
+  - help-7-8-3
+  flag: --demo
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - run
+  notes: Hidden but accepted by the 7.8.3 source parser.
+  value_type: none
+- aliases:
+  - --sessionId
+  attachment:
+  - space
+  - equals
+  description: Cloud Agent session ID
+  evidence_ids:
+  - src-kilocode-cli-cmd-cloud
+  - parser-v22
+  - help-7-8-3
+  flag: --session-id
+  invocation_scope:
+  - applies_to: command
+    command:
+    - cloud
+    - result
+  - applies_to: command
+    command:
+    - cloud
+    - send
+  - applies_to: command
+    command:
+    - cloud
+    - status
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid.
+  value_optional: true
+  value_type: string
+- aliases:
+  - --messageId
+  attachment:
+  - space
+  - equals
+  description: Cloud Agent message ID
+  evidence_ids:
+  - src-kilocode-cli-cmd-cloud
+  - parser-v22
+  - help-7-8-3
+  flag: --message-id
+  invocation_scope:
+  - applies_to: command
+    command:
+    - cloud
+    - result
+  - applies_to: command
+    command:
+    - cloud
+    - status
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid.
+  value_optional: true
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: prompt for the Cloud Agent
+  evidence_ids:
+  - src-kilocode-cli-cmd-cloud
+  - parser-v22
+  - help-7-8-3
+  flag: --prompt
+  invocation_scope:
+  - applies_to: command
+    command:
+    - cloud
+    - send
+  - applies_to: command
+    command:
+    - cloud
+    - start
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid.
+  value_optional: true
+  value_type: string
+- aliases:
+  - --promptStdin
+  attachment: []
+  description: read the prompt from standard input
+  evidence_ids:
+  - src-kilocode-cli-cmd-cloud
+  - parser-v22
+  - help-7-8-3
+  flag: --prompt-stdin
+  invocation_scope:
+  - applies_to: command
+    command:
+    - cloud
+    - send
+  - applies_to: command
+    command:
+    - cloud
+    - start
+  value_type: none
+- attachment:
+  - space
+  - equals
+  description: repository shorthand or URL
+  evidence_ids:
+  - src-kilocode-cli-cmd-cloud
+  - parser-v22
+  - help-7-8-3
+  flag: --repo
+  invocation_scope:
+  - applies_to: command
+    command:
+    - cloud
+    - start
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid.
+  value_optional: true
+  value_type: string
+- aliases:
+  - --repoType
+  attachment:
+  - space
+  - equals
+  description: repository provider type
+  evidence_ids:
+  - src-kilocode-cli-cmd-cloud
+  - parser-v22
+  - help-7-8-3
+  flag: --repo-type
+  invocation_scope:
+  - applies_to: command
+    command:
+    - cloud
+    - start
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid.
+  value_optional: false
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: repository branch
+  evidence_ids:
+  - src-kilocode-cli-cmd-cloud
+  - parser-v22
+  - help-7-8-3
+  flag: --branch
+  invocation_scope:
+  - applies_to: command
+    command:
+    - cloud
+    - start
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid.
+  value_optional: true
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: Cloud Agent model
+  evidence_ids:
+  - src-kilocode-cli-cmd-cloud
+  - parser-v22
+  - help-7-8-3
+  flag: --model
+  invocation_scope:
+  - applies_to: command
+    command:
+    - cloud
+    - start
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid.
+  value_optional: true
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: Cloud Agent mode
+  evidence_ids:
+  - src-kilocode-cli-cmd-cloud
+  - parser-v22
+  - help-7-8-3
+  flag: --mode
+  invocation_scope:
+  - applies_to: command
+    command:
+    - cloud
+    - start
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid.
+  value_optional: true
+  value_type: string
+- aliases:
+  - --orgId
+  attachment:
+  - space
+  - equals
+  description: Kilo organization ID
+  evidence_ids:
+  - src-kilocode-cli-cmd-cloud
+  - parser-v22
+  - help-7-8-3
+  flag: --org-id
+  invocation_scope:
+  - applies_to: command
+    command:
+    - cloud
+    - start
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid.
+  value_optional: true
+  value_type: string
+- attachment: []
+  description: connect to the WebSocket stream and print events as JSONL
+  evidence_ids:
+  - src-kilocode-cli-cmd-cloud
+  - parser-v22
+  - help-7-8-3
+  flag: --stream
+  invocation_scope:
+  - applies_to: command
+    command:
+    - cloud
+    - start
+  value_type: none
+- attachment: []
+  description: disable mini session history replay on resume and after resize
+  evidence_ids:
+  - src-cli-cmd-tui
+  - parser-v22
+  - help-7-8-3
+  flag: --no-replay
+  invocation_scope:
+  - applies_to: command
+    command:
+    - completion
+  notes: Run scope retains compatibility switches; mini/replay settings may be rejected by the handler outside interactive mode.
+  value_type: none
+- attachment: []
+  description: print daemon details as JSON
+  evidence_ids:
+  - src-kilocode-cli-cmd-console
+  - parser-v22
+  - src-kilocode-cli-cmd-daemon
+  - help-7-8-3
+  flag: --json
+  invocation_scope:
+  - applies_to: command
+    command:
+    - console
+    - stop
+  - applies_to: command
+    command:
+    - daemon
+  - applies_to: command
+    command:
+    - daemon
+    - restart
+  - applies_to: command
+    command:
+    - daemon
+    - start
+  - applies_to: command
+    command:
+    - daemon
+    - status
+  - applies_to: command
+    command:
+    - daemon
+    - stop
+  value_type: none
+- aliases:
+  - -f
+  - --f
+  attachment: []
+  description: keep the command active until interrupted
+  evidence_ids:
+  - src-kilocode-cli-cmd-daemon
+  - parser-v22
+  - help-7-8-3
+  flag: --foreground
+  invocation_scope:
+  - applies_to: command
+    command:
+    - daemon
+  - applies_to: command
+    command:
+    - daemon
+    - restart
+  - applies_to: command
+    command:
+    - daemon
+    - start
+  value_type: none
+- attachment:
+  - space
+  - equals
+  description: Output format
+  evidence_ids:
+  - src-cli-cmd-db
+  - parser-v22
+  - help-7-8-3
+  flag: --format
+  invocation_scope:
+  - applies_to: command
+    command:
+    - db
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid.
+  value_optional: true
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: Tool id to execute
+  evidence_ids:
+  - src-cli-cmd-debug-agent
+  - parser-v22
+  - help-7-8-3
+  flag: --tool
+  invocation_scope:
+  - applies_to: command
+    command:
+    - debug
+    - agent
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid.
+  value_optional: true
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: Tool params as JSON or a JS object literal
+  evidence_ids:
+  - src-cli-cmd-debug-agent
+  - parser-v22
+  - help-7-8-3
+  flag: --params
+  invocation_scope:
+  - applies_to: command
+    command:
+    - debug
+    - agent
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid.
+  value_optional: true
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: Filter files by query
+  evidence_ids:
+  - src-cli-cmd-debug-ripgrep
+  - parser-v22
+  - help-7-8-3
+  flag: --query
+  invocation_scope:
+  - applies_to: command
+    command:
+    - debug
+    - rg
+    - files
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid.
+  value_optional: true
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: Glob pattern to match files
+  evidence_ids:
+  - src-cli-cmd-debug-ripgrep
+  - parser-v22
+  - help-7-8-3
+  flag: --glob
+  invocation_scope:
+  - applies_to: command
+    command:
+    - debug
+    - rg
+    - files
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid.
+  value_optional: true
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: Limit number of results
+  evidence_ids:
+  - src-cli-cmd-debug-ripgrep
+  - parser-v22
+  - help-7-8-3
+  flag: --limit
+  invocation_scope:
+  - applies_to: command
+    command:
+    - debug
+    - rg
+    - files
+  - applies_to: command
+    command:
+    - debug
+    - rg
+    - search
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid.
+  value_optional: true
+  value_type: number
+- attachment:
+  - space
+  - equals
+  description: File glob patterns
+  evidence_ids:
+  - src-cli-cmd-debug-ripgrep
+  - parser-v22
+  - help-7-8-3
+  flag: --glob
+  gap: Source eatArray and a parser replay establish a minimum of zero (bare --glob produces []), but revision 2 allows only integers >=1. Recheck the same declaration and zero-value parse after the contract can represent zero; do not assume a minimum of one.
+  invocation_scope:
+  - applies_to: command
+    command:
+    - debug
+    - rg
+    - search
+  notes: Greedily consumes following non-option words even after --name=value; use -- before the prompt. Repeated occurrences concatenate arrays.
+  value_type: variadic
+  variadic_min: unknown
+- attachment:
+  - space
+  - equals
+  description: Provider CLI switch.
+  evidence_ids:
+  - src-old-cli-cmd-debug-ripgrep
+  - parser-v22
+  - help-7-3-45
+  flag: --limit
+  invocation_scope:
+  - applies_to: command
+    command:
+    - debug
+    - rg
+    - tree
+  notes: 7.3.45-specific command; not registered in 7.8.3. Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid.
+  value_optional: true
+  value_type: number
+- attachment: []
+  description: redact sensitive transcript and file data
+  evidence_ids:
+  - src-cli-cmd-export
+  - parser-v22
+  - help-7-8-3
+  flag: --sanitize
+  invocation_scope:
+  - applies_to: command
+    command:
+    - export
+  value_type: none
+- attachment:
+  - space
+  - equals
+  description: GitHub mock event to run the agent for
+  evidence_ids:
+  - src-cli-cmd-github
+  - parser-v22
+  - help-7-8-3
+  flag: --event
+  invocation_scope:
+  - applies_to: command
+    command:
+    - github
+    - run
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid.
+  value_optional: true
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: GitHub personal access token (github_pat_********)
+  evidence_ids:
+  - src-cli-cmd-github
+  - parser-v22
+  - help-7-8-3
+  flag: --token
+  invocation_scope:
+  - applies_to: command
+    command:
+    - github
+    - run
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid.
+  value_optional: true
+  value_type: string
+- attachment: []
+  description: Show help for all commands.
+  evidence_ids:
+  - src-kilocode-help-command
+  - parser-v22
+  - help-7-8-3
+  flag: --all
+  invocation_scope:
+  - applies_to: command
+    command:
+    - help
+  value_type: none
+- attachment:
+  - space
+  - equals
+  description: Select help output format md or text.
+  evidence_ids:
+  - src-kilocode-help-command
+  - parser-v22
+  - help-7-8-3
+  flag: --format
+  invocation_scope:
+  - applies_to: command
+    command:
+    - help
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid.
+  value_optional: true
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: URL for a remote MCP server
+  evidence_ids:
+  - src-cli-cmd-mcp
+  - parser-v22
+  - help-7-8-3
+  flag: --url
+  invocation_scope:
+  - applies_to: command
+    command:
+    - mcp
+    - add
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid.
+  value_optional: true
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: environment variable for a local MCP server (KEY=VALUE)
+  evidence_ids:
+  - src-cli-cmd-mcp
+  - parser-v22
+  - help-7-8-3
+  flag: --env
+  gap: Source eatArray and a parser replay establish a minimum of zero (bare --env produces []), but revision 2 allows only integers >=1. Recheck the same declaration and zero-value parse after the contract can represent zero; do not assume a minimum of one.
+  invocation_scope:
+  - applies_to: command
+    command:
+    - mcp
+    - add
+  notes: Greedily consumes following non-option words even after --name=value; use -- before the prompt. Repeated occurrences concatenate arrays.
+  value_type: variadic
+  variadic_min: unknown
+- attachment:
+  - space
+  - equals
+  description: HTTP header for a remote MCP server (KEY=VALUE)
+  evidence_ids:
+  - src-cli-cmd-mcp
+  - parser-v22
+  - help-7-8-3
+  flag: --header
+  gap: Source eatArray and a parser replay establish a minimum of zero (bare --header produces []), but revision 2 allows only integers >=1. Recheck the same declaration and zero-value parse after the contract can represent zero; do not assume a minimum of one.
+  invocation_scope:
+  - applies_to: command
+    command:
+    - mcp
+    - add
+  notes: Greedily consumes following non-option words even after --name=value; use -- before the prompt. Repeated occurrences concatenate arrays.
+  value_type: variadic
+  variadic_min: unknown
+- attachment: []
+  description: use more verbose model output (includes metadata like costs)
+  evidence_ids:
+  - src-cli-cmd-models
+  - parser-v22
+  - help-7-8-3
+  flag: --verbose
+  invocation_scope:
+  - applies_to: command
+    command:
+    - models
+  value_type: none
+- attachment: []
+  description: refresh the models cache from models.dev
+  evidence_ids:
+  - src-cli-cmd-models
+  - parser-v22
+  - help-7-8-3
+  flag: --refresh
+  invocation_scope:
+  - applies_to: command
+    command:
+    - models
+  value_type: none
+- aliases:
+  - -g
+  - --g
+  attachment: []
+  description: install in global config
+  evidence_ids:
+  - src-cli-cmd-plug
+  - parser-v22
+  - help-7-8-3
+  flag: --global
+  invocation_scope:
+  - applies_to: command
+    command:
+    - plug
+  - applies_to: command
+    command:
+    - plugin
+  value_type: none
+- aliases:
+  - -f
+  - --f
+  attachment: []
+  description: replace existing plugin version
+  evidence_ids:
+  - src-cli-cmd-plug
+  - parser-v22
+  - help-7-8-3
+  flag: --force
+  invocation_scope:
+  - applies_to: command
+    command:
+    - plug
+  - applies_to: command
+    command:
+    - plugin
+  value_type: none
+- aliases:
+  - -s
+  - --s
+  attachment:
+  - space
+  - equals
+  - short_attached
+  description: session id to apply the PR link to
+  evidence_ids:
+  - src-cli-cmd-pr
+  - parser-v22
+  - help-7-8-3
+  flag: --session
+  invocation_scope:
+  - applies_to: command
+    command:
+    - pr
+    - link
+  - applies_to: command
+    command:
+    - pr
+    - status
+  - applies_to: command
+    command:
+    - pr
+    - unlink
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid. Short attachment works for numeric or punctuation-leading values (for example -m123 or -f/path); alphabetic -mfoo is parsed as a short-option group and is not a general value form. Use -m foo or -m=foo.
+  value_optional: true
+  value_type: string
+- attachment: []
+  description: output profile as JSON
+  evidence_ids:
+  - src-kilocode-cli-cmd-profile
+  - parser-v22
+  - help-7-8-3
+  flag: --json
+  invocation_scope:
+  - applies_to: command
+    command:
+    - profile
+  value_type: none
+- attachment:
+  - space
+  - equals
+  description: Prompt to send to each model
+  evidence_ids:
+  - src-kilocode-cli-cmd-roll-call
+  - parser-v22
+  - help-7-8-3
+  flag: --prompt
+  invocation_scope:
+  - applies_to: command
+    command:
+    - roll-call
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid.
+  value_optional: true
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: Timeout for each model call in milliseconds
+  evidence_ids:
+  - src-kilocode-cli-cmd-roll-call
+  - parser-v22
+  - help-7-8-3
+  flag: --timeout
+  invocation_scope:
+  - applies_to: command
+    command:
+    - roll-call
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid.
+  value_optional: true
+  value_type: number
+- attachment:
+  - space
+  - equals
+  description: Number of parallel model calls
+  evidence_ids:
+  - src-kilocode-cli-cmd-roll-call
+  - parser-v22
+  - help-7-8-3
+  flag: --parallel
+  invocation_scope:
+  - applies_to: command
+    command:
+    - roll-call
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid.
+  value_optional: true
+  value_type: number
+- attachment: []
+  description: Show verbose output
+  evidence_ids:
+  - src-kilocode-cli-cmd-roll-call
+  - parser-v22
+  - help-7-8-3
+  flag: --verbose
+  invocation_scope:
+  - applies_to: command
+    command:
+    - roll-call
+  value_type: none
+- attachment: []
+  description: Suppress progress and decoration
+  evidence_ids:
+  - src-kilocode-cli-cmd-roll-call
+  - parser-v22
+  - help-7-8-3
+  flag: --quiet
+  invocation_scope:
+  - applies_to: command
+    command:
+    - roll-call
+  value_type: none
+- attachment:
+  - space
+  - equals
+  description: Output format (table, json, or md)
+  evidence_ids:
+  - src-kilocode-cli-cmd-roll-call
+  - parser-v22
+  - help-7-8-3
+  flag: --output
+  invocation_scope:
+  - applies_to: command
+    command:
+    - roll-call
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid.
+  value_optional: true
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: the command to run, use message for args
+  evidence_ids:
+  - src-cli-cmd-run
+  - parser-v22
+  - parser-replay
+  - help-7-8-3
+  flag: --command
+  invocation_scope:
+  - applies_to: command
+    command:
+    - run
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid.
+  value_optional: true
+  value_type: string
+- attachment: []
+  description: fork the session before continuing (requires --continue or --session)
+  evidence_ids:
+  - src-cli-cmd-run
+  - parser-v22
+  - parser-replay
+  - help-7-8-3
+  flag: --fork
+  invocation_scope:
+  - applies_to: command
+    command:
+    - run
+  value_type: none
+- attachment: []
+  description: share the session
+  evidence_ids:
+  - src-cli-cmd-run
+  - parser-v22
+  - parser-replay
+  - help-7-8-3
+  flag: --share
+  invocation_scope:
+  - applies_to: command
+    command:
+    - run
+  value_type: none
+- attachment:
+  - space
+  - equals
+  description: 'format: default (formatted) or json (raw JSON events)'
+  evidence_ids:
+  - src-cli-cmd-run
+  - parser-v22
+  - parser-replay
+  - help-7-8-3
+  flag: --format
+  invocation_scope:
+  - applies_to: command
+    command:
+    - run
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid.
+  value_optional: true
+  value_type: string
+- aliases:
+  - -f
+  - --f
+  attachment:
+  - space
+  - equals
+  - short_attached
+  description: file(s) to attach to message
+  evidence_ids:
+  - src-cli-cmd-run
+  - parser-v22
+  - parser-replay
+  - help-7-8-3
+  flag: --file
+  gap: Source eatArray and a parser replay establish a minimum of zero (bare --file produces []), but revision 2 allows only integers >=1. Recheck the same declaration and zero-value parse after the contract can represent zero; do not assume a minimum of one.
+  invocation_scope:
+  - applies_to: command
+    command:
+    - run
+  notes: Short attachment works for numeric or punctuation-leading values (for example -m123 or -f/path); alphabetic -mfoo is parsed as a short-option group and is not a general value form. Use -m foo or -m=foo. Greedily consumes following non-option words even after --name=value; use -- before the prompt. Repeated occurrences concatenate arrays.
+  value_type: variadic
+  variadic_min: unknown
+- attachment:
+  - space
+  - equals
+  description: title for the session (uses truncated prompt if no value provided)
+  evidence_ids:
+  - src-cli-cmd-run
+  - parser-v22
+  - parser-replay
+  - help-7-8-3
+  flag: --title
+  invocation_scope:
+  - applies_to: command
+    command:
+    - run
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid.
+  value_optional: true
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: attach to a running kilo server (e.g., http://localhost:4096)
+  evidence_ids:
+  - src-cli-cmd-run
+  - parser-v22
+  - parser-replay
+  - help-7-8-3
+  flag: --attach
+  invocation_scope:
+  - applies_to: command
+    command:
+    - run
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid.
+  value_optional: true
+  value_type: string
+- aliases:
+  - -p
+  - --p
+  attachment:
+  - space
+  - equals
+  - short_attached
+  description: basic auth password (defaults to KILO_SERVER_PASSWORD)
+  evidence_ids:
+  - src-cli-cmd-run
+  - parser-v22
+  - parser-replay
+  - help-7-8-3
+  flag: --password
+  invocation_scope:
+  - applies_to: command
+    command:
+    - run
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid. Short attachment works for numeric or punctuation-leading values (for example -m123 or -f/path); alphabetic -mfoo is parsed as a short-option group and is not a general value form. Use -m foo or -m=foo.
+  value_optional: true
+  value_type: string
+- aliases:
+  - -u
+  - --u
+  attachment:
+  - space
+  - equals
+  - short_attached
+  description: basic auth username (defaults to KILO_SERVER_USERNAME or 'kilo')
+  evidence_ids:
+  - src-cli-cmd-run
+  - parser-v22
+  - parser-replay
+  - help-7-8-3
+  flag: --username
+  invocation_scope:
+  - applies_to: command
+    command:
+    - run
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid. Short attachment works for numeric or punctuation-leading values (for example -m123 or -f/path); alphabetic -mfoo is parsed as a short-option group and is not a general value form. Use -m foo or -m=foo.
+  value_optional: true
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: directory to run in, path on remote server if attaching
+  evidence_ids:
+  - src-cli-cmd-run
+  - parser-v22
+  - parser-replay
+  - help-7-8-3
+  flag: --dir
+  invocation_scope:
+  - applies_to: command
+    command:
+    - run
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid.
+  value_optional: true
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: port for the local server (defaults to random port if no value provided)
+  evidence_ids:
+  - src-cli-cmd-run
+  - parser-v22
+  - parser-replay
+  - help-7-8-3
+  flag: --port
+  invocation_scope:
+  - applies_to: command
+    command:
+    - run
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid.
+  value_optional: true
+  value_type: number
+- attachment:
+  - space
+  - equals
+  description: model variant (provider-specific reasoning effort, e.g., high, max, minimal)
+  evidence_ids:
+  - src-cli-cmd-run
+  - parser-v22
+  - parser-replay
+  - help-7-8-3
+  flag: --variant
+  invocation_scope:
+  - applies_to: command
+    command:
+    - run
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid.
+  value_optional: true
+  value_type: string
+- attachment: []
+  description: show thinking blocks
+  evidence_ids:
+  - src-cli-cmd-run
+  - parser-v22
+  - parser-replay
+  - help-7-8-3
+  flag: --thinking
+  invocation_scope:
+  - applies_to: command
+    command:
+    - run
+  value_type: none
+- aliases:
+  - -i
+  - --i
+  attachment: []
+  description: run in direct interactive split-footer mode
+  evidence_ids:
+  - src-cli-cmd-run
+  - parser-v22
+  - parser-replay
+  - help-7-8-3
+  flag: --interactive
+  invocation_scope:
+  - applies_to: command
+    command:
+    - run
+  value_type: none
+- attachment: []
+  description: Internal minimal interactive interface selector.
+  evidence_ids:
+  - src-cli-cmd-run
+  - parser-v22
+  - parser-replay
+  - help-7-8-3
+  flag: --mini
+  invocation_scope:
+  - applies_to: command
+    command:
+    - run
+  notes: Hidden but accepted by the 7.8.3 source parser. Run scope retains compatibility switches; mini/replay settings may be rejected by the handler outside interactive mode.
+  value_type: none
+- aliases:
+  - --replayLimit
+  attachment:
+  - space
+  - equals
+  description: Limit interactive replay messages.
+  evidence_ids:
+  - src-cli-cmd-run
+  - parser-v22
+  - parser-replay
+  - help-7-8-3
+  flag: --replay-limit
+  invocation_scope:
+  - applies_to: command
+    command:
+    - run
+  notes: Hidden but accepted by the 7.8.3 source parser. Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid. Run scope retains compatibility switches; mini/replay settings may be rejected by the handler outside interactive mode.
+  value_optional: true
+  value_type: number
+- aliases:
+  - -n
+  - --maxCount
+  - --n
+  attachment:
+  - space
+  - equals
+  - short_attached
+  description: limit to N most recent sessions
+  evidence_ids:
+  - src-cli-cmd-session
+  - parser-v22
+  - help-7-8-3
+  flag: --max-count
+  invocation_scope:
+  - applies_to: command
+    command:
+    - session
+    - list
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid. Short attachment works for numeric or punctuation-leading values (for example -m123 or -f/path); alphabetic -mfoo is parsed as a short-option group and is not a general value form. Use -m foo or -m=foo.
+  value_optional: true
+  value_type: number
+- attachment:
+  - space
+  - equals
+  description: output format
+  evidence_ids:
+  - src-cli-cmd-session
+  - parser-v22
+  - help-7-8-3
+  flag: --format
+  invocation_scope:
+  - applies_to: command
+    command:
+    - session
+    - list
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid.
+  value_optional: true
+  value_type: string
+- aliases:
+  - -a
+  - --a
+  attachment: []
+  description: list sessions from all projects
+  evidence_ids:
+  - src-cli-cmd-session
+  - parser-v22
+  - help-7-8-3
+  flag: --all
+  invocation_scope:
+  - applies_to: command
+    command:
+    - session
+    - list
+  value_type: none
+- aliases:
+  - -s
+  - --s
+  attachment:
+  - space
+  - equals
+  - short_attached
+  description: filter sessions by title
+  evidence_ids:
+  - src-cli-cmd-session
+  - parser-v22
+  - help-7-8-3
+  flag: --search
+  invocation_scope:
+  - applies_to: command
+    command:
+    - session
+    - list
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid. Short attachment works for numeric or punctuation-leading values (for example -m123 or -f/path); alphabetic -mfoo is parsed as a short-option group and is not a general value form. Use -m foo or -m=foo.
+  value_optional: true
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: 'show stats for the last N days (default: all time)'
+  evidence_ids:
+  - src-cli-cmd-stats
+  - parser-v22
+  - help-7-8-3
+  flag: --days
+  invocation_scope:
+  - applies_to: command
+    command:
+    - stats
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid.
+  value_optional: true
+  value_type: number
+- attachment:
+  - space
+  - equals
+  description: 'number of tools to show (default: all)'
+  evidence_ids:
+  - src-cli-cmd-stats
+  - parser-v22
+  - help-7-8-3
+  flag: --tools
+  invocation_scope:
+  - applies_to: command
+    command:
+    - stats
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid.
+  value_optional: true
+  value_type: number
+- attachment: []
+  description: 'show model statistics (default: hidden). Pass a number to show top N, otherwise shows all'
+  evidence_ids:
+  - src-cli-cmd-stats
+  - parser-v22
+  - help-7-8-3
+  flag: --models
+  gap: The declaration has no explicit type and yargs infers boolean when bare, number for numeric input, and string otherwise. Replaying stats --models with omitted, numeric, and text values confirms the polymorphism; a contract capable of expressing those alternatives would settle its wrapper representation.
+  invocation_scope:
+  - applies_to: command
+    command:
+    - stats
+  value_type: unknown
+- attachment:
+  - space
+  - equals
+  description: 'filter by project (default: all projects, empty string: current project)'
+  evidence_ids:
+  - src-cli-cmd-stats
+  - parser-v22
+  - help-7-8-3
+  flag: --project
+  invocation_scope:
+  - applies_to: command
+    command:
+    - stats
+  notes: Parser permits omission unless a choice/check rejects the empty or undefined value; this does not make the command semantically valid.
+  value_optional: true
+  value_type: string
+- aliases:
+  - -c
+  - --keepConfig
+  - --c
+  attachment: []
+  description: keep configuration files
+  evidence_ids:
+  - src-cli-cmd-uninstall
+  - parser-v22
+  - help-7-8-3
+  flag: --keep-config
+  invocation_scope:
+  - applies_to: command
+    command:
+    - uninstall
+  value_type: none
+- aliases:
+  - -d
+  - --keepData
+  - --d
+  attachment: []
+  description: keep session data and snapshots
+  evidence_ids:
+  - src-cli-cmd-uninstall
+  - parser-v22
+  - help-7-8-3
+  flag: --keep-data
+  invocation_scope:
+  - applies_to: command
+    command:
+    - uninstall
+  value_type: none
+- aliases:
+  - --dryRun
+  attachment: []
+  description: show what would be removed without removing
+  evidence_ids:
+  - src-cli-cmd-uninstall
+  - parser-v22
+  - help-7-8-3
+  flag: --dry-run
+  invocation_scope:
+  - applies_to: command
+    command:
+    - uninstall
+  value_type: none
+- aliases:
+  - -f
+  - --f
+  attachment: []
+  description: skip confirmation prompts
+  evidence_ids:
+  - src-cli-cmd-uninstall
+  - parser-v22
+  - help-7-8-3
+  flag: --force
+  invocation_scope:
+  - applies_to: command
+    command:
+    - uninstall
+  value_type: none
+- aliases:
+  - --no-h
+  attachment: []
+  description: Use parser-generated negation of --help.
+  evidence_ids:
+  - src-index
+  - parser-v22
+  - help-7-8-3
+  flag: --no-help
+  invocation_scope:
+  - applies_to: global
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- aliases:
+  - --no-v
+  attachment: []
+  description: Use parser-generated negation of --version.
+  evidence_ids:
+  - src-index
+  - parser-v22
+  - help-7-8-3
+  flag: --no-version
+  invocation_scope:
+  - applies_to: global
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- aliases:
+  - --no-printLogs
+  attachment: []
+  description: Use parser-generated negation of --print-logs.
+  evidence_ids:
+  - src-index
+  - parser-v22
+  - help-7-8-3
+  flag: --no-print-logs
+  invocation_scope:
+  - applies_to: global
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- aliases:
+  - --no-logLevel
+  attachment: []
+  description: Use parser-generated negation of --log-level.
+  evidence_ids:
+  - src-index
+  - parser-v22
+  - help-7-8-3
+  flag: --no-log-level
+  invocation_scope:
+  - applies_to: global
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --pure.
+  evidence_ids:
+  - src-index
+  - parser-v22
+  - help-7-8-3
+  flag: --no-pure
+  invocation_scope:
+  - applies_to: global
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --port.
+  evidence_ids:
+  - src-cli-cmd-tui
+  - parser-v22
+  - src-kilocode-cli-cmd-daemon
+  - src-cli-cmd-run
+  - parser-replay
+  - help-7-8-3
+  flag: --no-port
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - completion
+  - applies_to: command
+    command:
+    - daemon
+  - applies_to: command
+    command:
+    - daemon
+    - restart
+  - applies_to: command
+    command:
+    - daemon
+    - start
+  - applies_to: command
+    command:
+    - run
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --hostname.
+  evidence_ids:
+  - src-cli-cmd-tui
+  - parser-v22
+  - src-kilocode-cli-cmd-daemon
+  - help-7-8-3
+  flag: --no-hostname
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - completion
+  - applies_to: command
+    command:
+    - daemon
+  - applies_to: command
+    command:
+    - daemon
+    - restart
+  - applies_to: command
+    command:
+    - daemon
+    - start
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --mdns.
+  evidence_ids:
+  - src-cli-cmd-tui
+  - parser-v22
+  - src-kilocode-cli-cmd-daemon
+  - help-7-8-3
+  flag: --no-mdns
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - completion
+  - applies_to: command
+    command:
+    - daemon
+  - applies_to: command
+    command:
+    - daemon
+    - restart
+  - applies_to: command
+    command:
+    - daemon
+    - start
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- aliases:
+  - --no-mdnsDomain
+  attachment: []
+  description: Use parser-generated negation of --mdns-domain.
+  evidence_ids:
+  - src-cli-cmd-tui
+  - parser-v22
+  - src-kilocode-cli-cmd-daemon
+  - help-7-8-3
+  flag: --no-mdns-domain
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - completion
+  - applies_to: command
+    command:
+    - daemon
+  - applies_to: command
+    command:
+    - daemon
+    - restart
+  - applies_to: command
+    command:
+    - daemon
+    - start
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --cors.
+  evidence_ids:
+  - src-cli-cmd-tui
+  - parser-v22
+  - src-kilocode-cli-cmd-daemon
+  - help-7-8-3
+  flag: --no-cors
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - completion
+  - applies_to: command
+    command:
+    - daemon
+  - applies_to: command
+    command:
+    - daemon
+    - restart
+  - applies_to: command
+    command:
+    - daemon
+    - start
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- aliases:
+  - --no-m
+  attachment: []
+  description: Use parser-generated negation of --model.
+  evidence_ids:
+  - src-cli-cmd-tui
+  - parser-v22
+  - src-cli-cmd-run
+  - parser-replay
+  - help-7-8-3
+  flag: --no-model
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - completion
+  - applies_to: command
+    command:
+    - run
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- aliases:
+  - --no-c
+  attachment: []
+  description: Use parser-generated negation of --continue.
+  evidence_ids:
+  - src-cli-cmd-tui
+  - parser-v22
+  - src-cli-cmd-run
+  - parser-replay
+  - help-7-8-3
+  flag: --no-continue
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - completion
+  - applies_to: command
+    command:
+    - run
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- aliases:
+  - --no-s
+  attachment: []
+  description: Use parser-generated negation of --session.
+  evidence_ids:
+  - src-cli-cmd-tui
+  - parser-v22
+  - src-cli-cmd-pr
+  - src-cli-cmd-run
+  - parser-replay
+  - help-7-8-3
+  flag: --no-session
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - completion
+  - applies_to: command
+    command:
+    - pr
+    - link
+  - applies_to: command
+    command:
+    - pr
+    - status
+  - applies_to: command
+    command:
+    - pr
+    - unlink
+  - applies_to: command
+    command:
+    - run
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --fork.
+  evidence_ids:
+  - src-cli-cmd-tui
+  - parser-v22
+  - src-cli-cmd-run
+  - parser-replay
+  - help-7-8-3
+  flag: --no-fork
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - completion
+  - applies_to: command
+    command:
+    - run
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- aliases:
+  - --no-cloudFork
+  attachment: []
+  description: Use parser-generated negation of --cloud-fork.
+  evidence_ids:
+  - src-cli-cmd-tui
+  - parser-v22
+  - src-cli-cmd-run
+  - parser-replay
+  - help-7-8-3
+  flag: --no-cloud-fork
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - completion
+  - applies_to: command
+    command:
+    - run
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --worktree.
+  evidence_ids:
+  - src-cli-cmd-tui
+  - parser-v22
+  - help-7-8-3
+  flag: --no-worktree
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - completion
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --prompt.
+  evidence_ids:
+  - src-cli-cmd-tui
+  - parser-v22
+  - src-kilocode-cli-cmd-cloud
+  - src-kilocode-cli-cmd-roll-call
+  - help-7-8-3
+  flag: --no-prompt
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - cloud
+    - send
+  - applies_to: command
+    command:
+    - cloud
+    - start
+  - applies_to: command
+    command:
+    - completion
+  - applies_to: command
+    command:
+    - roll-call
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --agent.
+  evidence_ids:
+  - src-cli-cmd-tui
+  - parser-v22
+  - src-cli-cmd-run
+  - parser-replay
+  - help-7-8-3
+  flag: --no-agent
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - completion
+  - applies_to: command
+    command:
+    - run
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --auto.
+  evidence_ids:
+  - src-cli-cmd-tui
+  - parser-v22
+  - src-cli-cmd-run
+  - parser-replay
+  - help-7-8-3
+  flag: --no-auto
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - completion
+  - applies_to: command
+    command:
+    - run
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --mini.
+  evidence_ids:
+  - src-cli-cmd-tui
+  - parser-v22
+  - src-cli-cmd-run
+  - parser-replay
+  - help-7-8-3
+  flag: --no-mini
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - completion
+  - applies_to: command
+    command:
+    - run
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- aliases:
+  - --no-replayLimit
+  attachment: []
+  description: Use parser-generated negation of --replay-limit.
+  evidence_ids:
+  - src-cli-cmd-tui
+  - parser-v22
+  - src-cli-cmd-run
+  - parser-replay
+  - help-7-8-3
+  flag: --no-replay-limit
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - completion
+  - applies_to: command
+    command:
+    - run
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --yolo.
+  evidence_ids:
+  - src-cli-cmd-tui
+  - parser-v22
+  - src-cli-cmd-run
+  - parser-replay
+  - help-7-8-3
+  flag: --no-yolo
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - run
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- aliases:
+  - --no-dangerouslySkipPermissions
+  attachment: []
+  description: Use parser-generated negation of --dangerously-skip-permissions.
+  evidence_ids:
+  - src-cli-cmd-tui
+  - parser-v22
+  - src-cli-cmd-run
+  - parser-replay
+  - help-7-8-3
+  flag: --no-dangerously-skip-permissions
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - run
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --demo.
+  evidence_ids:
+  - src-cli-cmd-tui
+  - parser-v22
+  - src-cli-cmd-run
+  - parser-replay
+  - help-7-8-3
+  flag: --no-demo
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - run
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- aliases:
+  - --no-sessionId
+  attachment: []
+  description: Use parser-generated negation of --session-id.
+  evidence_ids:
+  - src-kilocode-cli-cmd-cloud
+  - parser-v22
+  - help-7-8-3
+  flag: --no-session-id
+  invocation_scope:
+  - applies_to: command
+    command:
+    - cloud
+    - result
+  - applies_to: command
+    command:
+    - cloud
+    - send
+  - applies_to: command
+    command:
+    - cloud
+    - status
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- aliases:
+  - --no-messageId
+  attachment: []
+  description: Use parser-generated negation of --message-id.
+  evidence_ids:
+  - src-kilocode-cli-cmd-cloud
+  - parser-v22
+  - help-7-8-3
+  flag: --no-message-id
+  invocation_scope:
+  - applies_to: command
+    command:
+    - cloud
+    - result
+  - applies_to: command
+    command:
+    - cloud
+    - status
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- aliases:
+  - --no-promptStdin
+  attachment: []
+  description: Use parser-generated negation of --prompt-stdin.
+  evidence_ids:
+  - src-kilocode-cli-cmd-cloud
+  - parser-v22
+  - help-7-8-3
+  flag: --no-prompt-stdin
+  invocation_scope:
+  - applies_to: command
+    command:
+    - cloud
+    - send
+  - applies_to: command
+    command:
+    - cloud
+    - start
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --repo.
+  evidence_ids:
+  - src-kilocode-cli-cmd-cloud
+  - parser-v22
+  - help-7-8-3
+  flag: --no-repo
+  invocation_scope:
+  - applies_to: command
+    command:
+    - cloud
+    - start
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- aliases:
+  - --no-repoType
+  attachment: []
+  description: Use parser-generated negation of --repo-type.
+  evidence_ids:
+  - src-kilocode-cli-cmd-cloud
+  - parser-v22
+  - help-7-8-3
+  flag: --no-repo-type
+  invocation_scope:
+  - applies_to: command
+    command:
+    - cloud
+    - start
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --branch.
+  evidence_ids:
+  - src-kilocode-cli-cmd-cloud
+  - parser-v22
+  - help-7-8-3
+  flag: --no-branch
+  invocation_scope:
+  - applies_to: command
+    command:
+    - cloud
+    - start
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --model.
+  evidence_ids:
+  - src-kilocode-cli-cmd-cloud
+  - parser-v22
+  - help-7-8-3
+  flag: --no-model
+  invocation_scope:
+  - applies_to: command
+    command:
+    - cloud
+    - start
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --mode.
+  evidence_ids:
+  - src-kilocode-cli-cmd-cloud
+  - parser-v22
+  - help-7-8-3
+  flag: --no-mode
+  invocation_scope:
+  - applies_to: command
+    command:
+    - cloud
+    - start
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- aliases:
+  - --no-orgId
+  attachment: []
+  description: Use parser-generated negation of --org-id.
+  evidence_ids:
+  - src-kilocode-cli-cmd-cloud
+  - parser-v22
+  - help-7-8-3
+  flag: --no-org-id
+  invocation_scope:
+  - applies_to: command
+    command:
+    - cloud
+    - start
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --stream.
+  evidence_ids:
+  - src-kilocode-cli-cmd-cloud
+  - parser-v22
+  - help-7-8-3
+  flag: --no-stream
+  invocation_scope:
+  - applies_to: command
+    command:
+    - cloud
+    - start
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --json.
+  evidence_ids:
+  - src-kilocode-cli-cmd-console
+  - parser-v22
+  - src-kilocode-cli-cmd-daemon
+  - src-kilocode-cli-cmd-profile
+  - help-7-8-3
+  flag: --no-json
+  invocation_scope:
+  - applies_to: command
+    command:
+    - console
+    - stop
+  - applies_to: command
+    command:
+    - daemon
+  - applies_to: command
+    command:
+    - daemon
+    - restart
+  - applies_to: command
+    command:
+    - daemon
+    - start
+  - applies_to: command
+    command:
+    - daemon
+    - status
+  - applies_to: command
+    command:
+    - daemon
+    - stop
+  - applies_to: command
+    command:
+    - profile
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- aliases:
+  - --no-f
+  attachment: []
+  description: Use parser-generated negation of --foreground.
+  evidence_ids:
+  - src-kilocode-cli-cmd-daemon
+  - parser-v22
+  - help-7-8-3
+  flag: --no-foreground
+  invocation_scope:
+  - applies_to: command
+    command:
+    - daemon
+  - applies_to: command
+    command:
+    - daemon
+    - restart
+  - applies_to: command
+    command:
+    - daemon
+    - start
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --format.
+  evidence_ids:
+  - src-cli-cmd-db
+  - parser-v22
+  - src-kilocode-help-command
+  - src-cli-cmd-run
+  - src-cli-cmd-session
+  - parser-replay
+  - help-7-8-3
+  flag: --no-format
+  invocation_scope:
+  - applies_to: command
+    command:
+    - db
+  - applies_to: command
+    command:
+    - help
+  - applies_to: command
+    command:
+    - run
+  - applies_to: command
+    command:
+    - session
+    - list
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --tool.
+  evidence_ids:
+  - src-cli-cmd-debug-agent
+  - parser-v22
+  - help-7-8-3
+  flag: --no-tool
+  invocation_scope:
+  - applies_to: command
+    command:
+    - debug
+    - agent
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --params.
+  evidence_ids:
+  - src-cli-cmd-debug-agent
+  - parser-v22
+  - help-7-8-3
+  flag: --no-params
+  invocation_scope:
+  - applies_to: command
+    command:
+    - debug
+    - agent
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --query.
+  evidence_ids:
+  - src-cli-cmd-debug-ripgrep
+  - parser-v22
+  - help-7-8-3
+  flag: --no-query
+  invocation_scope:
+  - applies_to: command
+    command:
+    - debug
+    - rg
+    - files
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --glob.
+  evidence_ids:
+  - src-cli-cmd-debug-ripgrep
+  - parser-v22
+  - help-7-8-3
+  flag: --no-glob
+  invocation_scope:
+  - applies_to: command
+    command:
+    - debug
+    - rg
+    - files
+  - applies_to: command
+    command:
+    - debug
+    - rg
+    - search
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --limit.
+  evidence_ids:
+  - src-cli-cmd-debug-ripgrep
+  - parser-v22
+  - src-old-cli-cmd-debug-ripgrep
+  - help-7-3-45
+  - help-7-8-3
+  flag: --no-limit
+  invocation_scope:
+  - applies_to: command
+    command:
+    - debug
+    - rg
+    - files
+  - applies_to: command
+    command:
+    - debug
+    - rg
+    - search
+  - applies_to: command
+    command:
+    - debug
+    - rg
+    - tree
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --sanitize.
+  evidence_ids:
+  - src-cli-cmd-export
+  - parser-v22
+  - help-7-8-3
+  flag: --no-sanitize
+  invocation_scope:
+  - applies_to: command
+    command:
+    - export
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --event.
+  evidence_ids:
+  - src-cli-cmd-github
+  - parser-v22
+  - help-7-8-3
+  flag: --no-event
+  invocation_scope:
+  - applies_to: command
+    command:
+    - github
+    - run
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --token.
+  evidence_ids:
+  - src-cli-cmd-github
+  - parser-v22
+  - help-7-8-3
+  flag: --no-token
+  invocation_scope:
+  - applies_to: command
+    command:
+    - github
+    - run
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --all.
+  evidence_ids:
+  - src-kilocode-help-command
+  - parser-v22
+  - help-7-8-3
+  flag: --no-all
+  invocation_scope:
+  - applies_to: command
+    command:
+    - help
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --url.
+  evidence_ids:
+  - src-cli-cmd-mcp
+  - parser-v22
+  - help-7-8-3
+  flag: --no-url
+  invocation_scope:
+  - applies_to: command
+    command:
+    - mcp
+    - add
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --env.
+  evidence_ids:
+  - src-cli-cmd-mcp
+  - parser-v22
+  - help-7-8-3
+  flag: --no-env
+  invocation_scope:
+  - applies_to: command
+    command:
+    - mcp
+    - add
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --header.
+  evidence_ids:
+  - src-cli-cmd-mcp
+  - parser-v22
+  - help-7-8-3
+  flag: --no-header
+  invocation_scope:
+  - applies_to: command
+    command:
+    - mcp
+    - add
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --verbose.
+  evidence_ids:
+  - src-cli-cmd-models
+  - parser-v22
+  - src-kilocode-cli-cmd-roll-call
+  - help-7-8-3
+  flag: --no-verbose
+  invocation_scope:
+  - applies_to: command
+    command:
+    - models
+  - applies_to: command
+    command:
+    - roll-call
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --refresh.
+  evidence_ids:
+  - src-cli-cmd-models
+  - parser-v22
+  - help-7-8-3
+  flag: --no-refresh
+  invocation_scope:
+  - applies_to: command
+    command:
+    - models
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- aliases:
+  - --no-g
+  attachment: []
+  description: Use parser-generated negation of --global.
+  evidence_ids:
+  - src-cli-cmd-plug
+  - parser-v22
+  - help-7-8-3
+  flag: --no-global
+  invocation_scope:
+  - applies_to: command
+    command:
+    - plug
+  - applies_to: command
+    command:
+    - plugin
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- aliases:
+  - --no-f
+  attachment: []
+  description: Use parser-generated negation of --force.
+  evidence_ids:
+  - src-cli-cmd-plug
+  - parser-v22
+  - src-cli-cmd-uninstall
+  - help-7-8-3
+  flag: --no-force
+  invocation_scope:
+  - applies_to: command
+    command:
+    - plug
+  - applies_to: command
+    command:
+    - plugin
+  - applies_to: command
+    command:
+    - uninstall
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --timeout.
+  evidence_ids:
+  - src-kilocode-cli-cmd-roll-call
+  - parser-v22
+  - help-7-8-3
+  flag: --no-timeout
+  invocation_scope:
+  - applies_to: command
+    command:
+    - roll-call
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --parallel.
+  evidence_ids:
+  - src-kilocode-cli-cmd-roll-call
+  - parser-v22
+  - help-7-8-3
+  flag: --no-parallel
+  invocation_scope:
+  - applies_to: command
+    command:
+    - roll-call
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --quiet.
+  evidence_ids:
+  - src-kilocode-cli-cmd-roll-call
+  - parser-v22
+  - help-7-8-3
+  flag: --no-quiet
+  invocation_scope:
+  - applies_to: command
+    command:
+    - roll-call
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --output.
+  evidence_ids:
+  - src-kilocode-cli-cmd-roll-call
+  - parser-v22
+  - help-7-8-3
+  flag: --no-output
+  invocation_scope:
+  - applies_to: command
+    command:
+    - roll-call
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --command.
+  evidence_ids:
+  - src-cli-cmd-run
+  - parser-v22
+  - parser-replay
+  - help-7-8-3
+  flag: --no-command
+  invocation_scope:
+  - applies_to: command
+    command:
+    - run
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --share.
+  evidence_ids:
+  - src-cli-cmd-run
+  - parser-v22
+  - parser-replay
+  - help-7-8-3
+  flag: --no-share
+  invocation_scope:
+  - applies_to: command
+    command:
+    - run
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- aliases:
+  - --no-f
+  attachment: []
+  description: Use parser-generated negation of --file.
+  evidence_ids:
+  - src-cli-cmd-run
+  - parser-v22
+  - parser-replay
+  - help-7-8-3
+  flag: --no-file
+  invocation_scope:
+  - applies_to: command
+    command:
+    - run
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --title.
+  evidence_ids:
+  - src-cli-cmd-run
+  - parser-v22
+  - parser-replay
+  - help-7-8-3
+  flag: --no-title
+  invocation_scope:
+  - applies_to: command
+    command:
+    - run
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --attach.
+  evidence_ids:
+  - src-cli-cmd-run
+  - parser-v22
+  - parser-replay
+  - help-7-8-3
+  flag: --no-attach
+  invocation_scope:
+  - applies_to: command
+    command:
+    - run
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- aliases:
+  - --no-p
+  attachment: []
+  description: Use parser-generated negation of --password.
+  evidence_ids:
+  - src-cli-cmd-run
+  - parser-v22
+  - parser-replay
+  - help-7-8-3
+  flag: --no-password
+  invocation_scope:
+  - applies_to: command
+    command:
+    - run
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- aliases:
+  - --no-u
+  attachment: []
+  description: Use parser-generated negation of --username.
+  evidence_ids:
+  - src-cli-cmd-run
+  - parser-v22
+  - parser-replay
+  - help-7-8-3
+  flag: --no-username
+  invocation_scope:
+  - applies_to: command
+    command:
+    - run
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --dir.
+  evidence_ids:
+  - src-cli-cmd-run
+  - parser-v22
+  - parser-replay
+  - help-7-8-3
+  flag: --no-dir
+  invocation_scope:
+  - applies_to: command
+    command:
+    - run
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --variant.
+  evidence_ids:
+  - src-cli-cmd-run
+  - parser-v22
+  - parser-replay
+  - help-7-8-3
+  flag: --no-variant
+  invocation_scope:
+  - applies_to: command
+    command:
+    - run
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --thinking.
+  evidence_ids:
+  - src-cli-cmd-run
+  - parser-v22
+  - parser-replay
+  - help-7-8-3
+  flag: --no-thinking
+  invocation_scope:
+  - applies_to: command
+    command:
+    - run
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- aliases:
+  - --no-i
+  attachment: []
+  description: Use parser-generated negation of --interactive.
+  evidence_ids:
+  - src-cli-cmd-run
+  - parser-v22
+  - parser-replay
+  - help-7-8-3
+  flag: --no-interactive
+  invocation_scope:
+  - applies_to: command
+    command:
+    - run
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --replay.
+  evidence_ids:
+  - src-cli-cmd-run
+  - parser-v22
+  - parser-replay
+  - help-7-8-3
+  flag: --no-replay
+  invocation_scope:
+  - applies_to: command
+    command:
+    - run
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- aliases:
+  - --no-n
+  - --no-maxCount
+  attachment: []
+  description: Use parser-generated negation of --max-count.
+  evidence_ids:
+  - src-cli-cmd-session
+  - parser-v22
+  - help-7-8-3
+  flag: --no-max-count
+  invocation_scope:
+  - applies_to: command
+    command:
+    - session
+    - list
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- aliases:
+  - --no-a
+  attachment: []
+  description: Use parser-generated negation of --all.
+  evidence_ids:
+  - src-cli-cmd-session
+  - parser-v22
+  - help-7-8-3
+  flag: --no-all
+  invocation_scope:
+  - applies_to: command
+    command:
+    - session
+    - list
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- aliases:
+  - --no-s
+  attachment: []
+  description: Use parser-generated negation of --search.
+  evidence_ids:
+  - src-cli-cmd-session
+  - parser-v22
+  - help-7-8-3
+  flag: --no-search
+  invocation_scope:
+  - applies_to: command
+    command:
+    - session
+    - list
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --days.
+  evidence_ids:
+  - src-cli-cmd-stats
+  - parser-v22
+  - help-7-8-3
+  flag: --no-days
+  invocation_scope:
+  - applies_to: command
+    command:
+    - stats
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --tools.
+  evidence_ids:
+  - src-cli-cmd-stats
+  - parser-v22
+  - help-7-8-3
+  flag: --no-tools
+  invocation_scope:
+  - applies_to: command
+    command:
+    - stats
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --models.
+  evidence_ids:
+  - src-cli-cmd-stats
+  - parser-v22
+  - help-7-8-3
+  flag: --no-models
+  invocation_scope:
+  - applies_to: command
+    command:
+    - stats
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- attachment: []
+  description: Use parser-generated negation of --project.
+  evidence_ids:
+  - src-cli-cmd-stats
+  - parser-v22
+  - help-7-8-3
+  flag: --no-project
+  invocation_scope:
+  - applies_to: command
+    command:
+    - stats
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- aliases:
+  - --no-c
+  - --no-keepConfig
+  attachment: []
+  description: Use parser-generated negation of --keep-config.
+  evidence_ids:
+  - src-cli-cmd-uninstall
+  - parser-v22
+  - help-7-8-3
+  flag: --no-keep-config
+  invocation_scope:
+  - applies_to: command
+    command:
+    - uninstall
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- aliases:
+  - --no-d
+  - --no-keepData
+  attachment: []
+  description: Use parser-generated negation of --keep-data.
+  evidence_ids:
+  - src-cli-cmd-uninstall
+  - parser-v22
+  - help-7-8-3
+  flag: --no-keep-data
+  invocation_scope:
+  - applies_to: command
+    command:
+    - uninstall
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
+- aliases:
+  - --no-dryRun
+  attachment: []
+  description: Use parser-generated negation of --dry-run.
+  evidence_ids:
+  - src-cli-cmd-uninstall
+  - parser-v22
+  - help-7-8-3
+  flag: --no-dry-run
+  invocation_scope:
+  - applies_to: command
+    command:
+    - uninstall
+  notes: Parser-generated negation consumes no following argument. Underlying value becomes false, zero for a number, or [false] for an array; choices or the handler may reject it. This is a recognized parser spelling, not a recommended invocation.
+  value_type: none
 config_paths:
-  - os: macos
-    scope: user
-    path: "~/.config/kilo/kilo.jsonc"
-    format: jsonc
-    notes: "Primary user config observed locally and documented; `.json` and `config.json` are also supported."
-  - os: linux
-    scope: user
-    path: "~/.config/kilo/kilo.jsonc"
-    format: jsonc
-    notes: "Primary user config documented for XDG Linux; `.json` and `config.json` are also supported."
-  - os: windows
-    scope: user
-    path: "%APPDATA%\\kilo\\kilo.jsonc"
-    format: jsonc
-    notes: "Docs say Windows config dir may vary; this is the expected roaming app-data equivalent."
-  - os: macos
-    scope: user
-    path: "~/.config/kilo/tui.jsonc"
-    format: jsonc
-    notes: "TUI notifications, sounds, themes, and keybindings; `.json` also supported."
-  - os: linux
-    scope: user
-    path: "~/.config/kilo/tui.jsonc"
-    format: jsonc
-    notes: "TUI notifications, sounds, themes, and keybindings; `.json` also supported."
-  - os: windows
-    scope: user
-    path: "%APPDATA%\\kilo\\tui.jsonc"
-    format: jsonc
-    notes: "Expected Windows equivalent; docs say Windows config dir may vary."
-  - os: macos
-    scope: repo
-    path: "./kilo.jsonc"
-    format: jsonc
-    notes: "Project config takes precedence over global settings; `.json` supported."
-  - os: linux
-    scope: repo
-    path: "./kilo.jsonc"
-    format: jsonc
-    notes: "Project config takes precedence over global settings; `.json` supported."
-  - os: windows
-    scope: repo
-    path: ".\\kilo.jsonc"
-    format: jsonc
-    notes: "Project config takes precedence over global settings; `.json` supported."
-  - os: macos
-    scope: repo
-    path: "./.kilo/kilo.jsonc"
-    format: jsonc
-    notes: "Project directory config; docs also mention legacy `.kilocode` and `.opencode` discovery."
-  - os: linux
-    scope: repo
-    path: "./.kilo/kilo.jsonc"
-    format: jsonc
-    notes: "Project directory config; docs also mention legacy `.kilocode` and `.opencode` discovery."
-  - os: windows
-    scope: repo
-    path: ".\\.kilo\\kilo.jsonc"
-    format: jsonc
-    notes: "Project directory config; docs also mention legacy `.kilocode` and `.opencode` discovery."
-  - os: macos
-    scope: user
-    path: "~/.local/share/kilo/kilo.db"
-    format: other
-    notes: "Local inspection showed SQLite session/state DB, WAL/SHM sidecars, session-export DB, logs, repos, and telemetry-id under data dir."
-  - os: linux
-    scope: user
-    path: "~/.local/share/kilo/kilo.db"
-    format: other
-    notes: "XDG data path equivalent reported by local `kilo debug paths` on macOS."
-  - os: windows
-    scope: user
-    path: "%LOCALAPPDATA%\\kilo\\kilo.db"
-    format: other
-    notes: "Expected Windows local data equivalent; not locally verified."
+- format: jsonc
+  notes: Default XDG_CONFIG_HOME/kilo directory on every OS; Windows source uses home/.config, not APPDATA. Main global load order is config.json, kilo.json, kilo.jsonc, opencode.json, opencode.jsonc; TUI files are a separate layer.
+  os: macos
+  path: ~/.config/kilo/config.json
+  scope: user
+- format: jsonc
+  notes: Default XDG_CONFIG_HOME/kilo directory on every OS; Windows source uses home/.config, not APPDATA. Main global load order is config.json, kilo.json, kilo.jsonc, opencode.json, opencode.jsonc; TUI files are a separate layer.
+  os: macos
+  path: ~/.config/kilo/kilo.json
+  scope: user
+- format: jsonc
+  notes: Default XDG_CONFIG_HOME/kilo directory on every OS; Windows source uses home/.config, not APPDATA. Main global load order is config.json, kilo.json, kilo.jsonc, opencode.json, opencode.jsonc; TUI files are a separate layer.
+  os: macos
+  path: ~/.config/kilo/kilo.jsonc
+  scope: user
+- format: jsonc
+  notes: Default XDG_CONFIG_HOME/kilo directory on every OS; Windows source uses home/.config, not APPDATA. Main global load order is config.json, kilo.json, kilo.jsonc, opencode.json, opencode.jsonc; TUI files are a separate layer.
+  os: macos
+  path: ~/.config/kilo/opencode.json
+  scope: user
+- format: jsonc
+  notes: Default XDG_CONFIG_HOME/kilo directory on every OS; Windows source uses home/.config, not APPDATA. Main global load order is config.json, kilo.json, kilo.jsonc, opencode.json, opencode.jsonc; TUI files are a separate layer.
+  os: macos
+  path: ~/.config/kilo/opencode.jsonc
+  scope: user
+- format: jsonc
+  notes: Default XDG_CONFIG_HOME/kilo directory on every OS; Windows source uses home/.config, not APPDATA. Main global load order is config.json, kilo.json, kilo.jsonc, opencode.json, opencode.jsonc; TUI files are a separate layer.
+  os: macos
+  path: ~/.config/kilo/tui.json
+  scope: user
+- format: jsonc
+  notes: Default XDG_CONFIG_HOME/kilo directory on every OS; Windows source uses home/.config, not APPDATA. Main global load order is config.json, kilo.json, kilo.jsonc, opencode.json, opencode.jsonc; TUI files are a separate layer.
+  os: macos
+  path: ~/.config/kilo/tui.jsonc
+  scope: user
+- format: jsonc
+  notes: Walked from launch directory to worktree boundary and merged ancestor-first; disabled by KILO_DISABLE_PROJECT_CONFIG.
+  os: macos
+  path: ./kilo.json
+  scope: repo
+- format: jsonc
+  notes: Supported config-directory discovery; also examines the same directory names in the user home and primary checkout fallbacks for linked worktrees.
+  os: macos
+  path: ./.kilo/kilo.json
+  scope: repo
+- format: jsonc
+  notes: Supported config-directory discovery; also examines the same directory names in the user home and primary checkout fallbacks for linked worktrees.
+  os: macos
+  path: ./.kilocode/kilo.json
+  scope: repo
+- format: jsonc
+  notes: Walked from launch directory to worktree boundary and merged ancestor-first; disabled by KILO_DISABLE_PROJECT_CONFIG.
+  os: macos
+  path: ./kilo.jsonc
+  scope: repo
+- format: jsonc
+  notes: Supported config-directory discovery; also examines the same directory names in the user home and primary checkout fallbacks for linked worktrees.
+  os: macos
+  path: ./.kilo/kilo.jsonc
+  scope: repo
+- format: jsonc
+  notes: Supported config-directory discovery; also examines the same directory names in the user home and primary checkout fallbacks for linked worktrees.
+  os: macos
+  path: ./.kilocode/kilo.jsonc
+  scope: repo
+- format: jsonc
+  notes: Walked from launch directory to worktree boundary and merged ancestor-first; disabled by KILO_DISABLE_PROJECT_CONFIG.
+  os: macos
+  path: ./opencode.json
+  scope: repo
+- format: jsonc
+  notes: Supported config-directory discovery; also examines the same directory names in the user home and primary checkout fallbacks for linked worktrees.
+  os: macos
+  path: ./.kilo/opencode.json
+  scope: repo
+- format: jsonc
+  notes: Supported config-directory discovery; also examines the same directory names in the user home and primary checkout fallbacks for linked worktrees.
+  os: macos
+  path: ./.kilocode/opencode.json
+  scope: repo
+- format: jsonc
+  notes: Walked from launch directory to worktree boundary and merged ancestor-first; disabled by KILO_DISABLE_PROJECT_CONFIG.
+  os: macos
+  path: ./opencode.jsonc
+  scope: repo
+- format: jsonc
+  notes: Supported config-directory discovery; also examines the same directory names in the user home and primary checkout fallbacks for linked worktrees.
+  os: macos
+  path: ./.kilo/opencode.jsonc
+  scope: repo
+- format: jsonc
+  notes: Supported config-directory discovery; also examines the same directory names in the user home and primary checkout fallbacks for linked worktrees.
+  os: macos
+  path: ./.kilocode/opencode.jsonc
+  scope: repo
+- format: jsonc
+  notes: Walked from launch directory to worktree boundary and merged ancestor-first; disabled by KILO_DISABLE_PROJECT_CONFIG.
+  os: macos
+  path: ./tui.json
+  scope: repo
+- format: jsonc
+  notes: Supported config-directory discovery; also examines the same directory names in the user home and primary checkout fallbacks for linked worktrees.
+  os: macos
+  path: ./.kilo/tui.json
+  scope: repo
+- format: jsonc
+  notes: Supported config-directory discovery; also examines the same directory names in the user home and primary checkout fallbacks for linked worktrees.
+  os: macos
+  path: ./.kilocode/tui.json
+  scope: repo
+- format: jsonc
+  notes: Walked from launch directory to worktree boundary and merged ancestor-first; disabled by KILO_DISABLE_PROJECT_CONFIG.
+  os: macos
+  path: ./tui.jsonc
+  scope: repo
+- format: jsonc
+  notes: Supported config-directory discovery; also examines the same directory names in the user home and primary checkout fallbacks for linked worktrees.
+  os: macos
+  path: ./.kilo/tui.jsonc
+  scope: repo
+- format: jsonc
+  notes: Supported config-directory discovery; also examines the same directory names in the user home and primary checkout fallbacks for linked worktrees.
+  os: macos
+  path: ./.kilocode/tui.jsonc
+  scope: repo
+- format: jsonc
+  notes: Enterprise-managed files override ordinary file and inline-content layers; directory can be redirected by KILO_TEST_MANAGED_CONFIG_DIR.
+  os: macos
+  path: /Library/Application Support/kilo/kilo.jsonc
+  scope: system
+- format: jsonc
+  notes: Enterprise-managed files override ordinary file and inline-content layers; directory can be redirected by KILO_TEST_MANAGED_CONFIG_DIR.
+  os: macos
+  path: /Library/Application Support/kilo/kilo.json
+  scope: system
+- format: jsonc
+  notes: Enterprise-managed files override ordinary file and inline-content layers; directory can be redirected by KILO_TEST_MANAGED_CONFIG_DIR.
+  os: macos
+  path: /Library/Application Support/kilo/opencode.jsonc
+  scope: system
+- format: jsonc
+  notes: Enterprise-managed files override ordinary file and inline-content layers; directory can be redirected by KILO_TEST_MANAGED_CONFIG_DIR.
+  os: macos
+  path: /Library/Application Support/kilo/opencode.json
+  scope: system
+- format: jsonc
+  notes: Explicit JSONC file loaded after global config, before project config.
+  os: macos
+  path: $KILO_CONFIG
+  scope: env
+- format: jsonc
+  notes: Explicit TUI JSONC file loaded after global TUI, before project TUI.
+  os: macos
+  path: $KILO_TUI_CONFIG
+  scope: env
+- format: jsonc
+  notes: Default XDG_CONFIG_HOME/kilo directory on every OS; Windows source uses home/.config, not APPDATA. Main global load order is config.json, kilo.json, kilo.jsonc, opencode.json, opencode.jsonc; TUI files are a separate layer.
+  os: linux
+  path: ~/.config/kilo/config.json
+  scope: user
+- format: jsonc
+  notes: Default XDG_CONFIG_HOME/kilo directory on every OS; Windows source uses home/.config, not APPDATA. Main global load order is config.json, kilo.json, kilo.jsonc, opencode.json, opencode.jsonc; TUI files are a separate layer.
+  os: linux
+  path: ~/.config/kilo/kilo.json
+  scope: user
+- format: jsonc
+  notes: Default XDG_CONFIG_HOME/kilo directory on every OS; Windows source uses home/.config, not APPDATA. Main global load order is config.json, kilo.json, kilo.jsonc, opencode.json, opencode.jsonc; TUI files are a separate layer.
+  os: linux
+  path: ~/.config/kilo/kilo.jsonc
+  scope: user
+- format: jsonc
+  notes: Default XDG_CONFIG_HOME/kilo directory on every OS; Windows source uses home/.config, not APPDATA. Main global load order is config.json, kilo.json, kilo.jsonc, opencode.json, opencode.jsonc; TUI files are a separate layer.
+  os: linux
+  path: ~/.config/kilo/opencode.json
+  scope: user
+- format: jsonc
+  notes: Default XDG_CONFIG_HOME/kilo directory on every OS; Windows source uses home/.config, not APPDATA. Main global load order is config.json, kilo.json, kilo.jsonc, opencode.json, opencode.jsonc; TUI files are a separate layer.
+  os: linux
+  path: ~/.config/kilo/opencode.jsonc
+  scope: user
+- format: jsonc
+  notes: Default XDG_CONFIG_HOME/kilo directory on every OS; Windows source uses home/.config, not APPDATA. Main global load order is config.json, kilo.json, kilo.jsonc, opencode.json, opencode.jsonc; TUI files are a separate layer.
+  os: linux
+  path: ~/.config/kilo/tui.json
+  scope: user
+- format: jsonc
+  notes: Default XDG_CONFIG_HOME/kilo directory on every OS; Windows source uses home/.config, not APPDATA. Main global load order is config.json, kilo.json, kilo.jsonc, opencode.json, opencode.jsonc; TUI files are a separate layer.
+  os: linux
+  path: ~/.config/kilo/tui.jsonc
+  scope: user
+- format: jsonc
+  notes: Walked from launch directory to worktree boundary and merged ancestor-first; disabled by KILO_DISABLE_PROJECT_CONFIG.
+  os: linux
+  path: ./kilo.json
+  scope: repo
+- format: jsonc
+  notes: Supported config-directory discovery; also examines the same directory names in the user home and primary checkout fallbacks for linked worktrees.
+  os: linux
+  path: ./.kilo/kilo.json
+  scope: repo
+- format: jsonc
+  notes: Supported config-directory discovery; also examines the same directory names in the user home and primary checkout fallbacks for linked worktrees.
+  os: linux
+  path: ./.kilocode/kilo.json
+  scope: repo
+- format: jsonc
+  notes: Walked from launch directory to worktree boundary and merged ancestor-first; disabled by KILO_DISABLE_PROJECT_CONFIG.
+  os: linux
+  path: ./kilo.jsonc
+  scope: repo
+- format: jsonc
+  notes: Supported config-directory discovery; also examines the same directory names in the user home and primary checkout fallbacks for linked worktrees.
+  os: linux
+  path: ./.kilo/kilo.jsonc
+  scope: repo
+- format: jsonc
+  notes: Supported config-directory discovery; also examines the same directory names in the user home and primary checkout fallbacks for linked worktrees.
+  os: linux
+  path: ./.kilocode/kilo.jsonc
+  scope: repo
+- format: jsonc
+  notes: Walked from launch directory to worktree boundary and merged ancestor-first; disabled by KILO_DISABLE_PROJECT_CONFIG.
+  os: linux
+  path: ./opencode.json
+  scope: repo
+- format: jsonc
+  notes: Supported config-directory discovery; also examines the same directory names in the user home and primary checkout fallbacks for linked worktrees.
+  os: linux
+  path: ./.kilo/opencode.json
+  scope: repo
+- format: jsonc
+  notes: Supported config-directory discovery; also examines the same directory names in the user home and primary checkout fallbacks for linked worktrees.
+  os: linux
+  path: ./.kilocode/opencode.json
+  scope: repo
+- format: jsonc
+  notes: Walked from launch directory to worktree boundary and merged ancestor-first; disabled by KILO_DISABLE_PROJECT_CONFIG.
+  os: linux
+  path: ./opencode.jsonc
+  scope: repo
+- format: jsonc
+  notes: Supported config-directory discovery; also examines the same directory names in the user home and primary checkout fallbacks for linked worktrees.
+  os: linux
+  path: ./.kilo/opencode.jsonc
+  scope: repo
+- format: jsonc
+  notes: Supported config-directory discovery; also examines the same directory names in the user home and primary checkout fallbacks for linked worktrees.
+  os: linux
+  path: ./.kilocode/opencode.jsonc
+  scope: repo
+- format: jsonc
+  notes: Walked from launch directory to worktree boundary and merged ancestor-first; disabled by KILO_DISABLE_PROJECT_CONFIG.
+  os: linux
+  path: ./tui.json
+  scope: repo
+- format: jsonc
+  notes: Supported config-directory discovery; also examines the same directory names in the user home and primary checkout fallbacks for linked worktrees.
+  os: linux
+  path: ./.kilo/tui.json
+  scope: repo
+- format: jsonc
+  notes: Supported config-directory discovery; also examines the same directory names in the user home and primary checkout fallbacks for linked worktrees.
+  os: linux
+  path: ./.kilocode/tui.json
+  scope: repo
+- format: jsonc
+  notes: Walked from launch directory to worktree boundary and merged ancestor-first; disabled by KILO_DISABLE_PROJECT_CONFIG.
+  os: linux
+  path: ./tui.jsonc
+  scope: repo
+- format: jsonc
+  notes: Supported config-directory discovery; also examines the same directory names in the user home and primary checkout fallbacks for linked worktrees.
+  os: linux
+  path: ./.kilo/tui.jsonc
+  scope: repo
+- format: jsonc
+  notes: Supported config-directory discovery; also examines the same directory names in the user home and primary checkout fallbacks for linked worktrees.
+  os: linux
+  path: ./.kilocode/tui.jsonc
+  scope: repo
+- format: jsonc
+  notes: Enterprise-managed files override ordinary file and inline-content layers; directory can be redirected by KILO_TEST_MANAGED_CONFIG_DIR.
+  os: linux
+  path: /etc/kilo/kilo.jsonc
+  scope: system
+- format: jsonc
+  notes: Enterprise-managed files override ordinary file and inline-content layers; directory can be redirected by KILO_TEST_MANAGED_CONFIG_DIR.
+  os: linux
+  path: /etc/kilo/kilo.json
+  scope: system
+- format: jsonc
+  notes: Enterprise-managed files override ordinary file and inline-content layers; directory can be redirected by KILO_TEST_MANAGED_CONFIG_DIR.
+  os: linux
+  path: /etc/kilo/opencode.jsonc
+  scope: system
+- format: jsonc
+  notes: Enterprise-managed files override ordinary file and inline-content layers; directory can be redirected by KILO_TEST_MANAGED_CONFIG_DIR.
+  os: linux
+  path: /etc/kilo/opencode.json
+  scope: system
+- format: jsonc
+  notes: Explicit JSONC file loaded after global config, before project config.
+  os: linux
+  path: $KILO_CONFIG
+  scope: env
+- format: jsonc
+  notes: Explicit TUI JSONC file loaded after global TUI, before project TUI.
+  os: linux
+  path: $KILO_TUI_CONFIG
+  scope: env
+- format: jsonc
+  notes: Default XDG_CONFIG_HOME/kilo directory on every OS; Windows source uses home/.config, not APPDATA. Main global load order is config.json, kilo.json, kilo.jsonc, opencode.json, opencode.jsonc; TUI files are a separate layer.
+  os: windows
+  path: '%USERPROFILE%\.config\kilo\config.json'
+  scope: user
+- format: jsonc
+  notes: Default XDG_CONFIG_HOME/kilo directory on every OS; Windows source uses home/.config, not APPDATA. Main global load order is config.json, kilo.json, kilo.jsonc, opencode.json, opencode.jsonc; TUI files are a separate layer.
+  os: windows
+  path: '%USERPROFILE%\.config\kilo\kilo.json'
+  scope: user
+- format: jsonc
+  notes: Default XDG_CONFIG_HOME/kilo directory on every OS; Windows source uses home/.config, not APPDATA. Main global load order is config.json, kilo.json, kilo.jsonc, opencode.json, opencode.jsonc; TUI files are a separate layer.
+  os: windows
+  path: '%USERPROFILE%\.config\kilo\kilo.jsonc'
+  scope: user
+- format: jsonc
+  notes: Default XDG_CONFIG_HOME/kilo directory on every OS; Windows source uses home/.config, not APPDATA. Main global load order is config.json, kilo.json, kilo.jsonc, opencode.json, opencode.jsonc; TUI files are a separate layer.
+  os: windows
+  path: '%USERPROFILE%\.config\kilo\opencode.json'
+  scope: user
+- format: jsonc
+  notes: Default XDG_CONFIG_HOME/kilo directory on every OS; Windows source uses home/.config, not APPDATA. Main global load order is config.json, kilo.json, kilo.jsonc, opencode.json, opencode.jsonc; TUI files are a separate layer.
+  os: windows
+  path: '%USERPROFILE%\.config\kilo\opencode.jsonc'
+  scope: user
+- format: jsonc
+  notes: Default XDG_CONFIG_HOME/kilo directory on every OS; Windows source uses home/.config, not APPDATA. Main global load order is config.json, kilo.json, kilo.jsonc, opencode.json, opencode.jsonc; TUI files are a separate layer.
+  os: windows
+  path: '%USERPROFILE%\.config\kilo\tui.json'
+  scope: user
+- format: jsonc
+  notes: Default XDG_CONFIG_HOME/kilo directory on every OS; Windows source uses home/.config, not APPDATA. Main global load order is config.json, kilo.json, kilo.jsonc, opencode.json, opencode.jsonc; TUI files are a separate layer.
+  os: windows
+  path: '%USERPROFILE%\.config\kilo\tui.jsonc'
+  scope: user
+- format: jsonc
+  notes: Walked from launch directory to worktree boundary and merged ancestor-first; disabled by KILO_DISABLE_PROJECT_CONFIG.
+  os: windows
+  path: .\kilo.json
+  scope: repo
+- format: jsonc
+  notes: Supported config-directory discovery; also examines the same directory names in the user home and primary checkout fallbacks for linked worktrees.
+  os: windows
+  path: .\.kilo\kilo.json
+  scope: repo
+- format: jsonc
+  notes: Supported config-directory discovery; also examines the same directory names in the user home and primary checkout fallbacks for linked worktrees.
+  os: windows
+  path: .\.kilocode\kilo.json
+  scope: repo
+- format: jsonc
+  notes: Walked from launch directory to worktree boundary and merged ancestor-first; disabled by KILO_DISABLE_PROJECT_CONFIG.
+  os: windows
+  path: .\kilo.jsonc
+  scope: repo
+- format: jsonc
+  notes: Supported config-directory discovery; also examines the same directory names in the user home and primary checkout fallbacks for linked worktrees.
+  os: windows
+  path: .\.kilo\kilo.jsonc
+  scope: repo
+- format: jsonc
+  notes: Supported config-directory discovery; also examines the same directory names in the user home and primary checkout fallbacks for linked worktrees.
+  os: windows
+  path: .\.kilocode\kilo.jsonc
+  scope: repo
+- format: jsonc
+  notes: Walked from launch directory to worktree boundary and merged ancestor-first; disabled by KILO_DISABLE_PROJECT_CONFIG.
+  os: windows
+  path: .\opencode.json
+  scope: repo
+- format: jsonc
+  notes: Supported config-directory discovery; also examines the same directory names in the user home and primary checkout fallbacks for linked worktrees.
+  os: windows
+  path: .\.kilo\opencode.json
+  scope: repo
+- format: jsonc
+  notes: Supported config-directory discovery; also examines the same directory names in the user home and primary checkout fallbacks for linked worktrees.
+  os: windows
+  path: .\.kilocode\opencode.json
+  scope: repo
+- format: jsonc
+  notes: Walked from launch directory to worktree boundary and merged ancestor-first; disabled by KILO_DISABLE_PROJECT_CONFIG.
+  os: windows
+  path: .\opencode.jsonc
+  scope: repo
+- format: jsonc
+  notes: Supported config-directory discovery; also examines the same directory names in the user home and primary checkout fallbacks for linked worktrees.
+  os: windows
+  path: .\.kilo\opencode.jsonc
+  scope: repo
+- format: jsonc
+  notes: Supported config-directory discovery; also examines the same directory names in the user home and primary checkout fallbacks for linked worktrees.
+  os: windows
+  path: .\.kilocode\opencode.jsonc
+  scope: repo
+- format: jsonc
+  notes: Walked from launch directory to worktree boundary and merged ancestor-first; disabled by KILO_DISABLE_PROJECT_CONFIG.
+  os: windows
+  path: .\tui.json
+  scope: repo
+- format: jsonc
+  notes: Supported config-directory discovery; also examines the same directory names in the user home and primary checkout fallbacks for linked worktrees.
+  os: windows
+  path: .\.kilo\tui.json
+  scope: repo
+- format: jsonc
+  notes: Supported config-directory discovery; also examines the same directory names in the user home and primary checkout fallbacks for linked worktrees.
+  os: windows
+  path: .\.kilocode\tui.json
+  scope: repo
+- format: jsonc
+  notes: Walked from launch directory to worktree boundary and merged ancestor-first; disabled by KILO_DISABLE_PROJECT_CONFIG.
+  os: windows
+  path: .\tui.jsonc
+  scope: repo
+- format: jsonc
+  notes: Supported config-directory discovery; also examines the same directory names in the user home and primary checkout fallbacks for linked worktrees.
+  os: windows
+  path: .\.kilo\tui.jsonc
+  scope: repo
+- format: jsonc
+  notes: Supported config-directory discovery; also examines the same directory names in the user home and primary checkout fallbacks for linked worktrees.
+  os: windows
+  path: .\.kilocode\tui.jsonc
+  scope: repo
+- format: jsonc
+  notes: Enterprise-managed files override ordinary file and inline-content layers; directory can be redirected by KILO_TEST_MANAGED_CONFIG_DIR.
+  os: windows
+  path: '%ProgramData%\kilo\kilo.jsonc'
+  scope: system
+- format: jsonc
+  notes: Enterprise-managed files override ordinary file and inline-content layers; directory can be redirected by KILO_TEST_MANAGED_CONFIG_DIR.
+  os: windows
+  path: '%ProgramData%\kilo\kilo.json'
+  scope: system
+- format: jsonc
+  notes: Enterprise-managed files override ordinary file and inline-content layers; directory can be redirected by KILO_TEST_MANAGED_CONFIG_DIR.
+  os: windows
+  path: '%ProgramData%\kilo\opencode.jsonc'
+  scope: system
+- format: jsonc
+  notes: Enterprise-managed files override ordinary file and inline-content layers; directory can be redirected by KILO_TEST_MANAGED_CONFIG_DIR.
+  os: windows
+  path: '%ProgramData%\kilo\opencode.json'
+  scope: system
+- format: jsonc
+  notes: Explicit JSONC file loaded after global config, before project config.
+  os: windows
+  path: '%KILO_CONFIG%'
+  scope: env
+- format: jsonc
+  notes: Explicit TUI JSONC file loaded after global TUI, before project TUI.
+  os: windows
+  path: '%KILO_TUI_CONFIG%'
+  scope: env
+- format: jsonc
+  notes: Home compatibility config directory, discovered separately from the default XDG user-config directory.
+  os: macos
+  path: ~/.kilo/kilo.json
+  scope: user
+- format: jsonc
+  notes: Home compatibility config directory, discovered separately from the default XDG user-config directory.
+  os: macos
+  path: ~/.kilocode/kilo.json
+  scope: user
+- format: jsonc
+  notes: Explicit config directory is an additional discovery layer for main/TUI configuration and shared resources.
+  os: macos
+  path: $KILO_CONFIG_DIR/kilo.json
+  scope: env
+- format: jsonc
+  notes: Home compatibility config directory, discovered separately from the default XDG user-config directory.
+  os: macos
+  path: ~/.kilo/kilo.jsonc
+  scope: user
+- format: jsonc
+  notes: Home compatibility config directory, discovered separately from the default XDG user-config directory.
+  os: macos
+  path: ~/.kilocode/kilo.jsonc
+  scope: user
+- format: jsonc
+  notes: Explicit config directory is an additional discovery layer for main/TUI configuration and shared resources.
+  os: macos
+  path: $KILO_CONFIG_DIR/kilo.jsonc
+  scope: env
+- format: jsonc
+  notes: Home compatibility config directory, discovered separately from the default XDG user-config directory.
+  os: macos
+  path: ~/.kilo/opencode.json
+  scope: user
+- format: jsonc
+  notes: Home compatibility config directory, discovered separately from the default XDG user-config directory.
+  os: macos
+  path: ~/.kilocode/opencode.json
+  scope: user
+- format: jsonc
+  notes: Explicit config directory is an additional discovery layer for main/TUI configuration and shared resources.
+  os: macos
+  path: $KILO_CONFIG_DIR/opencode.json
+  scope: env
+- format: jsonc
+  notes: Home compatibility config directory, discovered separately from the default XDG user-config directory.
+  os: macos
+  path: ~/.kilo/opencode.jsonc
+  scope: user
+- format: jsonc
+  notes: Home compatibility config directory, discovered separately from the default XDG user-config directory.
+  os: macos
+  path: ~/.kilocode/opencode.jsonc
+  scope: user
+- format: jsonc
+  notes: Explicit config directory is an additional discovery layer for main/TUI configuration and shared resources.
+  os: macos
+  path: $KILO_CONFIG_DIR/opencode.jsonc
+  scope: env
+- format: jsonc
+  notes: Home compatibility config directory, discovered separately from the default XDG user-config directory.
+  os: macos
+  path: ~/.kilo/tui.json
+  scope: user
+- format: jsonc
+  notes: Home compatibility config directory, discovered separately from the default XDG user-config directory.
+  os: macos
+  path: ~/.kilocode/tui.json
+  scope: user
+- format: jsonc
+  notes: Explicit config directory is an additional discovery layer for main/TUI configuration and shared resources.
+  os: macos
+  path: $KILO_CONFIG_DIR/tui.json
+  scope: env
+- format: jsonc
+  notes: Home compatibility config directory, discovered separately from the default XDG user-config directory.
+  os: macos
+  path: ~/.kilo/tui.jsonc
+  scope: user
+- format: jsonc
+  notes: Home compatibility config directory, discovered separately from the default XDG user-config directory.
+  os: macos
+  path: ~/.kilocode/tui.jsonc
+  scope: user
+- format: jsonc
+  notes: Explicit config directory is an additional discovery layer for main/TUI configuration and shared resources.
+  os: macos
+  path: $KILO_CONFIG_DIR/tui.jsonc
+  scope: env
+- format: json
+  notes: Legacy CLI authentication config may be read/migrated at bootstrap; not the current main config store.
+  os: macos
+  path: ~/.kilocode/cli/config.json
+  scope: user
+- format: json
+  notes: Persisted provider authentication state; credentials are not included in this research. XDG_DATA_HOME redirects the base.
+  os: macos
+  path: ~/.local/share/kilo/auth.json
+  scope: user
+- format: jsonc
+  notes: Home compatibility config directory, discovered separately from the default XDG user-config directory.
+  os: linux
+  path: ~/.kilo/kilo.json
+  scope: user
+- format: jsonc
+  notes: Home compatibility config directory, discovered separately from the default XDG user-config directory.
+  os: linux
+  path: ~/.kilocode/kilo.json
+  scope: user
+- format: jsonc
+  notes: Explicit config directory is an additional discovery layer for main/TUI configuration and shared resources.
+  os: linux
+  path: $KILO_CONFIG_DIR/kilo.json
+  scope: env
+- format: jsonc
+  notes: Home compatibility config directory, discovered separately from the default XDG user-config directory.
+  os: linux
+  path: ~/.kilo/kilo.jsonc
+  scope: user
+- format: jsonc
+  notes: Home compatibility config directory, discovered separately from the default XDG user-config directory.
+  os: linux
+  path: ~/.kilocode/kilo.jsonc
+  scope: user
+- format: jsonc
+  notes: Explicit config directory is an additional discovery layer for main/TUI configuration and shared resources.
+  os: linux
+  path: $KILO_CONFIG_DIR/kilo.jsonc
+  scope: env
+- format: jsonc
+  notes: Home compatibility config directory, discovered separately from the default XDG user-config directory.
+  os: linux
+  path: ~/.kilo/opencode.json
+  scope: user
+- format: jsonc
+  notes: Home compatibility config directory, discovered separately from the default XDG user-config directory.
+  os: linux
+  path: ~/.kilocode/opencode.json
+  scope: user
+- format: jsonc
+  notes: Explicit config directory is an additional discovery layer for main/TUI configuration and shared resources.
+  os: linux
+  path: $KILO_CONFIG_DIR/opencode.json
+  scope: env
+- format: jsonc
+  notes: Home compatibility config directory, discovered separately from the default XDG user-config directory.
+  os: linux
+  path: ~/.kilo/opencode.jsonc
+  scope: user
+- format: jsonc
+  notes: Home compatibility config directory, discovered separately from the default XDG user-config directory.
+  os: linux
+  path: ~/.kilocode/opencode.jsonc
+  scope: user
+- format: jsonc
+  notes: Explicit config directory is an additional discovery layer for main/TUI configuration and shared resources.
+  os: linux
+  path: $KILO_CONFIG_DIR/opencode.jsonc
+  scope: env
+- format: jsonc
+  notes: Home compatibility config directory, discovered separately from the default XDG user-config directory.
+  os: linux
+  path: ~/.kilo/tui.json
+  scope: user
+- format: jsonc
+  notes: Home compatibility config directory, discovered separately from the default XDG user-config directory.
+  os: linux
+  path: ~/.kilocode/tui.json
+  scope: user
+- format: jsonc
+  notes: Explicit config directory is an additional discovery layer for main/TUI configuration and shared resources.
+  os: linux
+  path: $KILO_CONFIG_DIR/tui.json
+  scope: env
+- format: jsonc
+  notes: Home compatibility config directory, discovered separately from the default XDG user-config directory.
+  os: linux
+  path: ~/.kilo/tui.jsonc
+  scope: user
+- format: jsonc
+  notes: Home compatibility config directory, discovered separately from the default XDG user-config directory.
+  os: linux
+  path: ~/.kilocode/tui.jsonc
+  scope: user
+- format: jsonc
+  notes: Explicit config directory is an additional discovery layer for main/TUI configuration and shared resources.
+  os: linux
+  path: $KILO_CONFIG_DIR/tui.jsonc
+  scope: env
+- format: json
+  notes: Legacy CLI authentication config may be read/migrated at bootstrap; not the current main config store.
+  os: linux
+  path: ~/.kilocode/cli/config.json
+  scope: user
+- format: json
+  notes: Persisted provider authentication state; credentials are not included in this research. XDG_DATA_HOME redirects the base.
+  os: linux
+  path: ~/.local/share/kilo/auth.json
+  scope: user
+- format: jsonc
+  notes: Home compatibility config directory, discovered separately from the default XDG user-config directory.
+  os: windows
+  path: '%USERPROFILE%\.kilo\kilo.json'
+  scope: user
+- format: jsonc
+  notes: Home compatibility config directory, discovered separately from the default XDG user-config directory.
+  os: windows
+  path: '%USERPROFILE%\.kilocode\kilo.json'
+  scope: user
+- format: jsonc
+  notes: Explicit config directory is an additional discovery layer for main/TUI configuration and shared resources.
+  os: windows
+  path: '%KILO_CONFIG_DIR%\kilo.json'
+  scope: env
+- format: jsonc
+  notes: Home compatibility config directory, discovered separately from the default XDG user-config directory.
+  os: windows
+  path: '%USERPROFILE%\.kilo\kilo.jsonc'
+  scope: user
+- format: jsonc
+  notes: Home compatibility config directory, discovered separately from the default XDG user-config directory.
+  os: windows
+  path: '%USERPROFILE%\.kilocode\kilo.jsonc'
+  scope: user
+- format: jsonc
+  notes: Explicit config directory is an additional discovery layer for main/TUI configuration and shared resources.
+  os: windows
+  path: '%KILO_CONFIG_DIR%\kilo.jsonc'
+  scope: env
+- format: jsonc
+  notes: Home compatibility config directory, discovered separately from the default XDG user-config directory.
+  os: windows
+  path: '%USERPROFILE%\.kilo\opencode.json'
+  scope: user
+- format: jsonc
+  notes: Home compatibility config directory, discovered separately from the default XDG user-config directory.
+  os: windows
+  path: '%USERPROFILE%\.kilocode\opencode.json'
+  scope: user
+- format: jsonc
+  notes: Explicit config directory is an additional discovery layer for main/TUI configuration and shared resources.
+  os: windows
+  path: '%KILO_CONFIG_DIR%\opencode.json'
+  scope: env
+- format: jsonc
+  notes: Home compatibility config directory, discovered separately from the default XDG user-config directory.
+  os: windows
+  path: '%USERPROFILE%\.kilo\opencode.jsonc'
+  scope: user
+- format: jsonc
+  notes: Home compatibility config directory, discovered separately from the default XDG user-config directory.
+  os: windows
+  path: '%USERPROFILE%\.kilocode\opencode.jsonc'
+  scope: user
+- format: jsonc
+  notes: Explicit config directory is an additional discovery layer for main/TUI configuration and shared resources.
+  os: windows
+  path: '%KILO_CONFIG_DIR%\opencode.jsonc'
+  scope: env
+- format: jsonc
+  notes: Home compatibility config directory, discovered separately from the default XDG user-config directory.
+  os: windows
+  path: '%USERPROFILE%\.kilo\tui.json'
+  scope: user
+- format: jsonc
+  notes: Home compatibility config directory, discovered separately from the default XDG user-config directory.
+  os: windows
+  path: '%USERPROFILE%\.kilocode\tui.json'
+  scope: user
+- format: jsonc
+  notes: Explicit config directory is an additional discovery layer for main/TUI configuration and shared resources.
+  os: windows
+  path: '%KILO_CONFIG_DIR%\tui.json'
+  scope: env
+- format: jsonc
+  notes: Home compatibility config directory, discovered separately from the default XDG user-config directory.
+  os: windows
+  path: '%USERPROFILE%\.kilo\tui.jsonc'
+  scope: user
+- format: jsonc
+  notes: Home compatibility config directory, discovered separately from the default XDG user-config directory.
+  os: windows
+  path: '%USERPROFILE%\.kilocode\tui.jsonc'
+  scope: user
+- format: jsonc
+  notes: Explicit config directory is an additional discovery layer for main/TUI configuration and shared resources.
+  os: windows
+  path: '%KILO_CONFIG_DIR%\tui.jsonc'
+  scope: env
+- format: json
+  notes: Legacy CLI authentication config may be read/migrated at bootstrap; not the current main config store.
+  os: windows
+  path: '%USERPROFILE%\.kilocode\cli\config.json'
+  scope: user
+- format: json
+  notes: Persisted provider authentication state; credentials are not included in this research. XDG_DATA_HOME redirects the base.
+  os: windows
+  path: '%USERPROFILE%\.local\share\kilo\auth.json'
+  scope: user
+- format: other
+  notes: macOS managed preference plist; first readable user-specific/system file is converted using plutil and applied last.
+  os: macos
+  path: /Library/Managed Preferences/<username>/ai.opencode.managed.plist
+  scope: system
+- format: other
+  notes: macOS managed preference plist; first readable user-specific/system file is converted using plutil and applied last.
+  os: macos
+  path: /Library/Managed Preferences/ai.opencode.managed.plist
+  scope: system
 env_vars:
-  - name: KILO_PROVIDER
-    effect: "Overrides the active provider ID."
-  - name: KILO_<FIELD_NAME>
-    effect: "Overrides provider/config fields for non-kilocode providers, for example KILO_API_KEY maps to apiKey."
-  - name: KILOCODE_<FIELD_NAME>
-    effect: "Overrides fields for the `kilocode` provider, for example KILOCODE_MODEL maps to kilocodeModel."
-  - name: KILO_PURE
-    effect: "When set to 1, skips external plugins; useful for reproducible CI or debugging."
-  - name: KILO_SERVER_PASSWORD
-    effect: "Default basic auth password for `kilo run --attach` and `kilo attach`."
-  - name: KILO_SERVER_USERNAME
-    effect: "Default basic auth username for `kilo run --attach` and `kilo attach`; falls back to `kilo`."
-  - name: KILO_TREE_SITTER_WASM_DIR
-    effect: "Overrides the tree-sitter WASM resource directory; npm launcher sets it to the co-located package resource directory when absent."
+- effect: Unix home-directory input used by Node/Bun and XDG defaults.
+  name: HOME
+- effect: Windows home-directory input; XDG defaults are under this home.
+  name: USERPROFILE
+- effect: Choose the base directory containing kilo user configuration.
+  name: XDG_CONFIG_HOME
+- effect: Choose the base directory containing kilo auth, database, sessions, and logs.
+  name: XDG_DATA_HOME
+- effect: Choose the base directory containing kilo caches and helper binaries.
+  name: XDG_CACHE_HOME
+- effect: Choose the base directory containing kilo state and daemon metadata.
+  name: XDG_STATE_HOME
+- effect: Windows enterprise-managed configuration base; defaults to C:\ProgramData.
+  name: ProgramData
+- effect: Load an explicitly named configuration file after global configuration.
+  name: KILO_CONFIG
+- effect: Add an explicit directory for config, agent, command, skill, and plugin discovery; does not erase the normal global layer.
+  name: KILO_CONFIG_DIR
+- effect: Merge an inline JSONC config string after project/config-directory layers, before organization and managed policy layers.
+  name: KILO_CONFIG_CONTENT
+- effect: Load an explicitly named TUI config file.
+  name: KILO_TUI_CONFIG
+- effect: Skip project config files and project .kilo/.kilocode discovery when true or 1.
+  name: KILO_DISABLE_PROJECT_CONFIG
+- effect: Disable external plugins when true or 1; built-in plugins still appear in resolved config.
+  name: KILO_PURE
+- effect: npm launcher selects the supplied native executable instead of normal binary discovery.
+  name: KILO_BIN_PATH
+- effect: Choose tree-sitter WASM resource directory; npm launcher fills it from bundled resources if unset.
+  name: KILO_TREE_SITTER_WASM_DIR
+- effect: HTTP server/client Basic authentication password default.
+  name: KILO_SERVER_PASSWORD
+- effect: HTTP Basic authentication username default; client falls back to kilo.
+  name: KILO_SERVER_USERNAME
+- effect: Disable automatic updates when true or 1.
+  name: KILO_DISABLE_AUTOUPDATE
+- effect: Always show update notification when true or 1.
+  name: KILO_ALWAYS_NOTIFY_UPDATE
+- effect: Automatically share newly created sessions when true or 1.
+  name: KILO_AUTO_SHARE
+- effect: Enable Exa search; also enabled by KILO_EXPERIMENTAL_EXA or the grouped experimental switch.
+  name: KILO_ENABLE_EXA
+- effect: Compatibility experimental Exa search switch.
+  name: KILO_EXPERIMENTAL_EXA
+- effect: Enable experimental icon discovery.
+  name: KILO_EXPERIMENTAL_ICON_DISCOVERY
+- effect: Enable experimental oxfmt integration.
+  name: KILO_EXPERIMENTAL_OXFMT
+- effect: Enable experimental ty language-server integration.
+  name: KILO_EXPERIMENTAL_LSP_TY
+- effect: Enable experimental LSP tool.
+  name: KILO_EXPERIMENTAL_LSP_TOOL
+- effect: Enable experimental scout behavior.
+  name: KILO_EXPERIMENTAL_SCOUT
+- effect: The CLI sets this to 1 before command bootstrap so children can recognize an agent context.
+  name: AGENT
+- effect: The CLI sets this compatibility marker to 1 before bootstrap.
+  name: OPENCODE
+- effect: The CLI sets this marker to 1 during normal Kilo bootstrap.
+  name: KILO
+- effect: Disable automatic pruning of older tool outputs.
+  name: KILO_DISABLE_PRUNE
+- effect: Disable automatic context compaction.
+  name: KILO_DISABLE_AUTOCOMPACT
+- effect: Prevent terminal title changes.
+  name: KILO_DISABLE_TERMINAL_TITLE
+- effect: Disable TUI mouse handling.
+  name: KILO_DISABLE_MOUSE
+- effect: Disable automatic LSP downloads.
+  name: KILO_DISABLE_LSP_DOWNLOAD
+- effect: Disable default external plugin loading.
+  name: KILO_DISABLE_DEFAULT_PLUGINS
+- effect: Disable external skill discovery.
+  name: KILO_DISABLE_EXTERNAL_SKILLS
+- effect: Disable Claude Code compatibility prompt/skill discovery.
+  name: KILO_DISABLE_CLAUDE_CODE
+- effect: Disable Claude Code skill discovery independently.
+  name: KILO_DISABLE_CLAUDE_CODE_SKILLS
+- effect: Disable Claude Code prompt discovery independently; semantics belong to system-prompt.
+  name: KILO_DISABLE_CLAUDE_CODE_PROMPT
+- effect: Specify Windows Git Bash executable path; also used to locate less for session table paging.
+  name: KILO_GIT_BASH_PATH
+- effect: Override the SQLite database path.
+  name: KILO_DB
+- effect: Disable installation-channel-specific database naming.
+  name: KILO_DISABLE_CHANNEL_DB
+- effect: Skip database migrations; unsafe with incompatible databases.
+  name: KILO_SKIP_MIGRATIONS
+- effect: Enable strict configuration dependency handling.
+  name: KILO_STRICT_CONFIG_DEPS
+- effect: Override plugin metadata file location.
+  name: KILO_PLUGIN_META_FILE
+- effect: Set client identity; defaults to cli.
+  name: KILO_CLIENT
+- effect: Override retry limit with a positive integer; invalid/nonpositive values are ignored.
+  name: KILO_SESSION_RETRY_LIMIT
+- effect: Identify the workspace for runtime services.
+  name: KILO_WORKSPACE_ID
+- effect: Disable the embedded web UI.
+  name: KILO_DISABLE_EMBEDDED_WEB_UI
+- effect: Disable fff file finder; defaults disabled on Windows in 7.8.3.
+  name: KILO_DISABLE_FFF
+- effect: Enable the question tool.
+  name: KILO_ENABLE_QUESTION_TOOL
+- effect: Enable parallel execution; KILO_EXPERIMENTAL_PARALLEL also enables it.
+  name: KILO_ENABLE_PARALLEL
+- effect: Compatibility experimental switch for parallel execution.
+  name: KILO_EXPERIMENTAL_PARALLEL
+- effect: Enable grouped experimental features.
+  name: KILO_EXPERIMENTAL
+- effect: Enable experimental file watching (Effect boolean config).
+  name: KILO_EXPERIMENTAL_FILEWATCHER
+- effect: Disable experimental file watching (Effect boolean config).
+  name: KILO_EXPERIMENTAL_DISABLE_FILEWATCHER
+- effect: Disable copy-on-select; default true on Windows.
+  name: KILO_EXPERIMENTAL_DISABLE_COPY_ON_SELECT
+- effect: Override bash default timeout with a positive integer in milliseconds.
+  name: KILO_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS
+- effect: Override output-token ceiling with a positive integer.
+  name: KILO_EXPERIMENTAL_OUTPUT_TOKEN_MAX
+- effect: Enable experimental Markdown rendering unless false or 0.
+  name: KILO_EXPERIMENTAL_MARKDOWN
+- effect: Enable skill customization; defaults enabled for dev/beta/local channels unless false or 0.
+  name: KILO_EXPERIMENTAL_CUSTOMIZE_SKILL
+- effect: Enable experimental Claude migration.
+  name: KILO_EXPERIMENTAL_CLAUDE_MIGRATION
+- effect: Enable experimental workspaces; inherits KILO_EXPERIMENTAL unless explicitly set.
+  name: KILO_EXPERIMENTAL_WORKSPACES
+- effect: Enable experimental event system.
+  name: KILO_EXPERIMENTAL_EVENT_SYSTEM
+- effect: Enable experimental session switching.
+  name: KILO_EXPERIMENTAL_SESSION_SWITCHING
+- effect: Enable experimental session switcher; inherits KILO_EXPERIMENTAL unless explicitly set.
+  name: KILO_EXPERIMENTAL_SESSION_SWITCHER
+- effect: Enable experimental references; inherits KILO_EXPERIMENTAL unless explicitly set.
+  name: KILO_EXPERIMENTAL_REFERENCES
+- effect: Override Global.Path.home for compatibility discovery; does not move XDG bases already initialized from the real home.
+  name: KILO_TEST_HOME
+- effect: Override system-managed config directory; named as a test override in source.
+  name: KILO_TEST_MANAGED_CONFIG_DIR
+- effect: Used by run to resolve its working directory; wrappers should keep it consistent with the actual child cwd.
+  name: PWD
 machine_introspection:
-  - command: "kilo debug paths"
-    purpose: env
-    machine_readable: false
-    output_format: table
-    useful_for_codegen: true
-    notes: "Prints resolved home, data, bin, log, repos, cache, config, state, and tmp paths."
-  - command: "kilo debug config"
-    purpose: config_dump
-    machine_readable: true
-    output_format: json
-    useful_for_codegen: true
-    notes: "Prints resolved configuration; can be very large because built-in/custom agents include full prompts."
-  - command: "kilo config check"
-    purpose: doctor
-    machine_readable: false
-    output_format: text
-    useful_for_codegen: false
-    notes: "Prints configuration warnings/errors; local clean output was `No config warnings.`"
-  - command: "kilo debug info"
-    purpose: doctor
-    machine_readable: false
-    output_format: text
-    useful_for_codegen: false
-    notes: "Prints version, OS, terminal, and plugin summary."
-  - command: "kilo debug v2"
-    purpose: capabilities
-    machine_readable: true
-    output_format: json
-    useful_for_codegen: true
-    notes: "Prints enabled providers, defaults, provider endpoint metadata, and model maps."
-  - command: "kilo debug skill"
-    purpose: tools
-    machine_readable: true
-    output_format: json
-    useful_for_codegen: true
-    notes: "Prints available skills with name, description, location, and content; large output."
-  - command: "kilo models --verbose"
-    purpose: models
-    machine_readable: false
-    output_format: text
-    useful_for_codegen: true
-    notes: "Emits repeated `provider/model` labels followed by JSON objects; no JSON array mode in help."
-  - command: "kilo session list --format json --max-count N"
-    purpose: other
-    machine_readable: true
-    output_format: json
-    useful_for_codegen: false
-    notes: "Lists local sessions; empty local result produced empty stdout with exit 0."
-  - command: "kilo daemon status --json"
-    purpose: doctor
-    machine_readable: true
-    output_format: json
-    useful_for_codegen: false
-    notes: "Reports daemon running/stale/file/reason state."
-  - command: "kilo db path"
-    purpose: env
-    machine_readable: false
-    output_format: text
-    useful_for_codegen: false
-    notes: "Prints resolved SQLite database path."
-  - command: "kilo db '<query>' --format json"
-    purpose: config_dump
-    machine_readable: true
-    output_format: json
-    useful_for_codegen: false
-    notes: "Runs arbitrary SQLite query against Kilo DB; useful for diagnostics, risky for wrappers unless query is fixed/read-only."
-  - command: "kilo auth list"
-    purpose: env
-    machine_readable: false
-    output_format: text
-    useful_for_codegen: false
-    notes: "Shows credential file and environment-sourced providers."
-  - command: "kilo mcp list"
-    purpose: mcp
-    machine_readable: false
-    output_format: text
-    useful_for_codegen: false
-    notes: "Lists MCP server status; local empty state exited 0 with human text."
-  - command: "kilo profile --json"
-    purpose: env
-    machine_readable: true
-    output_format: json
-    useful_for_codegen: false
-    notes: "Only useful when authenticated; local unauthenticated run exited 1 with a styled error."
+- command: kilo debug config
+  machine_readable: true
+  notes: Observed valid JSON; contains merged configuration and may expose sensitive configuration.
+  output_format: json
+  purpose: config_dump
+  useful_for_codegen: true
+- command: kilo debug v2
+  machine_readable: true
+  notes: Observed providers/default/small JSON. In 7.8.3 default serialized an Effect object rather than a resolved model ID; do not trust that field.
+  output_format: json
+  purpose: models
+  useful_for_codegen: true
+- command: kilo debug skill
+  machine_readable: true
+  notes: Observed JSON array including full skill content; potentially sensitive and large.
+  output_format: json
+  purpose: capabilities
+  useful_for_codegen: true
+- command: kilo generate
+  machine_readable: true
+  notes: Hidden source-registered command emits HTTP OpenAPI, not JSON Schema for kilo.json and not CLI switches. Handler not run.
+  output_format: json
+  purpose: other
+  useful_for_codegen: true
+- command: kilo models --verbose
+  machine_readable: false
+  notes: Source prints model IDs plus JSON metadata blocks; not one JSON document.
+  output_format: text
+  purpose: models
+  useful_for_codegen: true
+- command: kilo session list --format json
+  machine_readable: true
+  notes: Observed empty stdout with exit 0 when no sessions; otherwise source emits JSON array. Avoid the table pager.
+  output_format: json
+  purpose: other
+  useful_for_codegen: false
+- command: kilo daemon status --json
+  machine_readable: true
+  notes: Observed JSON with running, stale, file, reason; safe state projection omits password.
+  output_format: json
+  purpose: other
+  useful_for_codegen: false
+- command: kilo db 'SELECT 1 AS probe' --format json
+  machine_readable: true
+  notes: Observed [{"probe":1}]; query mode accesses local SQLite. Keep wrapper queries fixed/read-only.
+  output_format: json
+  purpose: other
+  useful_for_codegen: false
+- command: kilo db path
+  machine_readable: false
+  notes: Observed resolved database path.
+  output_format: text
+  purpose: env
+  useful_for_codegen: true
+- command: kilo debug paths
+  machine_readable: false
+  notes: Observed text key/path lines after initialization; first simultaneous boot raced with other probes and failed a migration, sequential rerun succeeded.
+  output_format: text
+  purpose: env
+  useful_for_codegen: true
+- command: kilo config check
+  machine_readable: false
+  notes: Observed styled diagnostics and exit 1; not a JSON diagnostics protocol.
+  output_format: text
+  purpose: doctor
+  useful_for_codegen: false
+- command: kilo auth list
+  machine_readable: false
+  notes: Source renders credentials/provider names and environment-variable names; no JSON switch.
+  output_format: text
+  purpose: capabilities
+  useful_for_codegen: false
+- command: kilo mcp list
+  machine_readable: false
+  notes: Source renders status text; configured servers may connect/spawn.
+  output_format: text
+  purpose: mcp
+  useful_for_codegen: false
+- command: kilo profile --json
+  machine_readable: true
+  notes: Observed unauthenticated exit 1, empty stdout, styled stderr; JSON only on success.
+  output_format: json
+  purpose: other
+  useful_for_codegen: false
+- command: kilo cloud status --session-id ID --message-id ID
+  machine_readable: true
+  notes: Source prints authenticated remote-task status JSON; not executed.
+  output_format: json
+  purpose: other
+  useful_for_codegen: false
+- command: kilo cloud result --session-id ID --message-id ID
+  machine_readable: true
+  notes: Source prints authenticated remote-task result JSON; not executed.
+  output_format: json
+  purpose: other
+  useful_for_codegen: false
 wrapper_notes:
-  - "Installed local version is 7.3.45, but npm latest on 2026-07-03 is 7.4.1; wrappers should not assume local and upstream latest match."
-  - "The npm package exposes both `kilo` and `kilocode`; both local symlinks target the same launcher."
-  - "The npm launcher spawns a platform binary and forwards SIGINT, SIGTERM, and SIGHUP; process-tree handling should account for this wrapper layer."
-  - "Most `--help` commands initialize file/db services and print INFO lines to stderr after help text, even without `--print-logs`; help capture should tolerate noisy stderr."
-  - "`kilo run --auto --format json` is the main non-interactive execution shape. Without `--auto`, Kilo can prompt for approvals."
-  - "The installed 7.3.45 binary rejects `--system-prompt`, `--append-system-prompt`, and `--replace-system-prompt`; system-prompt customization appears to be config/agent based, not a run flag."
-  - "`kilo models --verbose` is useful but not clean JSON; it emits labels plus JSON object blocks and provider filters can exit 1 when the provider id is unknown."
-  - "`kilo help --all --format md` did not provide a full all-command reference locally despite official docs listing `--all` and `--format`; prefer per-command help or official CLI reference for full inventories."
-  - "Local first inspection created/used `~/.config/kilo/kilo.jsonc`, `~/.local/share/kilo/kilo.db`, WAL/SHM sidecars, log files, `session-export.db`, and `telemetry-id`."
-  - "Commands that open UI or mutate host state include default TUI, `web`, `console`, `plugin`, `import`, `pr`, `github install`, `upgrade`, and `uninstall`."
-  - "`profile --json` exits 1 when not authenticated; this is an expected state, not necessarily a wrapper failure."
+- Installed kilo --version is exactly 7.3.45; separately downloaded 7.8.3 native binary also reports 7.8.3. Gate compatibility by version; latest npm/GitHub release is 7.8.3.
+- 'Use run with closed stdin and --format json for one-shot execution; --interactive/-i and root --mini require a TTY. No resume command exists: use run --continue/-c or --session/-s, with --fork or --cloud-fork as appropriate.'
+- run --file/-f is greedy variadic, including after equals. Put -- before positional prompt text. Minimum zero is a confirmed fact that schema revision 2 cannot encode; variadic_min is conservatively unknown with an explicit gap.
+- yargs short-option groups do not support arbitrary -mfoo values. Numeric or punctuation-leading attached values work; space or equals avoids grouped-letter ambiguity.
+- Scalar flags usually allow parser-level omission; empty strings/undefined can still fail choices or handlers. Boolean flags can consume a following literal true/false or accept =true/=false; the none records describe standalone toggles.
+- Boolean negations and camel-case aliases are accepted by the parser. Some handlers inspect literal argv spelling (for example network explicitness and print-logs), so parser acceptance does not guarantee equivalent downstream behavior.
+- Bare root positional is a project path; --prompt supplies the initial user prompt. No system-prompt, append-system-prompt, or replace-system-prompt options occur in the examined declarations; dedicated semantics belong to system-prompt.
+- Help is normally on stderr with branding and can include INFO lines on successful exit. NO_COLOR did not remove all styled diagnostic output. help --all --format md returned root help in both releases.
+- Configuration/data initialization writes directories, database migrations, logs and telemetry state. Concurrent first boots into one empty home caused a migration failure; sequential initialization succeeded. Use a disposable home/XDG sandbox for probing.
+- Windows uses XDG defaults under USERPROFILE/.config and .local/share, rather than APPDATA/LOCALAPPDATA. Enterprise configuration is separate under ProgramData/kilo.
+- session list JSON mode can return empty stdout. debug v2 default in 7.8.3 is an unevaluated Effect object; do not assume it is a model ID.
+- Long-running acp/serve/debug wait do not meet this contract's run-to-completion non_interactive criterion. Daemon launch returns unless foreground is selected; export/db require explicit arguments to avoid a picker/shell.
+- cloud start/send, roll-call, github run and actual model sessions can incur charges. Plugin/import/session deletion/worktree commands mutate local state. None of these handlers was executed for research.
+- npm launcher adds a Node process, forwards SIGINT/SIGTERM/SIGHUP and propagates exit status/signals; KILO_BIN_PATH can redirect it to another binary.
+- ~/.kilo was checked and is absent on this host; home .kilo is only one config-discovery location, not the default user config store.
 changes:
-  - "Updated upstream latest version from 7.3.54 to npm latest 7.4.1 while recording local installed 7.3.45."
-  - "Replaced invalid schema records using `os: all` with explicit macOS, Linux, and Windows records."
-  - "Added observed global `--pure`, server flags, root `--prompt`, noisy help stderr, npm launcher behavior, and local XDG state paths."
-  - "Added negative probes showing Kilo 7.3.45 rejects system-prompt delivery flags."
-  - "Expanded machine-introspection coverage for debug paths/config/v2/skill, daemon status JSON, DB query JSON, auth, MCP, profile, and models."
+- Migrated the previous untyped revision-1 document to revision 2 with evidence-backed switch types, attachments, exact scopes, and explicit gaps.
+- Verified installed 7.3.45 and current release 7.8.3; inventoried nested native commands and aliases and documented removed/added paths.
+- Corrected file attachment from repeatable scalar to greedy variadic, Windows XDG paths, and long-running server classification.
+- Recorded hidden compatibility switches, parser omission/short-attachment behavior, empty JSON session output, help-reference discrepancy, and configuration initialization caveats.
+- Removed unsupported generic KILO_PROVIDER/KILO_<FIELD_NAME>/KILOCODE_<FIELD_NAME> claims; provider-endpoint variables belong to model-config.
 requires_claudine_update: true
-reason: "Claudine provider metadata for Kilo should account for npm latest 7.4.1, the `kilo`/`kilocode` binary aliases, `run --auto --format json` automation, noisy stderr during successful help/introspection, lack of system-prompt run flags in 7.3.45, and per-OS schema-valid install/config records."
+reason: Regenerate the Kilo switch catalog from revision 2; preserve greedy array semantics and the explicit zero-minimum/polymorphic gaps. Existing scalar-file assumptions would steal prompt arguments; latest-release command and config discovery differ from the previous research.
+contract_checked: 2026-10-01
 ---
 
-# Kilo Code CLI Surface
+# Kilo Code CLI: Commands, Switch Parsing, and Wrapper Integration
 
 ## Overview
 
-Kilo Code is Kilo's open source agentic coding product for VS Code, JetBrains, and the terminal. The public CLI is shipped from the `Kilo-Org/kilocode` repository and the npm package `@kilocode/cli`. The primary command users type is `kilo`; the npm package also installs `kilocode` as an alias to the same launcher.
+Kilo Code is an open-source coding agent shipped by Kilo Org for IDEs and the terminal. The terminal CLI is published as `@kilocode/cli` from the [Kilo repository](https://github.com/Kilo-Org/kilocode). Its primary entrypoint is `kilo`; npm also exposes `kilocode`. See the [product site](https://kilo.ai/), [documentation](https://kilo.ai/docs), [CLI guide](https://kilo.ai/docs/code-with-ai/platforms/cli), and [command reference](https://kilo.ai/docs/code-with-ai/platforms/cli-reference).
 
-The current upstream version I verified is `7.4.1`, from `npm view @kilocode/cli version dist-tags bin repository homepage --json` on 2026-07-03. The locally installed npm package and binary are `7.3.45`, verified with `kilo --version`, `kilocode --version`, and `/Users/ken/.nvm/versions/node/v22.20.0/lib/node_modules/@kilocode/cli/package.json`. This document treats `7.4.1` as the upstream latest and local `7.3.45` as the behavioral evidence for help output and config/state discovery.
-
-Primary sources:
-
-- Homepage: [https://kilo.ai/](https://kilo.ai/)
-- Repository: [https://github.com/Kilo-Org/kilocode](https://github.com/Kilo-Org/kilocode)
-- General docs: [https://kilo.ai/docs](https://kilo.ai/docs)
-- CLI overview: [https://kilo.ai/docs/code-with-ai/platforms/cli](https://kilo.ai/docs/code-with-ai/platforms/cli)
-- CLI reference: [https://kilo.ai/docs/code-with-ai/platforms/cli-reference](https://kilo.ai/docs/code-with-ai/platforms/cli-reference)
+On 2026-10-01, the installed `kilo --version` returned exactly `7.3.45`. `npm view @kilocode/cli version repository bin --json` and the GitHub latest-release API both reported `7.8.3` (published 2026-10-01). A separately downloaded npm platform binary, without changing the installed package, returned `7.8.3`. Help was examined recursively for both releases; source was pinned to commits `67b815466c9ab3e022f16692988673712437b881` and `59f1428abb5fe782ee7bd4d258e72a08b74aadb4`. All execution probes used closed stdin and isolated home/XDG directories; no model sessions were started.
 
 ## Installation and Binaries
 
-The npm package `@kilocode/cli` exposes two bin names:
-
-| OS | Primary command | Aliases/shims | Notes |
-| --- | --- | --- | --- |
-| macOS | `kilo` | `kilocode` | Local npm install creates symlinks to `../lib/node_modules/@kilocode/cli/bin/kilo`. |
-| Linux | `kilo` | `kilocode` | Same npm bin names; standalone assets are platform archives. |
-| Windows | `kilo.cmd` | `kilocode.cmd`, `kilo.ps1`, `kilocode.ps1`, `kilo.exe` | npm creates command/PowerShell shims; standalone archives contain the Windows binary. |
-
-Official install commands and release assets:
-
-| OS | Method | Command or asset |
+| OS | Command | Other installed names |
 | --- | --- | --- |
-| macOS/Linux/Windows | npm | `npm install -g @kilocode/cli` |
-| macOS/Linux/Windows | pnpm | `pnpm add -g @kilocode/cli` |
-| macOS/Linux/Windows | Bun | `bun add -g @kilocode/cli` |
-| macOS/Linux | Homebrew | `brew install Kilo-Org/tap/kilo` |
-| macOS/Linux | curl installer | `curl -fsSL https://kilo.ai/cli/install \| bash` |
-| Linux | Arch AUR | `paru -S kilo-bin` |
-| macOS | GitHub Releases | `kilo-darwin-arm64.zip`, `kilo-darwin-x64.zip`, or `kilo-darwin-x64-baseline.zip` |
-| Linux | GitHub Releases | `kilo-linux-x64.tar.gz`, `kilo-linux-arm64.tar.gz`; docs also note musl/baseline variants |
-| Windows | GitHub Releases | `kilo-windows-x64.zip` or `kilo-windows-x64-baseline.zip` |
+| macos | kilo | `kilocode` |
+| linux | kilo | `kilocode` |
+| windows | kilo | `kilocode`, `kilo.cmd`, `kilocode.cmd`, `kilo.ps1`, `kilocode.ps1`, `kilo.exe` |
 
-The local npm launcher is a Node script that locates/spawns the packaged platform binary, sets `KILO_TREE_SITTER_WASM_DIR` to the co-located tree-sitter WASM directory when absent, and forwards `SIGINT`, `SIGTERM`, and `SIGHUP`.
+The [release package README](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/README.md) documents npm, direct npx execution, Homebrew, and prebuilt releases. The [npm launcher](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/bin/kilo) locates the platform binary and forwards signals. Windows npm shims and standalone `kilo.exe` are different launch layers.
+
+| OS | Method | Invocation |
+| --- | --- | --- |
+| macos | npm | `npm install -g @kilocode/cli` |
+| macos | other | `npx --package @kilocode/cli kilo` |
+| macos | standalone_binary | `Download the matching asset from GitHub Releases` |
+| macos | brew | `brew install Kilo-Org/tap/kilo` |
+| linux | npm | `npm install -g @kilocode/cli` |
+| linux | other | `npx --package @kilocode/cli kilo` |
+| linux | standalone_binary | `Download the matching asset from GitHub Releases` |
+| linux | brew | `brew install Kilo-Org/tap/kilo` |
+| windows | npm | `npm install -g @kilocode/cli` |
+| windows | other | `npx --package @kilocode/cli kilo` |
+| windows | standalone_binary | `Download the matching asset from GitHub Releases` |
+
+Release assets include macOS arm64/x64 ZIPs, Linux arm64/x64 tarballs with musl variants, and Windows arm64/x64 ZIPs. Baseline x64 builds support older CPUs without AVX. The earlier document listed curl, pnpm, Bun, and AUR installs; those were not established by the examined release README and are not retained as current verified methods.
 
 ## Subcommands
 
-| Command | Description | Automation / interaction notes |
+The following table lists native command paths and accepted aliases across the two examined releases. The bare executable is the interactive TUI and is deliberately absent. **Yes** means an explicit automation invocation can finish with no TTY, browser, or prompt; the notes identify arguments that are required to obtain that behavior. It does not mean read-only, free, or guaranteed success. Group-only paths are marked No, as are persistent servers. Release-gated developer commands and the internal background-process runner are not part of this public release inventory.
+
+| Path after kilo | Finishes unattended | Purpose and constraints |
 | --- | --- | --- |
-| `kilo [project]` | Starts the terminal UI. | Interactive; first-time provider setup uses `/connect`. |
-| `completion` | Generates shell completion script. | Non-interactive. |
-| `acp` | Starts an ACP server. | Non-interactive but long-running. |
-| `mcp` | Manages MCP servers, OAuth auth, logout, and debug flows. | `mcp list` is inspectable; auth/debug can require browser/OAuth interaction. |
-| `attach <url>` | Attaches to a running Kilo server. | Usually interactive or server-dependent. |
-| `run [message..]` | Runs Kilo with a message. | Main automation entry point; use `--auto --format json`. |
-| `debug` | Troubleshooting tools for config, paths, skills, provider catalog, LSP, ripgrep, files, snapshots, agents, and startup. | Mostly non-interactive; `debug wait` intentionally waits indefinitely. |
-| `auth` / `providers` | Manages AI providers and credentials. | `auth list` is inspectable; login/logout are interactive or mutating. |
-| `agent` | Creates or lists agents. | `agent list` is inspectable; `agent create` may prompt/generate and writes files. |
-| `upgrade [target]` | Upgrades Kilo. | Mutating; can invoke package managers. |
-| `uninstall` | Removes Kilo and related files. | Mutating; use `--dry-run` and `--force` for automation. |
-| `serve` | Starts a headless HTTP server. | Non-interactive but long-running. |
-| `web` | Starts a server and opens the web UI. | Browser/open side effect. |
-| `models [provider]` | Lists models. | Non-interactive; `--verbose` is structured-ish but not clean JSON. |
-| `stats` | Shows usage/cost statistics. | Non-interactive human output. |
-| `export [sessionID]` | Exports session data as JSON. | Non-interactive; `--sanitize` redacts sensitive data. |
-| `import <file>` | Imports session JSON or share URL. | Mutates local session storage. |
-| `github` | Installs or runs the GitHub agent. | Mutating/auth-sensitive. |
-| `pr <number>` | Fetches/checks out a GitHub PR branch, then runs Kilo. | Mutates git state. |
-| `session` | Lists or deletes sessions. | `session list --format json` is machine-readable; delete mutates. |
-| `plugin` / `plug` | Installs a plugin and updates config. | Mutates config and may install packages. |
-| `db` | Opens sqlite shell, prints DB path, migrates data, or runs a SQL query. | Query form with `--format json` is non-interactive; bare command is interactive. |
-| `console` | Opens local Kilo Console. | UI/browser oriented. |
-| `roll-call <filter>` | Batch-tests text models. | Non-interactive with `--output json`, but performs live model calls. |
-| `profile` | Shows Kilo account profile. | `--json` is machine-readable when authenticated; exits 1 if not authenticated. |
-| `remote` | Enables real-time remote connection. | Requires Kilo Gateway authentication. |
-| `daemon` | Manages local daemon. | `daemon status --json` is machine-readable; start/restart are long-running with `--foreground`. |
-| `config` | Configuration tools. | `config check` is non-interactive text diagnostics. |
-| `help [command]` | Shows CLI reference. | Non-interactive, but local `--all --format md` did not expand all commands. |
+| acp | No | Start ACP (Agent Client Protocol) server. Protocol server remains active; it does not run to completion. |
+| agent | No | Manage agents. Command group; select a child path. |
+| agent create | No | Create a new agent. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| agent list | Yes | List all available agents. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| attach | No | Attach to a running kilo server. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| auth | No | Manage providers and credentials. Command group; select a child path. |
+| auth list | Yes | List providers and credentials. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| auth login | No | Log in to a provider. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| auth logout | Yes | Log out from a configured provider. 7.8.3 accepts an explicit provider to avoid selection; 7.3.45 has an interactive provider picker. |
+| auth ls | Yes | List providers and credentials. Alias of auth list. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| cloud | No | Run Cloud Agent tasks. Command group; select a child path. |
+| cloud result | Yes | Show a Cloud Agent task result. 7.8.3 only; requires --session-id and --message-id and authenticated network access. |
+| cloud send | Yes | Send a follow-up prompt to a Cloud Agent task. 7.8.3 only; sends a follow-up to a paid task, requiring --session-id and a prompt input. Not executed. |
+| cloud start | Yes | Start a Cloud Agent task. 7.8.3 only; starts a paid remote task. Provide --prompt or --prompt-stdin; --stream follows JSONL events. Not executed. |
+| cloud status | Yes | Show Cloud Agent task status. 7.8.3 only; requires --session-id and --message-id and authenticated network access. |
+| completion | Yes | Generate shell completion script. Shell completion generator; internal --get-yargs-completions is a shell callback, not an agent session. |
+| config | No | Configuration tools. Command group; select a child path. |
+| config check | Yes | Check configuration for warnings and errors. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| console | No | Open or stop the local Kilo Console (deprecated). Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| console stop | Yes | Stop the daemon behind Kilo Console. 7.8.3 only; stops the daemon behind the deprecated Console without opening a browser. |
+| daemon | Yes | Manage the local kilo daemon. 7.8.3 defaults to starting a detached daemon and returns; --foreground/-f keeps the caller active. 7.3.45 required a child command. |
+| daemon restart | Yes | Restart the local kilo daemon. Returns after restarting detached daemon; --foreground stays active. Mutates daemon state. |
+| daemon start | Yes | Start or reuse the detached local daemon. Returns after starting/reusing a detached daemon; --foreground (7.8.3 alias -f) stays active. Mutates daemon state. |
+| daemon status | Yes | Show local kilo daemon status. Reports daemon state; --json is suitable for wrappers. |
+| daemon stop | Yes | Stop the local kilo daemon. Stops the daemon and returns; --json added in 7.8.3. |
+| db | Yes | Database tools. Supply a nonempty SQL query; omission spawns the interactive sqlite3 shell. --format json is available. |
+| db migrate | Yes | Migrate JSON data to SQLite (merges with existing data). 7.3.45 only; removed from the 7.8.3 registered command surface. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| db path | Yes | Print the database path. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| debug | No | Debugging and troubleshooting tools. Command group; select a child path. |
+| debug agent | Yes | Show agent configuration details. Prints agent configuration; --tool executes a real tool using --params and may mutate files. |
+| debug config | Yes | Show resolved configuration. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| debug file | No | File system debugging utilities. Command group; select a child path. |
+| debug file list | Yes | List files in a directory. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| debug file read | Yes | Read file contents as JSON. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| debug file search | Yes | Search files by query. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| debug file status | Yes | Show file status information. 7.3.45 only; removed from the 7.8.3 registered command surface. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| debug file tree | Yes | Show directory tree. 7.3.45 only; removed from the 7.8.3 registered command surface. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| debug info | Yes | Show debug information. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| debug lsp | No | LSP debugging utilities. Command group; select a child path. |
+| debug lsp diagnostics | Yes | Get diagnostics for a file. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| debug lsp document-symbols | Yes | Get symbols from a document. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| debug lsp symbols | Yes | Search workspace symbols. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| debug paths | Yes | Show global paths (data, config, cache, state). Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| debug rg | No | Ripgrep debugging utilities. Command group; select a child path. |
+| debug rg files | Yes | List files using ripgrep. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| debug rg search | Yes | Search file contents using ripgrep. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| debug rg tree | Yes | Show file tree using ripgrep. 7.3.45 only; removed from the 7.8.3 registered command surface. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| debug scrap | Yes | List all known projects. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| debug skill | Yes | List all available skills. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| debug snapshot | No | Snapshot debugging utilities. Command group; select a child path. |
+| debug snapshot diff | Yes | Show diff for a snapshot hash. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| debug snapshot patch | Yes | Show patch for a snapshot hash. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| debug snapshot track | Yes | Track current snapshot state. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| debug startup | Yes | Print startup timing. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| debug v2 | Yes | Debug v2 catalog and built-in plugins. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| debug wait | No | Wait indefinitely (for debugging). Waits indefinitely (source sleeps for a day); excluded from completion-based automation. |
+| export | Yes | Export session data as JSON. Supply sessionID; omission opens an interactive session picker when sessions exist. |
+| generate | Yes | Emit the HTTP OpenAPI description as JSON. Registered but hidden from root help; emits HTTP OpenAPI JSON, not the CLI/configuration schema. |
+| github | No | Manage GitHub agent. Command group; select a child path. |
+| github install | No | Install the GitHub agent. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| github run | Yes | Run the GitHub agent. Runs the CI GitHub agent with existing credentials/event context; may execute models and modify a checkout. Not executed. |
+| help | Yes | Show full CLI reference. Source declares --all and --format md\|text; both releases actually returned only root help in the tested full-reference invocation. |
+| import | Yes | Import session data from JSON file or URL. Imports supplied file/share URL into session storage without a picker; writes local data. |
+| mcp | No | Manage MCP (Model Context Protocol) servers. Command group; select a child path. |
+| mcp add | Yes | Add an MCP server. 7.8.3 supports explicit name plus --url or a local command after -- without prompts; otherwise uses a setup wizard. Earlier version uses a wizard. |
+| mcp auth | No | Authenticate with an OAuth-enabled MCP server. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| mcp auth list | Yes | List OAuth-capable MCP servers and their authentication state. Text OAuth status report; does not perform the browser authorization flow. |
+| mcp auth ls | Yes | List OAuth-capable MCP servers and their authentication state. Alias of mcp auth list. Text OAuth status report; does not perform the browser authorization flow. |
+| mcp debug | No | Debug OAuth connection for an MCP server. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| mcp list | Yes | List MCP servers and their status. Text status report; configured servers may be contacted or started. |
+| mcp logout | Yes | Remove OAuth credentials for an MCP server. Supply a server name to avoid selection; removes OAuth credentials. |
+| mcp ls | Yes | List MCP servers and their status. Alias of mcp list. Text status report; configured servers may be contacted or started. |
+| models | Yes | List all available models. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| plug | Yes | Install plugin and update config. Alias of plugin. Installs packages and edits configuration; no confirmation in the source handler. Alias plug. |
+| plugin | Yes | Install plugin and update config. Installs packages and edits configuration; no confirmation in the source handler. Alias plug. |
+| pr | No | Manage pull requests. 7.8.3 command group; 7.3.45 pr <number> checked out a branch and launched the TUI. |
+| pr checkout | No | Fetch and checkout a GitHub PR branch, then run kilo. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| pr link | Yes | Link a session to a pull request. 7.8.3 only; sets PR metadata for --session/-s or a resolved session. |
+| pr status | Yes | Show a session's linked pull request. 7.8.3 only; reports linked PR metadata for --session/-s or a resolved session. |
+| pr unlink | Yes | Clear a session's linked pull request. 7.8.3 only; clears PR metadata for --session/-s or a resolved session. |
+| profile | Yes | Show Kilo account profile. --json emits JSON on success; unauthenticated state exits 1 with styled stderr. |
+| providers | No | Manage providers and credentials. Alias of auth. Command group; select a child path. |
+| providers list | Yes | List providers and credentials. Alias of auth list. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| providers login | No | Log in to a provider. Alias of auth login. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| providers logout | Yes | Log out from a configured provider. Alias of auth logout. 7.8.3 accepts an explicit provider to avoid selection; 7.3.45 has an interactive provider picker. |
+| providers ls | Yes | List providers and credentials. Alias of auth list. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| remote | No | Enable remote connection for real-time session relay. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| roll-call | Yes | Batch-test text models matching a filter for connectivity and latency. Runs live model calls and may incur charges; not executed during this research. |
+| run | Yes | Run kilo with a message. One-shot mode with closed stdin; --interactive/-i requires a TTY. Resume via --continue/-c or --session/-s; no native resume subcommand. |
+| serve | No | Starts a headless kilo server. HTTP server remains active until terminated. |
+| session | No | Manage sessions. Command group; select a child path. |
+| session delete | Yes | Delete a session. Deletes the explicitly named session without confirmation. |
+| session list | Yes | List sessions. Use --format json or pipe stdout to avoid the table pager; an empty result is empty stdout, not []. |
+| stats | Yes | Show token usage and cost statistics. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| uninstall | Yes | Uninstall kilo and remove all related files. Use --dry-run or --force to avoid the confirmation prompt. Destructive without --dry-run. |
+| upgrade | No | Upgrade kilo to the latest or a specific version. Pass --method to avoid install-method selection; package managers may still prompt or require elevated privileges. |
+| web | No | Start kilo server and open web interface. 7.3.45 only; removed from the 7.8.3 registered command surface. Finishes with explicit arguments and closed stdin; help and source examined, handler not necessarily executed. |
+| worktree | No | Manage git worktrees. Command group; select a child path. |
+| worktree create | Yes | Create (or reuse) a git worktree by name. 7.8.3 only; creates/reuses a named git worktree without a prompt. |
+| worktree list | Yes | List git worktrees for the current project. 7.8.3 only; prints worktree state. |
+| worktree remove | Yes | Remove a named git worktree and its branch. 7.8.3 only; removes the worktree and its branch without a confirmation. Not executed. |
+
+Every path in this table has its canonical help examined; alias resolution was checked through help and declarations. `generate` is registered in source despite being absent from displayed root help. Removed paths were confirmed by source registration, because asking an unknown nested path for help can misleadingly print parent help with exit 0. There is no `resume` path; resumption uses `run` switches.
 
 ## CLI Switch Inventory
 
-Observed global options in local `7.3.45`: `-h, --help`; `-v, --version`; `--print-logs`; `--log-level DEBUG|INFO|WARN|ERROR`; `--pure`; server options `--port`, `--hostname`, `--mdns`, `--mdns-domain`, `--cors`; session/model shortcuts `-m, --model`, `-c, --continue`, `-s, --session`, `--fork`, `--cloud-fork`, `--prompt`, and `--agent`.
+The inventory covers the root and every path marked Yes above, including aliases, query/export automation forms, and run resumption. Interactive paths additionally receive the five global switches; their other switches are outside the required inventory. Records for removed commands explicitly apply to 7.3.45 only. Root and run hidden compatibility options were also read from source.
 
-Wrapper-relevant `run` options:
+Parsing is [yargs 18.0.0](https://github.com/yargs/yargs/tree/v18.0.0) with [yargs-parser 22.0.0](https://github.com/yargs/yargs-parser/blob/v22.0.0/lib/yargs-parser.ts), pinned in the release manifests and lockfile. Kilo sets `populate--: true` and enables strict validation. Parser defaults retain greedy arrays, short-option groups, boolean negation, and camel-case expansion. The Kilo declaration establishes each switch type; parser source establishes its written forms.
 
-| Flag | Type | Default | Example | Notes |
-| --- | --- | --- | --- | --- |
-| `--command <command>` | value | unset | `kilo run --command review` | Runs a named command; message supplies args. |
-| `--continue`, `-c` | boolean | false | `kilo run --continue` | Docs say not with autonomous mode or prompt. |
-| `--session <id>`, `-s` | value | unset | `kilo run --session ses_123` | Continue specific session. |
-| `--fork` | boolean | false | `kilo run --session ses_123 --fork` | Requires `--continue` or `--session`. |
-| `--cloud-fork` | boolean | false | `kilo run --session ses_123 --cloud-fork` | Requires `--session`. |
-| `--share` | boolean | false | `kilo run --share 'summarize'` | Shares the session. |
-| `--model <provider/model>`, `-m` | value | config/default | `kilo run --model kilo/~anthropic/claude-haiku-latest --auto 'review'` | Provider-prefixed model id. |
-| `--agent <name>` | value | config/default | `kilo run --agent plan 'design this'` | Selects active agent/mode. |
-| `--format default\|json` | value | `default` | `kilo run --format json --auto 'summarize'` | JSON is the wrapper-grade event stream. Unsupported values exit 1. |
-| `--file <path>`, `-f` | repeatable value | `[]` | `kilo run --file src/lib.rs 'explain'` | Attaches files. |
-| `--title <title>` | value | truncated prompt | `kilo run --title 'CI review' 'review diff'` | Sets session title. |
-| `--attach <url>` | value | unset | `kilo run --attach http://localhost:4096 'continue'` | Attaches to server. |
-| `--password <password>`, `-p` | value | `KILO_SERVER_PASSWORD` | `kilo attach http://localhost:4096 --password "$KILO_SERVER_PASSWORD"` | Server basic auth. |
-| `--username <username>`, `-u` | value | `KILO_SERVER_USERNAME` or `kilo` | `kilo attach http://localhost:4096 --username kilo` | Server basic auth. |
-| `--dir <path>` | value | current directory | `kilo run --dir /repo 'inspect'` | Working directory or remote path. |
-| `--port <number>` | value | random for run server | `kilo run --port 4096 'task'` | Local server port. |
-| `--variant <variant>` | value | unset | `kilo run --variant high 'solve'` | Provider-specific reasoning effort. |
-| `--thinking` | boolean | false | `kilo run --thinking 'debug'` | Shows thinking blocks. |
-| `--interactive`, `-i` | boolean | false | `kilo run --interactive 'start'` | Direct interactive split-footer mode. |
-| `--dangerously-skip-permissions` | boolean | false | `kilo run --dangerously-skip-permissions 'fix lint'` | Auto-approves permissions not explicitly denied. |
-| `--auto` | boolean | false | `kilo run --auto 'Implement feature X'` | Official autonomous mode. |
-| `--demo` | boolean | false | `kilo run --demo` | Demo slash commands. |
-
-Other observed scoped switches:
-
-| Scope | Switches |
+| Type/form | Established behavior |
 | --- | --- |
-| `acp` | server flags plus `--cwd <path>` |
-| `auth login` | `--provider <id-or-name>`, `--method <label>` |
-| `upgrade` | `--method curl\|npm\|pnpm\|bun\|brew\|choco\|scoop` |
-| `uninstall` | `--keep-config`, `--keep-data`, `--dry-run`, `--force` |
-| `models` | `--verbose`, `--refresh` |
-| `roll-call` | `--prompt <text>`, `--timeout <ms>`, `--parallel <n>`, `--verbose`, `--quiet`, `--output table\|json\|md` |
-| `profile` | `--json` |
-| `stats` | `--days <n>`, `--tools <n>`, `--models [n]`, `--project <project>` |
-| `export` | `--sanitize` |
-| `github run` | `--event <event>`, `--token <github_pat>` |
-| `session list` | `--max-count <n>`, `--format table\|json`, `--all`, `--search <text>` |
-| `daemon start/restart` | `--foreground` |
-| `daemon status` | `--json` |
-| `db` | `--format json\|tsv` for query mode |
-| `plugin` | `--global`, `--force` |
-| `agent create` | `--path <path>`, `--description <text>`, `--mode all\|primary\|subagent`, `--permissions <list>`, `--tools <list>` |
-| `debug rg` | `--query`, `--glob`, `--limit` depending on subcommand |
-| `debug agent` | `--tool <id>`, `--params <json-or-js-object>` |
-| `help` | docs list `--all` and `--format md\|text`; local `7.3.45` did not expand all commands with `--all` |
+| none | Standalone boolean toggle; also accepts an explicit =true/=false or consumes a following literal true/false. Negations are recorded separately. |
+| string / number | At most one following value, or --flag=value. No requiresArg/nargs is declared for the inventoried scalar options; defaultValue permits omission, but choices without a default reject it. Other handlers can also reject empty values. |
+| variadic | One occurrence consumes multiple non-option words. Equals does not stop greediness. Bare array options produce [], a zero minimum that revision 2 cannot encode; variadic_min remains unknown with the exact limitation. |
+| short_attached | Accepted only for compatible numeric/punctuation-leading values, not arbitrary alphabetic text; -mfoo is a grouped-letter parse, while -m123 and -f/path consume attached values. -m=foo is equals. |
+| unknown | stats --models is undeclared/polymorphic: bare true, numeric input number, other input string. The schema cannot encode that union, so it remains unknown. |
 
-System-prompt delivery flags: none were supported by the installed `7.3.45` binary. Negative probes for `kilo run --system-prompt test`, `kilo run --append-system-prompt x test`, and `kilo run --replace-system-prompt x test` all exited 1 and printed help. The plain `--prompt` flag is an initial user prompt, not a system-prompt override. If Kilo adds system-prompt flags later, semantics belong in the sibling `system-prompt` research topic.
+A disposable fixture replayed the extracted `run` builder with the exact yargs 18.0.0 dependency graph and no provider handler. It produced `file:["a","b","prompt"]` from `--file a b prompt`, `file:["a","b"]` from `--file=a b`, and `file:[]` from bare `--file`. Native `7.8.3` rejected missing-file probes by naming the consumed path for space, equals, and `-f/path`. Native `run --replayLimit=-2` reached the handler and produced `--replay-limit requires --mini`, confirming the camel-case spelling and equals number parse without a model call. Help/version early exits were not used to prove consumption.
 
-When official docs and local help disagree, this document trusts local help for wrapper behavior and official docs for install paths and cross-platform release assets. The most important disagreement observed was `kilo help --all --format md`: official CLI reference documents those flags, but the local command emitted only top-level help.
+### Global switches
+
+| Switch | Aliases | Value |
+| --- | --- | --- |
+| --help | -h, --h | none |
+| --version | -v, --v | none |
+| --print-logs | --printLogs | none |
+| --log-level | --logLevel | string |
+| --pure | — | none |
+| --no-help | --no-h | none |
+| --no-version | --no-v | none |
+| --no-print-logs | --no-printLogs | none |
+| --no-log-level | --no-logLevel | none |
+| --no-pure | — | none |
+
+### Command-scoped switches
+
+Each row cites a pinned declaration. Space/equals are accepted for scalar/array rows; short attachments are listed only where a one-character alias exists and have the restrictions above. Scalar omission is accepted unless choices without a default reject it: --log-level and --repo-type require a value. Frontmatter records value_optional individually. Parser-generated boolean negations are listed separately below.
+
+| Exact command path | Switch and aliases | Type | Attachment | Purpose and declaration |
+| --- | --- | --- | --- | --- |
+| root, completion, daemon, daemon restart, daemon start | --port | number | space, equals | port to listen on [src/cli/cmd/tui.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/tui.ts) |
+| root, completion, daemon, daemon restart, daemon start | --hostname | string | space, equals | hostname to listen on [src/cli/cmd/tui.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/tui.ts) |
+| root, completion, daemon, daemon restart, daemon start | --mdns | none | — | enable mDNS service discovery (defaults hostname to 0.0.0.0) [src/cli/cmd/tui.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/tui.ts) |
+| root, completion, daemon, daemon restart, daemon start | --mdns-domain / --mdnsDomain | string | space, equals | custom domain name for mDNS service (default: kilo.local) [src/cli/cmd/tui.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/tui.ts) |
+| root, completion, daemon, daemon restart, daemon start | --cors | variadic | space, equals | additional domains to allow for CORS [src/cli/cmd/tui.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/tui.ts) |
+| root, completion, run | --model / -m, --m | string | space, equals, short_attached | model to use in the format of provider/model [src/cli/cmd/tui.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/tui.ts) |
+| root, completion, run | --continue / -c, --c | none | — | continue the last session [src/cli/cmd/tui.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/tui.ts) |
+| root, completion, run | --session / -s, --s | string | space, equals, short_attached | session id to continue [src/cli/cmd/tui.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/tui.ts) |
+| root, completion | --fork | none | — | fork the session when continuing (use with --continue or --session) [src/cli/cmd/tui.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/tui.ts) |
+| root, completion, run | --cloud-fork / --cloudFork | none | — | fetch session from cloud and continue locally (use with --session) [src/cli/cmd/tui.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/tui.ts) |
+| root, completion | --worktree | string | space, equals | create (or reuse) a git worktree with this name and start kilo there [src/cli/cmd/tui.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/tui.ts) |
+| root, completion | --prompt | string | space, equals | prompt to use [src/cli/cmd/tui.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/tui.ts) |
+| root, completion, run | --agent | string | space, equals | agent to use [src/cli/cmd/tui.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/tui.ts) |
+| root, completion, run | --auto | none | — | auto-approve permissions that are not explicitly denied (dangerous!) [src/cli/cmd/tui.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/tui.ts) |
+| root, completion | --mini | none | — | start the minimal interactive interface [src/cli/cmd/tui.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/tui.ts) |
+| root | --no-replay / --noReplay | none | — | disable mini session history replay on resume and after resize [src/cli/cmd/tui.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/tui.ts) |
+| root, completion | --replay-limit / --replayLimit | number | space, equals | cap visible mini replay to the newest N messages [src/cli/cmd/tui.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/tui.ts) |
+| root, run | --yolo | none | — | Compatibility permission bypass switch. [src/cli/cmd/tui.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/tui.ts) |
+| root, run | --dangerously-skip-permissions / --dangerouslySkipPermissions | none | — | Compatibility permission bypass switch. [src/cli/cmd/tui.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/tui.ts) |
+| root, run | --replay | none | — | Control interactive history replay. [src/cli/cmd/tui.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/tui.ts) |
+| root, run | --demo | none | — | Enable direct interactive demo slash commands. [src/cli/cmd/tui.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/tui.ts) |
+| cloud result, cloud send, cloud status | --session-id / --sessionId | string | space, equals | Cloud Agent session ID [src/kilocode/cli/cmd/cloud.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/kilocode/cli/cmd/cloud.ts) |
+| cloud result, cloud status | --message-id / --messageId | string | space, equals | Cloud Agent message ID [src/kilocode/cli/cmd/cloud.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/kilocode/cli/cmd/cloud.ts) |
+| cloud send, cloud start | --prompt | string | space, equals | prompt for the Cloud Agent [src/kilocode/cli/cmd/cloud.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/kilocode/cli/cmd/cloud.ts) |
+| cloud send, cloud start | --prompt-stdin / --promptStdin | none | — | read the prompt from standard input [src/kilocode/cli/cmd/cloud.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/kilocode/cli/cmd/cloud.ts) |
+| cloud start | --repo | string | space, equals | repository shorthand or URL [src/kilocode/cli/cmd/cloud.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/kilocode/cli/cmd/cloud.ts) |
+| cloud start | --repo-type / --repoType | string | space, equals | repository provider type [src/kilocode/cli/cmd/cloud.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/kilocode/cli/cmd/cloud.ts) |
+| cloud start | --branch | string | space, equals | repository branch [src/kilocode/cli/cmd/cloud.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/kilocode/cli/cmd/cloud.ts) |
+| cloud start | --model | string | space, equals | Cloud Agent model [src/kilocode/cli/cmd/cloud.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/kilocode/cli/cmd/cloud.ts) |
+| cloud start | --mode | string | space, equals | Cloud Agent mode [src/kilocode/cli/cmd/cloud.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/kilocode/cli/cmd/cloud.ts) |
+| cloud start | --org-id / --orgId | string | space, equals | Kilo organization ID [src/kilocode/cli/cmd/cloud.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/kilocode/cli/cmd/cloud.ts) |
+| cloud start | --stream | none | — | connect to the WebSocket stream and print events as JSONL [src/kilocode/cli/cmd/cloud.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/kilocode/cli/cmd/cloud.ts) |
+| completion | --no-replay | none | — | disable mini session history replay on resume and after resize [src/cli/cmd/tui.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/tui.ts) |
+| console stop, daemon, daemon restart, daemon start, daemon status, daemon stop | --json | none | — | print daemon details as JSON [src/kilocode/cli/cmd/console.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/kilocode/cli/cmd/console.ts) |
+| daemon, daemon restart, daemon start | --foreground / -f, --f | none | — | keep the command active until interrupted [src/kilocode/cli/cmd/daemon.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/kilocode/cli/cmd/daemon.ts) |
+| db | --format | string | space, equals | Output format [src/cli/cmd/db.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/db.ts) |
+| debug agent | --tool | string | space, equals | Tool id to execute [src/cli/cmd/debug/agent.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/debug/agent.ts) |
+| debug agent | --params | string | space, equals | Tool params as JSON or a JS object literal [src/cli/cmd/debug/agent.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/debug/agent.ts) |
+| debug rg files | --query | string | space, equals | Filter files by query [src/cli/cmd/debug/ripgrep.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/debug/ripgrep.ts) |
+| debug rg files | --glob | string | space, equals | Glob pattern to match files [src/cli/cmd/debug/ripgrep.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/debug/ripgrep.ts) |
+| debug rg files, debug rg search | --limit | number | space, equals | Limit number of results [src/cli/cmd/debug/ripgrep.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/debug/ripgrep.ts) |
+| debug rg search | --glob | variadic | space, equals | File glob patterns [src/cli/cmd/debug/ripgrep.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/debug/ripgrep.ts) |
+| debug rg tree | --limit | number | space, equals | Provider CLI switch. [src/cli/cmd/debug/ripgrep.ts](https://github.com/Kilo-Org/kilocode/blob/67b815466c9ab3e022f16692988673712437b881/packages/opencode/src/cli/cmd/debug/ripgrep.ts) |
+| export | --sanitize | none | — | redact sensitive transcript and file data [src/cli/cmd/export.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/export.ts) |
+| github run | --event | string | space, equals | GitHub mock event to run the agent for [src/cli/cmd/github.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/github.ts) |
+| github run | --token | string | space, equals | GitHub personal access token (github_pat_********) [src/cli/cmd/github.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/github.ts) |
+| help | --all | none | — | Show help for all commands. [src/kilocode/help-command.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/kilocode/help-command.ts) |
+| help | --format | string | space, equals | Select help output format md or text. [src/kilocode/help-command.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/kilocode/help-command.ts) |
+| mcp add | --url | string | space, equals | URL for a remote MCP server [src/cli/cmd/mcp.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/mcp.ts) |
+| mcp add | --env | variadic | space, equals | environment variable for a local MCP server (KEY=VALUE) [src/cli/cmd/mcp.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/mcp.ts) |
+| mcp add | --header | variadic | space, equals | HTTP header for a remote MCP server (KEY=VALUE) [src/cli/cmd/mcp.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/mcp.ts) |
+| models | --verbose | none | — | use more verbose model output (includes metadata like costs) [src/cli/cmd/models.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/models.ts) |
+| models | --refresh | none | — | refresh the models cache from models.dev [src/cli/cmd/models.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/models.ts) |
+| plug, plugin | --global / -g, --g | none | — | install in global config [src/cli/cmd/plug.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/plug.ts) |
+| plug, plugin | --force / -f, --f | none | — | replace existing plugin version [src/cli/cmd/plug.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/plug.ts) |
+| pr link, pr status, pr unlink | --session / -s, --s | string | space, equals, short_attached | session id to apply the PR link to [src/cli/cmd/pr.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/pr.ts) |
+| profile | --json | none | — | output profile as JSON [src/kilocode/cli/cmd/profile.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/kilocode/cli/cmd/profile.ts) |
+| roll-call | --prompt | string | space, equals | Prompt to send to each model [src/kilocode/cli/cmd/roll-call.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/kilocode/cli/cmd/roll-call.ts) |
+| roll-call | --timeout | number | space, equals | Timeout for each model call in milliseconds [src/kilocode/cli/cmd/roll-call.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/kilocode/cli/cmd/roll-call.ts) |
+| roll-call | --parallel | number | space, equals | Number of parallel model calls [src/kilocode/cli/cmd/roll-call.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/kilocode/cli/cmd/roll-call.ts) |
+| roll-call | --verbose | none | — | Show verbose output [src/kilocode/cli/cmd/roll-call.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/kilocode/cli/cmd/roll-call.ts) |
+| roll-call | --quiet | none | — | Suppress progress and decoration [src/kilocode/cli/cmd/roll-call.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/kilocode/cli/cmd/roll-call.ts) |
+| roll-call | --output | string | space, equals | Output format (table, json, or md) [src/kilocode/cli/cmd/roll-call.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/kilocode/cli/cmd/roll-call.ts) |
+| run | --command | string | space, equals | the command to run, use message for args [src/cli/cmd/run.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/run.ts) |
+| run | --fork | none | — | fork the session before continuing (requires --continue or --session) [src/cli/cmd/run.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/run.ts) |
+| run | --share | none | — | share the session [src/cli/cmd/run.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/run.ts) |
+| run | --format | string | space, equals | format: default (formatted) or json (raw JSON events) [src/cli/cmd/run.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/run.ts) |
+| run | --file / -f, --f | variadic | space, equals, short_attached | file(s) to attach to message [src/cli/cmd/run.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/run.ts) |
+| run | --title | string | space, equals | title for the session (uses truncated prompt if no value provided) [src/cli/cmd/run.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/run.ts) |
+| run | --attach | string | space, equals | attach to a running kilo server (e.g., http://localhost:4096) [src/cli/cmd/run.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/run.ts) |
+| run | --password / -p, --p | string | space, equals, short_attached | basic auth password (defaults to KILO_SERVER_PASSWORD) [src/cli/cmd/run.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/run.ts) |
+| run | --username / -u, --u | string | space, equals, short_attached | basic auth username (defaults to KILO_SERVER_USERNAME or 'kilo') [src/cli/cmd/run.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/run.ts) |
+| run | --dir | string | space, equals | directory to run in, path on remote server if attaching [src/cli/cmd/run.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/run.ts) |
+| run | --port | number | space, equals | port for the local server (defaults to random port if no value provided) [src/cli/cmd/run.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/run.ts) |
+| run | --variant | string | space, equals | model variant (provider-specific reasoning effort, e.g., high, max, minimal) [src/cli/cmd/run.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/run.ts) |
+| run | --thinking | none | — | show thinking blocks [src/cli/cmd/run.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/run.ts) |
+| run | --interactive / -i, --i | none | — | run in direct interactive split-footer mode [src/cli/cmd/run.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/run.ts) |
+| run | --mini | none | — | Internal minimal interactive interface selector. [src/cli/cmd/run.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/run.ts) |
+| run | --replay-limit / --replayLimit | number | space, equals | Limit interactive replay messages. [src/cli/cmd/run.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/run.ts) |
+| session list | --max-count / -n, --maxCount, --n | number | space, equals, short_attached | limit to N most recent sessions [src/cli/cmd/session.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/session.ts) |
+| session list | --format | string | space, equals | output format [src/cli/cmd/session.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/session.ts) |
+| session list | --all / -a, --a | none | — | list sessions from all projects [src/cli/cmd/session.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/session.ts) |
+| session list | --search / -s, --s | string | space, equals, short_attached | filter sessions by title [src/cli/cmd/session.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/session.ts) |
+| stats | --days | number | space, equals | show stats for the last N days (default: all time) [src/cli/cmd/stats.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/stats.ts) |
+| stats | --tools | number | space, equals | number of tools to show (default: all) [src/cli/cmd/stats.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/stats.ts) |
+| stats | --models | unknown | — | show model statistics (default: hidden). Pass a number to show top N, otherwise shows all [src/cli/cmd/stats.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/stats.ts) |
+| stats | --project | string | space, equals | filter by project (default: all projects, empty string: current project) [src/cli/cmd/stats.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/stats.ts) |
+| uninstall | --keep-config / -c, --keepConfig, --c | none | — | keep configuration files [src/cli/cmd/uninstall.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/uninstall.ts) |
+| uninstall | --keep-data / -d, --keepData, --d | none | — | keep session data and snapshots [src/cli/cmd/uninstall.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/uninstall.ts) |
+| uninstall | --dry-run / --dryRun | none | — | show what would be removed without removing [src/cli/cmd/uninstall.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/uninstall.ts) |
+| uninstall | --force / -f, --f | none | — | skip confirmation prompts [src/cli/cmd/uninstall.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/uninstall.ts) |
+| run | --no-replay | none | — | Use parser-generated negation of --replay. [src/cli/cmd/run.ts](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/run.ts) |
+
+### Parser-generated negation switches
+
+These recognized parser spellings negate their underlying registered option in the same exact scope. They consume no following argument and have empty attachment lists. Scalars become false (numbers zero), arrays [false]; choice validation or a handler may reject the resulting value. They are recorded for argument ownership, not recommended as useful command invocations. Boolean affirmative flags can also consume a following literal true/false; their explicit-value semantics do not fit a separate typed value field in this contract.
+
+| Spelling | Aliases | Exact scope |
+| --- | --- | --- |
+| --no-help | --no-h | global |
+| --no-version | --no-v | global |
+| --no-print-logs | --no-printLogs | global |
+| --no-log-level | --no-logLevel | global |
+| --no-pure | — | global |
+| --no-port | — | root, completion, daemon, daemon restart, daemon start, run |
+| --no-hostname | — | root, completion, daemon, daemon restart, daemon start |
+| --no-mdns | — | root, completion, daemon, daemon restart, daemon start |
+| --no-mdns-domain | --no-mdnsDomain | root, completion, daemon, daemon restart, daemon start |
+| --no-cors | — | root, completion, daemon, daemon restart, daemon start |
+| --no-model | --no-m | root, completion, run |
+| --no-continue | --no-c | root, completion, run |
+| --no-session | --no-s | root, completion, pr link, pr status, pr unlink, run |
+| --no-fork | — | root, completion, run |
+| --no-cloud-fork | --no-cloudFork | root, completion, run |
+| --no-worktree | — | root, completion |
+| --no-prompt | — | root, cloud send, cloud start, completion, roll-call |
+| --no-agent | — | root, completion, run |
+| --no-auto | — | root, completion, run |
+| --no-mini | — | root, completion, run |
+| --no-replay-limit | --no-replayLimit | root, completion, run |
+| --no-yolo | — | root, run |
+| --no-dangerously-skip-permissions | --no-dangerouslySkipPermissions | root, run |
+| --no-demo | — | root, run |
+| --no-session-id | --no-sessionId | cloud result, cloud send, cloud status |
+| --no-message-id | --no-messageId | cloud result, cloud status |
+| --no-prompt-stdin | --no-promptStdin | cloud send, cloud start |
+| --no-repo | — | cloud start |
+| --no-repo-type | --no-repoType | cloud start |
+| --no-branch | — | cloud start |
+| --no-model | — | cloud start |
+| --no-mode | — | cloud start |
+| --no-org-id | --no-orgId | cloud start |
+| --no-stream | — | cloud start |
+| --no-json | — | console stop, daemon, daemon restart, daemon start, daemon status, daemon stop, profile |
+| --no-foreground | --no-f | daemon, daemon restart, daemon start |
+| --no-format | — | db, help, run, session list |
+| --no-tool | — | debug agent |
+| --no-params | — | debug agent |
+| --no-query | — | debug rg files |
+| --no-glob | — | debug rg files, debug rg search |
+| --no-limit | — | debug rg files, debug rg search, debug rg tree |
+| --no-sanitize | — | export |
+| --no-event | — | github run |
+| --no-token | — | github run |
+| --no-all | — | help |
+| --no-url | — | mcp add |
+| --no-env | — | mcp add |
+| --no-header | — | mcp add |
+| --no-verbose | — | models, roll-call |
+| --no-refresh | — | models |
+| --no-global | --no-g | plug, plugin |
+| --no-force | --no-f | plug, plugin, uninstall |
+| --no-timeout | — | roll-call |
+| --no-parallel | — | roll-call |
+| --no-quiet | — | roll-call |
+| --no-output | — | roll-call |
+| --no-command | — | run |
+| --no-share | — | run |
+| --no-file | --no-f | run |
+| --no-title | — | run |
+| --no-attach | — | run |
+| --no-password | --no-p | run |
+| --no-username | --no-u | run |
+| --no-dir | — | run |
+| --no-variant | — | run |
+| --no-thinking | — | run |
+| --no-interactive | --no-i | run |
+| --no-max-count | --no-n, --no-maxCount | session list |
+| --no-all | --no-a | session list |
+| --no-search | --no-s | session list |
+| --no-days | — | stats |
+| --no-tools | — | stats |
+| --no-models | — | stats |
+| --no-project | — | stats |
+| --no-keep-config | --no-c, --no-keepConfig | uninstall |
+| --no-keep-data | --no-d, --no-keepData | uninstall |
+| --no-dry-run | --no-dryRun | uninstall |
+
+System-prompt delivery: no dedicated `--system-prompt`, `--append-system-prompt`, or `--replace-system-prompt` declaration was found in either release, and standalone native probes rejected those spellings. `--prompt` is a string switch at the TUI, cloud start/send, and roll-call scopes; it is not a verified system-prompt delivery flag. Detailed semantics belong to the system-prompt topic. `--` is an end-of-options delimiter, not a switch record; place it before prompt text to preserve dash-leading content and stop array consumption.
 
 ## Configuration Discovery
 
-Kilo uses XDG-style config and data directories on macOS/Linux. On this host, `HOME` was `/Users/ken/.claudine`; `kilo debug paths` resolved:
+The [global path module](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/core/src/global.ts), [config loader](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/config/config.ts), [directory walker](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/config/paths.ts), [TUI loader](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/config/tui.ts), and [managed config loader](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/config/managed.ts) define discovery. `xdg-basedir` 5.1.0 uses home-relative defaults on **all three operating systems**, including Windows. The earlier APPDATA/LOCALAPPDATA description was incorrect.
 
-| Kind | Local resolved path |
-| --- | --- |
-| home | `/Users/ken/.claudine` |
-| config | `/Users/ken/.claudine/.config/kilo` |
-| data | `/Users/ken/.claudine/.local/share/kilo` |
-| state | `/Users/ken/.claudine/.local/state/kilo` |
-| cache | `/Users/ken/.claudine/.cache/kilo` |
-| bin | `/Users/ken/.claudine/.cache/kilo/bin` |
-| log | `/Users/ken/.claudine/.local/share/kilo/log` |
-| repos | `/Users/ken/.claudine/.local/share/kilo/repos` |
-| tmp | `/var/folders/.../T/kilo` |
+| Kind | macOS / Linux default | Windows default |
+| --- | --- | --- |
+| User config | `~/.config/kilo/` | `%USERPROFILE%\.config\kilo\` |
+| Data/auth/database | `~/.local/share/kilo/` | `%USERPROFILE%\.local\share\kilo\` |
+| State | `~/.local/state/kilo/` | `%USERPROFILE%\.local\state\kilo\` |
+| Cache | `~/.cache/kilo/` | `%USERPROFILE%\.cache\kilo\` |
+| System-managed | `/Library/Application Support/kilo/ (macOS); /etc/kilo/ (Linux)` | `%ProgramData%\kilo\` |
 
-Config files and scopes:
+Main global configuration merges `config.json`, `kilo.json`, `kilo.jsonc`, `opencode.json`, then `opencode.jsonc`. Files are parsed as JSONC even when named `.json`. `KILO_CONFIG` follows that global layer. Project root `kilo.json[c]` and `opencode.json[c]` files are walked ancestor-first; `.kilo` and legacy `.kilocode` directories load the same four main filenames. Home config directories, linked-worktree primary checkout fallbacks, and `KILO_CONFIG_DIR` also participate. `.opencode` directory discovery is not present in the examined walker. `KILO_CONFIG_CONTENT` is merged after directory layers. Organization configuration, enterprise files, and macOS managed preferences may override it.
 
-| Scope | macOS/Linux path | Windows path | Format | Notes |
-| --- | --- | --- | --- | --- |
-| User | `~/.config/kilo/kilo.jsonc` | `%APPDATA%\kilo\kilo.jsonc` | JSONC | Local file contained only `$schema: https://app.kilo.ai/config.json`; docs also allow `.json` and `config.json`. |
-| User TUI | `~/.config/kilo/tui.jsonc` | `%APPDATA%\kilo\tui.jsonc` | JSONC | Notifications, sounds, themes, keybindings; `.json` also supported. |
-| Project | `./kilo.jsonc` | `.\kilo.jsonc` | JSONC | Project config takes precedence over global. |
-| Project directory | `./.kilo/kilo.jsonc` | `.\.kilo\kilo.jsonc` | JSONC | Docs also mention legacy `.kilocode` and `.opencode` discovery. |
-| User data | `~/.local/share/kilo/kilo.db` | `%LOCALAPPDATA%\kilo\kilo.db` | SQLite | Local inspection showed DB, WAL/SHM sidecars, logs, repos, `session-export.db`, and `telemetry-id`. |
+TUI configuration is separate: global `tui.json`, `tui.jsonc`, explicit `KILO_TUI_CONFIG`, project `tui.json[c]`, then discovered `.kilo`/`.kilocode` directory TUI files. The macOS managed preference domain remains `ai.opencode.managed`, in a user-specific or system `/Library/Managed Preferences/` plist. Explicit test overrides can redirect managed directories. The frontmatter enumerates individual file/OS records rather than conflating these layers.
 
-Side effects observed on first/local runs: Kilo initialized file and DB services during help/debug commands, opened/applied migrations to `~/.local/share/kilo/kilo.db`, wrote logs under `~/.local/share/kilo/log`, and maintained `telemetry-id`. `auth list` displayed credential storage at `~/.local/share/kilo/auth.json` even when the file did not yet contain credentials.
+`~/.kilo` was checked and was absent on this host. Native `debug paths` in the sandbox resolved the requested XDG paths. Bootstrap can initialize configuration/data directories, `kilo.db` and migrations, logs, telemetry state, and `auth.json`; startup can migrate legacy `~/.kilocode/cli/config.json` authentication. Config loading can write `$schema`, `.gitignore`, migrate legacy rules/modes/workflows, or install plugin dependencies. Isolate probes and do not treat a diagnostic command as filesystem-pure. Concurrent first-start probes sharing an empty home produced one database migration error; the sequential rerun succeeded.
 
 ## Environment Variables
 
-General CLI/runtime variables:
+The general runtime variables below come from the [core flags](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/core/src/flag/flag.ts), global/config/managed loaders, launcher, and [session pager](https://github.com/Kilo-Org/kilocode/blob/59f1428abb5fe782ee7bd4d258e72a08b74aadb4/packages/opencode/src/cli/cmd/session.ts). Unless otherwise noted, core booleans accept case-insensitive `true` or `1`; positive-number helpers ignore invalid/nonpositive values. Experimental variables are implementation controls, not stable wrapper guarantees.
 
 | Variable | Effect |
 | --- | --- |
-| `KILO_PROVIDER` | Overrides the active provider id. |
-| `KILO_<FIELD_NAME>` | Overrides provider/config fields for non-`kilocode` providers, for example `KILO_API_KEY` maps to `apiKey`. |
-| `KILOCODE_<FIELD_NAME>` | Overrides fields for the `kilocode` provider, for example `KILOCODE_MODEL` maps to `kilocodeModel`. |
-| `KILO_PURE` | `KILO_PURE=1` skips external plugins; useful for reproducible CI or debugging. |
-| `KILO_SERVER_PASSWORD` | Default basic auth password for `run --attach` and `attach`. |
-| `KILO_SERVER_USERNAME` | Default basic auth username for `run --attach` and `attach`; falls back to `kilo`. |
-| `KILO_TREE_SITTER_WASM_DIR` | Overrides tree-sitter WASM resource directory; the npm launcher sets it to the package's bundled directory when absent. |
+| HOME | Unix home-directory input used by Node/Bun and XDG defaults. |
+| USERPROFILE | Windows home-directory input; XDG defaults are under this home. |
+| XDG_CONFIG_HOME | Choose the base directory containing kilo user configuration. |
+| XDG_DATA_HOME | Choose the base directory containing kilo auth, database, sessions, and logs. |
+| XDG_CACHE_HOME | Choose the base directory containing kilo caches and helper binaries. |
+| XDG_STATE_HOME | Choose the base directory containing kilo state and daemon metadata. |
+| ProgramData | Windows enterprise-managed configuration base; defaults to C:\ProgramData. |
+| KILO_CONFIG | Load an explicitly named configuration file after global configuration. |
+| KILO_CONFIG_DIR | Add an explicit directory for config, agent, command, skill, and plugin discovery; does not erase the normal global layer. |
+| KILO_CONFIG_CONTENT | Merge an inline JSONC config string after project/config-directory layers, before organization and managed policy layers. |
+| KILO_TUI_CONFIG | Load an explicitly named TUI config file. |
+| KILO_DISABLE_PROJECT_CONFIG | Skip project config files and project .kilo/.kilocode discovery when true or 1. |
+| KILO_PURE | Disable external plugins when true or 1; built-in plugins still appear in resolved config. |
+| KILO_BIN_PATH | npm launcher selects the supplied native executable instead of normal binary discovery. |
+| KILO_TREE_SITTER_WASM_DIR | Choose tree-sitter WASM resource directory; npm launcher fills it from bundled resources if unset. |
+| KILO_SERVER_PASSWORD | HTTP server/client Basic authentication password default. |
+| KILO_SERVER_USERNAME | HTTP Basic authentication username default; client falls back to kilo. |
+| KILO_DISABLE_AUTOUPDATE | Disable automatic updates when true or 1. |
+| KILO_ALWAYS_NOTIFY_UPDATE | Always show update notification when true or 1. |
+| KILO_AUTO_SHARE | Automatically share newly created sessions when true or 1. |
+| KILO_ENABLE_EXA | Enable Exa search; also enabled by KILO_EXPERIMENTAL_EXA or the grouped experimental switch. |
+| KILO_EXPERIMENTAL_EXA | Compatibility experimental Exa search switch. |
+| KILO_EXPERIMENTAL_ICON_DISCOVERY | Enable experimental icon discovery. |
+| KILO_EXPERIMENTAL_OXFMT | Enable experimental oxfmt integration. |
+| KILO_EXPERIMENTAL_LSP_TY | Enable experimental ty language-server integration. |
+| KILO_EXPERIMENTAL_LSP_TOOL | Enable experimental LSP tool. |
+| KILO_EXPERIMENTAL_SCOUT | Enable experimental scout behavior. |
+| AGENT | The CLI sets this to 1 before command bootstrap so children can recognize an agent context. |
+| OPENCODE | The CLI sets this compatibility marker to 1 before bootstrap. |
+| KILO | The CLI sets this marker to 1 during normal Kilo bootstrap. |
+| KILO_DISABLE_PRUNE | Disable automatic pruning of older tool outputs. |
+| KILO_DISABLE_AUTOCOMPACT | Disable automatic context compaction. |
+| KILO_DISABLE_TERMINAL_TITLE | Prevent terminal title changes. |
+| KILO_DISABLE_MOUSE | Disable TUI mouse handling. |
+| KILO_DISABLE_LSP_DOWNLOAD | Disable automatic LSP downloads. |
+| KILO_DISABLE_DEFAULT_PLUGINS | Disable default external plugin loading. |
+| KILO_DISABLE_EXTERNAL_SKILLS | Disable external skill discovery. |
+| KILO_DISABLE_CLAUDE_CODE | Disable Claude Code compatibility prompt/skill discovery. |
+| KILO_DISABLE_CLAUDE_CODE_SKILLS | Disable Claude Code skill discovery independently. |
+| KILO_DISABLE_CLAUDE_CODE_PROMPT | Disable Claude Code prompt discovery independently; semantics belong to system-prompt. |
+| KILO_GIT_BASH_PATH | Specify Windows Git Bash executable path; also used to locate less for session table paging. |
+| KILO_DB | Override the SQLite database path. |
+| KILO_DISABLE_CHANNEL_DB | Disable installation-channel-specific database naming. |
+| KILO_SKIP_MIGRATIONS | Skip database migrations; unsafe with incompatible databases. |
+| KILO_STRICT_CONFIG_DEPS | Enable strict configuration dependency handling. |
+| KILO_PLUGIN_META_FILE | Override plugin metadata file location. |
+| KILO_CLIENT | Set client identity; defaults to cli. |
+| KILO_SESSION_RETRY_LIMIT | Override retry limit with a positive integer; invalid/nonpositive values are ignored. |
+| KILO_WORKSPACE_ID | Identify the workspace for runtime services. |
+| KILO_DISABLE_EMBEDDED_WEB_UI | Disable the embedded web UI. |
+| KILO_DISABLE_FFF | Disable fff file finder; defaults disabled on Windows in 7.8.3. |
+| KILO_ENABLE_QUESTION_TOOL | Enable the question tool. |
+| KILO_ENABLE_PARALLEL | Enable parallel execution; KILO_EXPERIMENTAL_PARALLEL also enables it. |
+| KILO_EXPERIMENTAL_PARALLEL | Compatibility experimental switch for parallel execution. |
+| KILO_EXPERIMENTAL | Enable grouped experimental features. |
+| KILO_EXPERIMENTAL_FILEWATCHER | Enable experimental file watching (Effect boolean config). |
+| KILO_EXPERIMENTAL_DISABLE_FILEWATCHER | Disable experimental file watching (Effect boolean config). |
+| KILO_EXPERIMENTAL_DISABLE_COPY_ON_SELECT | Disable copy-on-select; default true on Windows. |
+| KILO_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS | Override bash default timeout with a positive integer in milliseconds. |
+| KILO_EXPERIMENTAL_OUTPUT_TOKEN_MAX | Override output-token ceiling with a positive integer. |
+| KILO_EXPERIMENTAL_MARKDOWN | Enable experimental Markdown rendering unless false or 0. |
+| KILO_EXPERIMENTAL_CUSTOMIZE_SKILL | Enable skill customization; defaults enabled for dev/beta/local channels unless false or 0. |
+| KILO_EXPERIMENTAL_CLAUDE_MIGRATION | Enable experimental Claude migration. |
+| KILO_EXPERIMENTAL_WORKSPACES | Enable experimental workspaces; inherits KILO_EXPERIMENTAL unless explicitly set. |
+| KILO_EXPERIMENTAL_EVENT_SYSTEM | Enable experimental event system. |
+| KILO_EXPERIMENTAL_SESSION_SWITCHING | Enable experimental session switching. |
+| KILO_EXPERIMENTAL_SESSION_SWITCHER | Enable experimental session switcher; inherits KILO_EXPERIMENTAL unless explicitly set. |
+| KILO_EXPERIMENTAL_REFERENCES | Enable experimental references; inherits KILO_EXPERIMENTAL unless explicitly set. |
+| KILO_TEST_HOME | Override Global.Path.home for compatibility discovery; does not move XDG bases already initialized from the real home. |
+| KILO_TEST_MANAGED_CONFIG_DIR | Override system-managed config directory; named as a test override in source. |
+| PWD | Used by run to resolve its working directory; wrappers should keep it consistent with the actual child cwd. |
 
-Kilo also documents `{env:VARIABLE_NAME}` interpolation inside config files. OpenTelemetry variables are documented by Kilo, but those belong to the logging topic unless a wrapper needs to control telemetry explicitly.
+Core flags also include experimental icon discovery, Exa search, oxfmt, LSP ty/tool, and scout controls; those feature-specific controls do not establish argument ownership. Model-endpoint/catalog variables belong to model-config, permission variables to agent-permissions, MCP variables to mcp, and log/telemetry/process-correlation variables to agent-logging. No generic `KILO_PROVIDER`, `KILO_<FIELD_NAME>`, or `KILOCODE_<FIELD_NAME>` override mechanism was found in the examined CLI config source; the previous claim is removed.
 
 ## Machine Introspection
 
-| Command | Machine-readable | Format | Codegen use | Notes |
-| --- | --- | --- | --- | --- |
-| `kilo debug paths` | No | table/text | Yes | Resolved home/data/config/cache/state/tmp paths. |
-| `kilo debug config` | Yes | JSON | Yes | Resolved config; very large because agent prompts are included. |
-| `kilo config check` | No | text | No | Doctor-style config warnings/errors. |
-| `kilo debug info` | No | text | No | Version, OS, terminal, plugins. |
-| `kilo debug v2` | Yes | JSON | Yes | Enabled providers, endpoints, defaults, model maps. |
-| `kilo debug skill` | Yes | JSON | Yes | Available skills with full content; large and potentially sensitive. |
-| `kilo models --verbose` | Partly | text with JSON object blocks | Yes | Model catalog and metadata, but no clean JSON-array mode. |
-| `kilo session list --format json --max-count N` | Yes | JSON | No | Local empty state produced empty stdout and exit 0. |
-| `kilo daemon status --json` | Yes | JSON | No | Daemon running/stale/file/reason. |
-| `kilo db path` | No | text | No | Resolved SQLite DB path. |
-| `kilo db '<query>' --format json` | Yes | JSON | No | Arbitrary DB query; wrappers should keep queries fixed/read-only. |
-| `kilo auth list` | No | text | No | Credentials and environment-backed providers. |
-| `kilo mcp list` | No | text | No | MCP server status; local empty state exited 0. |
-| `kilo profile --json` | Yes | JSON or styled error | No | Exits 1 when unauthenticated. |
+| Command | Format | Use and limitations |
+| --- | --- | --- |
+| kilo debug config | json | Observed valid JSON; contains merged configuration and may expose sensitive configuration. |
+| kilo debug v2 | json | Observed providers/default/small JSON. In 7.8.3 default serialized an Effect object rather than a resolved model ID; do not trust that field. |
+| kilo debug skill | json | Observed JSON array including full skill content; potentially sensitive and large. |
+| kilo generate | json | Hidden source-registered command emits HTTP OpenAPI, not JSON Schema for kilo.json and not CLI switches. Handler not run. |
+| kilo models --verbose | text (human output) | Source prints model IDs plus JSON metadata blocks; not one JSON document. |
+| kilo session list --format json | json | Observed empty stdout with exit 0 when no sessions; otherwise source emits JSON array. Avoid the table pager. |
+| kilo daemon status --json | json | Observed JSON with running, stale, file, reason; safe state projection omits password. |
+| kilo db 'SELECT 1 AS probe' --format json | json | Observed [{"probe":1}]; query mode accesses local SQLite. Keep wrapper queries fixed/read-only. |
+| kilo db path | text (human output) | Observed resolved database path. |
+| kilo debug paths | text (human output) | Observed text key/path lines after initialization; first simultaneous boot raced with other probes and failed a migration, sequential rerun succeeded. |
+| kilo config check | text (human output) | Observed styled diagnostics and exit 1; not a JSON diagnostics protocol. |
+| kilo auth list | text (human output) | Source renders credentials/provider names and environment-variable names; no JSON switch. |
+| kilo mcp list | text (human output) | Source renders status text; configured servers may connect/spawn. |
+| kilo profile --json | json | Observed unauthenticated exit 1, empty stdout, styled stderr; JSON only on success. |
+| kilo cloud status --session-id ID --message-id ID | json | Source prints authenticated remote-task status JSON; not executed. |
+| kilo cloud result --session-id ID --message-id ID | json | Source prints authenticated remote-task result JSON; not executed. |
+
+No machine-readable CLI option manifest or CLI JSON-help mode was found. `completion` generates a shell script; it is not a typed option schema. `generate` exposes HTTP OpenAPI only. `run --format json` is an execution event stream, not provider-state introspection. `models --verbose` mixes IDs and JSON object blocks rather than emitting a JSON array. Cloud output is documented from source, not authenticated execution.
 
 ## Wrapper Notes
 
-- Prefer `kilo run --auto --format json <prompt>` for non-interactive task execution.
-- Capture and classify stderr carefully: help and diagnostics can succeed while still printing INFO service/file/db lines to stderr.
-- Do not assume the locally installed version is current. On 2026-07-03, npm latest was `7.4.1` while local install was `7.3.45`.
-- Account for the npm launcher as an extra process layer; it forwards signals to the packaged platform binary.
-- `--auto` does not mean "ignore policy"; docs say autonomous mode still respects auto-approval configuration, and unapproved operations are not allowed.
-- Kilo 7.3.45 does not support run-time system-prompt delivery flags. Use config/agent mechanisms or wait for the sibling system-prompt topic if later versions add flags.
-- `kilo models --verbose` is useful for model metadata but is not directly machine-readable as a single JSON document.
-- `profile --json` exiting 1 when unauthenticated is an expected state.
-- UI/mutating commands include default TUI, `web`, `console`, `plugin`, `import`, `pr`, `github install`, `upgrade`, and `uninstall`.
-- Shell quoting matters for JSON-ish values such as `debug agent --params '{path:"README.md"}'`.
-- Local runs initialized config/data/log/telemetry files even for help/debug commands; wrappers should use isolated `HOME`/XDG directories when probing.
-
-## Changelog
-
-- 2026-07-03: Updated upstream latest to npm `7.4.1` and recorded local installed `7.3.45`.
-- 2026-07-03: Reworked frontmatter to satisfy `_schema.yaml` with explicit macOS/Linux/Windows records instead of `os: all`.
-- 2026-07-03: Added local evidence for binary aliases, npm launcher signal/tree-sitter behavior, noisy help stderr, XDG config/data paths, DB/log side effects, and machine-introspection commands.
-- 2026-07-03: Added negative probes showing installed Kilo rejects `--system-prompt`, `--append-system-prompt`, and `--replace-system-prompt`.
-- 2026-07-03: Expanded install methods from README/docs, including curl, pnpm, Bun, Homebrew, Arch AUR, and release assets.
+- Installed kilo --version is exactly 7.3.45; separately downloaded 7.8.3 native binary also reports 7.8.3. Gate compatibility by version; latest npm/GitHub release is 7.8.3.
+- Use run with closed stdin and --format json for one-shot execution; --interactive/-i and root --mini require a TTY. No resume command exists: use run --continue/-c or --session/-s, with --fork or --cloud-fork as appropriate.
+- run --file/-f is greedy variadic, including after equals. Put -- before positional prompt text. Minimum zero is a confirmed fact that schema revision 2 cannot encode; variadic_min is conservatively unknown with an explicit gap.
+- yargs short-option groups do not support arbitrary -mfoo values. Numeric or punctuation-leading attached values work; space or equals avoids grouped-letter ambiguity.
+- Scalar flags usually allow parser-level omission; empty strings/undefined can still fail choices or handlers. Boolean flags can consume a following literal true/false or accept =true/=false; the none records describe standalone toggles.
+- Boolean negations and camel-case aliases are accepted by the parser. Some handlers inspect literal argv spelling (for example network explicitness and print-logs), so parser acceptance does not guarantee equivalent downstream behavior.
+- Bare root positional is a project path; --prompt supplies the initial user prompt. No system-prompt, append-system-prompt, or replace-system-prompt options occur in the examined declarations; dedicated semantics belong to system-prompt.
+- Help is normally on stderr with branding and can include INFO lines on successful exit. NO_COLOR did not remove all styled diagnostic output. help --all --format md returned root help in both releases.
+- Configuration/data initialization writes directories, database migrations, logs and telemetry state. Concurrent first boots into one empty home caused a migration failure; sequential initialization succeeded. Use a disposable home/XDG sandbox for probing.
+- Windows uses XDG defaults under USERPROFILE/.config and .local/share, rather than APPDATA/LOCALAPPDATA. Enterprise configuration is separate under ProgramData/kilo.
+- session list JSON mode can return empty stdout. debug v2 default in 7.8.3 is an unevaluated Effect object; do not assume it is a model ID.
+- Long-running acp/serve/debug wait do not meet this contract's run-to-completion non_interactive criterion. Daemon launch returns unless foreground is selected; export/db require explicit arguments to avoid a picker/shell.
+- cloud start/send, roll-call, github run and actual model sessions can incur charges. Plugin/import/session deletion/worktree commands mutate local state. None of these handlers was executed for research.
+- npm launcher adds a Node process, forwards SIGINT/SIGTERM/SIGHUP and propagates exit status/signals; KILO_BIN_PATH can redirect it to another binary.
+- ~/.kilo was checked and is absent on this host; home .kilo is only one config-discovery location, not the default user config store.
 
 ## Sources
 
 - [Kilo homepage](https://kilo.ai/)
-- [Kilo docs](https://kilo.ai/docs)
-- [Kilo CLI overview](https://kilo.ai/docs/code-with-ai/platforms/cli)
-- [Kilo CLI command reference](https://kilo.ai/docs/code-with-ai/platforms/cli-reference)
-- [Kilo GitHub repository](https://github.com/Kilo-Org/kilocode)
-- [Kilo MCP CLI docs](https://kilo.ai/docs/automate/mcp/using-in-cli)
-- [Kilo plugin docs](https://kilo.ai/docs/automate/extending/plugins)
-- [npm package: `@kilocode/cli`](https://www.npmjs.com/package/@kilocode/cli)
-- Local command: `npm view @kilocode/cli version dist-tags bin repository homepage --json`
-- Local command: `kilo --version`; `kilocode --version`
-- Local command: `kilo --help`; `kilo <subcommand> --help`; `kilo help --all --format md`
-- Local command: `kilo debug paths`; `kilo debug config`; `kilo debug info`; `kilo debug v2`; `kilo debug skill`
-- Local command: `kilo config check`; `kilo auth list`; `kilo mcp list`; `kilo daemon status --json`; `kilo db path`; `kilo db 'select name from sqlite_master limit 3' --format json`
-- Local files inspected: `~/.config/kilo/kilo.jsonc`, `~/.config/kilo/.gitignore`, `~/.local/share/kilo/`, `/Users/ken/.nvm/versions/node/v22.20.0/lib/node_modules/@kilocode/cli/package.json`, and `/Users/ken/.nvm/versions/node/v22.20.0/lib/node_modules/@kilocode/cli/bin/kilo`
+- [CLI guide](https://kilo.ai/docs/code-with-ai/platforms/cli)
+- [CLI command reference](https://kilo.ai/docs/code-with-ai/platforms/cli-reference)
+- [npm latest package metadata](https://registry.npmjs.org/@kilocode/cli/latest)
+- [GitHub 7.8.3 release](https://github.com/Kilo-Org/kilocode/releases/tag/v7.8.3)
+- [7.3.45 source](https://github.com/Kilo-Org/kilocode/tree/67b815466c9ab3e022f16692988673712437b881) and [7.8.3 source](https://github.com/Kilo-Org/kilocode/tree/59f1428abb5fe782ee7bd4d258e72a08b74aadb4)
+- [yargs parser defaults and consumption](https://github.com/yargs/yargs-parser/blob/v22.0.0/lib/yargs-parser.ts)
+- [yargs option factory](https://github.com/yargs/yargs/blob/v18.0.0/lib/yargs-factory.ts)
+- [xdg-basedir defaults](https://github.com/sindresorhus/xdg-basedir/blob/v5.1.0/index.js)
+- Pinned per-command declaration links appear in the switch table and evidence records.
+- Local observations: `kilo --version`; downloaded platform binary `--version`; recursive `--help`; isolated paths/config/catalog/skills/session/db/daemon/profile/config-check commands; missing-file and rejected-switch probes. Sanitized temporary help/probe artifacts are under `/tmp/kilo-cli-research-20261001/`; these paths are session artifacts, not published source URLs.
+
+## Changelog
+
+- 2026-10-01: Migrated the previous untyped revision-1 document to revision 2 with evidence-backed switch types, attachments, exact scopes, and explicit gaps.
+- 2026-10-01: Verified installed 7.3.45 and current release 7.8.3; inventoried nested native commands and aliases and documented removed/added paths.
+- 2026-10-01: Corrected file attachment from repeatable scalar to greedy variadic, Windows XDG paths, and long-running server classification.
+- 2026-10-01: Recorded hidden compatibility switches, parser omission/short-attachment behavior, empty JSON session output, help-reference discrepancy, and configuration initialization caveats.
+- 2026-10-01: Removed unsupported generic KILO_PROVIDER/KILO_<FIELD_NAME>/KILOCODE_<FIELD_NAME> claims; provider-endpoint variables belong to model-config.

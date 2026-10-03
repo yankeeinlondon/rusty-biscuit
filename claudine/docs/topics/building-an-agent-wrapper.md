@@ -295,7 +295,7 @@ Special cases already in production:
 
 ### Hook handlers run under a deadline
 
-`claudine handle` enforces a 5-second hook deadline (overridable via `CLAUDINE_HANDLE_DEADLINE_SECONDS`). Bash and messenger actions inside handlers have their own 3-second timeout. If a new provider introduces synchronous network calls in its handler path, the deadline will fire and exit 124. Any blocking IO must be async, time-boxed, or moved to a background sink.
+`claudine handle` enforces a 15-second hook deadline (overridable via `CLAUDINE_HANDLE_DEADLINE_SECONDS`). Bash actions have their own fixed 3-second timeout. Message sends have none, and they are drained before exit within the same deadline. If a new provider introduces synchronous network calls in its handler path, the deadline will fire and exit 124. Any blocking IO must be async, time-boxed, or moved to a background sink.
 
 ### Linking compatibility cuts both ways
 

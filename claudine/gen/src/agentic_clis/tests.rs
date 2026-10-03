@@ -10,7 +10,7 @@ fn fixture_area(root: &Path, roster: &str) -> PathBuf {
 }
 
 const ROSTER: &str = r#"kind: sequence
-list:
+sequence:
     - slug: claude
       cli_aliases: ["claude"]
       sniff_binding: Claude
@@ -96,7 +96,7 @@ fn check_detects_every_roster_change_without_regeneration() {
     assert!(matches!(check_agentic_clis(&area).unwrap(), CheckOutcome::Clean));
 
     let edits = [
-        ("added slug", ROSTER.replacen("list:\n", "list:\n    - slug: codex\n      sniff_binding: Codex\n", 1)),
+        ("added slug", ROSTER.replacen("sequence:\n", "sequence:\n    - slug: codex\n      sniff_binding: Codex\n", 1)),
         ("removed slug", ROSTER.replace("    - slug: paused\n      skip_research: true\n      sniff_binding: Goose\n", "")),
         ("added alias", ROSTER.replace("[\"claude\"]", "[\"claude\", \"claude_code\"]")),
         ("removed alias", ROSTER.replace(", \"kimi-code\"", "")),

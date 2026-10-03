@@ -15,6 +15,8 @@ mod common;
 // Formerly the `real_terminal_render` target: its tests are `level2_`, and a
 // `real_` path segment would also put them in the stub `real` tier (R5).
 #[cfg(unix)]
+mod level2_input_table_layout;
+#[cfg(unix)]
 mod terminal_render;
 #[cfg(windows)]
 mod windows_captured_stdout;

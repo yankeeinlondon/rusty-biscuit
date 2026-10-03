@@ -8,7 +8,7 @@
 # `benchmark_fixtures.rs` proves the recorded identities still match.
 #
 # Generator version: bump on any change to emitted bytes.
-#   version: 1.3.0
+#   version: 1.3.1
 #   command: bash generate.sh
 #
 # Usage:
@@ -179,7 +179,7 @@ EOF
   printf -- '---\n'
   printf '\n# {{ title }}\n\n'
   printf 'Project {{ proj }} rooted at {{ base }}.\n\n'
-  printf "Nested: {{ proj ? 'inside {{proj}} now' : 'none' }}\n\n"
+  printf "Nested: {{ proj ? 'inside ' + proj + ' now' : 'none' }}\n\n"
   printf 'Literal escape stays raw: {{{ not_interpolated }}}\n\n'
   printf '  indented: {{ chain_15 }}\n\n'
   printf 'Unicode prose: café {{ proj }} 日本語 🎉\n\n'

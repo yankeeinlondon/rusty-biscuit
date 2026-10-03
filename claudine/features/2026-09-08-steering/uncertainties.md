@@ -1,6 +1,32 @@
 # Steering Uncertainty Register
 
-Updated: 2026-09-08
+Updated: 2026-09-28 (final status after implementation); the sections after
+"Final status" are the 2026-09-08 register, kept as written.
+
+## Final status (2026-09-28)
+
+What the implementation established, what it enabled, and what is still open.
+Evidence paths are in [verification/README.md](verification/README.md) and the
+[implementation log](implementation-log.md).
+
+| Provider | Implemented | Enabled (reviewed grant) | Still open, with the next check |
+| --- | --- | --- | --- |
+| Codex | Managed `codex app-server` launch for non-interactive runs whose options map exactly (`exec` is the pre-submission fallback); adapter `codex-app-server` r1: steer the active turn with `expectedTurnId` as the guard, idle `turn/start` after a fresh `thread/read`, consented interrupt-then-start | **macOS, Codex 0.157.1**, profile `managed-app-server`, origin Claudine: `app-server-steer` (working) and `app-server-turn-start` (idle). Manual send, automatic warning + recovery, and continued repetition to the unchanged stop verified through the production wrapper | Linux and native Windows: real-Codex runs not made (fake-protocol and daemon suites pass natively); each needs `just test-real real_codex_` on that host, then a grant. Every other Codex version needs a re-run and a grant bump. Ordinary (native) Codex sessions: no discovery channel. Interrupt-then-start: verified, deliberately not granted (a non-interrupting route exists and research lists the case as non-interrupting) |
+| Pi | Managed RPC launch with JSON fallback; adapter `pi-rpc` r1 (steer, idle prompt, abort-then-submit) | none — reviewed block on `retained-rpc` | An effective session-change guard: extensions can switch the session without coordination (measured loss). Next check: a provider-side switch guard or a profile that excludes session-switching extensions, verified with the switch/crash fixtures |
+| Claude Code | Native registry discovery on macOS, Linux, and Windows (live-process + start-time freshness) | none | Peer-socket reply framing and receipt timing are undocumented. Next check: capture sanitized reply frames in a disposable session gated by version and `peerProtocol`. Native Windows: no external credential path (evidenced blocked) |
+| OpenCode | none (listed as managed rows, unavailable) | none | Managed `serve` + `run --attach` adapter. Next check: disposable `prompt_async` during a busy session (research records that input to a busy session can be stranded) |
+| Kilo | none | none | Managed `kilo serve` adapter; strongest HTTP candidate (macOS working case researched non-interrupting at the end of the tool batch) |
+| Gemini | none | none | Managed ACP adapter for idle prompt and consented cancel-then-prompt; automatic help evidenced unsupported (no non-interrupting active steer in 0.51.0) |
+| Goose | none | none | Externally blocked: not installed on any test host. Managed ACP steer guarded by `expectedRunId` once installed |
+| Kimi | none | none | Kimi Code 2.x is a major-version change (research pins 0.28.1): needs a research refresh. Separately, Claudine's non-interactive Kimi launch uses `--wire`, which Kimi Code 2.0.2 rejects |
+| Qwen | none | none | Managed daemon follow-up + idle prompt; follow-ups start at the next turn, so automatic help is evidenced unsupported |
+| Antigravity | none | none | Needs a versioned structured-input contract before any test |
+
+Platform evidence for the shared machinery (routing, owner link, controller,
+discovery, detector, audit): macOS, native Linux, native Windows (named
+pipes), and WSL2 for the library and Rendezvous suites. Missing daemon, slow
+or expired routing, owner disconnect, daemon restart, stale targets, and
+no-replay are covered by the daemon-backed tests on all three native OSes.
 
 This register separates contract shape from provider evidence and implementation.
 It is based on the revision-3 reports. Pi now has two passing, narrowly scoped

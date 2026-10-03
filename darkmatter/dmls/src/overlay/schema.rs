@@ -21,7 +21,8 @@ use darkmatter::markdown::schemas::{
     DarkmatterSchemas, EffectiveSchema, PatternKey, PropertyAtom, PropertyDef, SchemaArm,
     SchemaAdvisory, SchemaError, SchemaShape, SchemaSourceMap, SchemaSourcePath, SchemaSpanKind,
     SimplifiedSchema, SimplifiedType, StandaloneSchemaDocument, StandaloneSchemaEnvelope, TypeExpr,
-    darkmatter_base_json_schema_ref, darkmatter_base_schema, triggers::TriggerRegistry,
+    darkmatter_base_json_schema_ref, darkmatter_base_schema, mapping_separator,
+    triggers::TriggerRegistry,
 };
 use globset::{Glob, GlobSetBuilder};
 use serde_json::Value;
@@ -327,9 +328,10 @@ fn block_top_level_entries(text: &str) -> Vec<(String, String)> {
         // multi-line quoted scalar (`description: "multi`) whose following
         // continuation lines close it.
         advance_quote_state(line, &mut quote);
-        let Some((key, value)) = line.split_once(':') else {
+        let Some(colon) = mapping_separator(line, false) else {
             continue;
         };
+        let (key, value) = (&line[..colon], &line[colon + 1..]);
         let Some(key) = lexical_scalar(key.trim()) else {
             continue;
         };
@@ -399,11 +401,13 @@ fn advance_quote_state(line: &str, quote: &mut Option<char>) {
     let mut previous_space = true;
     let mut presentation = ScalarPresentation::Block;
     let mut flow_depth = 0usize;
+    let mut after_node = false;
     while let Some(ch) = chars.next() {
         if quote.is_some() {
             if step_quoted(quote, &mut escaped, ch, chars.peek().copied()) {
                 chars.next();
             }
+            after_node = quote.is_none();
             continue;
         }
         match ch {
@@ -422,9 +426,16 @@ fn advance_quote_state(line: &str, quote: &mut Option<char>) {
             _ => {}
         }
         previous_space = ch.is_whitespace();
-        at_scalar_start =
-            is_scalar_boundary(ch, at_scalar_start, chars.peek().copied(), presentation)
-                || (at_scalar_start && previous_space);
+        at_scalar_start = is_scalar_boundary(
+            ch,
+            at_scalar_start,
+            after_node,
+            chars.peek().copied(),
+            presentation,
+        ) || (at_scalar_start && previous_space);
+        if !previous_space {
+            after_node = matches!(ch, '}' | ']');
+        }
     }
 }
 
@@ -441,19 +452,32 @@ enum ScalarPresentation {
 /// YAML indicators are context-sensitive. `-` is structural only when it is
 /// already at a scalar boundary and is followed by whitespace or end of line;
 /// a mid-token `-` remains plain-scalar content even when whitespace follows
-/// it. `:` followed by whitespace or end of line is a mapping separator. `[`,
-/// `{`, and `,` begin scalar positions only in flow presentation; in block
-/// presentation they are content once a plain scalar has begun.
+/// it. `[`, `{`, and `,` begin scalar positions only in flow presentation; in
+/// block presentation they are content once a plain scalar has begun.
+///
+/// `:` is a mapping value indicator when whitespace or end of line follows it.
+/// In flow presentation it is one also when a flow indicator follows it, or
+/// when it does not continue a plain scalar: `after_node` says it directly
+/// follows a quoted scalar or closed collection (`{"a":1}`). Elsewhere it is
+/// plain-scalar content, as in `a:'b` or `http://x`, so the quote after it
+/// stays content too.
 fn is_scalar_boundary(
     ch: char,
     at_scalar_start: bool,
+    after_node: bool,
     next: Option<char>,
     presentation: ScalarPresentation,
 ) -> bool {
     match ch {
         '[' | '{' | ',' => presentation == ScalarPresentation::Flow,
         '-' => at_scalar_start && next.is_none_or(char::is_whitespace),
-        ':' => next.is_none_or(char::is_whitespace),
+        ':' => {
+            next.is_none_or(char::is_whitespace)
+                || (presentation == ScalarPresentation::Flow
+                    && (at_scalar_start
+                        || after_node
+                        || next.is_some_and(|next| matches!(next, ',' | '[' | ']' | '{' | '}'))))
+        }
         _ => false,
     }
 }
@@ -478,7 +502,8 @@ fn flow_mapping_start(text: &str) -> Option<usize> {
 /// Top-level `key: value` entries of a flow mapping. `inner` starts
 /// immediately after the opening `{`.
 ///
-/// Only depth-0 `:` and `,` delimit entries, so nested flow collections and
+/// Only a depth-0 `,` and a depth-0 `:` that YAML reads as a value indicator
+/// (see [`is_scalar_boundary`]) delimit entries, so nested flow collections and
 /// quoted scalars (which is where a raw JSON Schema hides its `://` and its
 /// commas) cannot be mistaken for top-level structure. A quote opens such a
 /// scalar only at a YAML scalar boundary; a quote embedded in plain content is
@@ -494,6 +519,7 @@ fn flow_top_level_entries(inner: &str) -> Vec<(String, String)> {
     let mut key: Option<String> = None;
     let mut token = String::new();
     let mut escaped = false;
+    let mut after_node = false;
     let mut chars = inner.chars().peekable();
 
     while let Some(ch) = chars.next() {
@@ -513,9 +539,17 @@ fn flow_top_level_entries(inner: &str) -> Vec<(String, String)> {
             }
             at_scalar_start = false;
             previous_space = false;
+            after_node = quote.is_none();
             continue;
         }
         let mut structural_value_boundary = false;
+        let boundary = is_scalar_boundary(
+            ch,
+            at_scalar_start,
+            after_node,
+            chars.peek().copied(),
+            ScalarPresentation::Flow,
+        );
         match ch {
             '\'' | '"' if at_scalar_start => {
                 token.push(ch);
@@ -537,7 +571,7 @@ fn flow_top_level_entries(inner: &str) -> Vec<(String, String)> {
                 push_flow_entry(&mut entries, &mut key, &mut token);
                 break;
             }
-            ':' if depth == 0 && key.is_none() => {
+            ':' if boundary && depth == 0 && key.is_none() => {
                 key = Some(std::mem::take(&mut token));
                 structural_value_boundary = true;
             }
@@ -545,14 +579,11 @@ fn flow_top_level_entries(inner: &str) -> Vec<(String, String)> {
             _ => token.push(ch),
         }
         previous_space = ch.is_whitespace();
-        at_scalar_start = structural_value_boundary
-            || is_scalar_boundary(
-                ch,
-                at_scalar_start,
-                chars.peek().copied(),
-                ScalarPresentation::Flow,
-            )
-            || (at_scalar_start && previous_space);
+        at_scalar_start =
+            structural_value_boundary || boundary || (at_scalar_start && previous_space);
+        if !previous_space {
+            after_node = matches!(ch, '}' | ']');
+        }
     }
     push_flow_entry(&mut entries, &mut key, &mut token);
     entries
@@ -639,6 +670,7 @@ pub(crate) fn flow_value_cursor(text: &str, offset: usize) -> Option<FlowCursor>
     let mut in_comment = false;
     let mut at_scalar_start = true;
     let mut previous_space = true;
+    let mut after_node = false;
     let mut token = String::new();
     let mut chars = prefix.char_indices().peekable();
 
@@ -661,8 +693,17 @@ pub(crate) fn flow_value_cursor(text: &str, offset: usize) -> Option<FlowCursor>
             }
             previous_space = false;
             at_scalar_start = false;
+            after_node = quote.is_none();
             continue;
         }
+        let indicator = ch == ':'
+            && is_scalar_boundary(
+                ch,
+                at_scalar_start,
+                after_node,
+                chars.peek().map(|(_, next)| *next),
+                ScalarPresentation::Flow,
+            );
         match ch {
             '#' if previous_space => in_comment = true,
             '\'' | '"' if at_scalar_start => {
@@ -690,7 +731,9 @@ pub(crate) fn flow_value_cursor(text: &str, offset: usize) -> Option<FlowCursor>
                 frames.pop();
                 token.clear();
             }
-            ':' if frames.last().is_some_and(|frame| frame.mapping && frame.key.is_none()) => {
+            ':' if indicator
+                && frames.last().is_some_and(|frame| frame.mapping && frame.key.is_none()) =>
+            {
                 let key = lexical_scalar(token.trim())
                     .unwrap_or_else(|| token.trim().to_string());
                 let frame = frames.last_mut().expect("guarded above");
@@ -712,8 +755,12 @@ pub(crate) fn flow_value_cursor(text: &str, offset: usize) -> Option<FlowCursor>
             }
         }
         previous_space = ch.is_whitespace();
-        at_scalar_start =
-            matches!(ch, ':' | ',' | '-' | '[' | '{') || (at_scalar_start && previous_space);
+        at_scalar_start = indicator
+            || matches!(ch, ',' | '-' | '[' | '{')
+            || (at_scalar_start && previous_space);
+        if !previous_space {
+            after_node = matches!(ch, '}' | ']');
+        }
     }
 
     let root_start = frames.first()?.start;
@@ -1485,6 +1532,62 @@ mod tests {
             None,
             "a flow collection opened at a block value boundary keeps its quote state"
         );
+    }
+
+    /// A `:` is a value indicator only where YAML reads one: inside a plain
+    /// key or value (`a:'b`) it is content, and so is the quote after it. An
+    /// adjacent `:` after a quoted flow key (`{"a":1}`) still separates.
+    #[test]
+    fn envelope_claim_reads_a_content_colon_as_plain_scalar_content() {
+        use StandaloneSchemaEnvelope::{Pure, Tagged};
+        for (text, expected) in [
+            // Controls.
+            ("{kind: schema, types: {t: string}}", Some(Tagged)),
+            ("{\"a\":1, kind: schema, types: {t: string}}", Some(Tagged)),
+            ("a:'b: 1\nkind: schema\ntypes:\n  t: string\n", Some(Tagged)),
+            ("$schema: ./a.yaml\n", Some(Pure)),
+            // A quote after a content colon in a flow key or value.
+            ("{a:'b: 1, kind: schema, types: {t: string}}", Some(Tagged)),
+            ("{a:\"b: 1, kind: schema, types: {t: string}}", Some(Tagged)),
+            ("{x: a:'b, kind: schema, types: {t: string}}", Some(Tagged)),
+            ("{a:'b: 1, c: 2}", None),
+            // A content colon or quoted colon in a block key.
+            ("$schema:x: ./a.yaml\n", None),
+            ("'a: b': c\n$schema: ./a.yaml\n", None),
+            ("$schema: ./a.yaml\n'a: b': c\n", None),
+            ("\"a: b\": c\n$schema: ./a.yaml\n", None),
+        ] {
+            let recognized = !matches!(
+                darkmatter::markdown::schemas::parse_standalone_schema_document(
+                    text,
+                    Path::new("/w/schema.yaml"),
+                ),
+                Ok(None)
+            );
+            assert_eq!(recognized, expected.is_some(), "parser disagrees with the row: {text:?}");
+            assert_eq!(standalone_envelope_claim(text), expected, "{text:?}");
+        }
+    }
+
+    /// The flow cursor reads a content colon as part of a plain key or value,
+    /// so the quote after it cannot swallow the key being authored.
+    #[test]
+    fn flow_value_cursor_reads_a_content_colon_as_plain_scalar_content() {
+        for (prefix, key, ancestors) in [
+            ("{title: ", "title", vec![]),
+            ("{a:'b: 1, title: ", "title", vec![]),
+            ("{a:\"b: 1, title: ", "title", vec![]),
+            ("{x: a:'b, title: ", "title", vec![]),
+            ("{\"x\":1, title: ", "title", vec![]),
+            ("{types: {a:'b: string, c: ", "c", vec!["types"]),
+            ("{a:'b: ", "a:'b", vec![]),
+        ] {
+            let cursor = flow_value_cursor(prefix, prefix.len())
+                .unwrap_or_else(|| panic!("{prefix:?}"));
+            assert_eq!(cursor.key, key, "{prefix:?}");
+            assert_eq!(cursor.ancestors, ancestors, "{prefix:?}");
+            assert_eq!(cursor.value_start, prefix.len(), "{prefix:?}");
+        }
     }
 
     /// Pattern keys live on `SchemaShape::pattern_keys`, not in the literal

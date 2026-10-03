@@ -363,3 +363,127 @@ fn classify_error_covers_categories() {
     assert_eq!(classify_error("run aborted by user"), SemanticErrorKind::Interrupted);
     assert_eq!(classify_error("something odd"), SemanticErrorKind::AgentNative);
 }
+
+/// One real Pi 0.84.4 RPC exchange (`get_state`, `prompt`, one assistant
+/// turn), session path and model detail trimmed.
+const RPC_TRANSCRIPT: &[&str] = &[
+    r#"{"command":"get_state","data":{"isCompacting":false,"isStreaming":false,"model":{"id":"fixture","provider":"claudine-probe"},"pendingMessageCount":0,"sessionId":"01a0eae3","sessionFile":"/tmp/s.jsonl"},"id":"claudine-ready","success":true,"type":"response"}"#,
+    r#"{"command":"prompt","id":"claudine-prompt","success":true,"type":"response"}"#,
+    r#"{"type":"agent_start"}"#,
+    r#"{"type":"turn_start"}"#,
+    r#"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"ACK:TEMPLATE_NONCE"}}"#,
+    r#"{"type":"message_end","message":{"role":"assistant","stopReason":"stop","model":"fixture"}}"#,
+    r#"{"type":"turn_end"}"#,
+    r#"{"type":"agent_end","willRetry":false}"#,
+    r#"{"type":"agent_settled"}"#,
+];
+
+#[test]
+fn rpc_transcript_reads_like_a_json_mode_run() {
+    let (events, mut parser) = new_parser();
+    for line in RPC_TRANSCRIPT {
+        parser.feed_line(line);
+    }
+    let collected = events.lock().unwrap().clone();
+    assert_eq!(kinds(&collected), vec!["session_start", "output_text", "turn_complete"]);
+    match &collected[0] {
+        SemanticEvent::SessionStart { session_id, model, .. } => {
+            assert_eq!(session_id.as_deref(), Some("01a0eae3"));
+            assert_eq!(model.as_deref(), Some("fixture"), "get_state reports the model before any message");
+        }
+        other => panic!("expected SessionStart, got {other:?}"),
+    }
+    let summary = parser.finish(0);
+    assert_eq!(summary.session_id.as_deref(), Some("01a0eae3"));
+    assert_eq!(summary.assistant_text, "ACK:TEMPLATE_NONCE");
+    assert!(!summary.is_error);
+}
+
+fn state_line(session: &str) -> String {
+    let data = serde_json::json!({
+        "sessionId": session, "isStreaming": true, "isCompacting": false, "pendingMessageCount": 0,
+    });
+    serde_json::json!({"type": "response", "command": "get_state", "id": "q", "success": true, "data": data})
+        .to_string()
+}
+
+#[test]
+fn repeated_state_reports_only_announce_a_changed_session() {
+    let (events, mut parser) = new_parser();
+    parser.feed_line(&state_line("first"));
+    parser.feed_line(&state_line("first"));
+    parser.feed_line(&state_line("second"));
+    // A refused or data-less state report is not a session change.
+    parser.feed_line(r#"{"type":"response","command":"get_state","id":"q","success":false,"error":"x"}"#);
+    parser.feed_line(r#"{"type":"response","command":"get_state","id":"q","success":true}"#);
+    let sessions: Vec<_> = events
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|event| match event {
+            SemanticEvent::SessionStart { session_id, .. } => session_id.clone(),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(sessions, ["first", "second"]);
+    assert_eq!(parser.finish(0).session_id.as_deref(), Some("second"));
+}
+
+#[test]
+fn a_refused_prompt_fails_the_run_and_other_refusals_do_not() {
+    let (events, mut parser) = new_parser();
+    parser.feed_line(r#"{"type":"response","command":"steer","id":"s","success":false,"error":"not streaming"}"#);
+    parser.feed_line(r#"{"type":"response","command":"abort","id":"a","success":true}"#);
+    assert!(events.lock().unwrap().is_empty(), "the owner reports its own commands");
+    parser.feed_line(r#"{"type":"response","command":"prompt","id":"p","success":false,"error":"Unknown model"}"#);
+    let collected = events.lock().unwrap().clone();
+    assert_eq!(kinds(&collected), vec!["error"]);
+    let summary = parser.finish(1);
+    assert!(summary.is_error);
+    assert_eq!(summary.error_message.as_deref(), Some("Pi refused the prompt: Unknown model"));
+}
+
+#[test]
+fn extension_ui_requests_are_reported_by_kind() {
+    let (events, mut parser) = new_parser();
+    for line in [
+        r#"{"type":"extension_ui_request","id":"1","method":"confirm","title":"Pi probe","message":"Approve?"}"#,
+        r#"{"type":"extension_ui_request","id":"2","method":"notify","message":"probe-handled","notifyType":"info"}"#,
+        r#"{"type":"extension_ui_request","id":"3","method":"notify","message":"disk low","notifyType":"warning"}"#,
+        r#"{"type":"extension_ui_request","id":"4","method":"setStatus","statusKey":"k","statusText":"busy"}"#,
+        r#"{"type":"extension_ui_request","id":"5","method":"notify","message":""}"#,
+        r#"{"type":"extension_ui_request","id":"6","method":"custom"}"#,
+        r#"{"type":"extension_error","event":"session_start","error":"boom"}"#,
+    ] {
+        parser.feed_line(line);
+    }
+    let messages: Vec<(&str, String)> = events
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|event| match event {
+            SemanticEvent::Warning { message, .. } => ("warning", message.clone()),
+            SemanticEvent::Info { message, .. } => ("info", message.clone()),
+            other => panic!("unexpected {other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        messages,
+        [
+            (
+                "warning",
+                "a Pi extension asked for `confirm` input (\"Pi probe\"); nobody can answer during a \
+                 managed run, so the request was cancelled"
+                    .to_string()
+            ),
+            ("info", "probe-handled".to_string()),
+            ("warning", "disk low".to_string()),
+            (
+                "warning",
+                "a Pi extension sent an unsupported `custom` UI request, which no managed run can answer".to_string()
+            ),
+            ("warning", "a Pi extension failed in `session_start`: boom".to_string()),
+        ]
+    );
+    assert!(!parser.finish(0).is_error, "UI traffic alone does not fail the run");
+}

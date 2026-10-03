@@ -4,12 +4,19 @@
 //! evaluates them against an [`EvaluationLookup`] implementation, and
 //! returns the rewritten string. Supports both markdown-aware scanning
 //! (skipping code regions) and plain-text scanning.
+//!
+//! Every scan is single-pass: text an expression or literal produces is data
+//! and is never scanned again.
 
 use super::{EvalResult, Evaluator, ExpressionFinder, ExpressionLocation, parse};
+use crate::markdown::compose::body_origin::{DataRanges, TextEdit};
+use crate::markdown::compose::expression::InterpolationLiteral;
+use crate::markdown::compose::parse_utils::structural_view;
 use crate::markdown::compose::expression::lint::whole_value_span;
 use crate::markdown::compose::expression::{EvaluationLookup, ExpressionError};
 use crate::markdown::compose::ComposeWarning;
 use crate::markdown::compose::context::report::ExpressionOrigin;
+use crate::markdown::literal_token::{TOKEN_PREFIX, TokenError};
 use crate::markdown::types::{MarkdownError, SourceRef};
 use serde_json::Value;
 
@@ -34,21 +41,49 @@ fn interpolation_error(expression: &str, cause: ExpressionError) -> MarkdownErro
     }
 }
 
+/// A located failure for the literal token (`{{!data:…}}`) at `span` in
+/// `input`, which no scan accepts: composition decodes a token only as an
+/// entire authored frontmatter value, before any scan.
+fn literal_token_failure(
+    input: &str,
+    span: std::ops::Range<usize>,
+    cause: TokenError,
+) -> LocatedInterpolationError {
+    LocatedInterpolationError {
+        error: Box::new(interpolation_error(
+            &input[span.clone()],
+            ExpressionError::MalformedLiteralToken(cause),
+        )),
+        span: Some(span),
+    }
+}
+
+/// An expression whose source holds a token spelling, say inside a string
+/// literal, would return that spelling as text; N5 makes it malformed instead.
+fn expression_holds_token(loc: &ExpressionLocation) -> Option<LocatedInterpolationError> {
+    loc.expression.contains(TOKEN_PREFIX).then(|| LocatedInterpolationError {
+        error: Box::new(interpolation_error(
+            &loc.expression,
+            ExpressionError::MalformedLiteralToken(TokenError::Embedded),
+        )),
+        span: Some(loc.start..loc.end),
+    })
+}
+
 /// What a failing `{{ … }}` expression does to the text being rewritten.
 ///
 /// A full-document composition always passes [`Strict`](Self::Strict), whatever
 /// `ComposeOptions::fail_fast` says: an expression that cannot be parsed or
-/// evaluated is an authoring error there. [`Lenient`](Self::Lenient) is for
-/// best-effort callers, `compose_subtree(..., SubtreeStrictness::Lenient)` and
-/// preflight command discovery, which must keep going past a bad span.
+/// evaluated is an authoring error there, and subtree compose is strict too.
+/// [`Lenient`](Self::Lenient) is for best-effort preflight command discovery,
+/// which must keep going past a bad span.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ExpressionFailurePolicy {
     /// A parse or evaluation failure becomes a coded `ComposeWarning` and the
     /// failing `{{ … }}` stays in the output. Authoring-fatal causes
     /// (`ExpressionError::is_authoring_fatal`) still abort.
     Lenient,
-    /// Every parse or evaluation failure aborts the rewrite, including one found
-    /// by a rescan of replacement output.
+    /// Every parse or evaluation failure aborts the rewrite.
     Strict,
 }
 
@@ -74,18 +109,17 @@ pub(crate) struct InterpolationRewrite {
     pub replacements: usize,
     /// Warnings generated during rewrite (non-fatal issues).
     pub warnings: Vec<ComposeWarning>,
+    /// One data edit per replaced expression and converted literal, in input
+    /// order: the text each wrote is data and is never scanned again.
+    pub edits: Vec<TextEdit>,
 }
-
-/// Maximum number of rescan iterations to prevent infinite loops.
-const MAX_INTERPOLATION_DEPTH: usize = 10;
 
 /// Converts `{{{ ... }}}` interpolation literals in `input` to the literal
 /// text `{{ ... }}`.
 ///
 /// Literals are recognized using the shared scanner and are converted
-/// from end to start so byte offsets remain stable. This runs **after**
-/// the final interpolation pass so replacement values that introduce new
-/// literals are also converted.
+/// from end to start so byte offsets remain stable. The output is data: a
+/// caller never scans it again.
 pub(crate) fn convert_literals(input: &str, scan_mode: ScanMode) -> String {
     let scan = match scan_mode {
         ScanMode::MarkdownAware => ExpressionFinder::new(input).scan(),
@@ -105,19 +139,17 @@ pub(crate) fn convert_literals(input: &str, scan_mode: ScanMode) -> String {
 pub(crate) struct LocatedInterpolationError {
     /// Boxed so the pair stays within clippy's `result_large_err` budget.
     pub error: Box<MarkdownError>,
-    /// Byte range of the failing `{{ … }}` in the caller's `input`, or `None`
-    /// when the expression was found by a rescan of replacement output and so
-    /// has no position in the text the caller supplied.
+    /// Byte range of the failing `{{ … }}` in the caller's `input`. `None`
+    /// only for a failure that is not about one located expression.
     pub span: Option<std::ops::Range<usize>>,
 }
 
-/// Scans `input` for `{{ }}` expressions, evaluates them, and returns
-/// the rewritten string.
+/// Scans `input` for `{{ }}` expressions and `{{{ }}}` literals once,
+/// evaluates the expressions, and returns the rewritten string.
 ///
-/// After each pass of replacements, the output is rescanned for newly
-/// introduced `{{ }}` expressions (e.g. from a ternary branch that
-/// contains interpolation placeholders).  Loop-depth protection prevents
-/// runaway recursion when a replacement re-introduces the same expression.
+/// The scan is single-pass: text an expression returns and text a literal
+/// produces are data and are never scanned again, even when they contain a
+/// valid expression or literal.
 ///
 /// ## Arguments
 ///
@@ -139,12 +171,6 @@ pub(crate) fn interpolate_text<L: EvaluationLookup>(
 
 /// [`interpolate_text`], but a fatal failure also reports the failing
 /// expression's span in `input`.
-///
-/// Expressions evaluated in the first pass are located in `input` itself:
-/// replacements run end to start, so every byte before an expression is still
-/// the caller's text when it fails. Later passes rescan replacement output, so
-/// an expression found there is reported with no span rather than an offset
-/// that points at generated text.
 pub(crate) fn interpolate_text_located<L: EvaluationLookup>(
     input: &str,
     evaluator: &Evaluator<L>,
@@ -152,69 +178,98 @@ pub(crate) fn interpolate_text_located<L: EvaluationLookup>(
     policy: ExpressionFailurePolicy,
     warning_stage: &'static str,
 ) -> Result<InterpolationRewrite, LocatedInterpolationError> {
+    interpolate_text_in(input, None, evaluator, scan_mode, policy, warning_stage)
+}
+
+/// [`interpolate_text_located`] over text whose `data` bytes an earlier stage
+/// inserted.
+///
+/// Expressions, literals, and code regions are found in the masked view (see
+/// [`DataRanges::masked`]), so data neither contributes an expression nor
+/// hides an authored one; a span that straddles authored text and data is not
+/// an expression and stays as written.
+pub(crate) fn interpolate_text_in<L: EvaluationLookup>(
+    input: &str,
+    data: Option<&DataRanges>,
+    evaluator: &Evaluator<L>,
+    scan_mode: ScanMode,
+    policy: ExpressionFailurePolicy,
+    warning_stage: &'static str,
+) -> Result<InterpolationRewrite, LocatedInterpolationError> {
     let strict = policy == ExpressionFailurePolicy::Strict;
     // Fast path (F14): a `{{ … }}` expression and a `{{{ … }}}` literal both
-    // require the `{{` sequence. When the input contains none, no expression or
-    // literal can be present, so the whole scan pipeline — the MarkdownAware
-    // pulldown-cmark code-region parse in `ExpressionFinder::new`, every rescan
-    // pass, and `convert_literals` — is provably a no-op. Skip it and return the
-    // input verbatim. Byte-identical: the scan would find zero locations and
-    // `convert_literals` zero literals either way.
+    // require the `{{` sequence. When the input contains none, the scan — the
+    // MarkdownAware pulldown-cmark code-region parse in particular — is
+    // provably a no-op. Skip it and return the input verbatim.
     if !input.contains("{{") {
         return Ok(InterpolationRewrite {
             output: input.to_string(),
             replacements: 0,
             warnings: Vec::new(),
+            edits: Vec::new(),
         });
     }
 
+    let view = structural_view(input, data);
+    let scan = match scan_mode {
+        ScanMode::MarkdownAware => ExpressionFinder::new(&view).scan(),
+        ScanMode::Plain => ExpressionFinder::scan_plain(&view),
+    };
+    let straddles = |start: usize, end: usize| data.is_some_and(|data| data.intersects(&(start..end)));
+    // A token the masked view still shows was authored here, not as an entire
+    // frontmatter value, so it is malformed under either policy.
+    if let Some(token) = scan.tokens.first() {
+        return Err(literal_token_failure(input, token.start..token.end, TokenError::Embedded));
+    }
+
+    // Expressions and literals never overlap; rewrite them end to start so
+    // every byte before the current span is still the caller's text.
+    enum Found {
+        Expression(ExpressionLocation),
+        Literal(InterpolationLiteral),
+    }
+    let mut found: Vec<(usize, usize, Found)> = scan
+        .expressions
+        .into_iter()
+        .filter(|loc| !straddles(loc.start, loc.end))
+        .map(|loc| (loc.start, loc.end, Found::Expression(loc)))
+        .chain(
+            scan.literals
+                .into_iter()
+                .filter(|lit| !straddles(lit.start, lit.end))
+                .map(|lit| (lit.start, lit.end, Found::Literal(lit))),
+        )
+        .collect();
+    found.sort_by_key(|(start, ..)| std::cmp::Reverse(*start));
+
     let mut output = input.to_string();
-    let mut total_count = 0;
-    let mut all_warnings = Vec::new();
-    // Failures already reported, at their current range in `output`. A failing
-    // span is left in place, so when a sibling is replaced the next pass would
-    // otherwise evaluate and report it again. The range tracks `output` as
-    // replacements land; the origin is the failure's stable identity.
-    let mut reported: Vec<(std::ops::Range<usize>, ExpressionOrigin)> = Vec::new();
+    let mut count = 0;
+    let mut warnings = Vec::new();
+    let mut edits = Vec::new();
 
-    for depth in 0..MAX_INTERPOLATION_DEPTH {
-        let locations: Vec<ExpressionLocation> = match scan_mode {
-            ScanMode::MarkdownAware => ExpressionFinder::new(&output).find_all(),
-            ScanMode::Plain => ExpressionFinder::find_all_plain(&output),
-        };
-
-        if locations.is_empty() {
-            break;
-        }
-
-        let mut count = 0;
-        let mut warnings = Vec::new();
-
-        for loc in locations.into_iter().rev() {
-            if reported.iter().any(|(range, _)| *range == (loc.start..loc.end)) {
+    for (start, end, item) in found {
+        let loc = match item {
+            Found::Literal(lit) => {
+                let replacement = format!("{}{}{}", "{{", lit.content, "}}");
+                edits.push(TextEdit::data(start..end, replacement.len()));
+                output.replace_range(start..end, &replacement);
                 continue;
             }
-            let origin = if depth == 0 {
-                ExpressionOrigin::Authored(loc.start..loc.end)
-            } else {
-                ExpressionOrigin::Generated {
-                    pass: depth,
-                    span: loc.start..loc.end,
-                }
-            };
-            match parse(&loc.expression) {
-                Ok(expr) => {
-                    let mut ctx_warnings = evaluator.collect_context_warnings(
-                        &expr,
-                        warning_stage,
-                    );
-                    ctx_warnings.reverse();
-                    warnings.append(&mut ctx_warnings);
-                    let mark = evaluator.missing_root_mark();
-                    let evaluated = evaluator.eval(&expr);
-                    evaluator
-                        .locate_missing_roots(mark, (depth == 0).then_some(loc.start..loc.end));
-                    match evaluated {
+            Found::Expression(loc) => loc,
+        };
+        if let Some(failure) = expression_holds_token(&loc) {
+            return Err(failure);
+        }
+        let origin = ExpressionOrigin::Authored(loc.start..loc.end);
+        match parse(&loc.expression) {
+            Ok(expr) => {
+                let mut ctx_warnings = evaluator.collect_context_warnings(&expr, warning_stage);
+                ctx_warnings.reverse();
+                warnings.append(&mut ctx_warnings);
+                let mark = evaluator.missing_root_mark();
+                let evaluated = evaluator.eval(&expr);
+                evaluator.locate_missing_roots(mark, Some(loc.start..loc.end));
+                match evaluated {
                     EvalResult::Value(replacement) => {
                         // Inherit line indentation for multiline replacements
                         let replacement = if replacement.contains('\n') {
@@ -232,16 +287,14 @@ pub(crate) fn interpolate_text_located<L: EvaluationLookup>(
                         } else {
                             replacement
                         };
-                        shift_reported(&mut reported, &loc, replacement.len());
+                        edits.push(TextEdit::data(loc.start..loc.end, replacement.len()));
                         output.replace_range(loc.start..loc.end, &replacement);
                         count += 1;
                     }
-                    EvalResult::Error { error, .. }
-                        if strict || error.is_authoring_fatal() =>
-                    {
+                    EvalResult::Error { error, .. } if strict || error.is_authoring_fatal() => {
                         return Err(LocatedInterpolationError {
                             error: Box::new(interpolation_error(&loc.expression, error)),
-                            span: (depth == 0).then_some(loc.start..loc.end),
+                            span: Some(loc.start..loc.end),
                         });
                     }
                     EvalResult::Error { error, original } => {
@@ -249,86 +302,42 @@ pub(crate) fn interpolate_text_located<L: EvaluationLookup>(
                             warning_stage,
                             format!("failed to evaluate '{}': {}", original, error),
                             ComposeWarning::EXPRESSION_EVALUATION_FAILURE_CODE,
-                            origin.clone(),
+                            origin,
                         ));
-                        reported.push((loc.start..loc.end, origin));
                     }
                 }
-                }
-                Err(e) if strict => {
-                    return Err(LocatedInterpolationError {
-                        error: Box::new(interpolation_error(
-                            &loc.expression,
-                            ExpressionError::Parse(e.to_string()),
-                        )),
-                        span: (depth == 0).then_some(loc.start..loc.end),
-                    });
-                }
-                Err(e) => {
-                    warnings.push(ComposeWarning::expression_failure(
-                        warning_stage,
-                        format!("failed to parse '{}': {}", loc.expression, e),
-                        ComposeWarning::EXPRESSION_PARSE_FAILURE_CODE,
-                        origin.clone(),
-                    ));
-                    reported.push((loc.start..loc.end, origin));
-                }
             }
-        }
-
-        total_count += count;
-        // Locations were visited end to start; report them in document order
-        // so the first authored occurrence of an issue is the one kept.
-        warnings.reverse();
-        all_warnings.extend(warnings);
-
-        if count == 0 {
-            break;
-        }
-
-        // If we hit the max depth with replacements still pending, add a warning.
-        if depth == MAX_INTERPOLATION_DEPTH - 1 {
-            all_warnings.push(ComposeWarning::new(
-                warning_stage,
-                format!(
-                    "interpolation depth limit ({}) reached; possible infinite loop",
-                    MAX_INTERPOLATION_DEPTH
-                ),
-            ));
+            Err(e) if strict => {
+                return Err(LocatedInterpolationError {
+                    error: Box::new(interpolation_error(
+                        &loc.expression,
+                        ExpressionError::Parse(e.to_string()),
+                    )),
+                    span: Some(loc.start..loc.end),
+                });
+            }
+            Err(e) => {
+                warnings.push(ComposeWarning::expression_failure(
+                    warning_stage,
+                    format!("failed to parse '{}': {}", loc.expression, e),
+                    ComposeWarning::EXPRESSION_PARSE_FAILURE_CODE,
+                    origin,
+                ));
+            }
         }
     }
 
-    // `convert_literals` runs a full expression scan (a pulldown-cmark parse in
-    // MarkdownAware mode) plus a copy. A `{{{ … }}}` literal is impossible
-    // without the `{{{` sequence, so skip that work entirely when it's absent
-    // (F14) — byte-identical: the scan would find no literals either way.
-    let output = if output.contains("{{{") {
-        convert_literals(&output, scan_mode)
-    } else {
-        output
-    };
+    // Spans were visited end to start; report and record them in document
+    // order so the first authored occurrence of an issue is the one kept.
+    warnings.reverse();
+    edits.reverse();
 
     Ok(InterpolationRewrite {
         output,
-        replacements: total_count,
-        warnings: all_warnings,
+        replacements: count,
+        warnings,
+        edits,
     })
-}
-
-/// Moves every reported range that sits after `replaced` by the length change
-/// of replacing it with `replacement_len` bytes.
-///
-/// Locations are replaced end to start and never overlap, so a reported range
-/// is either wholly after `replaced` or wholly before it.
-fn shift_reported(
-    reported: &mut [(std::ops::Range<usize>, ExpressionOrigin)],
-    replaced: &ExpressionLocation,
-    replacement_len: usize,
-) {
-    let removed = replaced.end - replaced.start;
-    for (range, _) in reported.iter_mut().filter(|(range, _)| range.start >= replaced.end) {
-        *range = range.start + replacement_len - removed..range.end + replacement_len - removed;
-    }
 }
 
 /// Interpolates a single frontmatter value.
@@ -378,6 +387,9 @@ pub(crate) fn interpolate_value_located<L: EvaluationLookup>(
             error: Box::new(error),
             span: Some(loc.start..loc.end),
         };
+        if let Some(failure) = expression_holds_token(&loc) {
+            return Err(failure);
+        }
         let expr = parse(&loc.expression).map_err(|e| {
             located(interpolation_error(&loc.expression, ExpressionError::Parse(e.to_string())))
         })?;
@@ -474,23 +486,72 @@ mod tests {
         assert_eq!(&input[span], "{{ > invalid }}");
     }
 
-    /// An expression that exists only in a replacement value is found by the
-    /// rescan and must not be reported at an offset in the caller's input.
+    /// A replacement value that spells an invalid expression is data: the
+    /// single scan never parses it, even under the strict policy.
     #[test]
-    fn located_failure_from_replacement_output_has_no_span() {
+    fn replacement_output_is_never_parsed() {
         let state = make_state(json!({"template": "{{ > invalid }}"}));
         let evaluator = Evaluator::new(&state);
-        let Err(failure) = interpolate_text_located(
+        let result = interpolate_text_located(
             "x\ny {{ template }}",
             &evaluator,
             ScanMode::Plain,
             ExpressionFailurePolicy::Strict,
             "test",
-        ) else {
-            panic!("the generated invalid expression must fail");
-        };
-        assert!(matches!(*failure.error, MarkdownError::Interpolation { .. }));
-        assert_eq!(failure.span, None);
+        )
+        .expect("inserted text is data, not an expression");
+        assert_eq!(result.output, "x\ny {{ > invalid }}");
+        assert_eq!(result.replacements, 1);
+        assert!(result.warnings.is_empty(), "{:?}", result.warnings);
+    }
+
+    /// Each replaced expression and converted literal reports one data edit
+    /// at its input range, in input order.
+    #[test]
+    fn replacements_report_one_data_edit_each() {
+        use crate::markdown::compose::body_origin::{EditOrigin, TextEdit};
+        let state = make_state(json!({"name": "Alice"}));
+        let evaluator = Evaluator::new(&state);
+        let result = interpolate_text(
+            "a {{ name }} b {{{ raw }}}",
+            &evaluator,
+            ScanMode::Plain,
+            ExpressionFailurePolicy::Strict,
+            "test",
+        )
+        .unwrap();
+        assert_eq!(result.output, "a Alice b {{ raw }}");
+        assert_eq!(
+            result.edits,
+            vec![
+                TextEdit { range: 2..12, replacement_len: 5, origin: EditOrigin::Data },
+                TextEdit { range: 15..26, replacement_len: 9, origin: EditOrigin::Data },
+            ]
+        );
+    }
+
+    /// Expressions an earlier stage inserted as data are skipped, and one that
+    /// straddles authored text and data is not an expression.
+    #[test]
+    fn data_ranges_are_never_scanned() {
+        use crate::markdown::compose::body_origin::DataRanges;
+        let state = make_state(json!({"name": "Alice"}));
+        let evaluator = Evaluator::new(&state);
+        let input = "{{ name }} {{ name }} {{ name }}";
+        // The whole second expression is data, and so is the `name` inside the
+        // third, whose braces are authored.
+        let data = DataRanges::covering(input, vec![11..21, 25..29]);
+        let result = interpolate_text_in(
+            input,
+            Some(&data),
+            &evaluator,
+            ScanMode::Plain,
+            ExpressionFailurePolicy::Strict,
+            "test",
+        )
+        .unwrap();
+        assert_eq!(result.output, "Alice {{ name }} {{ name }}");
+        assert_eq!(result.replacements, 1);
     }
 
     #[test]
@@ -701,10 +762,10 @@ mod tests {
         assert_eq!(result.replacements, 1);
     }
 
+    /// A ternary branch's text is the expression's result, so a placeholder
+    /// inside it is data and stays literal. Compose with `+` instead.
     #[test]
-    fn rescans_replacement_text_for_nested_interpolation() {
-        // A ternary branch that contains an interpolation placeholder
-        // should be resolved in a subsequent pass.
+    fn replacement_text_is_not_rescanned_for_nested_interpolation() {
         let state = make_state(json!({"pkg": "darkmatter"}));
         let evaluator = Evaluator::new(&state);
         let result = interpolate_text(
@@ -715,12 +776,22 @@ mod tests {
             "test",
         )
         .unwrap();
-        assert_eq!(result.output, "in a package directory: darkmatter");
-        assert_eq!(result.replacements, 2);
+        assert_eq!(result.output, "in a package directory: {{pkg}}");
+        assert_eq!(result.replacements, 1);
+
+        let concatenated = interpolate_text(
+            "{{ pkg ? 'in a package directory: ' + pkg : 'not in a package directory' }}",
+            &evaluator,
+            ScanMode::Plain,
+            ExpressionFailurePolicy::Lenient,
+            "test",
+        )
+        .unwrap();
+        assert_eq!(concatenated.output, "in a package directory: darkmatter");
     }
 
     #[test]
-    fn rescans_false_branch_for_nested_interpolation() {
+    fn false_branch_is_not_rescanned_for_nested_interpolation() {
         let state = make_state(json!({"pkg": null, "fallback": "none"}));
         let evaluator = Evaluator::new(&state);
         let result = interpolate_text(
@@ -731,8 +802,8 @@ mod tests {
             "test",
         )
         .unwrap();
-        assert_eq!(result.output, "missing: none");
-        assert_eq!(result.replacements, 2);
+        assert_eq!(result.output, "missing: {{fallback}}");
+        assert_eq!(result.replacements, 1);
     }
 
     #[test]
@@ -903,8 +974,10 @@ mod tests {
             assert_eq!(result.replacements, 1);
         }
 
+        /// Literal conversion applies to authored literals only: a literal a
+        /// replacement inserted is data and keeps its three braces.
         #[test]
-        fn rescan_loop_converts_introduced_literal() {
+        fn introduced_literal_is_not_converted() {
             let state = make_state(json!({"tmpl": "{{{ y }}}"}));
             let evaluator = Evaluator::new(&state);
             let result = interpolate_text(
@@ -915,7 +988,7 @@ mod tests {
                 "test",
             )
             .unwrap();
-            assert_eq!(result.output, "{{ y }}");
+            assert_eq!(result.output, "{{{ y }}}");
             assert_eq!(result.replacements, 1);
         }
 
@@ -1043,10 +1116,10 @@ mod tests {
             assert!(messages[1].contains("'> second'"), "{messages:?}");
         }
 
-        /// A replacement that generates a failing expression is reported once,
-        /// at a generated origin that cannot alias an authored failure.
+        /// A replacement that spells a failing expression is data and reports
+        /// nothing; only the authored failure is reported.
         #[test]
-        fn a_generated_failure_is_reported_once_and_distinct_from_an_authored_one() {
+        fn only_the_authored_failure_is_reported() {
             let state = make_state(json!({"tpl": "{{ > generated }}"}));
             let evaluator = Evaluator::new(&state);
             let result = interpolate_text(
@@ -1059,7 +1132,7 @@ mod tests {
             .unwrap();
 
             assert_eq!(result.output, "{{ > generated }} {{ > generated }}");
-            assert_eq!(result.warnings.len(), 2, "{:?}", result.warnings);
+            assert_eq!(result.warnings.len(), 1, "{:?}", result.warnings);
             let origins: Vec<_> = result
                 .warnings
                 .iter()
@@ -1071,11 +1144,7 @@ mod tests {
                     other => panic!("expected an expression identity, got {other:?}"),
                 })
                 .collect();
-            assert!(origins.contains(&ExpressionOrigin::Authored(10..27)), "{origins:?}");
-            assert!(
-                origins.contains(&ExpressionOrigin::Generated { pass: 1, span: 0..17 }),
-                "{origins:?}"
-            );
+            assert_eq!(origins, vec![ExpressionOrigin::Authored(10..27)]);
         }
 
         /// Ten references to one unknown `ctx.*` group in one text carry one

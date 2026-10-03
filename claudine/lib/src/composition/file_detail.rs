@@ -135,11 +135,19 @@ fn file_stem_fallback(path: &Path) -> String {
         .unwrap_or_else(|| biscuit_file::to_portable_string(path))
 }
 
+/// A stored literal token shows as the text it holds.
+fn decoded_text(value: &str) -> String {
+    match crate::composition::closure::stored_text(&Value::String(value.to_string())) {
+        Value::String(text) => text,
+        _ => value.to_string(),
+    }
+}
+
 fn string_from_map(map: &IndexMap<String, Value>, key: &str) -> Option<String> {
     map.get(key)
         .and_then(|v| {
             if let Value::String(s) = v {
-                Some(s.clone())
+                Some(decoded_text(s))
             } else {
                 serde_json::to_string(v).ok()
             }
@@ -179,7 +187,7 @@ fn string_from_yaml_map(
     map.get(biscuit_file::serde_yaml_ng::Value::String(key.to_string()))
         .and_then(|v| {
             if let biscuit_file::serde_yaml_ng::Value::String(s) = v {
-                Some(s.clone())
+                Some(decoded_text(s))
             } else {
                 biscuit_file::serde_yaml_ng::to_string(v).ok()
             }
@@ -239,6 +247,18 @@ mod tests {
         assert_eq!(detail.description.as_deref(), Some("A helpful prompt"));
         assert!(detail.schema_lines.iter().any(|l| l.contains("title")));
         assert_eq!(detail.badge, "COMPOSE");
+    }
+
+    #[test]
+    fn a_stored_literal_token_shows_its_text() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("plan.md");
+        let token = darkmatter::markdown::literal_token::encode_yaml_scalar("Fixes {{…}} parsing");
+        write(&path, &format!("---\nname: {token}\ndescription: {token}\n---\nBody\n"));
+
+        let detail = extract_markdown_detail(&path, "INLINE_COMPOSE");
+        assert_eq!(detail.name, "Fixes {{…}} parsing");
+        assert_eq!(detail.description.as_deref(), Some("Fixes {{…}} parsing"));
     }
 
     #[test]

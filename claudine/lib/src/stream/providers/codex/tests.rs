@@ -74,8 +74,40 @@ fn reasoning_item_emits_reasoning_event() {
     let collected = events.lock().unwrap().clone();
     assert!(matches!(
         collected[0],
-        SemanticEvent::Reasoning { ref text, .. } if text == "long thought"
+        SemanticEvent::Reasoning { ref text, .. } if text == "long thought\n"
     ));
+}
+
+/// A completed item is a whole message: it ends at a line boundary, so
+/// repeated messages reach the thinking renderer and the repetition detector
+/// as repeated lines rather than one line that never ends.
+#[test]
+fn completed_messages_end_at_a_line_boundary_and_updates_do_not() {
+    let (events, mut parser) = new_parser();
+    for _ in 0..3 {
+        parser.feed_line(r#"{"type":"item.completed","item":{"id":"m","type":"agent_message","text":"I will try the same fix again."}}"#);
+    }
+    parser.feed_line(r#"{"type":"item.completed","item":{"id":"m","type":"agent_message","text":"already ends\n"}}"#);
+    parser.feed_line(r#"{"type":"item.updated","item":{"id":"r","type":"reasoning","text":"still"}}"#);
+    let texts: Vec<String> = events
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|event| match event {
+            SemanticEvent::Reasoning { text, .. } => Some(text.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        texts,
+        [
+            "I will try the same fix again.\n",
+            "I will try the same fix again.\n",
+            "I will try the same fix again.\n",
+            "already ends\n",
+            "still",
+        ]
+    );
 }
 
 #[test]
@@ -773,4 +805,106 @@ fn truncated_json_line_emits_warning_and_continues() {
     parser.feed_line(r#"{"type":"turn.started"}"#);
     let ks = kinds(&events.lock().unwrap());
     assert_eq!(ks, vec!["warning", "turn_start"]);
+}
+
+/// A real Codex 0.157.1 app-server run (macOS, scripted model): a turn that
+/// runs a tool, is steered twice while the tool runs, answers, and is
+/// followed by a second turn. Temp paths are replaced.
+const APP_SERVER_RUN: &str = include_str!("../../protocol/fixtures/codex-app-server-steer-0.157.1.jsonl");
+
+#[test]
+fn an_app_server_run_reads_like_an_exec_run() {
+    let (events, mut parser) = new_parser();
+    // The owner's own requests and a server request are control traffic.
+    parser.feed_line(r#"{"id":"claudine-9","result":{"turnId":"t"}}"#);
+    parser.feed_line(r#"{"id":0,"method":"item/tool/requestUserInput","params":{"threadId":"t"}}"#);
+    for line in APP_SERVER_RUN.lines() {
+        parser.feed_line(line);
+    }
+    let collected = events.lock().unwrap().clone();
+    let kinds = kinds(&collected);
+    assert_eq!(kinds.iter().filter(|kind| **kind == "session_start").count(), 1);
+    assert_eq!(kinds.iter().filter(|kind| **kind == "turn_start").count(), 2);
+    assert_eq!(kinds.iter().filter(|kind| **kind == "turn_complete").count(), 2);
+    assert!(kinds.contains(&"tool_call") && kinds.contains(&"tool_result"), "{kinds:?}");
+    assert!(!kinds.contains(&"provider_extension"), "nothing leaks as an extension: {kinds:?}");
+    assert!(
+        collected.iter().any(|event| matches!(event, SemanticEvent::Warning { message, .. } if message.contains("Model metadata"))),
+        "provider warnings are surfaced"
+    );
+    let summary = parser.finish(0);
+    assert_eq!(summary.session_id.as_deref(), Some("01a0eb8a-ecce-7432-81d1-6fb51dba267b"));
+    assert!(summary.assistant_text.contains("Done after the tool."), "{:?}", summary.assistant_text);
+    assert!(summary.assistant_text.contains("Second turn reply."));
+    assert_eq!(summary.num_turns, Some(2));
+    assert!(!summary.is_error);
+    assert_eq!(summary.exit_code, 0);
+}
+
+fn app_server_turn(status: &str) -> String {
+    json!({"method": "turn/completed", "params": {"threadId": "thr", "turn": {"id": "t", "status": status, "error": {"message": "stream disconnected"}}}})
+        .to_string()
+}
+
+#[test]
+fn app_server_failures_exit_like_exec() {
+    let started = r#"{"method":"turn/started","params":{"threadId":"thr","turn":{"id":"t","status":"inProgress"}}}"#;
+
+    // A failed turn fails the run even though the server exited 0.
+    let (_, mut parser) = new_parser();
+    parser.feed_line(started);
+    parser.feed_line(&app_server_turn("failed"));
+    let summary = parser.finish(0);
+    assert!(summary.is_error);
+    assert_eq!(summary.error_message.as_deref(), Some("stream disconnected"));
+    assert_eq!(summary.exit_code, 1);
+
+    // A final interrupted turn fails the run; a later turn clears it.
+    let (_, mut parser) = new_parser();
+    parser.feed_line(started);
+    parser.feed_line(&app_server_turn("interrupted"));
+    let summary = parser.finish(0);
+    assert_eq!((summary.is_error, summary.error_kind.as_deref(), summary.exit_code), (true, Some("interrupted"), 1));
+
+    let (_, mut parser) = new_parser();
+    parser.feed_line(started);
+    parser.feed_line(&app_server_turn("interrupted"));
+    parser.feed_line(started);
+    parser.feed_line(&app_server_turn("completed"));
+    let summary = parser.finish(0);
+    assert!(!summary.is_error, "a replacement turn completed");
+    assert_eq!(summary.exit_code, 0);
+
+    // A retried error is a warning; an unretried one fails the run.
+    let (events, mut parser) = new_parser();
+    parser.feed_line(started);
+    parser.feed_line(r#"{"method":"error","params":{"error":{"message":"reconnecting"},"willRetry":true,"threadId":"thr","turnId":"t"}}"#);
+    parser.feed_line(&app_server_turn("completed"));
+    assert!(kinds(&events.lock().unwrap()).contains(&"warning"));
+    assert_eq!(parser.finish(0).exit_code, 0);
+    let (_, mut parser) = new_parser();
+    parser.feed_line(r#"{"method":"error","params":{"error":{"message":"quota"},"willRetry":false,"threadId":"thr","turnId":"t"}}"#);
+    assert_eq!(parser.finish(0).exit_code, 1);
+
+    // A refused task fails the run; another request's refusal does not.
+    let (events, mut parser) = new_parser();
+    parser.feed_line(r#"{"id":"claudine-7","error":{"code":-32600,"message":"no active turn to steer"}}"#);
+    assert!(events.lock().unwrap().is_empty());
+    parser.feed_line(r#"{"id":"claudine-task","error":{"code":-32602,"message":"invalid input"}}"#);
+    assert!(kinds(&events.lock().unwrap()).contains(&"error"));
+    let summary = parser.finish(0);
+    assert_eq!(summary.exit_code, 1);
+    assert!(summary.error_message.as_deref().is_some_and(|message| message.contains("invalid input")));
+
+    // A signal exit code is never rewritten.
+    let (_, mut parser) = new_parser();
+    parser.feed_line(&app_server_turn("failed"));
+    assert_eq!(parser.finish(130).exit_code, 130);
+}
+
+#[test]
+fn an_exec_run_keeps_its_own_exit_code() {
+    let (_, mut parser) = new_parser();
+    parser.feed_line(r#"{"type":"turn.failed","error":{"message":"boom"}}"#);
+    assert_eq!(parser.finish(0).exit_code, 0, "exec reports its own exit code; only app-server runs are rewritten");
 }

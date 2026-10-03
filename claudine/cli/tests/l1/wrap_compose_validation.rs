@@ -71,25 +71,29 @@ fn compose_empty_key_setter_errors() {
     );
 }
 
+/// A second bare word is a positional argument in `argv`, not a second file.
 #[test]
-fn compose_multiple_file_candidates_errors() {
-    let fixture = CliProcessFixture::named("compose-multiple-candidates");
+fn compose_second_bare_word_is_a_positional_not_a_file() {
+    let fixture = CliProcessFixture::named("compose-second-bare-word");
     let a = fixture.cwd().join("a.md");
     let b = fixture.cwd().join("b.md");
-    fs::write(&a, "---\n---\nbody\n").unwrap();
+    fs::write(&a, "---\ntitle: a\n---\nArgs: {{ argv }}\n").unwrap();
     fs::write(&b, "---\n---\nbody\n").unwrap();
 
-    let assert = fixture
+    let output = fixture
         .command()
-        .args(["compose", a.to_str().unwrap(), b.to_str().unwrap()])
-        .assert()
-        .code(1);
-    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
-    let plain = strip_ansi(&stderr);
-    assert!(
-        plain.contains("multiple"),
-        "expected multiple-file error, got: {plain}"
-    );
+        .args(["compose", "--claude", "--dry-run", a.to_str().unwrap(), b.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let plain = strip_ansi(&format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    ));
+    assert!(output.status.success(), "{plain}");
+    assert!(!plain.contains("multiple"), "no multiple-file error: {plain}");
+    let expected = format!("Args: [{}]", serde_json::json!(b.to_str().unwrap()));
+    assert!(plain.contains(&expected), "expected {expected}: {plain}");
 }
 
 #[test]
@@ -348,8 +352,8 @@ fn compose_dry_run_quiet_and_silent_are_no_op() {
 }
 
 /// Late-binding lifecycle evaluation error (process-level, non-interactive):
-/// an `initialize` stack whose `when:` guard references an undefined root
-/// *raises* at event time. Under DM2 strict mode this is a crashed expression,
+/// an `initialize` stack whose `when:` guard calls an unknown function
+/// *raises* at event time. Under DM2 this is a crashed expression,
 /// not a clean `false` guard, so the run must surface a styled
 /// `lifecycle evaluation error` to **stderr** and exit **non-zero** — never a
 /// silent success. This is the setup-phase end-to-end proof for the
@@ -365,7 +369,7 @@ fn compose_initialize_when_evaluation_error_exits_non_zero() {
     fs::write(
         &md_file,
         "---\nname: late-bind\nagent: goose\ninitialize:\n  stack:\n    \
-         - when: \"missing_root == true\"\n      action: {stderr: \"ready\"}\n---\nBODY_MARKER_QQQ\n",
+         - when: \"missing_root() == true\"\n      action: {stderr: \"ready\"}\n---\nBODY_MARKER_QQQ\n",
     )
     .unwrap();
 
@@ -405,8 +409,8 @@ fn compose_initialize_when_evaluation_error_exits_non_zero() {
 
 /// Late-binding lifecycle evaluation error swallowing — regression for the
 /// previously-broken explicit-`error(...)` catch path. When `initialize.error`
-/// routes the run to `failure` and the catch `failure.when:` guard references
-/// an undefined root, the run must surface the FAILURE evaluation error (the
+/// routes the run to `failure` and the catch `failure.when:` guard calls an
+/// unknown function, the run must surface the FAILURE evaluation error (the
 /// latest lifecycle crash) to stderr and exit non-zero — not swallow it and
 /// return only the original `error(...)` reason. This is the explicit-control
 /// counterpart to `compose_initialize_when_evaluation_error_exits_non_zero`
@@ -422,7 +426,7 @@ fn compose_initialize_error_with_failure_raise_surfaces_failure_evaluation_error
         &md_file,
         "---\nname: explicit-error\nagent: goose\ninitialize:\n  stack:\n    \
          - action: {error: \"preflight refused\"}\nfailure:\n  stderr: \"fail\"\n  stack:\n    \
-         - when: \"missing_root == true\"\n      action: {stderr: \"unreachable\"}\n---\nBODY_MARKER_QQQ\n",
+         - when: \"missing_root() == true\"\n      action: {stderr: \"unreachable\"}\n---\nBODY_MARKER_QQQ\n",
     )
     .unwrap();
 
@@ -468,7 +472,7 @@ fn compose_initialize_error_with_failure_raise_surfaces_failure_evaluation_error
 /// that *raises* must surface its styled `lifecycle evaluation error` to stderr
 /// **at the point of error — before the catch `finalize` event fires** — and
 /// exactly **once**. The provider runs and exits 0 (so `success` fires), the
-/// first `success` guard references an undefined root (a crashed expression),
+/// first `success` guard calls an unknown function (a crashed expression),
 /// and `finalize.stderr` writes a recognizable marker. The assertion is a byte
 /// offset ordering: the evaluation-error text must appear earlier in captured
 /// stderr than the `finalize` marker, proving the original crash is visible
@@ -481,12 +485,12 @@ fn compose_success_when_evaluation_error_surfaces_before_finalize_marker() {
     fixture.seed_user_config();
 
     let md_file = fixture.cwd().join("prompt.md");
-    // `success` first guard raises (undefined root under DM2 strict mode);
+    // `success` first guard raises (an unknown function);
     // `finalize.stderr` emits a marker the catch event prints to stderr.
     fs::write(
         &md_file,
         "---\nname: late-bind-success\nagent: goose\nsuccess:\n  stack:\n    \
-         - when: \"missing_root == true\"\n      action: {stderr: \"unreachable\"}\n\
+         - when: \"missing_root() == true\"\n      action: {stderr: \"unreachable\"}\n\
          finalize:\n  stderr: \"FINALIZE_MARKER_ZZZ\"\n---\nBODY_MARKER_QQQ\n",
     )
     .unwrap();
@@ -862,6 +866,11 @@ fn colliding_proxy_overlay_paths_are_rejected_before_launch() {
 
 /// Acceptance 4: synthesized action bodies, mixed strings, ordinary
 /// whole-value frontmatter, and the valid `+` form still launch the provider.
+///
+/// Darkmatter scans each authored span once, so the ordinary whole-value
+/// `resides_in` renders its nested `{{area}}` as literal text in the prompt,
+/// and the mixed `success.info` composes its branch with `+`
+/// (`2026-09-27-agent-text-is-data`).
 #[test]
 fn synthesized_mixed_and_ordinary_frontmatter_values_still_launch() {
     let fixture = CliProcessFixture::named("nested-span-negative-controls");
@@ -870,7 +879,7 @@ fn synthesized_mixed_and_ordinary_frontmatter_values_still_launch() {
     let doc = fixture.cwd().join("controls.md");
     fs::write(
         &doc,
-        "---\narea: claudine\nresides_in: \"{{ area ? 'in {{area}}' : 'nowhere' }}\"\nstart:\n    info: \"starting in {{area}}\"\n    stack:\n        - action:\n              - info: \"running {{area}}\"\n              - action: info\n                message: \"Deployed {{area}}\"\nsuccess:\n    info: \"a {{ area ? 'in {{area}}' : 'x' }} b\"\n    stdout: \"{{ 'done in ' + area }}\"\n---\nBody {{resides_in}}\n",
+        "---\narea: claudine\nresides_in: \"{{ area ? 'in {{area}}' : 'nowhere' }}\"\nstart:\n    info: \"starting in {{area}}\"\n    stack:\n        - action:\n              - info: \"running {{area}}\"\n              - action: info\n                message: \"Deployed {{area}}\"\nsuccess:\n    info: \"a {{ area ? 'in ' + area : 'x' }} b\"\n    stdout: \"{{ 'done in ' + area }}\"\n---\nBody {{resides_in}}\n",
     )
     .unwrap();
 
@@ -879,13 +888,15 @@ fn synthesized_mixed_and_ordinary_frontmatter_values_still_launch() {
     assert!(success, "valid forms must run:\n{stderr}");
     assert_eq!(provider_runs(&marker), 1, "the provider launches exactly once");
     assert!(!stderr.contains("nested interpolation"), "{stderr}");
+    assert!(stderr.contains("Body in {{area}}"), "the prompt keeps the data literal:\n{stderr}");
+    assert!(stderr.contains("a in claudine b"), "{stderr}");
 }
 
-/// D4: a frontmatter value that holds template text reaches the event-time
-/// guard, which names the lifecycle key and the typed reason and selects the
-/// concatenate/`{{{ … }}}` hint rather than the missing-path one.
+/// A frontmatter value that holds template text is data at event time (N10):
+/// a `{{{ … }}}` escape produced it, so the lifecycle message sends the braces
+/// verbatim instead of refusing them or expanding them a second time.
 #[test]
-fn surviving_span_at_event_time_names_the_property_and_specific_hint() {
+fn a_template_text_value_is_sent_verbatim_at_event_time() {
     let fixture = CliProcessFixture::named("nested-span-runtime-backstop");
     fixture.seed_user_config();
     let marker = install_marker_provider(&fixture);
@@ -898,16 +909,13 @@ fn surviving_span_at_event_time_names_the_property_and_specific_hint() {
 
     let (success, stderr) =
         run_with_marker(&fixture, &marker, &["compose", "--goose", doc.to_str().unwrap()]);
-    assert!(!success, "{stderr}");
-    assert!(stderr.contains("lifecycle evaluation error"), "{stderr}");
-    assert!(stderr.contains("start.info"), "the property is named:\n{stderr}");
+    assert!(success, "{stderr}");
+    assert!(!stderr.contains("lifecycle evaluation error"), "{stderr}");
     assert!(
-        stderr.contains("still contains `{{ctx.repo_name}}` after every interpolation pass"),
-        "the typed reason is rendered:\n{stderr}"
+        stderr.contains("{{ctx.repo_name}}"),
+        "the escape's braces are sent as text:\n{stderr}"
     );
-    assert!(stderr.contains("concatenate with `+`"), "{stderr}");
-    assert!(!stderr.contains("resolve the missing"), "the old hint must not appear:\n{stderr}");
-    assert_eq!(provider_runs(&marker), 0);
+    assert_eq!(provider_runs(&marker), 1);
 }
 
 /// `retry` and `resume` re-read the document and run canonical preparation

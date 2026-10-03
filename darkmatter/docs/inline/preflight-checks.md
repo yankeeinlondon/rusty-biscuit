@@ -37,11 +37,23 @@ execution-time gate degrades to a pure membership check: the command is already
 approved, so it runs with no prompt — this run or any later loop iteration with
 flipped conditions. A dead-branch command is **approved but never executed**.
 
+Collection walks each transcluded child with the inputs composition gives it:
+the parent's composed values as inherited defaults, the directive's `set.*`
+overlay on top, and the same replace settings. So a partial's
+`::shell git show {{ base }}` is approved with the `base` its parent resolved,
+whether that value was a parent default, derived from another key, or supplied
+by the caller. A remote (`::url`, `https://`) child composes with its parent's
+options only, and is collected the same way.
+
 A miss surfaces as `NotPreApproved`, which after collection is purely a bug
-sentinel. A user-authored command whose shape depends on a frontmatter value
-still pending frontmatter-shell expansion (the chicken-and-egg case) is rejected
-up front as `DynamicCommandShape` rather than surfacing as a late
-`NotPreApproved`.
+sentinel. It always fails the composition: the transclusion stage does not
+replace the failing child with a "could not transclude" notice, a
+`when_error` fallback does not apply (it covers a command that ran and
+failed), and an `as_markdown(…) || fallback` does not fall back. A
+user-authored command whose shape depends on a frontmatter value still pending
+frontmatter-shell expansion (the chicken-and-egg case) is rejected up front as
+`DynamicCommandShape` rather than surfacing as a late `NotPreApproved`; the
+same holds in a child that inherits the pending value.
 
 Content passed to `as_markdown(...)` is part of the graph. Preflight never
 composes it: statically known content (string-literal arguments, in every
@@ -49,9 +61,19 @@ branch, and arguments discovery can evaluate) is walked like a transcluded
 child, relative to the root document. Discovery answers shell probes
 (`has_alias`, `has_builtin_function`, `has_user_function`, `can_execute`) with
 `false`, returns `""` for `as_markdown`, and answers `ping`/`ping_under` with
-`null`, so a command, transclusion target, or nested content whose shape
-depends on one of those calls is rejected up front as
-`UnevaluatedDependencyShape`.
+`null`, and observes no lazy `current.*`/`current_env.*` value, so a command,
+transclusion target, or nested content whose shape depends on one of those is
+rejected up front as `UnevaluatedDependencyShape`. That includes reading one
+indirectly: through a frontmatter value that reads it, in the same document or
+inherited by a transcluded child. A caller override of that frontmatter value
+makes the command approvable again.
+
+```md
+---
+flag: "{{ has_alias('ll') }}"
+---
+::shell echo alias-{{ flag }}   <!-- UnevaluatedDependencyShape: frontmatter.flag -->
+```
 
 ## ICMP Effects
 

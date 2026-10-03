@@ -58,7 +58,7 @@ replace:
 
 Project {{ proj }} rooted at {{ base }}.
 
-Nested: {{ proj ? 'inside {{proj}} now' : 'none' }}
+Nested: {{ proj ? 'inside ' + proj + ' now' : 'none' }}
 
 Literal escape stays raw: {{{ not_interpolated }}}
 

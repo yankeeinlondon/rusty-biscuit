@@ -1,0 +1,71 @@
+# Named types for the agent-cli research contract, revision 2.
+#
+# The switch records here decide how Claudine reads a command line that mixes
+# its own inputs with switches for the agent, so every field that changes that
+# decision is a closed set or a checked number, and research that cannot
+# establish a fact says so with unknown and a gap.
+kind: schema
+types:
+    switch_value_type: enum(none,string,number,variadic,unknown) -> How many values the switch takes and what kind; variadic is a list of strings, and unknown means research could not establish it, which Claudine treats as an unrecognized switch and never as none
+
+    switch_attachment: enum(space,equals,short_attached) -> A way the provider accepts a value, where space is the next argument, equals is --name=value, and short_attached is a value written straight after a two-character switch such as -cvalue
+
+    cli_switch:
+        flag: string(required; pattern(^--?[A-Za-z0-9][A-Za-z0-9_.-]*$)) -> The canonical spelling the provider documents, copied exactly with its dashes
+        aliases: string(pattern(^--?[A-Za-z0-9][A-Za-z0-9_.-]*$))[] -> Every other exact spelling the provider accepts for the same switch, such as -c for --config; omit when there are none
+        value: string(not-empty) -> Placeholder a person reads, such as <key=value>; never used to decide the value type
+        value_type: switch_value_type(required)@this -> How the switch takes its value, established from documentation, source, or a test and never guessed from the placeholder or the notes
+        value_optional: boolean -> Whether the single value may be left out; present exactly when value_type is string or number
+        variadic_min:
+            - literal(unknown) -> The fewest values could not be established; the switch record then carries a gap, and the field is present exactly when value_type is variadic
+            - "number(integer; min(1)) -> The fewest values a variadic switch requires; present exactly when value_type is variadic"
+        attachment: switch_attachment[](required)@this -> Every form in which the provider accepts the value; empty exactly when value_type is none or unknown, and short_attached only when a spelling is a single dash and one character
+        invocation_scope: switch_scope[](required)@this -> Where on the command line the switch is accepted; at least one entry
+        scope: string[] -> Topic labels such as config or model_selection that group switches for a reader; descriptive only and never read as command paths
+        default: string(not-empty) -> The value in force when the switch is not given, as the provider documents it
+        description: string(required; not-empty) -> What the switch does, in the provider's terms
+        example: string(not-empty) -> One complete command that uses the switch
+        notes: string(not-empty) -> Anything a wrapper author must know that the other fields cannot express
+        evidence_ids: identifier[](required)@../_types.yaml -> Evidence for the spellings, the value type, and the attachment forms recorded here
+        gap: string(not-empty) -> What could not be established and the check that would establish it; present exactly when value_type or variadic_min is unknown
+
+    switch_scope:
+        applies_to: enum(global,command; required) -> global when the provider accepts the switch at every command path, command when only at the one path below
+        command: string(pattern(^[A-Za-z0-9][A-Za-z0-9_.:-]*$))[] -> The exact native command path after the executable, one word per entry, such as exec then resume; an empty list is the root entrypoint; present exactly when applies_to is command
+
+    binary_record:
+        os: os(required)@../_types.yaml -> Operating system this record describes; one record per operating system and never one for all of them
+        binary: string(required; not-empty) -> The command name a user types on this operating system
+        alt_binaries: string[] -> Other executable names or shims installed for the same command, such as codex.cmd on Windows
+        notes: string(not-empty) -> How the name was confirmed, and anything about it a wrapper must know
+
+    install_method:
+        os: os(required)@../_types.yaml -> Operating system the method installs on
+        method: enum(package_manager,standalone_binary,npm,pip,cargo,brew,winget,chocolatey,scoop,app_bundle,source,other; required) -> The kind of installation, where package_manager means a system package manager not named in the set
+        command: string(not-empty) -> The exact command the provider's documentation gives
+        notes: string(not-empty) -> Install location, upgrade path, or a caveat of this method
+
+    subcommand:
+        name: string(required; pattern(^[A-Za-z0-9][A-Za-z0-9_.:\x20-]*$)) -> The native command path after the executable, one space between words, such as exec resume; the root entrypoint is not listed, and a command-scoped switch names one of these paths
+        description: string(required; not-empty) -> What the command does, in one sentence a reader new to the provider understands
+        non_interactive: boolean(required) -> Whether the command runs to completion without a terminal, a browser, or a person answering a prompt
+        notes: string(not-empty) -> Aliases, prompts it may raise, or other behavior a wrapper must know
+
+    config_path:
+        os: os(required)@../_types.yaml -> Operating system the path applies to; one record per operating system because Windows paths differ
+        scope: enum(user,repo,system,env,other; required) -> Where the file sits, where env means a path chosen by an environment variable
+        path: string(required; not-empty) -> The path as the provider documents it, with ~ for the home directory
+        format: enum(json,jsonc,yaml,toml,ini,text,other) -> File format the provider parses the file as; other when it is none of the listed formats
+        notes: string(not-empty) -> Precedence, whether the provider writes the file itself, and other side effects
+
+    env_var:
+        name: string(required; pattern(^[A-Za-z_][A-Za-z0-9_]*$)) -> The variable name exactly as the provider reads it
+        effect: string(required; not-empty) -> What the provider does differently when the variable is set
+
+    introspection_command:
+        command: string(required; not-empty) -> The complete command to run, with its arguments
+        purpose: enum(version,help,models,config_schema,config_dump,doctor,env,capabilities,plugins,mcp,tools,other; required) -> What provider state the command reports
+        machine_readable: boolean(required) -> Whether the output is a structured format a program can parse
+        output_format: enum(json,jsonl,text,table,yaml,toml,unknown; required) -> Format of the command's standard output; unknown when it was not run and the documentation does not say
+        useful_for_codegen: boolean(required) -> Whether Claudine could generate metadata from the output
+        notes: string(not-empty) -> Side effects, authentication it needs, or limits of the output

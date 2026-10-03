@@ -1,0 +1,147 @@
+{
+  "info": {
+    "id": "ses_f13603c79ffezDHsM8pn7hENkN",
+    "slug": "sunny-meadow",
+    "projectID": "global",
+    "directory": "[redacted:session-directory:ses_f13603c79ffezDHsM8pn7hENkN]",
+    "path": "private/tmp/kilo-research-invalid",
+    "title": "[redacted:session-title:ses_f13603c79ffezDHsM8pn7hENkN]",
+    "agent": "code",
+    "model": {
+      "id": "openai/gpt-6-luna",
+      "providerID": "kilo",
+      "variant": "definitely-not-a-variant"
+    },
+    "version": "7.3.45",
+    "summary": {
+      "additions": 0,
+      "deletions": 0,
+      "files": 0
+    },
+    "cost": 0,
+    "tokens": {
+      "input": 0,
+      "output": 0,
+      "reasoning": 0,
+      "cache": {
+        "read": 0,
+        "write": 0
+      }
+    },
+    "permission": [
+      {
+        "permission": "question",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "plan_enter",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "plan_exit",
+        "pattern": "*",
+        "action": "deny"
+      }
+    ],
+    "time": {
+      "created": 1790676288390,
+      "updated": 1790676288797
+    }
+  },
+  "messages": [
+    {
+      "info": {
+        "role": "user",
+        "time": {
+          "created": 1790676288426
+        },
+        "agent": "code",
+        "model": {
+          "providerID": "kilo",
+          "modelID": "openai/gpt-6-luna",
+          "variant": "definitely-not-a-variant"
+        },
+        "summary": {
+          "diffs": []
+        },
+        "id": "msg_0ec9fc3aa001g1QqjZs0ceDrW7",
+        "sessionID": "ses_f13603c79ffezDHsM8pn7hENkN"
+      },
+      "parts": [
+        {
+          "type": "text",
+          "text": "[redacted:text:prt_0ec9fc3ae001X7ylQrq2Yrqg3H]",
+          "id": "prt_0ec9fc3ae001X7ylQrq2Yrqg3H",
+          "sessionID": "ses_f13603c79ffezDHsM8pn7hENkN",
+          "messageID": "msg_0ec9fc3aa001g1QqjZs0ceDrW7"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_0ec9fc3aa001g1QqjZs0ceDrW7",
+        "role": "assistant",
+        "mode": "code",
+        "agent": "code",
+        "variant": "definitely-not-a-variant",
+        "path": {
+          "cwd": "[redacted:cwd:msg_0ec9fc4f2001tqXxgz6oS6DM6V]",
+          "root": "[redacted:root:msg_0ec9fc4f2001tqXxgz6oS6DM6V]"
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "modelID": "openai/gpt-6-luna",
+        "providerID": "kilo",
+        "time": {
+          "created": 1790676288754,
+          "completed": 1790676289029
+        },
+        "error": {
+          "name": "APIError",
+          "data": {
+            "message": "You need to sign in to use this model.",
+            "statusCode": 401,
+            "isRetryable": false,
+            "responseHeaders": {
+              "cache-control": "public, max-age=0, must-revalidate",
+              "content-security-policy-report-only": "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://www.googletagmanager.com https://utt.impactcdn.com https://login.kilo.ai https://login-test.kilo.ai https://js.stripe.com https://*.js.stripe.com https://checkout.stripe.com https://challenges.cloudflare.com https://widget.usepylon.com https://assets.churnkey.co; connect-src 'self' https://auth.kilo.ai https://us.i.posthog.com https://us-assets.i.posthog.com https://api.stripe.com https://r.stripe.com https://m.stripe.com https://checkout.stripe.com https://utt.impactcdn.com https://cdn.jsdelivr.net https://unpkg.com https://widget.usepylon.com https://assets.churnkey.co https://api.churnkey.co https://*.churnkey.co https://*.d.kiloapps.io https://e115e769bcdd4c3d66af59d3332cb394.r2.cloudflarestorage.com wss://cloud-agent-next.kilosessions.ai wss://ingest.kilosessions.ai https://gastown.kiloapps.io wss://gastown.kiloapps.io; img-src 'self' data: blob: https://lh3.googleusercontent.com https://avatars.githubusercontent.com https://secure.gravatar.com https://gravatar.com https://media.licdn.com https://cdn.discordapp.com https://gitlab.com https://*.stripe.com https://www.googletagmanager.com https://utt.impactcdn.com https://widget.usepylon.com https://assets.churnkey.co https://*.churnkey.co https://www.gravatar.com https://openrouter.ai https://e115e769bcdd4c3d66af59d3332cb394.r2.cloudflarestorage.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; frame-src 'self' https://js.stripe.com https://*.js.stripe.com https://hooks.stripe.com https://checkout.stripe.com https://challenges.cloudflare.com https://www.youtube.com https://widget.usepylon.com https://assets.churnkey.co https://*.churnkey.co https://*.d.kiloapps.io; worker-src 'self' blob:; media-src 'self' blob:; manifest-src 'self'",
+              "content-type": "application/json",
+              "cross-origin-embedder-policy-report-only": "require-corp",
+              "cross-origin-opener-policy": "same-origin",
+              "cross-origin-resource-policy": "same-origin",
+              "date": "Tue, 29 Sep 2026 10:04:48 GMT",
+              "permissions-policy": "geolocation=(self), camera=(), microphone=()",
+              "referrer-policy": "strict-origin-when-cross-origin",
+              "server": "Vercel",
+              "strict-transport-security": "max-age=31536000; includeSubDomains",
+              "transfer-encoding": "chunked",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "SAMEORIGIN",
+              "x-matched-path": "/api/openrouter/[...path]",
+              "x-vercel-cache": "MISS",
+              "x-vercel-id": "sfo1:sfo1:sfo1::sfo1::gd6s8-1790676288869-4511fc1c9345",
+              "x-xss-protection": "0"
+            },
+            "responseBody": "{\"error\":{\"code\":\"PAID_MODEL_AUTH_REQUIRED\",\"message\":\"You need to sign in to use this model.\"},\"error_type\":\"paid_model_auth_required\"}",
+            "metadata": {
+              "url": "https://api.kilo.ai/api/openrouter/responses"
+            }
+          }
+        },
+        "id": "msg_0ec9fc4f2001tqXxgz6oS6DM6V",
+        "sessionID": "ses_f13603c79ffezDHsM8pn7hENkN"
+      },
+      "parts": []
+    }
+  ]
+}

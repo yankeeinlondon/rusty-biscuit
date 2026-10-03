@@ -1,0 +1,21 @@
+$ qwen -p "/effort" -o text   # no level configured
+Reasoning effort: not set (using the model/provider default).
+Available: low, medium, high, xhigh, max
+Use "/effort <tier>" to set it.
+
+$ qwen -p "/effort bogus" -o text
+Unknown reasoning effort "bogus". Choose one of: low, medium, high, xhigh, max.
+exit=1
+$ project .qwen/settings.json = {"model": {"reasoningEffort": "low"}}
+$ qwen -p "/effort" -o text
+Current reasoning effort: low
+Available: low, medium, high, xhigh, max
+Use "/effort <tier>" to change it.
+
+$ project .qwen/settings.json = {"model": {"reasoningEffort": "bogus"}}
+$ qwen -p "/effort" -o text   # invalid settings token
+Ignoring invalid model.reasoningEffort "bogus"; expected one of: low, medium, high, xhigh, max.
+Reasoning effort: not set (using the model/provider default).
+Available: low, medium, high, xhigh, max
+Use "/effort <tier>" to set it.
+exit=0

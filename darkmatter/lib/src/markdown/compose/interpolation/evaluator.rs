@@ -213,7 +213,7 @@ impl EvalValue {
 pub struct Evaluator<'a, L: EvaluationLookup> {
     state: &'a L,
     presentation_values: Option<&'a HashMap<String, Value>>,
-    /// Unhandled reads of unknown roots, when the surface observes them.
+    /// Unhandled reads of absent document properties, when the surface observes them.
     /// Stage-local and uncontended: one evaluator serves one stage.
     missing_roots: Option<RefCell<Vec<MissingRoot>>>,
 }
@@ -302,11 +302,11 @@ impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
 
         // Preserve debug/trace logging for variable resolution
         if let Expr::Variable(name) = expr {
-            // Objects must pass through the lookup's string hook because some
-            // production lookups apply configured name coercion there. Scalars
-            // stay on the single-lookup fast path.
-            let resolved = match self.state.get_checked(name) {
-                Ok(resolved) => resolved,
+            // One resolution, then the lookup's own formatting hook (some
+            // production lookups apply configured name coercion there); a
+            // second lookup could hide an error or observe another value.
+            let binding = match self.state.resolve(name) {
+                Ok(binding) => binding,
                 Err(error) => {
                     return EvalResult::Error {
                         error,
@@ -314,19 +314,13 @@ impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
                     };
                 }
             };
-            if resolved.is_none()
-                && let Some(roots) = &self.missing_roots
-            {
-                observe_missing(name, AbsenceScope::default(), self.state, &mut *roots.borrow_mut());
+            if let Some(roots) = &self.missing_roots {
+                observe_missing(name, &binding, AbsenceScope::default(), &mut *roots.borrow_mut());
             }
-            let value = match resolved {
-                Some(array @ Value::Array(_)) => scalar_string(&array),
-                Some(Value::Object(_)) => self.state.get_string(name),
-                None | Some(Value::Null) => String::new(),
-                Some(Value::String(s)) => s,
-                Some(Value::Number(n)) => n.to_string(),
-                Some(Value::Bool(b)) => b.to_string(),
-            };
+            let value = binding
+                .into_value()
+                .map(|value| self.state.format_resolved(name, &value))
+                .unwrap_or_default();
             if value.is_empty() {
                 debug!(variable = %name, "interpolation: unresolved variable");
             } else {

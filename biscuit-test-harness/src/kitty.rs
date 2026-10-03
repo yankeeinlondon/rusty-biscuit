@@ -373,6 +373,34 @@ impl KittyHarness {
         let raw = String::from_utf8_lossy(&out.stdout).into_owned();
         Ok(CapturedFrame::from_raw(raw))
     }
+
+    /// Presses kitty key names (`"ctrl+c"`, `"shift+tab"`, ...) in this
+    /// window through `kitty @ send-key`, without raising or focusing it.
+    ///
+    /// Unlike [`send_text`](TerminalHarness::send_text), the keys go through
+    /// kitty's own key encoder for the program's current keyboard mode, as a
+    /// physical press does once it reaches kitty; the OS input layer before
+    /// kitty is not involved. Ctrl+C therefore arrives as the byte the pane's
+    /// line discipline turns into `SIGINT`.
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error when `kitty @ send-key` fails. kitty reports success
+    /// even when the program's keyboard mode drops the key, so a caller must
+    /// observe the key's effect.
+    pub fn send_key(&mut self, key: &str) -> io::Result<()> {
+        let id = self.window_id().to_string();
+        let mut cmd = self.remote();
+        cmd.args(["send-key", "--match", &format!("id:{id}"), key]);
+        let out = run_with_timeout(&mut cmd, SEND_TIMEOUT)?;
+        if !out.status.success() {
+            return Err(io::Error::other(format!(
+                "kitty @ send-key failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            )));
+        }
+        Ok(())
+    }
 }
 
 /// `kitty @`, addressed to `to` when given and to `KITTY_LISTEN_ON` otherwise.
@@ -479,9 +507,7 @@ impl KittyInstance {
     /// A harness attached to the instance's window. It does not own the
     /// window; the instance closes it.
     pub fn harness(&self) -> KittyHarness {
-        let mut harness = KittyHarness::attach(self.window_id.clone());
-        harness.to = Some(self.to.clone());
-        harness
+        attach_at(&self.window_id, &self.to)
     }
 
     /// Writes a PNG of the instance's OS window (title bar included) to
@@ -518,9 +544,17 @@ impl Drop for KittyInstance {
     }
 }
 
+/// A harness attached to `window_id` of the kitty instance listening at `to`.
+pub(crate) fn attach_at(window_id: &str, to: &str) -> KittyHarness {
+    let mut harness = KittyHarness::attach(window_id);
+    harness.to = Some(to.to_string());
+    harness
+}
+
 /// The first window's id and its OS window's `platform_window_id` (the macOS
-/// CGWindowID), once the instance answers `kitty @ ls`.
-fn first_window(to: &str) -> Option<(String, u64)> {
+/// CGWindowID, or the X11 window id on Linux), once the instance answers
+/// `kitty @ ls`.
+pub(crate) fn first_window(to: &str) -> Option<(String, u64)> {
     let mut cmd = remote_command(Some(to));
     cmd.arg("ls");
     let out = run_with_timeout(&mut cmd, QUERY_TIMEOUT).ok()?;
@@ -534,7 +568,7 @@ fn first_window(to: &str) -> Option<(String, u64)> {
     Some((window.get("id")?.as_u64()?.to_string(), platform))
 }
 
-fn quit_instance(to: &str) {
+pub(crate) fn quit_instance(to: &str) {
     let mut cmd = remote_command(Some(to));
     cmd.args(["action", "quit"]).stdout(Stdio::null()).stderr(Stdio::null());
     let _ = run_with_timeout(&mut cmd, CLEANUP_TIMEOUT);

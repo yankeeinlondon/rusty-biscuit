@@ -49,7 +49,6 @@ pub(crate) mod launch;
 mod pipeline;
 mod preflight;
 pub(crate) mod prep_context;
-mod provider_args;
 pub(crate) mod runner;
 pub(crate) mod selection;
 pub(crate) mod staged_boot;
@@ -114,31 +113,31 @@ pub(crate) struct SingleCompositionOutcome {
     /// messages, and protocol records are never part of it. `None` for a
     /// dry-run, a `skip`, or a failed run — a failure commits no entry.
     pub final_output: Option<String>,
-    /// An `initialize`-time proxy handoff the document requested before its
-    /// first provider attempt, surfaced to the composition command's
-    /// active-document coordinator (`compose/prep.rs`) instead of being run
-    /// inside the provider harness.
+    /// A proxy handoff this run's lifecycle raised, surfaced to the command
+    /// coordinator that owns the document instead of being run inside the
+    /// provider harness.
     ///
-    /// This is how loop recognition follows document identity (R7): the router's
-    /// `initialize` is evaluated here, and if it hands off, the coordinator
-    /// re-prepares the target as a fresh document and decides loop-vs-single on
-    /// the *target*. `None` on every ordinary run. Populated on any live
-    /// (non-dry-run) run that carries a command-owned coordinator ledger — both
-    /// the top-level `compose`/`inline-compose` path and each `sequence` step's
-    /// contained coordinator, which surfaces the proxy to the step's own scope.
+    /// Every route arrives here: the document's `initialize`, its `start`,
+    /// `success`, `failure`, or `finalize` stack, and a proxied target's own
+    /// `initialize` chain. `None` on every ordinary run. Populated on any live
+    /// (non-dry-run) run that carries a command-owned coordinator ledger:
+    /// `compose`/`inline-compose`, each `--loop` iteration, and each `sequence`
+    /// step or `prompt:` task, which contains the handoff within its own scope.
+    /// The owner re-prepares the target as a fresh document and decides
+    /// loop-vs-single on the *target* (R7), so an owner that ignores this field
+    /// silently drops the handoff while the ledger already records the hop.
     ///
-    /// Carries a [`SurfacedHandoff`]: an `initialize`-route proxy arrives as a
-    /// [`SurfacedHandoff::Request`] awaiting commit by the command ledger; a
-    /// terminal-recovery / target-initialize-chain proxy arrives as a
-    /// [`SurfacedHandoff::Committed`] the harness already committed against the
-    /// shared invocation ledger. Either way the composition command's
-    /// active-document coordinator re-prepares the resolved target through the
-    /// same canonical launch pipeline a direct invocation uses.
+    /// Carries a [`SurfacedHandoff`]: an `initialize`-route proxy may arrive as
+    /// a [`SurfacedHandoff::Request`] awaiting commit by the command ledger; a
+    /// terminal-route proxy arrives as a [`SurfacedHandoff::Committed`] the
+    /// harness already committed against the shared invocation ledger. Either
+    /// way the owner re-prepares the resolved target through the same canonical
+    /// launch pipeline a direct invocation uses.
     ///
     /// [`SurfacedHandoff`]: claudine::composition::SurfacedHandoff
     /// [`SurfacedHandoff::Request`]: claudine::composition::SurfacedHandoff::Request
     /// [`SurfacedHandoff::Committed`]: claudine::composition::SurfacedHandoff::Committed
-    pub initialize_handoff: Option<claudine::composition::SurfacedHandoff>,
+    pub handoff: Option<claudine::composition::SurfacedHandoff>,
 }
 
 /// Execute a composition request through the wrapper-grade pipeline, returning
@@ -150,7 +149,7 @@ pub(crate) struct SingleCompositionOutcome {
 /// `request.prepared.effective_frontmatter`, never from raw source state.
 ///
 /// The outcome carries provider/reason metadata (used by the sequence
-/// orchestrator) and any surfaced [`SingleCompositionOutcome::initialize_handoff`]
+/// orchestrator) and any surfaced [`SingleCompositionOutcome::handoff`]
 /// the composition command's active-document coordinator must commit.
 pub(crate) fn execute_composition_request_inner(
     request: CompositionExecutionRequest,

@@ -349,7 +349,10 @@ fn single_pass_inventory_matches_the_authored_claudine_schema() {
     let signals: BTreeSet<&str> = LifecycleSignal::ALL.iter().map(|s| s.property_name()).collect();
     assert_eq!(schema_events, signals);
 
-    let comm_fields: BTreeSet<&str> = LIFECYCLE_COMM_FIELDS.iter().copied().collect();
+    let comm_fields: BTreeSet<&str> = notification_comm_fields(&LifecycleNotification::default())
+        .iter()
+        .map(|(name, _)| *name)
+        .collect();
     for event_type in ["lifecycle-event", "loop-event"] {
         let fields: BTreeSet<&str> = types["$schema"][event_type]
             .as_object()

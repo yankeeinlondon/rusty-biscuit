@@ -70,6 +70,14 @@ enum Command {
         /// catalog.json is always checked against the full scope.
         slug: Option<String>,
     },
+    /// Generate one provider from the current inputs and report only whether
+    /// the generator accepts them; drift from the committed data.rs is not a
+    /// failure. A research fleet runs this in its `success` event, so a
+    /// document is refused by the generator's own rules before it is accepted.
+    Validate {
+        /// Provider slug (the research document stem).
+        slug: String,
+    },
     /// Deterministic validate-and-resume gate for the `agent-errors` research
     /// topic (spec D10). Its subcommands are the mechanical half of the fleet
     /// lifecycle: the fleet `success` stack runs `check`, then branches on the
@@ -216,6 +224,18 @@ fn run(term: &Terminal, area: Option<PathBuf>, command: Command) -> Result<ExitC
                 )
             );
 
+            let steering = claudine_gen::check_steering_catalog(&area)?;
+            drifted |= !matches!(steering, CheckOutcome::Clean);
+            print!(
+                "{}",
+                report::artifact_check(
+                    term,
+                    "steering generated.rs",
+                    "(research and activation policy match the committed tables)",
+                    &steering,
+                )
+            );
+
             let agentic_clis = claudine_gen::check_agentic_clis(&area)?;
             drifted |= !matches!(agentic_clis, CheckOutcome::Clean);
             print!(
@@ -252,6 +272,21 @@ fn run(term: &Terminal, area: Option<PathBuf>, command: Command) -> Result<ExitC
                 ExitCode::FAILURE
             } else {
                 ExitCode::SUCCESS
+            })
+        }
+        Command::Validate { slug } => {
+            let area = resolve_area(area)?;
+            // Input errors go to stdout with a failing exit, so the caller
+            // reads the refusal from the same stream as the acceptance.
+            Ok(match claudine_gen::generate_for_area(&area, &slug) {
+                Ok(_) => {
+                    print!("{}", report::inputs_accepted(term, &slug));
+                    ExitCode::SUCCESS
+                }
+                Err(err) => {
+                    print!("{}", report::inputs_refused(term, &slug, &err));
+                    ExitCode::FAILURE
+                }
             })
         }
         Command::AgentErrors { command } => {
@@ -390,6 +425,7 @@ fn run_generate(
     let families = claudine_gen::build_families(area, &generations)?;
     let vocabulary = claudine_gen::build_vocabulary(area)?;
     let agentic_clis = claudine_gen::build_agentic_clis(area)?;
+    let steering_catalog = claudine_gen::build_steering_catalog(area)?;
     print!(
         "{}",
         report::families_count(term, claudine_gen::compiled_family_keys(&generations).len())
@@ -421,6 +457,7 @@ fn run_generate(
             families: &families,
             vocabulary: &vocabulary,
             agentic_clis: &agentic_clis,
+            steering: &steering_catalog,
         },
         &mut decide,
     )?;

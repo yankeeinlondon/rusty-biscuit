@@ -148,7 +148,17 @@ fn match_keyword(trimmed: &str) -> Option<(DirectiveKind, usize)> {
 /// span. Block openers and closers are reported as individual directives here;
 /// use [`scan_darkmatter_blocks`] to pair them with body spans.
 pub fn scan_darkmatter_directives(source: &str) -> Vec<ParsedDirective> {
-    let code_regions = find_code_regions(source);
+    scan_darkmatter_directives_in(source, None)
+}
+
+/// [`scan_darkmatter_directives`] over a body whose `data` bytes were inserted
+/// by an earlier stage: a directive counts only when its line start, prefix,
+/// and keyword are authored, and code regions are found in the masked view.
+pub(crate) fn scan_darkmatter_directives_in(
+    source: &str,
+    data: Option<&super::body_origin::DataRanges>,
+) -> Vec<ParsedDirective> {
+    let code_regions = find_code_regions(&super::parse_utils::structural_view(source, data));
     let bytes = source.as_bytes();
     let mut directives = Vec::new();
 
@@ -174,6 +184,7 @@ pub fn scan_darkmatter_directives(source: &str) -> Vec<ParsedDirective> {
 
         if let Some((kind, kw_len)) = match_keyword(trimmed)
             && !is_in_code_region(trimmed_start, &code_regions)
+            && super::parse_utils::authored_directive(data, line_start, trimmed_start + kw_len)
         {
             directives.push(parse_directive_line(
                 kind,

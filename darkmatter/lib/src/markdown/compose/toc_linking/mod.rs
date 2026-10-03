@@ -66,6 +66,15 @@ pub(crate) fn parse_directives(content: &str) -> Result<Vec<TocLinkingDirective>
     parse_toc_linking_directives(content)
 }
 
+/// [`parse_directives`] over a body whose `data` bytes were inserted by an
+/// earlier stage; see [`parser::parse_toc_linking_directives_in`].
+pub(crate) fn parse_directives_in(
+    content: &str,
+    data: Option<&crate::markdown::compose::body_origin::DataRanges>,
+) -> Result<Vec<TocLinkingDirective>, TocLinkingError> {
+    parser::parse_toc_linking_directives_in(content, data)
+}
+
 /// Resolves the first existing file in a toc-linking fallback chain.
 pub(crate) fn resolve_target_chain(
     directive: &TocLinkingDirective,

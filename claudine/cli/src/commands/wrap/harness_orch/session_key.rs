@@ -28,12 +28,15 @@
 //!   invocation's *canonical* argv — the pre-resume-normalization argv, the same
 //!   for the session-opening attempt and the resume attempt. It is deliberately
 //!   NOT [`AttemptLaunch::args`]: the resume path re-points argv at the provider's
-//!   resume entrypoint and carries through only a small whitelist of flags
-//!   (`resume::append_resume_passthrough_args`), intentionally dropping the
-//!   system-prompt and MCP flags because the live session already holds them.
-//!   Comparing the resume's stripped argv against the opener's full argv would
-//!   flag every such resume as incompatible — a false refusal. The canonical argv
-//!   keeps the comparison apples-to-apples. A consequence worth knowing: the
+//!   resume entrypoint, appends the forwarded provider tail once, and carries
+//!   through only a small allowlist of Claudine's own flags
+//!   (`resume::assemble_resume_args`), intentionally dropping the system-prompt
+//!   and MCP flags because the live session already holds them. Comparing the
+//!   resume's stripped argv against the opener's full argv would flag every such
+//!   resume as incompatible — a false refusal. The canonical argv keeps the
+//!   comparison apples-to-apples. The forwarded tail is invocation-fixed and
+//!   present in both canonical argvs, so it can never make a resume look
+//!   incompatible. A consequence worth knowing: the
 //!   argv is invocation-fixed and the system prompt was already *composed* into
 //!   it, so `system_prompt` cannot move across a same-document refresh — the
 //!   file digest re-read here only re-reads a temp file the invocation wrote.

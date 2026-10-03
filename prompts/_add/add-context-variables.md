@@ -152,7 +152,7 @@ expected.
 
 ## Rules Learned the Hard Way
 
-These came out of the `darkmatter/features/2026-09-09-more-context` feature and its five
+These came out of the `2026-09-09-more-context` feature and its five
 review cycles. Treat them as constraints, not suggestions.
 
 - **Capture once, never rediscover.** One `FileResolutionContext` and one repository

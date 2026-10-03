@@ -17,6 +17,8 @@ mod log;
 mod output;
 mod perf;
 mod provider_values;
+mod shutdown;
+mod steering;
 mod table_utils;
 mod telemetry;
 
@@ -40,10 +42,11 @@ fn wrapper_command(
     }
 }
 
-/// Attach the pre-clap agent tail ([`argv::partition_composition_tail`]) to
-/// the composition command's shared args. A no-op for every other command and
-/// when the tail is empty.
-fn inject_provider_tail(cli: &mut Cli, tail: argv::ProviderArgs) {
+/// Attach the arguments after the composition file
+/// ([`argv::partition_composition_tail`]) to the composition command's shared
+/// args, for type-aware ownership once the file is read. A no-op for every
+/// other command.
+fn inject_caller_arguments(cli: &mut Cli, arguments: claudine::composition::ArgumentsAfterFile) {
     let Some(command) = cli.command.as_mut() else {
         return;
     };
@@ -53,8 +56,7 @@ fn inject_provider_tail(cli: &mut Cli, tail: argv::ProviderArgs) {
         Commands::Sequence(args) => &mut args.shared,
         _ => return,
     };
-    shared.provider_args = tail.args;
-    shared.provider_args_explicit = tail.explicit;
+    shared.caller_arguments = arguments;
 }
 
 /// Check if the Claudine config file exists and is valid. If not (missing or
@@ -87,10 +89,10 @@ async fn ensure_config_exists() -> Result<()> {
 /// `clap::Command` so we can:
 ///
 /// - Inject `--help`/`-h` (an `ArgAction::Help`) on every non-wrapper
-///   subcommand. The root `Cli` sets `disable_help_flag = true` for custom
-///   help routing, and clap propagates that disable through to subcommands,
-///   so without injection `claudine <subcmd> --help` errors with
-///   `unexpected argument '--help'`.
+///   subcommand, nested ones included. The root `Cli` sets
+///   `disable_help_flag = true` for custom help routing, and clap propagates
+///   that disable through to subcommands, so without injection
+///   `claudine <subcmd> --help` errors with `unexpected argument '--help'`.
 /// - Mark each wrapper subcommand with `ignore_errors(true)` so unknown
 ///   flags destined for the wrapped agent CLI flow into the `passthrough`
 ///   bucket instead of aborting with a clap error.
@@ -103,6 +105,8 @@ async fn ensure_config_exists() -> Result<()> {
 /// On `try_get_matches_from`:
 ///
 /// - `Ok` → build `Cli` from matches.
+/// - `Err(_)` with a root help request → the grouped help, via
+///   [`root_help_request`]; help never waits on a required argument.
 /// - `Err(DisplayHelp | DisplayVersion | DisplayHelpOnMissingArgumentOrSubcommand)`
 ///   → call `err.exit()` so the injected `ArgAction::Help` prints clap's
 ///   per-subcommand help screen and exits (matching `Cli::parse_from`'s
@@ -130,16 +134,48 @@ fn parse_cli_from(argv: &[OsString]) -> Cli {
         }
     }
 
-    match cmd.try_get_matches_from(argv.iter().cloned()) {
+    match cmd.clone().try_get_matches_from(argv.iter().cloned()) {
         Ok(matches) => Cli::from_arg_matches(&matches)
             .unwrap_or_else(|_| Cli::parse_from(argv.iter().cloned())),
-        Err(err) => match err.kind() {
-            ErrorKind::DisplayHelp
-            | ErrorKind::DisplayVersion
-            | ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand => err.exit(),
-            _ => Cli::parse_from(argv.iter().cloned()),
-        },
+        Err(err) => {
+            if let Some(cli) = root_help_request(cmd, argv) {
+                return cli;
+            }
+            match err.kind() {
+                ErrorKind::DisplayHelp
+                | ErrorKind::DisplayVersion
+                | ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand => err.exit(),
+                _ => Cli::parse_from(argv.iter().cloned()),
+            }
+        }
     }
+}
+
+/// The root help request in `argv`, read without subcommand validation.
+///
+/// The root `help` is a plain Boolean so the grouped help screen can render
+/// it, which means clap only reports it after validating the selected
+/// subcommand. Rule 4 hoists a composition `--help` to the root, so
+/// `claudine compose --help` (no file) would otherwise fail on the missing
+/// required file before help could display. A root help request outranks every
+/// subcommand validation error; the global presentation options are kept so
+/// `--plain` and `--debug` still apply to the help screen.
+fn root_help_request(cmd: clap::Command, argv: &[OsString]) -> Option<Cli> {
+    let matches = cmd
+        .ignore_errors(true)
+        .try_get_matches_from(argv.iter().cloned())
+        .ok()?;
+    matches.get_flag("help").then(|| Cli {
+        verbose: matches.get_count("verbose"),
+        debug: matches
+            .try_get_one::<args::DebugLevel>("debug")
+            .ok()
+            .flatten()
+            .copied(),
+        plain: matches.get_flag("plain"),
+        help: true,
+        command: None,
+    })
 }
 
 /// Subcommand names that must NOT receive an `ArgAction::Help` injection.
@@ -152,15 +188,16 @@ fn skip_help_injection(name: &str) -> bool {
 }
 
 /// Add `--help`/`-h` (an `ArgAction::Help`) to every subcommand for which
-/// [`skip_help_injection`] returns `false`.
+/// [`skip_help_injection`] returns `false`, and to every subcommand nested
+/// beneath one (`budget grant`, `mcp alias`, …).
 ///
 /// This is necessary because the root `Cli` sets `disable_help_flag = true`
 /// (so the custom grouped help can fire on `claudine` / `claudine --help`),
-/// and clap propagates that setting to subcommands. Without re-injection,
-/// `claudine <subcmd> --help` errors with `unexpected argument '--help'`.
+/// and clap propagates that setting to subcommands at every depth. Without
+/// re-injection, `claudine <subcmd> --help` errors with
+/// `unexpected argument '--help'`. Clap acts on an `ArgAction::Help` before
+/// it validates required arguments, so `budget grant --help` needs no ledger.
 fn inject_subcommand_help_flag(cmd: &mut clap::Command) {
-    use clap::{Arg, ArgAction};
-
     let names: Vec<String> = cmd
         .get_subcommands()
         .filter(|sub| !skip_help_injection(sub.get_name()))
@@ -170,16 +207,22 @@ fn inject_subcommand_help_flag(cmd: &mut clap::Command) {
     for name in names {
         if let Some(sub) = cmd.find_subcommand_mut(&name) {
             let owned = std::mem::replace(sub, clap::Command::new("__placeholder__"));
-            let injected = owned.arg(
-                Arg::new("help")
-                    .short('h')
-                    .long("help")
-                    .action(ArgAction::Help)
-                    .help("Print help"),
-            );
-            let _ = std::mem::replace(sub, injected);
+            let _ = std::mem::replace(sub, with_help_flag(owned));
         }
     }
+}
+
+fn with_help_flag(cmd: clap::Command) -> clap::Command {
+    use clap::{Arg, ArgAction};
+
+    cmd.arg(
+        Arg::new("help")
+            .short('h')
+            .long("help")
+            .action(ArgAction::Help)
+            .help("Print help"),
+    )
+    .mut_subcommands(with_help_flag)
 }
 
 fn main() -> Result<()> {
@@ -191,13 +234,11 @@ fn main() -> Result<()> {
         .ok();
     color_eyre::install()?;
 
-    match run() {
-        Ok(()) => Ok(()),
-        Err(report) => {
-            render_top_level_error(&report);
-            std::process::exit(1);
-        }
-    }
+    // `run` returns only for an error raised before the runtime exists; every
+    // other exit goes through `shutdown::finish` inside the runtime.
+    let Err(report) = run();
+    render_top_level_error(&report);
+    shutdown::exit_before_runtime(1)
 }
 
 fn run_audio_worker_if_requested() -> Result<Option<i32>> {
@@ -215,18 +256,9 @@ fn run_audio_worker_if_requested() -> Result<Option<i32>> {
 /// walker. Falls back to the CLI's generic `log::error` formatting
 /// (preserving the styled `Error:` label) when no cause in the chain
 /// implements `BlockError`.
-///
-/// Process-level tests may set `CLAUDINE_TEST_DIAGNOSTIC_SNAPSHOT` to capture
-/// the same structured diagnostic selected for rendering. Capture failures are
-/// deliberately ignored so this test seam cannot replace the original error.
 fn render_top_level_error(report: &Report) {
-    if let Some(path) = std::env::var_os("CLAUDINE_TEST_DIAGNOSTIC_SNAPSHOT")
-        && let Some(snapshot) =
-            claudine::diagnostics::DiagnosticSnapshot::select(report.as_ref())
-        && let Ok(encoded) = serde_json::to_vec(&snapshot)
-    {
-        let _ = std::fs::write(path, encoded);
-    }
+    #[cfg(feature = "test-fixtures")]
+    write_diagnostic_snapshot_for_tests(report);
 
     // A lifecycle evaluation error already rendered its styled block to stderr
     // at its catch point (Decision #2), before any catch events fired. Suppress
@@ -244,7 +276,24 @@ fn render_top_level_error(report: &Report) {
     log::error(&report.to_string());
 }
 
-fn run() -> Result<()> {
+/// Test seam, compiled only with the `test-fixtures` feature (never into a
+/// default or installed build): with `CLAUDINE_TEST_DIAGNOSTIC_SNAPSHOT=<path>`
+/// set, writes the structured diagnostic selected for rendering to `<path>`.
+///
+/// Capture failures are deliberately ignored so this seam cannot replace the
+/// original error.
+#[cfg(feature = "test-fixtures")]
+fn write_diagnostic_snapshot_for_tests(report: &Report) {
+    if let Some(path) = std::env::var_os("CLAUDINE_TEST_DIAGNOSTIC_SNAPSHOT")
+        && let Some(snapshot) =
+            claudine::diagnostics::DiagnosticSnapshot::select(report.as_ref())
+        && let Ok(encoded) = serde_json::to_vec(&snapshot)
+    {
+        let _ = std::fs::write(path, encoded);
+    }
+}
+
+fn run() -> Result<std::convert::Infallible> {
     let process_start = std::time::Instant::now();
 
     // When invoked as a completion subprocess (COMPLETE=<shell> claudine …),
@@ -264,7 +313,7 @@ fn run() -> Result<()> {
     // Ownership partition (replaces the retired Rule 3): split composition argv
     // into the Claudine argv handed to clap and the agent tail forwarded to the
     // provider. Non-composition argv passes through unchanged with an empty tail.
-    let (argv, provider_tail) = argv::partition_composition_tail(normalized)?;
+    let (argv, caller_arguments) = argv::partition_composition_tail(normalized)?;
 
     // Pre-scan the normalized argv for --plain so clap's ANSI styling is
     // disabled before parsing. Uses the same token stream the parse will see.
@@ -283,22 +332,52 @@ fn run() -> Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
-    runtime.block_on(async_main(
+    Ok(runtime.block_on(async_main(
         argv,
-        provider_tail,
+        caller_arguments,
         perf_bootstrap,
         arg_parse_start,
         process_start,
-    ))
+    )))
 }
 
+/// Run the command, render any error, and exit through the shutdown path.
+///
+/// The error block renders before the drain so it precedes any
+/// pending-delivery warning.
 async fn async_main(
     argv: Vec<OsString>,
-    provider_tail: argv::ProviderArgs,
+    caller_arguments: claudine::composition::ArgumentsAfterFile,
     perf_bootstrap: perf::PerfBootstrap,
     arg_parse_start: std::time::Instant,
     process_start: std::time::Instant,
-) -> Result<()> {
+) -> std::convert::Infallible {
+    let code = match dispatch(
+        argv,
+        caller_arguments,
+        perf_bootstrap,
+        arg_parse_start,
+        process_start,
+    )
+    .await
+    {
+        Ok(code) => code,
+        Err(report) => {
+            render_top_level_error(&report);
+            1
+        }
+    };
+    shutdown::finish(code).await
+}
+
+/// Parse the CLI and run the selected command, returning its exit code.
+async fn dispatch(
+    argv: Vec<OsString>,
+    caller_arguments: claudine::composition::ArgumentsAfterFile,
+    perf_bootstrap: perf::PerfBootstrap,
+    arg_parse_start: std::time::Instant,
+    process_start: std::time::Instant,
+) -> Result<i32> {
     let mut cli = parse_cli_from(&argv);
     let launch_mode = if matches!(cli.command, Some(Commands::Handle(_))) {
         claudine::child_environment::LaunchDirectoryMode::ProviderHook
@@ -308,7 +387,7 @@ async fn async_main(
     claudine::child_environment::initialize_process_launch_directory(launch_mode)?;
     // Attach the partitioned agent tail to the composition command. The tail is
     // captured before clap and never reconstructed from clap matches or argv.
-    inject_provider_tail(&mut cli, provider_tail);
+    inject_caller_arguments(&mut cli, caller_arguments);
     let perf_arg_parsing = arg_parse_start.elapsed();
     log::set_plain(cli.plain);
 
@@ -319,7 +398,7 @@ async fn async_main(
     let perf_tracing_init = tracing_start.elapsed();
 
     if cli.help || cli.command.is_none() {
-        return commands::help::run();
+        return commands::help::run().map(|()| 0);
     }
 
     let perf_enabled = perf_bootstrap.enabled;
@@ -359,10 +438,12 @@ async fn async_main(
 
     // Commands that must work without config (handle is a hook callback,
     // completions is shell setup, __complete runs under a shell completion
-    // pipeline). Everything else requires config.
+    // pipeline, and steer must never change configuration or prompt a
+    // `--json` caller). Everything else requires config, and a missing one
+    // starts the interactive setup wizard.
     let needs_config = !matches!(
         command,
-        Commands::Handle(_) | Commands::Completions(_) | Commands::Complete(_)
+        Commands::Handle(_) | Commands::Completions(_) | Commands::Complete(_) | Commands::Steer(_)
     );
 
     let perf_config_loading = if needs_config {
@@ -387,8 +468,8 @@ async fn async_main(
         None
     };
 
-    match command {
-        Commands::Handle(args) => commands::handle::run(args).await,
+    let result = match command {
+        Commands::Handle(args) => return commands::handle::run(args).await,
         Commands::Completions(args) => commands::completions::run(args),
         Commands::Complete(args) => commands::completions::run_complete(args),
         Commands::Config(args) => commands::config_tui::run(args).await,
@@ -414,17 +495,34 @@ async fn async_main(
         | Commands::Pi(_)
         | Commands::Antigravity(_) => unreachable!("wrapper commands are handled before this match"),
         Commands::Compose(args) => {
-            commands::compose::run_compose(args, cli.verbose, startup_timings)
+            return commands::compose::run_compose(args, cli.verbose, startup_timings);
         }
         Commands::InlineCompose(args) => {
-            commands::compose::run_inline_compose(args, cli.verbose, startup_timings)
+            return commands::compose::run_inline_compose(args, cli.verbose, startup_timings);
         }
         Commands::Sequence(args) => {
-            commands::sequence::run_sequence(args, cli.verbose, startup_timings)
+            return commands::sequence::run_sequence(args, cli.verbose, startup_timings);
         }
+        Commands::Steer(args) => return Ok(commands::steer::run(args).await),
         Commands::Budget(args) => commands::budget::run(args),
         Commands::Dashboard(args) => commands::dashboard::run(args).await,
         Commands::Context(args) => commands::context::run(args),
         Commands::Errors(args) => commands::errors::run(args),
+    };
+    result.map(|()| 0)
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::CommandFactory;
+
+    /// Clap checks a command's definition lazily, only for the subcommand an
+    /// argv selects; this walks the whole tree so an injected `-h` that
+    /// collides with a nested subcommand's own short flag fails here.
+    #[test]
+    fn injected_help_flags_are_valid_on_every_subcommand() {
+        let mut cmd = <super::Cli as CommandFactory>::command();
+        super::inject_subcommand_help_flag(&mut cmd);
+        cmd.debug_assert();
     }
 }

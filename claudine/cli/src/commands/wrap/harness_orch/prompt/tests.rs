@@ -252,6 +252,7 @@ fn harness_reentry_epochs_keep_launch_values_and_source_ownership() {
     assert_eq!(
         proxy.document_epoch.as_ref().unwrap().work_snapshot(),
         claudine::invocation_context::DocumentEpochWork {
+            volatile_observations: Default::default(),
             launch_context_constructions: 1,
             launch_context_extensions: 0,
             ambient_fallbacks: 0,
@@ -295,6 +296,7 @@ fn harness_reentry_epochs_keep_launch_values_and_source_ownership() {
     assert_eq!(
         stabilized.document_epoch.as_ref().unwrap().work_snapshot(),
         claudine::invocation_context::DocumentEpochWork {
+            volatile_observations: Default::default(),
             launch_context_constructions: 1,
             launch_context_extensions: 1,
             ambient_fallbacks: 0,

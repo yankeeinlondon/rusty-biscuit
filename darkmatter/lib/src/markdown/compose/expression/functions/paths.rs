@@ -4,6 +4,7 @@ pub(super) const BINDINGS: &[FunctionBinding] = &[
     FunctionBinding { canonical: "absolute", aliases: &[], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::absolute_fn)) },
     FunctionBinding { canonical: "relative", aliases: &[], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::relative_fn)) },
     FunctionBinding { canonical: "file_exists", aliases: &["fileexists"], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::file_exists_fn)) },
+    FunctionBinding { canonical: "find_files", aliases: &["findfiles"], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::find_files_fn)) },
     FunctionBinding { canonical: "has_command", aliases: &["hascommand"], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::has_command_fn)) },
     // `has_binary` is a second documented name for the same probe (R16), not an
     // alias: both names must appear in the descriptor catalog.

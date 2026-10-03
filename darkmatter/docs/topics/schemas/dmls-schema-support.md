@@ -99,7 +99,8 @@ Diagnostics are **push-based** (`textDocument/publishDiagnostics`): DMLS compute
 | `dm.schema.missing_simplified_envelope`                        | a referenced bare property map looks like SimplifiedSchema but lacks a supported envelope             |
 | `dm.schema.document_malformed`                                 | a recognized standalone schema envelope is malformed                                                  |
 | `dm.style.unknown_key` / `dm.style.deprecated_key`             | `style:` surface problems                                                                             |
-| `dm.expression.malformed` / `dm.expression.unknown_identifier` | expression-typed frontmatter values that do not parse or name something resolvable                    |
+| `dm.expression.malformed` / `dm.expression.unknown_function`   | expression-typed frontmatter values that do not parse or call an unknown function (errors)            |
+| `dm.expression.undeclared_property`                            | an expression reads an undeclared document property (advisory warning; the property is valid)         |
 
 The severity policy follows one guiding principle: *diagnose edit-time problems, not compose-time ones*. A document is a template; values arrive at compose time via CLI `--set`, seeds, `$(...)` expansion, or an interactive prompt. So:
 
@@ -131,6 +132,8 @@ While *authoring a schema* — inside an inline `$schema` value, a `type-definit
 - `$schema` file references (`./schema.yaml` scaffolds plus workspace paths)
 
 A deliberate gap: a constraint's *arguments* (a regex body, a glob, an enum member) are author-supplied values — the catalog has nothing truthful to offer there, so completion is silent rather than guessing.
+
+Grammar completion reads each part of a definition the way the parser does. Text after `->` is a human description, so completion is silent while the cursor is inside it. Inside an inline object that description ends at the property's `,`, and completion resumes for the next property: in `{ a: string -> (it's fine), b: str`, the cursor after `str` is offered `string`. A `Name@reference` filename is one token up to its `,`, `}`, or `->`, so `Name@./a(b.yaml` is a file reference rather than a constraint list, and `[Name@./a(b.yaml, s` offers type keywords for the second alternative.
 
 All items are **eager and self-contained**: every item carries an explicit `textEdit` replacing the exact token under the cursor, with plain insert text (no snippets) and no `completionItem/resolve` round-trip. This is deliberately Zed-safe. Trigger characters are `/` (paths), `#` (anchors), `(` (directive options and function arguments), and `.` (`ctx.` members inside an open `{{ }}`).
 

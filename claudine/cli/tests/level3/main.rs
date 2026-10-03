@@ -12,9 +12,15 @@ mod common;
 #[cfg(target_os = "macos")]
 mod level3_auto_complete_chooser;
 #[cfg(target_os = "linux")]
+mod level3_drain_ctrl_c;
+#[cfg(target_os = "macos")]
+mod level3_lifecycle_ctrl_c;
+#[cfg(target_os = "linux")]
 mod level3_linux_sequence_ctrl_c;
 #[cfg(target_os = "macos")]
 mod level3_sequence_ctrl_c;
+#[cfg(target_os = "linux")]
+mod level3_sequence_review_screen_keys;
 #[cfg(windows)]
 mod level3_windows_sequence_ctrl_c;
 mod level3_wrap_ctrl_c;

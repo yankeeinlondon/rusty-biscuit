@@ -329,6 +329,7 @@ fn finalize_requires_recorded_terminal_not_just_stack_run() {
     let mut guard = LifecycleRunGuard::new(&config, &ctx, &emitter);
     let stack_ctx = crate::composition::lifecycle_executor::StackExecutionContext {
         signal: LifecycleSignal::Failure,
+        scope: None,
         frontmatter: &serde_json::Map::new(),
         live_frontmatter: None,
         runtime_state: None,
@@ -442,6 +443,7 @@ fn run_event_stack_emits_top_level_and_stack() {
 
     let stack_ctx = crate::composition::lifecycle_executor::StackExecutionContext {
         signal: LifecycleSignal::Start,
+        scope: None,
         frontmatter: &serde_json::Map::new(),
         live_frontmatter: None,
         runtime_state: None,
@@ -509,6 +511,7 @@ fn execute_event_still_runs_full_event() {
 
     let stack_ctx = crate::composition::lifecycle_executor::StackExecutionContext {
         signal: LifecycleSignal::Start,
+        scope: None,
         frontmatter: &serde_json::Map::new(),
         live_frontmatter: None,
         runtime_state: None,
@@ -536,4 +539,131 @@ fn execute_event_still_runs_full_event() {
     assert!(outcome.control.is_none());
     assert!(guard.start_emitted());
     assert_eq!(emitter.signals().len(), 1);
+}
+
+/// Records, at every `stderr` emission, whether a terminal lifecycle scope was
+/// active — the flag the CLI's SIGINT guard reads to grant a repeat Ctrl+C the
+/// grace window.
+struct ScopeProbeEmitter {
+    observations: Mutex<Vec<(LifecycleSignal, bool)>>,
+}
+
+impl LifecycleEmitter for ScopeProbeEmitter {
+    fn emit_stderr(&self, signal: LifecycleSignal, _text: &str, _term: &Terminal) {
+        self.observations
+            .lock()
+            .unwrap()
+            .push((signal, crate::interrupt::terminal_lifecycle_active()));
+    }
+
+    fn emit_message(
+        &self,
+        _text: &str,
+        _source_path: &Path,
+        _repo_root: Option<&Path>,
+        _messaging: &RuntimeMessagingSettings,
+    ) {
+    }
+
+    fn emit_speech(&self, _text: &str, _tts_config: TtsConfig) {}
+
+    fn emit_effect(&self, _name: &str) {}
+
+    fn emit_notification(&self, _title: &str) {}
+}
+
+/// `run_event_stack` is the choke point every production lifecycle path
+/// (`execute_event` included) runs a stack through, so observing the scope from
+/// inside each event's top-level notification and stack action proves all four
+/// terminal events enter it — and that `start` does not.
+#[test]
+fn run_event_stack_marks_only_terminal_events_as_terminal_lifecycle_work() {
+    let event = |label: &str| json!({"stderr": label, "stack": [{"action": {"stderr": label}}]});
+    let config = parse_lifecycle_config(
+        &json!({
+            "start": event("start"),
+            "success": event("success"),
+            "blocked": event("blocked"),
+            "failure": event("failure"),
+            "finalize": event("finalize"),
+        }),
+        dummy_path(),
+    )
+    .unwrap();
+    let (settings, messaging, term) = test_ctx();
+    let emitter = ScopeProbeEmitter {
+        observations: Mutex::new(Vec::new()),
+    };
+    let ctx = LifecycleRuntimeContext {
+        settings: &settings,
+        messaging: &messaging,
+        term: &term,
+        source_path: dummy_path(),
+        repo_root: None,
+        launch_area: None,
+        context: None,
+    };
+    let guard = LifecycleRunGuard::new(&config, &ctx, &emitter);
+    let effect_engine = darkmatter::effects::EffectEngine::builder()
+        .mutation_root(std::env::current_dir().unwrap())
+        .auto_rehash(false)
+        .build();
+    let stack_ctx = crate::composition::lifecycle_executor::StackExecutionContext {
+        signal: LifecycleSignal::Start,
+        scope: None,
+        frontmatter: &serde_json::Map::new(),
+        live_frontmatter: None,
+        runtime_state: None,
+        err: None,
+        timing: None,
+        current: None,
+        group: None,
+        base_dir: None,
+        ctx_base_dir: None,
+        prepared_context: None,
+        file_resolution_context: None,
+        effect_engine: &effect_engine,
+        shell_runner: &crate::composition::lifecycle_executor::SystemShellRunner,
+        emitter: &emitter,
+        term: &term,
+        source_path: dummy_path(),
+        repo_root: None,
+        messaging: &messaging,
+        settings: &settings,
+    };
+
+    let signals = [
+        LifecycleSignal::Start,
+        LifecycleSignal::Success,
+        LifecycleSignal::Blocked,
+        LifecycleSignal::Failure,
+        LifecycleSignal::Finalize,
+    ];
+    for signal in signals {
+        let outcome = guard.run_event_stack(signal, &stack_ctx);
+        assert!(outcome.action_error.is_none(), "{signal:?}: {outcome:?}");
+        assert!(
+            !crate::interrupt::terminal_lifecycle_active(),
+            "the scope must end with the {signal:?} event"
+        );
+    }
+
+    let observed_for = |signal: LifecycleSignal| -> Vec<bool> {
+        emitter
+            .observations
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(emitted, _)| *emitted == signal)
+            .map(|(_, active)| *active)
+            .collect()
+    };
+    assert_eq!(observed_for(LifecycleSignal::Start), vec![false, false]);
+    for signal in &signals[1..] {
+        assert_eq!(
+            observed_for(*signal),
+            vec![true, true],
+            "{signal:?}'s top-level notification and stack must run inside the scope"
+        );
+    }
 }

@@ -13,7 +13,8 @@
 //! system prompt, YOLO/reasoning, prompt args, policy axes),
 //! [`models_offerings`] (billing, cap policies, offerings, resume, catalog
 //! source), [`event_policy`] (event mapping, ACP, platform kind, gaps,
-//! display policy), and [`linking`] (resource-support builder). The shared
+//! display policy), [`linking`] (resource-support builder), and
+//! [`cli_switches`] (switch metadata). The shared
 //! literal/import helpers and the [`emit_data_file`] assembler stay here.
 //!
 //! Formatting is hand-rolled and deterministic; the drift test compares
@@ -27,6 +28,7 @@ use serde_json::Value;
 
 use crate::errors::GenError;
 
+mod cli_switches;
 mod event_policy;
 mod execution_prompting;
 mod identity_paths;
@@ -333,6 +335,7 @@ pub fn emit_data_file(
         execution_prompting::emission_fragment(&values, &memory_const, &mut ctx)?,
         models_offerings::emission_fragment(&values, &mut ctx)?,
         linking::emission_fragment(&values, &mut ctx)?,
+        cli_switches::emission_fragment(&values, &mut ctx)?,
         core_emission_fragment(&values, &provider_static)?,
     ];
     ctx.import("std::sync::LazyLock");
@@ -344,7 +347,7 @@ pub fn emit_data_file(
         .flat_map(|fragment| fragment.fields.drain(..))
         .collect::<Vec<_>>();
     fields.sort_by_key(|field| field.order);
-    if fields.len() != 49 || fields.iter().enumerate().any(|(order, field)| order != field.order as usize) {
+    if fields.len() != 50 || fields.iter().enumerate().any(|(order, field)| order != field.order as usize) {
         return Err(unmappable(
             "data.rs",
             "domain fragments did not emit each ProviderInfo field exactly once".to_string(),

@@ -1,5 +1,5 @@
-//! `wt list` performance with the network down, with a PR request that hits
-//! its deadline, with a stale stored answer whose refresh fails, with a
+//! `wt list` performance with the network down, with a stale stored answer
+//! whose refresh fails, with a PR request held by the provider, with a
 //! live-head check or a fetch held by `origin`, and with `-r` and `--ff`
 //! against a held `origin`, against the targets in
 //! `worktree/docs/performance-testing.md` (warm `list gather` 120 ms, cold
@@ -15,8 +15,8 @@ use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use perf_support::{
-    HoldingOrigin, MixedFixture, ProxyStub, RemoveOnDrop, list_gather_from_perf, refresh_workers,
-    stage_from_perf,
+    FakeGitea, GiteaReply, HoldingOrigin, MixedFixture, ProxyStub, WorkerReaper, list_gather_from_perf,
+    refresh_workers, stage_from_perf, wait_for_refresh_workers,
 };
 use remote_fixture::{Fixture, UploadPackGate, assert_no_spinner};
 use serial_test::serial;
@@ -27,7 +27,9 @@ use worktree::remote_update::FETCH_DEADLINE;
 const WARM_LIST_GATHER_BOUND: Duration = Duration::from_millis(120);
 const COLD_LIST_GATHER_BOUND: Duration = Duration::from_millis(300);
 const FULL_COMMAND_BOUND: Duration = Duration::from_millis(1000);
-const PR_DEADLINE: Duration = Duration::from_millis(300);
+/// What a stage may take beyond the work it waits for: `pr gather` (the PR
+/// store reads around the wait, no request) and `remote wait` past its 3 s.
+const STAGE_SLACK: Duration = Duration::from_millis(300);
 /// Ordinary listing's wait for a stalled worker (spec §3).
 const REMOTE_WAIT: Duration = Duration::from_secs(3);
 /// What a forced listing may add to the worker's own deadline: launching it,
@@ -76,7 +78,6 @@ fn best_full_command(fixture: &MixedFixture, proxy: &ProxyStub) -> Duration {
 #[serial]
 fn perf_list_meets_sla_with_the_network_down() {
     let fixture = MixedFixture::new().with_github_origin();
-    let _cleanup = RemoveOnDrop(fixture.pr_store());
     seed_fresh_head(&fixture);
     fixture.warm_untracked_cache();
     let proxy = ProxyStub::refusing();
@@ -95,36 +96,6 @@ fn perf_list_meets_sla_with_the_network_down() {
     assert!(cold < COLD_LIST_GATHER_BOUND, "cold list gather {cold:.2?}");
     assert!(warm < WARM_LIST_GATHER_BOUND, "warm list gather {warm:.2?}");
     assert!(full < FULL_COMMAND_BOUND, "full wt list {full:.2?}");
-}
-
-#[test]
-#[serial]
-fn perf_list_meets_sla_when_the_pr_request_hits_its_deadline() {
-    let fixture = MixedFixture::new().with_github_origin();
-    let _cleanup = RemoveOnDrop(fixture.pr_store());
-    seed_fresh_head(&fixture);
-    fixture.warm_untracked_cache();
-    // Held past the foreground request's deadline, then closed, so each
-    // run's worker fails its two requests soon after it starts.
-    let proxy = ProxyStub::closing_after(PR_DEADLINE + Duration::from_millis(100));
-
-    let runs: Vec<(Duration, Duration)> = (0..5).map(|_| stages(&fixture, &proxy)).collect();
-    let warm = runs.iter().map(|(list, _)| *list).min().unwrap();
-    let full = best_full_command(&fixture, &proxy);
-    assert!(
-        fixture.wait_until_unlocked(Duration::from_secs(20), || ()),
-        "every worker exited and released its locks"
-    );
-
-    eprintln!("stalled PR request: warm list gather {warm:.2?}, full {full:.2?}, pr gather {:?}", runs.iter().map(|r| r.1).collect::<Vec<_>>());
-    assert!(proxy.connections() >= runs.len(), "every run made the request");
-    for (_, pr) in &runs {
-        assert!(*pr >= PR_DEADLINE, "the request should have waited for its deadline, got {pr:?}");
-    }
-    assert!(warm < WARM_LIST_GATHER_BOUND, "warm list gather {warm:.2?}");
-    // The miss request settles before the worker is launched, so the full
-    // command adds it to the wait for the (failing) worker.
-    assert!(full < FULL_COMMAND_BOUND + PR_DEADLINE, "full wt list {full:.2?}");
 }
 
 /// Best of five full `wt list` runs, reseeding the store `age` old before
@@ -163,37 +134,37 @@ fn pr_gather_with_store(fixture: &MixedFixture, proxy: &ProxyStub, age: Duration
     (stage_from_perf(&stderr, "pr gather").expect("pr gather stage"), stderr)
 }
 
-/// A stale matching answer renders without waiting for its PR request.
-/// Timing alone cannot show that nothing waits (1 s would hide a 300 ms
-/// wait), so `pr gather` must also stay under the request deadline;
-/// `list_prs::a_detached_workers_answer_replaces_the_stale_one_on_the_next_list`
-/// proves deterministically that the parent never joins its worker.
+/// Every listing's worker asks for open PRs, fresh answer or stale; when that
+/// request fails at once, the listing still meets the 1 s bound and shows the
+/// stale answer as one it couldn't refresh. `pr gather` (the store reads
+/// around the wait) must stay under [`STAGE_SLACK`] too, since the 1 s bound
+/// alone would hide a reintroduced foreground request.
 #[test]
 #[serial]
 fn perf_list_meets_sla_with_a_stale_answer_and_a_failing_refresh() {
     const STALE: Duration = Duration::from_secs(12 * 60 + 5);
     let fixture = MixedFixture::new().with_github_origin();
-    let _cleanup = RemoveOnDrop(fixture.pr_store());
     seed_fresh_head(&fixture);
     fixture.warm_untracked_cache();
     // Every worker request is counted and fails at once.
     let proxy = ProxyStub::closing_after(Duration::ZERO);
     let origin = origin_url(fixture.main()).expect("origin");
 
-    // Warm the comparison cache with a fresh answer. Its workers make only
-    // the live-head half's request.
+    // Warm the comparison cache with a fresh answer. Its workers ask for
+    // open PRs as well as for the live head: one request per half.
     let _ = pr_gather_with_store(&fixture, &proxy, Duration::ZERO);
     let fresh_full = best_full_command_with_store(&fixture, &proxy, Duration::ZERO);
     let fresh_pr = (0..5).map(|_| pr_gather_with_store(&fixture, &proxy, Duration::ZERO).0).min().unwrap();
     assert!(fixture.wait_until_unlocked(Duration::from_secs(20), || ()), "the fresh runs' workers exited");
-    assert_eq!(proxy.connections(), 11, "a fresh answer makes no PR request, only the live-head check");
+    assert_eq!(proxy.connections(), 2 * 11, "a fresh answer is asked for again, beside the live-head check");
 
     let stale_full = best_full_command_with_store(&fixture, &proxy, STALE);
     let mut stale_pr = Vec::new();
     for _ in 0..5 {
         let (pr, stderr) = pr_gather_with_store(&fixture, &proxy, STALE);
         assert!(stderr.contains("PR #99"), "the stale badge is shown:\n{stderr}");
-        assert!(stderr.contains("PRs as of 12 min ago"), "with its age:\n{stderr}");
+        assert!(stderr.contains("PRs as of 12 min ago (couldn't refresh)"), "with its age:\n{stderr}");
+        assert!(!stderr.contains("running this command again"), "the failure ended the wait:\n{stderr}");
         stale_pr.push(pr);
     }
     assert!(fixture.wait_until_unlocked(Duration::from_secs(20), || ()), "the stale runs' workers exited");
@@ -202,16 +173,64 @@ fn perf_list_meets_sla_with_a_stale_answer_and_a_failing_refresh() {
         matches!(select_cached(&fixture.pr_store(), Some(&origin), unix_now()), CachedPrs::Stale(_)),
         "the store stayed stale"
     );
-    assert!(proxy.connections() > 11 + 10, "the stale runs' workers made PR requests too");
+    assert_eq!(proxy.connections(), 2 * (11 + 10), "the stale runs' workers made one request per half");
 
     eprintln!(
         "fresh answer: full {fresh_full:.2?}, pr gather {fresh_pr:.2?}; \
          stale answer, failing refresh: full {stale_full:.2?}, pr gather {stale_pr:.2?}"
     );
     for pr in &stale_pr {
-        assert!(*pr < PR_DEADLINE, "a stale answer waits for no request, got {pr:?}");
+        assert!(*pr < STAGE_SLACK, "no PR request in the foreground, got {pr:?}");
     }
     assert!(stale_full < FULL_COMMAND_BOUND, "full wt list with a stale answer {stale_full:.2?}");
+}
+
+/// A PR request that the provider holds costs a listing its 3 s wait and no
+/// more, like a held live-head check: the worker's head half ends at once
+/// (the branch-head API answers 404 and git's fallback is refused), the
+/// `remote wait` stage ends at the wait, and the command returns within that
+/// plus the full-command bound while the PR request is still held.
+#[test]
+#[serial]
+fn perf_a_held_pr_request_costs_the_listing_only_its_wait() {
+    let fixture = MixedFixture::new().with_gitea_origin();
+    fixture.seed_pr_store(Duration::from_secs(12 * 60 + 5), 99, "divergent-0");
+    seed_fresh_head(&fixture);
+    fixture.warm_untracked_cache();
+    let gitea = FakeGitea::new(GiteaReply::Status(503));
+    gitea.hold();
+    let _reaper = WorkerReaper::new(&fixture, &gitea);
+
+    // The second listing's worker finds the first one's PR request holding
+    // the lock, and waits within the same budget.
+    let mut samples = Vec::new();
+    for _ in 0..2 {
+        let t0 = Instant::now();
+        let output = fixture
+            .wt_command_via_gitea(&gitea)
+            .args(["list", "--perf"])
+            .env("NO_COLOR", "1")
+            .output()
+            .expect("wt list --perf should run");
+        let full = t0.elapsed();
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        assert!(output.status.success(), "wt list --perf failed:\n{stderr}");
+        let text = stderr.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(text.contains("- PRs as of 12 min ago - running this command again"), "pending, then the hint:\n{stderr}");
+        samples.push((stage_from_perf(&stderr, "remote wait").expect("remote wait stage"), full));
+    }
+    let held = gitea.waiting() == 1;
+    gitea.release(GiteaReply::Status(503));
+    let left = wait_for_refresh_workers(fixture.main(), 0, Duration::from_secs(20));
+
+    eprintln!("held PR request: (remote wait, full) {samples:.2?}");
+    assert!(held, "the PR request was still held after both listings returned");
+    assert_eq!(gitea.requests(), 1, "one PR request at a time");
+    assert!(left.is_empty(), "every worker exited: {left:?}");
+    for (wait, full) in &samples {
+        assert!(*wait >= REMOTE_WAIT && *wait < REMOTE_WAIT + STAGE_SLACK, "remote wait {wait:?}");
+        assert!(*full < REMOTE_WAIT + FULL_COMMAND_BOUND, "full wt list {full:?}");
+    }
 }
 
 /// A live-head check that `origin` holds costs a listing its 3 s wait and no
@@ -224,7 +243,7 @@ fn perf_list_meets_sla_with_a_stale_answer_and_a_failing_refresh() {
 fn perf_a_held_live_head_check_costs_the_listing_only_its_wait() {
     let origin = HoldingOrigin::new();
     let fixture = MixedFixture::new().with_origin(&origin.url());
-    let _cleanup = RemoveOnDrop(fixture.pr_store());
+    let _reaper = WorkerReaper::new(&fixture, &origin);
     fixture.seed_empty_pr_store(Duration::ZERO);
     fixture.warm_untracked_cache();
 
@@ -253,7 +272,7 @@ fn perf_a_held_live_head_check_costs_the_listing_only_its_wait() {
     assert!(held, "the worker was still held after both listings returned");
     assert!(released, "the worker exited and released its locks");
     for (wait, full) in &samples {
-        assert!(*wait >= REMOTE_WAIT && *wait < REMOTE_WAIT + PR_DEADLINE, "remote wait {wait:?}");
+        assert!(*wait >= REMOTE_WAIT && *wait < REMOTE_WAIT + STAGE_SLACK, "remote wait {wait:?}");
         assert!(*full < REMOTE_WAIT + FULL_COMMAND_BOUND, "full wt list {full:?}");
     }
 }
@@ -287,7 +306,7 @@ fn perf_a_held_fetch_costs_the_listing_only_its_wait() {
     eprintln!("held fetch: remote wait {wait:.2?}, full {full:.2?}");
     assert!(stderr.contains("pulling remote updates in the background"), "still pulling:\n{stderr}");
     assert!(still_held, "the worker was still held in its fetch after the listing returned");
-    assert!(wait >= REMOTE_WAIT && wait < REMOTE_WAIT + PR_DEADLINE, "remote wait {wait:?}");
+    assert!(wait >= REMOTE_WAIT && wait < REMOTE_WAIT + STAGE_SLACK, "remote wait {wait:?}");
     assert!(full < REMOTE_WAIT + FULL_COMMAND_BOUND, "full wt list {full:?}");
 }
 
@@ -298,7 +317,7 @@ fn perf_a_held_fetch_costs_the_listing_only_its_wait() {
 fn perf_refresh_against_a_held_check_reports_within_the_check_deadline() {
     let origin = HoldingOrigin::new();
     let fixture = MixedFixture::new().with_origin(&origin.url());
-    let _cleanup = RemoveOnDrop(fixture.pr_store());
+    let _reaper = WorkerReaper::new(&fixture, &origin);
     fixture.seed_empty_pr_store(Duration::ZERO);
     fixture.warm_untracked_cache();
 

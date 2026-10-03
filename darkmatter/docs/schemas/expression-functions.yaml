@@ -1088,6 +1088,24 @@ functions:
                 result: "true"
                 verification: display-only
                 reason: result is host-dependent
+    - name: find_files
+      category: Filesystem
+      order: 64
+      description:
+          Returns every file a glob reference matches (`&dir/**/name.md`), as sorted
+          absolute paths; the path before the first wildcard is the directory searched.
+      overloads:
+          - parameters:
+                - name: pattern
+                  type: string
+            returns:
+                type: file
+                array: true
+                fallible: true
+            example:
+                expression: length(find_files("**/note.md"))
+                result: "2"
+                verification: executable
     - name: is_indexed_file
       category: Filesystem
       order: 65
@@ -1362,6 +1380,24 @@ functions:
                 fallible: true
             example:
                 expression: frontmatter("fixture.md", "title")
+                result: Fixture Title
+                verification: executable
+    - name: try_frontmatter
+      category: Filesystem
+      order: 60
+      description:
+          Reads the frontmatter of a Markdown file as `{ok, value, error}`; a missing,
+          unreadable, or unparsable file gives `ok` false and its reason instead of
+          failing.
+      overloads:
+          - parameters:
+                - name: file
+                  type: file
+            returns:
+                type: object
+                nullable: true
+            example:
+                expression: try_frontmatter("fixture.md").value.title
                 result: Fixture Title
                 verification: executable
     - name: markdown_body_empty

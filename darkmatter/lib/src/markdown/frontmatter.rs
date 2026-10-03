@@ -229,6 +229,32 @@ impl Frontmatter {
         &mut self.map
     }
 
+    /// The values with every whole-leaf literal token decoded, in key order.
+    /// See [`decode_literal_tokens`](crate::markdown::literal_token::decode_literal_tokens).
+    ///
+    /// ## Errors
+    ///
+    /// Returns the first malformed or embedded token, with its path.
+    pub fn decoded_literal_tokens(
+        &self,
+    ) -> Result<FrontmatterMap, crate::markdown::literal_token::LiteralTokenError> {
+        use crate::markdown::literal_token::decode_literal_tokens;
+        self.map
+            .iter()
+            .map(|(key, value)| {
+                let decoded = decode_literal_tokens(value).map_err(|mut error| {
+                    error.path = match error.path.as_str() {
+                        "" => key.clone(),
+                        nested if nested.starts_with('[') => format!("{key}{nested}"),
+                        nested => format!("{key}.{nested}"),
+                    };
+                    error
+                })?;
+                Ok((key.clone(), decoded))
+            })
+            .collect()
+    }
+
     /// Consumes self and returns the underlying map.
     pub fn into_map(self) -> FrontmatterMap {
         self.map

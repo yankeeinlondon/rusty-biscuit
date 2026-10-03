@@ -23,8 +23,9 @@
 //! The default command pins `current_dir` to the fixture `cwd`, points
 //! `HOME`/`USERPROFILE`/`APPDATA`/`LOCALAPPDATA` at the fixture `home`,
 //! removes `HOMEDRIVE`/`HOMEPATH`/`XDG_CONFIG_HOME`, and sets
-//! `CLAUDINE_RENDEZVOUS_REPORT=false`, `NO_COLOR=1`, `PLAYA_DRY_RUN=1`, and a
-//! fixture-local `PLAYA_SPOOL_DIR`.
+//! `CLAUDINE_RENDEZVOUS_REPORT=false`, a fixture-private unreachable
+//! `RENDEZVOUS_ENDPOINT`, `NO_COLOR=1`, `PLAYA_DRY_RUN=1`, and a fixture-local
+//! `PLAYA_SPOOL_DIR`.
 //!
 //! ### Why audio is a spawn-contract concern
 //!
@@ -144,13 +145,26 @@
 
 #![allow(dead_code)]
 
+pub(crate) mod codex_model;
 pub(crate) mod completion;
+pub(crate) mod drain_interrupt;
 pub(crate) mod host_tools;
 pub(crate) mod incomplete_subagents;
 #[cfg(unix)]
+pub(crate) mod launch_recorder;
+pub(crate) mod owned_value_options;
+#[cfg(unix)]
 pub(crate) mod pty;
 pub(crate) mod review_router;
+#[cfg(unix)]
+pub(crate) mod review_screen;
+#[cfg(unix)]
+pub(crate) mod signal;
+pub(crate) mod site_identity;
 pub(crate) mod source_scan;
+#[cfg(unix)]
+pub(crate) mod terminal_interrupt;
+pub(crate) mod webhook_listener;
 pub(crate) mod wrap;
 
 // Re-exported so a call site keeps saying `common::helper_command`.
@@ -393,6 +407,20 @@ impl CliProcessFixture {
         self.workspace.path().join("audio-spool")
     }
 
+    /// A private Rendezvous endpoint nothing listens on. Every wrapped
+    /// execution opens a steering control link to the per-user daemon, so the
+    /// default policy points it here: the link fails fast instead of
+    /// registering the test's execution with the developer's own daemon. A
+    /// test that boots a daemon overrides it with `.env`.
+    pub fn rendezvous_endpoint(&self) -> std::ffi::OsString {
+        if cfg!(windows) {
+            let tag = self.workspace.path().file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+            format!(r"\\.\pipe\claudine-l1-unreachable-{tag}").into()
+        } else {
+            self.workspace.path().join("rendezvous-unreachable").join("daemon.sock").into_os_string()
+        }
+    }
+
     /// A `claudine` command with the hermetic defaults described in the module
     /// docs.
     pub fn command(&self) -> assert_cmd::Command {
@@ -587,6 +615,7 @@ impl<'fixture> ClaudineCommandBuilder<'fixture> {
             ("LOCALAPPDATA", home.to_os_string()),
             ("PATH", self.path_value()),
             ("CLAUDINE_RENDEZVOUS_REPORT", "false".into()),
+            ("RENDEZVOUS_ENDPOINT", self.fixture.rendezvous_endpoint()),
             ("NO_COLOR", "1".into()),
             ("PLAYA_DRY_RUN", "1".into()),
             ("PLAYA_SPOOL_DIR", self.fixture.audio_spool().into()),

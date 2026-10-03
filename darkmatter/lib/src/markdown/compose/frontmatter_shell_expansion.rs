@@ -32,15 +32,19 @@ use super::expression::{
     scalar_string,
 };
 use super::frontmatter_interpolation::FrontmatterSeedState;
+use super::value_origin::{DataPaths, FrontmatterProvenance};
 use super::interpolation::{Evaluator, ExpressionFailurePolicy, ScanMode, interpolate_text};
 use super::shell_expansion::store::resolve_policy_paths;
 use super::shell_expansion::tokenize::{parse_pipeline, tokenize};
+use super::shell_expansion::executor::{ShellOutcome, ShellStatus};
 use super::shell_expansion::types::{
     ChainOperator, ErrorHandling, PipelineRuntime, ShellCommandOrigin, ShellDirective,
-    ShellExpansionError, ShellPipeline, ShellPolicyPaths, frontmatter_key_line,
+    ShellExpansionError, ShellExpansionRuntime, ShellPipeline, ShellPolicyPaths,
+    ShellTimeoutBehavior, frontmatter_key_line,
 };
 use super::shell_expansion::{
-    PreparedShellDirective, execute_prepared_directive, prepare_directive,
+    PreparedShellDirective, execute_prepared_directive, execute_prepared_outcome,
+    prepare_directive,
 };
 use super::{ComposeOptions, ComposeWarning};
 use crate::markdown::frontmatter::Frontmatter;
@@ -51,14 +55,16 @@ use rayon::prelude::*;
 use serde_json::Value;
 use std::collections::HashMap;
 
-/// A recognized trailing suffix on a frontmatter `$(...)` value.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum FrontmatterShellSuffix {
-    /// `::timeout:N` — a per-directive timeout in whole seconds.
-    Timeout(u64),
-    /// `::no-cache` — bypass the per-compose command cache.
-    NoCache,
-}
+mod assignment;
+mod suffix;
+
+pub use assignment::{
+    ResolvedShellValue, check_frontmatter_shell_value, execute_resolved_shell_values,
+};
+pub use suffix::{
+    FRONTMATTER_SHELL_SUFFIXES, FrontmatterShellSuffix, ShellResultKind, ShellSuffixDescriptor,
+    ShellSuffixError, describe_suffix, expected_suffixes, parse_frontmatter_shell_suffixes,
+};
 
 /// One chain action of a spanned frontmatter `$(...)` pipeline (the segments
 /// between top-level `&&` / `||` operators).
@@ -209,43 +215,13 @@ fn trimmed_subspan(parent: &str, parent_base: usize, child: &str) -> SourceSpan 
     start..start + trimmed.len()
 }
 
-/// Scans the text after the closing `)` for `::timeout:N` / `::no-cache`
-/// suffixes, returning each recognized suffix with its span (base-shifted).
+/// Recovers the suffixes after the closing `)`, with their spans
+/// (base-shifted).
 ///
-/// Lenient: scanning stops at the first unrecognized token rather than erroring,
-/// because this is a passive analyzer.
+/// Lenient: scanning stops at the first text the strict grammar rejects rather
+/// than erroring, because this is a passive analyzer.
 fn scan_suffix_spans(after_close: &str, base: usize) -> Vec<Spanned<FrontmatterShellSuffix>> {
-    let mut out = Vec::new();
-    let mut suffix = after_close;
-    let mut offset = base;
-
-    while !suffix.is_empty() {
-        if let Some(rest) = suffix.strip_prefix("::no-cache") {
-            let len = suffix.len() - rest.len();
-            out.push(Spanned::new(FrontmatterShellSuffix::NoCache, offset..offset + len));
-            offset += len;
-            suffix = rest;
-        } else if let Some(rest) = suffix.strip_prefix("::timeout:") {
-            let digits_end = rest.find("::").unwrap_or(rest.len());
-            let digits = &rest[..digits_end];
-            match digits.parse::<u64>() {
-                Ok(value) => {
-                    let len = suffix.len() - rest.len() + digits_end;
-                    out.push(Spanned::new(
-                        FrontmatterShellSuffix::Timeout(value),
-                        offset..offset + len,
-                    ));
-                    offset += len;
-                    suffix = &rest[digits_end..];
-                }
-                Err(_) => break,
-            }
-        } else {
-            break;
-        }
-    }
-
-    out
+    suffix::scan_frontmatter_shell_suffixes(after_close, base)
 }
 
 /// Byte spans of the whitespace-delimited tokens in a shell action, respecting
@@ -404,6 +380,9 @@ pub(crate) struct FrontmatterShellDirective {
     /// When `true` (from the `::no-cache` suffix), the directive bypasses the
     /// per-compose command cache and executes fresh at every occurrence.
     pub no_cache: bool,
+    /// The result suffix, when the value is the command's outcome rather than
+    /// its stdout.
+    pub result: Option<ShellResultKind>,
     #[allow(dead_code)] // Inspected by parser tests; production uses `directive_reachable_pipelines`.
     pub pipeline: Option<ShellPipeline>,
     pub ast: FrontmatterShellAst,
@@ -420,85 +399,57 @@ pub(crate) struct FrontmatterShellExpansionReport {
     pub approvals_used: usize,
     /// Warnings emitted.
     pub warnings: Vec<ComposeWarning>,
-    /// Unknown-root reads by a ternary's condition and selected branch, each
+    /// Absent-property reads by a ternary's condition and selected branch, each
     /// with its frontmatter key. The unselected branch is prepared but not
     /// part of the result, so its reads are dropped.
     pub missing_roots: Vec<(String, MissingRoot)>,
+    /// Keys whose value a result suffix typed; `$schema` judges these after
+    /// expansion.
+    pub typed_keys: std::collections::HashSet<String>,
+}
+
+/// The suffixes of one `$(...)` value, as execution reads them.
+#[derive(Debug, Clone, Copy, Default)]
+struct ParsedSuffixes {
+    timeout_override: Option<std::time::Duration>,
+    no_cache: bool,
+    result: Option<ShellResultKind>,
 }
 
 /// Parses the suffix tail that follows the closing `)` of a `$(...)` shell
-/// expression.
-///
-/// Two suffixes are recognized — `::timeout:N` and the `::no-cache` cache
-/// opt-out — in any order. Each may appear at most once; anything else (any
-/// non-suffix trailing content) is a hard parse error. This grammar is shared
-/// between [`parse_shell_value`] and the leak-guard shape detector so the
-/// supported suffix forms live in exactly one place.
+/// expression through the shared grammar
+/// ([`parse_frontmatter_shell_suffixes`]), so execution, the leak guard, and
+/// the language server accept exactly the same suffixes.
 ///
 /// ## Errors
 ///
 /// Returns a key-tagged [`ShellExpansionError::ParseDirective`] for a duplicate
-/// suffix, an invalid/zero timeout value, or any non-suffix trailing content.
+/// suffix, a second result suffix, an invalid/zero timeout value, or any
+/// non-suffix trailing content.
 fn parse_shell_suffixes(
     after_close: &str,
     key: &str,
     ctx: &SourceContext,
-) -> Result<(Option<std::time::Duration>, bool), ShellExpansionError> {
-    let mut timeout_override = None;
-    let mut no_cache = false;
-    let mut suffix = after_close;
-    while !suffix.is_empty() {
-        if let Some(rest) = suffix.strip_prefix("::no-cache") {
-            if no_cache {
-                return Err(frontmatter_parse_error(
-                    key,
-                    ctx,
-                    "Duplicate ::no-cache suffix in frontmatter shell expression",
-                ));
+) -> Result<ParsedSuffixes, ShellExpansionError> {
+    let suffixes = parse_frontmatter_shell_suffixes(after_close, 0)
+        .map_err(|error| frontmatter_parse_error(key, ctx, error.message))?;
+    let mut parsed = ParsedSuffixes::default();
+    for suffix in suffixes {
+        match suffix.value {
+            FrontmatterShellSuffix::Timeout(seconds) => {
+                parsed.timeout_override = Some(std::time::Duration::from_secs(seconds));
             }
-            no_cache = true;
-            suffix = rest;
-        } else if let Some(rest) = suffix.strip_prefix("::timeout:") {
-            if timeout_override.is_some() {
-                return Err(frontmatter_parse_error(
-                    key,
-                    ctx,
-                    "Duplicate ::timeout suffix in frontmatter shell expression",
-                ));
-            }
-            // The timeout digits run up to the next `::` suffix or end of string.
-            let digits_end = rest.find("::").unwrap_or(rest.len());
-            let (digits, tail) = rest.split_at(digits_end);
-            let timeout_val: u64 = digits.parse().map_err(|_| {
-                frontmatter_parse_error(
-                    key,
-                    ctx,
-                    "Invalid ::timeout value in frontmatter shell expression; expected a positive integer number of seconds",
-                )
-            })?;
-            if timeout_val == 0 {
-                return Err(frontmatter_parse_error(
-                    key,
-                    ctx,
-                    "Frontmatter shell timeout must be greater than zero",
-                ));
-            }
-            timeout_override = Some(std::time::Duration::from_secs(timeout_val));
-            suffix = tail;
-        } else {
-            return Err(frontmatter_parse_error(
-                key,
-                ctx,
-                "Unexpected trailing content after frontmatter shell expression",
-            ));
+            FrontmatterShellSuffix::NoCache => parsed.no_cache = true,
+            other => parsed.result = other.result_kind(),
         }
     }
-    Ok((timeout_override, no_cache))
+    Ok(parsed)
 }
 
 /// Parses a single frontmatter string value for shell expression.
 ///
-/// Returns `Some` if the value matches `$(cmd)` or `$(cmd)::timeout:N`.
+/// Returns `Some` if the value matches `$(cmd)` followed by any valid suffixes
+/// ([`parse_frontmatter_shell_suffixes`]).
 ///
 /// ## Rules
 ///
@@ -507,8 +458,9 @@ fn parse_shell_suffixes(
 ///   `"  $(echo ok)  "` parses identically to `"$(echo ok)"`
 /// - Trimmed value must start with `$(` (a mixed literal whose trimmed form
 ///   starts with other text returns `Ok(None)` and is left to other handling)
-/// - Must have a closing `)` — either at the end, or followed by `::timeout:N`
-/// - If `::timeout:N` suffix present: extract it, validate N > 0
+/// - Must have a closing `)` — either at the end, or followed only by suffixes
+/// - Parse the suffixes: `::timeout:N` (N > 0), `::no-cache`, and at most one
+///   of `::ok`, `::exit-code`, `::result`, each at most once, in any order
 /// - Extract the inner command string between `$(` and `)`
 /// - Tokenize with the existing tokenizer
 /// - If `original_value` is provided (pre-interpolation snapshot), check the
@@ -546,7 +498,11 @@ pub(crate) fn parse_shell_value(
     let inner_command = &rest[..close_pos];
     let after_close = &rest[close_pos + 1..];
 
-    let (timeout_override, no_cache) = parse_shell_suffixes(after_close, key, ctx)?;
+    let ParsedSuffixes {
+        timeout_override,
+        no_cache,
+        result,
+    } = parse_shell_suffixes(after_close, key, ctx)?;
 
     // The original (pre-interpolation) inner text drives ternary structure
     // detection and per-branch executable-interpolation validation. If no
@@ -595,6 +551,7 @@ pub(crate) fn parse_shell_value(
             args: Vec::new(),
             timeout_override,
             no_cache,
+            result,
             pipeline: None,
             ast: FrontmatterShellAst::Ternary {
                 condition_source,
@@ -659,6 +616,7 @@ pub(crate) fn parse_shell_value(
         args,
         timeout_override,
         no_cache,
+        result,
         pipeline: Some(pipeline.clone()),
         ast: FrontmatterShellAst::Pipeline(pipeline),
         line: None,
@@ -978,7 +936,9 @@ fn no_command_diagnostic(key: &str, ctx: &SourceContext, inner: &str) -> ShellEx
 ///
 /// Walks the original (pre-interpolation) branch text, splits it at
 /// top-level `&&` / `||` chain operators, and rejects any segment whose
-/// first token contains `{{` and `}}`. Mirrors the rule enforced by
+/// first token opens a `{{` span. The token is whitespace-delimited, so a
+/// spaced `{{ cmd }}` leaves only `{{` in it; the opener alone decides. Mirrors
+/// the rule enforced by
 /// [`validate_no_executable_interpolation`] but operates on a branch slice
 /// and embeds the branch name into the error message.
 fn validate_branch_no_executable_interpolation(
@@ -989,7 +949,7 @@ fn validate_branch_no_executable_interpolation(
 ) -> Result<(), ShellExpansionError> {
     for segment in split_at_chain_operators(branch) {
         let executable_portion = first_token_portion(segment);
-        if executable_portion.contains("{{") && executable_portion.contains("}}") {
+        if executable_portion.contains("{{") {
             return Err(frontmatter_parse_error(
                 key,
                 ctx,
@@ -1150,10 +1110,11 @@ fn operator_label(op: ChainOperator) -> &'static str {
 
 /// Validates that no executable token in the pipeline comes from interpolation.
 ///
-/// Checks the ORIGINAL (pre-interpolation) string to ensure `{{ }}` doesn't
-/// appear in any executable position — that is, the first non-whitespace token
-/// after `$(`, plus the first non-whitespace token after every top-level `&&`
-/// or `||` chain operator.
+/// Checks the ORIGINAL (pre-interpolation) string to ensure no `{{` span opens
+/// in any executable position — that is, the first non-whitespace token after
+/// `$(`, plus the first non-whitespace token after every top-level `&&` or
+/// `||` chain operator. The opener alone decides, because a spaced
+/// `{{ cmd }}` splits across tokens.
 fn validate_no_executable_interpolation(
     original: &str,
     key: &str,
@@ -1171,7 +1132,7 @@ fn validate_no_executable_interpolation(
 
     for segment in split_at_chain_operators(inner) {
         let executable_portion = first_token_portion(segment);
-        if executable_portion.contains("{{") && executable_portion.contains("}}") {
+        if executable_portion.contains("{{") {
             return Err(frontmatter_parse_error(
                 key,
                 ctx,
@@ -1242,9 +1203,16 @@ fn split_at_chain_operators(input: &str) -> Vec<&str> {
 ///
 /// Only examines top-level keys — nested objects and arrays are ignored.
 /// Keys present in `exclude_keys` are skipped entirely (DM1 passthrough).
+///
+/// A key is a candidate only when its **authored** value is a whole-value
+/// `$( … )` ([`authored_shell_candidate`]). Interpolation may have supplied the
+/// command's arguments since; it cannot have created the shape, and a data
+/// value is never a candidate however it reads.
+///
+/// [`authored_shell_candidate`]: super::value_origin::authored_shell_candidate
 pub(crate) fn scan_frontmatter(
     frontmatter: &Frontmatter,
-    pre_interpolation_snapshot: Option<&HashMap<String, String>>,
+    provenance: &FrontmatterProvenance,
     ctx: &SourceContext,
     exclude_keys: &std::collections::HashSet<String>,
 ) -> Result<Vec<FrontmatterShellDirective>, ShellExpansionError> {
@@ -1252,14 +1220,12 @@ pub(crate) fn scan_frontmatter(
     let fm = frontmatter.as_map();
 
     for (key, value) in fm.iter() {
-        if exclude_keys.contains(key) {
+        if exclude_keys.contains(key) || !provenance.is_authored_shell_candidate(key) {
             continue;
         }
         // Only process top-level string values
         if let Value::String(s) = value {
-            let original = pre_interpolation_snapshot
-                .and_then(|map| map.get(key))
-                .map(|s| s.as_str());
+            let original = provenance.authored_source(key);
 
             if let Some(mut directive) = parse_shell_value(s, key, original, ctx)? {
                 directive.line = frontmatter_key_line(ctx, key);
@@ -1287,22 +1253,23 @@ pub(crate) fn execute_frontmatter_shell_expansion(
     frontmatter: &mut Frontmatter,
     options: &ComposeOptions,
     runtime: &mut PipelineRuntime,
-    pre_interpolation_snapshot: Option<&HashMap<String, String>>,
+    provenance: &mut FrontmatterProvenance,
     ctx: &SourceContext,
 ) -> MarkdownResult<FrontmatterShellExpansionReport> {
-    let candidates = scan_frontmatter(frontmatter, pre_interpolation_snapshot, ctx, &options.exclude_keys)?;
+    let candidates = scan_frontmatter(frontmatter, provenance, ctx, &options.exclude_keys)?;
 
     if candidates.is_empty() {
-        // No directives to execute, but a scan-skipped whole-value `$(...)`
-        // (e.g. one behind leading whitespace) could still be sitting in
-        // frontmatter. Enabled shell expansion must never leave a raw
-        // expansion-form value behind, so guard even on the no-op path.
-        validate_no_whole_value_shell_leak(frontmatter, ctx, &options.exclude_keys)?;
+        // No directives to execute, but an authored whole-value `$(...)` the
+        // scan did not take could still be sitting in frontmatter. Enabled
+        // shell expansion must never leave a raw authored expansion-form value
+        // behind, so guard even on the no-op path.
+        validate_no_whole_value_shell_leak(frontmatter, provenance.data(), ctx, &options.exclude_keys)?;
         return Ok(FrontmatterShellExpansionReport {
             replacements: 0,
             approvals_used: 0,
             warnings: vec![],
             missing_roots: Vec::new(),
+            typed_keys: Default::default(),
         });
     }
 
@@ -1320,15 +1287,6 @@ pub(crate) fn execute_frontmatter_shell_expansion(
     let resolution_context = options.frontmatter_resolution_context();
     let mut seed_state: Option<FrontmatterSeedState> = None;
 
-    // Either "execute this prepared pipeline" or "use this resolved value".
-    // PreparedShellDirective is hefty (~432 bytes), so box the variant to
-    // keep the enum compact. `Value` carries an empty-string branch or a §2
-    // value branch already evaluated through the expression engine.
-    enum Pending {
-        Execute(Box<PreparedShellDirective>),
-        Value(String),
-    }
-
     let mut pending: Vec<(usize, String, Pending)> = Vec::with_capacity(candidates.len());
     let mut missing_roots = Vec::new();
 
@@ -1341,7 +1299,7 @@ pub(crate) fn execute_frontmatter_shell_expansion(
                     candidate,
                     options,
                     &policy_paths,
-                    runtime,
+                    &mut runtime.shell,
                     ctx,
                 )?;
                 Pending::Execute(Box::new(prepared))
@@ -1380,7 +1338,7 @@ pub(crate) fn execute_frontmatter_shell_expansion(
                     candidate,
                     options,
                     &policy_paths,
-                    runtime,
+                    &mut runtime.shell,
                     ctx,
                     state,
                     BranchPosition::Then,
@@ -1392,7 +1350,7 @@ pub(crate) fn execute_frontmatter_shell_expansion(
                     candidate,
                     options,
                     &policy_paths,
-                    runtime,
+                    &mut runtime.shell,
                     ctx,
                     state,
                     BranchPosition::Else,
@@ -1426,20 +1384,18 @@ pub(crate) fn execute_frontmatter_shell_expansion(
         pending.push((index, candidate.key.clone(), pending_item));
     }
 
-    // Run executable preparations in parallel; short-circuit branches contribute
-    // an empty string and skip the shell runtime entirely. The cache lives behind
-    // the runtime's shared mutex, so a shared borrow suffices here.
+    // Run executable preparations in parallel; value branches skip the shell
+    // runtime entirely. The cache lives behind the runtime's shared mutex, so a
+    // shared borrow suffices here.
     let shell_runtime = &runtime.shell;
+    let results: HashMap<&str, Option<ShellResultKind>> = candidates
+        .iter()
+        .map(|candidate| (candidate.key.as_str(), candidate.result))
+        .collect();
     let mut executions: Vec<_> = pending
         .into_par_iter()
         .map(|(index, key, item)| {
-            let result = match item {
-                Pending::Execute(prepared) => {
-                    execute_prepared_directive(&prepared, options, shell_runtime)
-                        .map(|res| (res.stdout, res.warnings))
-                }
-                Pending::Value(value) => Ok((value, Vec::new())),
-            };
+            let result = expand_pending(item, results[key.as_str()], options, shell_runtime);
             (index, key, result)
         })
         .collect();
@@ -1449,15 +1405,17 @@ pub(crate) fn execute_frontmatter_shell_expansion(
     let fm_mut = frontmatter.as_map_mut();
     let mut warnings = Vec::new();
     for (_, key, execution) in executions {
-        let (stdout, exec_warnings) = execution?;
+        let (value, exec_warnings) = execution?;
         warnings.extend(exec_warnings);
-        fm_mut.insert(key, Value::String(stdout.trim().to_string()));
+        // Shell output is data: it is never scanned for `{{ … }}` or `$( … )`.
+        provenance.data_mut().mark_key(&key);
+        fm_mut.insert(key, value);
     }
 
-    // Post-expansion leak guard: after replacements, no top-level value may
-    // still be a whole-value `$(...)` candidate (e.g. command output that
-    // reproduced `$( … )`). Such a value is leaked executable state, not text.
-    validate_no_whole_value_shell_leak(frontmatter, ctx, &options.exclude_keys)?;
+    // Post-expansion leak guard: after replacements, no authored top-level
+    // value may still be a whole-value `$(...)` candidate. Command output that
+    // reproduced `$( … )` is data and is kept as text.
+    validate_no_whole_value_shell_leak(frontmatter, provenance.data(), ctx, &options.exclude_keys)?;
 
     let approvals_used = runtime.shell.take_recent_approval_count();
 
@@ -1466,7 +1424,110 @@ pub(crate) fn execute_frontmatter_shell_expansion(
         approvals_used,
         warnings,
         missing_roots,
+        typed_keys: candidates
+            .iter()
+            .filter(|candidate| candidate.result.is_some())
+            .map(|candidate| candidate.key.clone())
+            .collect(),
     })
+}
+
+/// One frontmatter shell value ready to expand: either "execute this prepared
+/// pipeline" or "use this resolved value".
+///
+/// PreparedShellDirective is hefty (~432 bytes), so box the variant to keep
+/// the enum compact. `Value` carries an empty-string branch or a §2 value
+/// branch already evaluated through the expression engine.
+enum Pending {
+    Execute(Box<PreparedShellDirective>),
+    Value(String),
+}
+
+/// Expands one pending value into the frontmatter value it stands for.
+///
+/// Without a result suffix the value is the trimmed stdout and any status but
+/// `0` fails. With one, the whole outcome becomes a typed value; a ternary
+/// that selected a value branch ran nothing that failed, so it reads as exit
+/// `0` with the branch text as its stdout.
+fn expand_pending(
+    item: Pending,
+    result: Option<ShellResultKind>,
+    options: &ComposeOptions,
+    shell_runtime: &ShellExpansionRuntime,
+) -> Result<(Value, Vec<ComposeWarning>), ShellExpansionError> {
+    match (item, result) {
+        (Pending::Execute(prepared), None) => {
+            execute_prepared_directive(&prepared, options, shell_runtime)
+                .map(|res| (Value::String(res.stdout.trim().to_string()), res.warnings))
+        }
+        (Pending::Execute(prepared), Some(kind)) => {
+            let outcome = execute_prepared_outcome(&prepared, options, shell_runtime)?;
+            let value = result_value(
+                kind,
+                outcome.outcome,
+                &prepared.effective,
+                options.shell_options().timeout_behavior,
+            )?;
+            Ok((value, outcome.warnings))
+        }
+        (Pending::Value(text), None) => Ok((Value::String(text.trim().to_string()), Vec::new())),
+        (Pending::Value(text), Some(kind)) => Ok((
+            outcome_value(kind, Some(0), &text, ""),
+            Vec::new(),
+        )),
+    }
+}
+
+/// The typed value a result suffix reads from a command's outcome.
+///
+/// Only an exit status becomes a value. A timeout has no status, so it stays a
+/// failure unless timeouts are allowed, when its code is `null`. A command
+/// ended by a signal, which includes a user interruption, stays a failure.
+fn result_value(
+    kind: ShellResultKind,
+    outcome: ShellOutcome,
+    directive: &ShellDirective,
+    behavior: ShellTimeoutBehavior,
+) -> Result<Value, ShellExpansionError> {
+    let code = match outcome.status {
+        ShellStatus::Exited(code) => Some(code),
+        ShellStatus::TimedOut if behavior == ShellTimeoutBehavior::EmptyString => None,
+        ShellStatus::TimedOut => {
+            return Err(ShellExpansionError::Timeout {
+                ctx: Box::new(directive.ctx.clone()),
+                command: directive.raw_command.clone(),
+                timeout: outcome
+                    .timed_out_after
+                    .expect("a timed-out status records its deadline"),
+                origin: directive.origin.clone(),
+            });
+        }
+        ShellStatus::Signaled => {
+            return Err(ShellExpansionError::ExecutionFailed {
+                ctx: Box::new(directive.ctx.clone()),
+                command: directive.raw_command.clone(),
+                code: -1,
+                stdout: outcome.stdout,
+                stderr: outcome.stderr,
+                origin: directive.origin.clone(),
+            });
+        }
+    };
+    Ok(outcome_value(kind, code, &outcome.stdout, &outcome.stderr))
+}
+
+fn outcome_value(kind: ShellResultKind, code: Option<i32>, stdout: &str, stderr: &str) -> Value {
+    let ok = code == Some(0);
+    match kind {
+        ShellResultKind::Ok => Value::Bool(ok),
+        ShellResultKind::ExitCode => code.map_or(Value::Null, Value::from),
+        ShellResultKind::Result => serde_json::json!({
+            "ok": ok,
+            "code": code,
+            "stdout": stdout.trim(),
+            "stderr": stderr.trim(),
+        }),
+    }
 }
 
 /// Returns every shell pipeline that this directive could execute at runtime.
@@ -1560,7 +1621,7 @@ pub(crate) fn directive_reachable_pipelines(
 /// [`ShellExpansionError::ExpressionEvaluation`], both tagged with the
 /// frontmatter key.
 ///
-/// The condition is a gate, like `when=`: a bare unknown root in it is
+/// The condition is a gate, like `when=`: a bare absent property in it is
 /// recorded in `missing`, not treated as an absence check.
 fn evaluate_ternary_condition(
     condition_source: &str,
@@ -1632,7 +1693,7 @@ fn prepare_branch_pipeline(
     candidate: &FrontmatterShellDirective,
     options: &ComposeOptions,
     policy_paths: &ShellPolicyPaths,
-    runtime: &mut PipelineRuntime,
+    runtime: &mut ShellExpansionRuntime,
     ctx: &SourceContext,
 ) -> Result<PreparedShellDirective, ShellExpansionError> {
     let executable = pipeline.actions[0].command.executable.clone();
@@ -1655,7 +1716,7 @@ fn prepare_branch_pipeline(
         ctx: ctx.clone(),
     };
 
-    prepare_directive(&directive, options, policy_paths, &mut runtime.shell)
+    prepare_directive(&directive, options, policy_paths, runtime)
 }
 
 /// A ternary branch resolved for execution: either a value produced without a
@@ -1685,7 +1746,7 @@ fn prepare_optional_branch(
     candidate: &FrontmatterShellDirective,
     options: &ComposeOptions,
     policy_paths: &ShellPolicyPaths,
-    runtime: &mut PipelineRuntime,
+    runtime: &mut ShellExpansionRuntime,
     ctx: &SourceContext,
     state: &FrontmatterSeedState,
     position: BranchPosition,
@@ -1841,19 +1902,19 @@ fn interpolate_branch_text(
     Ok(rewrite.output)
 }
 
-/// Post-expansion leak guard for top-level frontmatter string values.
+/// Post-expansion leak guard for authored top-level frontmatter string values.
 ///
-/// After enabled frontmatter shell expansion has run, no top-level value may
-/// still be a whole-value `$(...)` shell-expansion candidate. A surviving
-/// candidate means executable state leaked as raw syntax — e.g. a command whose
-/// own output reproduced `$( … )`, or a `$(...)` value behind leading
-/// whitespace that the strict-start scan skipped. Frontmatter values that are
-/// exactly an expansion form are executable state, not text, and must resolve
-/// or fail loudly rather than reach the composed document verbatim.
+/// After enabled frontmatter shell expansion has run, no **authored** top-level
+/// value may still be a whole-value `$(...)` shell-expansion candidate. A
+/// surviving candidate means executable state leaked as raw syntax. Authored
+/// values that are exactly an expansion form are executable state, not text,
+/// and must resolve or fail loudly rather than reach the composed document
+/// verbatim. A data value (shell output, an interpolation result, a data
+/// override) is exempt however it reads: it was never an instruction.
 ///
 /// Candidate recognition is delegated to [`is_whole_value_shell_candidate`],
 /// which reuses [`parse_shell_value`] so the `$( … )` grammar and supported
-/// suffix rules (`::timeout` / `::no-cache`) are defined in exactly one place.
+/// suffix rules are defined in exactly one place.
 /// Mixed literals (`literal $(echo ok)`) and values with trailing content after
 /// the closing paren are not whole-value candidates and pass through unchanged.
 ///
@@ -1865,11 +1926,12 @@ fn interpolate_branch_text(
 /// key.
 fn validate_no_whole_value_shell_leak(
     frontmatter: &Frontmatter,
+    data: &DataPaths,
     ctx: &SourceContext,
     exclude_keys: &std::collections::HashSet<String>,
 ) -> Result<(), ShellExpansionError> {
     for (key, value) in frontmatter.as_map().iter() {
-        if exclude_keys.contains(key) {
+        if exclude_keys.contains(key) || data.is_data_key(key) {
             continue;
         }
         if let Value::String(s) = value {
@@ -1926,8 +1988,8 @@ enum WholeValueShellShape {
 ///
 /// - **Unclosed** (no unquoted closing `)`): a whole-value shape whose body
 ///   cannot parse — returns [`ShapeButError`] carrying the missing-paren error.
-/// - **Clean close followed only by valid suffixes** (`::no-cache` /
-///   `::timeout:N`, any order, each at most once): a whole-value shape. If the
+/// - **Clean close followed only by valid suffixes** (see
+///   [`parse_frontmatter_shell_suffixes`]): a whole-value shape. If the
 ///   directive then parses, [`CleanDirective`]; otherwise [`ShapeButError`]
 ///   carrying the body's parse error (e.g. the no-command diagnostic).
 /// - **Clean close followed by non-suffix content** (`$(echo ok) trailing`): a

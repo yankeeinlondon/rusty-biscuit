@@ -47,7 +47,8 @@ fn write_gemini_reader(bin_dir: &Path, log: &Path) {
 }
 
 /// A fake `codex` that echoes the content of the file its replacement config
-/// key names.
+/// key names. It has no app-server, so the wrapper's managed launch falls back
+/// to `codex exec`, which carries the same config key.
 ///
 /// Codex's `replace` delivery is `ConfigKeyFile`, i.e. one argv token shaped
 /// `model_instructions_file=<path>`.
@@ -55,7 +56,7 @@ fn write_codex_reader(bin_dir: &Path, log: &Path) {
     write_executable(
         &bin_dir.join("codex"),
         &format!(
-            "#!/bin/sh\ncase \"$1\" in --version|-V|-v|version|models) exit 0;; esac\n\
+            "#!/bin/sh\ncase \"$1\" in --version|-V|-v|version|models) exit 0;; app-server) exit 2;; esac\n\
              if [ ! -t 0 ]; then while IFS= read -r _; do :; done; fi\n\
              for a in \"$@\"; do\n  case \"$a\" in\n    \
              model_instructions_file=*)\n      f=\"${{a#model_instructions_file=}}\"\n      \

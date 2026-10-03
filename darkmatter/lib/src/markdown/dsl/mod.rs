@@ -47,10 +47,21 @@ pub struct CodeBlockMeta {
     pub title: Option<String>,
     /// Whether to show line numbers.
     pub line_numbering: bool,
-    /// Line ranges to highlight.
+    /// Line ranges to highlight, in the absolute numbering that
+    /// [`start_line`](Self::start_line) establishes.
     pub highlight: HighlightSpec,
+    /// Number of the first line, for a block excerpted from a larger source.
+    /// `None` numbers from 1. Not settable from a fence info string.
+    pub start_line: Option<usize>,
     /// Custom key-value pairs for future extensions.
     pub custom: HashMap<String, String>,
+}
+
+impl CodeBlockMeta {
+    /// The absolute number of the block's first line.
+    pub fn first_line(&self) -> usize {
+        self.start_line.unwrap_or(1)
+    }
 }
 
 /// Validated highlight specification containing line ranges.

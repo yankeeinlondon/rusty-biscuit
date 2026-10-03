@@ -240,27 +240,23 @@ fn err_global_is_readable_in_a_failure_with() {
 
 #[test]
 fn out_of_scope_err_in_a_with_value_is_rejected_before_the_event_fires() {
-    // `err` is out of scope on an event that carries no error snapshot. Now
-    // that `with:` values are expression trees they are reachable from the
-    // shared surface walk, so the same static scan that guards `target` and
-    // every message body guards them too — at prepare time, not by failing
-    // mid-handoff.
+    // `err` is declared unavailable on an event that carries no error
+    // snapshot. A `with:` value is a lifecycle surface like `target` and every
+    // message body, so Darkmatter's passive validation rejects it at prepare
+    // time, not by failing mid-handoff.
     for (event, with) in [
         ("initialize", json!({"reason": "{{ err.msg }}"})),
         ("start", json!({"meta": {"reason": "{{ err.msg }}"}})),
         ("success", json!({"list": ["ok", "{{ err.variant }}"]})),
     ] {
-        let config = parse_lifecycle_config(
-            &json!({event: {"stack": [{"action": {
-                "action": "proxy",
-                "target": "@next.md",
-                "with": with
-            }}]}}),
-            Path::new("router.md"),
-        )
-        .expect("config parses");
+        let fm = json!({event: {"stack": [{"action": {
+            "action": "proxy",
+            "target": "@next.md",
+            "with": with
+        }}]}});
+        let config = parse_lifecycle_config(&fm, Path::new("router.md")).expect("config parses");
 
-        let err = validate_no_err_in_no_error_events(&config, Path::new("router.md"))
+        let err = validate_no_err_in_no_error_events(&fm, &config, Path::new("router.md"))
             .expect_err("`err` is out of scope on {event}");
         match err {
             CompositionError::LifecycleErrNotAvailable {
@@ -283,34 +279,68 @@ fn out_of_scope_err_in_a_with_value_is_rejected_before_the_event_fires() {
 fn err_in_a_with_value_is_allowed_on_an_error_carrying_event() {
     // The mirror of the scan above: `failure` carries `err`, so the same
     // authoring is legal there.
-    let config = parse_lifecycle_config(
-        &proxy_stack(json!({"reason": "{{ err.msg }}"})),
-        Path::new("router.md"),
-    )
-    .expect("config parses");
-    assert!(validate_no_err_in_no_error_events(&config, Path::new("router.md")).is_ok());
+    let fm = proxy_stack(json!({"reason": "{{ err.msg }}"}));
+    let config = parse_lifecycle_config(&fm, Path::new("router.md")).expect("config parses");
+    assert!(validate_no_err_in_no_error_events(&fm, &config, Path::new("router.md")).is_ok());
 }
 
 #[test]
-fn a_raw_span_stored_in_frontmatter_never_reaches_the_overlay() {
-    // A frontmatter value that is itself template text would otherwise ride
-    // into the overlay and be evaluated a second time, at the target. It must
-    // not — including from inside a resolved container.
-    for (label, state) in [
-        ("scalar", json!({"payload": "{{ target_side }}"})),
-        ("nested", json!({"payload": {"inner": "{{ target_side }}"}})),
-        ("array", json!({"payload": ["ok", "{{ target_side }}"]})),
+fn a_raw_span_stored_in_frontmatter_reaches_the_overlay_as_data() {
+    // A frontmatter value that is itself template text is data (N10). It rides
+    // into the overlay verbatim, including from inside a resolved container;
+    // the target receives the overlay as a data layer, so nothing evaluates it
+    // a second time there.
+    for (label, state, expected) in [
+        (
+            "scalar",
+            json!({"payload": "{{ target_side }}"}),
+            json!("{{ target_side }}"),
+        ),
+        (
+            "nested",
+            json!({"payload": {"inner": "{{ target_side }}"}}),
+            json!({"inner": "{{ target_side }}"}),
+        ),
+        (
+            "array",
+            json!({"payload": ["ok", "{{ target_side }}"]}),
+            json!(["ok", "{{ target_side }}"]),
+        ),
     ] {
         let outcome = run_failure(proxy_stack(json!({"x": "{{ payload }}"})), state, None);
-        assert!(
-            outcome.control.is_none(),
-            "{label}: a surviving span must abort the handoff"
-        );
+        assert!(outcome.evaluation_error.is_none(), "{label}: {:?}", outcome.evaluation_error);
+        let (_, overlay, _) = proxy_of(&outcome);
+        assert_eq!(overlay.get("x"), Some(&expected), "{label}");
+    }
+}
+
+#[test]
+fn run_time_template_text_cannot_become_the_targets_lifecycle_configuration() {
+    // A lifecycle key is reparsed by the target as its own stack and evaluated
+    // at event time, outside compose, so data carrying a span there fails
+    // closed — scalar, nested, and inside an array alike. The same data under
+    // an ordinary key is accepted above.
+    for (key, state) in [
+        ("success", json!({"payload": {"info": "{{ secret }}"}})),
+        ("loop", json!({"payload": {"actions": ["ok", "{{ secret }}"]}})),
+        ("failure", json!({"payload": "{{ secret }}"})),
+    ] {
+        let outcome = run_failure(proxy_stack(json!({key: "{{ payload }}"})), state, None);
+        assert!(outcome.control.is_none(), "{key}: the handoff must abort");
         let info = outcome
             .evaluation_error
-            .unwrap_or_else(|| panic!("{label}: expected an evaluation error"));
-        assert_eq!(info.variant, "LifecycleProxyWithEvaluationFailed", "{label}");
+            .unwrap_or_else(|| panic!("{key}: expected an evaluation error"));
+        assert_eq!(info.variant, "LifecycleProxyWithEvaluationFailed", "{key}");
+        assert!(info.msg.contains("{{ secret }}"), "{key}: {}", info.msg);
     }
+
+    // Authored structure without run-time template text still installs.
+    let outcome = run_failure(
+        proxy_stack(json!({"success": "{{ payload }}"})),
+        json!({"payload": {"info": "done"}}),
+        None,
+    );
+    assert!(outcome.evaluation_error.is_none(), "{:?}", outcome.evaluation_error);
 }
 
 // ---------------------------------------------------------------------------
@@ -322,13 +352,13 @@ fn failure_names_the_exact_nested_path_without_echoing_other_values() {
     let outcome = run_failure(
         proxy_stack(json!({
             "secret": "s3cret-value",
-            "metadata": {"area": ["ok", "{{ missing_root }}"]}
+            "metadata": {"area": ["ok", "{{ missing_root() }}"]}
         })),
         json!({}),
         None,
     );
     assert!(outcome.control.is_none());
-    let info = outcome.evaluation_error.expect("unknown root raises");
+    let info = outcome.evaluation_error.expect("an unknown function raises");
     assert_eq!(info.variant, "LifecycleProxyWithEvaluationFailed");
     assert!(
         info.msg.contains("failure.stack[0].action[0].with.metadata.area[1]"),
@@ -376,7 +406,7 @@ fn evaluation_is_atomic_across_the_whole_mapping() {
     // and the source stays active for attribution. The overlay only exists on
     // the handoff, so "no partial overlay" is observable as "no handoff".
     let outcome = run_failure(
-        proxy_stack(json!({"good": "{{ present }}", "bad": "{{ absent_root }}"})),
+        proxy_stack(json!({"good": "{{ present }}", "bad": "{{ absent_root() }}"})),
         json!({"present": "value"}),
         None,
     );
@@ -396,8 +426,8 @@ fn a_failing_target_never_evaluates_the_overlay() {
             "failure": {
                 "stack": [{"action": {
                     "action": "proxy",
-                    "target": "{{ absent_root }}",
-                    "with": {"x": "{{ also_absent }}"}
+                    "target": "{{ absent_root() }}",
+                    "with": {"x": "{{ also_absent() }}"}
                 }}]
             }
         }),
@@ -421,7 +451,7 @@ fn no_error_does_not_suppress_an_overlay_failure() {
                     "action": "proxy",
                     "target": "@next.md",
                     "no_error": true,
-                    "with": {"x": "{{ absent_root }}"}
+                    "with": {"x": "{{ absent_root() }}"}
                 }}]
             }
         }),

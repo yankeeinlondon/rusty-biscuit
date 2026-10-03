@@ -69,30 +69,38 @@ fn resolve_deadline() -> Duration {
     Duration::from_secs(secs)
 }
 
-/// Handle an incoming event from stdin under a hard execution deadline.
+/// Handle an incoming event from stdin under a hard execution deadline;
+/// returns the process exit code.
 ///
 /// ## Deadline semantics
 ///
-/// Real work runs inside [`run_inner`], wrapped in [`tokio::time::timeout`]
+/// Real work runs inside [`run_inner`], wrapped in [`tokio::time::timeout_at`]
 /// sized by `CLAUDINE_HANDLE_DEADLINE_SECONDS` (default 15s). When the
 /// deadline elapses, the handler prints a one-line diagnostic to stderr and
-/// exits with code 124 (`coreutils timeout` convention) so the parent agent
+/// returns code 124 (`coreutils timeout` convention) so the parent agent
 /// classifies the handler as "failed" instead of waiting for its own ~30s
 /// hook timeout.
+///
+/// The same deadline caps the exit-time delivery drain
+/// ([`crate::shutdown::set_drain_deadline`]), so a stalled hook `message`
+/// cannot hold the handler past it. It is published before any work starts,
+/// so an error returned through `?` is drained under it too.
 ///
 /// ## Exit discipline
 ///
 /// Hook handlers run as short-lived children of an interactive agent. The
-/// top-level command owns stdout/stderr flushing plus the final
-/// [`std::process::exit`] so inner async helpers never bypass buffered
-/// machine-readable output.
-pub async fn run(args: HandleArgs) -> Result<()> {
+/// handler flushes stdout and stderr before returning, so its
+/// machine-readable response is complete before the shared shutdown path
+/// drains deliveries and exits.
+pub async fn run(args: HandleArgs) -> Result<i32> {
     let deadline = resolve_deadline();
+    let deadline_at = tokio::time::Instant::now() + deadline;
+    crate::shutdown::set_drain_deadline(deadline_at);
 
-    match tokio::time::timeout(deadline, run_inner(args)).await {
+    match tokio::time::timeout_at(deadline_at, run_inner(args)).await {
         Ok(Ok(exit_code)) => {
             flush_streams();
-            std::process::exit(exit_code);
+            Ok(exit_code)
         }
         Ok(Err(error)) => {
             flush_streams();
@@ -106,7 +114,7 @@ pub async fn run(args: HandleArgs) -> Result<()> {
                 deadline.as_secs()
             );
             flush_streams();
-            std::process::exit(EXIT_CODE_DEADLINE_EXCEEDED);
+            Ok(EXIT_CODE_DEADLINE_EXCEEDED)
         }
     }
 }
@@ -119,7 +127,7 @@ fn flush_streams() {
 
 async fn run_inner(args: HandleArgs) -> Result<i32> {
     // Run the sync stdin read on a blocking-pool thread so the outer
-    // `tokio::time::timeout` can fire even if the parent agent never closes
+    // `tokio::time::timeout_at` can fire even if the parent agent never closes
     // its end of the pipe. If we ran this on the async runtime thread,
     // `stdin.read_to_string` would block without yielding and the timer
     // would never be polled.

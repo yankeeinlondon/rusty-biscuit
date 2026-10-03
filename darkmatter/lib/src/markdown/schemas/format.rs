@@ -31,9 +31,10 @@
 //!
 //! `darkmatter-file` / `darkmatter-file-reference` are `Format`s (they see
 //! only the string) and the `x-darkmatter-*` semantic validators are custom
-//! `Keyword` implementations. `match(...)` is **not** a validation keyword: it is suggestion
-//! metadata carried on the SimplifiedSchema atom (`Constraint::Match` →
-//! completion), never lowered into the compiled JSON Schema.
+//! `Keyword` implementations. `match(...)` is suggestion metadata carried on
+//! the SimplifiedSchema atom (`Constraint::Match` → completion); it is
+//! validated for each declaring root-union arm, through the
+//! `x-darkmatter-match` keyword in [`super::file_match`].
 //!
 //! ## Examples
 //!
@@ -241,6 +242,10 @@ pub(crate) fn register_darkmatter_formats_in_context(
         // I/O, or context. Condition mode is the either-dialect superset (§Q2),
         // so a value valid in either expression dialect validates here.
         .with_format(DARKMATTER_EXPRESSION_FORMAT, |value: &str| {
+            // A stored literal token is data: its text is the final value.
+            if let Some(Ok(decoded)) = crate::markdown::literal_token::decode_leaf(value) {
+                return crate::markdown::compose::expression::parse_condition(&decoded).is_ok();
+            }
             if is_pending_expression_value(value) {
                 return true;
             }
@@ -257,13 +262,14 @@ pub(crate) fn register_darkmatter_formats_in_context(
 /// True when an `expression`-typed value still holds an unresolved `$(...)`
 /// shell expression or `{{ ... }}` template. Such a value is pending, not a
 /// final expression, so validation defers rather than eager-failing the parse.
+/// A whole-value literal token is stored data and never pending.
 ///
 /// Lexical only: nothing is evaluated, executed, or read. Neither marker is
 /// expression syntax, so deferral never masks a malformed final expression.
 /// Editor analysis must call this before parsing so it defers exactly where
 /// schema validation does.
 pub fn is_pending_expression_value(value: &str) -> bool {
-    value.contains("$(") || value.contains("{{")
+    crate::markdown::literal_token::holds_pending_syntax(value)
 }
 
 /// Validates a string by parsing it as a `FileReference` and confirming the
@@ -372,7 +378,7 @@ pub(crate) fn resolve_file_reference(
     resolve_file_reference_in_context(value, base_dir, fallback, None)
 }
 
-fn resolve_file_reference_in_context(
+pub(crate) fn resolve_file_reference_in_context(
     value: &str,
     base_dir: Option<&Path>,
     _fallback: Option<&Path>,
@@ -601,27 +607,41 @@ mod tests {
         tempfile::tempdir().expect("create temp dir")
     }
 
+    /// An external document (a `cwd` in another repository) has no
+    /// repository of its own unless a catalog supplies one: a bare reference
+    /// neither borrows the request repository nor rediscovers the child's.
+    /// The request repository stays reachable through the launch `@` scope.
     #[test]
-    fn eager_file_validation_reuses_request_repository() {
+    fn eager_file_validation_of_an_external_document_keeps_only_the_launch_scope() {
         let request_repo = temp_dir();
         let nested_repo = temp_dir();
         std::fs::create_dir_all(request_repo.path().join(".git")).unwrap();
-        std::fs::create_dir_all(nested_repo.path().join(".git/docs")).unwrap();
+        std::fs::create_dir_all(nested_repo.path().join(".git")).unwrap();
+        std::fs::create_dir_all(nested_repo.path().join("docs")).unwrap();
         let request_target = request_repo.path().join("spec.md");
         std::fs::write(&request_target, "request").unwrap();
+        std::fs::write(nested_repo.path().join("spec.md"), "child decoy").unwrap();
         let context = biscuit_file::FileResolutionContext::new(request_repo.path())
             .with_repository_root(request_repo.path())
-            .for_trusted_external_base(nested_repo.path().join("docs"));
+            .for_trusted_external_cwd(nested_repo.path().join("docs"));
+        assert_eq!(context.repository_root(), None);
 
-        let resolved = resolve_file_reference_in_context(
+        let bare = resolve_file_reference_in_context(
             "spec.md",
+            Some(&nested_repo.path().join("docs")),
+            None,
+            Some(&context),
+        );
+        assert!(matches!(bare, Err(FileReferenceFailure::NoMatch { .. })), "{bare:?}");
+
+        let magic = resolve_file_reference_in_context(
+            "@spec.md",
             Some(&nested_repo.path().join("docs")),
             None,
             Some(&context),
         )
         .unwrap();
-
-        assert_eq!(resolved, request_target);
+        assert_eq!(magic, request_target);
     }
 
     #[test]
@@ -1087,6 +1107,19 @@ mod schema_plus_content_formats {
         for final_value in ["a == b", "a ((", "", "$ (x)", "{ {x} }", "{x: 1}"] {
             assert!(!is_pending_expression_value(final_value), "{final_value:?}");
         }
+        // A stored literal token is data, whatever it holds; a malformed one
+        // stays pending so composition reports it.
+        let token = crate::markdown::literal_token::encode("{{ x }} && $(cmd)");
+        assert!(!is_pending_expression_value(&token));
+        assert!(is_pending_expression_value("{{!data:v9:YQ}}"));
+    }
+
+    #[test]
+    fn expression_validation_parses_the_text_a_literal_token_holds() {
+        use crate::markdown::literal_token::encode;
+        assert!(accepts("when: expression", &json!({ "when": encode("a == b") })));
+        assert!(!accepts("when: expression", &json!({ "when": encode("a ((") })));
+        assert!(!accepts("when: expression", &json!({ "when": encode("{{ x }}") })));
     }
 
     #[test]

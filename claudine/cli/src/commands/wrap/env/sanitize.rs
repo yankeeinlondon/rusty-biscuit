@@ -2,12 +2,15 @@
 //!
 //! Strips sensitive process-env keys (honoring `--include` and provider
 //! allow-lists), validates `--include` names, and redacts secret-looking CLI
-//! arguments before they are serialized into `AGENT_PARAMS`.
+//! arguments before they are displayed, traced, or serialized into
+//! `AGENT_PARAMS`.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::ffi::OsString;
 
 use claudine::invocation_context::EnvBaseline;
+pub(crate) use claudine::secrets::is_sensitive_key_name as is_sensitive_key;
+use claudine::secrets::{MASK, find_argument_secret_spans, has_credential_prefix, mask_argument_token};
 use color_eyre::eyre::{Result, bail};
 
 pub(crate) fn validate_include_names(include: &[String]) -> Result<HashSet<String>> {
@@ -116,105 +119,129 @@ pub(crate) fn ambient_sensitive_env() -> HashMap<OsString, OsString> {
         .collect()
 }
 
-pub(crate) fn is_sensitive_key(key: &str) -> bool {
-    let uppercase = key.to_ascii_uppercase();
-    uppercase.contains("API_KEY")
-        || uppercase.contains("TOKEN")
-        || uppercase.contains("PASSWORD")
-        || uppercase.contains("SECRET")
-        || uppercase.contains("PRIVATE_KEY")
-        || uppercase.contains("CREDENTIAL")
-        || uppercase.contains("ACCESS_KEY")
-        || uppercase.contains("PASSPHRASE")
-        || (uppercase.ends_with("_KEY") && !uppercase.contains("PUBLIC_KEY"))
-        || uppercase.ends_with("_AUTH")
-        || uppercase.ends_with("_PAT")
-        || uppercase.ends_with("_PWD")
-        || uppercase.ends_with("_PEM")
-}
-
 /// Redact values in CLI args that look like they contain secrets.
 ///
-/// Scans for patterns like `--api-key=sk-...` or `--token sk-...` and
-/// replaces the value portion with `****`. Matching is case-insensitive for
-/// flag names, and a few common short aliases (`-k`) and token-value shapes
-/// (`sk-`, `ghp_`, `xox[bp]-`, `AKIA`) are also redacted.
+/// Every display or metadata surface of an argument vector goes through this
+/// policy; the child itself always receives the original tokens.
+///
+/// - A sensitive flag (`--api-key`, `--token`, `-k`, …; case-insensitive)
+///   keeps its name and masks its value, attached (`--token=****`) or in the
+///   next token.
+/// - A short switch with a credential-shaped value attached keeps the switch
+///   (`-csk-…` becomes `-c****`).
+/// - Every other token keeps only what the shared argument recognizer
+///   ([`claudine::secrets::mask_argument_token`]) does not mask, so a bare
+///   credential, an embedded assignment (`api_key=sk-…`), and a long attached
+///   value (`--config=sk-…`) are masked too.
 pub(crate) fn redact_sensitive_args(args: &[String]) -> Vec<String> {
-    let sensitive_prefixes: &[&str] = &[
-        "--api-key",
-        "--apikey",
-        "--token",
-        "--secret",
-        "--password",
-        "--credential",
-        "--access-key",
-        "--accesskey",
-        "--private-key",
-        "--privatekey",
-        "--passphrase",
-        "--bearer",
-        "-k",
-    ];
+    redact_args(args).into_iter().map(|arg| arg.shown).collect()
+}
 
+/// The original values [`redact_sensitive_args`] masks in `args`, so text that
+/// echoes one of them without its flag can be masked too.
+pub(crate) fn sensitive_arg_values(args: &[String]) -> Vec<String> {
+    redact_args(args)
+        .into_iter()
+        .flat_map(|arg| arg.secrets)
+        .collect()
+}
+
+/// One token as displays show it, and the original secret text it hides.
+struct RedactedArg {
+    shown: String,
+    secrets: Vec<String>,
+}
+
+impl RedactedArg {
+    fn kept(arg: &str) -> Self {
+        Self {
+            shown: arg.to_string(),
+            secrets: Vec::new(),
+        }
+    }
+
+    /// `arg` with everything from byte `at` masked.
+    fn masked_from(arg: &str, at: usize) -> Self {
+        Self {
+            shown: format!("{}{MASK}", &arg[..at]),
+            secrets: vec![arg[at..].to_string()],
+        }
+    }
+}
+
+const SENSITIVE_FLAGS: &[&str] = &[
+    "--api-key",
+    "--apikey",
+    "--token",
+    "--secret",
+    "--password",
+    "--credential",
+    "--access-key",
+    "--accesskey",
+    "--private-key",
+    "--privatekey",
+    "--passphrase",
+    "--bearer",
+    "-k",
+];
+
+fn is_sensitive_flag(flag: &str) -> bool {
+    let flag = flag.to_ascii_lowercase();
+    SENSITIVE_FLAGS.contains(&flag.as_str())
+}
+
+fn redact_args(args: &[String]) -> Vec<RedactedArg> {
     let mut result = Vec::with_capacity(args.len());
     let mut redact_next = false;
 
     for arg in args {
         if redact_next {
-            result.push("****".to_string());
             redact_next = false;
+            result.push(RedactedArg::masked_from(arg, 0));
             continue;
         }
-
-        // Check for --flag=value format first, preserving the authored casing
-        // of the flag while redacting the value.
-        let mut matched = false;
-        if let Some(eq_pos) = arg.find('=') {
-            let (flag, _rest) = arg.split_at(eq_pos);
-            let flag_lower = flag.to_ascii_lowercase();
-            for prefix in sensitive_prefixes {
-                if flag_lower == *prefix {
-                    result.push(format!("{flag}=****"));
-                    matched = true;
-                    break;
-                }
-            }
-        }
-        if matched {
+        if let Some((flag, _)) = arg.split_once('=')
+            && is_sensitive_flag(flag)
+        {
+            result.push(RedactedArg::masked_from(arg, flag.len() + 1));
             continue;
         }
-
-        // Check for --flag value format.
-        let arg_lower = arg.to_ascii_lowercase();
-        for prefix in sensitive_prefixes {
-            if arg_lower == *prefix {
-                result.push(arg.clone());
-                redact_next = true;
-                matched = true;
-                break;
-            }
-        }
-        if matched {
+        if is_sensitive_flag(arg) {
+            redact_next = true;
+            result.push(RedactedArg::kept(arg));
             continue;
         }
-
-        // Value-shape redaction: bare secret-looking tokens.
-        if looks_like_secret_token(arg) {
-            result.push("****".to_string());
+        // Checked before the shared recognizer: `-csk-…` has no word boundary
+        // before `sk-`, so the catalog shapes never see the attached value.
+        if let Some(attached) = short_attached_value(arg)
+            && has_credential_prefix(attached)
+        {
+            result.push(RedactedArg::masked_from(arg, 2));
             continue;
         }
-
-        result.push(arg.clone());
+        let spans = find_argument_secret_spans(arg);
+        if spans.is_empty() {
+            result.push(RedactedArg::kept(arg));
+        } else {
+            result.push(RedactedArg {
+                shown: mask_argument_token(arg).into_owned(),
+                secrets: spans.into_iter().map(|span| arg[span].to_string()).collect(),
+            });
+        }
     }
 
     result
 }
 
-/// Returns `true` when a bare argument value starts with a known secret prefix.
-fn looks_like_secret_token(value: &str) -> bool {
-    value.starts_with("sk-")
-        || value.starts_with("ghp_")
-        || value.starts_with("xoxb-")
-        || value.starts_with("xoxp-")
-        || value.starts_with("AKIA")
+/// The text attached to a single-dash short switch (`secret` in `-csecret`),
+/// or `None` for anything else.
+fn short_attached_value(arg: &str) -> Option<&str> {
+    let rest = arg.strip_prefix('-')?;
+    if rest.starts_with('-') {
+        return None;
+    }
+    let mut chars = rest.chars();
+    let switch = chars.next()?;
+    let attached = chars.as_str();
+    (switch.is_ascii_alphanumeric() && !attached.is_empty()).then_some(attached)
 }

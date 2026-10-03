@@ -13,14 +13,12 @@ use super::super::lifecycle_executor::{ShellRunner, StackControl, StackExecution
 use super::super::lifecycle::runtime::{
     LifecycleCatchExecution, LifecycleCatchProtocol, LifecycleCatchResult, LifecycleCatchState,
 };
-use super::super::prepare::PrepareOptions;
-use super::super::types::{CompositionMode, LoopConfig, OnRateLimit, ResolvedCompositionSource};
+use super::super::types::{LoopConfig, OnRateLimit};
 use super::actions::ActionStaging;
-use super::config::resolve_loop_config;
 use super::expression::{LoopAmbient, LoopExpressionLookup, evaluate_condition};
-use super::seed::build_loop_seed;
 use super::types::{
     LoopExecutionOptions, LoopExecutionResult, LoopIterationContext, LoopIterationOutput,
+    insert_ambient_overrides,
 };
 use crate::stream::summary::RateLimitInfo;
 
@@ -37,275 +35,21 @@ const PAUSE_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_milli
 /// providers commonly return `429` for a moment after the nominal reset.
 const PAUSE_RESET_MARGIN: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// Execute a loop defined on a resolved composition source.
-///
-/// Returns `Ok(None)` when the source has no `loop` frontmatter.
-///
-/// `prepare_options` is used to build the loop seed: one compose pass is run
-/// before iteration 1 so control variables hold resolved, typed values. CLI
-/// `key=value` setters in `prepare_options.set_overrides` are preserved in
-/// the seed.
-///
-/// `mode` selects the seed compose pass and is forwarded to
-/// [`build_loop_seed`]. It must match the composition mode of the caller
-/// (`ChainedDocument` for `compose`, `InlineFrontmatterPrompt` for
-/// `inline-compose`) so seeding and iteration 1 resolve from the same body.
-///
-/// ## Errors
-///
-/// Returns parse/evaluation errors that prevent the engine from determining
-/// loop control flow. Per-iteration prompt/action failures are represented in
-/// [`LoopExecutionResult::error`] according to fail-fast semantics.
-pub fn execute_loop(
-    source: &ResolvedCompositionSource,
-    options: LoopExecutionOptions,
-    prepare_options: PrepareOptions,
-    mode: CompositionMode,
-    executor: impl FnMut(LoopIterationContext) -> Result<LoopIterationOutput, CompositionError>,
-) -> Result<Option<LoopExecutionResult>, CompositionError> {
-    let Some(config) = resolve_loop_config(source)? else {
-        return Ok(None);
-    };
-    let document_epoch = prepare_options.document_epoch.clone();
-    let initial_frontmatter = build_loop_seed(source, &config, prepare_options, mode)?;
-    if let Some(epoch) = document_epoch.as_ref() {
-        epoch.record_prepared_context_consumer(
-            crate::invocation_context::PreparedContextConsumer::LoopCondition,
-        );
-    }
-    execute_loop_with_config(
-        &source.resolved_path,
-        &config,
-        initial_frontmatter,
-        options,
-        executor,
-    )
-    .map(Some)
-}
-
-/// Execute a loop with an already parsed configuration and initial state.
-///
-/// This is the core engine used by tests and by higher-level CLI integration.
-///
-/// ## Errors
-///
-/// Returns condition evaluation errors. Runtime prompt/action failures are
-/// carried by the returned [`LoopExecutionResult`] so callers can report the
-/// final state together with the error.
-pub fn execute_loop_with_config(
-    prompt_path: &Path,
-    config: &LoopConfig,
-    initial_frontmatter: Map<String, Value>,
-    options: LoopExecutionOptions,
-    mut executor: impl FnMut(LoopIterationContext) -> Result<LoopIterationOutput, CompositionError>,
-) -> Result<LoopExecutionResult, CompositionError> {
-    let max_iterations = options
-        .max_iterations
-        .or(config.max_iterations)
-        .unwrap_or(DEFAULT_MAX_ITERATIONS);
-    let fail_fast = options.fail_fast.or(config.fail_fast).unwrap_or(true);
-    let on_rate_limit = options
-        .on_rate_limit
-        .or(config.on_rate_limit)
-        .unwrap_or_default();
-
-    // Read-side expression functions in loop conditions resolve against the
-    // prompt document's directory; the probe re-runs each iteration while this
-    // base stays fixed.
-    let base_dir = prompt_path.parent();
-
-    let mut frontmatter = initial_frontmatter;
-    let mut iteration_count = 0usize;
-    let mut last_output = String::new();
-    let mut last_exit_code = 0i32;
-
-    for iteration in 1..=max_iterations {
-        let is_last = compute_is_last(
-            prompt_path,
-            config,
-            &frontmatter,
-            iteration,
-            max_iterations,
-            &last_output,
-            last_exit_code,
-            None,
-        )?;
-        let ambient = LoopAmbient::new(
-            iteration,
-            iteration == 1,
-            is_last,
-            last_output.clone(),
-            last_exit_code,
-        );
-        let lookup = LoopExpressionLookup::new(&frontmatter, &ambient)
-            .with_base_dir(base_dir)
-            .with_file_ref_fallback_dir(None);
-        if !evaluate_condition(&config.condition, &lookup)? {
-            return Ok(LoopExecutionResult::success(
-                frontmatter,
-                iteration_count,
-                last_output,
-                last_exit_code,
-            ));
-        }
-
-        let context = LoopIterationContext {
-            iteration,
-            frontmatter: frontmatter.clone(),
-            ambient,
-        };
-        let output = match executor(context) {
-            Ok(output) => output,
-            Err(error) => {
-                last_output.clear();
-                last_exit_code = 1;
-                iteration_count += 1;
-                if fail_fast {
-                    return Ok(LoopExecutionResult::failure(
-                        frontmatter,
-                        iteration_count,
-                        last_output,
-                        last_exit_code,
-                        error,
-                    ));
-                }
-                continue;
-            }
-        };
-
-        last_output = output.output;
-        last_exit_code = output.exit_code;
-        iteration_count += 1;
-        let iteration_rate_limit = output.rate_limit.clone();
-        let iteration_provider = output.provider_id.clone();
-        let iteration_model = output.model_id.clone();
-
-        if let Some(error) = output.error {
-            if fail_fast {
-                return Ok(LoopExecutionResult::failure(
-                    frontmatter,
-                    iteration_count,
-                    last_output,
-                    last_exit_code,
-                    error,
-                ));
-            }
-            continue;
-        }
-
-        // Apply the rate-limit policy when the iteration completed and a
-        // throttling signal was attached. Skipped on the very last
-        // iteration because the loop is about to exit anyway — pausing or
-        // aborting would just delay (or falsely fail) a clean finish.
-        if !is_last {
-            match decide_rate_limit_action(
-                iteration_rate_limit.as_ref(),
-                on_rate_limit,
-                prompt_path,
-                iteration,
-                iteration_provider,
-                iteration_model,
-                options.interrupt_check,
-                options.pause_reset_margin.unwrap_or(PAUSE_RESET_MARGIN),
-            ) {
-                RateLimitOutcome::Proceed => {}
-                RateLimitOutcome::Interrupted => {
-                    // Caller's wrapped executor will short-circuit the
-                    // next iteration and produce the LoopInterrupted
-                    // error, so we just continue the loop here.
-                }
-                RateLimitOutcome::Abort(error) => {
-                    return Ok(LoopExecutionResult::failure(
-                        frontmatter,
-                        iteration_count,
-                        last_output,
-                        last_exit_code,
-                        error,
-                    ));
-                }
-            }
-        }
-
-        // Build a post-executor lookup so action-time templates resolve
-        // against the iteration that just ran: ambient `_loop_count`,
-        // `_loop_is_first`, `_loop_is_last` reflect this iteration, while
-        // `_loop_last_output` and `_loop_last_exit_code` reflect what the
-        // executor produced moments ago.
-        let post_ambient = LoopAmbient::new(
-            iteration,
-            iteration == 1,
-            is_last,
-            last_output.clone(),
-            last_exit_code,
-        );
-        let post_lookup = LoopExpressionLookup::new(&frontmatter, &post_ambient)
-            .with_base_dir(base_dir)
-            .with_file_ref_fallback_dir(None);
-        match apply_actions(config, &frontmatter, iteration, Some(&post_lookup)) {
-            Ok(next_frontmatter) => frontmatter = next_frontmatter,
-            Err(error) => {
-                if fail_fast {
-                    return Ok(LoopExecutionResult::failure(
-                        frontmatter,
-                        iteration_count,
-                        last_output,
-                        last_exit_code,
-                        error,
-                    ));
-                }
-            }
-        }
-
-        if iteration == max_iterations
-            && should_continue_after_cap(
-                config,
-                &frontmatter,
-                iteration + 1,
-                &last_output,
-                last_exit_code,
-                LoopFileResolution {
-                    source_path: prompt_path,
-                    fallback_dir: None,
-                    context: None,
-                    prepared_context: None,
-                },
-            )?
-        {
-            return Ok(LoopExecutionResult::failure(
-                frontmatter,
-                iteration_count,
-                last_output,
-                last_exit_code,
-                CompositionError::LoopLimitExceeded {
-                    cap: max_iterations,
-                    prompt_path: PathBuf::from(prompt_path),
-                    iteration,
-                },
-            ));
-        }
-    }
-
-    Ok(LoopExecutionResult::success(
-        frontmatter,
-        iteration_count,
-        last_output,
-        last_exit_code,
-    ))
-}
-
 /// Execute a loop with integrated lifecycle events.
 ///
-/// This is the Phase 6 loop-gate driver. It emits `initialize` exactly once
-/// before the first iteration, delegates `start`/terminal/`finalize` emission
-/// to the provided executor, and runs the post-`finalize` loop gate in the
-/// required order:
+/// This is the only loop engine, and it is post-checked: every iteration runs
+/// before its condition is read, so a loop always runs at least once. It emits
+/// `initialize` exactly once before the first iteration, delegates
+/// `start`/terminal/`finalize` emission to the provided executor, and runs the
+/// post-`finalize` loop gate in the required order:
 ///
 /// 1. Loop lifecycle concerns (against pre-mutation frontmatter).
 /// 2. Evaluate `while`/`until` condition (against pre-mutation frontmatter).
 /// 3. Apply per-iteration mutations only when continuing.
 ///
-/// Loop concerns run on every gate pass, including the terminal pass that
-/// exits. Under `fail_fast: true`, iterations ending in `blocked` or `failure`
+/// Steps 1 and 2 read the same `_loop_*` values: those of the iteration that
+/// just finished. Loop concerns run on every gate pass, including the terminal
+/// pass that exits. Under `fail_fast: true`, iterations ending in `blocked` or `failure`
 /// emit `finalize` through the executor and then exit before the loop gate.
 /// Under `fail_fast: false`, failed iterations reach the loop gate.
 ///
@@ -526,6 +270,9 @@ where
     let mut iteration_count = 0usize;
     let mut last_output = String::new();
     let mut last_exit_code = 0i32;
+    // The prepared snapshot of the most recent iteration's run; the loop's
+    // starting snapshot until an iteration reports its own.
+    let mut run_context: Option<darkmatter::markdown::compose::ComposeContext> = None;
 
     for iteration in 1..=max_iterations {
         // Under post-finalize checking the current frontmatter is the
@@ -547,7 +294,7 @@ where
                     .with_base_dir(base_dir)
                     .with_file_ref_fallback_dir(lifecycle_ctx.launch_area)
                     .with_file_resolution_context(file_resolution_context, prompt_path)
-                    .with_prepared_context(lifecycle_ctx.context);
+                    .with_prepared_context(run_context.as_ref().or(lifecycle_ctx.context));
             !evaluate_condition(&config.condition, &pre_mutation_lookup)?
         };
         let ambient = LoopAmbient::new(
@@ -566,7 +313,7 @@ where
 
         // The executor is responsible for emitting start, the terminal event,
         // and finalize through the shared guard.
-        let output = match executor(context, &mut guard) {
+        let mut output = match executor(context, &mut guard) {
             Ok(output) => output,
             Err(error) => {
                 last_output.clear();
@@ -602,6 +349,16 @@ where
             )
             .with_handoff(handoff));
         }
+
+        if let Some(context) = output.context.take() {
+            run_context = Some(context);
+        }
+        // The gate after this iteration belongs to this iteration's run.
+        let iteration_lifecycle = LifecycleRuntimeContext {
+            context: run_context.as_ref().or(lifecycle_ctx.context),
+            ..*lifecycle_ctx
+        };
+        let lifecycle_ctx = &iteration_lifecycle;
 
         last_output = output.output;
         last_exit_code = output.exit_code;
@@ -678,21 +435,22 @@ where
             last_output.clone(),
             last_exit_code,
         );
-    match run_loop_gate(
-        config,
-        prompt_path,
-        &frontmatter,
-        &gate_ambient,
-        base_dir,
-        &mut guard,
-        lifecycle_ctx,
-        effect_engine,
-        shell_runner,
-        emitter,
-        loop_start,
-        file_resolution_context,
-        current_authority.clone(),
-    )? {
+        match run_loop_gate(
+            config,
+            prompt_path,
+            &frontmatter,
+            &gate_ambient,
+            fail_fast,
+            base_dir,
+            &mut guard,
+            lifecycle_ctx,
+            effect_engine,
+            shell_runner,
+            emitter,
+            loop_start,
+            file_resolution_context,
+            current_authority.clone(),
+        )? {
             LoopGateOutcome::Exit => {
                 return Ok(LoopExecutionResult::success(
                     frontmatter,
@@ -805,7 +563,9 @@ enum LoopGateOutcome {
 ///
 /// Executes loop lifecycle concerns against pre-mutation frontmatter, then
 /// evaluates the `while`/`until` condition, then applies mutations only if
-/// the loop should continue.
+/// the loop should continue. A failed action list commits nothing; it fails
+/// the loop under `fail_fast` and otherwise continues from the pre-action
+/// state.
 ///
 /// An explicit `error(...)` lifecycle action in the gate stack surfaces as
 /// [`StackControl::Error`] and converts the final outcome to failure
@@ -820,6 +580,7 @@ fn run_loop_gate(
     prompt_path: &Path,
     frontmatter: &Map<String, Value>,
     ambient: &LoopAmbient,
+    fail_fast: bool,
     base_dir: Option<&Path>,
     guard: &mut LifecycleRunGuard<'_>,
     lifecycle_ctx: &LifecycleRuntimeContext<'_>,
@@ -831,9 +592,15 @@ fn run_loop_gate(
     current: Option<darkmatter::markdown::compose::CurrentAuthority>,
 ) -> Result<LoopGateOutcome, CompositionError> {
     let timing = capture_loop_lifecycle_timing(loop_start);
+    // The gate's notification fields and stack read `_loop_*` from the same
+    // ambient the condition reads below: the iteration that just finished.
+    // Ambient values shadow same-named frontmatter keys, matching
+    // `LoopExpressionLookup`'s resolution order.
+    let mut gate_frontmatter = frontmatter.clone();
+    insert_ambient_overrides(&mut gate_frontmatter, ambient);
     let loop_ctx = build_loop_stack_context(
         LifecycleSignal::Loop,
-        frontmatter,
+        &gate_frontmatter,
         lifecycle_ctx,
         effect_engine,
         shell_runner,
@@ -946,8 +713,21 @@ fn run_loop_gate(
         return Ok(LoopGateOutcome::Exit);
     }
 
-    let next_frontmatter = apply_actions(config, frontmatter, ambient.iteration, Some(&lookup))?;
-    Ok(LoopGateOutcome::Continue(next_frontmatter))
+    // Actions stage atomically: a failed action list commits nothing. Under
+    // `fail_fast: false` the loop continues from the pre-action state.
+    match apply_actions(config, frontmatter, ambient.iteration, Some(&lookup)) {
+        Ok(next_frontmatter) => Ok(LoopGateOutcome::Continue(next_frontmatter)),
+        Err(error) if fail_fast => Ok(LoopGateOutcome::Fail(error)),
+        Err(error) => {
+            tracing::warn!(
+                source_path = %prompt_path.display(),
+                iteration = ambient.iteration,
+                %error,
+                "loop action failed under `fail_fast: false`; continuing from the pre-action state"
+            );
+            Ok(LoopGateOutcome::Continue(frontmatter.clone()))
+        }
+    }
 }
 
 /// Build a stack execution context for loop lifecycle events.
@@ -970,6 +750,7 @@ fn build_loop_stack_context<'a>(
 ) -> StackExecutionContext<'a> {
     StackExecutionContext {
         signal,
+        scope: None,
         frontmatter,
         // The loop engine fires a single `loop` gate concern per iteration and
         // threads frontmatter across iterations via `apply_actions` /
@@ -981,7 +762,8 @@ fn build_loop_stack_context<'a>(
         runtime_state: None,
         err: None,
         timing,
-        current,
+        // Each call builds one event's context: one `current` observation.
+        current: current.as_ref().map(darkmatter::markdown::compose::CurrentAuthority::memoized),
         // A loop gate is not inside a sequence group; `group.*` has no scope
         // here.
         group: None,
@@ -1116,63 +898,6 @@ fn apply_actions(
         stage.apply_action(action, index + 1, lookup)?;
     }
     Ok(stage.commit_map())
-}
-
-#[allow(clippy::too_many_arguments)]
-fn compute_is_last(
-    prompt_path: &Path,
-    config: &LoopConfig,
-    frontmatter: &Map<String, Value>,
-    iteration: usize,
-    max_iterations: usize,
-    last_output: &str,
-    last_exit_code: i32,
-    file_ref_fallback_dir: Option<&Path>,
-) -> Result<bool, CompositionError> {
-    if iteration == max_iterations {
-        return Ok(true);
-    }
-
-    let base_dir = prompt_path.parent();
-
-    // Speculative is_last computation: render templates against the
-    // pre-iteration state. `_loop_last_output` / `_loop_last_exit_code`
-    // here reflect the prior iteration (or the seed values on iteration 1)
-    // because the current iteration has not run yet.
-    let speculative_ambient = LoopAmbient::new(
-        iteration,
-        iteration == 1,
-        iteration == max_iterations,
-        last_output.to_string(),
-        last_exit_code,
-    );
-    let speculative_lookup = LoopExpressionLookup::new(frontmatter, &speculative_ambient)
-        .with_base_dir(base_dir)
-        .with_file_ref_fallback_dir(file_ref_fallback_dir);
-    let Ok(next_frontmatter) =
-        apply_actions(config, frontmatter, iteration, Some(&speculative_lookup))
-    else {
-        return Ok(false);
-    };
-    let next_ambient = LoopAmbient::new(
-        iteration + 1,
-        false,
-        iteration + 1 == max_iterations,
-        last_output,
-        last_exit_code,
-    );
-    let lookup = LoopExpressionLookup::new(&next_frontmatter, &next_ambient)
-        .with_base_dir(base_dir)
-        .with_file_ref_fallback_dir(file_ref_fallback_dir);
-    evaluate_condition(&config.condition, &lookup)
-        .map(|will_continue| !will_continue)
-        .map_err(|error| match error {
-            CompositionError::LoopInvalid(message) => CompositionError::LoopInvalid(format!(
-                "failed to compute loop is_last for {} at iteration {iteration}: {message}",
-                biscuit_file::to_portable_string(prompt_path)
-            )),
-            other => other,
-        })
 }
 
 fn should_continue_after_cap(

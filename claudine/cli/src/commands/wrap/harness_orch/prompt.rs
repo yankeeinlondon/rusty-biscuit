@@ -159,18 +159,9 @@ fn harness_prepare_options(
     child_cwd: &Path,
 ) -> claudine::composition::PrepareOptions {
     let mut input_layers = state.input_layers.clone();
-    let mut caller_values = serde_json::Map::new();
-    for (key, value) in &state.overlay {
-        if !value.is_null() {
-            caller_values.insert(key.clone(), value.clone());
-        }
-    }
-    if let Some(serde_json::Value::Object(explicit)) = input_layers.set_overrides.as_ref() {
-        caller_values.extend(explicit.clone());
-    }
-    let caller_values = serde_json::Value::Object(caller_values);
-    input_layers.set_overrides = Some(claudine::composition::layered_set_overrides(
-        Some(&caller_values),
+    let base = input_layers.layered_overrides();
+    input_layers.set_layered_overrides(claudine::composition::layered_set_overrides(
+        base,
         Some(&state.runtime_state.snapshot()),
         None,
     ));
@@ -224,6 +215,10 @@ fn harness_prepare_options(
     let mut options = input_layers.apply_to(claudine::composition::PrepareOptions {
         invocation_context: state.invocation_context.clone(),
         shell_working_directory: Some(child_cwd.to_path_buf()),
+        // The immediate `proxy.with:` overlay, re-applied as a data layer so a
+        // retry, resume, or in-place adoption composes it exactly as the first
+        // preparation did.
+        proxy_overlay: state.overlay.clone(),
         ..claudine::composition::PrepareOptions::default()
     });
     if let Some((context, file_resolution)) = propagated {

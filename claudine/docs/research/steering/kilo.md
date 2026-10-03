@@ -1,6 +1,6 @@
 ---
 "$schema": "./_schema.yaml"
-schema_revision: 3
+schema_revision: 4
 provider: kilo
 created: 2026-09-08
 last_updated: 2026-09-08
@@ -1295,6 +1295,7 @@ gaps:
   next_check: When a released examined binary exposes V2, inspect its OpenAPI/source
     and test migration, receipts, active snapshots, and compatibility separately.
 changes:
+- "Migrated to schema revision 4 on 2026-09-28: verification rows gained stable ids and typed assertion kinds; no provider facts changed."
 - Initial Kilo steering report under schema revision 2.
 - Separated the 24 ordinary baseline combinations from a future managed authenticated
   HTTP-server profile.

@@ -5,7 +5,9 @@
 //! [`local_endpoint`] names it — and carries the `Ping` / `Status` round-trip,
 //! the session-log document model ([`session_log`]) with its append/read RPC
 //! surface over the daemon's redb-backed Loro persistence and DuckDB
-//! projection, and the pairing and sync operations.
+//! projection, the pairing and sync operations, and the in-memory,
+//! local-only steering control surface (`SteeringControl`,
+//! `ListManagedTargets`, `RouteSteering`).
 
 pub mod document;
 pub mod envelope;
@@ -45,6 +47,12 @@ pub use proto::{
     SyncChunkOutcome, SyncDelta, SyncEnd, SyncError, SyncFrame, SyncHello, SyncWithPeerRequest,
     SyncWithPeerResponse, sync_frame,
 };
+pub use proto::{
+    ControlAccepted, ListManagedTargetsRequest, ListManagedTargetsResponse, ManagedTargetInfo,
+    RouteOutcome, RouteSteeringRequest, RouteSteeringResponse, SteeringControlDown,
+    SteeringControlUp, SteeringDelivery, SteeringReply, TargetBinding, steering_control_down,
+    steering_control_up,
+};
 
 pub use document::{
     CAPABILITY_DOMAIN, DocumentId, DocumentIdParseError, REPOS_DOMAIN, SESSION_DOMAIN,
@@ -67,6 +75,11 @@ pub use session_log::{
     ChunkConfig, ChunkId, ChunkIdParseError, ChunkMetadata, DEFAULT_MAX_BYTES_PER_CHUNK,
     DEFAULT_MAX_ENTRIES_PER_CHUNK, Entry,
 };
+
+/// Longest `RouteSteering` wait a caller may request, in milliseconds. It
+/// covers a consented interruption (cancellation plus submission deadlines)
+/// with transport slack; routing is never a long-lived wait.
+pub const MAX_ROUTE_DEADLINE_MS: u32 = 30_000;
 
 /// Semver string of the `rendezvous-core` crate, surfaced so the daemon
 /// and clients can report a single shared version in protocol responses.

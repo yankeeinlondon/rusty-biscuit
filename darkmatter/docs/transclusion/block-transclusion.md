@@ -82,6 +82,49 @@ The example showed a relative path used to the foreign file and this is the reco
     - and by the time the _transclusion_ stage was reached this reference to an ENV variable would have been replaced with the value of that ENV variable.
     - this strategy of file referencing will typically result in an absolute path but with an abstraction layer that makes it potentially more portable then a static absolute path.
 
+### File Trees
+
+Every document has a **tree root** (`base_dir`): the directory its relative references (`./x.md`, `../x.md`, `x.md`) may move around in but not leave. A relative reference whose target lands outside the tree root is an error, not a missing file:
+
+```text
+repo/                    ← tree root of every document inside the repository
+├── shared.md
+└── docs/
+    └── guide.md         ::file ../shared.md       → repo/shared.md        (inside: fine)
+                         ::file ../../outside.md   → error: leaves repo/   (outside)
+```
+
+The tree root is chosen by the first rule that applies:
+
+1. the **repository** the document is in;
+2. a root the host supplied explicitly;
+3. the deepest configured **vault** that contains the document;
+4. the **anchor of the reference that opened the document**, when it is `~` (or a leading `{{VAR}}` file-reference anchor) and the anchor contains the document;
+5. otherwise the document's own directory. This last one is only a fallback: nothing said where the tree is, so it rejects nothing.
+
+Rule 4 is what gives a document outside any repository a boundary:
+
+```md
+<!-- work/parent.md (not in a repository) -->
+::file ~/Downloads/a.md
+```
+
+```md
+<!-- ~/Downloads/a.md: its tree root is ~ -->
+::file ../b.md            → ~/b.md (inside the home tree)
+::file ../../outside.md   → error: leaves ~
+```
+
+Opened as `::file /Users/me/Downloads/a.md` instead, the same `a.md` has no anchor, falls back to its own directory, and `../../outside.md` resolves. An anchor never replaces a tree that already contains the document: `~/repo/docs/a.md` inside the repository is still bounded by the repository.
+
+For an environment anchor, remember that the interpolation stage evaluates `{{ … }}` before transclusion runs (see "ENV based paths" above): in `::file {{NOTES}}/inbox/a.md`, `{{NOTES}}` is evaluated as a Darkmatter expression (an unknown name, so the target becomes `/inbox/a.md`) and no anchor is left. Write the anchor with triple braces so the composed directive keeps a literal `{{NOTES}}` for the file reference to resolve:
+
+```md
+::file "{{{NOTES}}}/inbox/a.md"   → a.md's tree root is $NOTES
+```
+
+A tree-root error follows the rules in [When an Included File Fails](#when-an-included-file-fails): inside a nested document it becomes a `_Could not transclude …_` notice and a warning in lenient mode, and stops the composition with `fail_fast`. `&` and `^` keep their own repository-only rule.
+
 ### Options and Conditionals
 
 The syntax we've covered so far for block file transclusion is just `::file <filename>` and that is how a block file transclusion MUST start but beyond that we offer a way to assign key/value pairs to modify the behavior of the transclusion. The full syntax looks something like: `::file <filename> <key>=<value> <key>=<value>` and the `keys` represent the various aspects you're allowed to modify. These include:
@@ -203,6 +246,26 @@ in this example:
 - if either one is then the condition result in a `true` outcome and the transclusion is executed
 
 For the full grammar, truthiness rules, supported operators, functions, and edge cases, see [Darkmatter Expressions](../topics/darkmatter-expressions.md).
+
+### When an Included File Fails
+
+An included file is composed as part of the same composition, so what happens when it fails depends on why it failed.
+
+- **A shell span fails the composition, exactly as it would inline.** A `::shell`, `::shell-block`, or frontmatter `$( … )` that fails without a handler (a non-zero exit with no `when_error`, a missing program, a timeout without `--allow-shell-timeout`) stops the composition, and the error names the included file. A command the author gave a fallback renders that fallback, as it does inline.
+- **Structural and context failures also stop it:** a cycle, the depth limit, a remote fetch that failed, a `ctx` value the composition never captured, and a command missing from the approved set.
+- **Any other failure is tolerated in lenient mode (`fail_fast` off, the default).** The included file is replaced by a visible `_Could not transclude `name`_` notice, a warning is reported, and the parent composes on. With `fail_fast` on, it stops the composition.
+
+```md
+<!-- facts.md -->
+::shell-block when_error="(unknown)"
+git rev-list --count origin/main..HEAD
+::end-block
+::shell-block
+just ci-local --plan
+::end-block
+```
+
+Transcluding `facts.md` with `git` working but `just` missing stops the composition with an error that names `facts.md`. With `just` present and the `git` command exiting non-zero, the first block renders `(unknown)` and the composition continues.
 
 ## Non Markdown Local Files
 

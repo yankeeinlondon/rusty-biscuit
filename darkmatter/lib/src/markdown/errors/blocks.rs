@@ -309,7 +309,7 @@ pub(crate) fn interpolation_block(
             // the on-disk path, or the resolved text + origin key for late
             // binding (DM2 event-time resolution has no stable file region).
             match source {
-                SourceRef::OnDisk(_) | SourceRef::OnDiskSpan { .. } => {
+                SourceRef::OnDisk(_) | SourceRef::OnDiskSpan { .. } | SourceRef::Supplied { .. } => {
                     push_on_disk_locus(&mut body, key, expression, source);
                 }
                 SourceRef::Effective {
@@ -333,7 +333,7 @@ pub(crate) fn interpolation_block(
             // the siblings of the expected path against its leaf name. Computed
             // here at render time only — the hot eval loop never touches disk.
             if matches!(diagnostic.kind, FileRefFailure::NotFound) {
-                let expected = diagnostic.base_dir.join(&diagnostic.reference);
+                let expected = diagnostic.cwd.join(&diagnostic.reference);
                 let suggestions = suggest_sibling_files(&expected, DEFAULT_MAX_SUGGESTIONS);
                 if !suggestions.is_empty() {
                     let mut hint = String::from("<b>Did you mean?</b>");
@@ -372,6 +372,7 @@ pub(crate) fn interpolation_block(
                         body.push(context.excerpt_prose(span.line(), 2, "markdown"));
                     }
                 }
+                SourceRef::Supplied { .. } => push_on_disk_locus(&mut body, key, expression, source),
                 _ => {}
             }
             let (headline, hint) = match cause {
@@ -389,6 +390,22 @@ pub(crate) fn interpolation_block(
                 .error_header(ErrorHeader::new("MarkdownError", headline))
                 .body(body)
                 .hint(hint)
+        }
+        ExpressionError::MalformedLiteralToken(reason) => {
+            let mut body = vec![Prose::new(format!(
+                "{scope} holds <dim>`{}`</dim>, which is not a valid literal token:\n\n{}",
+                Prose::escape_text(expression),
+                Prose::escape_text(&reason.to_string())
+            ))];
+            push_on_disk_locus(&mut body, key, expression, source);
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("MarkdownError", "malformed literal token"))
+                .body(body)
+                .hint(
+                    "A literal token stores one string as data and is written by tools, not \
+                     by hand. Restore the value the tool wrote, or replace the whole token \
+                     with ordinary text.",
+                )
         }
         other => {
             let mut body = vec![Prose::new(format!(
@@ -408,8 +425,9 @@ pub(crate) fn interpolation_block(
 /// Appends the on-disk locus of a failing expression: the linked file, the
 /// authored line and column when known ([`SourceRef::OnDiskSpan`]), and an
 /// excerpt — of the receiving frontmatter key for a keyed error, else of the
-/// authored body line. A late-binding [`SourceRef::Effective`] source has no
-/// locus and adds nothing.
+/// authored body line. A [`SourceRef::Supplied`] value names who supplied it
+/// instead of the document, and a late-binding [`SourceRef::Effective`] source
+/// has no locus and adds nothing.
 fn push_on_disk_locus(
     body: &mut Vec<Prose>,
     key: Option<&str>,
@@ -440,6 +458,12 @@ fn push_on_disk_locus(
             } else {
                 body.push(context.excerpt_prose(span.line(), 2, "markdown"));
             }
+        }
+        SourceRef::Supplied { supplier } => {
+            body.push(Prose::new(format!(
+                "The value came from {}, not from the document.",
+                Prose::escape_text(supplier)
+            )));
         }
         SourceRef::Effective { .. } => {}
     }
@@ -761,7 +785,7 @@ mod tests {
             function: "frontmatter",
             reference: "specs.md".to_string(),
             kind: FileRefFailure::NotFound,
-            base_dir: dir.path().to_path_buf(),
+            cwd: dir.path().to_path_buf(),
             fallback_dir: None,
             source: None,
             caller: None,
@@ -789,7 +813,7 @@ mod tests {
             function: "frontmatter",
             reference: "missing.md".to_string(),
             kind: FileRefFailure::Malformed,
-            base_dir: PathBuf::from("/repo"),
+            cwd: PathBuf::from("/repo"),
             fallback_dir: None,
             source: None,
             caller: None,
@@ -889,7 +913,7 @@ mod tests {
             function: "frontmatter",
             reference: "features/x/spec.md".to_string(),
             kind: FileRefFailure::NotFound,
-            base_dir: PathBuf::from("/repo"),
+            cwd: PathBuf::from("/repo"),
             fallback_dir: None,
             source: None,
             caller: None,

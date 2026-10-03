@@ -17,6 +17,7 @@ success:
               - success: "pull request ready: {{ frontmatter(report, 'pr_url') }}"
               - message: "🚀  pull request for `{{branch}}` is open and CI/CD is running: {{ frontmatter(report, 'pr_url') }}"
               - say: "The pull request is open and CI CD is running."
+              - stop
         - action:
               - message: |-
                     💥  could not open a pull request for `{{branch}}` in {{ ctx.area_description || ctx.repo }}; the branch is pushed, so `gh pr create` can still be run by hand

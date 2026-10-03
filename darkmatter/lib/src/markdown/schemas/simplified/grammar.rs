@@ -272,6 +272,76 @@ struct GrammarBug {
     span: Range<usize>,
 }
 
+// ── Lexical-mode boundaries ──────────────────────────────────────────────
+//
+// The grammar reads four kinds of text with different rules, and only an
+// argument list gives quotes meaning. These functions are the single statement
+// of where each non-type text ends; the parser and every structural reader of
+// decoded type expressions (`source::scan_expression`, the editor cursor) call
+// them rather than restating the rules. Each scans `bytes[start..end]`.
+
+/// Just past the closing quote of the argument string whose opening quote is
+/// at `start`, or `None` when it is unterminated. `\` escapes the next byte in
+/// either quote style, as [`Lexer::read_quoted`] reads it.
+pub(super) fn quoted_end(bytes: &[u8], start: usize, end: usize) -> Option<usize> {
+    let quote = bytes[start];
+    let mut index = start + 1;
+    while index < end {
+        match bytes[index] {
+            b'\\' => index += 1,
+            byte if byte == quote => return Some(index + 1),
+            _ => {}
+        }
+        index += 1;
+    }
+    None
+}
+
+/// The index of the `,` or `}` ending an inline-object property description
+/// that starts at `start`, or `end` when neither occurs.
+///
+/// Description prose nests `{`/`}` and `(`/`)` so a comma or brace inside them
+/// does not end it; quotes and brackets are prose. `Err` carries the index of
+/// an unbalanced `)`, which the parser rejects.
+pub(super) fn inline_description_end(bytes: &[u8], start: usize, end: usize) -> Result<usize, usize> {
+    let mut brace_depth = 0usize;
+    let mut paren_depth = 0usize;
+    for (index, &byte) in bytes.iter().enumerate().take(end).skip(start) {
+        match byte {
+            b'{' => brace_depth += 1,
+            b'}' if brace_depth == 0 => return Ok(index),
+            b'}' => brace_depth -= 1,
+            b'(' => paren_depth += 1,
+            b')' if paren_depth == 0 => return Err(index),
+            b')' => paren_depth -= 1,
+            b',' if brace_depth == 0 && paren_depth == 0 => return Ok(index),
+            _ => {}
+        }
+    }
+    Ok(end)
+}
+
+/// The index of the `,`, `}`, or `->` ending the imported file reference that
+/// starts at `start`, or `end` when none occurs. A reference is opaque: no
+/// punctuation inside it opens a quote or a nesting level.
+pub(super) fn file_reference_end(bytes: &[u8], start: usize, end: usize) -> usize {
+    (start..end)
+        .find(|&index| match bytes[index] {
+            b',' | b'}' => true,
+            b'-' => index + 1 < end && bytes[index + 1] == b'>',
+            _ => false,
+        })
+        .unwrap_or(end)
+}
+
+/// Just past the `>` closing the pattern key whose `<` is at `start`, or
+/// `None` when it is unterminated. The key body is opaque up to its first `>`.
+pub(super) fn pattern_key_end(bytes: &[u8], start: usize, end: usize) -> Option<usize> {
+    (start + 1..end)
+        .find(|&index| bytes[index] == b'>')
+        .map(|index| index + 1)
+}
+
 // ── Parser ───────────────────────────────────────────────────────────────
 
 /// Modes affect which tokens the lexer recognises.
@@ -648,14 +718,10 @@ impl<'a> Parser<'a> {
     /// it into a [`PatternKey`] (Feature C). The body runs to the first `>`.
     fn read_inline_pattern_key(&mut self) -> Result<(PatternKey, Range<usize>), SchemaError> {
         let start = self.lex.pos; // positioned at `<`
-        let mut pos = start + 1;
-        while pos < self.lex.bytes.len() && self.lex.bytes[pos] != b'>' {
-            pos += 1;
-        }
-        if pos >= self.lex.bytes.len() {
-            return self.err("unterminated pattern key (missing `>`)", start..pos);
-        }
-        pos += 1; // consume `>`
+        let len = self.lex.bytes.len();
+        let Some(pos) = pattern_key_end(self.lex.bytes, start, len) else {
+            return self.err("unterminated pattern key (missing `>`)", start..len);
+        };
         let raw = &self.src[start..pos];
         let key = PatternKey::parse(raw).map_err(|message| SchemaError::Grammar {
             property: self.property.to_string(),
@@ -719,9 +785,8 @@ impl<'a> Parser<'a> {
     }
 
     /// Reads a description text from the current position up to (but not
-    /// consuming) the next `,` or `}` at the current inline-object depth.
-    /// Tracks nested `{`/`}` and constraint `(`/`)` so commas and braces
-    /// inside nested structures do not terminate the description.
+    /// consuming) the next `,` or `}` at the current inline-object depth, as
+    /// [`inline_description_end`] bounds it.
     ///
     /// Decision #9 says: descriptions terminate at the next top-level comma
     /// or closing brace in the *current* inline object body. The caller is
@@ -729,34 +794,12 @@ impl<'a> Parser<'a> {
     fn read_inline_object_description(&mut self) -> Result<String, SchemaError> {
         let start = self.lex.pos;
         let bytes = self.lex.bytes;
-        let mut pos = start;
-        let mut brace_depth: usize = 0;
-        let mut paren_depth: usize = 0;
-        while pos < bytes.len() {
-            let b = bytes[pos];
-            match b {
-                b'{' => brace_depth += 1,
-                b'}' => {
-                    if brace_depth == 0 {
-                        break;
-                    }
-                    brace_depth -= 1;
-                }
-                b'(' => paren_depth += 1,
-                b')' => {
-                    if paren_depth == 0 {
-                        return self.err(
-                            "unbalanced `)` in inline object description",
-                            pos..pos + 1,
-                        );
-                    }
-                    paren_depth -= 1;
-                }
-                b',' if brace_depth == 0 && paren_depth == 0 => break,
-                _ => {}
+        let pos = match inline_description_end(bytes, start, bytes.len()) {
+            Ok(pos) => pos,
+            Err(pos) => {
+                return self.err("unbalanced `)` in inline object description", pos..pos + 1);
             }
-            pos += 1;
-        }
+        };
         let raw = &self.src[start..pos];
         let trimmed = raw.trim();
         if trimmed.is_empty() {
@@ -1038,23 +1081,14 @@ impl<'a> Parser<'a> {
     }
 
     /// Reads the file reference to the right of `@`. Runs to the end of the
-    /// current sub-expression: stops at `->` (description arrow), a top-level
-    /// `,` or `}` (inline-object terminators), or end of input.
+    /// current sub-expression, as [`file_reference_end`] bounds it: `->`
+    /// (description arrow), a `,` or `}` (inline-object terminators), or end
+    /// of input.
     fn read_fileref(&mut self) -> Result<String, SchemaError> {
         self.lex.skip_ws();
         let start = self.lex.pos;
         let bytes = self.lex.bytes;
-        let mut pos = start;
-        while pos < bytes.len() {
-            let b = bytes[pos];
-            if b == b',' || b == b'}' {
-                break;
-            }
-            if b == b'-' && bytes.get(pos + 1) == Some(&b'>') {
-                break;
-            }
-            pos += 1;
-        }
+        let pos = file_reference_end(bytes, start, bytes.len());
         let raw = self.src[start..pos].trim();
         if raw.is_empty() {
             return self.err("expected a file reference after `@`", start..pos);

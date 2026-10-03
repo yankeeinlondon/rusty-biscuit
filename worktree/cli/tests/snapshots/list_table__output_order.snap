@@ -22,9 +22,9 @@ expression: "labeled(vec![(\"with a graph\".into(), assemble(Some(graph), None))
 └───────────────────┴──────────────────────────────────┴──────────────────────┴───────────────────────────┘
 
  Worktree   ○ clean    ● uncommitted files    ● uncommitted source files
- Branch     └─ merges cleanly into parent    └─ conflicts with parent    └┄ parent deleted
- PRs as of 10 min ago
+ Branch     └─ merges cleanly into parent     └─ conflicts with parent    └┄ parent deleted
 <the git graph>
+ - PRs as of 10 min ago
  - running this command again will provide updated metrics; alternatively use the --refresh / -r flags to force refresh immediately
 
  - main is 7 commits behind origin/main; run  wt --ff  to fast-forward it.
@@ -52,8 +52,8 @@ expression: "labeled(vec![(\"with a graph\".into(), assemble(Some(graph), None))
 └───────────────────┴──────────────────────────────────┴──────────────────────┴───────────────────────────┘
 
  Worktree   ○ clean    ● uncommitted files    ● uncommitted source files
- Branch     └─ merges cleanly into parent    └─ conflicts with parent    └┄ parent deleted
- PRs as of 10 min ago
+ Branch     └─ merges cleanly into parent     └─ conflicts with parent    └┄ parent deleted
+ - PRs as of 10 min ago
  - running this command again will provide updated metrics; alternatively use the --refresh / -r flags to force refresh immediately
 
  - main is 7 commits behind origin/main; run  wt --ff  to fast-forward it.
@@ -81,9 +81,9 @@ expression: "labeled(vec![(\"with a graph\".into(), assemble(Some(graph), None))
 └───────────────────┴──────────────────────────────────┴──────────────────────┴───────────────────────────┘
 
  Worktree   ○ clean    ● uncommitted files    ● uncommitted source files
- Branch     └─ merges cleanly into parent    └─ conflicts with parent    └┄ parent deleted
- PRs as of 10 min ago
+ Branch     └─ merges cleanly into parent     └─ conflicts with parent    └┄ parent deleted
 <the git graph>
+ - PRs as of 10 min ago
  - running this command again will provide updated metrics; alternatively use the --refresh / -r flags to force refresh immediately
 <the verbose section>
 
@@ -112,8 +112,8 @@ expression: "labeled(vec![(\"with a graph\".into(), assemble(Some(graph), None))
 └───────────────────┴──────────────────────────────────┴──────────────────────┴───────────────────────────┘
 
  Worktree   ○ clean    ● uncommitted files    ● uncommitted source files
- Branch     └─ merges cleanly into parent    └─ conflicts with parent    └┄ parent deleted
- PRs as of 10 min ago
+ Branch     └─ merges cleanly into parent     └─ conflicts with parent    └┄ parent deleted
+ - PRs as of 10 min ago
  - running this command again will provide updated metrics; alternatively use the --refresh / -r flags to force refresh immediately
 <the verbose section>
 

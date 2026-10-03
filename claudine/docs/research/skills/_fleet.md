@@ -30,7 +30,7 @@ success:
               - message: "🎉  the **Agent Skills** research on **{{state.name}}** completed successfully"
 failure:
     message: "💥 the Agent Skills research on **{{state.name}}** failed to complete!"
-    warn: "The Agent Skills research on **{{state.name}}** failed to complete! (err: {{err.message}})"
+    warn: "The Agent Skills research on **{{state.name}}** failed to complete! (err: {{ err.msg }})"
 ---
 # Agent Skills Research on {{state.name}}
 

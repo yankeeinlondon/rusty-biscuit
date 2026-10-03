@@ -2,6 +2,7 @@ pub(crate) mod api_errors;
 pub(crate) mod assistant;
 pub(crate) mod error_report;
 pub(crate) mod error_walker;
+pub(crate) mod native_exit;
 pub(crate) mod switches;
 
 pub(crate) use api_errors::try_format_api_error;
@@ -128,7 +129,7 @@ pub(crate) fn log_wrapper_header(
     // For compose-based prompts, show the source file instead of the prompt text.
     // For static string prompts, show truncated prompt text as before.
     if let Some(filename) = compose_source_hint {
-        let prose_safe = filename.replace('<', "\\<");
+        let prose_safe = Prose::escape_text(filename);
         header_parts.push(
             Prose::new(format!(
                 "<dim><i>prompt sourced from <blue>{prose_safe}</blue></i></dim>"
@@ -144,7 +145,7 @@ pub(crate) fn log_wrapper_header(
         let term_width = term.width() as usize;
         let available = term_width.saturating_sub(used);
         let truncated = truncate_args(&escaped, available);
-        let prose_safe = truncated.replace('<', "\\<");
+        let prose_safe = Prose::escape_text(&truncated);
         header_parts.push(Prose::new(format!("<dim>{prose_safe}</dim>")).render(term));
     }
 
@@ -289,7 +290,7 @@ pub(crate) fn log_wrapper_env_details(
         for (key, value) in &env_plan.added {
             items.push(RenderableTerminalContent::from(Prose::new(format!(
                 "<green>{key}</green><dim>={}</dim>",
-                summarize_value(key, value)
+                Prose::escape_text(&summarize_value(key, value))
             ))));
         }
 
@@ -340,12 +341,16 @@ pub(crate) fn log_dry_run(
 
     // Full command line
     let cmd_parts: Vec<String> = std::iter::once(biscuit_file::to_portable_string(binary_path))
-        .chain(child_args.iter().map(|a| shell_escape(a)))
+        .chain(
+            crate::commands::wrap::env::redact_sensitive_args(child_args)
+                .iter()
+                .map(|a| shell_escape(a)),
+        )
         .collect();
     log::message(
         &Prose::new(format!(
             "<bold>Command:</bold> <dim>{}</dim>",
-            cmd_parts.join(" ")
+            Prose::escape_text(&cmd_parts.join(" "))
         ))
         .render(term),
     );
@@ -365,7 +370,8 @@ pub(crate) fn log_dry_run(
     }
     for (key, value) in &env_plan.added {
         items.push(RenderableTerminalContent::from(Prose::new(format!(
-            "<green>{key}</green><dim>={value}</dim>"
+            "<green>{key}</green><dim>={}</dim>",
+            Prose::escape_text(value)
         ))));
     }
     if items.is_empty() {

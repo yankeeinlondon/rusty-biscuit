@@ -47,7 +47,7 @@ away from their references or replace their content with placeholders.
 | DMLS architecture, protocol behavior, and rollout history | [dmls.md](dmls.md) |
 | Render tree, style lowering, disclosure blocks, code blocks | [rendering.md](rendering.md) |
 | Terminal rendering options | [terminal.md](terminal.md) |
-| Frontmatter model | [frontmatter.md](frontmatter.md) |
+| Frontmatter model, literal tokens, in-place leaf edits | [frontmatter.md](frontmatter.md) |
 | Error/status block conventions | [errors.md](errors.md) |
 | Document comparison | [comparison.md](comparison.md) |
 | Module layout | [structure.md](structure.md) |
@@ -258,10 +258,36 @@ rule lives in the lexer, never in `is_identifier_char`. Any cursor-side scan
 rather than add `-` to a character class, which would merge `foo--bar`.
 
 A `{{ … }}` that cannot be parsed or evaluated fails full-document
-composition regardless of `fail_fast`, including one a rescan finds in
-replacement output. `interpolate_text`/`interpolate_value` take an explicit
+composition regardless of `fail_fast`.
+
+**Inserted text is data.** Every authored span is scanned once. Produced text
+is never scanned again. This covers expression results, file reads, shell
+output, `{{{ }}}` results, data overrides, decoded tokens, and values a parent
+passes to a child. There is intentionally no fixed point:
+`note: "fixed {{{ area }}}"` renders `{{ note }}` as `fixed {{ area }}`. A
+template that relied on a rescan is rewritten at the source. Rules to keep:
+
+- Origin travels beside values. Frontmatter uses `compose/value_origin.rs`,
+  and the body uses `DataRanges`. A directive scanner reads
+  `parse_utils::structural_view`.
+- Frontmatter `$( … )` runs only when its *authored source* is a whole value.
+- Guards judge authored syntax, never flattened text.
+- `--set` (`with_set_overrides`) stays an authored template, and its failures
+  name the override (`SourceRef::Supplied`). Callers pass produced values
+  with `with_data_overrides` or `with_override_layers`.
+- A stored `"{{!data:v1:<base64url>}}"` (`markdown::literal_token`) is a data
+  string. Loaders keep it encoded, and readers call `decode_literal_tokens`.
+- A malformed token is a located, authoring-fatal `MalformedLiteralToken`.
+- Data is never schema-pending (`holds_pending_syntax`).
+- `hash::locate_frontmatter_leaves` finds a leaf's bytes for an in-place
+  write.
+
+Details are in [compose.md](compose.md#inserted-text-is-data) and
+[frontmatter.md](frontmatter.md#literal-tokens).
+
+`interpolate_text`/`interpolate_value` take an explicit
 `ExpressionFailurePolicy`. Pass `Strict` from document stages. Use `Lenient`
-only for `compose_subtree(..., Lenient)` and preflight discovery (see
+only for preflight discovery (see
 [compose.md](compose.md#error-handling)). The error carries the authored
 span (`SourceRef::OnDiskSpan`) whenever it is provable, including after an
 earlier stage rewrote the body and inside block (`|`, `>`), multi-line,
@@ -269,15 +295,32 @@ tagged, anchored, or aliased frontmatter scalars. `interpolation_block` renders 
 authored line and column for every cause, and
 `interpolation/fatality_characterization.rs` is the drift guard.
 
-A well-formed identifier that resolves to nothing warns as
-`dm.expression.unknown_identifier` (once per root per document) unless the
-author handled its absence (`x || d`, `x ? …`, `is_null(x)`) or the root is
-known to the final state, a caller input, or the effective schema. Read
-[compose.md](compose.md#unknown-identifiers-dmexpressionunknown_identifier)
+A well-formed identifier that resolves to nothing is an absent document
+property (`null`); a bare name never falls back to `ctx`. Compose reports it as
+the advisory `dm.expression.undeclared_property` (once per root per document)
+unless the author handled its absence (`x || d`, `x ? …`, `is_null(x)`) or the
+root is declared by the final state, a caller input, or the effective schema.
+Read
+[compose.md](compose.md#undeclared-properties-dmexpressionundeclared_property)
 before changing a runtime evaluation surface: new surfaces must observe
-through the shared `AbsenceScope`, not a new walk. DMLS reports the same code
-at `WARNING` through the static twin, `expression::static_variable_reads`
-(see [dmls.md](dmls.md#unknown-identifiers)).
+through the shared `AbsenceScope`, not a new walk. DMLS reports the same
+`dm.expression.undeclared_property` at `WARNING` through the static twin,
+`expression::static_variable_reads`, classified by `BindingView::baseline()`,
+and an unknown function as the `ERROR` `dm.expression.unknown_function` through
+`expression::validate_expression` (see
+[dmls.md](dmls.md#undeclared-properties-and-unknown-functions)).
+
+Hosts add globals (Claudine's `err`, `timing`, `group`) through the binding
+model in `expression/binding.rs`, never through a lookup override. A root
+resolves as reserved namespace → registered global (available, possibly
+`null`, or unavailable with a namespaced reason) → document property. Declare
+globals in an immutable `BindingView`, pair them with runtime entries through
+`EvaluationSession::associate` (rejects reserved names, omissions, and
+contradictions before any provider runs), check authored text passively with
+`prepare_value` + `validate_prepared` (every branch, no provider), and evaluate
+with `evaluate_prepared` or `SubtreeCompose::with_binding_view`. There is no
+strict mode and no root-membership hook. See
+[Host Bindings](../../../darkmatter/docs/topics/darkmatter-expressions.md#host-bindings).
 
 Each issue is reported once. A coded `ComposeWarning` family declares its
 identity in its constructor (`from_schema_advisory`,
@@ -290,9 +333,9 @@ report merges upward. Push new warnings through `add_warning`/`add_warnings`,
 not `report.warnings.push`. Membership is O(1) through a private
 `WarningIndex` cache: it indexes direct pushes lazily and rebuilds when the
 vector shrinks, but an element replaced in place is not seen.
-`interpolate_text` tracks a failed span across
-rescans and never re-evaluates it. A new coded family, such as
-`dm.expression.unknown_identifier`, adds a `WarningSubject` constructor
+`interpolate_text` scans once, so a failed span
+is reported once. A new coded family, such as
+`dm.expression.undeclared_property`, adds a `WarningSubject` constructor
 rather than a message-based check.
 
 Deterministic `md` integration tests must launch through

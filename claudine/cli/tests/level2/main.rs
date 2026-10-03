@@ -18,9 +18,15 @@ mod level2_auto_complete_operation_file;
 #[cfg(unix)]
 mod level2_context_capture;
 #[cfg(unix)]
+mod level2_drain_ctrl_c_kitty;
+#[cfg(unix)]
+mod level2_drain_ctrl_c_tmux;
+#[cfg(unix)]
 mod level2_dry_run_approval_capture;
 #[cfg(unix)]
 mod level2_dry_run_metadata_capture;
+#[cfg(unix)]
+mod level2_edit_interactive_capture;
 #[cfg(unix)]
 mod level2_explicit_operation_file_miss;
 #[cfg(unix)]
@@ -32,6 +38,8 @@ mod level2_initialize_generated_transclusion;
 #[cfg(unix)]
 mod level2_inline_compose_mismatch_capture;
 #[cfg(unix)]
+mod level2_inline_prompt_scrollback;
+#[cfg(unix)]
 mod level2_interrupt_feedback_capture;
 #[cfg(unix)]
 mod level2_invalid_file_reference_capture;
@@ -40,11 +48,15 @@ mod level2_lifecycle_action_forms;
 #[cfg(unix)]
 mod level2_lifecycle_control;
 #[cfg(unix)]
+mod level2_lifecycle_ctrl_c_tmux;
+#[cfg(unix)]
 mod level2_lifecycle_dispatch;
 #[cfg(unix)]
 mod level2_lifecycle_loop;
 #[cfg(unix)]
 mod level2_malformed_frontmatter_capture;
+#[cfg(unix)]
+mod level2_ownership_prompt_capture;
 #[cfg(unix)]
 mod level2_perf_capture;
 #[cfg(unix)]
@@ -56,6 +68,8 @@ mod level2_provider_overlay_capture;
 mod level2_removed_validation_key_capture;
 #[cfg(unix)]
 mod level2_schema_parse_capture;
+#[cfg(unix)]
+mod level2_sequence_review_screen;
 #[cfg(unix)]
 mod level2_sequence_task_stream_capture;
 #[cfg(unix)]

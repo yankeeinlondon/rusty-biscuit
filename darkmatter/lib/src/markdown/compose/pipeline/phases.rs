@@ -19,12 +19,15 @@ use super::super::{
 use tracing::{debug, info};
 
 use transclusion::{ApplyTarget, ResolvedTransclusion, SectionSlot, TransclusionEngine};
-use super::super::body_origin::BodyOrigin;
+use super::super::body_origin::BodyProvenance;
+use super::super::value_origin::DataPaths;
 
 impl Markdown {
-    /// Runs one inline-pre `operation`. `body_origin` maps the body back to
-    /// the loaded text; the stages that rewrite the body carry it forward and
-    /// body interpolation projects failure spans through it.
+    /// Runs one inline-pre `operation`. `body` records where each byte of the
+    /// body came from: every stage that rewrites the body carries it forward,
+    /// every stage that scans for instructions skips its data, and body
+    /// interpolation projects failure spans through its origin map.
+    /// `frontmatter_data` names the frontmatter leaves that are data.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn run_inline_pre_operation(
         &mut self,
@@ -34,7 +37,8 @@ impl Markdown {
         runtime: &mut shell_expansion::types::PipelineRuntime,
         report: &mut ComposeReport,
         perf: &mut perf::PerfCollector,
-        body_origin: &mut Option<BodyOrigin>,
+        body: &mut BodyProvenance,
+        frontmatter_data: &DataPaths,
     ) -> MarkdownResult<()> {
         match operation {
             // FrontmatterInterpolation is handled before EffectiveState build,
@@ -44,35 +48,51 @@ impl Markdown {
             // not in the generic operation loop.
             ComposeOperation::FrontmatterShellExpansion => Ok(()),
             ComposeOperation::TextReplacement => {
-                report.replacements_applied =
-                    inline::replacement::run_stage(self, state, options, body_origin);
+                report.replacements_applied = inline::replacement::run_stage(
+                    self,
+                    state,
+                    options,
+                    body,
+                    frontmatter_data,
+                )?;
                 Ok(())
             }
             ComposeOperation::PageBlocks => {
-                inline::page_blocks::run_stage(self, state, options, runtime, report, body_origin)
+                inline::page_blocks::run_stage(self, state, options, runtime, report, body)
             }
             ComposeOperation::Interpolation => {
                 report.interpolations_applied =
-                    inline::interpolation::run_stage(self, state, options, runtime, report, body_origin.as_ref())
+                    inline::interpolation::run_stage(self, state, options, runtime, report, body)
                         .map_err(|e| e.with_on_disk_source(&self.full_source_context_for_errors()))?;
                 Ok(())
             }
             ComposeOperation::ShellExpansion => {
-                inline::shell_expansion::run_stage(self, options, runtime, report, perf)
+                inline::shell_expansion::run_stage(self, options, runtime, report, perf, body)
             }
             ComposeOperation::ShellBlocks => {
                 let sb_ctx = self.full_source_context_for_errors();
                 let line_offset = self.frontmatter_line_count();
-                shell_blocks::run_shell_blocks_stage_for_markdown(
-                    &mut self.content,
+                body.data.ensure_describes(&self.content)?;
+                let (new_content, stage_report, edits) = shell_blocks::run_shell_blocks_stage_in(
+                    &self.content,
+                    Some(&body.data),
                     options,
                     &mut runtime.shell,
-                    report,
                     &sb_ctx,
                     line_offset,
-                )
+                )?;
+                body.advance(&self.content, &edits, &new_content)?;
+                self.content = new_content;
+                report.shell_blocks_applied += stage_report.shell_blocks_applied;
+                report.shell_approvals_used += stage_report.shell_approvals_used;
+                report.warnings.extend(stage_report.warnings);
+                Ok(())
             }
-            ComposeOperation::LinkResolve => link_resolve::link_resolve(self, options, report),
+            ComposeOperation::LinkResolve => {
+                let before = self.content.clone();
+                let edits = link_resolve::link_resolve_with_edits(self, options, report)?;
+                body.advance(&before, &edits, &self.content)
+            }
             _ => Ok(()),
         }
     }
@@ -175,6 +195,12 @@ impl Markdown {
         }
     }
 
+    /// Runs the transclusion phase.
+    ///
+    /// `body` is consumed: the directive parse is the last scan of this
+    /// document's body for instructions, so provenance ends here. A directive
+    /// inside data is not a directive.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn run_transclusion_phase(
         &mut self,
         operations: &[ComposeOperation],
@@ -183,6 +209,7 @@ impl Markdown {
         runtime: &mut shell_expansion::types::PipelineRuntime,
         report: &mut ComposeReport,
         perf_collector: &mut perf::PerfCollector,
+        body: BodyProvenance,
     ) -> MarkdownResult<()> {
         use rayon::prelude::*;
 
@@ -192,6 +219,8 @@ impl Markdown {
 
         info!(operations = ?operations, "compose: starting transclusion phase");
         let parse_start = perf_collector.is_enabled().then(std::time::Instant::now);
+        body.data.ensure_describes(&self.content)?;
+        let data = Some(&body.data);
 
         let parsed_directives = if operations.iter().any(|op| {
             matches!(
@@ -199,9 +228,11 @@ impl Markdown {
                 ComposeOperation::BlockTransclusion | ComposeOperation::CodeTransclusion
             )
         }) {
-            Some(transclusion::parse_directives(
+            Some(transclusion::parse_directives_in(
                 &self.content,
+                data,
                 self.source_context_for_errors(),
+                0,
             )?)
         } else {
             None
@@ -217,13 +248,13 @@ impl Markdown {
         };
 
         let toc_directives = if operations.contains(&ComposeOperation::TocLinking) {
-            Some(toc_linking::parse_directives(&self.content)?)
+            Some(toc_linking::parse_directives_in(&self.content, data)?)
         } else {
             None
         };
 
         let file_links_directives = if operations.contains(&ComposeOperation::FileLinks) {
-            Some(file_links::parse_file_links_directives(&self.content)?)
+            Some(file_links::parse_file_links_directives_in(&self.content, data)?)
         } else {
             None
         };
@@ -386,20 +417,7 @@ impl Markdown {
                 Ok(resolved) => resolved,
                 Err(failure) => {
                     let (anchor, error) = *failure;
-                    // A child that cannot read its runtime context would be
-                    // replaced by a notice: the partially composed document
-                    // the missing-capture contract forbids.
-                    let is_structural = matches!(
-                        error,
-                        MarkdownError::Transclusion(ref inner)
-                            if matches!(
-                                inner.as_ref(),
-                                transclusion::TransclusionError::CycleDetected { .. }
-                                    | transclusion::TransclusionError::MaxDepthExceeded { .. }
-                                    | transclusion::TransclusionError::RemoteFetchFailed { .. }
-                            )
-                    ) || error.missing_runtime_context().is_some();
-                    if is_structural || options.fail_fast {
+                    if transclusion_failure_is_fatal(&error) || options.fail_fast {
                         return Err(error);
                     }
                     // Tolerating the failure is a promise that the output stays
@@ -531,5 +549,106 @@ impl Markdown {
             ""
         };
         format!("{indent}{notice}{newline}")
+    }
+}
+
+/// Whether a transcluded child's failure must fail the compose instead of
+/// being replaced by a notice.
+///
+/// A child that cannot read its runtime context would leave the partially
+/// composed document the missing-capture contract forbids. A child command
+/// missing from the approval set is a broken pre-flight invariant, not a
+/// failure an author can tolerate.
+fn transclusion_failure_is_fatal(error: &MarkdownError) -> bool {
+    matches!(
+        error,
+        MarkdownError::Transclusion(inner)
+            if matches!(
+                inner.as_ref(),
+                transclusion::TransclusionError::CycleDetected { .. }
+                    | transclusion::TransclusionError::MaxDepthExceeded { .. }
+                    | transclusion::TransclusionError::RemoteFetchFailed { .. }
+            )
+    ) || error.missing_runtime_context().is_some()
+        || error.pre_approval_violation().is_some()
+        || error.shell_span_failure()
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+    use crate::markdown::compose::ShellBlockError;
+    use crate::markdown::compose::shell_blocks::types::SourceExcerpt;
+    use crate::markdown::compose::shell_expansion::types::{ShellCommandOrigin, ShellExpansionError};
+
+    /// A `NotPreApproved` for `echo main`, as execution raises it.
+    pub(crate) fn not_pre_approved() -> ShellExpansionError {
+        ShellExpansionError::NotPreApproved {
+            ctx: Box::new(biscuit_terminal::errors::SourceContext::new(
+                "part.md".into(),
+                "part.md".into(),
+                "echo main\n",
+            )),
+            command: "echo main".to_string(),
+            origin: ShellCommandOrigin::Body { line: 1 },
+            source_desc: " (in part.md)".to_string(),
+        }
+    }
+
+    /// The same failure as a `::shell-block` command, where a `when_error`
+    /// fallback would apply to an ordinary command failure.
+    pub(crate) fn not_pre_approved_in_shell_block() -> MarkdownError {
+        MarkdownError::from(ShellBlockError::Command {
+            block_start_line: 1,
+            command_line: 2,
+            partial_output: Box::default(),
+            excerpt: SourceExcerpt::from_text("echo main\n", 2, 2, 1),
+            source: Box::new(not_pre_approved()),
+            source_file: None,
+        })
+    }
+
+    #[test]
+    fn a_pre_approval_violation_in_a_child_is_fatal() {
+        for error in [
+            MarkdownError::from(not_pre_approved()),
+            not_pre_approved_in_shell_block(),
+        ] {
+            assert!(error.pre_approval_violation().is_some(), "{error:?}");
+            assert!(transclusion_failure_is_fatal(&error), "{error:?}");
+        }
+    }
+
+    #[test]
+    fn a_child_shell_failure_is_fatal() {
+        let not_found = || ShellExpansionError::CommandNotFound {
+            ctx: Box::new(biscuit_terminal::errors::SourceContext::new(
+                "part.md".into(),
+                "part.md".into(),
+                "nope\n",
+            )),
+            command: "nope".to_string(),
+            origin: ShellCommandOrigin::Body { line: 1 },
+        };
+        let in_block = MarkdownError::from(ShellBlockError::Command {
+            block_start_line: 1,
+            command_line: 2,
+            partial_output: Box::default(),
+            excerpt: SourceExcerpt::from_text("nope\n", 2, 2, 1),
+            source: Box::new(not_found()),
+            source_file: None,
+        });
+        for error in [MarkdownError::from(not_found()), in_block] {
+            assert!(error.pre_approval_violation().is_none(), "{error:?}");
+            assert!(error.shell_span_failure(), "{error:?}");
+            assert!(transclusion_failure_is_fatal(&error), "{error:?}");
+        }
+    }
+
+    #[test]
+    fn an_ordinary_child_failure_stays_tolerable() {
+        let error = MarkdownError::Transform("ordinary".to_string());
+        assert!(!error.shell_span_failure());
+        assert!(!transclusion_failure_is_fatal(&error));
     }
 }

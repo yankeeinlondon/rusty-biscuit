@@ -1,9 +1,9 @@
 ---
 "$schema": "./_schema.yaml"
-schema_revision: 3
+schema_revision: 4
 provider: codex
 created: 2026-09-08
-last_updated: 2026-09-08
+last_updated: 2026-09-28
 agent: codex
 model: gpt-5.6-sol
 reasoning_effort: low
@@ -11,6 +11,9 @@ versions_examined:
 - Codex CLI 0.153.4 (local macOS installation and generated experimental app-server
   schema)
 - openai/codex main app-server protocol documentation observed 2026-09-08
+- Codex CLI 0.157.1 (local macOS installation, generated app-server schema, source
+  at rust-v0.157.1, and disposable Claudine-managed app-server sessions against a
+  scripted local model)
 launch_profiles:
 - id: ordinary-cli
   description: Ordinary Codex TUI or one-shot exec/resume launch without a deliberately
@@ -57,13 +60,14 @@ launch_profiles:
   - launch and retain app-server
   - initialize client
   - register endpoint and provider thread identity
-  preserves_extensions: unknown
-  preserves_skills: unknown
-  preserves_templates: unknown
+  preserves_extensions: 'yes'
+  preserves_skills: 'yes'
+  preserves_templates: 'yes'
   preserves_context: 'yes'
   evidence_ids:
   - official-app-server
   - local-help-0-153-4
+  - source-exec-client-0-157-1
 access_findings:
 - mechanism_id: app-server-steer
   os: macos
@@ -154,6 +158,7 @@ delivery_states:
 - mechanism_id: app-server-steer
   states:
   - accepted
+  - queued
   - delivered
   - refused
   - unknown
@@ -162,10 +167,12 @@ delivery_states:
     is echoed on the userMessage item. Success returns the active turn ID, but terminal
     processing requires later item/turn notifications. Revision 1 cannot represent
     persisted, processing, completed, stale-turn rejection, or the final-turn race
-    precisely.
+    precisely. In 0.157.1 the answer means the input joined the turn's pending input
+    (queued); the userMessage item carrying clientUserMessageId marks its delivery.
   evidence_ids:
   - official-app-server
   - local-schema-0-153-4
+  - live-app-server-0-157-1
 - mechanism_id: app-server-turn-start
   states:
   - accepted
@@ -253,6 +260,51 @@ evidence:
     silently creating a new turn would change the operation's meaning.
   limitations: Exact error code, persistence behavior, and retry contract were not
     live-tested or pinned to 0.153.4 source.
+- id: source-exec-client-0-157-1
+  method: source_code
+  location: https://github.com/openai/codex/blob/rust-v0.157.1/codex-rs/exec/src/lib.rs
+  version: rust-v0.157.1
+  observed_on: 2026-09-28
+  claim: codex exec is itself an in-process app-server client. It starts a thread
+    with approvalPolicy never, submits one turn/start, cancels MCP elicitations and
+    answers every other server request with JSON-RPC error -32000, ends at the task
+    turn's turn/completed, exits 1 when that turn failed or was interrupted or an
+    unretried error arrived, and refuses to run outside a Git repository without
+    --skip-git-repo-check or the bypass flag. Configuration, skills, prompts, context,
+    and MCP loading are therefore the same core in both interfaces.
+  limitations: Source reading of one release; parity of a managed app-server launch
+    still depends on mapping each exec option exactly, which Claudine does and otherwise
+    stays on exec.
+- id: local-schema-0-157-1
+  method: local_inspection
+  location: sanitized temporary output of codex app-server generate-ts --experimental
+    and generate-json-schema --experimental
+  version: 0.157.1
+  observed_on: 2026-09-28
+  claim: The installed protocol defines turn/steer {threadId, expectedTurnId, input,
+    clientUserMessageId} answered by {turnId}, turn/start answered by {turn}, turn/interrupt
+    answered by {}, thread/read with thread.status {idle, active, notLoaded, systemError},
+    and initialize answered by a userAgent naming the exact version.
+  limitations: Shape only.
+- id: live-app-server-0-157-1
+  method: disposable_test
+  location: claudine/features/2026-09-08-steering/verification/codex-macos-0.157.1.json
+  version: 0.157.1
+  observed_on: 2026-09-28
+  claim: 'Disposable Claudine-managed app-server sessions on macOS with an isolated
+    CODEX_HOME and a scripted local Responses-API model: a steer with the exact
+    expectedTurnId is answered with that turnId at once while a tool runs and reaches
+    the model at the turn''s next request, after the whole tool batch; a steer sent while
+    the model is generating is also answered at once and reaches the model when that
+    response ends, the turn then continuing with the steer; a wrong or stale expectedTurnId is refused (-32600) and never reaches
+    the model; an idle turn is refused by turn/steer ("no active turn to steer");
+    a repeated clientUserMessageId is delivered twice; turn/interrupt answers {} and
+    turn/completed reports interrupted within about 200 ms, the running tool stops,
+    and a replacement turn/start is accepted and reaches the model; closing stdin
+    during a turn makes the server exit 0 at once and abandons the turn.'
+  limitations: One macOS host, one release, a scripted model (no cloud inference),
+    stdio transport only, exec_command tools only; Linux and native Windows were not
+    run.
 discovery:
 - id: discover-macos-native
   os: macos
@@ -483,7 +535,7 @@ mechanisms:
   interface_status: documented
   transport: other
   conversation_effect: preserve_running_turn
-  delivery_boundary: unknown
+  delivery_boundary: end_of_tool_batch
   destination: An app-server-managed thread's exact active regular turn, addressed
     by both threadId and expectedTurnId over its owning initialized JSON-RPC connection.
   authentication: Stdio is inherited from the process owner; Unix socket security
@@ -497,15 +549,18 @@ mechanisms:
   response_format: Success identifies the same turn; userMessage items can echo clientUserMessageId.
     Later item and turn notifications establish processing/completion. Protocol errors
     reject invalid, stale, idle, or ineligible targets.
-  long_tool_behavior: The protocol accepts input for the active turn rather than starting
-    a new one. Exact incorporation timing during token generation or a long command/tool
-    requires disposable tests. A pending approval after the user message is accepted
-    is execution state, not a delivery hold.
+  long_tool_behavior: 'Observed in 0.157.1: while a tool runs the steer is answered at
+    once and reaches the model at the turn''s next request, after every tool in the
+    running batch finishes; the tool is not cancelled. While the model is generating,
+    the steer is also answered at once and reaches the model when that response ends;
+    the turn then continues with the steer even if the response was a final message. A pending approval after the user message
+    is accepted is execution state, not a delivery hold.'
   ordering: Submission ordering follows the app-server/core queue, but concurrent-client
     ordering and behavior when multiple steers race are not documented sufficiently
     for activation.
-  duplicate_handling: clientUserMessageId provides correlation; no documented idempotency
-    or duplicate-suppression guarantee was found.
+  duplicate_handling: clientUserMessageId provides correlation only. Observed in 0.157.1,
+    two steers with the same clientUserMessageId were both delivered, so a resend is
+    never safe.
   cancellation: No recall operation for accepted steer input was found; turn/interrupt
     cancels the whole active turn and is a separate operation.
   limits: Regular directly controlled active turns only; review/manual-compaction
@@ -517,6 +572,8 @@ mechanisms:
   - official-app-server
   - local-schema-0-153-4
   - final-race-inference
+  - local-schema-0-157-1
+  - live-app-server-0-157-1
   maturity: experimental
   initialization: Launch or connect to the retained app-server, complete initialize/initialized,
     then identify or resume the target thread.
@@ -535,9 +592,10 @@ mechanisms:
     socket transports.
   response_framing: Matching JSON-RPC response followed by asynchronous lifecycle
     notifications.
-  tool_batch_behavior: unknown
-  queue_behavior: Same-turn input, not a documented next-turn queue; exact incorporation
-    timing is unverified.
+  tool_batch_behavior: continue_all
+  queue_behavior: Same-turn pending input, drained in submission order at the turn's
+    next model request (observed in 0.157.1); not the separate thread/queue next-turn
+    queue.
   message_interpretation: provider_defined
   interruption_phases: []
   interruption_partial_failure: Not applicable.
@@ -571,6 +629,7 @@ mechanisms:
   evidence_ids:
   - official-app-server
   - local-schema-0-153-4
+  - live-app-server-0-157-1
   maturity: experimental
   initialization: Launch or connect to the retained app-server, complete initialize/initialized,
     then identify or resume the target thread.
@@ -619,6 +678,7 @@ mechanisms:
   evidence_ids:
   - official-app-server
   - final-race-inference
+  - live-app-server-0-157-1
   maturity: experimental
   initialization: Launch or connect to the retained app-server, complete initialize/initialized,
     then identify or resume the target thread.
@@ -655,6 +715,7 @@ compatibility:
   os: macos
   versions_verified:
   - 0.153.4 passive schema only
+  - 0.157.1 disposable managed sessions
   documented_version_bounds: No reliable introduction bound found.
   read_only_check: Check codex --version, generate the installed experimental app-server
     schema, require turn/steer fields, validate endpoint ownership/auth, initialize,
@@ -694,6 +755,7 @@ compatibility:
   os: macos
   versions_verified:
   - 0.153.4 passive schema only
+  - 0.157.1 disposable managed sessions
   documented_version_bounds: No reliable introduction bound found.
   read_only_check: Probe installed schema for thread/resume and turn/start; validate
     registered endpoint and idle thread.
@@ -728,6 +790,7 @@ compatibility:
   os: macos
   versions_verified:
   - 0.153.4 passive schema only
+  - 0.157.1 disposable managed sessions
   documented_version_bounds: No reliable introduction bound found.
   read_only_check: Probe exact-ID interrupt and turn/start schemas; validate current
     active turn before asking for approval.
@@ -759,7 +822,160 @@ compatibility:
   evidence_ids:
   - official-app-server
   profile_id: managed-app-server
-verification: []
+verification:
+- id: codex-app-server-steer-tool-01571
+  mechanism_id: app-server-steer
+  session_state: working
+  outcome: passed
+  assertion_kinds:
+  - target_identity
+  - acceptance_signal
+  - conversation_delivery
+  - delivery_boundary
+  - running_work_preserved
+  assertions:
+  - turn/steer names the bound thread and the running turn as expectedTurnId
+  - the answer names that turn before the model received the message
+  - the message reaches the model at the same turn's next request, after the running tool batch
+  - the running tool completes uncancelled and its result reaches the model with the message
+  limitations: Real Codex 0.157.1 on macOS through Claudine's production app-server session and codex-app-server adapter (revision 1), stdio transport, disposable CODEX_HOME, scripted local Responses-API model. No cloud inference, Linux, native Windows, other transports, review/compaction/subagent turns, or MCP servers.
+  evidence_ids:
+  - live-app-server-0-157-1
+  fixture: claudine/features/2026-09-08-steering/verification/codex-macos-0.157.1.json
+  launch_mode: non_interactive
+  origin: claudine
+  os: macos
+  profile_id: managed-app-server
+  provider_version: 0.157.1
+  tested_on: 2026-09-28
+- id: codex-app-server-steer-generation-01571
+  mechanism_id: app-server-steer
+  session_state: working
+  outcome: passed
+  assertion_kinds:
+  - acceptance_signal
+  - conversation_delivery
+  - delivery_boundary
+  - running_work_preserved
+  assertions:
+  - an automatic-origin steer sent during generation is answered within the two-second automatic deadline
+  - the turn continues past the final-message response with the steer instead of completing
+  limitations: Real Codex 0.157.1 on macOS through Claudine's production app-server session and codex-app-server adapter (revision 1), stdio transport, disposable CODEX_HOME, scripted local Responses-API model. No cloud inference, Linux, native Windows, other transports, review/compaction/subagent turns, or MCP servers. Generation was held open by the scripted model for three seconds.
+  evidence_ids:
+  - live-app-server-0-157-1
+  fixture: claudine/features/2026-09-08-steering/verification/codex-macos-0.157.1.json
+  launch_mode: non_interactive
+  origin: claudine
+  os: macos
+  profile_id: managed-app-server
+  provider_version: 0.157.1
+  tested_on: 2026-09-28
+- id: codex-app-server-steer-stale-01571
+  mechanism_id: app-server-steer
+  session_state: working
+  outcome: passed
+  assertion_kinds:
+  - target_identity
+  assertions:
+  - a steer naming a turn other than the running one is refused with JSON-RPC -32600
+  - the refused message never reaches the model
+  limitations: Real Codex 0.157.1 on macOS through Claudine's production app-server session and codex-app-server adapter (revision 1), stdio transport, disposable CODEX_HOME, scripted local Responses-API model. No cloud inference, Linux, native Windows, other transports, review/compaction/subagent turns, or MCP servers.
+  evidence_ids:
+  - live-app-server-0-157-1
+  fixture: claudine/features/2026-09-08-steering/verification/codex-macos-0.157.1.json
+  launch_mode: non_interactive
+  origin: claudine
+  os: macos
+  profile_id: managed-app-server
+  provider_version: 0.157.1
+  tested_on: 2026-09-28
+- id: codex-app-server-steer-duplicate-01571
+  mechanism_id: app-server-steer
+  session_state: working
+  outcome: passed
+  assertion_kinds:
+  - duplicate_behavior
+  - expected_loss
+  assertions:
+  - two steers with the same clientUserMessageId are both accepted
+  - the model receives the message twice
+  limitations: Real Codex 0.157.1 on macOS through Claudine's production app-server session and codex-app-server adapter (revision 1), stdio transport, disposable CODEX_HOME, scripted local Responses-API model. No cloud inference, Linux, native Windows, other transports, review/compaction/subagent turns, or MCP servers. Written directly, not through the adapter, which never resends.
+  evidence_ids:
+  - live-app-server-0-157-1
+  fixture: claudine/features/2026-09-08-steering/verification/codex-macos-0.157.1.json
+  launch_mode: non_interactive
+  origin: claudine
+  os: macos
+  profile_id: managed-app-server
+  provider_version: 0.157.1
+  tested_on: 2026-09-28
+- id: codex-app-server-idle-01571
+  mechanism_id: app-server-turn-start
+  session_state: idle
+  outcome: passed
+  assertion_kinds:
+  - target_identity
+  - acceptance_signal
+  - conversation_delivery
+  assertions:
+  - thread/read reports the bound thread idle before turn/start
+  - turn/start is answered with one new turn in the bound thread
+  - the message reaches the model and the turn's answer is the run's final message
+  limitations: Real Codex 0.157.1 on macOS through Claudine's production app-server session and codex-app-server adapter (revision 1), stdio transport, disposable CODEX_HOME, scripted local Responses-API model. No cloud inference, Linux, native Windows, other transports, review/compaction/subagent turns, or MCP servers.
+  evidence_ids:
+  - live-app-server-0-157-1
+  fixture: claudine/features/2026-09-08-steering/verification/codex-macos-0.157.1.json
+  launch_mode: non_interactive
+  origin: claudine
+  os: macos
+  profile_id: managed-app-server
+  provider_version: 0.157.1
+  tested_on: 2026-09-28
+- id: codex-app-server-interrupt-01571
+  mechanism_id: app-server-interrupt-then-start
+  session_state: working
+  outcome: passed
+  assertion_kinds:
+  - target_identity
+  - acceptance_signal
+  - cancellation_established
+  - conversation_delivery
+  - process_cleanup
+  assertions:
+  - turn/interrupt names the bound thread and running turn and is answered with an empty result
+  - turn/completed reports that turn interrupted before any replacement is sent
+  - the replacement turn/start is accepted and its message reaches the model
+  - the interrupted shell tool does not run to completion
+  limitations: Real Codex 0.157.1 on macOS through Claudine's production app-server session and codex-app-server adapter (revision 1), stdio transport, disposable CODEX_HOME, scripted local Responses-API model. No cloud inference, Linux, native Windows, other transports, review/compaction/subagent turns, or MCP servers. Process cleanup observed for one exec_command tool only.
+  evidence_ids:
+  - live-app-server-0-157-1
+  fixture: claudine/features/2026-09-08-steering/verification/codex-macos-0.157.1.json
+  launch_mode: non_interactive
+  origin: claudine
+  os: macos
+  profile_id: managed-app-server
+  provider_version: 0.157.1
+  tested_on: 2026-09-28
+- id: codex-app-server-eof-01571
+  mechanism_id: app-server-turn-start
+  session_state: working
+  outcome: passed
+  assertion_kinds:
+  - process_cleanup
+  - expected_loss
+  assertions:
+  - closing stdin during a turn makes the app-server exit 0 within three seconds
+  - the running tool does not complete and the turn never continues
+  limitations: Real Codex 0.157.1 on macOS through Claudine's production app-server session and codex-app-server adapter (revision 1), stdio transport, disposable CODEX_HOME, scripted local Responses-API model. No cloud inference, Linux, native Windows, other transports, review/compaction/subagent turns, or MCP servers. Documents why the owner closes stdin only after settlement.
+  evidence_ids:
+  - live-app-server-0-157-1
+  fixture: claudine/features/2026-09-08-steering/verification/codex-macos-0.157.1.json
+  launch_mode: non_interactive
+  origin: claudine
+  os: macos
+  profile_id: managed-app-server
+  provider_version: 0.157.1
+  tested_on: 2026-09-28
 cases:
 - os: macos
   launch_mode: interactive
@@ -1407,6 +1623,7 @@ gaps:
     destination, active-turn guard, long-generation/tool behavior, acknowledgment,
     retry behavior, and interruption effects.
 changes:
+- "Migrated to schema revision 4 on 2026-09-28: verification rows gained stable ids and typed assertion kinds; no provider facts changed."
 - Refreshed the revision 1 Codex pilot into steering schema revision 2.
 - Separated the 24 ordinary baseline combinations from the managed app-server profile.
 - Added all six Claudine-managed non-interactive app-server cases; app-server is a
@@ -1422,18 +1639,20 @@ receipt_guarantees:
 - mechanism_id: app-server-steer
   request_acceptance: confirmed
   persistence: unknown
-  scheduling: unknown
+  scheduling: confirmed
   conversation_delivery: unknown
   provider_signals:
   - turn/steer response returns accepting turnId
-  - later userMessage item may echo clientUserMessageId
+  - later userMessage item echoes clientUserMessageId when the input is delivered
   - later turn/completed reports turn outcome
   correlation: message_id
   evidence_ids:
   - official-app-server
   - local-schema-0-153-4
-  limitations: Initial success proves admission to the named active turn, not durable
-    persistence, model incorporation, or completion.
+  - live-app-server-0-157-1
+  limitations: Initial success proves the input joined the named active turn's pending
+    input, which the turn drains at its next model request (observed in 0.157.1);
+    it does not prove durable persistence, model incorporation, or completion.
 - mechanism_id: app-server-turn-start
   request_acceptance: confirmed
   persistence: unknown
@@ -1494,8 +1713,9 @@ receipt_observations:
 - evidence_ids:
   - official-app-server
   - local-schema-0-153-4
+  - live-app-server-0-157-1
   mechanism_id: app-server-steer
-  signal: Success identifies the same turn; userMessage items can echo clientUserMessageId. Later item and turn notifications establish processing/completion. Protocol errors reject invalid, stale, idle, or ineligible targets. Initial receipt only; later processing and settlement have separate signals.
+  signal: Success identifies the same turn; userMessage items can echo clientUserMessageId. Later item and turn notifications establish processing/completion. Protocol errors reject invalid, stale, idle, or ineligible targets. Initial receipt only; later processing and settlement have separate signals. In 0.157.1 the answer arrives at once both while a tool runs and while the model is generating.
   timing: early
 - evidence_ids:
   - official-app-server

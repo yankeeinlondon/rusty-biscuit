@@ -5,6 +5,7 @@
 
 use std::path::Path;
 
+use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::status::{Status, StatusState, StatusTheme};
 use biscuit_terminal::prelude::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
@@ -18,30 +19,15 @@ fn emit_status(markup: &str, state: StatusState, term: &Terminal) {
     eprintln!("{rendered}");
 }
 
-/// Escape user-controlled strings for safe Prose interpolation.
+/// Escape user-controlled text (file references, file names, shell commands,
+/// recovery messages) so Prose renders it exactly as written.
 ///
-/// Escapes `<`, `>`, `{`, `}`, and `\` to backslash form to prevent
-/// unintended markup, and `"` to the HTML entity `&quot;` because Prose's
-/// attribute parser (e.g. inside `href="..."`) treats a backslashed quote
-/// as a literal quote rather than a string delimiter -- the entity form is
-/// the documented escape for embedding a quote inside an attribute value.
-///
-/// Performs a single linear scan over the input and reserves capacity up
-/// front so the typical input (no special characters) costs one allocation.
+/// Delegates to [`Prose::escape_text`], which also neutralizes Markdown
+/// emphasis and code delimiters: a hand-rolled escaper that skipped `_` and `*`
+/// rendered `_draft_.md` as an italic `draft.md`. For an attribute value such
+/// as an `href`, use [`Prose::quoted_attr`] instead.
 pub fn prose_escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 8);
-    for ch in s.chars() {
-        match ch {
-            '\\' => out.push_str("\\\\"),
-            '<' => out.push_str("\\<"),
-            '>' => out.push_str("\\>"),
-            '{' => out.push_str("\\{"),
-            '}' => out.push_str("\\}"),
-            '"' => out.push_str("&quot;"),
-            other => out.push(other),
-        }
-    }
-    out
+    Prose::escape_text(s)
 }
 
 /// Emit the source-file existence status.
@@ -79,7 +65,7 @@ fn linked_path_markup(path: &Path) -> String {
     let label_path = path.file_name().map(Path::new).unwrap_or(path);
     let label = prose_escape(&biscuit_file::to_portable_string(label_path));
     match url::Url::from_file_path(path) {
-        Ok(href) => format!("<a href=\"{}\">{label}</a>", prose_escape(href.as_str())),
+        Ok(href) => format!("<a href={}>{label}</a>", Prose::quoted_attr(href.as_str())),
         Err(()) => label,
     }
 }
@@ -168,8 +154,11 @@ pub fn report_prompt_property(has_prompt: bool, is_non_empty: bool, term: &Termi
 }
 
 /// Emit a terminal unhandled failure banner.
+///
+/// `message` is plain text — often a provider's own diagnostic — and is shown
+/// exactly as written, so a masked secret (`****`) is not read as emphasis.
 pub fn report_unhandled_failure(message: &str, term: &Terminal) {
-    emit_status(message, StatusState::Error, term);
+    emit_status(&prose_escape(message), StatusState::Error, term);
 }
 
 #[cfg(test)]
@@ -186,17 +175,31 @@ mod tests {
 
     // -- prose_escape --
 
-    #[test]
-    fn prose_escape_handles_special_chars() {
-        assert_eq!(prose_escape("<b>"), "\\<b\\>");
-        assert_eq!(prose_escape("{x}"), "\\{x\\}");
-        assert_eq!(prose_escape("a\\b"), "a\\\\b");
-        assert_eq!(prose_escape("plain"), "plain");
+    /// What Prose shows for `markup`, with terminal styling stripped.
+    fn rendered(markup: &str) -> String {
+        biscuit_terminal::utils::escape_codes::strip_escape_codes(
+            biscuit_terminal::components::prose::Prose::new(markup).render_optimistic(None),
+        )
     }
 
     #[test]
-    fn prose_escape_escapes_double_quotes() {
-        assert_eq!(prose_escape(r#"href="evil""#), r#"href=&quot;evil&quot;"#);
+    fn escaped_text_renders_exactly_as_written() {
+        for text in [
+            "<b>{x}</b> a\\b plain",
+            "_draft_.md",
+            "**bold** `code_span` [link](target) *star*",
+            r#"lifecycle retry: "quoted" _loop_count"#,
+            "git log --format=%s *_test*",
+        ] {
+            assert_eq!(rendered(&prose_escape(text)), text, "{text:?}");
+        }
+    }
+
+    #[test]
+    fn a_linked_file_name_keeps_its_underscores() {
+        let path = std::env::temp_dir().join("_draft_ \"x\".md");
+        let markup = linked_path_markup(&path);
+        assert_eq!(rendered(&markup).trim(), "_draft_ \"x\".md", "{markup}");
     }
 
     // -- report_source_file --
@@ -214,13 +217,11 @@ mod tests {
         let path = std::env::temp_dir().join("_details.md");
         let href = url::Url::from_file_path(&path).unwrap();
 
+        let markup = source_file_success_markup(&path);
+        assert!(markup.contains(&format!("href=\"{href}\"")), "{markup}");
         assert_eq!(
-            source_file_success_markup(&path),
-            format!(
-                "the file reference was resolved to \
-                 <blue-500><a href=\"{href}\">_details.md</a></blue-500> \
-                 file on this host"
-            )
+            rendered(&markup).trim(),
+            "the file reference was resolved to _details.md file on this host"
         );
     }
 

@@ -125,12 +125,12 @@ pub async fn run(args: SlashCommandsArgs, verbose: bool) -> Result<()> {
 
 fn render_detail(term: &Terminal, cmd: &CommandInfo) {
     let badge = scope_badge(cmd.scope);
-    let desc = cmd.description.as_deref().unwrap_or("no description");
+    let desc = Prose::escape_text(cmd.description.as_deref().unwrap_or("no description"));
 
     let name_line = Prose::new(format!(
-        r#"<a href="{}"><b>{}</b></a> {badge}"#,
-        biscuit_file::to_portable_string(&cmd.command_file_path),
-        cmd.name,
+        "<a href={}><b>{}</b></a> {badge}",
+        Prose::quoted_attr(&biscuit_file::to_portable_string(&cmd.command_file_path)),
+        Prose::escape_text(&cmd.name),
     ));
     log::data(&name_line.render(term));
 
@@ -143,11 +143,13 @@ fn render_detail(term: &Terminal, cmd: &CommandInfo) {
         log::data("");
         let mut props_list = UnorderedList::empty();
         for (key, value) in &cmd.frontmatter {
+            let value = Prose::escape_text(value);
             let display_value = if key == "model" {
                 format!("{value} <orange>(not shareable)</orange>")
             } else {
-                value.clone()
+                value
             };
+            let key = Prose::escape_text(key);
             props_list.add(Prose::new(format!(
                 "<b>{key}</b>: <dim>{display_value}</dim>"
             )));

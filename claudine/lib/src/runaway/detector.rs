@@ -11,6 +11,11 @@
 //!   observed (a trip is terminal — further work on the chunk stops).
 //! - [`ContentDetector::flush`] — process any trailing partial line
 //!   without a newline at end-of-stream.
+//! - [`ContentDetector::observe`] / [`ContentDetector::observe_flush`] — the
+//!   same two operations, also returning the nonterminal
+//!   [`RepetitionSignal`]s (early warning, recovery) the chunk produced.
+//!   Signals never change when or whether a trip fires, and a chunk that
+//!   trips returns none: a hard stop always takes priority over a warning.
 //! - [`ContentDetector::reset_turn`] — zero the volume counters; the
 //!   streaming caller invokes it on `TurnComplete` so a multi-turn run
 //!   does not accumulate.
@@ -24,6 +29,58 @@ use super::patterns::CompiledExitExpressions;
 use super::{
     MAX_CYCLE_LENGTH, MAX_REPETITION_ALLOWED, Trip, VOLUME_BYTES, VOLUME_LINES,
 };
+
+/// Fewest nonblank lines without detected repetition that end a warned
+/// repetition episode, whatever the warned cycle length.
+pub const MIN_RECOVERY_LINES: usize = 8;
+
+/// The full-cycle count at which a repetition earns an early warning: half
+/// the stop limit, rounded up. `None` for a stop limit of 0 or 1, which
+/// leaves no count between "repetition established" and the stop.
+pub fn warning_threshold(stop_limit: usize) -> Option<usize> {
+    (stop_limit > 1).then(|| stop_limit / 2 + stop_limit % 2)
+}
+
+/// Nonblank lines without detected repetition that end an episode whose
+/// warned block was `cycle_len` lines long.
+pub fn recovery_lines(cycle_len: usize) -> usize {
+    MIN_RECOVERY_LINES.max(cycle_len.saturating_mul(2))
+}
+
+/// A nonterminal observation about repetition. It never stops the run and
+/// never alters the evidence the repetition trip is decided on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RepetitionSignal {
+    /// A new repetition episode reached [`warning_threshold`] of the stop
+    /// limit without tripping.
+    Warning {
+        cycle_len: usize,
+        repeats: usize,
+        stop_limit: usize,
+    },
+    /// The warned episode ended: [`recovery_lines`] nonblank lines arrived
+    /// without detected repetition. Another episode must reach the warning
+    /// threshold on its own before it earns a warning.
+    Recovered { cycle_len: usize },
+}
+
+/// Everything one [`ContentDetector::observe`] call produced. `signals` is
+/// empty whenever `trip` is set.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ContentObservation {
+    pub trip: Option<Trip>,
+    pub signals: Vec<RepetitionSignal>,
+}
+
+/// Warning eligibility, kept apart from the evidence that trips.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Episode {
+    /// The next repetition to reach the warning threshold earns a warning.
+    Armed,
+    /// A warning was issued for a `cycle_len`-line block; `recovered`
+    /// nonblank lines have since arrived without detected repetition.
+    Warned { cycle_len: usize, recovered: usize },
+}
 
 /// Knobs that parameterize a [`ContentDetector`]. Built by the caller
 /// (CLI wiring layer) from the resolved `GuardSettings` config; the
@@ -94,6 +151,10 @@ pub struct ContentDetector {
     /// Number of consecutive lines at the tail that match the active
     /// cycle. `full_cycles = consecutive_matching_lines / L`.
     consecutive_matching_lines: usize,
+    /// Warning eligibility. Never read by the trip decision.
+    episode: Episode,
+    /// Signals produced by the lines of the current `observe` call.
+    signals: Vec<RepetitionSignal>,
 }
 
 impl ContentDetector {
@@ -110,6 +171,8 @@ impl ContentDetector {
             bytes: 0,
             current_cycle_len: None,
             consecutive_matching_lines: 0,
+            episode: Episode::Armed,
+            signals: Vec::new(),
         }
     }
 
@@ -150,31 +213,56 @@ impl ContentDetector {
     /// cycle detection. Returns the **first** `Trip` observed and stops
     /// further work on the chunk (a trip is terminal).
     pub fn feed(&mut self, chunk: &str) -> Option<Trip> {
+        self.observe(chunk).trip
+    }
+
+    /// [`Self::feed`], also returning the repetition signals the chunk's
+    /// lines produced. A chunk that trips returns no signals, so a warning
+    /// can never precede, delay, or replace the stop it shares a chunk with.
+    pub fn observe(&mut self, chunk: &str) -> ContentObservation {
         self.pending.push_str(chunk);
-        loop {
-            let newline_pos = self.pending.find('\n')?;
+        let trip = loop {
+            let Some(newline_pos) = self.pending.find('\n') else {
+                break None;
+            };
             let line: String = self.pending.drain(..=newline_pos).collect();
             // `line` includes the trailing `\n`; strip it for matching.
             let completed = &line[..line.len() - 1];
             if let Some(trip) = self.process_line(completed, true) {
-                return Some(trip);
+                break Some(trip);
             }
-        }
+        };
+        self.finish_observation(trip)
     }
 
     /// Process any trailing partial line without a newline. Useful at
     /// end-of-stream so the per-line match target fires on a final
     /// partial line.
     pub fn flush(&mut self) -> Option<Trip> {
+        self.observe_flush().trip
+    }
+
+    /// [`Self::flush`], also returning the repetition signals the trailing
+    /// line produced (none when it trips).
+    pub fn observe_flush(&mut self) -> ContentObservation {
         if self.pending.is_empty() {
-            return None;
+            return ContentObservation::default();
         }
         let completed = std::mem::take(&mut self.pending);
         // A flushed partial line never carried a `\n`, so do not add the
         // implicit-newline byte to the volume counter (matches the
         // streaming feed which always counts the `\n` for completed
         // lines).
-        self.process_line(&completed, false)
+        let trip = self.process_line(&completed, false);
+        self.finish_observation(trip)
+    }
+
+    fn finish_observation(&mut self, trip: Option<Trip>) -> ContentObservation {
+        let signals = std::mem::take(&mut self.signals);
+        match trip {
+            Some(trip) => ContentObservation { trip: Some(trip), signals: Vec::new() },
+            None => ContentObservation { trip: None, signals },
+        }
     }
 
     /// Zero the per-turn volume counters. The streaming caller invokes
@@ -239,26 +327,67 @@ impl ContentDetector {
         // guard needs the ring; if the guard is disabled, skip the push
         // entirely (zero overhead for runs that opt out).
         if self.cfg.repetition_enabled {
+            let blank = normalized.is_empty();
             if self.ring.len() == self.ring_cap() {
                 self.ring.pop_front();
             }
             self.ring.push_back(normalized);
-            if let Some((cycle_len, repeats)) = self.detect_cycle() {
-                return Some(Trip::RunawayRepetition {
-                    cycle_len,
-                    repeats,
-                });
+            match self.detect_cycle() {
+                Some((cycle_len, repeats)) if repeats >= self.cfg.max_repeats => {
+                    return Some(Trip::RunawayRepetition {
+                        cycle_len,
+                        repeats,
+                    });
+                }
+                Some((cycle_len, repeats)) => self.observe_repetition(cycle_len, repeats),
+                None => self.observe_unrepeated_line(blank),
             }
         }
 
         None
     }
 
+    /// A line continued (or started) a recognized cycle below the stop
+    /// limit. It earns a warning in an armed episode that reached the
+    /// threshold, and resets recovery in a warned one. The warned block's
+    /// length stays frozen, even when this is a different block.
+    fn observe_repetition(&mut self, cycle_len: usize, repeats: usize) {
+        match &mut self.episode {
+            Episode::Armed => {
+                if warning_threshold(self.cfg.max_repeats).is_some_and(|threshold| repeats >= threshold) {
+                    self.signals.push(RepetitionSignal::Warning {
+                        cycle_len,
+                        repeats,
+                        stop_limit: self.cfg.max_repeats,
+                    });
+                    self.episode = Episode::Warned { cycle_len, recovered: 0 };
+                }
+            }
+            Episode::Warned { recovered, .. } => *recovered = 0,
+        }
+    }
+
+    /// A line with no recognized cycle at the tail. Only a nonblank one
+    /// advances recovery of a warned episode.
+    fn observe_unrepeated_line(&mut self, blank: bool) {
+        if blank {
+            return;
+        }
+        if let Episode::Warned { cycle_len, recovered } = &mut self.episode {
+            *recovered += 1;
+            if *recovered >= recovery_lines(*cycle_len) {
+                self.signals.push(RepetitionSignal::Recovered { cycle_len: *cycle_len });
+                self.episode = Episode::Armed;
+            }
+        }
+    }
+
     /// Group-cycle detection (B1/B2). Find the smallest period `L` in
     /// `1..=max_cycle_length` such that the last `2L` ring entries are
-    /// two identical halves; update the consecutive-match state and
-    /// trip when `consecutive_matching_lines / L` reaches
-    /// `max_repeats`.
+    /// two identical halves and update the consecutive-match state.
+    /// Returns the active cycle's `(L, full_cycles)`, or `None` when no
+    /// cycle is recognized at the tail; the caller trips when
+    /// `full_cycles` reaches `max_repeats`.
     ///
     /// State model: the ring (bounded at `2K`) is the sliding window
     /// used to recognize the cycle each line. The
@@ -297,11 +426,7 @@ impl ContentDetector {
                         self.consecutive_matching_lines = 2 * cycle_len;
                     }
                 }
-                let full_cycles = self.consecutive_matching_lines / cycle_len;
-                if full_cycles >= self.cfg.max_repeats {
-                    return Some((cycle_len, full_cycles));
-                }
-                None
+                Some((cycle_len, self.consecutive_matching_lines / cycle_len))
             }
             None => {
                 // No cycle recognized at the tail — reset state so a

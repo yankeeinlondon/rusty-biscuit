@@ -207,6 +207,7 @@ fn write_resumable_codex(
         &bin_dir.join("codex"),
         &format!(
             r#"#!/bin/sh
+case "$1" in app-server) exit 2;; esac
 prompt=$(cat)
 printf 'provider-ran\n' >> {log}
 case " $* " in
@@ -814,11 +815,17 @@ Body
 /// `interactive:` gets the pane's tty on the retried attempt, where an
 /// unconditional `cat` would block until the operator sent EOF — which, in a
 /// non-interactive test session, is never.
+///
+/// Every stub in this file that can stand in for `codex` exits on
+/// `app-server` without recording anything: it models an exec-only Codex, so
+/// the wrapper's managed launch falls back to `codex exec` before submitting
+/// the task and the recorded launch is exec's. A stub that drained stdin
+/// instead would wait on the app-server handshake until the readiness deadline.
 fn write_launch_recorder(bin_dir: &Path, slug: &str, events_log: &Path, exit_code: i32) {
     write_executable(
         &bin_dir.join(slug),
         &format!(
-            "#!/bin/sh\nif [ ! -t 0 ]; then cat > /dev/null 2>&1; fi\n\
+            "#!/bin/sh\ncase \"$1\" in app-server) exit 2;; esac\nif [ ! -t 0 ]; then cat > /dev/null 2>&1; fi\n\
              printf 'launched-binary=%s\\n' \"$(basename \"$0\")\" >> {log}\n\
              flags=\nallowed=none\nprev=\n\
              for a in \"$@\"; do\n  \
@@ -886,7 +893,7 @@ fn write_full_launch_recorder_with_exit(
             // listing, `<binary> models` during model validation; recording
             // either as a launch would make the attempt sequence depend on
             // which provider the row happens to open with.
-            "#!/bin/sh\ncase \"$1\" in --version|-V|-v|version|models) exit 0;; esac\n\
+            "#!/bin/sh\ncase \"$1\" in --version|-V|-v|version|models) exit 0;; app-server) exit 2;; esac\n\
              if [ ! -t 0 ]; then cat > /dev/null 2>&1; fi\n\
              printf 'begin-attempt=%s\\n' \"$(basename \"$0\")\" >> {log}\n\
              for a in \"$@\"; do printf 'argv=%s\\n' \"$a\" >> {log}; done\n\
@@ -1122,7 +1129,7 @@ fn write_codex_system_prompt_reader(bin_dir: &Path, events_log: &Path) {
     write_executable(
         &bin_dir.join("codex"),
         &format!(
-            "#!/bin/sh\ncase \"$1\" in --version|-V|-v|version|models) exit 0;; esac\n\
+            "#!/bin/sh\ncase \"$1\" in --version|-V|-v|version|models) exit 0;; app-server) exit 2;; esac\n\
              if [ ! -t 0 ]; then cat > /dev/null 2>&1; fi\n\
              printf 'launched-binary=%s\\n' \"$(basename \"$0\")\" >> {log}\n\
              for a in \"$@\"; do\n  case \"$a\" in\n    \
@@ -2018,6 +2025,7 @@ fn write_codex_with_output_file(bin_dir: &Path, events_log: &Path) {
         &bin_dir.join("codex"),
         &format!(
             r#"#!/bin/sh
+case "$1" in app-server) exit 2;; esac
 if [ ! -t 0 ]; then cat > /dev/null 2>&1; fi
 printf 'launched-binary=%s\n' "$(basename "$0")" >> {log}
 sink=none
@@ -2047,7 +2055,7 @@ fn write_noisy_launch_recorder(bin_dir: &Path, slug: &str, events_log: &Path, ex
     write_executable(
         &bin_dir.join(slug),
         &format!(
-            "#!/bin/sh\nif [ ! -t 0 ]; then cat > /dev/null 2>&1; fi\n\
+            "#!/bin/sh\ncase \"$1\" in app-server) exit 2;; esac\nif [ ! -t 0 ]; then cat > /dev/null 2>&1; fi\n\
              printf 'launched-binary=%s\\n' \"$(basename \"$0\")\" >> {log}\n\
              flags=\nfor a in \"$@\"; do\n  \
              case \"$a\" in -*) flags=\"$flags $a\";; esac\ndone\n\
@@ -2379,7 +2387,7 @@ fn write_failing_session_reporting_codex(
         &bin_dir.join("codex"),
         &format!(
             r#"#!/bin/sh
-case "$1" in --version|-V|-v|version|models) exit 0;; esac
+case "$1" in --version|-V|-v|version|models) exit 0;; app-server) exit 2;; esac
 cat > /dev/null
 printf 'launched-binary=codex\n' >> {log}
 printf '%s\n' '{{"type":"thread.started","thread_id":"{session_id}"}}'
@@ -2401,7 +2409,7 @@ fn write_session_reporting_codex(bin_dir: &Path, events_log: &Path, session_id: 
         &bin_dir.join("codex"),
         &format!(
             r#"#!/bin/sh
-case "$1" in --version|-V|-v|version|models) exit 0;; esac
+case "$1" in --version|-V|-v|version|models) exit 0;; app-server) exit 2;; esac
 prompt=$(cat)
 printf 'launched-binary=codex\n' >> {log}
 case " $* " in
@@ -7126,7 +7134,7 @@ fn write_named_provider(bin_dir: &Path, slug: &str, events_log: &Path) {
     write_executable(
         &bin_dir.join(slug),
         &format!(
-            "#!/bin/sh\ncat > /dev/null 2>&1\nprintf 'launched={slug}\\n' >> {log}\nexit 0\n",
+            "#!/bin/sh\ncase \"$1\" in app-server) exit 2;; esac\ncat > /dev/null 2>&1\nprintf 'launched={slug}\\n' >> {log}\nexit 0\n",
             slug = slug,
             log = events_log.display(),
         ),
@@ -7228,7 +7236,7 @@ fn write_launch_bundle_recorder(bin_dir: &Path, slug: &str, events_log: &Path) {
     write_executable(
         &bin_dir.join(slug),
         &format!(
-            "#!/bin/sh\ncat > /dev/null 2>&1\n\
+            "#!/bin/sh\ncase \"$1\" in app-server) exit 2;; esac\ncat > /dev/null 2>&1\n\
              printf 'launched-binary=%s\\n' \"$(basename \"$0\")\" >> {log}\n\
              printf 'entrypoint=%s\\n' \"$1\" >> {log}\n\
              printf 'argv-flags=%s\\n' \"$(for a in \"$@\"; do case \"$a\" in -*) printf '%s ' \"$a\" ;; esac; done)\" >> {log}\n\
@@ -7546,7 +7554,7 @@ fn write_selector_recording_provider(bin_dir: &Path, slug: &str, events_log: &Pa
     write_executable(
         &bin_dir.join(slug),
         &format!(
-            "#!/bin/sh\ncat > /dev/null 2>&1\n\
+            "#!/bin/sh\ncase \"$1\" in app-server) exit 2;; esac\ncat > /dev/null 2>&1\n\
              for name in {names}; do\n  \
              eval \"value=\\${{$name-<unset>}}\"\n  \
              printf 'child %s=%s\\n' \"$name\" \"$value\" >> {log}\n\
@@ -8620,7 +8628,7 @@ fn stage_wrapper_memory_file(memory_file: &str, target_doc: &str) -> Staged {
     write_executable(
         &bin_dir.join("codex"),
         &format!(
-            "#!/bin/sh\ncat > /dev/null 2>&1\n\
+            "#!/bin/sh\ncase \"$1\" in app-server) exit 2;; esac\ncat > /dev/null 2>&1\n\
              printf 'launched-binary=codex\\n' >> {log}\nexit 0\n",
             log = events_log.display(),
         ),

@@ -180,7 +180,7 @@ impl ShellBlockError {
 impl biscuit_terminal::errors::BlockError for ShellBlockError {
     fn status_block(
         &self,
-        _term: &biscuit_terminal::terminal::Terminal,
+        term: &biscuit_terminal::terminal::Terminal,
     ) -> biscuit_terminal::components::status_block::StatusBlock {
         use biscuit_terminal::components::status::StatusState;
         use biscuit_terminal::components::status_block::StatusBlock;
@@ -321,6 +321,10 @@ impl biscuit_terminal::errors::BlockError for ShellBlockError {
                         .error_header(ErrorHeader::new("ShellBlockError", "command failed"))
                         .body(body)
                         .hint("Run the command directly to reproduce the failure.")
+                } else if matches!(source.as_ref(), ShellExpansionError::NotPreApproved { .. }) {
+                    // A broken pre-flight invariant, not a failed command: its
+                    // own block names the unapproved command and says so.
+                    source.status_block(term)
                 } else {
                     let mut body = String::new();
                     if let Some(path) = source_file {

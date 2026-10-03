@@ -1,19 +1,28 @@
 //! Inline composition closure: read the agent's on-disk artifact, judge it
-//! against the pre-run guard, restore the closure-owned nodes, and persist the
-//! result with exactly one atomic write.
+//! against the pre-run guard, repair and restore its frontmatter, store
+//! agent-written instruction text as literal tokens, and persist the result
+//! with exactly one atomic write.
 //!
 //! The agent is the writer (spec `2026-09-05-inline-flow-and-validations` §D4),
-//! so nothing here parses provider output. The guard snapshot is consulted only
-//! for the three owned properties and for the body-change verdict.
+//! so nothing here parses provider output. The guard snapshot decides which
+//! frontmatter the agent changed, restores the three owned properties, and
+//! anchors the body-change verdict.
 
 use darkmatter::markdown::hash::{
-    FrontmatterDelta, MdHashKind, MdHashOptions, StoredHash, apply_hash_save_text,
-    restore_properties_text,
+    FrontmatterDelta, FrontmatterDeltaEntry, MdHashKind, MdHashOptions, StoredHash,
+    apply_hash_save_text, restore_properties_text,
 };
 use darkmatter::markdown::{Markdown, MarkdownResult, extract_frontmatter_block};
 
 use crate::composition::error::CompositionError;
 use crate::composition::types::InlineClosurePlan;
+
+mod persist;
+
+pub use persist::{
+    AgentFrontmatterRejection, EncodeError, encode_agent_values, repair_agent_frontmatter,
+};
+pub(crate) use persist::{opens_stored_token, persisted_data, stored_text};
 
 /// Frontmatter properties the closure owns; the agent is told not to touch them.
 ///
@@ -55,8 +64,9 @@ pub struct InlineArtifact {
     /// warning is emitted per entry; this is never an error.
     pub restored_properties: Vec<String>,
     /// The agent's semantic frontmatter changes, excluding every owned
-    /// property. Layered over live effective frontmatter to build the
-    /// completion instance.
+    /// property. Values are what composition reads, so a value stored as a
+    /// literal token appears as its decoded text. Layered over live effective
+    /// frontmatter to build the completion instance.
     pub frontmatter_delta: FrontmatterDelta,
     /// Whether Darkmatter's cleanup pass rewrote the agent's body.
     pub body_cleaned: bool,
@@ -80,8 +90,11 @@ pub enum InlineReconciliation {
 /// ## Errors
 ///
 /// Returns [`CompositionError::InlineArtifactUnreadable`] when the document
-/// cannot be read back, [`CompositionError::InlineArtifactEditFailed`] when
-/// either frontmatter block is malformed or carries duplicate owned keys,
+/// cannot be read back, [`CompositionError::InlineAgentFrontmatterRejected`]
+/// when the agent's frontmatter is invalid YAML after the narrow repair or a
+/// value that must be stored as a literal token cannot be located,
+/// [`CompositionError::InlineArtifactEditFailed`] when either frontmatter block
+/// is otherwise unusable or carries duplicate owned keys,
 /// [`CompositionError::InlineHashMalformed`] when the stored `hash` cannot be
 /// parsed, and [`CompositionError::AtomicWriteFailed`] when the write fails.
 pub fn reconcile_inline_artifact(
@@ -133,15 +146,30 @@ pub fn reconcile_inline_artifact_with_evidence(
         return Ok(InlineReconciliation::Rejected(BodyRejection::Unchanged));
     }
 
+    // Order (ruling N7): repair before restoring, since restoring needs
+    // parseable YAML; encode after, so the hash and the write see the tokens.
+    let rejected = |rejection| CompositionError::InlineAgentFrontmatterRejected {
+        path: path.to_path_buf(),
+        rejection: Box::new(rejection),
+    };
+    let candidate = repair_agent_frontmatter(&candidate, &plan.original_document_text)
+        .map_err(rejected)?;
     let restored = restore_properties_text(
         &candidate,
         &plan.original_document_text,
         CLOSURE_OWNED_PROPERTIES,
     )
     .map_err(CompositionError::InlineArtifactEditFailed)?;
+    let encoded = encode_agent_values(&restored.text, &restored.frontmatter_delta).map_err(
+        |error| match error {
+            EncodeError::Rejected(rejection) => rejected(rejection),
+            EncodeError::Frontmatter(error) => CompositionError::InlineArtifactEditFailed(error),
+        },
+    )?;
+    let frontmatter_delta = decoded_delta(restored.frontmatter_delta, &encoded);
 
     let opts = inline_hash_options();
-    let md: Markdown = restored.text.clone().into();
+    let md: Markdown = encoded.clone().into();
     let stored =
         parse_inline_stored_hash(&md, &opts).map_err(CompositionError::InlineHashMalformed)?;
     let mut decision = md
@@ -150,9 +178,9 @@ pub fn reconcile_inline_artifact_with_evidence(
     // Hash-save treats a missing stored hash as baseline creation, but every
     // accepted inline closure is a known body mutation and must date it.
     decision.bump_last_updated = true;
-    let text = apply_hash_save_text(&restored.text, &decision, &opts, today)
+    let text = apply_hash_save_text(&encoded, &decision, &opts, today)
         .map_err(CompositionError::InlineHashMalformed)?
-        .unwrap_or(restored.text);
+        .unwrap_or(encoded);
 
     crate::config::atomic::atomic_write(path, text.as_bytes()).map_err(|source| {
         CompositionError::AtomicWriteFailed {
@@ -164,7 +192,7 @@ pub fn reconcile_inline_artifact_with_evidence(
     Ok(InlineReconciliation::Written(Box::new(InlineArtifact {
         text,
         restored_properties: restored.restored_properties,
-        frontmatter_delta: restored.frontmatter_delta,
+        frontmatter_delta,
         body_cleaned,
     })))
 }
@@ -206,6 +234,28 @@ pub fn inline_hash_options() -> MdHashOptions {
 // ---------------------------------------------------------------------------
 // Private helpers
 // ---------------------------------------------------------------------------
+
+/// `delta` with each added or replaced value as composition reads it from
+/// `document`: literal tokens decoded, every other byte as written. A malformed
+/// token stays raw; composition reports it.
+fn decoded_delta(mut delta: FrontmatterDelta, document: &str) -> FrontmatterDelta {
+    let md: Markdown = document.to_string().into();
+    let written = md.frontmatter().as_map();
+    for entry in &mut delta.entries {
+        let (FrontmatterDeltaEntry::Addition { property, value }
+        | FrontmatterDeltaEntry::Replacement {
+            property, value, ..
+        }) = entry
+        else {
+            continue;
+        };
+        let Some(stored) = written.get(property.as_str()) else {
+            continue;
+        };
+        *value = stored_text(stored);
+    }
+    delta
+}
 
 fn raw_body_of(document: &str) -> Result<&str, CompositionError> {
     match extract_frontmatter_block(document).map_err(CompositionError::InlineArtifactEditFailed)? {

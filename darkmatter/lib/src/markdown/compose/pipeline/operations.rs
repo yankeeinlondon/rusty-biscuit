@@ -79,9 +79,9 @@ pub enum ComposeOperation {
     LinkResolve,
 
     /// Converts absolute path links back into portable forms during the
-    /// Finalization stage (relative paths within the same repo, `~/` for
-    /// home-relative paths, `${VAR}` for whitelisted environment-relative
-    /// paths).
+    /// Finalization stage through `biscuit_file::PortablePath` (nearby
+    /// relative, `&` repository-rooted, a declared portable `{{VAR}}`
+    /// written as `{{{VAR}}}`, or `~/`).
     LinkNormalization,
 }
 

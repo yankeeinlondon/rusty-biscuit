@@ -93,10 +93,21 @@ functions on them.
 
 | Surface | Binding |
 |---------|---------|
-| `ctx.<key>` | Eager — captured once at the start of the run and shared by the whole run |
-| `current.<key>` | Lazy — the same key as `ctx.<key>`, observed when the reference is reached |
+| `ctx.<key>` | Eager — evaluated once for each composition run and shared by that run |
+| `current.<key>` | Lazy — the same key as `ctx.<key>`, observed once per lifecycle event (in a document body, once per expression) |
 | `env.<key>` | Eager — the frozen invocation snapshot |
 | `current_env.<key>` | Lazy — the same key as `env.<key>`, reread from the live process environment when the reference is reached |
+
+**`ctx` is evaluated once for each composition run.** A composition run is one document being composed and executed: a document invoked directly or adopted through `proxy`, each sequence step (each task of a serial group; a parallel group shares one capture until a sibling re-enters), each loop iteration, and each retry or resume attempt. Transclusion does not start a run: a document and every file it includes share one `ctx`. `current` is observed once per lifecycle event.
+
+A later run therefore sees what an earlier run changed: a `proxy` target, a
+later sequence step, a later loop iteration, and a retried attempt each observe
+the branch and the staged, dirty, and untracked files as they are when that
+run starts, however many runs asked for them before. Only Git working state is
+observed per run; the launch directory, the repository and its packages, host
+facts, and the environment are observed once per invocation. See
+[Composition — Launch-Anchored Prepared Context](../composition.md#launch-anchored-prepared-context)
+for the parallel-group, `initialize`, and include rules.
 
 The spelling is a direct mirror: write `current.branch` for the live value of
 `ctx.branch` and `current_env.HOME` for the live value of `env.HOME`. `current`
@@ -109,8 +120,9 @@ Repository metadata and topology (`repo`, `repo_root`, `packages`, `area`, and
 the rest of the repository keys) are fixed by the request's repository
 observation, captured once when the request is created, so `current.repo`
 always reads what `ctx.repo` does. Only mutable Git and filesystem facts
-refresh at reference time: `branch`, recent history (`recent_commits`),
-`dirty_files` and the other working-tree keys, and every `current_env.<key>`.
+refresh from one event to the next: `branch`, recent history (`recent_commits`),
+and `dirty_files` and the other working-tree keys. Every `current_env.<key>` is
+reread when the reference is reached.
 The invocation directory and the root document's identity (`cwd`, `self`,
 `hash`, `id`, `sid`) are request-owned and never refresh either.
 

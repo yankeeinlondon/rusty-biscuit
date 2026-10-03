@@ -1,9 +1,10 @@
 ---
-source: darkmatter/lib/tests/error_snapshots/link.rs
+source: darkmatter/lib/tests/l1/error_snapshots/link.rs
 expression: out
 ---
 ⤫ LinkError: unrecognized link format
 ┃ 
-┃ Input did not look like an HTML `` tag or a Markdown `text` link.
+┃ Input did not look like an HTML `<a>` tag or a Markdown `[text](href)`
+┃ link.
 ┃ 
-┃ Use display for Markdown or &lt;a href="url"&gt;text&lt;/a&gt; for HTML.
+┃ Use [display](url) for Markdown or <a href="url">text</a> for HTML.

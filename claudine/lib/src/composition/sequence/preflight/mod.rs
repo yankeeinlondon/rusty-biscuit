@@ -33,6 +33,10 @@ use std::sync::Arc;
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::subtree::SubtreeCompose;
+
+use super::super::lifecycle::bindings::{
+    LifecycleScope, LifecycleValues, approval_diagnostics, runtime_bindings, unavailable_root,
+};
 use darkmatter::markdown::compose::{ComposeContext, EffectiveState, EffectiveStateBuilder};
 use serde_json::{Map, Value};
 
@@ -42,14 +46,15 @@ use super::super::lifecycle::{parse_lifecycle_config, validate_no_nested_spans_i
 use super::super::json_util::json_type_name;
 use super::super::types::ResolvedCompositionSource;
 use super::model::{ExecutableField, SequencePlan, StepExecutable};
+use super::task::TaskStage;
 use super::{reserved, source as source_resolution};
 use crate::invocation_context::{InvocationContext, SourceContext};
 
 mod shape;
 
 pub use shape::{
-    GroupExecution, PreflightAction, PreflightGroup, PreflightStep, PreflightTask,
-    TaskDiagnosticProvenance,
+    ApprovedCommand, CommandSiteId, GroupExecution, PreflightAction, PreflightGroup,
+    PreflightStep, PreflightTask, TaskDiagnosticProvenance,
 };
 
 /// A shell command discovered during preflight, with the location that
@@ -133,13 +138,6 @@ impl PreflightGraph {
     }
 }
 
-/// Roots whose values do not exist when shell commands are approved.
-///
-/// `outputs` is preflight-specific: it is the accumulator later tasks push
-/// onto, so no shell string may depend on it (spec → *Shell approval with
-/// strict byte-parity*). The other three are the standard lifecycle
-/// late-binding globals.
-const SHELL_UNAVAILABLE_ROOTS: &[&str] = &["outputs", "err", "timing", "current", "current_env"];
 
 /// Reject invoking a non-sequence document kind directly.
 ///
@@ -353,7 +351,8 @@ impl<'a> Loader<'a> {
             .frontmatter()
             .as_map()
             .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
+            // Composition reads a stored literal token as its text.
+            .map(|(k, v)| (k.clone(), crate::composition::closure::stored_text(v)))
             .collect();
         if let Value::Object(overrides) = overlay.as_set_overrides(None) {
             frontmatter.extend(overrides);
@@ -489,6 +488,7 @@ impl<'a> Loader<'a> {
                 action_property: property_child(property, field.key()),
                 task_property: property.to_string(),
             },
+            approved_stack_commands: Vec::new(),
         };
 
         self.collect_lifecycle_shell(&mut task, origin, label, state)?;
@@ -850,7 +850,9 @@ impl<'a> Loader<'a> {
         Ok(resolved)
     }
 
-    /// Collect shell actions out of a task's `setup:`/`teardown:` stacks.
+    /// Collect shell actions out of a task's `setup:`/`teardown:` stacks,
+    /// fixing each one's bytes for approval and recording them on the task so
+    /// execution runs exactly what was approved.
     ///
     /// Traversal is condition-blind: a `when:`-guarded action contributes its
     /// command regardless of the guard, because the guard may read differently
@@ -862,16 +864,21 @@ impl<'a> Loader<'a> {
         label: &str,
         state: &EffectiveState,
     ) -> Result<(), CompositionError> {
-        for (stage, stack) in [("setup", task.setup.clone()), ("teardown", task.teardown.clone())] {
+        for (stage, stack) in [
+            (TaskStage::Setup, task.setup.clone()),
+            (TaskStage::Teardown, task.teardown.clone()),
+        ] {
             let Some(stack) = stack else { continue };
             for command in shape::collect_stack_shell_commands(&stack) {
-                let stage_label = format!("{label} `{stage}`");
+                let stage_label = format!("{label} `{}`", stage.key());
                 let bytes = self.resolve_shell_bytes(&command, origin, &stage_label, state)?;
                 self.graph.shell_commands.push(DiscoveredCommand {
-                    command: bytes,
+                    command: bytes.clone(),
                     source_file: origin.to_path_buf(),
                     origin: stage_label,
                 });
+                task.approved_stack_commands
+                    .push(ApprovedCommand::new(CommandSiteId::new(stage, command), bytes));
             }
         }
         Ok(())
@@ -899,11 +906,31 @@ impl<'a> Loader<'a> {
         if !raw.contains("{{") {
             return Ok(raw.to_string());
         }
-        if let Some(root) = shape::first_unavailable_root(raw, SHELL_UNAVAILABLE_ROOTS) {
-            return Err(CompositionError::SequenceShellLateBinding {
-                command: raw.to_string(),
-                root,
-                task: label.to_string(),
+        // The sequence approval scope declares every value that does not
+        // exist yet unavailable — `outputs` (the accumulator later tasks push
+        // onto), `err`, `timing`, and `group` — and `current`/`current_env`
+        // are refused with them, in any branch. A parse failure is left to the
+        // resolution below, which reports it typed.
+        let scope = LifecycleScope::SequenceShellApproval;
+        if let Ok(diagnostics) = approval_diagnostics(raw, scope)
+            && let Some(diagnostic) = diagnostics.into_iter().next()
+        {
+            return Err(match unavailable_root(&diagnostic.error).map(str::to_string) {
+                Some(root) => CompositionError::SequenceShellLateBinding {
+                    command: raw.to_string(),
+                    root,
+                    task: label.to_string(),
+                    source: Some(Box::new(diagnostic.error)),
+                },
+                None => CompositionError::SequenceShellResolution {
+                    command: raw.to_string(),
+                    task: label.to_string(),
+                    message: diagnostic.error.to_string(),
+                    source: Some(Box::new(super::super::preflight::approval_failure(
+                        raw,
+                        diagnostic.error,
+                    ))),
+                },
             });
         }
         if let Some(root) = shape::first_target_identity_root(raw) {
@@ -938,9 +965,11 @@ impl<'a> Loader<'a> {
             None,
         );
 
+        let (view, globals) = runtime_bindings(scope, LifecycleValues::default());
         let composed = SubtreeCompose::new(&Value::String(raw.to_string()), state)
             .with_resolution_context(resolution_ctx)
-            .strict()
+            .with_globals(globals)
+            .with_binding_view(view)
             .compose()
             .map_err(|e| CompositionError::SequenceShellResolution {
                 command: raw.to_string(),

@@ -63,7 +63,11 @@ A few other quick conversions:
   [`LanguageGrammar::from_token_or_plain_text`](../../lib/src/markdown/language_grammar.rs)
   (preserves the `sh` / `shell` / `python` / `py` / `yml` / `yaml` aliases)
 - `CodeBlock::with_meta(meta)` — sets `CodeBlockMeta` (title, line
-  numbering, highlight ranges) used by the renderer
+  numbering, highlight ranges, start line) used by the renderer
+- `CodeBlock::with_start_line(n)` — numbers the first line `n` instead of 1,
+  for code excerpted from a larger file. Highlight ranges use the same
+  absolute numbering, and the gutter widens to fit the last line number
+  (lines 98–102 get a three-digit gutter). A fence info string cannot set it.
 
 ## Why the change
 

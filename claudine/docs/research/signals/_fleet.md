@@ -30,7 +30,7 @@ success:
               - message: "🎉  the **Signals** research on **{{state.name}}** completed successfully"
 failure:
     message: "💥 the Signals research on **{{state.name}}** failed to complete!"
-    warn: "The Signals research on **{{state.name}}** failed to complete! (err: {{err.message}})"
+    warn: "The Signals research on **{{state.name}}** failed to complete! (err: {{ err.msg }})"
 ---
 # Signal Detection Research on {{state.name}}
 

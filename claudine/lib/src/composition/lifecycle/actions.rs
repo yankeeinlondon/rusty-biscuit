@@ -29,6 +29,8 @@
 //!   functions invoked for their result.
 
 use darkmatter::markdown::compose::expression::{Expr, ExpressionFinder};
+use darkmatter::markdown::compose::shell_expansion::ShellExpansionError;
+use darkmatter::markdown::compose::{ResolvedShellValue, check_frontmatter_shell_value};
 use indexmap::IndexMap;
 
 use super::LifecycleSignal;
@@ -228,6 +230,34 @@ pub enum ProxyWithValue {
     /// data, not property names — only the overlay's own top-level keys name
     /// target frontmatter properties, so only those are span-checked.
     Object(IndexMap<String, ProxyWithValue>),
+    /// A whole-value `$( … )` assigned by a lifecycle `set`. Only a `set`
+    /// mapping's top-level values take this form; a nested or mixed string,
+    /// and every `with:` value, stays data.
+    Shell(Box<SetShellValue>),
+}
+
+/// A lifecycle `set` value that runs a command when its action executes.
+///
+/// The command bytes are fixed once, at preflight, from early-binding values;
+/// the result is produced each time the action executes. See
+/// [`ResolvedShellValue`] for the two lifetimes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetShellValue {
+    /// The value as authored (trimmed), suffixes included.
+    pub authored: String,
+    /// The approved command bytes; `None` until preflight resolves them. An
+    /// unresolved value never runs.
+    pub resolved: Option<ResolvedShellValue>,
+}
+
+/// The message of a shell-value parse error, without the directive location
+/// prefix the lifecycle diagnostic supplies itself.
+pub(crate) fn shell_value_error_message(error: &ShellExpansionError) -> String {
+    match error {
+        ShellExpansionError::ParseDirective { message, .. }
+        | ShellExpansionError::ExpressionEvaluation { message, .. } => message.clone(),
+        other => other.to_string(),
+    }
 }
 
 /// Why an authored `with:` mapping could not be typed.
@@ -299,6 +329,22 @@ impl RuntimeSet {
         }
         let mut typed = IndexMap::with_capacity(ordered.len());
         for (key, value) in ordered {
+            if let serde_json::Value::String(text) = &value
+                && text.trim_start().starts_with("$(")
+            {
+                check_frontmatter_shell_value(&key, text).map_err(|error| RuntimeSetError::Value {
+                    path: key.clone(),
+                    message: shell_value_error_message(&error),
+                })?;
+                typed.insert(
+                    key,
+                    ProxyWithValue::Shell(Box::new(SetShellValue {
+                        authored: text.trim().to_string(),
+                        resolved: None,
+                    })),
+                );
+                continue;
+            }
             let value = type_with_value(&value, &key).map_err(|error| match error {
                 ProxyWithError::DynamicKey(_) => unreachable!("value typing does not inspect keys"),
                 ProxyWithError::Value { path, message } => {
@@ -328,6 +374,28 @@ impl RuntimeSet {
     /// Iterate destination keys and typed values in deterministic order.
     pub fn iter(&self) -> impl Iterator<Item = (&String, &ProxyWithValue)> {
         self.0.iter()
+    }
+
+    /// The whole-value shell assignments, in order.
+    pub fn shell_values(&self) -> impl Iterator<Item = (&String, &SetShellValue)> {
+        self.0.iter().filter_map(|(key, value)| match value {
+            ProxyWithValue::Shell(shell) => Some((key, shell.as_ref())),
+            _ => None,
+        })
+    }
+
+    /// Mutable access to the whole-value shell assignments, for preflight to
+    /// fix their command bytes.
+    pub fn shell_values_mut(&mut self) -> impl Iterator<Item = (&String, &mut SetShellValue)> {
+        self.0.iter_mut().filter_map(|(key, value)| match value {
+            ProxyWithValue::Shell(shell) => Some((key, shell.as_mut())),
+            _ => None,
+        })
+    }
+
+    /// Whether any value runs a command.
+    pub fn has_shell_values(&self) -> bool {
+        self.shell_values().next().is_some()
     }
 }
 
@@ -556,6 +624,11 @@ pub struct ShellAction {
     pub command: Expr,
     /// Message to emit when the command exits non-zero.
     pub on_error: Option<Expr>,
+    /// `true` once pre-flight (C3) has stamped `command` and `on_error` with
+    /// their resolved bytes. Those bytes are what was approved and are run as
+    /// they stand: anything the resolution inserted is data and is never
+    /// interpolated again at event time.
+    pub pre_resolved: bool,
 }
 
 /// A side-effect action — a Darkmatter effect verb invoked by name with

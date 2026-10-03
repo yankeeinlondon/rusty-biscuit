@@ -1517,16 +1517,16 @@ fn file_reference_error(
             candidate_provenance: provenance.candidate_provenance,
         })
     });
-    let (reference, base_dir) = ctx
+    let (reference, cwd) = ctx
         .active_caller_file_provenance
         .as_ref()
-        .map(|provenance| (provenance.reference.clone(), provenance.origin.base_dir().to_path_buf()))
-        .unwrap_or_else(|| (raw.to_string(), ctx.base_dir.clone()));
+        .map(|provenance| (provenance.reference.clone(), provenance.origin.cwd().to_path_buf()))
+        .unwrap_or_else(|| (raw.to_string(), ctx.cwd.clone()));
     ExpressionError::FileReference(FileReferenceDiagnostic {
         function,
         reference,
         kind,
-        base_dir,
+        cwd,
         fallback_dir: ctx.file_ref_fallback_dir.clone(),
         source: source.map(Arc::new),
         caller,
@@ -1553,7 +1553,7 @@ fn resolve_arg(
     // reference — only repository and authoring-document candidates participate.
     resolve_document_file_ref(
         &file_ref,
-        &ctx.base_dir,
+        &ctx.cwd,
         ctx.repository_root.as_deref(),
         ctx.package_area.as_deref(),
         &ctx.magic_paths,
@@ -1682,7 +1682,7 @@ pub fn relative_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Exp
     };
     Ok(Value::String(make_portable_relative_in_context(
         &abs,
-        &ctx.base_dir,
+        &ctx.cwd,
         ctx.file_resolution_context.as_ref(),
     )))
 }
@@ -1733,7 +1733,7 @@ fn resolve_path_shape(
     // shape is the first shared candidate rather than a source-first join.
     resolve_document_file_ref_shape(
         &file_ref,
-        &ctx.base_dir,
+        &ctx.cwd,
         ctx.repository_root.as_deref(),
         ctx.package_area.as_deref(),
         &ctx.magic_paths,
@@ -1801,7 +1801,7 @@ pub fn is_indexed_file_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Val
         return Ok(Value::Null);
     }
     let path = resolve_path_arg("is_indexed_file", &args[0], ctx)?;
-    let (_, base) = path_display_components(&path, &ctx.base_dir, ctx.file_resolution_context.as_ref());
+    let (_, base) = path_display_components(&path, &ctx.cwd, ctx.file_resolution_context.as_ref());
     let stem = file_stem(&base);
     Ok(Value::Bool(parse_indexed_stem(&stem).is_some()))
 }
@@ -1813,7 +1813,7 @@ pub fn file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, E
         return Ok(Value::Null);
     }
     let path = resolve_path_arg("file_index", &args[0], ctx)?;
-    let (_, base) = path_display_components(&path, &ctx.base_dir, ctx.file_resolution_context.as_ref());
+    let (_, base) = path_display_components(&path, &ctx.cwd, ctx.file_resolution_context.as_ref());
     let stem = file_stem(&base);
     let index = parse_indexed_stem(&stem)
         .map(|i| i.index as i64)
@@ -1829,7 +1829,7 @@ pub fn increment_file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Resul
         return Ok(Value::Null);
     }
     let path = resolve_path_arg("increment_file_index", &args[0], ctx)?;
-    let (_, base) = path_display_components(&path, &ctx.base_dir, ctx.file_resolution_context.as_ref());
+    let (_, base) = path_display_components(&path, &ctx.cwd, ctx.file_resolution_context.as_ref());
     let ext = file_extension(&base);
     let stem = file_stem(&base);
     let new_stem = if let Some((base_name, index, width)) = indexed_stem_info(&stem) {
@@ -1849,7 +1849,7 @@ pub fn increment_file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Resul
         .unwrap_or_else(|| PathBuf::from(&new_base));
     Ok(Value::String(make_portable_relative_in_context(
         &out,
-        &ctx.base_dir,
+        &ctx.cwd,
         ctx.file_resolution_context.as_ref(),
     )))
 }
@@ -1862,7 +1862,7 @@ pub fn decrement_file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Resul
         return Ok(Value::Null);
     }
     let path = resolve_path_arg("decrement_file_index", &args[0], ctx)?;
-    let (_, base) = path_display_components(&path, &ctx.base_dir, ctx.file_resolution_context.as_ref());
+    let (_, base) = path_display_components(&path, &ctx.cwd, ctx.file_resolution_context.as_ref());
     let ext = file_extension(&base);
     let stem = file_stem(&base);
     let new_stem = if let Some((base_name, index, width)) = indexed_stem_info(&stem) {
@@ -1882,7 +1882,7 @@ pub fn decrement_file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Resul
         .unwrap_or_else(|| PathBuf::from(&new_base));
     Ok(Value::String(make_portable_relative_in_context(
         &out,
-        &ctx.base_dir,
+        &ctx.cwd,
         ctx.file_resolution_context.as_ref(),
     )))
 }
@@ -1907,7 +1907,7 @@ fn find_index_endpoint(
     let Some(parent) = input.parent() else {
         return Ok(Value::String(make_portable_relative_in_context(
             &input,
-            &ctx.base_dir,
+            &ctx.cwd,
             ctx.file_resolution_context.as_ref(),
         )));
     };
@@ -1926,7 +1926,7 @@ fn find_index_endpoint(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return Ok(Value::String(make_portable_relative_in_context(
                 &input,
-                &ctx.base_dir,
+                &ctx.cwd,
                 ctx.file_resolution_context.as_ref(),
             )));
         }
@@ -1969,7 +1969,7 @@ fn find_index_endpoint(
         .unwrap_or(input);
     Ok(Value::String(make_portable_relative_in_context(
         &chosen,
-        &ctx.base_dir,
+        &ctx.cwd,
         ctx.file_resolution_context.as_ref(),
     )))
 }
@@ -1997,7 +1997,7 @@ pub fn basename_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Exp
         return Ok(Value::Null);
     }
     let path = resolve_path_arg("basename", &args[0], ctx)?;
-    let (_, base) = path_display_components(&path, &ctx.base_dir, ctx.file_resolution_context.as_ref());
+    let (_, base) = path_display_components(&path, &ctx.cwd, ctx.file_resolution_context.as_ref());
     Ok(Value::String(base))
 }
 
@@ -2009,7 +2009,7 @@ pub fn basename_without_index_fn(args: &[Value], ctx: &ResolutionContext) -> Res
         return Ok(Value::Null);
     }
     let path = resolve_path_arg("basename_without_index", &args[0], ctx)?;
-    let (_, base) = path_display_components(&path, &ctx.base_dir, ctx.file_resolution_context.as_ref());
+    let (_, base) = path_display_components(&path, &ctx.cwd, ctx.file_resolution_context.as_ref());
     let stem = file_stem(&base);
     let ext = file_extension(&base);
     let unindexed = match indexed_stem_info(&stem) {
@@ -2039,7 +2039,7 @@ pub fn dirname_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Expr
     // that still resolves when another file name is appended to it.
     let projected = make_portable_relative_in_context(
         &path,
-        &ctx.base_dir,
+        &ctx.cwd,
         ctx.file_resolution_context.as_ref(),
     );
     if Path::new(&projected).is_absolute() {
@@ -2049,7 +2049,7 @@ pub fn dirname_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Expr
                 .unwrap_or_default(),
         ));
     }
-    let (dirs, _) = path_display_components(&path, &ctx.base_dir, ctx.file_resolution_context.as_ref());
+    let (dirs, _) = path_display_components(&path, &ctx.cwd, ctx.file_resolution_context.as_ref());
     Ok(Value::String(if dirs.is_empty() {
         String::new()
     } else {
@@ -2065,7 +2065,7 @@ pub fn ext_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Expressi
         return Ok(Value::Null);
     }
     let path = resolve_path_arg("ext", &args[0], ctx)?;
-    let (_, base) = path_display_components(&path, &ctx.base_dir, ctx.file_resolution_context.as_ref());
+    let (_, base) = path_display_components(&path, &ctx.cwd, ctx.file_resolution_context.as_ref());
     Ok(Value::String(file_extension(&base)))
 }
 
@@ -2077,7 +2077,7 @@ pub fn parent_dir_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, E
         return Ok(Value::Null);
     }
     let path = resolve_path_arg("parent_dir", &args[0], ctx)?;
-    let (dirs, _) = path_display_components(&path, &ctx.base_dir, ctx.file_resolution_context.as_ref());
+    let (dirs, _) = path_display_components(&path, &ctx.cwd, ctx.file_resolution_context.as_ref());
     Ok(Value::String(dirs.last().cloned().unwrap_or_default()))
 }
 
@@ -2089,7 +2089,7 @@ pub fn file_trailing_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value
         return Ok(Value::Null);
     }
     let path = resolve_path_arg("file_trailing", &args[0], ctx)?;
-    let (dirs, base) = path_display_components(&path, &ctx.base_dir, ctx.file_resolution_context.as_ref());
+    let (dirs, base) = path_display_components(&path, &ctx.cwd, ctx.file_resolution_context.as_ref());
     Ok(Value::String(match dirs.last() {
         Some(d) => format!("{d}/{base}"),
         None => base,
@@ -2104,7 +2104,7 @@ pub fn dir_leading_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, 
         return Ok(Value::Null);
     }
     let path = resolve_path_arg("dir_leading", &args[0], ctx)?;
-    let (dirs, _) = path_display_components(&path, &ctx.base_dir, ctx.file_resolution_context.as_ref());
+    let (dirs, _) = path_display_components(&path, &ctx.cwd, ctx.file_resolution_context.as_ref());
     Ok(Value::String(if dirs.len() <= 1 {
         String::new()
     } else {
@@ -2136,7 +2136,7 @@ pub fn join_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Express
     Ok(Value::String(
         make_portable_relative_in_context(
             &validated,
-            &ctx.base_dir,
+            &ctx.cwd,
             ctx.file_resolution_context.as_ref(),
         ),
     ))
@@ -2237,7 +2237,7 @@ pub fn link_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Express
             let path = resolve_path_arg("link", &args[0], ctx)?;
             let desc = make_portable_relative_in_context(
                 &path,
-                &ctx.base_dir,
+                &ctx.cwd,
                 ctx.file_resolution_context.as_ref(),
             );
             let dest = portable_destination(&path)?;
@@ -2304,8 +2304,8 @@ pub fn has_skill_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Ex
         Some(snapshot) => snapshot
             .repository_root()
             .map(Path::to_path_buf)
-            .unwrap_or_else(|| ctx.base_dir.clone()),
-        None => ctx.base_dir.clone(),
+            .unwrap_or_else(|| ctx.cwd.clone()),
+        None => ctx.cwd.clone(),
     };
     let roots = SkillRoots::new(home_dir, local_root).roots_for_agent(&agent);
     Ok(Value::Bool(skill_exists_in_roots(&roots, name)))
@@ -2335,8 +2335,8 @@ pub fn has_local_skill_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Val
         Some(snapshot) => snapshot
             .repository_root()
             .map(Path::to_path_buf)
-            .unwrap_or_else(|| ctx.base_dir.clone()),
-        None => ctx.base_dir.clone(),
+            .unwrap_or_else(|| ctx.cwd.clone()),
+        None => ctx.cwd.clone(),
     };
     let roots = SkillRoots::new(PathBuf::from("."), local_root).local_roots_for_agent(&agent);
     Ok(Value::Bool(skill_exists_in_roots(&roots, name)))
@@ -2408,11 +2408,174 @@ pub fn frontmatter_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, 
     let map = md.frontmatter().as_map();
     if args.len() == 1 {
         let obj: serde_json::Map<String, Value> =
-            map.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+            map.iter().map(|(k, v)| (k.clone(), stored_value(v))).collect();
         return Ok(Value::Object(obj));
     }
     let prop = require_string_expr("frontmatter", &args[1])?;
-    Ok(map.get(prop).cloned().unwrap_or(Value::Null))
+    Ok(map.get(prop).map(stored_value).unwrap_or(Value::Null))
+}
+
+/// `try_frontmatter(file) -> { error, ok, value }` — `frontmatter(file)` as a
+/// value instead of a failure.
+///
+/// A file that reads and parses gives `{ ok: true, value: <frontmatter>,
+/// error: null }`. A file that is missing, unreadable, or whose frontmatter
+/// does not parse (invalid YAML, a duplicate key) gives `{ ok: false, value:
+/// null, error: <message> }`, so a document can report the problem instead of
+/// failing its composition. Parsing is `frontmatter()`'s: an opening fence
+/// that never closes is body text, which reads as empty frontmatter.
+pub fn try_frontmatter_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
+    require_args_expr("try_frontmatter", args, 1)?;
+    if any_null(args) {
+        return Ok(Value::Null);
+    }
+    let raw = require_string_expr("try_frontmatter", &args[0])?;
+    let (ok, value, error) = match load_markdown(raw, ctx, "try_frontmatter") {
+        Ok(md) => {
+            let object: serde_json::Map<String, Value> = md
+                .frontmatter()
+                .as_map()
+                .iter()
+                .map(|(key, value)| (key.clone(), stored_value(value)))
+                .collect();
+            (true, Value::Object(object), Value::Null)
+        }
+        Err(error) => (false, Value::Null, Value::String(error.to_string())),
+    };
+    let mut outcome = serde_json::Map::new();
+    outcome.insert("error".to_string(), error);
+    outcome.insert("ok".to_string(), Value::Bool(ok));
+    outcome.insert("value".to_string(), value);
+    Ok(Value::Object(outcome))
+}
+
+/// `find_files(pattern) -> file[] | Error` — every regular file a glob
+/// reference matches, as sorted absolute portable paths.
+///
+/// The path before the first segment holding `*`, `?`, or `[` is an ordinary
+/// file reference naming the directory to search (`&claudine/fixes`), and the
+/// rest is a glob matched against paths below it, where `*` stays within one
+/// segment and `**` crosses segments. A pattern without a wildcard names one
+/// file. A missing directory, like a missing file, matches nothing; so does a
+/// `null` pattern. Directory symlinks are not followed.
+pub fn find_files_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
+    require_args_expr("find_files", args, 1)?;
+    if any_null(args) {
+        return Ok(Value::Array(Vec::new()));
+    }
+    let raw = require_string_expr("find_files", &args[0])?;
+    if is_remote_url(raw) {
+        return Err(expression_other(
+            "find_files",
+            format!("find_files() searches local directories and cannot search {raw:?}"),
+        ));
+    }
+    if raw.starts_with('%') {
+        return Err(expression_other(
+            "find_files",
+            format!("find_files() takes a glob, not a `%` recursive reference: {raw:?}"),
+        ));
+    }
+    let normalized = normalize_path_arg(raw);
+    let Some(wildcard) = normalized.find(['*', '?', '[']) else {
+        let found = resolve_arg("find_files", raw, ctx)?.filter(|path| path.is_file());
+        return Ok(Value::Array(
+            found
+                .map(|path| Value::String(biscuit_file::to_portable_string(&path)))
+                .into_iter()
+                .collect(),
+        ));
+    };
+    // A leading root sigil belongs to the directory even when a wildcard
+    // follows it directly (`&**/spec.md`).
+    let sigil_len = match normalized.as_bytes() {
+        [b'&' | b'^' | b'@', b'/', ..] => 2,
+        [b'&' | b'^' | b'@', ..] => 1,
+        _ => 0,
+    };
+    let (prefix, glob) = match normalized[sigil_len..wildcard].rfind('/') {
+        Some(slash) => {
+            let slash = sigil_len + slash;
+            (&normalized[..slash], &normalized[slash + 1..])
+        }
+        None => (&normalized[..sigil_len.min(1)], &normalized[sigil_len..]),
+    };
+    let matcher = globset::GlobBuilder::new(glob)
+        .literal_separator(true)
+        .build()
+        .map_err(|error| {
+            expression_other("find_files", format!("find_files() has an invalid glob {glob:?}: {error}"))
+        })?
+        .compile_matcher();
+    // A bare sigil names its root, which a reference spells with a `.` payload.
+    let directory_ref = match prefix {
+        "" | "&" | "^" | "@" => format!("{prefix}."),
+        other => other.to_string(),
+    };
+    let file_ref = biscuit_file::FileReference::new(&directory_ref).map_err(|error| {
+        file_reference_error("find_files", raw, ctx, FileRefFailure::classify(&error), Some(error))
+    })?;
+    let directory = super::resolve_ctx::resolve_document_directory(
+        &file_ref,
+        &ctx.cwd,
+        &ctx.magic_paths,
+        ctx.file_resolution_context.as_ref(),
+    )
+    .map_err(|error| {
+        file_reference_error("find_files", raw, ctx, FileRefFailure::classify(&error), Some(error))
+    })?;
+    let mut matches = Vec::new();
+    if let Some(directory) = directory {
+        collect_glob_matches(&directory, &directory, &matcher, &mut matches).map_err(|error| {
+            expression_other("find_files", format!("find_files() could not search {raw:?}: {error}"))
+        })?;
+    }
+    matches.sort();
+    Ok(Value::Array(
+        matches
+            .iter()
+            .map(|path| Value::String(biscuit_file::to_portable_string(path)))
+            .collect(),
+    ))
+}
+
+/// Walks `directory` without following directory symlinks, collecting the
+/// regular files whose `/`-separated path below `root` matches `matcher`.
+fn collect_glob_matches(
+    root: &Path,
+    directory: &Path,
+    matcher: &globset::GlobMatcher,
+    matches: &mut Vec<PathBuf>,
+) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(directory)? {
+        let entry = entry?;
+        let path = entry.path();
+        let file_type = entry.file_type()?;
+        if file_type.is_dir() {
+            collect_glob_matches(root, &path, matcher, matches)?;
+            continue;
+        }
+        // A symlink counts when it points at a regular file.
+        if !(file_type.is_file() || (file_type.is_symlink() && path.is_file())) {
+            continue;
+        }
+        let Ok(relative) = path.strip_prefix(root) else {
+            continue;
+        };
+        if matcher.is_match(biscuit_file::to_portable_string(relative)) {
+            matches.push(path);
+        }
+    }
+    Ok(())
+}
+
+/// A value read from another document's frontmatter, with stored literal
+/// tokens decoded to the text they hold. The result is expression output, so
+/// it is data either way; a malformed token stays raw, as every other reader
+/// keeps it, rather than failing the reading expression.
+fn stored_value(value: &Value) -> Value {
+    crate::markdown::literal_token::decode_literal_tokens(value)
+        .unwrap_or_else(|_| value.clone())
 }
 
 /// `markdown_body_empty(file) -> bool | Error` — body has only whitespace.
@@ -2435,8 +2598,8 @@ pub fn markdown_title_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Valu
     }
     let raw = require_string_expr("markdown_title", &args[0])?;
     let md = load_markdown(raw, ctx, "markdown_title")?;
-    if let Some(t) = md.frontmatter().as_map().get("title").and_then(Value::as_str) {
-        return Ok(Value::String(t.to_string()));
+    if let Some(Value::String(t)) = md.frontmatter().as_map().get("title").map(stored_value) {
+        return Ok(Value::String(t));
     }
     let h1s: Vec<String> = md
         .content()
@@ -2714,6 +2877,15 @@ pub(crate) fn is_absence_predicate(name: &str) -> bool {
     predicates::ABSENCE_PREDICATES.iter().any(|binding| {
         binding.canonical.eq_ignore_ascii_case(name)
             || binding.aliases.iter().any(|alias| alias.eq_ignore_ascii_case(name))
+    })
+}
+
+/// Whether the evaluator dispatches `name`, matched exactly as
+/// `evaluate_function` matches it: lowercased, then by canonical name or alias.
+pub(crate) fn is_dispatchable(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    joined_bindings().iter().any(|entry| {
+        entry.binding.canonical == name || entry.binding.aliases.contains(&name.as_str())
     })
 }
 
@@ -3664,7 +3836,9 @@ mod tests {
 
         #[test]
         fn dirname_renamed_without_dir_alias() {
-            let ctx = ResolutionContext::new(std::path::PathBuf::from("."));
+            // A relative context directory fails resolution validation.
+            let dir = tempfile::TempDir::new().unwrap();
+            let ctx = ResolutionContext::new(dir.path().to_path_buf());
             assert_eq!(
                 dispatch_fs("dirname", &[json!("sub/note.md")], &ctx)
                     .unwrap()
@@ -5479,7 +5653,10 @@ mod arity_gating_tests {
 
     #[test]
     fn context_fixed_arity_accepts_exact_count() {
-        let ctx = ResolutionContext::default();
+        // The default context's empty `cwd` is relative, which resolution
+        // validation rejects.
+        let dir = tempfile::TempDir::new().unwrap();
+        let ctx = ResolutionContext::new(dir.path().to_path_buf());
         assert_eq!(
             dispatch_fs("basename", &[json!("foo/bar.md")], &ctx)
                 .unwrap()

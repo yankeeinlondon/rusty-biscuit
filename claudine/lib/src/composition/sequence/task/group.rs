@@ -164,8 +164,15 @@ impl TaskExecution<'_> {
                     break;
                 }
             };
+            // Each serial member is a composition run of its own, so its
+            // fields and its document see what earlier members changed.
+            let member_run = self.prompt.open_member_run(task);
             let member_stack = StackExecutionContext {
                 source_path: &task.diagnostic.source_path,
+                prepared_context: member_run
+                    .as_ref()
+                    .map(|opened| &opened.context)
+                    .or(scope_stack.prepared_context),
                 ..scope_stack.with_signal(scope_stack.signal)
             };
             let member = TaskExecution {
@@ -174,6 +181,7 @@ impl TaskExecution<'_> {
                 stack: &member_stack,
                 overlay: Some(scope_overlay),
                 live: stream.as_ref(),
+                run_evidence: member_run.as_ref().map(|opened| &opened.run),
                 ..*self
             };
             let outcome = member.run();
@@ -263,6 +271,18 @@ impl TaskExecution<'_> {
 
         // Absent cap means "launch all"; declaration-order admission falls out of
         // a single shared cursor, so a freed slot always takes the next task.
+        // One run for the whole group, captured before any sibling starts;
+        // a sibling that re-enters later opens its own.
+        let group_run = self.prompt.open_group_run(group);
+        let group_context = group_run
+            .as_ref()
+            .map(|opened| &opened.context)
+            .or(scope_stack.prepared_context);
+        let group_evidence = group_run
+            .as_ref()
+            .map(|opened| &opened.run)
+            .or(self.run_evidence);
+
         let workers = group
             .max_parallel
             .unwrap_or(group.tasks.len())
@@ -292,6 +312,7 @@ impl TaskExecution<'_> {
                         // not through `TaskExecution::runtime`.
                         let task_stack = StackExecutionContext {
                             source_path: &task.diagnostic.source_path,
+                            prepared_context: group_context,
                             ..scope_stack.with_signal(scope_stack.signal)
                         };
                         let member_stack = task_stack
@@ -303,6 +324,7 @@ impl TaskExecution<'_> {
                             overlay: Some(scope_overlay),
                             runtime: Some(&buffers[index]),
                             live: stream.as_ref(),
+                            run_evidence: group_evidence,
                             ..*self
                         };
                         // A sibling's failure never cancels in-flight work:

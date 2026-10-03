@@ -16,7 +16,8 @@ use darkmatter::markdown::schemas::format::is_pending_expression_value;
 use darkmatter::markdown::schemas::{
     PositionMap, SchemaError, SchemaOriginKind, SuggestionLintProblem, SuggestionLintReason,
     ValidationOptions, ValidationProblem, ValidationProblemCode, ValidationReport,
-    SchemaValueKind, SchemaValueNode, classify_schema_reference, locate_schema_value,
+    SchemaValueKind, SchemaValueNode, classify_schema_reference, flow_collection_end,
+    locate_schema_value,
     parse_property_definition, parse_schema_declaration, parse_yaml_schema,
 };
 use darkmatter::style::{self, StyleWarningKind};
@@ -501,41 +502,8 @@ fn nested_property_value_span(
 }
 
 fn complete_flow_value_span(text: &str, span: std::ops::Range<usize>) -> std::ops::Range<usize> {
-    let Some(open) = text.as_bytes().get(span.start).copied() else {
-        return span;
-    };
-    let close = match open {
-        b'[' => b']',
-        b'{' => b'}',
-        _ => return span,
-    };
-    let mut depth = 0usize;
-    let mut quote = None;
-    let mut escaped = false;
-    for (relative, byte) in text.as_bytes()[span.start..].iter().copied().enumerate() {
-        if let Some(active) = quote {
-            if active == b'"' && byte == b'\\' && !escaped {
-                escaped = true;
-                continue;
-            }
-            if byte == active && !escaped {
-                quote = None;
-            }
-            escaped = false;
-            continue;
-        }
-        if matches!(byte, b'\'' | b'"') {
-            quote = Some(byte);
-        } else if byte == open {
-            depth += 1;
-        } else if byte == close {
-            depth -= 1;
-            if depth == 0 {
-                return span.start..span.start + relative + 1;
-            }
-        }
-    }
-    span
+    let start = span.start;
+    flow_collection_end(text, start).map_or(span, |end| start..end + 1)
 }
 
 fn source_column(text: &str, offset: usize) -> usize {
@@ -622,8 +590,10 @@ fn problem_range(ast: &FrontmatterAst, sm: &SourceMap, problem: &ValidationProbl
 
 /// Expression-typed frontmatter value diagnostics: `dm.expression.malformed`
 /// (`ERROR`) for a value the expression grammar rejects,
-/// `dm.expression.unknown_identifier` (`WARNING`) for each unhandled
-/// identifier, in any operand position, that names nothing DMLS can resolve,
+/// `dm.expression.undeclared_property` (`WARNING`) for each unhandled
+/// identifier, in any operand position, that is an undeclared document property,
+/// `dm.expression.unknown_function` (`ERROR`) for each call to a function
+/// outside Darkmatter's catalog,
 /// and `dm.expression.nested_span_in_literal` for a lifecycle predicate. All
 /// carry source `darkmatter.frontmatter`; ranges go through the scalar
 /// projection, exact (YAML quotes excluded) for untagged single-line plain or
@@ -652,6 +622,11 @@ fn expression_diagnostics(
     for value in expression_values {
         let expression = value.expression();
         let path = ast.path_at(value.index);
+        // A stored literal token is data, not authored expression text; its
+        // source bytes cannot anchor a parse error in the decoded text.
+        if matches!(darkmatter::markdown::literal_token::decode_leaf(expression), Some(Ok(_))) {
+            continue;
+        }
         if is_pending_expression_value(expression) {
             // Schema validation defers a pending `{{ … }}` / `$(…)` value, so
             // it is not yet a final expression to parse or resolve. Only a
@@ -705,6 +680,18 @@ fn expression_diagnostics(
             }
             Ok(parsed) => {
                 settled.insert(expression_span);
+                for (name, span) in crate::overlay::expressions::unknown_function_calls(&parsed, expression) {
+                    let doc_span = value.project(span).unwrap_or_else(|| value.expression_span());
+                    if let Some(range) = ctx.source_map.byte_range_to_lsp(doc_span) {
+                        out.push(diagnostic(
+                            range,
+                            DiagnosticSeverity::ERROR,
+                            source::FRONTMATTER,
+                            code::EXPRESSION_UNKNOWN_FUNCTION,
+                            crate::overlay::expressions::unknown_function_message(&name),
+                        ));
+                    }
+                }
                 let Some(known_roots) = &known_roots else {
                     continue;
                 };
@@ -716,15 +703,6 @@ fn expression_diagnostics(
                 );
                 let first = out.len();
                 for finding in findings {
-                    // Beneath a lifecycle event a late-binding root (`err`,
-                    // `timing`, `current`) is legitimate and resolves at
-                    // dispatch, so it is not unknown there.
-                    if let crate::overlay::expressions::UnknownIdentifierFinding::Identifier { root, .. } = &finding
-                        && nested_span::lifecycle::is_beneath_event(&path)
-                        && nested_span::lifecycle::LATE_BINDING_ROOTS.contains(&root.as_str())
-                    {
-                        continue;
-                    }
                     let span = crate::providers::dsl::finding_span(&finding);
                     // A block, tagged, or multi-line value has no decoded-to-
                     // authored map, so its findings land on the whole scalar
@@ -742,7 +720,7 @@ fn expression_diagnostics(
                         without_fix(finding)
                     };
                     if let Some(range) = ctx.source_map.byte_range_to_lsp(doc_span) {
-                        let diagnostic = crate::providers::dsl::unknown_identifier_diagnostic(
+                        let diagnostic = crate::providers::dsl::undeclared_property_diagnostic(
                             range,
                             source::FRONTMATTER,
                             &finding,
@@ -788,15 +766,15 @@ fn yaml_quote(ctx: &DocumentContext, value: &ExpressionValue<'_>) -> Option<char
 }
 
 fn without_fix(
-    finding: crate::overlay::expressions::UnknownIdentifierFinding,
-) -> crate::overlay::expressions::UnknownIdentifierFinding {
+    finding: crate::overlay::expressions::UndeclaredPropertyFinding,
+) -> crate::overlay::expressions::UndeclaredPropertyFinding {
     match finding {
-        crate::overlay::expressions::UnknownIdentifierFinding::DashSeparatedKey {
+        crate::overlay::expressions::UndeclaredPropertyFinding::DashSeparatedKey {
             authored,
             key,
             span,
             ..
-        } => crate::overlay::expressions::UnknownIdentifierFinding::DashSeparatedKey {
+        } => crate::overlay::expressions::UndeclaredPropertyFinding::DashSeparatedKey {
             authored,
             key,
             span,
@@ -1407,7 +1385,7 @@ mod tests {
         diagnostics_for(&text, |diagnostics| {
             let unknown: Vec<&Diagnostic> = diagnostics
                 .iter()
-                .filter(|diagnostic| code_of(diagnostic) == Some(code::EXPRESSION_UNKNOWN_IDENTIFIER))
+                .filter(|diagnostic| code_of(diagnostic) == Some(code::EXPRESSION_UNDECLARED_PROPERTY))
                 .collect();
             assert_eq!(unknown.len(), 1, "{diagnostics:#?}");
             assert_eq!(unknown[0].source.as_deref(), Some(source::FRONTMATTER));
@@ -1419,7 +1397,7 @@ mod tests {
     fn native_scalar_coercion_produces_no_expression_false_diagnostics() {
         // A native boolean is coerced to a canonical expression string at compose
         // time, so `when: true` is valid — no type mismatch, no malformed, no
-        // unknown-identifier squiggle.
+        // undeclared-property squiggle.
         let text = expression_doc("when: true");
         diagnostics_for(&text, |diagnostics| {
             assert!(
@@ -1427,7 +1405,7 @@ mod tests {
                     let code = code_of(diagnostic);
                     code != Some(code::SCHEMA_TYPE_MISMATCH)
                         && code != Some(code::EXPRESSION_MALFORMED)
-                        && code != Some(code::EXPRESSION_UNKNOWN_IDENTIFIER)
+                        && code != Some(code::EXPRESSION_UNDECLARED_PROPERTY)
                 }),
                 "native scalar must not produce false diagnostics: {diagnostics:#?}"
             );
@@ -1470,7 +1448,7 @@ mod tests {
                 diagnostics.iter().all(|diagnostic| {
                     let code = code_of(diagnostic);
                     code != Some(code::EXPRESSION_MALFORMED)
-                        && code != Some(code::EXPRESSION_UNKNOWN_IDENTIFIER)
+                        && code != Some(code::EXPRESSION_UNDECLARED_PROPERTY)
                         && code != Some(code::SCHEMA_CONSTRAINT)
                         && code != Some(code::SCHEMA_TYPE_MISMATCH)
                 }),
@@ -1786,7 +1764,7 @@ mod tests {
                     diagnostics.iter().all(|diagnostic| {
                         let code = code_of(diagnostic);
                         code != Some(code::EXPRESSION_MALFORMED)
-                            && code != Some(code::EXPRESSION_UNKNOWN_IDENTIFIER)
+                            && code != Some(code::EXPRESSION_UNDECLARED_PROPERTY)
                     }),
                     "a valid expression under a mixed union is clean (expression_first={expression_first}): {diagnostics:#?}"
                 );
@@ -1962,6 +1940,104 @@ mod tests {
                 let expected = if last_type == "expression" { vec![definition_line] } else { Vec::new() };
                 assert_eq!(lines, expected, "malformed warnings with `last: {last_type}` ({terms} terms)");
                 assert_eq!(parses, 1, "expression parses with `last: {last_type}` ({terms} terms)");
+            }
+        }
+    }
+
+    /// A quote after a content colon (`a:'b`) is plain-scalar content, so it
+    /// does not hide the collection's closing delimiter.
+    #[test]
+    fn a_flow_value_span_completes_past_a_quote_after_a_content_colon() {
+        for value in [
+            // Controls: genuinely quoted colons, adjacent JSON-like keys, and
+            // a colon-bearing plain scalar without a quote.
+            "['a:''b', \"v\"]",
+            "{\"a\":b, c: 'v'}",
+            "[http://x, 'v']",
+            // One unmatched internal quote in a sequence, mapping value, or key.
+            "[a:'b, \"v\"]",
+            "[a:\"b, 'v']",
+            "{a: a:'b, b: \"v\"}",
+            "{a: a:\"b, b: 'v'}",
+            "{a:'b: \"v\"}",
+            "{a:\"b: 'v'}",
+            "{list: [a:'b, \"v\"]}",
+            // Balanced spellings.
+            "[a:'b, c:'d, \"v\"]",
+        ] {
+            for newline in ["\n", "\r\n"] {
+                let text = format!("k: {value}{newline}next: [x]{newline}");
+                assert_eq!(complete_flow_value_span(&text, 3..4), 3..3 + value.len(), "{text:?}");
+            }
+        }
+    }
+
+    /// Parentheses are plain-scalar content; the collection reader nests
+    /// only `[`/`{`, so the span still reaches the collection's close.
+    #[test]
+    fn a_flow_value_span_completes_past_parentheses() {
+        for value in [
+            "['a(b', \"v\"]",
+            "[a(b, \"v\"]",
+            "[a)b, \"v\"]",
+            "[a(b, c)d, \"v\"]",
+            "{a: a(b, b: \"v\"}",
+            "{list: [a(b, \"v\"]}",
+        ] {
+            for newline in ["\n", "\r\n"] {
+                let text = format!("k: {value}{newline}next: [x]{newline}");
+                assert_eq!(complete_flow_value_span(&text, 3..4), 3..3 + value.len(), "{text:?}");
+            }
+        }
+    }
+
+    /// The published diagnostic covers the whole authored collection.
+    #[test]
+    fn a_diagnostic_range_covers_a_collection_holding_a_content_colon() {
+        for value in ["[a:'b, 42]", "[a:\"b, 42]", "['a:''b', 42]"] {
+            for newline in ["\n", "\r\n"] {
+                let text = [
+                    "---",
+                    "$schema:",
+                    "  declaration: schema",
+                    &format!("declaration: {value}"),
+                    "---",
+                    "",
+                    "body",
+                    "",
+                ]
+                .join(newline);
+                let start = text.find(value).unwrap();
+                let source_map = SourceMap::new(
+                    "file:///w/doc.md".parse().unwrap(),
+                    1,
+                    PositionEncoding::Utf16,
+                    Arc::from(text.as_str()),
+                );
+                let expected = source_map.byte_range_to_lsp(start..start + value.len()).unwrap();
+                diagnostics_for(&text, |diagnostics| {
+                    let ranges: Vec<_> = diagnostics
+                        .iter()
+                        .filter(|diagnostic| code_of(diagnostic) == Some(code::SCHEMA_INVALID_SHAPE))
+                        .map(|diagnostic| diagnostic.range)
+                        .collect();
+                    assert_eq!(ranges, [expected], "{text:?}: {diagnostics:#?}");
+                });
+            }
+        }
+    }
+
+    #[test]
+    fn a_flow_value_span_completes_past_a_quote_inside_a_plain_scalar() {
+        for value in [
+            "[ordinary, \"v\"]",
+            "[don't, \"v\"]",
+            "{a: say \"hi, b: 'v'}",
+            "[\"a]\", 'b'']', [don't]]",
+        ] {
+            for newline in ["\n", "\r\n"] {
+                let text = format!("k: {value}{newline}next: [x]{newline}");
+                assert_eq!(complete_flow_value_span(&text, 3..4), 3..3 + value.len(), "{text:?}");
             }
         }
     }

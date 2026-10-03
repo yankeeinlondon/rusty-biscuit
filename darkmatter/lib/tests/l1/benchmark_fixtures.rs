@@ -125,7 +125,7 @@ fn benchmark_manifest_matches_recorded_identities() {
     if std::env::var_os("DM_BENCH_EMIT").is_some() {
         let manifest = Manifest {
             generator: Generator {
-                version: "1.3.0".to_string(),
+                version: "1.3.1".to_string(),
                 command: "bash generate.sh".to_string(),
             },
             fixtures,
@@ -144,7 +144,7 @@ fn benchmark_manifest_matches_recorded_identities() {
     let manifest: Manifest = serde_yaml_ng::from_str(&raw).expect("manifest parses");
 
     assert_eq!(
-        manifest.generator.version, "1.3.0",
+        manifest.generator.version, "1.3.1",
         "generator version drifted from the fixture test"
     );
     assert_eq!(

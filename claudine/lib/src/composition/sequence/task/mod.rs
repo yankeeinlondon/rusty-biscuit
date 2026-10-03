@@ -38,21 +38,28 @@ use std::time::{Duration, Instant};
 
 use darkmatter::markdown::MarkdownError;
 use darkmatter::markdown::compose::EffectiveState;
+use darkmatter::markdown::compose::expression::Expr;
 use darkmatter::markdown::compose::subtree::SubtreeCompose;
+
+use super::super::lifecycle::action_value_to_expr;
+use super::super::lifecycle::bindings::{LifecycleScope, LifecycleValues, runtime_bindings};
 use serde_json::{Map, Value};
 
 use super::super::error::CompositionError;
 use super::super::lifecycle::actions::{
     LifecycleAction, LifecycleActionKind, LifecycleStackItem, is_known_side_effect,
 };
-use super::super::lifecycle::context::LifecycleErrorInfo;
-use super::super::lifecycle::executor::StackExecutionContext;
+use super::super::lifecycle::context::{LifecycleCause, LifecycleErrorInfo};
+use super::super::lifecycle::executor::{LifecycleExprError, StackExecutionContext};
 use super::super::lifecycle::{
     LifecycleSignal, parse_single_action_with_order, parse_task_action_stack_with_order,
 };
-use super::super::runtime_state::{RuntimeState, layered_set_overrides, trim_transport_newline};
+use super::super::runtime_state::{
+    LayeredOverrides, RuntimeState, layered_set_overrides, trim_transport_newline,
+};
+use darkmatter::markdown::compose::OverrideOrigin;
 use super::model::RuntimeMutation;
-use super::preflight::{PreflightAction, PreflightGraph, PreflightTask, property_child};
+use super::preflight::{PreflightAction, PreflightGraph, PreflightGroup, PreflightTask, property_child};
 use super::reserved;
 use crate::harness::parse_timeout;
 use crate::render::{TaskLiveOutput, TaskStreamOutcome, TaskStreamSink};
@@ -182,9 +189,10 @@ pub struct PromptTaskRequest {
     /// `true` when the document's own frontmatter carries a string `prompt:`,
     /// making this an inline-compose run that rewrites the document's body.
     pub inline_compose: bool,
-    /// The fully layered `set_overrides` object: task `params` < sequence user
-    /// setters < accumulated runtime mutations < the reserved overlay.
-    pub set_overrides: Value,
+    /// The fully layered overrides: task `params` < sequence user setters <
+    /// accumulated runtime mutations < the reserved overlay. Only the user
+    /// setters are authored; evaluated `params` and every later layer are data.
+    pub set_overrides: LayeredOverrides,
     /// The evaluated `params` alone, for diagnostics and reporting.
     pub params: Map<String, Value>,
     /// Source document that authored `params`, used to retain their file origin.
@@ -204,6 +212,22 @@ pub struct PromptTaskRequest {
     /// thread draining the child's stdout. `None` leaves the stream
     /// undecorated, which is what a `--silent` run selects.
     pub frame_writer: Option<crate::render::TaskFrameWriter>,
+    /// The composition run the task executes as.
+    ///
+    /// The document's first preparation joins it, so the task's own fields
+    /// and its document observe one view of Git working state. `None` lets the
+    /// document open a run of its own. A handoff, retry, or resume inside the
+    /// document is a new run regardless.
+    pub run_evidence: Option<crate::invocation_context::RunEvidence>,
+}
+
+/// A composition run opened for a group member or a whole parallel group.
+#[derive(Debug, Clone)]
+pub struct TaskRun {
+    /// The run's prepared `ctx.*` snapshot, for the member's own fields.
+    pub context: darkmatter::markdown::compose::ComposeContext,
+    /// The run a member's prompt document joins.
+    pub run: crate::invocation_context::RunEvidence,
 }
 
 /// What a `prompt:` task's runner reports back.
@@ -233,6 +257,25 @@ pub trait PromptTaskRunner: Sync {
     /// composed or launched at all. A launched provider that failed reports its
     /// code through [`PromptRunOutcome::exit_code`].
     fn run(&self, request: &PromptTaskRequest) -> Result<PromptRunOutcome, CompositionError>;
+
+    /// Open the composition run one serial group member executes as.
+    ///
+    /// A serial member is a run of its own, so it observes what the members
+    /// before it changed. `None` keeps the group's snapshot for the member's
+    /// fields, which is all a runner without launch evidence can offer.
+    fn open_member_run(&self, _task: &PreflightTask) -> Option<TaskRun> {
+        None
+    }
+
+    /// Open the one composition run every sibling of a parallel group starts
+    /// from.
+    ///
+    /// The run is captured for the union of what the siblings mention before
+    /// any of them starts, so concurrent siblings share one view of the
+    /// working tree. `None` keeps the group's own snapshot and run.
+    fn open_group_run(&self, _group: &PreflightGroup) -> Option<TaskRun> {
+        None
+    }
 }
 
 /// A [`PromptTaskRunner`] that refuses every request.
@@ -308,6 +351,10 @@ pub struct TaskExecution<'a> {
     /// reader parked on a descendant's pipe is deliberately detached rather
     /// than joined, so it cannot hold a borrow of this execution.
     pub live: Option<&'a std::sync::Arc<TaskLiveOutput>>,
+    /// The composition run this task executes as, handed to its prompt
+    /// document's first preparation. A serial group member replaces it with
+    /// its own run; a parallel member with the group's.
+    pub run_evidence: Option<&'a crate::invocation_context::RunEvidence>,
 }
 
 impl TaskExecution<'_> {
@@ -458,6 +505,12 @@ impl TaskExecution<'_> {
         items: &[LifecycleStackItem],
         err: Option<&LifecycleErrorInfo>,
     ) -> Option<TaskDiagnostic> {
+        // The stack reuses the step's context, so it names its own scope:
+        // teardown reads the primary failure as `err` (or `null`), setup has none.
+        let scope = match stage {
+            TaskStage::Teardown => LifecycleScope::TaskTeardown,
+            TaskStage::Setup | TaskStage::Primary => LifecycleScope::TaskSetup,
+        };
         let with_err;
         let context = match err {
             Some(info) => {
@@ -466,7 +519,9 @@ impl TaskExecution<'_> {
             }
             None => self.stack,
         };
-        let outcome = context.execute_action_stack(items, &self.stack_property(stage));
+        let outcome = context
+            .in_scope(scope)
+            .execute_action_stack(items, &self.stack_property(stage));
         outcome
             .evaluation_error
             .or(outcome.action_error)
@@ -479,9 +534,9 @@ impl TaskExecution<'_> {
     /// Re-raise a runtime failure as the typed `composition.lifecycle_invalid`
     /// diagnostic, carrying the owning document's frontmatter excerpt.
     ///
-    /// `variant`/`property`/`reason` are restored onto the rebuilt snapshot
-    /// because they are the executor's findings, not the typed error's: the
-    /// typed error only widens what a projection can show.
+    /// `variant`/`property`/`reason` and the typed `cause` are restored onto
+    /// the rebuilt snapshot because they are the executor's findings, not the
+    /// typed error's: the typed error only widens what a projection can show.
     fn enrich_from_owning_document(&self, info: LifecycleErrorInfo) -> LifecycleErrorInfo {
         let diagnostic = CompositionError::lifecycle_evaluation(
             self.stack.signal.property_name(),
@@ -493,6 +548,7 @@ impl TaskExecution<'_> {
         enriched_info.variant = info.variant;
         enriched_info.property = info.property;
         enriched_info.reason = info.reason;
+        enriched_info.cause = info.cause;
         enriched_info
     }
 
@@ -556,6 +612,7 @@ impl TaskExecution<'_> {
             // The final assistant text is deliberately not re-emitted here: the
             // wrapper already wrote it, so a second emission would double-print.
             frame_writer: self.live.map(|live| live.rendered_writer()),
+            run_evidence: self.run_evidence.cloned(),
         };
 
         match self.prompt.run(&request) {
@@ -787,18 +844,69 @@ impl TaskExecution<'_> {
             )
             .map(|items| (!items.is_empty()).then_some(items)),
         };
-        Ok(ParsedStacks {
-            setup: parse(
-                self.task.setup.as_ref(),
-                LifecycleSignal::Start,
-                TaskStage::Setup,
-            )?,
-            teardown: parse(
-                self.task.teardown.as_ref(),
-                LifecycleSignal::Finalize,
-                TaskStage::Teardown,
-            )?,
-        })
+        let mut setup = parse(
+            self.task.setup.as_ref(),
+            LifecycleSignal::Start,
+            TaskStage::Setup,
+        )?;
+        let mut teardown = parse(
+            self.task.teardown.as_ref(),
+            LifecycleSignal::Finalize,
+            TaskStage::Teardown,
+        )?;
+        for (stage, items) in [(TaskStage::Setup, &mut setup), (TaskStage::Teardown, &mut teardown)] {
+            if let Some(items) = items {
+                self.apply_approved_commands(stage, items)?;
+            }
+        }
+        Ok(ParsedStacks { setup, teardown })
+    }
+
+    /// Replace each `shell` command and `on_error` in a parsed stack with the
+    /// bytes sequence approval fixed for that site, and mark the action
+    /// resolved, so execution runs exactly the approved bytes and never
+    /// evaluates the authored text again.
+    ///
+    /// A command with interpolation that approval did not record fails closed.
+    fn apply_approved_commands(
+        &self,
+        stage: TaskStage,
+        items: &mut [LifecycleStackItem],
+    ) -> Result<(), CompositionError> {
+        for action in items.iter_mut().flat_map(|item| item.actions.iter_mut()) {
+            let LifecycleActionKind::Shell(shell) = &mut action.kind else {
+                continue;
+            };
+            for expr in std::iter::once(&mut shell.command).chain(shell.on_error.as_mut()) {
+                let literal = match expr {
+                    Expr::StringLiteral(text) => !text.contains("{{"),
+                    Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => true,
+                    _ => false,
+                };
+                if literal {
+                    continue;
+                }
+                let approved = self.task.approved_stack_commands.iter().find(|approved| {
+                    approved.site().stage() == stage
+                        && action_value_to_expr(&Value::String(approved.site().authored().to_string()))
+                            .is_ok_and(|authored| authored == *expr)
+                });
+                let Some(approved) = approved else {
+                    return Err(CompositionError::SequenceShellResolution {
+                        command: expr.to_string(),
+                        task: self.label(),
+                        message: format!(
+                            "this `{}` command was not approved at sequence preflight",
+                            stage.key()
+                        ),
+                        source: None,
+                    });
+                };
+                *expr = Expr::StringLiteral(approved.command().to_string());
+            }
+            shell.pre_resolved = true;
+        }
+        Ok(())
     }
 
     /// Evaluate `params` just in time against the caller's effective state.
@@ -823,20 +931,13 @@ impl TaskExecution<'_> {
     ///
     /// Precedence, lowest first: task `params`, sequence user setters,
     /// accumulated runtime mutations, the reserved overlay (spec → *Task
-    /// Resolution and Lifecycle Semantics*).
-    fn layered_overrides(&self, params: &Map<String, Value>) -> Value {
-        let mut base = params.clone();
-        if let Some(Value::Object(setters)) = self.user_setters {
-            for (key, value) in setters {
-                base.insert(key.clone(), value.clone());
-            }
-        }
+    /// Resolution and Lifecycle Semantics*). `params` were already evaluated
+    /// once against the task's state, so their results are data.
+    fn layered_overrides(&self, params: &Map<String, Value>) -> LayeredOverrides {
+        let mut base = LayeredOverrides::data(Some(&Value::Object(params.clone())));
+        base.push(OverrideOrigin::Authored, self.user_setters);
         let snapshot = self.runtime.map(|runtime| runtime.snapshot());
-        layered_set_overrides(
-            Some(&Value::Object(base)),
-            snapshot.as_ref(),
-            self.overlay,
-        )
+        layered_set_overrides(base, snapshot.as_ref(), self.overlay)
     }
 
     /// The per-command budget: the authored `timeout:`, else 30 seconds.
@@ -861,6 +962,12 @@ impl TaskExecution<'_> {
     }
 
     /// Resolve one authored value's `{{ … }}` spans against the effective state.
+    ///
+    /// Task values (`params`, `timeout`, group `variables`) evaluate in the
+    /// task's pre-primary scope ([`LifecycleScope::TaskSetup`]): no `err`, and
+    /// `group` only inside an established group. A group's own `variables`
+    /// resolve before its scope is entered, so they never read `group`, and no
+    /// group's variables reach a later step.
     fn resolve_value(&self, value: &Value, field: &str) -> Result<Value, CompositionError> {
         if !contains_interpolation(value) {
             return Ok(value.clone());
@@ -871,15 +978,24 @@ impl TaskExecution<'_> {
             self.stack.file_resolution_context,
             self.stack.ctx_base_dir,
         );
+        let (view, globals) = runtime_bindings(
+            LifecycleScope::TaskSetup,
+            LifecycleValues {
+                err: None,
+                timing: self.stack.timing,
+                group: self.stack.group,
+            },
+        );
         SubtreeCompose::new(value, self.state)
             .with_resolution_context(resolution)
-            .strict()
+            .with_globals(globals)
+            .with_binding_view(view)
             .compose()
             .map_err(|error: MarkdownError| CompositionError::SequenceTaskValueResolution {
                 task: self.label(),
                 field: field.to_string(),
                 message: error.to_string(),
-                source: Box::new(error),
+                cause: LifecycleCause::new(LifecycleExprError::Compose(Box::new(error))),
             })
     }
 

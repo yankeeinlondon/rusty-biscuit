@@ -3,7 +3,7 @@ name: Fix Local Test Failures
 description: |-
     Repairs the problems a blocked push was diagnosed with, proves the repair by re-running the tests that failed, and **stages** the result. Reached by proxy from `_pr/triage.md` (the caller said yes) or from `_pr/diagnose.md` (`on_failure=fix`).
 
-    An attempt that does not verify is retried with a fresh agent, which reads what earlier attempts recorded in the report. This uses the lifecycle `retry` action rather than a `loop:` block, because a `proxy` fired from inside a looping document is not performed, and this document has to hand off to `commit.md`.
+    An attempt that does not verify is retried with a fresh agent, which reads what earlier attempts recorded in the report. This uses the lifecycle `retry` action rather than a `loop:` block: an attempt is a fresh session bounded by one budget, and the verified attempt hands off to `commit.md` from `success`.
 
     It never commits. Every commit goes through `commit.md`, so a verified fix is handed to it by proxy. A proxy chain can visit a document only once, which has two consequences: when `commit.md` already ran in this invocation the fix is left staged for the caller to commit, and the flow cannot return to `_pr/push.md`, so the caller runs the PR prompt again to push the fix.
 $schema:
@@ -43,10 +43,7 @@ success:
               - action: proxy
                 target: ../commit.md
                 with:
-                    # `commit.md` lists `ctx.staged_files` in its body, and `ctx` is the
-                    # start-of-run snapshot, so that list predates the fix was staged. A body
-                    # has no live `current`, so the real list travels in `message`.
-                    message: "These staged files repair local test failures that blocked the push of `{{ branch }}`. {{ frontmatter(report, 'summary') }} IMPORTANT: the staged-file list printed in this prompt was captured before the fix was staged, so it is out of date. Run `git diff --cached --name-only` for the real list. At handoff it was: {{ as_csv(frontmatter(report, 'staged')) }}."
+                    message: "These staged files repair local test failures that blocked the push of `{{ branch }}`. {{ frontmatter(report, 'summary') }}"
                     success:
                         success: "the fix is committed. Run the PR prompt again to push it; the pre-push hook reuses the passing evidence this run already produced"
                         message: "🗳️  the fix for the local test failures on `{{ branch }}` is committed. Run the PR prompt again to push it; the pre-push hook reuses the passing evidence this run already produced"
@@ -61,7 +58,6 @@ success:
               - error: "{{ frontmatter(report, 'summary') }}"
         - when: "frontmatter(report, 'fix_attempts') >= max_attempts"
           action:
-              - warn: "the local test failures on `{{branch}}` are still not fixed after {{ max_attempts }} attempts; what each attempt tried is in {{report}}"
               - message: "💥  the local test failures on `{{branch}}` are still not fixed after {{ max_attempts }} attempts; what each attempt tried is in `{{report}}`"
               - say: "The local test failures are still not fixed after {{ max_attempts }} attempts."
               - error: "the fix did not verify within {{ max_attempts }} attempts"

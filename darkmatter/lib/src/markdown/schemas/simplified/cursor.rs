@@ -20,8 +20,11 @@
 
 use std::ops::Range;
 
-use super::grammar::Lexer;
-use super::source::{SchemaSourcePath, SchemaSourcePathSegment};
+use super::grammar::{self, Lexer};
+use super::source::{
+    ExpressionContext, SchemaSourcePath, SchemaSourcePathSegment, quoted_flow_scalar_end,
+    scan_expression, split_flow_entries,
+};
 use super::yaml_scalar::decode_partial_scalar_at;
 
 /// The structural role a cursor occupies inside a partially authored value.
@@ -119,8 +122,10 @@ pub fn locate_type_definition_cursor(
 ///
 /// A declaration arm is a file reference or a whole-declaration scaffold rather
 /// than a type expression, so the arm's complete authored text is the token.
-/// The root-union layer is shared with
-/// [`locate_type_definition_cursor`], so `[./a.yaml, ./b` reports arm 1.
+/// A flow sequence is a union, as in [`locate_type_definition_cursor`], so
+/// `[./a.yaml, ./b` reports arm 1, but its arms split by YAML's entry rule:
+/// a parenthesis is part of the reference, so `[./a(b.yaml, ./b` also
+/// reports arm 1.
 ///
 /// ## Returns
 ///
@@ -148,11 +153,17 @@ fn locate_in(
     let lead = prefix.len() - prefix.trim_start().len();
     if prefix[lead..].starts_with('[') {
         let body_start = lead + 1;
-        let (arm, arm_start) = flow_union_arm(&prefix[body_start..]);
+        let body = &prefix[body_start..];
+        let starts = if declaration {
+            yaml_flow_arm_starts(body)
+        } else {
+            expression_flow_arm_starts(body)
+        };
+        let (arm, arm_start) = flow_union_arm(body, &starts);
         return locate_in(
             arm,
             offset + body_start + arm_start,
-            path.union_arm(flow_arm_index(&prefix[body_start..])),
+            path.union_arm(starts.len()),
             declaration,
         );
     }
@@ -175,43 +186,75 @@ fn whole_arm(prefix: &str, offset: usize, path: SchemaSourcePath) -> Option<Sche
     })
 }
 
-/// The trailing arm of a partially authored flow sequence, plus its byte offset
-/// within `body`. Splitting is depth- and quote-aware, so a `,` inside an
-/// `enum(a, b)` constraint or a `{ … }` literal never starts a new arm.
-fn flow_union_arm(body: &str) -> (&str, usize) {
-    let start = flow_arm_starts(body).last().copied().unwrap_or(0);
+/// The trailing arm of a partially authored flow sequence whose arms begin at
+/// `starts` (after the first), plus its byte offset within `body`.
+fn flow_union_arm<'a>(body: &'a str, starts: &[usize]) -> (&'a str, usize) {
+    let start = starts.last().copied().unwrap_or(0);
     let arm = &body[start..];
     let lead = arm.len() - arm.trim_start().len();
     (&arm[lead..], start + lead)
 }
 
-fn flow_arm_index(body: &str) -> usize {
-    flow_arm_starts(body).len()
+/// The byte offset just past each top-level `,` in `body`, the raw YAML text
+/// after a declaration's flow sequence `[`. Arms are opaque file references,
+/// so YAML's own entry rule applies: only `[`/`{` nest, and a parenthesis is
+/// plain-scalar content (`[./a(b.yaml, ./b` has two arms).
+fn yaml_flow_arm_starts(body: &str) -> Vec<usize> {
+    split_flow_entries(body, 0..body.len())
+        .iter()
+        .skip(1)
+        .map(|entry| entry.start)
+        .collect()
 }
 
-/// The byte offset just past each top-level `,` in `body`.
-fn flow_arm_starts(body: &str) -> Vec<usize> {
-    let mut starts = Vec::new();
+/// The byte offset just past each top-level `,` in `body`, the text after a
+/// type definition's flow sequence `[`.
+///
+/// Each arm is read in two layers. A quote at the arm's first character opens
+/// a YAML quoted scalar, which is skipped whole, so `['enum("a)b", c)', str`
+/// has two arms. The rest of a plain arm is type-expression text read by
+/// [`scan_expression`] in the grammar's own lexical modes: the `,` inside
+/// `enum(a, b)` or a quoted argument (`enum('a)b', c)`) stays in its argument
+/// list; a file reference (`Name@./a(b.yaml`) is opaque up to its `,`; and a
+/// top-level description is prose up to YAML's next `,` or `]`, so
+/// `[string -> (it's fine), s` has two arms. `[` nests outside those modes.
+/// Scanning stops inside an unterminated string or quoted scalar, where the
+/// cursor still is.
+fn expression_flow_arm_starts(body: &str) -> Vec<usize> {
     let bytes = body.as_bytes();
-    let mut quote = None;
-    let mut escaped = false;
-    let mut depth = 0usize;
-    for (index, byte) in bytes.iter().copied().enumerate() {
-        if escaped {
-            escaped = false;
-            continue;
+    let mut starts = Vec::new();
+    let mut arm = 0;
+    loop {
+        let mut from = arm + body[arm..].len() - body[arm..].trim_start().len();
+        if matches!(bytes.get(from), Some(b'\'' | b'"')) {
+            let Some(end) = quoted_flow_scalar_end(bytes, from, body.len()) else {
+                return starts;
+            };
+            from = end;
         }
-        match (quote, byte) {
-            (Some(b'"'), b'\\') => escaped = true,
-            (Some(active), current) if active == current => quote = None,
-            (None, b'\'' | b'"') => quote = Some(byte),
-            (None, b'(' | b'[' | b'{') => depth += 1,
-            (None, b')' | b']' | b'}') => depth = depth.saturating_sub(1),
-            (None, b',') if depth == 0 => starts.push(index + 1),
-            _ => {}
-        }
+        let mut nesting = 0usize;
+        let mut next = None;
+        scan_expression(body, from..body.len(), ExpressionContext::FlowArm, |index, byte, level| {
+            if !level.is_top() {
+                return false;
+            }
+            match byte {
+                b'[' => nesting += 1,
+                b']' => nesting = nesting.saturating_sub(1),
+                b',' if nesting == 0 => {
+                    next = Some(index + 1);
+                    return true;
+                }
+                _ => {}
+            }
+            false
+        });
+        let Some(next) = next else {
+            return starts;
+        };
+        starts.push(next);
+        arm = next;
     }
-    starts
 }
 
 /// One enclosing structural frame of the type-expression grammar.
@@ -231,9 +274,17 @@ enum Frame {
 
 /// Drives the grammar lexer across the authored prefix of one scalar and
 /// reports the frame stack and trailing token at its end.
+///
+/// Only type text and argument lists are lexed. Inside a constraint or
+/// argument list, `{`, `[`, `@`, `:`, and `<` are argument text. An imported
+/// file reference, an inline-object description, and a pattern key are each
+/// skipped to the end the grammar gives them, so their punctuation never opens
+/// a frame; the cursor resumes in type context after a description's `,` and
+/// keeps the import-reference role while it is still inside a reference.
 fn scan_scalar(prefix: &str, offset: usize, path: SchemaSourcePath) -> Option<SchemaCursor> {
     let (scalar, _) = decode_partial_scalar_at(prefix, 0);
     let src = scalar.decoded().to_string();
+    let bytes = src.as_bytes();
     let mut lex = Lexer::new(&src);
     let mut stack: Vec<Frame> = Vec::new();
     // The type keyword at the current type position, and whether a `[]` has
@@ -242,13 +293,52 @@ fn scan_scalar(prefix: &str, offset: usize, path: SchemaSourcePath) -> Option<Sc
     let mut subject: Option<String> = None;
     let mut saw_array = false;
     let mut last_word: Option<String> = None;
-    let mut after_at: Option<String> = None;
+    let mut import_name: Option<String> = None;
     let mut token: Option<(String, Range<usize>)> = None;
 
     loop {
         lex.skip_ws();
         let start = lex.pos;
         let Some(byte) = lex.peek_byte() else { break };
+        let in_list = matches!(
+            stack.last(),
+            Some(Frame::ArgList { .. } | Frame::ConstraintList { .. })
+        );
+        let arrow = byte == b'-' && bytes.get(start + 1) == Some(&b'>');
+        let structural = if in_list {
+            matches!(byte, b'(' | b')' | b',' | b';' | b'\'' | b'"')
+        } else {
+            matches!(byte, b'{' | b'}' | b'(' | b')' | b'[' | b']' | b',' | b':' | b'@' | b'\'' | b'"')
+                || arrow
+                || (byte == b'<'
+                    && matches!(stack.last(), Some(Frame::InlineObject { in_value: false, .. })))
+        };
+        if !structural {
+            let (word, span) = if matches!(stack.last(), Some(Frame::ArgList { .. })) {
+                lex.read_word()
+            } else {
+                lex.read_ident()
+            };
+            if word.is_empty() {
+                // An unrecognized character: consume it whole (never a
+                // partial UTF-8 sequence) and keep scanning, so a stray
+                // byte never aborts the reading.
+                lex.pos += src[start..].chars().next().map_or(1, char::len_utf8);
+                token = None;
+                continue;
+            }
+            match stack.last_mut() {
+                Some(Frame::ArgList { .. } | Frame::ConstraintList { .. }) => {}
+                Some(Frame::InlineObject { in_value: false, .. }) => {}
+                _ => {
+                    subject = Some(word.clone());
+                    saw_array = false;
+                }
+            }
+            last_word = Some(word.clone());
+            token = Some((word, span));
+            continue;
+        }
         match byte {
             b'{' => {
                 lex.pos += 1;
@@ -313,12 +403,10 @@ fn scan_scalar(prefix: &str, offset: usize, path: SchemaSourcePath) -> Option<Sc
                     subject = None;
                     saw_array = false;
                 }
-                after_at = None;
                 token = None;
             }
             b';' => {
                 lex.pos += 1;
-                after_at = None;
                 token = None;
             }
             b':' => {
@@ -329,51 +417,51 @@ fn scan_scalar(prefix: &str, offset: usize, path: SchemaSourcePath) -> Option<Sc
                 }
                 subject = None;
                 saw_array = false;
-                after_at = None;
                 token = None;
             }
             b'@' => {
-                lex.pos += 1;
-                after_at = last_word.clone().or(subject.clone());
+                let reference = start + 1;
+                let end = grammar::file_reference_end(bytes, reference, src.len());
+                lex.pos = end;
                 token = None;
+                if end == src.len() {
+                    // The cursor is inside the reference, which is one token
+                    // from its first non-blank byte however it is spelled.
+                    let lead = reference + src[reference..].len() - src[reference..].trim_start().len();
+                    import_name = subject.clone().or_else(|| last_word.clone());
+                    token = Some((src[lead..].to_string(), lead..src.len()));
+                }
             }
+            b'<' => match grammar::pattern_key_end(bytes, start, src.len()) {
+                Some(end) => {
+                    lex.pos = end;
+                    last_word = Some(src[start..end].to_string());
+                    token = Some((src[start..end].to_string(), start..end));
+                }
+                None => {
+                    lex.pos = src.len();
+                    token = Some((src[start..].to_string(), start..src.len()));
+                }
+            },
             b'\'' | b'"' => {
                 let (text, span) = read_quoted_prefix(&src, &mut lex, byte);
                 token = Some((text, span));
             }
-            b'-' if src.as_bytes().get(start + 1) == Some(&b'>') => {
-                // Everything past the top-level `->` is a human description,
-                // not grammar the cursor API can speak to.
-                return None;
-            }
             _ => {
-                let (word, span) = if matches!(stack.last(), Some(Frame::ArgList { .. }))
-                    || after_at.is_some()
-                {
-                    lex.read_word()
-                } else {
-                    lex.read_ident()
-                };
-                if word.is_empty() {
-                    // An unrecognized character: consume it whole (never a
-                    // partial UTF-8 sequence) and keep scanning, so a stray
-                    // byte never aborts the reading.
-                    lex.pos += src[start..].chars().next().map_or(1, char::len_utf8);
-                    token = None;
-                    continue;
+                // `->` opens a human description. At the top level it runs to
+                // the end of the value; inside an inline object it ends at the
+                // object's next `,` or `}`. Either way, a cursor inside it is
+                // in prose rather than grammar the cursor API can speak to.
+                if !matches!(stack.last(), Some(Frame::InlineObject { .. })) {
+                    return None;
                 }
-                match stack.last_mut() {
-                    Some(Frame::ArgList { .. }) => {}
-                    Some(Frame::ConstraintList { .. }) => {}
-                    Some(Frame::InlineObject { in_value: false, .. }) => {}
-                    _ if after_at.is_none() => {
-                        subject = Some(word.clone());
-                        saw_array = false;
+                match grammar::inline_description_end(bytes, start + 2, src.len()) {
+                    Ok(end) if end < src.len() => {
+                        lex.pos = end;
+                        token = None;
                     }
-                    _ => {}
+                    _ => return None,
                 }
-                last_word = Some(word.clone());
-                token = Some((word, span));
             }
         }
     }
@@ -402,7 +490,7 @@ fn scan_scalar(prefix: &str, offset: usize, path: SchemaSourcePath) -> Option<Sc
             array_level: *array_level,
         },
         Some(Frame::InlineObject { in_value: false, .. }) => SchemaCursorRole::InlineObjectKey,
-        Some(Frame::InlineObject { .. }) | None => match after_at {
+        Some(Frame::InlineObject { .. }) | None => match import_name {
             Some(name) => SchemaCursorRole::ImportReference { name },
             None => SchemaCursorRole::Type,
         },
@@ -416,8 +504,9 @@ fn scan_scalar(prefix: &str, offset: usize, path: SchemaSourcePath) -> Option<Sc
     })
 }
 
-/// Consumes a quoted run that may not be closed yet, returning its contents and
-/// the span of those contents.
+/// Consumes a quoted run that may not be closed yet, returning its authored
+/// contents and their span. As in the lexer, `\` escapes the next character in
+/// either quote style, so `'a\', b` is still one open string.
 fn read_quoted_prefix(src: &str, lex: &mut Lexer<'_>, quote: u8) -> (String, Range<usize>) {
     let start = lex.pos + 1;
     lex.pos += 1;
@@ -426,6 +515,12 @@ fn read_quoted_prefix(src: &str, lex: &mut Lexer<'_>, quote: u8) -> (String, Ran
             let end = lex.pos;
             lex.pos += 1;
             return (src[start..end].to_string(), start..end);
+        }
+        if byte == b'\\' {
+            lex.pos += 1;
+            if lex.pos >= src.len() {
+                break;
+            }
         }
         lex.pos += src[lex.pos..].chars().next().map_or(1, char::len_utf8);
     }
@@ -538,6 +633,179 @@ mod tests {
     }
 
     #[test]
+    fn a_quote_inside_a_plain_declaration_arm_does_not_hide_the_next_arm() {
+        for value in ["[./don't.yaml, ./b", "[./say \"hi.yaml, ./b", "['./it''s.yaml', ./b"] {
+            let state = locate_schema_declaration_cursor(value, 0, value.len()).unwrap();
+            assert_eq!(state.token, "./b", "{value:?}");
+            assert_eq!(state.path, SchemaSourcePath::root().union_arm(1), "{value:?}");
+        }
+    }
+
+    /// A quote after a content colon (`a:'b`) is plain-scalar content, so it
+    /// neither merges arms nor hides the separator before the final arm.
+    #[test]
+    fn a_quote_after_a_content_colon_does_not_hide_the_next_arm() {
+        let rows: &[(&str, usize)] = &[
+            ("[ordinary, ", 1),
+            ("['a:''b', ", 1),
+            ("[\"a:b\", ", 1),
+            ("[a:'b, ", 1),
+            ("[a:\"b, ", 1),
+            ("[a:'b, c:'d, ", 2),
+            ("[a:\"b, c:\"d, ", 2),
+            ("[{k: a:'b}, ", 1),
+            ("[{a:'b: c}, ", 1),
+        ];
+        let offset = 7;
+        for (before, arm) in rows {
+            for (token, declaration) in [("./b", true), ("str", false)] {
+                let value = format!("{before}{token}");
+                let end = offset + value.len();
+                let state = if declaration {
+                    locate_schema_declaration_cursor(&value, offset, end)
+                } else {
+                    locate_type_definition_cursor(&value, offset, end)
+                }
+                .unwrap_or_else(|| panic!("{value:?}"));
+                assert_eq!(state.path, SchemaSourcePath::root().union_arm(*arm), "{value:?}");
+                assert_eq!(state.role, SchemaCursorRole::Type, "{value:?}");
+                assert_eq!(state.token, token, "{value:?}");
+                assert_eq!(state.token_span, end - token.len()..end, "{value:?}");
+            }
+        }
+    }
+
+    /// A declaration arm is an opaque YAML scalar, so a parenthesis in it is
+    /// content and never hides the `,` before the next arm, while a type
+    /// expression keeps `(…)` nesting for constraints such as `enum(a, b)`.
+    #[test]
+    fn declaration_arms_split_at_commas_between_parentheses() {
+        let offset = 5;
+        let declarations: &[(&str, usize)] = &[
+            ("[./a(b.yaml, ", 1),
+            ("[./a(b.yaml, ./c)d.yaml, ", 2),
+            ("[./a)b.yaml, ", 1),
+            ("['./a(b.yaml', ", 1),
+            ("[\"./a(b, c)d.yaml\", ", 1),
+            ("[{k: a(b}, ", 1),
+            ("[./a.yaml, ", 1),
+        ];
+        for (before, arm) in declarations {
+            let value = format!("{before}./b");
+            let end = offset + value.len();
+            let state = locate_schema_declaration_cursor(&value, offset, end)
+                .unwrap_or_else(|| panic!("{value:?}"));
+            assert_eq!(state.path, SchemaSourcePath::root().union_arm(*arm), "{value:?}");
+            assert_eq!(state.role, SchemaCursorRole::Type, "{value:?}");
+            assert_eq!(state.token, "./b", "{value:?}");
+            assert_eq!(state.token_span, end - 3..end, "{value:?}");
+        }
+
+        for value in ["[enum(a, b), str", "[string(suggest(a, b)), str"] {
+            let end = offset + value.len();
+            let state = locate_type_definition_cursor(value, offset, end).unwrap();
+            assert_eq!(state.path, SchemaSourcePath::root().union_arm(1), "{value:?}");
+            assert_eq!(state.role, SchemaCursorRole::Type, "{value:?}");
+            assert_eq!(state.token, "str", "{value:?}");
+            assert_eq!(state.token_span, end - 3..end, "{value:?}");
+        }
+    }
+
+    /// A quote inside a constraint's parentheses opens an expression string, so
+    /// punctuation in a quoted argument neither closes the constraint nor
+    /// separates alternatives. A quote starting an arm is YAML quoting, and one
+    /// outside parentheses is content.
+    #[test]
+    fn a_quoted_argument_keeps_its_punctuation_inside_its_flow_arm() {
+        let rows: &[(&str, usize)] = &[
+            // Controls.
+            ("[enum(a, b), ", 1),
+            ("['enum(\"a)b\", c)', ", 1),
+            ("[\"enum('a]b', c)\", ", 1),
+            ("['it''s', ", 1),
+            ("[a:'b, ", 1),
+            ("[string -> it's, ", 1),
+            // Closing punctuation inside a quoted argument.
+            ("[enum('a)b', c), ", 1),
+            ("[enum('a]b', c), ", 1),
+            ("[enum('a}b', c), ", 1),
+            ("[enum(\"a)b\", c), ", 1),
+            ("[enum(\"a]b\", c), ", 1),
+            ("[enum(\"a}b\", c), ", 1),
+            // Opening punctuation inside a quoted argument.
+            ("[enum('a(b', c), ", 1),
+            ("[enum('a[b', c), ", 1),
+            ("[enum('a{b', c), ", 1),
+            ("[enum(\"a(b\", c), ", 1),
+            ("[enum(\"a[b\", c), ", 1),
+            ("[enum(\"a{b\", c), ", 1),
+            // Separators, escapes, and nesting.
+            ("[enum('a,b', c), ", 1),
+            ("[enum('a\\')b', c), ", 1),
+            ("[enum(\"a\\\")b\", c), ", 1),
+            ("[string(suggest('x)y', 'p(q')), ", 1),
+            ("[{ k: string(suggest('a}b')) }, ", 1),
+            ("[enum('a)b', c), enum(\"d(e\", f), ", 2),
+            ("['enum(\"a)b\", c)', enum('d(e', f), ", 2),
+        ];
+        let offset = 9;
+        for (before, arm) in rows {
+            let value = format!("{before}str");
+            let end = offset + value.len();
+            let state = locate_type_definition_cursor(&value, offset, end)
+                .unwrap_or_else(|| panic!("{value:?}"));
+            assert_eq!(state.path, SchemaSourcePath::root().union_arm(*arm), "{value:?}");
+            assert_eq!(state.role, SchemaCursorRole::Type, "{value:?}");
+            assert_eq!(state.token, "str", "{value:?}");
+            assert_eq!(state.token_span, end - 3..end, "{value:?}");
+        }
+    }
+
+    /// While an argument list is still open, the `,` after a quoted argument
+    /// separates enum members rather than alternatives, in a flow union and in
+    /// a plain scalar alike.
+    #[test]
+    fn a_comma_after_a_quoted_argument_stays_in_the_argument_list() {
+        let enum_argument = SchemaCursorRole::Argument {
+            subject: Some("enum".into()),
+            constraint: "enum".into(),
+            array_level: false,
+        };
+        let root = SchemaSourcePath::root();
+        let rows: &[(&str, SchemaSourcePath, &str)] = &[
+            ("[enum(a, c", root.union_arm(0), "c"),
+            ("[enum('a)b', c", root.union_arm(0), "c"),
+            ("[enum('a]b', c", root.union_arm(0), "c"),
+            ("[enum('a}b', c", root.union_arm(0), "c"),
+            ("[enum(\"a)b\", c", root.union_arm(0), "c"),
+            ("[enum(\"a]b\", c", root.union_arm(0), "c"),
+            ("[enum('a(b', c", root.union_arm(0), "c"),
+            ("[enum('a[b', c", root.union_arm(0), "c"),
+            ("[enum(\"a(b\", c", root.union_arm(0), "c"),
+            ("[enum('a\\')b', c", root.union_arm(0), "c"),
+            ("[str, enum('a)b', c", root.union_arm(1), "c"),
+            ("['enum(\"a)b\", c)', enum('d)e', c", root.union_arm(1), "c"),
+            ("enum('a)b', c", root.clone(), "c"),
+            ("enum('a(b', c", root.clone(), "c"),
+            ("enum('a]b', c", root.clone(), "c"),
+            ("enum(\"a)b\", c", root.clone(), "c"),
+            // The cursor is still inside an open string.
+            ("[enum('a, c", root.union_arm(0), "a, c"),
+            ("enum('a\\', c", root.clone(), "a\\', c"),
+        ];
+        let offset = 4;
+        for (value, path, token) in rows {
+            let end = offset + value.len();
+            let state = locate_type_definition_cursor(value, offset, end)
+                .unwrap_or_else(|| panic!("{value:?}"));
+            assert_eq!(&state.path, path, "{value:?}");
+            assert_eq!(state.role, enum_argument, "{value:?}");
+            assert_eq!(state.token, *token, "{value:?}");
+            assert_eq!(state.token_span, end - token.len()..end, "{value:?}");
+        }
+    }
+
+    #[test]
     fn constraint_arguments_report_their_constraint() {
         let state = at_end("url(scheme(htt");
         assert_eq!(
@@ -637,6 +905,108 @@ mod tests {
         assert!(locate_type_definition_cursor("string", 10, 5).is_none());
         assert!(locate_type_definition_cursor("string", 0, 7).is_none());
         assert!(locate_type_definition_cursor("café", 0, 4).is_none());
+    }
+
+    /// A description and a file reference are read in the grammar's own
+    /// modes, so their punctuation neither hides the `,` before the next
+    /// alternative nor adds one.
+    #[test]
+    fn descriptions_and_file_references_keep_the_next_alternative() {
+        let rows = [
+            // Controls.
+            "[string -> plain, ",
+            "[string -> (plain), ",
+            "[string -> it's fine, ",
+            "[Name@./a(b)c.yaml, ",
+            "[Name@./a)b.yaml, ",
+            "['string -> (it''s fine)', ",
+            "[string(suggest('a)b', c)), ",
+            // Prose punctuation after `->`.
+            "[string -> (it's fine), ",
+            "[string -> (say \"hi), ",
+            "[{ a: string -> plain ] here }, ",
+            "[{ a: string -> (it's fine), b: number }, ",
+            // Opening punctuation in an imported filename.
+            "[Name@./a(b.yaml, ",
+            "[Name@./a[b.yaml, ",
+            "[Name@./a{b.yaml, ",
+            "[Name@./a('b.yaml, ",
+            "[Name@./a(\"b.yaml, ",
+            "[{ r: Name@./a(b.yaml }, ",
+            "[{ r: Name@./a{b.yaml -> (it's), s: number }, ",
+        ];
+        let offset = 11;
+        for before in rows {
+            let value = format!("{before}s");
+            let end = offset + value.len();
+            let state = locate_type_definition_cursor(&value, offset, end)
+                .unwrap_or_else(|| panic!("{value:?}"));
+            assert_eq!(state.path, SchemaSourcePath::root().union_arm(1), "{value:?}");
+            assert_eq!(state.role, SchemaCursorRole::Type, "{value:?}");
+            assert_eq!(state.token, "s", "{value:?}");
+            assert_eq!(state.token_span, end - 1..end, "{value:?}");
+        }
+    }
+
+    /// Inside one scalar, the cursor resumes type context after an
+    /// inline-object description ends, keeps the import-reference role across
+    /// filename punctuation, and reads a pattern key as one key. Each row is
+    /// authored plain, single-quoted, and double-quoted.
+    #[test]
+    fn a_scalar_cursor_follows_description_reference_and_key_modes() {
+        let root = SchemaSourcePath::root();
+        let import = |name: &str| SchemaCursorRole::ImportReference { name: name.into() };
+        let rows: Vec<(&str, SchemaSourcePath, SchemaCursorRole, &str)> = vec![
+            ("Name@./a(b.yaml", root.clone(), import("Name"), "./a(b.yaml"),
+            ("Name@./a[b.yaml", root.clone(), import("Name"), "./a[b.yaml"),
+            ("Name@./a{b.yaml", root.clone(), import("Name"), "./a{b.yaml"),
+            ("Name@./a('b", root.clone(), import("Name"), "./a('b"),
+            ("Name@./a(\"b", root.clone(), import("Name"), "./a(\"b"),
+            ("Name(required)@./a(b", root.clone(), import("Name"), "./a(b"),
+            ("{ r: Name@./a{b.yaml", root.property("r"), import("Name"), "./a{b.yaml"),
+            ("{ a: string -> plain, b: str", root.property("b"), SchemaCursorRole::Type, "str"),
+            ("{ a: string -> (it's fine), b: str", root.property("b"), SchemaCursorRole::Type, "str"),
+            ("{ a: string -> (say \"hi), b: str", root.property("b"), SchemaCursorRole::Type, "str"),
+            ("{ a: string -> ({x} it's [fine), b: str", root.property("b"), SchemaCursorRole::Type, "str"),
+            ("{ o: { a: string -> x } -> (it's), b: str", root.property("b"), SchemaCursorRole::Type, "str"),
+            ("{ o: { a: string -> x, b: str", root.property("o").property("b"), SchemaCursorRole::Type, "str"),
+            ("{ r: Name@./a(b.yaml -> it's, b: str", root.property("b"), SchemaCursorRole::Type, "str"),
+            ("{ r: Name@./a(b.yaml, b: str", root.property("b"), SchemaCursorRole::Type, "str"),
+            ("{ <pattern::^(a,b):c$>: str", root.property("<pattern::^(a,b):c$>"), SchemaCursorRole::Type, "str"),
+            ("{ <pattern::^(a", root.clone(), SchemaCursorRole::InlineObjectKey, "<pattern::^(a"),
+            (
+                "string(pattern(^[{]@x:y$); re",
+                root.clone(),
+                SchemaCursorRole::Constraint { subject: Some("string".into()), array_level: false },
+                "re",
+            ),
+        ];
+        let offset = 6;
+        for (decoded, path, role, token) in rows {
+            for quote in ["", "'", "\""] {
+                let escape = |text: &str| match quote {
+                    "'" => text.replace('\'', "''"),
+                    "\"" => text.replace('"', "\\\""),
+                    _ => text.to_string(),
+                };
+                let value = format!("{quote}{}", escape(decoded));
+                let end = offset + value.len();
+                let state = locate_type_definition_cursor(&value, offset, end)
+                    .unwrap_or_else(|| panic!("{value:?}"));
+                assert_eq!(state.path, path, "{value:?}");
+                assert_eq!(state.role, role, "{value:?}");
+                assert_eq!(state.token, token, "{value:?}");
+                let authored = escape(token);
+                assert_eq!(state.token_span, end - authored.len()..end, "{value:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_cursor_inside_an_inline_object_description_is_in_prose() {
+        for value in ["{ a: string -> (it's", "{ a: string -> x, b: string -> y", "{ a: string -> (x, y"] {
+            assert!(locate_type_definition_cursor(value, 0, value.len()).is_none(), "{value:?}");
+        }
     }
 
     #[test]

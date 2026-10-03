@@ -1,0 +1,309 @@
+# DRAFT named types for revision 5 of the steering research contract.
+#
+# Conventions used throughout:
+#
+# - `unknown` is a valid research answer. It blocks activation, and each one
+#   needs a matching entry in `gaps` or `discovery_gaps`.
+# - A field path is a JSON Pointer from the root of the message, event, or
+#   record being read, such as /params/turn/id.
+# - A message template is a complete JSON value. Text to be filled in is one of
+#   these placeholders and no other:
+#     <message>                  the text being delivered
+#     <conversation>             the provider's identifier for the conversation
+#     <operation>                the provider's identifier for the running turn
+#     <request_id>               a fresh identifier for this request
+#     <message_id>               the sender's identifier for this message
+#     <directory>                the session's working directory
+#     <provider_request_id>      the identifier of a request the provider sent
+#     <provider_request_method>  the method of a request the provider sent
+#     <claudine_version>         the version of the sending Claudine
+# - A condition list holds when every condition in it holds.
+kind: schema
+types:
+    identifier: string(pattern(^[a-z][a-z0-9-]*$)) -> Lowercase letters, digits, and hyphens, starting with a letter
+    version: string(pattern(^[0-9]+[.][0-9]+[.][0-9]+[0-9A-Za-z.+-]*$)) -> An exact released version such as 0.157.1
+    pointer: string(pattern(^/[A-Za-z0-9_/~.-]+$)) -> JSON Pointer from the root of the value being read
+    os: enum(macos,linux,windows) -> Host operating system; WSL counts as linux
+    launch_mode: enum(interactive,non_interactive) -> Whether the session was started with a terminal interface or without one
+    origin: enum(native,claudine) -> Whether the provider was started directly or through a Claudine wrapper
+    session_state: enum(working,idle) -> Whether the session is running a turn or waiting for input
+    operation: enum(steer_active_turn,start_idle_turn,interrupt_then_submit,queue_follow_up,unknown) -> What sending the message does to the session
+
+    condition:
+        field: pointer(required)@this -> Where to look in the value being tested
+        test: enum(equals,present,absent; required) -> Whether the field must hold a value, merely exist, or not exist
+        value:
+            - string -> Text the field must hold, which may be a placeholder; required when the test is equals
+            - number -> Number the field must hold, compared exactly
+            - boolean -> Truth value the field must hold, compared exactly
+
+    request:
+        verb: enum(write,get,post,put,delete; required) -> write sends one framed message on a stream carrier; the others are HTTP methods
+        target: string(pattern(^/[A-Za-z0-9_/<>.:-]*$)) -> URL path for an HTTP carrier, which may contain placeholders; omitted on a stream carrier
+        body: json -> The complete message template; omitted when the request has no body
+        awaits_response: boolean(required) -> Whether the provider answers this request with a response the sender can match to it
+        expect_status: number(integer; min(100); max(599)) -> HTTP status that means the provider took the request; omitted on a stream carrier
+
+    evidence:
+        id: identifier(required)@this -> Stable name other entries use to cite this source
+        method: enum(official_docs,source_code,local_inspection,disposable_test,inference; required) -> How the claim was established; inference alone never supports a verified verdict
+        location: string(required; not-empty) -> URL, commit-pinned source link, or path of a sanitized local artifact
+        version: string(required; not-empty) -> Provider version the source describes, or the literal word unknown
+        observed_on: date(required) -> Date the source was read or the observation was made
+        claim: string(required; not-empty) -> The one thing this source establishes
+        limitations: string(required; not-empty) -> What this source does not establish
+
+    interface:
+        id: identifier(required)@this -> Stable name for the interface, kept unchanged across refreshes so versions of this document stay comparable
+        profile_ids: identifier[](required)@this -> Launch profiles that use this interface; empty when the interface was ruled out
+        disposition: enum(included,excluded,unknown; required) -> Whether the interface is used by a launch profile, ruled out, or undecided
+        reason: string(required; not-empty) -> Why the interface was included or ruled out
+        evidence_ids: identifier[](required)@this -> Evidence that the interface exists and behaves as the reason states
+
+    launch:
+        execution_interface: identifier@this -> Name of this interface in the provider's non-interactive-sessions research
+        arguments: string[](required) -> Arguments after the provider binary that start this profile; empty for an ordinary launch
+        readiness: enum(setup_complete,state_answered,endpoint_accepts,not_applicable,unknown; required) -> What shows the session is ready to take a request
+
+    launch_profile:
+        id: identifier(required)@this -> Stable name cases and channels use to refer to this profile; kept unchanged across refreshes
+        description: string(required; not-empty) -> What distinguishes this way of starting a session
+        baseline: boolean(required) -> Whether this is an ordinary provider launch rather than one set up for control
+        applicable_os: os[](required)@this -> Operating systems the profile exists on
+        applicable_launch_modes: launch_mode[](required)@this -> Launch modes the profile covers; a case is required for each one
+        applicable_origins: origin[](required)@this -> Whether the profile can be started natively or through Claudine or both
+        endpoint_scope: enum(internal,externally_reachable,retained_stdio,extension,none,unknown; required) -> Who can reach the control interface
+        lifetime: enum(one_shot,while_client_open,long_lived,provider_managed,unknown; required) -> How long the session stays reachable
+        launch: launch(required)@this -> How the profile is started and when it is ready
+        startup_requirements: string[](required) -> What must be true before launch for the profile to work
+        preserves_extensions: enum(yes,no,partial,unknown; required) -> Whether the user's extensions still load under this profile
+        preserves_skills: enum(yes,no,partial,unknown; required) -> Whether the user's skills still load under this profile
+        preserves_templates: enum(yes,no,partial,unknown; required) -> Whether the user's prompt templates still load under this profile
+        preserves_context: enum(yes,no,partial,unknown; required) -> Whether the user's context files still load under this profile
+        evidence_ids: identifier[](required)@this -> Evidence for how the profile is started and what it preserves
+
+    endpoint:
+        source: enum(child_pipes,claudine_assigned,registry_field,provider_file,unknown; required) -> Where the sender learns the address
+        locator: string -> The registry field path or file path that holds the address; omitted for child pipes
+
+    credential:
+        kind: enum(channel_ownership,http_basic,bearer_token,first_frame_token,unknown; required) -> What the provider requires to accept a sender
+        source: enum(not_applicable,claudine_generated,provider_file,registry_field,target_session_only,unknown; required) -> Where the secret comes from; target_session_only means no outside sender can obtain it
+        locator: string -> File path or registry field that holds the secret; never the secret itself
+        handoff: enum(not_applicable,environment_variable,launch_flag,unknown; required) -> How a secret Claudine generates is given to the provider at launch
+        handoff_name: string(pattern(^[A-Za-z_-][A-Za-z0-9_-]*$)) -> Name of that environment variable or flag
+
+    correlation:
+        request_id_field: pointer@this -> Where a request carries the identifier the provider echoes
+        response_id_field: pointer@this -> Where a response carries that identifier
+        response_when: condition[](required)@this -> What marks a message as a response rather than an event or a provider request
+        success_when: condition[](required)@this -> What marks a response as the provider taking the request
+        error_field: pointer@this -> Where a refusal carries its reason
+
+    setup_step:
+        id: identifier(required)@this -> Stable name for the step, used when a failure during setup is reported
+        request: request(required)@this -> The message sent in this step
+        binds: enum(nothing,conversation,provider_version; required) -> What the sender learns from the answer
+        field: pointer@this -> Where the answer carries that value
+        extract: enum(whole_value,first_version_number,not_applicable; required) -> Whether the value is used as given or a version number is taken from inside it
+
+    state_event:
+        match: condition[](required)@this -> What identifies the event among everything the provider emits on the channel
+        effect: session_state(required)@this -> The state the session is in after this event
+        operation_field: pointer@this -> Where the event names the turn that started or ended
+        conversation_field: pointer@this -> Where the event names its conversation
+        status_field: pointer@this -> Where an ending event says how the turn ended
+
+    state_reading:
+        source: enum(request,events,request_and_events,none,unknown; required) -> Whether state is asked for or followed from events or both
+        request: request@this -> The message that asks for the current state
+        working_when: condition[]@this -> What in the answer shows a turn is running
+        idle_when: condition[]@this -> What in the answer shows the session can take a new turn
+        operation_field: pointer@this -> Where the answer names the running turn
+        conversation_field: pointer@this -> Where the answer names the conversation
+        events: state_event[]@this -> Events that change the state, so the sender can follow it without asking
+
+    provider_request:
+        match: condition[](required)@this -> What identifies a request the provider sends to its client
+        meaning: enum(cancel,refuse,acknowledge; required) -> What the answer tells the provider
+        answer: json(required) -> The complete answer template, sent back on the same channel
+
+    channel:
+        id: identifier(required)@this -> Stable name mechanisms and discovery use to refer to this channel
+        profile_ids: identifier[](required)@this -> Launch profiles that expose this channel
+        os: os[](required)@this -> Operating systems this channel exists on
+        carrier: enum(child_stdio,http,unix_socket,named_pipe,websocket,unknown; required) -> What carries the bytes between the sender and the provider
+        envelope: enum(plain_json,json_rpc,unknown; required) -> Whether messages are bare JSON objects or JSON-RPC requests and responses
+        events: enum(same_channel,server_sent_events,websocket,none,unknown; required) -> Where events from the provider arrive
+        endpoint: endpoint(required)@this -> How the sender finds the address
+        credential: credential(required)@this -> What the sender must present before the provider accepts a request
+        correlation: correlation@this -> How a response is matched to its request; omitted when each request has its own HTTP response
+        setup: setup_step[](required)@this -> Messages exchanged in order before the channel can carry a request; empty when none are needed
+        state: state_reading(required)@this -> How the sender learns whether the session is working or idle
+        provider_requests: provider_request[](required)@this -> Requests the provider may send that need an answer when no person is present, most specific first because the first match applies; empty when it sends none
+        evidence_ids: identifier[](required)@this -> Evidence for the carrier, credential, setup exchange, and message shapes recorded here
+
+    record_source:
+        kind: enum(files,channel_request,claudine_registry,process_table,none,unknown; required) -> Where session records come from; none means sessions of this kind leave no record
+        locator: string -> File pattern for files, using <home> for the user's home directory; omitted otherwise
+        format: enum(json,json_lines,not_applicable,unknown; required) -> How each record is encoded, so a reader knows how to parse it
+        channel_id: identifier@this -> Channel to ask when records come from a request
+        request: request@this -> The message that lists sessions when records come from a request
+
+    record_fields:
+        conversation: pointer@this -> Where a record names its conversation
+        pid: pointer@this -> Where a record gives the provider's process ID
+        process_start: pointer@this -> Where a record gives the process start time
+        state: pointer@this -> Where a record says whether the session is working
+        state_updated: pointer@this -> Where a record says when its state last changed
+        cwd: pointer@this -> Where a record gives the working directory
+        name: pointer@this -> Where a record gives a name a person would recognize
+        provider_version: pointer@this -> Where a record gives the provider version
+        endpoint: pointer@this -> Where a record gives the address of its channel
+        kind: pointer@this -> Where a record says what kind of session it is
+
+    discovery:
+        id: identifier(required)@this -> Stable name cases use to refer to this method
+        profile_id: identifier(required)@this -> Launch profile whose sessions this method finds
+        os: os(required)@this -> Operating system this entry describes; record locations and liveness checks differ between systems
+        origin: origin(required)@this -> Whether this entry finds native or Claudine-launched sessions
+        method: enum(provider_registry,provider_api,process_inspection,claudine_registration,other; required) -> The kind of source consulted to find sessions of this profile
+        records: record_source(required)@this -> Where the records are and how they are encoded
+        fields: record_fields(required)@this -> Where each fact is found in a record; omit a fact the record does not carry
+        working_when: condition[]@this -> What in a record shows a turn is running
+        idle_when: condition[]@this -> What in a record shows the session can take a new turn
+        liveness: enum(pid_and_start_time,endpoint_exists,pid_start_and_endpoint,channel_round_trip,none,unknown; required) -> What proves the recorded session is still running
+        identity_notes: string(required; not-empty) -> What could make two records look like one session or one session look like two
+        prerequisites: string[](required) -> What must be true for this method to see a session
+        evidence_ids: identifier[](required)@this -> Evidence that the records exist where stated and carry the fields listed
+
+    discovery_gap:
+        profile_id: identifier(required)@this -> Launch profile whose sessions cannot be found
+        os: os(required)@this -> Operating system on which these sessions cannot be found
+        origin: origin(required)@this -> Origin of the sessions that cannot be found
+        launch_mode: launch_mode(required)@this -> Launch mode of the sessions that cannot be found
+        session_state: session_state(required)@this -> State of the sessions that cannot be found
+        detail: string(required; not-empty) -> Why they cannot be found, stated as a fact about the provider
+        next_check: string(required; not-empty) -> The specific check that would show whether these sessions can be found
+
+    acceptance:
+        rule: enum(correlated_success,http_status,none,unknown; required) -> What counts as the provider taking the message; none means the provider gives no answer
+        operation_echo_field: pointer@this -> Where the answer names the turn it applied to; the sender requires it to equal the turn it targeted
+        binds_operation_field: pointer@this -> Where the answer names a turn the message started
+        proves: enum(accepted,queued,delivered,unknown; required) -> The most the answer establishes about the message
+
+    stop_proof:
+        rule: enum(poll_state_idle,event,pending_response,not_applicable,unknown; required) -> What proves a cancelled turn has stopped; an answer to the cancel request alone never does
+        match: condition[]@this -> What identifies the proving event or the proving answer to the original request
+
+    mechanism:
+        id: identifier(required)@this -> Stable name cases, grants, and verification records use to refer to this mechanism; kept unchanged across refreshes
+        channel_id: identifier(required)@this -> Channel the mechanism is sent over
+        interface_status: enum(documented,undocumented,unknown; required) -> Whether the provider documents this interface
+        maturity: enum(stable,experimental,provider_unsupported,unknown; required) -> How the provider describes the interface's stability
+        operation_intent: operation(required)@this -> Which steering operation this mechanism performs; each mechanism performs exactly one
+        conversation_effect: enum(preserve_running_turn,cancel_turn_same_conversation,resume_same_conversation,new_conversation,unknown; required) -> What happens to the running turn and its conversation
+        delivery_boundary: enum(during_generation,next_tool_boundary,end_of_tool_batch,next_turn,idle_turn_start,unknown; required) -> The earliest point at which the agent sees the message
+        target_guard: enum(provider_checks_operation,provider_checks_conversation,none,unknown; required) -> Whether the provider itself refuses a message aimed at a turn or conversation that is no longer current
+        send: request@this -> The message that delivers the text; omitted only when it is unknown
+        acceptance: acceptance(required)@this -> What the provider's answer proves about the message, which limits what the sender may report
+        cancel: request@this -> The message that stops the running turn; present only for interrupt_then_submit
+        stop_proof: stop_proof(required)@this -> What proves the running turn stopped before the replacement is sent
+        message_limit_bytes: number(integer; min(1)) -> Largest message the provider accepts; omitted when no limit is established
+        tool_batch_behavior: enum(continue_all,stop_remaining,provider_defined,not_applicable,unknown; required) -> What happens to tool calls already requested when the message arrives
+        message_interpretation: enum(literal,skills_templates,extension_command,input_extension,provider_defined,unknown; required) -> Whether the provider treats the text as plain text or expands it
+        sender_message_id: enum(supported,unsupported,unknown; required) -> Whether the sender can attach its own identifier to the message
+        retry_policy: enum(safe_same_id,unsafe_possible_duplicate,never_retry,unknown; required) -> Whether sending the same message again can be done safely
+        startup_requirements: string[](required) -> What must have been true at launch for this mechanism to exist
+        target_preconditions: string[](required) -> What must be true of the session at the moment of sending
+        long_tool_behavior: string(required; not-empty) -> What happens to a message sent while a long tool call is running
+        queue_behavior: string(required; not-empty) -> How the provider holds messages it cannot deliver yet
+        interruption_partial_failure: string(required; not-empty) -> What state the session is left in when the turn stops and the replacement is not accepted
+        ordering: string(required; not-empty) -> What order several messages are delivered in
+        duplicate_handling: string(required; not-empty) -> What the provider does with a message it has already received
+        limits: string(required; not-empty) -> Turn kinds and conditions under which the provider refuses the message
+        evidence_ids: identifier[](required)@this -> Evidence for the message shape, the delivery boundary, and the provider's answer
+
+    access_finding:
+        mechanism_id: identifier(required)@this -> Mechanism whose reachability this finding records
+        profile_id: identifier(required)@this -> Launch profile the finding is about
+        os: os(required)@this -> Operating system the finding is about
+        status: enum(available,setup_required,blocked,unknown; required) -> Whether a sender can reach the mechanism
+        prerequisite: string(required; not-empty) -> What the user must do or have for the mechanism to be reachable
+        applies_to_existing_sessions: enum(yes,no,unknown; required) -> Whether meeting the prerequisite helps a session that is already running
+        evidence_ids: identifier[](required)@this -> Evidence that the mechanism is or is not reachable under this profile
+
+    delivery_state:
+        mechanism_id: identifier(required)@this -> Mechanism whose messages pass through these states
+        states: enum(accepted,queued,held,delivered,refused,expired,unknown)[](required) -> States a message can pass through before the agent sees it
+        observable_by_external_sender: enum(yes,partial,no,unknown; required) -> Whether a sender outside the session can observe those states
+        correlation: string(required; not-empty) -> How a later state is tied back to the message that was sent
+        evidence_ids: identifier[](required)@this -> Evidence that a message passes through the listed states
+
+    receipt_guarantee:
+        mechanism_id: identifier(required)@this -> Mechanism whose answer this guarantee describes
+        request_acceptance: enum(confirmed,rejected,unknown; required) -> Whether the answer proves the provider took the request
+        persistence: enum(confirmed,not_persisted,unknown; required) -> Whether the answer proves the message survives a provider restart
+        scheduling: enum(confirmed,not_scheduled,unknown; required) -> Whether the answer proves the message will be delivered
+        conversation_delivery: enum(confirmed,not_delivered,unknown; required) -> Whether the answer proves the agent has seen the message
+        correlation: enum(request_id,message_id,operation_id,none,unknown; required) -> Which identifier ties the answer to the message
+        provider_signals: string[](required) -> Names of the responses and events that carry the proof
+        limitations: string(required; not-empty) -> What the answer does not prove
+        evidence_ids: identifier[](required)@this -> Evidence for what the provider's answer does and does not prove
+
+    receipt_observation:
+        mechanism_id: identifier(required)@this -> Mechanism whose answer was observed arriving
+        timing: enum(early,terminal,multi_phase,none,unknown; required) -> Whether the answer arrives before delivery or only when the turn ends or in stages
+        signal: string(required; not-empty) -> Name of the response or event that was observed
+        evidence_ids: identifier[](required)@this -> Evidence for when the provider's answer arrives
+
+    compatibility_check:
+        channel_id: identifier@this -> Channel the check is sent over; omitted when the check reads a file or a version
+        request: request@this -> A message that changes nothing and shows the provider speaks this protocol
+        passes_when: condition[]@this -> What in the answer shows the protocol is the researched one
+
+    compatibility:
+        mechanism_id: identifier(required)@this -> Mechanism that must not be used until this check passes
+        profile_id: identifier(required)@this -> Launch profile the check applies to
+        os: os(required)@this -> Operating system the check applies to
+        versions_verified: version[](required)@this -> Versions a live test has passed on; empty when none has
+        documented_version_bounds: string(required; not-empty) -> Version range the provider documents for the interface or the literal word unknown
+        check: compatibility_check(required)@this -> How to confirm compatibility without changing the session
+        failure_behavior: string(required; not-empty) -> What the provider does when sent this protocol by a version that does not speak it
+        evidence_ids: identifier[](required)@this -> Evidence that the check tells a compatible provider from an incompatible one
+
+    verification:
+        id: identifier(required)@this -> Stable name activation grants use to cite this test
+        mechanism_id: identifier(required)@this -> Mechanism the live test sent its message through
+        profile_id: identifier(required)@this -> Launch profile the session was started under
+        os: os(required)@this -> Operating system the test ran on
+        provider_version: version(required)@this -> Exact provider version that was tested
+        launch_mode: launch_mode(required)@this -> Launch mode of the tested session
+        origin: origin(required)@this -> Whether the tested session was native or Claudine-launched
+        session_state: session_state(required)@this -> State the session was in when the message was sent
+        outcome: enum(passed,failed,inconclusive; required) -> Result of the test; only passed can support an activation grant
+        tested_on: date(required) -> Date the test ran, which dates the provider behavior it shows
+        fixture: string(required; not-empty) -> Path of the sanitized record of the test
+        assertions: string[](required) -> What the test checked in plain words
+        assertion_kinds: enum(target_identity,acceptance_signal,conversation_delivery,delivery_boundary,running_work_preserved,cancellation_established,resource_preservation,duplicate_behavior,process_cleanup,expected_loss)[](required) -> The kind of each thing checked; expected_loss marks a test that documents a message being lost
+        limitations: string(required; not-empty) -> What the test does not show
+        evidence_ids: identifier[](required)@this -> Evidence entries that hold the record of this test run
+
+    case:
+        profile_id: identifier(required)@this -> Launch profile this verdict applies to; one case exists for every combination the profile declares
+        os: os(required)@this -> Operating system this verdict applies to; evidence from one system never supports another
+        launch_mode: launch_mode(required)@this -> Launch mode this verdict applies to, since control interfaces differ between modes
+        origin: origin(required)@this -> Whether this verdict is for a native session or one Claudine launched
+        session_state: session_state(required)@this -> Whether this verdict is for a session running a turn or one waiting for input
+        support: enum(non_interrupting,interruption_required,unsupported,unknown; required) -> What the provider can do for this case; this describes the provider and not what Claudine has built
+        discovery_ids: identifier[](required)@this -> Methods that can find a session of this kind
+        mechanism_ids: identifier[](required)@this -> Mechanisms that can reach a session of this kind
+        prerequisites: string[](required) -> What the user must have set up for the verdict to hold
+        reason: string(required; not-empty) -> Why the verdict is what it is
+        evidence_ids: identifier[](required)@this -> Evidence that justifies the verdict for this combination
+
+    gap:
+        area: enum(discovery,channel,mechanism,receipt,compatibility,verification,launch,other; required) -> Which part of the research the gap is in
+        subject: identifier@this -> Name of the channel or mechanism or profile the gap concerns
+        detail: string(required; not-empty) -> What is not known, stated precisely enough for someone else to investigate
+        next_check: string(required; not-empty) -> The specific check that would close the gap

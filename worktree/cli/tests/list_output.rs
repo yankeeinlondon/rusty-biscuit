@@ -81,17 +81,19 @@ fn list_output_is_the_redesigned_table() {
 
     assert!(output.status.success(), "wt list should succeed");
     assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+    // The last column widens the table toward the legend's width, up to the
+    // 80-column terminal.
     assert_eq!(
         String::from_utf8_lossy(&output.stderr),
-        "\n┌─────────────┬───────────┬───────────┬───────────┐\n\
-│ Worktree    │ Branch    │ ->  main  │ -> parent │\n\
-├─────────────┼───────────┼───────────┼───────────┤\n\
-│ ○ base repo │  main     │ —         │ —         │\n\
-│ ○ feature-a │ feature-a │ clean     │ —         │\n\
-└─────────────┴───────────┴───────────┴───────────┘\n\
+        "\n┌─────────────┬───────────┬───────────┬────────────────────────────────────────┐\n\
+│ Worktree    │ Branch    │ ->  main  │ -> parent                              │\n\
+├─────────────┼───────────┼───────────┼────────────────────────────────────────┤\n\
+│ ○ base repo │  main     │ —         │ —                                      │\n\
+│ ○ feature-a │ feature-a │ clean     │ —                                      │\n\
+└─────────────┴───────────┴───────────┴────────────────────────────────────────┘\n\
 \n\
 \x20Worktree   ○ clean    ● uncommitted files    ● uncommitted source files\n\
-\x20Branch     └─ merges cleanly into parent    └─ conflicts with parent    └┄ parent deleted\n"
+\x20Branch     └─ merges cleanly into parent     └─ conflicts with parent    └┄ parent deleted\n"
     );
 }
 

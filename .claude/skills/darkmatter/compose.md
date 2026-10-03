@@ -37,9 +37,9 @@ Markdown presentation is retained separately and the raw record remains
 available for fresh preparation. Ordinary strings and document-authored file
 references keep their existing source-relative and repository-aware rules.
 
-1. **Frontmatter Interpolation (pass 1)** - `{{ variable }}` in frontmatter resolves before effective state is built; materialized caller-file parameters already expose their origin-resolved native values, and keys referencing a whole-value `$(...)` are deferred to pass 2
-2. **Schema Validation** - Validate frontmatter against `$schema` or `ComposeOptions::baseline_schema`. Runs after `--set` / `--state` overrides and frontmatter interpolation, but before shell expansion. **Coerces** schema-recognized top-level scalars to their declared types (default-on, e.g. the string `"true"` → real boolean) and writes the coerced values back into frontmatter, skipping `$(...)`-pending values. Problems on fields still holding `$(...)` are deferred to downstream re-validation only when frontmatter shell expansion is enabled; when it is disabled they fail fast
-3. **Frontmatter Shell Expansion** - top-level `$(cmd)` frontmatter values execute after interpolation and write trimmed `stdout` back into frontmatter. Tokens in executed position follow the `$()` token-resolution ladder (literal → `name(...)` safe function → executable → frontmatter property → null); an all-expression `$()` is rejected with a `{{ }}` suggestion
+1. **Frontmatter Interpolation (pass 1)** - `{{ variable }}` in frontmatter resolves before effective state is built; materialized caller-file parameters already expose their origin-resolved native values, and keys referencing an authored whole-value `$(...)` are deferred to pass 2; each string is scanned once (see [Inserted Text Is Data](#inserted-text-is-data))
+2. **Schema Validation** - Validate frontmatter against `$schema` or `ComposeOptions::baseline_schema`. Runs after `--set` / `--state` overrides and frontmatter interpolation, but before shell expansion. **Coerces** schema-recognized top-level scalars to their declared types (default-on, e.g. the string `"true"` → real boolean) and writes the coerced values back into frontmatter, skipping `$(...)`-pending values. Data (a data override, an expression result, a decoded literal token) is never pending: it is judged now. Problems on fields still holding `$(...)` are deferred to downstream re-validation only when frontmatter shell expansion is enabled; when it is disabled they fail fast
+3. **Frontmatter Shell Expansion** - top-level frontmatter values whose *authored source* is a whole-value `$(cmd)` execute after interpolation and write trimmed `stdout` back into frontmatter. Tokens in executed position follow the `$()` token-resolution ladder (literal → `name(...)` safe function → executable → frontmatter property → null); an all-expression `$()` is rejected with a `{{ }}` suggestion
 4. **Frontmatter Interpolation (pass 2)** - resolves the keys deferred in pass 1 against the now-concrete shell-expanded values
 5. **Text Replacement** - `replace:` frontmatter replaces literal strings
 6. **Page Blocks** - `::block`/`::end-block` conditional regions
@@ -66,6 +66,12 @@ the compose pipeline.
 - `prologue` / `epilogue` - Frontmatter-driven file includes
 - `when="..."` conditions, cycle detection, depth limits
 - Heading re-leveling for included markdown (H6 overflow handled gracefully)
+- A failing child becomes a `_Could not transclude …_` notice under lenient
+  mode, except fatal classes (`transclusion_failure_is_fatal` in
+  `pipeline/phases.rs`): cycle, depth, remote fetch, missing runtime context,
+  `NotPreApproved`, and any shell span failure (`MarkdownError::shell_span_failure`),
+  so a partial's unhandled `::shell`/`::shell-block`/`$( … )` failure fails the
+  composition exactly as it would inline
 
 **Inline Post** (serial):
 
@@ -81,10 +87,17 @@ the compose pipeline.
 
 **Finalization** (root-only serial):
 
-- **Link Normalization** - Converts absolute path links back into portable forms:
-    - **Same-repo**: Paths inside the same git repository are made relative to the document
-    - **Home-dir**: Paths under the user's home directory use the `~/` prefix
-    - **ENV-var**: Paths under whitelisted environment variables (e.g. `PROJECT_ROOT`) use `${VAR}/` prefix
+- **Link Normalization** - Converts absolute link destinations back into portable
+  references through `biscuit_file::PortablePath` (default strategy, root document's
+  context): nearby relative (`./x`, `../peer/x`), `&repo/path`, a declared `{{VAR}}`
+  (written as the literal `{{{VAR}}}` so recompose is stable), `~/`, else the absolute
+  path is kept with a `link_normalization` warning (the document still holds a
+  host-tied link); `ComposeOptions::with_absolute_fallback_warning(false)`
+  suppresses it. `#frag` / `?q` / `:line` suffixes are split and reattached. No variable
+  is portable by default: declare names with `PORTABLE_ENV_VARIABLES` or
+  `ComposeOptions::with_portable_env` (the old `with_env_path_whitelist` and its
+  `PROJECT_ROOT` / `DOCS_BASE` defaults are gone). See
+  `darkmatter/docs/inline/link-normalization.md`.
 
 ## API
 
@@ -154,10 +167,14 @@ let context = ComposeContext::capture_with_evidence(
 ```
 
 `ContextRequirements::for_content` scans active `ctx.*` references in one
-content fragment. `for_document` scans both authored frontmatter values and the
-body, preserving interpolation-literal masking and date/time aliases. `all`,
-`contains`, and `iter` support explicit orchestration without exposing the
-population modules. Date/time is always present in a requirements set.
+content fragment. `for_document` scans every frontmatter string at any depth
+(`for_frontmatter`, lifecycle blocks included) and the body, preserving
+interpolation-literal masking and date/time aliases. The body follows body
+interpolation's executable-span rule: a mention inside a fenced or indented
+code block demands nothing unless the document sets
+`interpolate_code_blocks: true`. `all`, `contains`, `iter`, and `union` support
+explicit orchestration without exposing the population modules. Date/time is
+always present in a requirements set.
 
 Calls to `package(`/`package_area(` demand `Repo` and `ipv4(`/`ipv6(` demand
 `Network` (`FUNCTION_GROUPS` in `capture/groups.rs`). Those functions read
@@ -287,10 +304,16 @@ file changes rather than discovering the repository a second time.
   `Evaluator::{eval, eval_value, eval_json}`, `conditions::evaluate_condition`,
   and the two `$()` ternary evaluations. That is the Q2 memo scope: repeated
   reads of one key inside one expression agree; the next expression refreshes.
+- `CurrentAuthority::memoized()` — an embedder's wider memo. It wraps the
+  authority's provider so every read through the returned handle (and its
+  clones) shares one observation per key; calling it again starts a fresh
+  memo. Claudine memoizes once per lifecycle event.
 
-Resolution rules, enforced in `EffectiveState`, `FrontmatterSeedState`, and
-`LayeredLookup` **before** frontmatter, external state, and injected globals,
-so neither can shadow a reserved root:
+Resolution rules, enforced in `EffectiveState` and `FrontmatterSeedState`
+**before** frontmatter and external state, so neither can shadow a reserved
+root. Subtree compose's `EvaluationSession` resolves reserved roots through
+the document lookup first, and refuses to register a global under one
+(`BindingError::ReservedName`):
 
 - `current.<key>` where `<key>` is cataloged: an `Invocation` or `Document`
   key is request-owned and reads the eager capture; every other group refreshes
@@ -318,9 +341,11 @@ the union across the walked graph.
 outcomes: `Present`, `NotCaptured`, `ProjectionMissing`, or `Unknown`.
 Classification uses only `ContextGroup::for_key`/`projected_keys` and the
 snapshot's `capture_requirements()`. Expression evaluation reads through
-`EvaluationLookup::get_checked`, which `EffectiveState`, `ResolvingLookup`,
-`FrontmatterSeedState`, `LayeredLookup`, `ShortcutLookup`, and `CtxLookup`
-override.
+`EvaluationLookup::resolve`, which `EffectiveState`, `ResolvingLookup`,
+`FrontmatterSeedState`, `ShortcutLookup`, `CtxLookup`, `DeferrableLookup`, and
+`EvaluationSession` override. A bare name is a document property only: no
+lookup falls back to `ctx` (the parity inventory in
+`compose/tests/lookup_parity.rs` lists every implementation and probes it).
 
 - A captured group must project every key it owns, with `null` for absence.
   `ProjectionMissing` raises `ExpressionError::ContextProjectionInvariant`
@@ -406,6 +431,9 @@ Version: VERSION
 - `null` → empty string
 - Non-map `replace` silently skipped
 - Single-pass (replacements not re-scanned)
+- A value keeps the origin of its leaf: an authored value writes authored
+  text (so it can introduce a directive or `{{ … }}`), while a data or
+  inherited value writes data
 
 ## Interpolation
 
@@ -438,6 +466,8 @@ optional-target idiom is condition-aware and warning-free:
 | `{{ current.branch }}` | The same key as `ctx.branch`, observed when this expression evaluates |
 | `{{ current_env.HOME }}` | The same key as `env.HOME`, reread from the live process environment |
 | `{{ file_exists(path) }}` | Read-side function (also `frontmatter`, `markdown_title`, `markdown_body_empty`, `validate_schema`, `absolute`, `relative`); resolves on every surface, both interpolation passes included |
+| `{{ find_files('&area/fixes/**/2026-01-01-x/spec.md') }}` | Every file a glob reference matches, sorted absolute paths; the path before the first wildcard is a file reference naming the directory walked (so the walk stays bounded), `[]` when nothing matches. Use it to find a spec by directory identity and to see ambiguity, which `%` (first lexical match) hides |
+| `{{ try_frontmatter(file) }}` | `frontmatter(file)` as `{ok, value, error}`: a missing, unreadable, or unparsable file is `ok: false` with the reason instead of failing the composition |
 
 Read-side functions and `doc.*` resolve identically on every surface
 (frontmatter both passes, body, `when=`, `$()` ternary condition/branches,
@@ -452,10 +482,11 @@ fatal), and what DMLS checks — is in `darkmatter/docs/topics/parsing/`. The
 `dm.*` code-sharing rules are in `darkmatter/dmls/docs/diagnostics.md`
 (§ "`dm.*` registry rules").
 
-### Unknown identifiers (`dm.expression.unknown_identifier`)
+### Undeclared properties (`dm.expression.undeclared_property`)
 
-A well-formed root that resolves to nothing still renders empty, but a
-full-document compose warns about it once per root per source document
+A well-formed root that resolves to nothing is an absent document property
+(`null`, renders empty), and a full-document compose reports it as an advisory
+once per root per source document
 (source `darkmatter.expression`, `path` and `line_number` set, location also
 in the Prose-escaped message because `md` and Claudine render only the
 message). The moving parts:
@@ -478,18 +509,19 @@ message). The moving parts:
   `conditions::evaluate_condition_observed`, or build the `Evaluator` with
   `.observing_missing_roots()` and drain `take_missing_roots()`. The `()`
   observer compiles the check away.
-- **Known roots** come from `EvaluationLookup::is_known_variable_root`:
-  `EffectiveState`, `ResolvingLookup`, and `FrontmatterSeedState` answer it
-  (state key even if `null`/`""`, `ctx`/`env`/`doc`/`current`/`current_env`,
-  bare context names, and `null`, which the grammar has no literal for). The
-  trait default `true` keeps other lookups silent.
+- **Candidates come from the binding classification.** Only a read that
+  resolves as `ResolvedBinding::Document { value: None }` is observed; a
+  namespace or a global never is. Reserved roots and `null` (which the grammar
+  has no literal for) are skipped. A bare runtime-context name such as
+  `branch` is a document property and is reported.
 - **Candidates, not warnings.** Surfaces push `UnknownRootCandidate`s onto
   `ComposeReport` (first read per root only, through the hash-backed
   `UnknownRootCandidates`, whose root set is private so it cannot drift from
   the list; `report.rs`'s identity-work counter pins O(1) per read).
   `unknown_identifiers::reconcile`
   runs once per document just before `attribute_to_document`. It drops roots
-  known to the final state, a caller input record, or the effective schema
+  that are keys of the final state, a caller input record, or the effective
+  schema
   (`EffectiveSchema::declares_top_level_property`: `properties`,
   `patternProperties`, union/`allOf`/`if` arms, local `$ref`), then emits.
   A discovery pass drops its candidates. A required-but-unset root never gets
@@ -667,11 +699,10 @@ Inline: `{{ evaluated }}`             # always interpolated
 
 ### Braces Inside String Literals
 
-A quoted literal inside an expression is inert text. The body and mixed
-frontmatter strings rescan their output, so `{{ "in {{ area }}" }}` happens to
-resolve there. A value that is **exactly one** `{{ … }}` span takes the
-whole-value path, evaluates once, and never rescans, so the braces survive
-raw. Claudine lifecycle values are single-pass and are refused before launch.
+A quoted literal inside an expression is inert text, and every surface is
+single-pass: `{{ "in {{ area }}" }}` emits the braces as literal text in the
+body, in mixed frontmatter strings, and on the whole-value path alike.
+Claudine lifecycle values are refused before launch.
 Build strings with `+` (`{{ area ? "in " + area : "at root" }}`), which works
 on every surface. `lint_expression` / `lint_spanned`
 (`compose::expression::lint`) find the defect in authored source and return a
@@ -686,6 +717,107 @@ scan mode. An even run (`\\{{`) escapes itself, so the span stays active.
 Compose keeps every backslash, and the Markdown renderer resolves the escape.
 Use it for prose that quotes Handlebars, Jinja, or similar syntax. Use
 `{{{ … }}}` when the composed output itself should contain `{{ … }}`.
+
+### Inserted Text Is Data
+
+Every authored span is scanned **once**. Produced text is data and is never
+scanned again for `{{ … }}`, `{{{ … }}}`, a whole-value `$( … )`, or a body
+directive. Produced text is:
+
+- an expression result, including a file read such as `frontmatter(log, 'k')`
+- shell output (frontmatter `$( … )`, `::shell`, `::shell-block`)
+- a `{{{ … }}}` escape's result
+- a data override (`with_data_overrides`, a `Data` override layer)
+- a decoded literal token
+- the composed values a parent hands to a transcluded child (via
+  `child_inherited_origin`, which joins the child cache key)
+
+Origin travels beside the value, never inside it. `compose/value_origin.rs`
+holds it for frontmatter: crate-private `DataPaths` (leaf paths) inside
+`FrontmatterProvenance`, which also snapshots the authored top-level strings.
+For the body, `body_origin::DataRanges` holds it inside `BodyProvenance`,
+which every body stage carries. `interpolate_text_in` scans the masked view
+once and converts literals in the same scan. `MAX_INTERPOLATION_DEPTH`, the
+rescan loop, and `ExpressionOrigin::Generated` no longer exist. Do not
+reintroduce a later stage that scans assembled text: a new scanner takes
+`Option<&DataRanges>` and reads `parse_utils::structural_view`, and a
+directive counts only when its line break, prefix, and keyword are authored.
+
+**Intentional behavior change (no fixed point).** Interpolation used to
+rescan inserted text until it stopped changing. Now:
+
+```yaml
+---
+area: claudine
+note: "fixed {{{ area }}}"
+---
+Body: {{ note }}
+```
+
+composes to `Body: fixed {{ area }}`, where it used to print
+`Body: fixed claudine`. An authored template that relied on the rescan must
+be rewritten at the source. Write adjacent authored spans
+(`{{ a }}{{ b }}`), or concatenate with `+` inside one expression.
+
+**Origin-aware guards.** Each guard judges authored syntax, never data. Do
+not reduce one to a raw string check on flattened text.
+
+- **Shell shape.** Frontmatter `$( … )` is a shell candidate only when the
+  key's **authored source** is a whole-value `$( … )`. The single predicate is
+  `FrontmatterProvenance::is_authored_shell_candidate` (crate-private). The runtime scan, the
+  pass-2 deferral, preflight collection, `pending_shell_literals`, and the
+  dynamic-shape detector all use it, whether or not shell expansion is
+  enabled. Interpolation may supply arguments but never create the command
+  shape.
+- **Post-expansion leak guard.** `validate_no_whole_value_shell_leak` skips
+  data paths, so shell output that looks like `$( … )` stays data.
+- **Body commands.** `data_changed_shape`
+  (`shell_expansion/parser.rs`) compares a command with its masked twin. Data
+  may not supply the executable, an action, an operator, or a redirection.
+  In a `::shell-block`, data may not split or join commands either.
+- **Strictness.** Authored unresolved whole values keep their strict error,
+  and mixed text keeps its lenient warning.
+- **Known gap.** A `::file … when="{{ cond }}"` condition built from data is
+  still evaluated.
+
+**Overrides and attribution.** `with_set_overrides` (`md compose --set`,
+`key=value`) values are **authored templates**, because a person typed them.
+`with_data_overrides` values are inert and apply after set overrides, so a
+key present in both is data. `with_override_layers([OverrideLayer::authored(..),
+OverrideLayer::data(..)])` folds ordered layers, and each top-level key takes
+the origin of the last layer that supplied it. It replaces both earlier
+setters. When a frontmatter interpolation fails on a key a `--set` override
+supplied, `attribute_frontmatter_failure` reports it as
+`SourceRef::Supplied` naming ``a command-line override (`--set`)``, not the
+document. See [errors.md](errors.md#origin-attribution).
+
+**Literal tokens.** A frontmatter string stored as
+`"{{!data:v1:<base64url>}}"` is data on disk (the codec is in
+`markdown::literal_token`, covered in [frontmatter.md](frontmatter.md#literal-tokens)).
+Pass 1's `decode_authored_tokens` pre-pass decodes each whole authored leaf
+at any depth once and marks it data. It is fatal even in best-effort
+preflight. `ExpressionFinder::scan` reports tokens in
+`ExpressionScanResult::tokens`, never as expressions. A token anywhere else
+is `ExpressionError::MalformedLiteralToken`, which is authoring-fatal under
+every policy and located by line and column:
+
+- a token in mixed text
+- a token with padding
+- a token in the body
+- a token inside an expression's string literal
+
+Keys in `exclude_keys` (Claudine's lifecycle keys) keep their raw text: pass 1
+neither decodes their tokens nor converts their `{{{ … }}}` literals, so the
+caller's event-time evaluation sees each escape as authored.
+
+**Schema pending.** Data is final, so it is judged at validation and never
+deferred. `value_pending_composition` in `compose/schema_validation.rs`
+checks only the `DataPaths::authored_view`. The shared lexical test,
+`literal_token::holds_pending_syntax`, never treats a whole valid token as
+pending. Outside compose, `EffectiveSchema::validate_with_options` validates
+the token-decoded instance, while it computes pending on the raw one.
+
+See `darkmatter/docs/inline/interpolation.md#inserted-text-is-data`.
 
 ## ComposeReport
 
@@ -757,6 +889,10 @@ Shell approval and shell execution are separate concerns:
   plan and sends nothing. Every all-literal call in the authored source is
   recorded too, so untaken branches contribute. `md compose --shell` prints
   them.
+- Only an authored whole-value `$( … )` is a candidate. A `$( … )` an
+  expression produced, shell output, a data override, or a decoded literal
+  token is data and is never collected. The pre-approval gate collects from a
+  snapshot of the document taken before frontmatter pass 1 for the same reason.
 - Frontmatter interpolation runs before the root's pre-approved gate, so the
   first nested call there runs the gate against the root document first.
 
@@ -803,16 +939,31 @@ the missing include.
 
 ## Shell Command Caching
 
-Identical commands (same normalized command string) execute **once per compose
-run** by default; the memoized `stdout`/`stderr` is reused at every other call
-site, including across recursive transclusion (the cache lives in the shared
+Identical commands execute **once per compose run** by default. The cache stores
+the whole `ShellOutcome` (status, stdout, stderr, whether a deadline hit), keyed
+on the normalized command plus working directory, `strip_ansi`, effective
+timeout, and timeout policy (`shell_expansion::cache_key`). Each entry is a
+once-cell, so concurrent identical requests share one execution; a failure that
+leaves no outcome (missing executable, spawn error) is not cached. Every reader
+maps the one outcome: a text reader (`outcome_to_execution`) fails on a non-zero
+status, a result suffix (`::ok`/`::exit-code`/`::result`) turns it into a typed
+value. The cache is shared across recursive transclusion (it lives in the shared
 `ShellExpansionRuntime`, not in `cache::RunLocalCache`). Opt out per directive to
 get a full cache bypass (fresh execution at each occurrence) using each family's
 own spelling:
 
 - Body `::shell --no-cache <cmd>`
-- Frontmatter `$(<cmd>)::no-cache` (combines with `::timeout:N` in either order)
+- Frontmatter `$(<cmd>)::no-cache` (combines with the other suffixes in any order)
 - `::shell-block no_cache=true` (the flag form `--no-cache` stays a parse error)
+
+Frontmatter suffixes have one grammar, `parse_frontmatter_shell_suffixes`
+(`frontmatter_shell_expansion/suffix.rs`), used by execution, the leak guard,
+and DMLS: at most one result suffix, no suffix twice, no trailing text. A
+suffix is never part of the approved bytes. `ResolvedShellValue` and
+`execute_resolved_shell_values` (`frontmatter_shell_expansion/assignment.rs`)
+serve a `$( … )` that runs outside a compose (Claudine's lifecycle `set`): bytes
+are fixed at `resolve`, and every execution gets a fresh cache. See
+`docs/inline/fm-shell-expansion.md`.
 
 A repeated command whose executable is on the built-in volatile allowlist
 (`uuidgen`, `date`, `openssl`) emits a one-time discoverability warning
@@ -867,11 +1018,12 @@ otherwise it is file-only `SourceRef::OnDisk`, never a guess.
   an alias's definition from its own YAML tree
   (`yaml_scalar::decode_alias_definition`) instead of searching: the search
   is affordable here only because a frontmatter failure ends the run.
-- **Rescans** of replacement output have no authored span.
+- **Replacement output**: an expression an authored `replace:` value
+  introduced has no authored span, so it reports file-only.
 
 The helper takes an explicit
-`ExpressionFailurePolicy`; only `compose_subtree(..., Lenient)`, preflight's
-best-effort frontmatter pass, and the discovery compose pass
+`ExpressionFailurePolicy`; only preflight's best-effort frontmatter pass and
+the discovery compose pass
 (`ComposeOptions::defer_expression_failures`, crate-private) use `Lenient`.
 Discovery must stay lenient because it runs without page blocks and would
 otherwise reject a failure inside a region a false `::block` removes.
@@ -978,7 +1130,7 @@ darkmatter/lib/src/
     │   ├── catalog.rs   # Descriptor catalog (parity-tested against functions)
     │   ├── ctx.rs       # CtxLookup (ctx.* runtime context)
     │   ├── doc_namespace.rs # Reserved doc / doc.* namespace resolution
-    │   └── resolve_ctx.rs   # ResolutionContext (base_dir, magic paths, remote)
+    │   └── resolve_ctx.rs   # ResolutionContext (cwd, base_dir() tree root, magic paths, remote)
     └── interpolation/
         ├── mod.rs       # Module exports
         ├── lexer.rs     # Expression finder

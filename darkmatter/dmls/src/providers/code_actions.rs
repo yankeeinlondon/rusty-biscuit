@@ -17,7 +17,7 @@
 //!   renames the key to its canonical spelling.
 //! - **close an unclosed directive block** — from an unclosed-block diagnostic;
 //!   appends the matching `::end-block` closer.
-//! - **reference a dash-separated key** — from an unknown-identifier diagnostic
+//! - **reference a dash-separated key** — from an undeclared-property diagnostic
 //!   that carries a [`expressions::KeyReferenceFix`] in `data`; replaces the
 //!   subtraction (`foo--bar`) with a reference to the key.
 //! - **rewrite with `+` concatenation** — from a nested-span-in-literal
@@ -85,7 +85,7 @@ pub fn code_actions(ctx: &DocumentContext, diagnostics: &[Diagnostic]) -> Vec<Co
             {
                 wrap_in_interpolation_literal(ctx, diag)
             }
-            code::EXPRESSION_UNKNOWN_IDENTIFIER
+            code::EXPRESSION_UNDECLARED_PROPERTY
                 if enabled(ctx.config, category::KEY_REFERENCE) =>
             {
                 reference_dash_separated_key(ctx, diag)

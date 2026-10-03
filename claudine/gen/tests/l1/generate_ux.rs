@@ -56,6 +56,8 @@ fn full_fixture() -> Fixture {
     };
     copy_file("docs/providers.yaml");
     copy_file("docs/providers/catalog.json");
+    // Types every research contract shares (agent-cli imports them).
+    copy_file("docs/research/_types.yaml");
     copy_dir("docs/providers/facts");
     copy_dir("docs/providers/overrides");
     for topic in [
@@ -68,6 +70,7 @@ fn full_fixture() -> Fixture {
         "non-interactive-sessions",
         "resume",
         "skills",
+        "steering",
     ] {
         copy_dir(&format!("docs/research/{topic}"));
     }
@@ -77,6 +80,8 @@ fn full_fixture() -> Fixture {
     copy_file("lib/src/signals/generated.rs");
     copy_file("lib/src/model_catalog/families_generated.rs");
     copy_file("lib/src/stream/providers/vocabulary.rs");
+    copy_file("docs/providers/steering-activation.yaml");
+    copy_file("lib/src/steering/generated.rs");
     for slug in claudine_gen::provider_slugs() {
         copy_file(&format!("lib/src/provider/{slug}/data.rs"));
     }
@@ -174,6 +179,7 @@ antigravity: clean (inputs match the committed data.rs)\n\
 catalog.json: clean (inputs match the committed catalog)\n\
 signals generated.rs: clean (inputs match the committed tables)\n\
 stream vocabulary.rs: clean (inputs match the committed tables)\n\
+steering generated.rs: clean (research and activation policy match the committed tables)\n\
 darkmatter agentic_cli_generated.rs: clean (roster matches the committed has_agentic_cli names)\n\
 families generated.rs: clean (26 family keys compiled)\n\
 roster: every active entry has a wired Provider variant"
@@ -201,6 +207,52 @@ fn roster_alias_rename_drifts_the_darkmatter_name_table_until_regenerated() {
     let table = fs::read_to_string(claudine_gen::agentic_clis_path(fixture.path())).unwrap();
     assert!(table.contains("(\"kimi_cli\", \"KimiCli\")") && !table.contains("\"kimi_code\""));
     assert!(run_gen(fixture.path(), &["check"]).status.success());
+}
+
+const PI_ADAPTER: &str = "adapters:\n  - { id: pi-rpc, revision: 1, provider: pi, mechanism_ids: [rpc-steer] }\n";
+
+fn pi_grant(verification_id: &str) -> String {
+    format!(
+        "{PI_ADAPTER}grants:\n  - provider: pi\n    mechanism_id: rpc-steer\n    operation: steer_active_turn\n    \
+         adapter: {{ id: pi-rpc, revision: 1 }}\n    profile_id: retained-rpc\n    os: macos\n    \
+         provider_version: \"0.84.4\"\n    launch_mode: non_interactive\n    origin: native\n    \
+         session_state: working\n    verification_ids: [{verification_id}]\nblocks: []\n"
+    )
+}
+
+/// End to end over the shipped steering research and the normal binary: a
+/// grant resting on an expected-loss record fails both `check` and
+/// `generate` without writing, while a grant over the passing fixture record
+/// drifts the committed table, is written by `generate`, and then checks
+/// clean (read → write → read).
+#[test]
+fn steering_activation_policy_gates_check_and_generate() {
+    let fixture = full_fixture();
+    let policy = fixture.path().join("docs/providers/steering-activation.yaml");
+    let generated = claudine_gen::steering_catalog_path(fixture.path());
+    let committed = fs::read_to_string(&generated).unwrap();
+
+    fs::write(&policy, pi_grant("pi-rpc-steer-eof-0844")).unwrap();
+    for args in [&["check"][..], &["generate", "--yes"][..]] {
+        let output = run_gen(fixture.path(), args);
+        let text = format!("{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+        assert!(!output.status.success(), "{args:?} must fail: {text}");
+        assert!(text.contains("documents an expected loss and cannot activate delivery"), "{args:?}: {text}");
+        assert_eq!(fs::read_to_string(&generated).unwrap(), committed, "{args:?} must not write");
+    }
+
+    fs::write(&policy, pi_grant("pi-rpc-steer-active-0844")).unwrap();
+    let output = run_gen(fixture.path(), &["check"]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("steering generated.rs: DRIFT"));
+
+    let output = run_gen(fixture.path(), &["generate", "--yes"]);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let written = fs::read_to_string(&generated).unwrap();
+    assert!(written.contains("AdapterRef { id: \"pi-rpc\", revision: 1 }"), "{written}");
+    assert!(written.contains("verification_ids: &[\"pi-rpc-steer-active-0844\"]"), "{written}");
+    let output = run_gen(fixture.path(), &["check"]);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stdout));
 }
 
 /// The `mapping` mode is machine-facing: pure JSON on stdout, never routed
@@ -341,4 +393,42 @@ fn scaffold_unwired_slug_errors_before_writing() {
     assert!(stderr.contains("no Provider variant is wired for slug `nonesuch`"), "{stderr}");
     // The failure precedes any write: the lib module stays absent.
     assert!(!fixture.path().join("lib/src/provider/nonesuch").exists());
+}
+
+/// `validate` answers one question for a research fleet: does the generator
+/// accept this provider's inputs? Drift from the committed data.rs is the
+/// expected state while research is being rewritten, so it is not a failure;
+/// a refused input is, and its reason is on stdout.
+#[test]
+fn validate_accepts_drifted_inputs_and_reports_a_refusal_on_stdout() {
+    const REVISION_TWO: &str = include_str!("../fixtures/agent-cli-r2/codex.md");
+    let fixture = full_fixture();
+    let doc = fixture.path().join("docs/research/agent-cli/codex.md");
+    fs::write(&doc, REVISION_TWO).unwrap();
+
+    let drifted = run_gen(fixture.path(), &["check", "codex"]);
+    assert!(!drifted.status.success(), "a revision-2 document drifts codex's data.rs");
+
+    let accepted = run_gen(fixture.path(), &["validate", "codex"]);
+    let stdout = String::from_utf8(accepted.stdout).unwrap();
+    assert!(accepted.status.success(), "drift is not a refusal: {stdout}");
+    assert_eq!(stdout.trim(), "codex: the generator accepts every input");
+
+    // One spelling claimed by two records where both apply: a relation the
+    // shape check cannot see and the generator refuses.
+    let conflicting = REVISION_TWO.replacen("  - flag: --oss\n", "  - flag: --oss\n    aliases: [-c]\n", 1);
+    assert_ne!(conflicting, REVISION_TWO, "fixture expectation drifted");
+    fs::write(&doc, conflicting).unwrap();
+    let refused = run_gen(fixture.path(), &["validate", "codex"]);
+    let stdout = String::from_utf8(refused.stdout).unwrap();
+    assert!(!refused.status.success());
+    assert!(
+        stdout.starts_with("codex: the generator refuses an input:") && stdout.contains("`-c`"),
+        "{stdout}"
+    );
+    assert_eq!(
+        fs::read(data_path(fixture.path(), "codex")).unwrap(),
+        fs::read(data_path(real_area(), "codex")).unwrap(),
+        "validate writes nothing"
+    );
 }

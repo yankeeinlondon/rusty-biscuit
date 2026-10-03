@@ -3,7 +3,7 @@ template:
     intro: "{{ name }} ({{url}})"
     slug: "{{dasherize(name)}}"
     file: "{{slug}}.md"
-list:
+sequence:
     - name: Wezterm
       url: ""
       os:

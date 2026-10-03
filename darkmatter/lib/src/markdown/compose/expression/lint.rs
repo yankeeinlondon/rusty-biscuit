@@ -557,13 +557,18 @@ mod tests {
             .unwrap_or_else(|| panic!("expected a suggestion for {source}"))
     }
 
-    /// What the author meant: the literal rescanned by a body interpolation.
+    /// What the author meant: the nested literal evaluated a second time, as
+    /// the retired fixed-point rescan did. Every scan is single-pass now, so
+    /// the second scan is explicit here.
     fn rescanned(source: &str, data: &Value) -> String {
         let state = state(data.clone());
         let evaluator = Evaluator::new(&state);
-        interpolate_text(&format!("{{{{ {source} }}}}"), &evaluator, ScanMode::Plain, crate::markdown::compose::interpolation::ExpressionFailurePolicy::Strict, "test")
-            .unwrap()
-            .output
+        let scan = |text: &str| {
+            interpolate_text(text, &evaluator, ScanMode::Plain, crate::markdown::compose::interpolation::ExpressionFailurePolicy::Strict, "test")
+                .unwrap()
+                .output
+        };
+        scan(&scan(&format!("{{{{ {source} }}}}")))
     }
 
     /// The rewrite evaluated exactly once, as a single-pass surface does.
@@ -984,16 +989,24 @@ mod tests {
             }
         }
 
+        /// A body scans once, so the nested span the lint describes renders
+        /// as the literal text it is; the lint's rewrite is what resolves it.
         #[test]
-        fn rescanning_body_still_resolves_what_the_lint_describes() {
+        fn a_body_keeps_the_nested_span_the_lint_describes_literal() {
             let expression = "pkg ? 'in {{pkg}}' : 'x'";
             assert_eq!(lint(expression).len(), 1, "the lint describes the syntax");
 
             let markdown: Markdown =
                 format!("---\npkg: darkmatter\n---\n{{{{ {expression} }}}}\n").into();
             let (composed, report) = markdown.compose().unwrap();
-            assert_eq!(composed.content().trim(), "in darkmatter");
+            assert_eq!(composed.content().trim(), "in {{pkg}}");
             assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+
+            let rewrite = suggestion(expression);
+            let markdown: Markdown =
+                format!("---\npkg: darkmatter\n---\n{{{{ {rewrite} }}}}\n").into();
+            let (composed, _) = markdown.compose().unwrap();
+            assert_eq!(composed.content().trim(), "in darkmatter");
         }
     }
 }

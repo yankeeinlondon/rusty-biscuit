@@ -72,7 +72,7 @@ What's available inside a loop's `while:` / `until:` expression:
 - **Frontmatter properties** of the document (top-level keys and dotted nested paths like `state.phase`).
 - **Ambient loop variables** under `state.loop` — see [Ambient variables](#ambient-variables) below.
 - **Environment variables** under `env.NAME`.
-- **Runtime context** under `ctx.*` (e.g. `ctx.current_package_area`). Canonical preparation stores the exact `ComposeContext` derived from the invocation's launch inputs and the active document's source. Loop iterations and sequence steps derive from that request snapshot rather than recapturing the wrapper's ambient CWD, so the child-working-directory switch cannot make CWD-derived values drift between iterations or steps.
+- **Runtime context** under `ctx.*` (e.g. `ctx.current_package_area`, `ctx.dirty_files`). Each iteration is a composition run of its own, so it captures its own `ctx`: Git working state (`ctx.branch`, `ctx.staged_files`, `ctx.dirty_files`, …) is observed as the previous iterations left it, while launch-facing values come from the invocation's launch inputs rather than the wrapper's ambient CWD, so the child-working-directory switch cannot make CWD-derived values drift between iterations or steps. See [Composition — Launch-Anchored Prepared Context](../composition.md#launch-anchored-prepared-context).
 - **Literals** — strings (`'review'` / `"review"`), numbers, `true`, `false`, `null`.
 - **Comparisons** — `==`, `!=`, `>`, `>=`, `<`, `<=`.
 - **Boolean operators** — `&&`, `||`, unary `!`, with `&&` binding tighter than `||`.
@@ -162,7 +162,7 @@ Action values can contain `{{ ... }}` templates. These are rendered at **action-
 - `state.loop.last_output` and `state.loop.last_exit_code` reflect what the executor produced for that same iteration.
 - Frontmatter values reflect the pre-action state of that iteration (earlier actions in the same list have not been applied yet).
 
-After rendering, the result is **re-parsed as JSON** so that numeric, boolean, and `null` template results land as their proper JSON types. Non-JSON results fall back to a string. Specifically:
+A value that is exactly one template span keeps its evaluated JSON type. Anything that mixes template and literal text renders to a string and stays one — it is **never re-parsed as JSON**, because the inserted values are data (`" {{ _loop_last_output }}"` with output `true` stays the string `" true"`). The rendered value is also data for the next iteration's preparation: a `{{ … }}` or `$( … )` it carries is never evaluated again. Specifically:
 
 | Action value                          | After rendering against `{ count: 3, name: "alice" }` |
 |---------------------------------------|--------------------------------------------------------|
@@ -170,13 +170,14 @@ After rendering, the result is **re-parsed as JSON** so that numeric, boolean, a
 | `"{{name}}"`                          | `"alice"` (string)                                     |
 | `"iter-{{count}}"`                    | `"iter-3"` (string — text + template = string)         |
 | `"{{count}} + {{count}}"`             | `"3 + 3"` (string)                                     |
+| `"{{count}}{{count}}"`                | `"33"` (string — never re-parsed as a number)          |
 | `{ phase: "{{name}}", n: "{{count}}" }` | `{ phase: "alice", n: 3 }` (object walked recursively)  |
 
 Templates are also rendered inside arrays and objects — every string leaf is processed, non-string scalars pass through.
 
 The rule of thumb: **a value that is purely a single template span preserves its evaluated type; anything mixing template with literal text becomes a string.** This means `set(retries, {{state.loop.count}})` lands as a JSON number you can safely compare arithmetically, while `set(label, "iter-{{state.loop.count}}")` lands as the obvious string.
 
-> **Loop vs lifecycle interpolation.** The loop action renderer and the lifecycle event renderer share the same Darkmatter expression core but differ in three deliberate ways — the JSON re-parse above (loop only), loop-contextual error typing, and unknown-root leniency (loop) vs strict fail-closed (lifecycle). See [Composition — Loop vs lifecycle interpolation](../composition.md#loop-vs-lifecycle-interpolation); both engines are held to a [shared conformance matrix](../../../lib/src/composition/interpolation_conformance.rs).
+> **Loop vs lifecycle interpolation.** The loop action renderer and the lifecycle event renderer share the same Darkmatter expression core and the same missing-property semantics (an absent property is `null`), and differ in two ways — loop-contextual error typing, and the loop renderer not recognizing `{{{ … }}}` escapes. See [Composition — Loop vs lifecycle interpolation](../composition.md#loop-vs-lifecycle-interpolation); both engines are held to a [shared conformance matrix](../../../lib/src/composition/interpolation_conformance.rs).
 
 
 ## Mutation Operations
@@ -211,11 +212,26 @@ In addition to the _mutation operations_ above, which change real state, the loo
 
 These variables can be referred to in interpolation, conditional page blocks, your `while`/`until` expression, your mutation operations, and the `start`, `success`, `failure`, and `finalize` lifecycle events.
 
+**Captured output is data.** `state.loop.last_output` holds the agent's text exactly as it was printed, and it stays that way everywhere it goes: in a condition, in an action value, in a lifecycle message, and in the next iteration's prompt. Agents often write template or shell syntax in their summaries; it is shown, never evaluated or run:
+
+```md
+---
+loop:
+  until: "contains(state.loop.last_output, 'DONE')"
+  max: 5
+---
+Continue from where you left off. Your last report was:
+
+{{ state.loop.last_output }}
+```
+
+If iteration 1 ends with `see {{…}} and $(rm -rf x)`, iteration 2's prompt contains exactly that text: no parse error, no shell approval, nothing run. The same holds for every value the loop produces, not only the ambient variables: a frontmatter key an action wrote, a value lifted from the composed document, and, inside a sequence, [`outputs`](sequences.md#the-outputs-array). Only values a person typed (`--set`, `key=value`, interactive answers) are templates; see [CLI overrides interact with looping](#cli-overrides-interact-with-looping).
+
 > **`state.loop.is_last` means "last permitted", not "last".** A loop usually ends because of something the iteration itself produced: the agent's output, an exit code, or a file it wrote that the condition reads through `frontmatter(...)`. Nothing can know that before the iteration runs, so `is_last` does not try. It is `true` only on the `max`-th pass. If you want a prompt to say "this is your final attempt" in a loop that runs a fixed number of times, test the count directly: `{{ state.loop.count == 3 }}`, or set `max: 3` and let `is_last` do it.
 >
 > **Planned.** The current engine instead *predicts* `is_last` by evaluating the condition before the iteration, which is exact for counter loops and silently wrong for every loop that ends on what the agent did, and which can raise when the condition reads a file the agent has not written yet. The cap-only definition above replaces it.
 
-> **Known defect.** The `loop:` block's own notification fields and stack (`loop: { info: "…" }`) cannot read the ambient loop values; referencing one there fails the run with an "unknown root" error. They can read ordinary frontmatter. The intended behavior is that they read `state.loop.*` like every other lifecycle event.
+> The `loop:` block's own notification fields and stack (`loop: { info: "…" }`) read the ambient loop values too. There they describe the iteration that just finished, the same values the condition reads.
 
 For example:
 
@@ -327,7 +343,7 @@ Read a condition as "*did the iteration that just finished satisfy this?*" rathe
 
 - **`break` (planned)** ends the innermost enclosing loop, whichever primitive owns it. The current iteration completes, `finalize` included, and the loop then stops without evaluating its condition or applying its actions. A loop ended by `break` is reported as its own outcome, distinct from "condition met" and "`max` reached". See [Flow Control — `break`](flow-control.md#break).
 - An explicit `error` in the `loop:` block's stack fails the run before the condition is evaluated.
-- A `proxy` raised by an iteration's `success`, `failure`, or `finalize` is meant to end the loop and hand off to its target, which is not an extra iteration of this loop. **Known defect:** the handoff is currently not performed and the loop continues. Until it is fixed, use a lifecycle `retry` for bounded repetition in a document that also has to hand off.
+- A `proxy` raised by an iteration's `start`, `success`, `failure`, or `finalize` ends the loop and hands off to its target, which enters at its own `initialize` and is not an extra iteration of this loop. No further iteration runs and the `loop:` block does not fire for the abandoned iteration. A proxy from `success` or `failure` skips that iteration's `finalize`, and one from `finalize` does not run it again.
 - `retry`, `resume`, and `proxy` authored inside the `loop:` block itself are not supported and fail the run with `LifecycleSetupPhaseRecoveryUnsupported`.
 
 ## Iteration cap
@@ -351,6 +367,8 @@ A loop therefore ends in one of three ways, and sequence summaries and exit code
 | Source of failure                                    | `fail_fast: true` (default)                                                 | `fail_fast: false`                                                              |
 |------------------------------------------------------|-----------------------------------------------------------------------------|---------------------------------------------------------------------------------|
 | Prompt run exits non-zero                            | Loop halts; `final_exit_code` is the failing run's code.                    | Loop continues; the next iteration sees the failure via `state.loop.last_exit_code`. |
+| An `error` in `success` that nothing recovers        | Loop halts; the error names the iteration and the `error` reason.           | Loop continues through the gate; the iteration's reason is reported as it ends. |
+| The iteration cannot complete (e.g. a refused `proxy`: missing target, cycle, hop limit) | Loop halts with that error.                                  | The error is reported and the next iteration starts; the `loop:` gate does not run for the failed iteration. |
 | Action raises an error (e.g. `InvalidIncrementType`) | Loop halts; the action stage for that iteration is discarded.               | Loop continues; the iteration's frontmatter remains in its pre-action state.    |
 | Loop condition cannot be parsed/evaluated            | Loop halts unconditionally — this is a structural error, not a runtime one. | Same.                                                                           |
 
@@ -382,6 +400,8 @@ claudine compose loop_example.md iteration=1 --claude
 
 …is equivalent to authoring the document with `iteration: 1` in the frontmatter. Subsequent iterations carry that value through unless an action explicitly overwrites it.
 
+A setter is authored text, so a template in it fills in on every iteration: `--set '{"label":"{{ title }}"}'` renders the current `title` each time. Once an action overwrites that key, the key holds the action's result, which is data.
+
 ## Common errors
 
 | Error                                                               | Cause                                                                                                                 |
@@ -395,10 +415,6 @@ claudine compose loop_example.md iteration=1 --claude
 | `InvalidAction at iteration N, action M of K: '<prop>' is reserved` | An action tried to write to `loop`, `state`, `replace`, or anything under `state.loop` / `state.seq`.                         |
 | `LoopLimitExceeded`                                                 | The cap was reached and the condition would still continue.                                                           |
 | `LoopInterrupted`                                                   | The user pressed Ctrl+C; the loop halted between iterations and exited with code `130`.                               |
-
-## Implementation note
-
-`claudine compose` and `claudine inline-compose` drive loops through `execute_loop_with_lifecycle` in [`looping/engine.rs`](../../../lib/src/composition/looping/engine.rs), and that is the engine this page describes. Group and sequence loops are specified to run the same engine, and a root `loop:` on a sequence document is defined as one serial group holding every step, so there is one set of rules to keep. The same file still holds `execute_loop` and `execute_loop_with_config`, an older engine that checks the condition **before** each iteration and so can run zero times. No command uses it, only library tests call it, and it is scheduled for deletion. Do not call it; this note goes away with it.
 
 ## See also
 

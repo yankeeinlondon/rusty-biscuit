@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use darkmatter::markdown::schemas::{
     Constraint, JsonPointer, PropertyAtom, PropertyDef, SchemaArm, SchemaCursor,
     SchemaCursorRole, SchemaDeclaration, SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr,
-    darkmatter_base_schema, decode_scalar, locate_schema_declaration_cursor,
+    darkmatter_base_schema, decode_scalar, locate_schema_declaration_cursor, mapping_separator,
     locate_type_definition_cursor, parse_property_definition, parse_schema_declaration,
     parse_schema_declaration_with_source, schema_constraint_descriptors, schema_type_descriptors,
     select_literal_discriminant_arm, suggestions_for_def,
@@ -1126,7 +1126,9 @@ pub fn hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
     }
     let path = ast.path_of(entry);
 
-    if path.first() == Some(&FmPathSegment::Key("ctx")) && entry.key_span.is_some() {
+    if path.first() == Some(&FmPathSegment::Key(expressions::context_root().name))
+        && entry.key_span.is_some()
+    {
         return ctx_hover(ctx, entry);
     }
     schema_hover(ctx, &path, entry)
@@ -1353,7 +1355,7 @@ fn ctx_hover(ctx: &DocumentContext, entry: &FmEntry) -> Option<Hover> {
 /// interpolation hover's block for the same variable; the compose-time note is
 /// interpolation-specific and never appears here.
 fn ctx_hover_markdown(dotted: &str, key: &str) -> String {
-    if dotted == "ctx" {
+    if dotted == expressions::context_root().name {
         return "**`ctx`** — Darkmatter-generated context (read-only)".to_string();
     }
     match expressions::ctx_descriptor(key) {
@@ -2155,7 +2157,8 @@ fn still_placed(ctx: &DocumentContext, entry: &FmEntry) -> bool {
 ///
 /// Structural first: an authored entry yields the entire *decoded* key, so
 /// `"build.target": …` is one key and `"host: port": …` is not split at its
-/// embedded colon. The lexical `key:` split is the fallback for a cursor no
+/// embedded colon. The lexical split at the line's YAML key separator, which
+/// keeps a content colon (`a:b: …`) in the key, is the fallback for a cursor no
 /// still-placed entry describes — most often a key part-way through being
 /// typed, which leaves the buffer unparseable.
 fn value_cursor(
@@ -2173,7 +2176,7 @@ fn value_cursor(
     {
         return Some((entry.key.clone(), partial.trim_start().to_string()));
     }
-    let colon = trimmed.find(':')?;
+    let colon = mapping_separator(trimmed, false)?;
     Some((
         trimmed[..colon].trim().to_string(),
         trimmed[colon + 1..].trim_start().to_string(),
@@ -2193,7 +2196,9 @@ fn enclosing_path_by_indent(text: &str, line_start: usize, indent: usize) -> Vec
         }
         let line_indent = line.len() - trimmed.len();
         if line_indent < needed {
-            let key = trimmed.split(':').next().unwrap_or("").trim();
+            let key = mapping_separator(trimmed, false)
+                .map_or(trimmed, |colon| &trimmed[..colon])
+                .trim();
             if !key.is_empty() {
                 path.push(key.to_string());
             }
@@ -3662,6 +3667,103 @@ mod tests {
         }
     }
 
+    /// Punctuation inside a quoted enum member neither ends the member list nor
+    /// starts a union alternative, so type keywords are offered only once the
+    /// cursor is in a new alternative.
+    #[test]
+    fn a_quoted_enum_member_keeps_the_type_definition_completion_context() {
+        let rows: &[(&str, bool)] = &[
+            ("[enum(a), s", true),
+            ("[enum(a, s", false),
+            ("[enum('a)b', c), s", true),
+            ("[enum(\"a]b\", c), s", true),
+            ("[enum('a(b', c), s", true),
+            ("[enum('a)b', s", false),
+            ("[enum(\"a)b\", s", false),
+            ("[enum('a]b', s", false),
+        ];
+        for (value, offers_types) in rows {
+            let text = format!("---\n$schema:\n  title: {value}]\n---\n\nbody\n");
+            with_ctx(&text, |ctx| {
+                let offset = text.find(value).unwrap() + value.len();
+                let items = completion(ctx, offset);
+                let string = items.iter().find(|item| item.label == "string");
+                assert_eq!(string.is_some(), *offers_types, "{value:?}: {items:#?}");
+                if let Some(string) = string {
+                    let Some(CompletionTextEdit::Edit(edit)) = &string.text_edit else {
+                        panic!("{value:?}: type completion has an eager edit");
+                    };
+                    let end = ("  title: ".len() + value.len()) as u32;
+                    assert_eq!(edit.range.start.character, end - 1, "{value:?}");
+                    assert_eq!(edit.range.end.character, end, "{value:?}");
+                }
+            });
+        }
+    }
+
+    /// Description prose and imported filenames are not argument syntax, so
+    /// their punctuation never hides the next alternative or property. Each
+    /// failing shape offers the same type completion and replacement range as
+    /// the controls beside it.
+    #[test]
+    fn descriptions_and_file_references_keep_the_type_definition_completion_context() {
+        let flow_rows = [
+            // Controls.
+            "[string -> plain, s",
+            "[string -> (plain), s",
+            "[string -> it's fine, s",
+            "[Name@./a(b)c.yaml, s",
+            // Prose and filename punctuation.
+            "[string -> (it's fine), s",
+            "[string -> (say \"hi), s",
+            "[Name@./a(b.yaml, s",
+            // YAML ends a plain flow scalar at `{` or `[`, so those filenames
+            // are written as quoted arms (asserted below).
+            "['Name@./a{b.yaml', s",
+            "[\"Name@./a[b.yaml\", s",
+        ];
+        for invalid in ["[Name@./a{b.yaml, s]", "[Name@./a[b.yaml, s]"] {
+            assert!(
+                serde_yaml_ng::from_str::<serde_yaml_ng::Value>(invalid).is_err(),
+                "{invalid:?} is not a YAML flow sequence"
+            );
+        }
+        let scalar_rows = [
+            // Controls.
+            "'{ a: string -> plain, b: s",
+            "'{ a: string -> (plain), b: s",
+            // Prose and filename punctuation.
+            "'{ a: string -> (it''s fine), b: s",
+            "\"{ a: string -> (say \\\"hi), b: s",
+            "'{ r: Name@./a(b.yaml, b: s",
+            "'{ r: Name@./a{b.yaml -> (it''s), b: s",
+        ];
+        let rows = flow_rows
+            .iter()
+            .map(|value| (*value, format!("{value}]")))
+            .chain(scalar_rows.iter().map(|value| {
+                let quote = &value[..1];
+                (*value, format!("{value} }}{quote}"))
+            }));
+        for (value, authored) in rows {
+            let text = format!("---\n$schema:\n  title: {authored}\n---\n\nbody\n");
+            with_ctx(&text, |ctx| {
+                let offset = text.find(value).unwrap() + value.len();
+                let items = completion(ctx, offset);
+                let Some(string) = items.iter().find(|item| item.label == "string") else {
+                    panic!("{value:?} offers `string`: {items:#?}");
+                };
+                let Some(CompletionTextEdit::Edit(edit)) = &string.text_edit else {
+                    panic!("{value:?}: type completion has an eager edit");
+                };
+                let end = ("  title: ".len() + value.len()) as u32;
+                assert_eq!(edit.range.start.line, 2, "{value:?}");
+                assert_eq!(edit.range.start.character, end - 1, "{value:?}");
+                assert_eq!(edit.range.end.character, end, "{value:?}");
+            });
+        }
+    }
+
     #[test]
     fn meta_schema_completion_catalog_is_descriptor_driven() {
         let text = "---\n$schema:\n  title: type-definition\ntitle: \n---\n\nbody\n";
@@ -3788,6 +3890,37 @@ mod tests {
         assert_eq!(enclosing_path_by_indent(text, under_style + 2, 2), vec!["style"]);
         // A top-level line (indent 0) has no ancestors.
         assert!(enclosing_path_by_indent(text, under_style, 0).is_empty());
+    }
+
+    /// An ancestor key holding a content colon or a quoted colon keeps it.
+    #[test]
+    fn enclosing_path_by_indent_keeps_a_colon_inside_an_ancestor_key() {
+        let text = "---\na:b:\n  'x: y':\n    ";
+        assert_eq!(enclosing_path_by_indent(text, text.len(), 4), vec!["a:b", "'x: y'"]);
+    }
+
+    /// The lexical fallback for an unparseable buffer splits a key line at
+    /// its YAML separator, not at a content colon inside the key.
+    #[test]
+    fn value_cursor_fallback_keeps_a_colon_inside_the_key() {
+        for (line, key, partial) in [
+            ("title: val", "title", "val"),
+            ("a:'b: val", "a:'b", "val"),
+            ("a:b: val", "a:b", "val"),
+            ("\"x: y\": val", "\"x: y\"", "val"),
+            ("key:", "key", ""),
+        ] {
+            let text = format!("---\nbroken: [unclosed\n{line}");
+            with_ctx(&text, |ctx| {
+                let line_start = text.len() - line.len();
+                let cursor = value_cursor(ctx, text.len(), line_start, line);
+                assert_eq!(
+                    cursor,
+                    Some((key.to_string(), partial.to_string())),
+                    "{line:?}"
+                );
+            });
+        }
     }
 
     #[test]

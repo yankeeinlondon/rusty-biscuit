@@ -88,7 +88,7 @@ fn adoption_persists_non_repository_target_context_for_the_next_hop() {
     let target_context = state.source_context.as_ref().unwrap();
     assert_eq!(target_context.repository_root(), None);
     assert_eq!(
-        state.file_resolution_context().unwrap().base_dir(),
+        state.file_resolution_context().unwrap().cwd(),
         outside.path()
     );
 

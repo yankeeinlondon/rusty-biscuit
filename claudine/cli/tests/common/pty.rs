@@ -181,7 +181,8 @@ pub(crate) fn wait_for_marker(session: &mut OsSession, marker: &str, deadline: D
 /// Alternate-screen enter sequence crossterm emits via `EnterAlternateScreen`.
 ///
 /// Only *fullscreen* prompts (the agent-resolution review picker) emit this;
-/// inline prompts (schema property collectors) do not. Tests asserting a
+/// inline prompts (schema property collectors, the one-shot provider picker)
+/// do not. Tests asserting a
 /// fullscreen UI did *not* render still key off this constant.
 pub(crate) const ALT_SCREEN_ENTER: &str = "\x1b[?1049h";
 

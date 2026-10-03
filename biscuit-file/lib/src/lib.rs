@@ -161,12 +161,20 @@ pub use self::pdf::{Pdf, PdfConfig, PdfError, PdfMarkdown, PdfToc};
 
 #[cfg(feature = "file-reference")]
 pub use self::file_reference::{
-    CandidatePlanOrder, CompletionEntryForm, DetailedOutcome, DetailedResolution, FileReference,
+    BaseDirOrigin, CandidatePlanOrder, CompletionEntryForm, ContextAnchor, DetailedOutcome, DetailedResolution, FileReference,
     FileReferenceClass, FileReferenceError, FileReferenceKind, FileResolutionContext,
     LaunchMagicScope, MagicPathRegistration, MagicPathTier, MagicSearchRoot, PackageAreaFallback,
-    PartialCompletion, PathPosition, ProbeDisposition, ProbedCandidate, RepositoryScope,
+    PartialCompletion, PathIdentity, PathPosition, ProbeDisposition, ProbedCandidate, RepositoryScope,
     RepositoryScopeCatalog, RepositoryScopeCatalogError, ResolutionCandidate, ResolutionFailure,
-    RootProvenance, find_git_root, home_dir,
+    RelativeRoute, RootProvenance, find_git_root, home_dir,
+};
+
+#[cfg(feature = "file-reference")]
+pub use self::file_reference::{
+    Attempt, AttemptOutcome, ConfigurationProblem, EnvAnchorProblem, FilterProblem, Finding,
+    IntentForms, InvalidTarget, NotApplicable, PORTABLE_ENV_VARIABLES, PortabilityPreference,
+    PortablePath, PortablePathError, PortableReference, ProbeError, ResolutionProblem,
+    SpellingProblem,
 };
 
 #[cfg(feature = "url")]

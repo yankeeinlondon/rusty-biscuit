@@ -279,7 +279,7 @@ Process an incoming event from a provider hook. Reads JSON payload from stdin, a
 claudine handle <EVENT> [OPTIONS]
 ```
 
-**Execution Deadline.** To prevent hook handlers from blocking the parent agent session, `claudine handle` enforces a hard **5-second deadline** by default (overridable via `CLAUDINE_HANDLE_DEADLINE_SECONDS`). When exceeded, the handler aborts with a diagnostic message to stderr and exits 124. Individual bash and messenger actions also have tighter 3s timeouts when running inside a hook handler.
+**Execution Deadline.** To prevent hook handlers from blocking the parent agent session, `claudine handle` enforces a hard **15-second deadline** by default (overridable via `CLAUDINE_HANDLE_DEADLINE_SECONDS`). When exceeded, the handler aborts with a diagnostic message to stderr and exits 124. Bash actions have a fixed 3 s timeout. Hook messages still sending are drained before exit, within the same deadline, and any that did not finish are reported as `delivery is unknown`.
 
 | Option | Description |
 |--------|-------------|
@@ -302,6 +302,13 @@ echo '{"hook_event_name": "PreToolUse", "tool_name": "Bash"}' | claudine handle 
 ## Composition Commands
 
 Markdown frontmatter-based composition pipelines for delivering prompts to provider sessions. All three commands reuse the wrapper pipeline (env setup, harness detection, structured streaming, lifecycle-stack recovery).
+
+After the file, Claudine options, `key=value` setters, bare words, and provider switches may be interleaved; `--` starts an opaque agent tail. Once the file is read, type-aware ownership (`claudine::composition::own_arguments`) decides each token from the compiled switch catalog of the candidate providers (`--<provider>`, else the literal frontmatter `agent`, else every provider): a declared `$schema` parameter is always a setter (directly after a string switch it leaves the switch empty, and the missing-value error names the key, never its value); another `key=value` goes to the agent only as the first value of a string/variadic switch, so a setter after provider switches is applied, never forwarded, and is last-wins and beats `--set` wherever written; a bare word no switch takes joins the `argv` string array (`argv=` and `--set {"argv":…}` are errors). Candidates that read a word differently prompt on a TTY, else fail with `ambiguous provider argument`. Every launch re-checks the implicit switches against the provider and entrypoint it really uses (resume included) and fails before the spawn on a researched mismatch. See [Type-aware ownership](topics/argv-normalization.md#type-aware-ownership).
+
+```bash
+claudine compose plan.md alpha --codex -c model_reasoning_effort=low phase=2
+# argv: ["alpha"]   phase: 2   forwarded to codex: -c model_reasoning_effort=low
+```
 
 ### `claudine compose <file-ref> [key=value ...]`
 
@@ -477,6 +484,7 @@ Claudine can wrap provider CLIs with preflight checks, argument translation, env
 |------|-------------|
 | `-y, --yolo` | Translate to provider-specific auto-approval mode (OpenCode: non-interactive only — pushes `--dangerously-skip-permissions` **and** merges a session-wide `permission` block into `OPENCODE_CONFIG_CONTENT` so subagents are also auto-approved; warn-only/ignored in OpenCode interactive sessions) |
 | `-i, --interactive` | Force interactive mode even when a prompt string is provided |
+| `--edit` | Draft the initial prompt in an external editor (`$EDITOR`, then `$VISUAL`, then an installed editor), optionally seeded by a positional prompt; combine with `-i` for an interactive session. Needs a terminal for the editor whatever the session mode (otherwise `--edit requires an interactive terminal`); an empty buffer exits 0 without launching the provider. `-i` with `--timeout`/`--step-timeout` is rejected before the editor opens |
 | `-m, --model <MODEL>` | Override the model used by the provider |
 | `--asp <FILE>` | Append a system prompt from a file (alias: `--append-system-prompt`) |
 | `--rsp <FILE>` | Replace the provider's system prompt with contents from a file (alias: `--replace-system-prompt`) |
@@ -495,7 +503,7 @@ Claudine can wrap provider CLIs with preflight checks, argument translation, env
 | `-q, --quiet` | Show only the header line; suppress env details |
 | `--silent` | Suppress all Claudine preflight output |
 | `--perf` | Print a reconciling performance tree to stderr after the run (see [`--perf`](#--perf)) |
-| `-- ...` | Force all remaining args to passthrough unchanged |
+| `-- ...` | End Claudine flags: the remaining args are never read as Claudine flags (a provider `--edit` there does not open the editor) and reach the provider as its options; the `--` itself is not forwarded |
 
 ### Wrapper Behavior
 
@@ -503,8 +511,11 @@ Claudine can wrap provider CLIs with preflight checks, argument translation, env
   command using the profile's executable name without resolving it on `PATH`;
   the provider need not be installed. Live runs still validate the executable
   before launch.
-- **Interactivity default**: providing a prompt string implies non-interactive mode. Use `-i`/`--interactive` to override back to interactive when providing a startup prompt.
+- **Interactivity default**: providing a prompt string implies non-interactive mode. Use `-i`/`--interactive` to override back to interactive when providing a startup prompt. A non-empty `--edit` result is treated exactly like a prompt string: plain `--edit` runs non-interactively, `--edit -i` opens an interactive session whose first user turn is the edited text. Each profile delivers an interactive startup prompt through the provider's native surface (for example Goose `run --text <p> --interactive`, Kilo `--prompt`, Antigravity `--prompt-interactive`, Pi `-- <p>`, Pi 0.84.3 or later). Kimi Code is the exception today: its interactive startup prompt goes through `--prompt`, which runs one turn and exits, for both a typed and an edited first message; a fix is pending updated Kimi research.
 - **Execution line**: displays `Claudine ▸ {provider} {badges} {prompt}` — only the user's prompt text is shown (provider-specific switches are not leaked). Truncated to one terminal line.
+- **Forwarding notice**: when arguments other than the prompt reach the provider, one INFO line names them before launch, the same line composition prints: `Forwarding provider arguments to Codex: -c` (switch names only; values and short tokens with attached text are never echoed), with arguments after the `--` summarized as an opaque tail. Each switch before the `--` then gets one sentence from the compiled switch catalog at the launch's command path (`-c is Codex's --config switch (…); forwarding to Codex.`, or that the catalog has no established type for it there and Claudine forwards it anyway); a value attached in a researched form is split off (`-csecret` → `-c`). `--quiet` and `--silent` suppress all of it. The child argv is unchanged.
+- **Redaction**: the `--dry-run` command line and the debug trace of the provider argv mask secret-shaped values (`--api-key ****`, `--token=****`, `-c****` for a credential attached to a short switch) the same way `AGENT_PARAMS` does; the child receives the original tokens. Passthrough that is not valid UTF-8 is refused by clap.
+- **Exit report**: a non-zero exit renders one `Agent Error` block built by `AgentErrorReport::for_native_exit`, the builder composition also uses. It classifies the exit from termination, exit code, and the last ten lines of each captured stream (precedence: interruption, timeout, missing binary, auth/permission, API error, model not found, argument rejected, missing argument). When the provider rejected its arguments, passthrough was forwarded, and any switch the message names is in that passthrough, the block says the failure was "likely caused by the forwarded arguments" and names their switches. Quoted provider lines are secret-masked and never repeat a line already streamed to the terminal. A plain (non-structured) launch forwards both streams live and captures nothing, so its exits stay unclassified; so does a passthrough that runs through the document harness.
 - **Structured streaming**: non-interactive runs use provider-native structured output (stream-json, JSONL, NDJSON) as the internal control plane. Claudine parses the stream live, reconstructs clean assistant text for stdout, and emits metadata summaries to stderr.
 - **Stderr summaries**: session-start info (session ID, model), completion summary (duration, tokens, cost, tool calls), and verbose details (tools used, turns, stop reason).
 - **Verbosity**: `--quiet` shows only a compact completion line; `--silent` suppresses all Claudine output; `-v` adds detailed metadata on the second summary line.
@@ -546,6 +557,14 @@ and a required file value is missing (omitted positional argument or a
 `file`/`file[]` schema property), Claudine opens a `ChooseOne` or
 `ChooseMany` chooser. See [Shell Completions](topics/completions/shell-completions.md)
 for details.
+
+**Provider arguments.** After a composition file, `<TAB>` completes a word
+only when type-aware ownership gives it to Claudine: `compose plan.md --codex
+-c <TAB>` offers nothing (the word is `-c`'s value), `compose plan.md --codex
+-c low ph<TAB>` offers `phase=`. An ambiguous word, a line execution would
+reject, or anything after an authored `--` offers nothing; completion never
+prompts. See [Shell Completions → Provider arguments after the composition
+file](topics/completions/shell-completions.md#provider-arguments-after-the-composition-file).
 
 ---
 

@@ -5,11 +5,13 @@
 //! ([`super::engine`]); the engine module holds the execution/routing/gate
 //! logic proper.
 
+use darkmatter::markdown::compose::OverrideOrigin;
 use serde_json::{Map, Value};
 
 use super::super::coordinator::SurfacedHandoff;
 use super::super::error::CompositionError;
 use super::super::lifecycle::LifecycleSignal;
+use super::super::runtime_state::LayeredOverrides;
 use super::super::types::OnRateLimit;
 use super::expression::LoopAmbient;
 use crate::stream::summary::RateLimitInfo;
@@ -55,15 +57,35 @@ pub struct LoopIterationContext {
 }
 
 impl LoopIterationContext {
-    /// Build `set_overrides` for prompt preparation.
+    /// Build the overrides for prompt preparation.
     ///
-    /// The returned object contains the current frontmatter plus read-only
-    /// ambient loop variables. Ambient variables intentionally shadow
-    /// frontmatter keys for the duration of an iteration.
-    pub fn as_set_overrides(&self) -> Value {
-        let mut overrides = self.frontmatter.clone();
-        insert_ambient_overrides(&mut overrides, &self.ambient);
-        Value::Object(overrides)
+    /// The result is `caller` — the run's own override layers — with the
+    /// current frontmatter and the read-only ambient loop variables on top.
+    /// Ambient variables intentionally shadow frontmatter keys for the duration
+    /// of an iteration.
+    ///
+    /// A frontmatter key is authored only while it still holds exactly the
+    /// value `caller` supplied as authored (a CLI setter carried through the
+    /// seed). Everything else was produced by the run — a control variable
+    /// lifted from the composed seed, a loop action result, an ambient value
+    /// such as `_loop_last_output` — so it is data, and its `{{ … }}` or
+    /// `$( … )` is never scanned again.
+    pub fn as_layered_overrides(&self, caller: &LayeredOverrides) -> LayeredOverrides {
+        let mut overrides = caller.clone();
+        for (key, value) in &self.frontmatter {
+            let typed_by_caller = caller.origin_of(key) == OverrideOrigin::Authored
+                && caller.values().get(key) == Some(value);
+            let origin = if typed_by_caller {
+                OverrideOrigin::Authored
+            } else {
+                OverrideOrigin::Data
+            };
+            overrides.insert(origin, key.clone(), value.clone());
+        }
+        let mut ambient = Map::new();
+        insert_ambient_overrides(&mut ambient, &self.ambient);
+        overrides.push(OverrideOrigin::Data, Some(&Value::Object(ambient)));
+        overrides
     }
 }
 
@@ -110,6 +132,14 @@ pub struct LoopIterationOutput {
     /// target is not an extra iteration of the source loop (R7) — and moves
     /// the handoff onto [`LoopExecutionResult::handoff`].
     pub handoff: Option<SurfacedHandoff>,
+    /// The prepared `ctx.*` snapshot of the composition run this iteration
+    /// was.
+    ///
+    /// Every iteration is its own run, so the loop gate that follows it, and
+    /// the next iteration's `_loop_is_last` prediction, read this snapshot
+    /// rather than the one the loop started with. `None` keeps the most recent
+    /// snapshot the loop has.
+    pub context: Option<darkmatter::markdown::compose::ComposeContext>,
 }
 
 impl LoopIterationOutput {
@@ -125,6 +155,7 @@ impl LoopIterationOutput {
             provider_id: None,
             model_id: None,
             handoff: None,
+            context: None,
         }
     }
 
@@ -140,6 +171,7 @@ impl LoopIterationOutput {
             provider_id: None,
             model_id: None,
             handoff: None,
+            context: None,
         }
     }
 
@@ -194,10 +226,10 @@ pub struct LoopExecutionResult {
     /// consume, when any loop lifecycle event handed the run off.
     ///
     /// `None` for an ordinary loop end. `Some` when the document's
-    /// `initialize`, an iteration's terminal/`finalize`/`start` stack, or the
-    /// post-`finalize` loop gate selected `proxy`: the loop ends at once (the
+    /// `initialize` or an iteration's `start`/terminal/`finalize` stack
+    /// selected `proxy` (the loop gate refuses one): the loop ends at once (the
     /// target is not an extra iteration of the source loop, R7) and the
-    /// handoff travels here. An initialize/gate handoff is an uncommitted
+    /// handoff travels here. An `initialize` handoff is an uncommitted
     /// [`SurfacedHandoff::Request`] — the engine has no run ledger, so it
     /// cannot answer the hop/cycle question, and a resolved-but-unapproved
     /// target is exactly the half-committed state the two-stage handoff
@@ -206,10 +238,8 @@ pub struct LoopExecutionResult {
     /// it against the shared invocation ledger while the source's stacks
     /// could still catch a refusal.
     ///
-    /// This is a typed channel, not an `Option<PathBuf>`: an unhandled
-    /// handoff is a compile-time-visible omission, whereas an ignored
-    /// optional target is the silently-dropped proxy that motivated this
-    /// feature.
+    /// A committed handoff is already in the run ledger's chain, so a caller
+    /// that ignores this field leaves a hop recorded that no document adopted.
     pub handoff: Option<SurfacedHandoff>,
 }
 
@@ -257,7 +287,7 @@ impl LoopExecutionResult {
 
 /// Insert the read-only ambient loop variables (`_loop_*`) into a frontmatter
 /// override map for prompt preparation.
-fn insert_ambient_overrides(frontmatter: &mut Map<String, Value>, ambient: &LoopAmbient) {
+pub(super) fn insert_ambient_overrides(frontmatter: &mut Map<String, Value>, ambient: &LoopAmbient) {
     frontmatter.insert(
         "_loop_count".to_string(),
         Value::Number(ambient.iteration.into()),

@@ -35,8 +35,8 @@ pub type FrontmatterMap = IndexMap<String, serde_json::Value>;
 #[derive(Debug, Clone)]
 pub enum SourceRef {
     /// Compose-time: the error maps to a file, but the expression's authored
-    /// position could not be proven (for example, a rescan found it in a
-    /// replacement value).
+    /// position could not be proven (for example, it sits in text an authored
+    /// replacement value inserted).
     OnDisk(SourceContext),
     /// Compose-time: an expression at a proven authored position in a file —
     /// in the body, or inside a frontmatter value.
@@ -50,6 +50,14 @@ pub enum SourceRef {
         context: SourceContext,
         /// Where the `{{ … }}` sits in `context.content`.
         span: AuthoredSpan,
+    },
+    /// Compose-time: the failing value was supplied from outside the document
+    /// — a command-line override, an agent's edit — so the document is not
+    /// where it was defined and no excerpt of it is shown.
+    Supplied {
+        /// Who supplied the value, as a noun phrase that completes "The value
+        /// came from …", for example ``a command-line override (`--set`)``.
+        supplier: String,
     },
     /// Late-binding or body text: no stable on-disk locus; carry the text.
     Effective {
@@ -364,6 +372,55 @@ impl MarkdownError {
         None
     }
 
+    /// The [`NotPreApproved`](crate::markdown::compose::ShellExpansionError::NotPreApproved)
+    /// failure somewhere in this error's cause chain, if any.
+    ///
+    /// It means a command about to run was missing from the approval set its
+    /// caller discovered: the discovery walk and execution disagreed about
+    /// the command's bytes. That is a broken invariant, not a command failure,
+    /// so no tolerance a stage offers for ordinary failures (a transclusion
+    /// replaced by a notice, a nested composition reported as an expression
+    /// failure) may absorb it.
+    pub fn pre_approval_violation(&self) -> Option<&crate::markdown::compose::ShellExpansionError> {
+        use crate::markdown::compose::ShellExpansionError;
+        let mut current: Option<&(dyn std::error::Error + 'static)> = Some(self);
+        while let Some(error) = current {
+            let shell = error
+                .downcast_ref::<ShellExpansionError>()
+                .or_else(|| error.downcast_ref::<Box<ShellExpansionError>>().map(AsRef::as_ref));
+            if let Some(shell @ ShellExpansionError::NotPreApproved { .. }) = shell {
+                return Some(shell);
+            }
+            current = error.source();
+        }
+        None
+    }
+
+    /// Whether a shell span (`::shell`, `::shell-block`, or a frontmatter
+    /// `$( … )`) failed somewhere in this error's cause chain.
+    ///
+    /// An unhandled command failure stops the composition wherever the span
+    /// is written. A transcluded file is part of the same composition, so the
+    /// lenient transclusion fallback (a notice in place of the file) must not
+    /// absorb it: that would turn a fact the author declared required into a
+    /// silent gap. A failure the author handled (`when_error`, a matching exit
+    /// code, `--allow-shell-timeout`) never reaches this error at all.
+    pub fn shell_span_failure(&self) -> bool {
+        use crate::markdown::compose::{ShellBlockError, ShellExpansionError};
+        let mut current: Option<&(dyn std::error::Error + 'static)> = Some(self);
+        while let Some(error) = current {
+            if error.is::<ShellExpansionError>()
+                || error.is::<Box<ShellExpansionError>>()
+                || error.is::<ShellBlockError>()
+                || error.is::<Box<ShellBlockError>>()
+            {
+                return true;
+            }
+            current = error.source();
+        }
+        false
+    }
+
     /// Anchors a [`MarkdownError::Interpolation`] to a real on-disk frontmatter
     /// region so the rendered block can show an OSC8-linked prompt file and a
     /// focused YAML excerpt.
@@ -378,7 +435,7 @@ impl MarkdownError {
     /// keeps the late-binding presentation rather than linking a non-file.
     ///
     /// Errors that are not `Interpolation`, or whose `source` is already
-    /// `OnDisk`/`OnDiskSpan`, pass through unchanged.
+    /// `OnDisk`/`OnDiskSpan`/`Supplied`, pass through unchanged.
     pub(crate) fn with_on_disk_source(self, ctx: &SourceContext) -> Self {
         match self {
             MarkdownError::Interpolation {
@@ -402,6 +459,29 @@ impl MarkdownError {
                     cause,
                 }
             }
+            other => other,
+        }
+    }
+
+    /// Attributes a [`MarkdownError::Interpolation`] to the value's supplier
+    /// ([`SourceRef::Supplied`]) instead of the document.
+    ///
+    /// Every other variant passes through unchanged.
+    pub(crate) fn with_supplier(self, supplier: impl Into<String>) -> Self {
+        match self {
+            MarkdownError::Interpolation {
+                key,
+                expression,
+                cause,
+                ..
+            } => MarkdownError::Interpolation {
+                key,
+                expression,
+                source: Box::new(SourceRef::Supplied {
+                    supplier: supplier.into(),
+                }),
+                cause,
+            },
             other => other,
         }
     }

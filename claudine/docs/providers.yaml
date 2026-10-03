@@ -13,7 +13,7 @@
 kind: sequence
 template:
     desc: "{{name}} (_site: {{site}}, repo: {{ repo || 'n/a' }}_)"
-list:
+sequence:
     - name: Claude Code
       file: claude.md
       slug: claude

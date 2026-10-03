@@ -1,0 +1,17 @@
+kind: trigger-schema
+match:
+    any:
+        - initialize: any(required)
+        - start: any(required)
+        - blocked: any(required)
+        - success: any(required)
+        - failure: any(required)
+        - finalize: any(required)
+$schema:
+    initialize: stack@./lifecycle.yaml
+    start: stack@./lifecycle.yaml
+    blocked: stack@./lifecycle.yaml
+    success: stack@./lifecycle.yaml
+    failure: stack@./lifecycle.yaml
+    finalize: stack@./lifecycle.yaml
+    loop: loop@./lifecycle.yaml

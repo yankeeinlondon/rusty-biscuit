@@ -159,7 +159,7 @@ const LEAK_DOC: &str =
     "---\nreview_file: computed.md\nsuccess:\n    message: \"{{ ok ? 'at {{area}}' : 'x' }}\"\n---\nbody\n";
 
 fn leak_with_frontmatter(stderr_is_tty: bool) -> CompositionError {
-    let excerpt = FrontmatterExcerpt::capture(LEAK_DOC, Some("success.message"), stderr_is_tty)
+    let excerpt = FrontmatterExcerpt::capture(LEAK_DOC, "success.message", stderr_is_tty)
         .expect("frontmatter block");
     CompositionError::WithFrontmatter {
         inner: Box::new(CompositionError::LifecycleNestedSpanInLiteral {
@@ -198,7 +198,8 @@ fn withholds_frontmatter_yaml_block_when_not_tty() {
 #[test]
 fn appends_yaml_block_for_inline_sequence_mismatch_on_tty() {
     let doc = "---\nprompt: Do it\nsequence:\n  - name: Hello\n---\nbody\n";
-    let excerpt = FrontmatterExcerpt::capture(doc, None, true).expect("frontmatter block");
+    let excerpt = FrontmatterExcerpt::capture_properties(doc, &["prompt", "sequence"], true)
+        .expect("both keys are authored");
     let err = CompositionError::WithFrontmatter {
         inner: Box::new(CompositionError::InlineComposeSequenceMismatch {
             source_path: PathBuf::from("greeting.md"),
@@ -284,6 +285,7 @@ fn renders_lifecycle_evaluation_error_for_success_when() {
         message: "frontmatter(review_file,'ready') raised: path did not resolve".to_string(),
         property: None,
         reason: Default::default(),
+        cause: None,
     };
     let report: Report = eyre!(err);
     let rendered = try_render_block_report(&report, &width80()).expect("block error found");
@@ -313,6 +315,7 @@ fn renders_lifecycle_evaluation_error_for_finalize() {
         message: "unknown root `missing_root`".to_string(),
         property: None,
         reason: Default::default(),
+        cause: None,
     };
     let report: Report = eyre!(err);
     let rendered = try_render_block_report(&report, &width80()).expect("block error found");
@@ -335,6 +338,7 @@ fn lifecycle_evaluation_error_is_plain_without_color() {
         message: "boom".to_string(),
         property: None,
         reason: Default::default(),
+        cause: None,
     };
     let report: Report = eyre!(err);
     let mut term = Terminal::new_optimistic(80);

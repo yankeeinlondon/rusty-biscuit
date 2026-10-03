@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use super::context::options::SourceDerivation;
+use super::context::options::{SourceDerivation, SourceOpening};
 use super::expression::ExpressionError;
 use super::shell_expansion::types::PipelineRuntime;
 use super::{ComposeOptions, ComposeReport, ComposeSource, ContextRequirements, transclusion};
@@ -193,13 +193,14 @@ impl NestedCompose {
         let mut options = self.scope.options.clone();
         // Relative references resolve against the root document (R11), not
         // the transcluded document that happens to call the function.
-        if let Some((source, derivation)) = runtime.root_source.clone() {
+        if let Some((source, derivation, opening)) = runtime.root_source.clone() {
             options.source = source;
             options.source_derivation = derivation;
+            options.source_opening = opening;
         }
         // `--set` overrides target the root document's frontmatter, and the
         // preflight graph's edges belong to the caller, not this content.
-        options.set_overrides = None;
+        options.clear_root_overrides();
         options.preflight_graph = None;
         let context = runtime.context_epoch.context_for_source(
             options.context(),
@@ -245,7 +246,7 @@ impl NestedCompose {
 }
 
 fn is_structural(error: &MarkdownError) -> bool {
-    matches!(
+    let transclusion_limit = matches!(
         error,
         MarkdownError::Transclusion(inner)
             if matches!(
@@ -253,7 +254,8 @@ fn is_structural(error: &MarkdownError) -> bool {
                 transclusion::TransclusionError::CycleDetected { .. }
                     | transclusion::TransclusionError::MaxDepthExceeded { .. }
             )
-    )
+    );
+    transclusion_limit || error.pre_approval_violation().is_some()
 }
 
 fn violation(message: String) -> ExpressionError {
@@ -270,4 +272,22 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 /// Root source recorded on the request runtime for nested children.
-pub(crate) type RootSource = (ComposeSource, SourceDerivation);
+pub(crate) type RootSource = (ComposeSource, SourceDerivation, Option<SourceOpening>);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::markdown::compose::pipeline::phases::tests::{
+        not_pre_approved, not_pre_approved_in_shell_block,
+    };
+
+    /// A nested composition failure is reported as an expression failure an
+    /// author's `||` fallback can absorb, except a pre-approval violation,
+    /// which is restored as the compose's own error.
+    #[test]
+    fn a_pre_approval_violation_is_restored_not_absorbed() {
+        assert!(is_structural(&MarkdownError::from(not_pre_approved())));
+        assert!(is_structural(&not_pre_approved_in_shell_block()));
+        assert!(!is_structural(&MarkdownError::Transform("ordinary".to_string())));
+    }
+}

@@ -11,7 +11,7 @@ use std::path::Path;
 
 use darkmatter::markdown::schemas::{
     Constraint, PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema, SimplifiedType,
-    TypeExpr, parse_yaml_schema,
+    TypeExpr, parse_standalone_schema_document, parse_yaml_schema,
 };
 
 use crate::errors::GenError;
@@ -21,6 +21,9 @@ use crate::registry::{DeclaredSource, RegistryEntry, SchemaExpectation};
 ///
 /// The sidecar must wrap its properties under a root `$schema:` key —
 /// darkmatter's resolver otherwise classifies the file as raw JSON Schema.
+/// A top-level property typed as an object from the topic's own types file
+/// (`name@./_types.yaml`) is inlined, so the gate checks a named record type
+/// exactly like an inline-object one.
 pub fn load_sidecar_schema(path: &Path) -> Result<SimplifiedSchema, GenError> {
     let text = std::fs::read_to_string(path).map_err(|source| GenError::Io {
         path: path.to_path_buf(),
@@ -36,10 +39,63 @@ pub fn load_sidecar_schema(path: &Path) -> Result<SimplifiedSchema, GenError> {
         .ok_or_else(|| GenError::SidecarMissing {
             path: path.to_path_buf(),
         })?;
-    parse_yaml_schema(root).map_err(|err| GenError::SidecarInvalid {
+    let mut schema = parse_yaml_schema(root).map_err(|err| GenError::SidecarInvalid {
         path: path.to_path_buf(),
         message: err.to_string(),
-    })
+    })?;
+    inline_local_object_types(&mut schema, path)?;
+    Ok(schema)
+}
+
+/// Replaces each top-level `name@./file` import of an object type with that
+/// type's shape. Imports of shared types (`../`) and of non-object types
+/// stay as they are; no registry entry reads through them.
+fn inline_local_object_types(schema: &mut SimplifiedSchema, sidecar: &Path) -> Result<(), GenError> {
+    let SimplifiedSchema::Single(shape) = schema else {
+        return Ok(());
+    };
+    for def in shape.properties.values_mut() {
+        let PropertyDef::Single(atom) = def else {
+            continue;
+        };
+        let TypeExpr::Imported { name, reference } = &atom.ty else {
+            continue;
+        };
+        let Some(relative) = reference.strip_prefix("./") else {
+            continue;
+        };
+        if let Some(object) = local_object_type(&sidecar.with_file_name(relative), name)? {
+            atom.ty = TypeExpr::InlineObject(object);
+        }
+    }
+    Ok(())
+}
+
+/// The shape of the object type `name` in a `kind: schema` types file, or
+/// `None` when `name` is a non-object type.
+fn local_object_type(path: &Path, name: &str) -> Result<Option<SchemaShape>, GenError> {
+    let text = std::fs::read_to_string(path).map_err(|source| GenError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let invalid = |message: String| GenError::SidecarInvalid {
+        path: path.to_path_buf(),
+        message,
+    };
+    let document = parse_standalone_schema_document(&text, path)
+        .map_err(|err| invalid(err.to_string()))?
+        .ok_or_else(|| invalid("not a `kind: schema` types file".into()))?;
+    let Some(SimplifiedSchema::Single(types)) = document.schema() else {
+        return Err(invalid("the `types` mapping did not parse as one schema".into()));
+    };
+    match types.properties.get(name) {
+        Some(PropertyDef::Single(PropertyAtom {
+            ty: TypeExpr::InlineObject(object),
+            ..
+        })) => Ok(Some(object.clone())),
+        Some(_) => Ok(None),
+        None => Err(invalid(format!("declares no type named `{name}`"))),
+    }
 }
 
 /// Checks every research-sourced registry entry against its topic sidecar.

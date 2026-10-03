@@ -17,7 +17,9 @@
 //!   fires — the only way to observe what bytes a terminal emits for a
 //!   given chord. One injector module per platform: [`cliclick`] (macOS
 //!   Quartz events), [`xdotool`] (Linux X11 XTEST), and [`win_input`]
-//!   (Windows `SendKeys`/`SendInput` via PowerShell).
+//!   (Windows `SendKeys`/`SendInput` via PowerShell). These press keys on
+//!   the user's desktop; the Linux-only `xvfb` module presses them on a
+//!   private X display instead, so it never takes the user's focus.
 //!
 //! Every harness's — and every Level-3 injector's — `available()` probe
 //! returns `false` cleanly when its required tooling or platform is
@@ -44,6 +46,8 @@ pub mod tmux;
 pub mod wezterm;
 pub mod win_input;
 pub mod xdotool;
+#[cfg(target_os = "linux")]
+pub mod xvfb;
 
 /// Prefix used to mark resources owned by this test harness.
 ///

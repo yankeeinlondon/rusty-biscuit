@@ -1,0 +1,530 @@
+kind: schema
+types:
+  item-0: bundle@./action.yaml
+  stack-0:
+    - item-0[]@this
+    - bundle@./action.yaml
+  item-1:
+    stop:
+      - any -> stop the lifecycle stack (any event)
+      - '{ no_error: boolean }'
+    skip:
+      - any -> skip the provider run (initialize only)
+      - '{ no_error: boolean }'
+    error:
+      - string -> fail the run with a reason
+      - '{ reason: string, no_error: boolean }'
+    proxy:
+      - file -> hand the run to another prompt
+      - '{ target: file(required), with: object, no_error: boolean }'
+    retry:
+      - number(integer; min(0)) -> re-read and re-run the same document
+      - '{ max_attempts: number(integer), delay: string, backoff: enum(fixed, exponential), with: object, no_error: boolean }'
+    resume:
+      - string -> send a follow-up message into the live session
+      - '{ message: string(required), max_attempts: number(integer), no_error: boolean }'
+    defer:
+      - 'string -> planned: defer the run'
+      - '{ delay: string(required), reason: string, no_error: boolean }'
+    break:
+      - 'string -> planned: leave the sequence'
+      - '{ reason: string, code: number(integer; min(0); max(255)), no_error: boolean }'
+    prep:
+      - 'file -> planned: prepare a target prompt'
+      - '{ target: file(required), with: object, no_error: boolean }'
+    say:
+      - 'string -> say: emit text'
+      - '{ text: string(required), no_error: boolean }'
+    speak:
+      - 'string -> speak: emit text'
+      - '{ text: string(required), no_error: boolean }'
+    effect:
+      - 'string -> effect: emit text'
+      - '{ text: string(required), no_error: boolean }'
+    message:
+      - 'string -> message: emit text'
+      - '{ text: string(required), no_error: boolean }'
+    notify:
+      - 'string -> notify: emit text'
+      - '{ text: string(required), no_error: boolean }'
+    stderr:
+      - 'string -> stderr: emit text'
+      - '{ text: string(required), no_error: boolean }'
+    info:
+      - 'string -> info: emit text'
+      - '{ text: string(required), no_error: boolean }'
+    warn:
+      - 'string -> warn: emit text'
+      - '{ text: string(required), no_error: boolean }'
+    success:
+      - 'string -> success: emit text'
+      - '{ text: string(required), no_error: boolean }'
+    stdout:
+      - 'string -> stdout: emit text'
+      - '{ text: string(required), no_error: boolean }'
+    shell:
+      - string -> run a shell command (not in initialize)
+      - '{ command: string(required), on_error: string, no_error: boolean }'
+    set:
+      - '{ <string>: any }(min-keys(1)) -> set runtime values (mapping only; no long form)'
+    set_frontmatter:
+      - any[] -> side effect set_frontmatter(file, prop, value)
+      - '{ file: any(required), prop: any(required), value: any(required), no_error: boolean }'
+    merge_frontmatter:
+      - any[] -> side effect merge_frontmatter(file, obj)
+      - '{ file: any(required), obj: any(required), no_error: boolean }'
+    delete_frontmatter:
+      - any[] -> side effect delete_frontmatter(file, prop)
+      - '{ file: any(required), prop: any(required), no_error: boolean }'
+    increment_frontmatter:
+      - any[] -> side effect increment_frontmatter(file, prop)
+      - '{ file: any(required), prop: any(required), no_error: boolean }'
+    decrement_frontmatter:
+      - any[] -> side effect decrement_frontmatter(file, prop)
+      - '{ file: any(required), prop: any(required), no_error: boolean }'
+    append_frontmatter:
+      - any[] -> side effect append_frontmatter(file, prop, value)
+      - '{ file: any(required), prop: any(required), value: any(required), no_error: boolean }'
+    prepend_frontmatter:
+      - any[] -> side effect prepend_frontmatter(file, prop, value)
+      - '{ file: any(required), prop: any(required), value: any(required), no_error: boolean }'
+    ensure_file:
+      - any[] -> side effect ensure_file(file, content)
+      - '{ file: any(required), content: any, no_error: boolean }'
+    ensure_dir:
+      - any -> side effect ensure_dir(dir)
+      - '{ dir: any(required), no_error: boolean }'
+    append_line:
+      - any[] -> side effect append_line(file, text)
+      - '{ file: any(required), text: any(required), no_error: boolean }'
+    append_jsonl:
+      - any[] -> side effect append_jsonl(file, obj)
+      - '{ file: any(required), obj: any(required), no_error: boolean }'
+    http_post:
+      - any[] -> side effect http_post(url, body)
+      - '{ url: any(required), body: any(required), no_error: boolean }'
+    is_string:
+      - any -> Returns true when the value is a string.
+      - '{ x: any(required), no_error: boolean }'
+    is_number:
+      - any -> Returns true when the value is a number.
+      - '{ x: any(required), no_error: boolean }'
+    is_array:
+      - any -> Returns true when the value is an array.
+      - '{ x: any(required), no_error: boolean }'
+    is_null:
+      - any -> Returns true when the value is null.
+      - '{ x: any(required), no_error: boolean }'
+    is_object:
+      - any -> Returns true when the value is an object.
+      - '{ x: any(required), no_error: boolean }'
+    is_empty:
+      - any -> Returns true when the value is null, empty string, empty array, or empty object.
+      - '{ x: any(required), no_error: boolean }'
+    is_positive:
+      - any -> Returns true when the coerced value is greater than zero.
+      - '{ val: any(required), no_error: boolean }'
+    is_negative:
+      - any -> Returns true when the coerced value is less than zero.
+      - '{ val: any(required), no_error: boolean }'
+    is_integer:
+      - any -> Returns true when the value is a JSON number with no fractional component.
+      - '{ val: any(required), no_error: boolean }'
+    min:
+      - any[] -> Returns the smaller of two numbers.
+      - '{ a: number(required), b: number(required), no_error: boolean }'
+    max:
+      - any[] -> Returns the larger of two numbers.
+      - '{ a: number(required), b: number(required), no_error: boolean }'
+    abs:
+      - any -> Returns the absolute value of a number.
+      - '{ x: number(required), no_error: boolean }'
+    round:
+      - any[] -> Rounds a value to the nearest integer, with an optional default.
+      - '{ x: number(required), default: number, no_error: boolean }'
+    first:
+      - any -> Returns the first element of an array, or null when empty.
+      - '{ x: any[](required), no_error: boolean }'
+    last:
+      - any -> Returns the last element of an array, or null when empty.
+      - '{ x: any[](required), no_error: boolean }'
+    has_key:
+      - any[] -> Returns true when the object contains the given key.
+      - '{ obj: any(required), key: string(required), no_error: boolean }'
+    contains:
+      - any[] -> Returns true when haystack contains needle (array, object, or string).
+      - '{ haystack: any(required), needle: any(required), no_error: boolean }'
+    length:
+      - any -> Returns the length of a string, array, or object.
+      - '{ x: any(required), no_error: boolean }'
+    number:
+      - any[] -> Converts a value to a number, with an optional default.
+      - '{ x: any(required), default: any, no_error: boolean }'
+    as_line_separated:
+      - any -> Joins a list into a newline-separated string, one element per line.
+      - '{ list: any[](required), no_error: boolean }'
+    as_csv:
+      - any -> Joins a list into a comma-separated string.
+      - '{ list: any[](required), no_error: boolean }'
+    as_tsv:
+      - any -> Joins a list into a tab-separated string.
+      - '{ list: any[](required), no_error: boolean }'
+    as_space_separated:
+      - any -> Joins a list into a space-separated string.
+      - '{ list: any[](required), no_error: boolean }'
+    as_unordered_list:
+      - any -> Renders a list as a Markdown unordered list, auto-nesting nested arrays and object-array shapes as indented sublists.
+      - '{ list: any[](required), no_error: boolean }'
+    as_ordered_list:
+      - any -> Renders a list as a Markdown ordered list, auto-nesting nested arrays and object-array shapes as indented sublists.
+      - '{ list: any[](required), no_error: boolean }'
+    as_json:
+      - "any -> Renders a list as compact JSON \u2014 the explicit spelling of how a bare array renders in text. An empty list renders as `[]`."
+      - '{ list: any[](required), no_error: boolean }'
+    as_json5:
+      - any -> Renders a list as compact single-line JSON5, with single-quoted strings and unquoted object keys where they are valid identifiers. An empty list renders as `[]`.
+      - '{ list: any[](required), no_error: boolean }'
+    starts_with:
+      - any[] -> Returns true when the string starts with the given prefix (case-sensitive).
+      - '{ x: string(required), find: string(required), no_error: boolean }'
+    ends_with:
+      - any[] -> Returns true when the string ends with the given suffix (case-sensitive).
+      - '{ x: string(required), find: string(required), no_error: boolean }'
+    lower:
+      - any -> Converts a string to lowercase.
+      - '{ x: string(required), no_error: boolean }'
+    upper:
+      - any -> Converts a string to uppercase.
+      - '{ x: string(required), no_error: boolean }'
+    capitalize:
+      - any -> Capitalizes the first character of a string.
+      - '{ x: string(required), no_error: boolean }'
+    kebab_case:
+      - any -> Converts a string to kebab-case.
+      - '{ x: string(required), no_error: boolean }'
+    snake_case:
+      - any -> Converts a string to snake_case.
+      - '{ x: string(required), no_error: boolean }'
+    camel_case:
+      - any -> Converts a string to camelCase.
+      - '{ x: string(required), no_error: boolean }'
+    pascal_case:
+      - any -> Converts a string to PascalCase.
+      - '{ x: string(required), no_error: boolean }'
+    title_case:
+      - any -> Converts a string to Title Case.
+      - '{ x: string(required), no_error: boolean }'
+    without_date:
+      - any -> Removes substrings that are real YYYY-MM-DD calendar dates, leaving surrounding text untouched.
+      - '{ string: string(required), no_error: boolean }'
+    ensure_leading:
+      - any[] -> Ensures the string form of a value starts with a prefix.
+      - '{ var: any(required), prefix: any(required), no_error: boolean }'
+    ensure_trailing:
+      - any[] -> Ensures the string form of a value ends with a postfix.
+      - '{ var: any(required), postfix: any(required), no_error: boolean }'
+    replace:
+      - any[] -> Replaces every literal occurrence of a substring; empty find is a no-op.
+      - '{ x: string(required), find: string(required), replacement: string(required), no_error: boolean }'
+    replace_first:
+      - any[] -> Replaces the first literal occurrence of a substring; empty find is a no-op.
+      - '{ x: string(required), find: string(required), replacement: string(required), no_error: boolean }'
+    replace_last:
+      - any[] -> Replaces the last literal occurrence of a substring; empty find is a no-op.
+      - '{ x: string(required), find: string(required), replacement: string(required), no_error: boolean }'
+    terminal:
+      - any -> Renders Prose markup to a terminal string with ANSI SGR sequences.
+      - '{ string: string(required), no_error: boolean }'
+    date:
+      - any[] -> Reformats an ISO date/datetime string into a named human format.
+      - '{ iso: string(required), fmt: string(required), no_error: boolean }'
+    is_date:
+      - any -> Returns true when the string is a valid ISO date (YYYY-MM-DD).
+      - '{ x: any(required), no_error: boolean }'
+    is_date_utc:
+      - any -> Same as is_date (the format itself is timezone-agnostic).
+      - '{ x: any(required), no_error: boolean }'
+    is_date_time:
+      - any -> Returns true when the string is a valid ISO datetime.
+      - '{ x: any(required), no_error: boolean }'
+    is_date_time_utc:
+      - any -> Same parse contract as is_date_time.
+      - '{ x: any(required), no_error: boolean }'
+    is_today:
+      - any -> Returns true when the date/datetime is today (local).
+      - '{ x: any(required), no_error: boolean }'
+    is_today_utc:
+      - any -> Returns true when the date/datetime is today (UTC).
+      - '{ x: any(required), no_error: boolean }'
+    is_yesterday:
+      - any -> Returns true when the date/datetime is yesterday (local).
+      - '{ x: any(required), no_error: boolean }'
+    is_yesterday_utc:
+      - any -> Returns true when the date/datetime is yesterday (UTC).
+      - '{ x: any(required), no_error: boolean }'
+    is_tomorrow:
+      - any -> Returns true when the date/datetime is tomorrow (local).
+      - '{ x: any(required), no_error: boolean }'
+    is_tomorrow_utc:
+      - any -> Returns true when the date/datetime is tomorrow (UTC).
+      - '{ x: any(required), no_error: boolean }'
+    is_this_month:
+      - any -> Returns true when the date/datetime is in the current month (local).
+      - '{ x: any(required), no_error: boolean }'
+    is_this_month_utc:
+      - any -> Returns true when the date/datetime is in the current month (UTC).
+      - '{ x: any(required), no_error: boolean }'
+    is_this_year:
+      - any -> Returns true when the date/datetime is in the current year (local).
+      - '{ x: any(required), no_error: boolean }'
+    is_this_year_utc:
+      - any -> Returns true when the date/datetime is in the current year (UTC).
+      - '{ x: any(required), no_error: boolean }'
+    date_delta:
+      - any[] -> Returns true when the two dates are at least the given duration apart, ignoring order (duration like 14d, 2mo, 1 hour).
+      - '{ date1: string(required), date2: string(required), diff: string(required), no_error: boolean }'
+    older_than:
+      - any[] -> Returns true when date1 is at least the given duration older (earlier) than date2.
+      - '{ date1: string(required), date2: string(required), diff: string(required), no_error: boolean }'
+    newer_than:
+      - any[] -> Returns true when date1 is at least the given duration newer (later) than date2.
+      - '{ date1: string(required), date2: string(required), diff: string(required), no_error: boolean }'
+    absolute:
+      - any -> Resolves a file path to an absolute path.
+      - '{ file: any(required), no_error: boolean }'
+    relative:
+      - any -> Returns a best-effort relative path from the document base directory.
+      - '{ file: any(required), no_error: boolean }'
+    file_exists:
+      - any -> Returns true when the file exists (local or remote URL).
+      - '{ file: any(required), no_error: boolean }'
+    has_command:
+      - any -> Returns true when the command is found on PATH or is an existing executable absolute path.
+      - '{ cmd: string(required), no_error: boolean }'
+    is_indexed_file:
+      - any -> Returns true when the filename stem matches the indexed grammar (base-NNN).
+      - '{ file: any(required), no_error: boolean }'
+    file_index:
+      - any -> Returns the parsed index suffix, or -1 when non-indexed.
+      - '{ file: any(required), no_error: boolean }'
+    increment_file_index:
+      - any -> Increments the numeric index suffix, preserving zero-padding width.
+      - '{ file: any(required), no_error: boolean }'
+    decrement_file_index:
+      - any -> Decrements the numeric index suffix, clamped at 0.
+      - '{ file: any(required), no_error: boolean }'
+    basename:
+      - any -> Returns the final path component including extension.
+      - '{ file: any(required), no_error: boolean }'
+    basename_without_index:
+      - any -> Returns the basename with any indexed suffix removed from the stem.
+      - '{ file: any(required), no_error: boolean }'
+    dirname:
+      - any -> Returns the directory portion of the display path.
+      - '{ file: any(required), no_error: boolean }'
+    ext:
+      - any -> Returns the final extension without the leading dot.
+      - '{ file: any(required), no_error: boolean }'
+    parent_dir:
+      - any -> Returns the directory segment immediately above the basename.
+      - '{ file: any(required), no_error: boolean }'
+    file_trailing:
+      - any -> Returns the last directory segment plus the basename.
+      - '{ file: any(required), no_error: boolean }'
+    dir_leading:
+      - any -> Returns the directory path above the last directory segment, dropping the basename and its parent (the complement of file_trailing).
+      - '{ file: any(required), no_error: boolean }'
+    join:
+      - any[] -> Joins two path strings with normalized separators.
+      - '{ left: string(required), right: string(required), no_error: boolean }'
+    link:
+      - any[] -> Creates a Markdown link to a local file, using its relative path as the link text.
+      - '{ file: any(required), no_error: boolean }'
+      - '{ target: any(required), desc: string(required), no_error: boolean }'
+    has_skill:
+      - any -> Returns true when a skill directory exists in a user-scoped or local-scoped skill root.
+      - '{ name: string(required), no_error: boolean }'
+    has_local_skill:
+      - any -> Returns true when a skill directory exists in a local-scoped skill root.
+      - '{ name: string(required), no_error: boolean }'
+    frontmatter:
+      - any[] -> Reads the frontmatter of a Markdown file as an object.
+      - '{ file: any(required), no_error: boolean }'
+      - '{ file: any(required), prop: string(required), no_error: boolean }'
+    markdown_body_empty:
+      - any -> Returns true when the Markdown body has only whitespace.
+      - '{ file: any(required), no_error: boolean }'
+    markdown_title:
+      - any -> Returns the title from frontmatter or the first H1 heading.
+      - '{ file: any(required), no_error: boolean }'
+    validate_schema:
+      - any[] -> Validates a Markdown document against its declared schema.
+      - '{ file: any(required), no_error: boolean }'
+      - '{ file: any(required), obj: any(required), no_error: boolean }'
+    and:
+      - any -> Logical AND of all arguments. Short-circuits on first falsy value.
+    or:
+      - any -> Logical OR of all arguments. Short-circuits on first truthy value.
+    predict_conflicts:
+      - any -> Returns the repository-relative paths that would conflict if the named local branch were merged into the caller's current branch.
+      - '{ branch: string(required), no_error: boolean }'
+    find_first_index:
+      - any -> Returns the lowest-indexed existing sibling in the file's directory, with the unindexed base sorting first; returns the input when the family has no existing member.
+      - '{ file: any(required), no_error: boolean }'
+    find_last_index:
+      - any -> Returns the highest-indexed existing sibling in the file's directory; returns the input when the family has no existing member.
+      - '{ file: any(required), no_error: boolean }'
+    branch_exists_on_remote:
+      - any[] -> Returns whether an exact branch exists in the selected remote's live ref advertisement or authoritative provider API.
+      - '{ no_error: boolean }'
+      - '{ branch: string(required), no_error: boolean }'
+      - '{ branch: string(required), remote: string(required), no_error: boolean }'
+    remote_vendor:
+      - any -> Returns the canonical provider token for the selected configured remote, probing an ambiguous self-hosted server only when allowlisted.
+      - '{ remote: string, no_error: boolean }'
+    pr:
+      - any -> Returns one provider pull or merge request in canonical Markdown form.
+      - '{ id: any(required), no_error: boolean }'
+    pr_list:
+      - any -> Queries pull or merge requests with the canonical bounded filter vocabulary. See the [provider query vocabulary](darkmatter-expressions.md#provider-query-vocabulary) for keys, enum values, defaults, and bounds.
+      - '{ query: any(required), no_error: boolean }'
+      - '{ count: any(required), no_error: boolean }'
+    cicd:
+      - any -> Returns one provider-addressable CI/CD job in canonical Markdown form.
+      - '{ id: any(required), no_error: boolean }'
+    cicd_list:
+      - any -> Queries CI/CD jobs with bounded direct listing or parent-execution traversal. See the [provider query vocabulary](darkmatter-expressions.md#provider-query-vocabulary) for keys, enum values, defaults, and bounds.
+      - '{ query: any(required), no_error: boolean }'
+      - '{ count: any(required), no_error: boolean }'
+    has_binary:
+      - any -> Returns true when the command is found on PATH or is an existing executable absolute path. A second name for has_command with the same implementation.
+      - '{ name_or_path: string(required), no_error: boolean }'
+    has_alias:
+      - any -> Returns true when the name is an alias in the login shell ($SHELL, or pwsh then powershell.exe on Windows). Any probe failure returns false; the name is never executed.
+      - '{ name: string(required), no_error: boolean }'
+    has_builtin_function:
+      - any -> Returns true when the name is a shell builtin (or a PowerShell cmdlet) in the login shell. Any probe failure returns false; the name is never executed.
+      - '{ name: string(required), no_error: boolean }'
+    has_user_function:
+      - any -> Returns true when the name is a user-defined function in the login shell. Any probe failure returns false; the name is never executed.
+      - '{ name: string(required), no_error: boolean }'
+    can_execute:
+      - any -> Returns true when the name is an alias, a binary, a shell builtin, or a user function (has_alias || has_binary || has_builtin_function || has_user_function).
+      - '{ name: string(required), no_error: boolean }'
+    has_agentic_cli:
+      - any -> Returns true when the named agentic CLI is installed on PATH. Names are the Claudine provider roster slugs and their aliases; an unknown name is a compose error.
+      - '{ agent: any(required), no_error: boolean }'
+    package_area:
+      - any -> Returns the name of the package area containing the path, from the captured repository observation. Returns an empty string outside the repository, outside a monorepo, or when no area contains the path.
+      - '{ where: any(required), no_error: boolean }'
+    package:
+      - any -> Returns the name of the package containing the path, from the captured repository observation. Returns an empty string outside the repository, outside a monorepo, or when no package contains the path.
+      - '{ where: any(required), no_error: boolean }'
+    recent_commits:
+      - any
+      - '{ count: any(required), no_error: boolean }'
+    ipv4:
+      - any -> Returns the host's IPv4 addresses, excluding loopback and link-local. A valid CIDR filter selects addresses inside that network (and can include loopback or link-local); any other filter is a substring match over the default set.
+      - '{ filter: string, no_error: boolean }'
+    ipv6:
+      - any -> Returns the host's IPv6 addresses, excluding loopback and link-local; scoped addresses keep their %scope suffix. Filters behave as in ipv4.
+      - '{ filter: string, no_error: boolean }'
+    ping:
+      - any[] -> Sends one ICMP echo to an IP address and returns true when it replies within timeout milliseconds (default 100). Returns null with a warning when the address is not granted through --allow-host, false when there is no reply, and a compose error when the host cannot send ICMP.
+      - '{ address: any(required), timeout: number, no_error: boolean }'
+    ping_under:
+      - any[] -> Sends attempts ICMP echoes (default 3) sequentially, each with a timeout of timeout milliseconds. Returns true when every reply arrives in time, false when none does, and "unstable" otherwise. Consent and error rules match ping.
+      - '{ address: any(required), timeout: number(required), attempts: any, no_error: boolean }'
+    as_markdown:
+      - any -> Composes the string as Markdown through the root document's request (same context, base directory, consent, and recursion budget) and returns the composed Markdown text.
+      - '{ content: string(required), no_error: boolean }'
+    when: expression -> guard (the parser requires it when then/else are present)
+    then:
+      - item-0[]@this
+      - bundle@./action.yaml
+    else:
+      - item-0[]@this
+      - bundle@./action.yaml
+    no_error: boolean
+    $constraints:
+      min-keys: 1
+  stack-1:
+    - item-1[]@this
+    - bundle@./action.yaml
+  stack: stack-1@this
+  loop:
+    while: expression
+    until: expression
+    action:
+      - string
+      - object
+      - any[]
+    actions:
+      - string
+      - object
+      - any[]
+    max: number(integer; min(1))
+    fail_fast: boolean
+    gate: stack-1@this
+    stop:
+      - any -> stop the lifecycle stack (any event)
+      - '{ no_error: boolean }'
+    skip:
+      - any -> skip the provider run (initialize only)
+      - '{ no_error: boolean }'
+    error:
+      - string -> fail the run with a reason
+      - '{ reason: string, no_error: boolean }'
+    proxy:
+      - file -> hand the run to another prompt
+      - '{ target: file(required), with: object, no_error: boolean }'
+    retry:
+      - number(integer; min(0)) -> re-read and re-run the same document
+      - '{ max_attempts: number(integer), delay: string, backoff: enum(fixed, exponential), with: object, no_error: boolean }'
+    resume:
+      - string -> send a follow-up message into the live session
+      - '{ message: string(required), max_attempts: number(integer), no_error: boolean }'
+    defer:
+      - 'string -> planned: defer the run'
+      - '{ delay: string(required), reason: string, no_error: boolean }'
+    break:
+      - 'string -> planned: leave the sequence'
+      - '{ reason: string, code: number(integer; min(0); max(255)), no_error: boolean }'
+    prep:
+      - 'file -> planned: prepare a target prompt'
+      - '{ target: file(required), with: object, no_error: boolean }'
+    say:
+      - 'string -> say: emit text'
+      - '{ text: string(required), no_error: boolean }'
+    speak:
+      - 'string -> speak: emit text'
+      - '{ text: string(required), no_error: boolean }'
+    effect:
+      - 'string -> effect: emit text'
+      - '{ text: string(required), no_error: boolean }'
+    message:
+      - 'string -> message: emit text'
+      - '{ text: string(required), no_error: boolean }'
+    notify:
+      - 'string -> notify: emit text'
+      - '{ text: string(required), no_error: boolean }'
+    stderr:
+      - 'string -> stderr: emit text'
+      - '{ text: string(required), no_error: boolean }'
+    info:
+      - 'string -> info: emit text'
+      - '{ text: string(required), no_error: boolean }'
+    warn:
+      - 'string -> warn: emit text'
+      - '{ text: string(required), no_error: boolean }'
+    success:
+      - 'string -> success: emit text'
+      - '{ text: string(required), no_error: boolean }'
+    stdout:
+      - 'string -> stdout: emit text'
+      - '{ text: string(required), no_error: boolean }'
+    shell:
+      - string -> run a shell command (not in initialize)
+      - '{ command: string(required), on_error: string, no_error: boolean }'
+    set:
+      - '{ <string>: any }(min-keys(1)) -> set runtime values (mapping only; no long form)'

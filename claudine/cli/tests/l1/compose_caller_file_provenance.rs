@@ -134,6 +134,9 @@ fn run_compose(
     strip_ansi(&String::from_utf8_lossy(&assertion.get_output().stderr))
 }
 
+// `CLAUDINE_TEST_DIAGNOSTIC_SNAPSHOT` is compiled into the binary only by
+// `test-fixtures` builds, so this helper and its callers are too.
+#[cfg(feature = "test-fixtures")]
 fn run_compose_failure(
     fixture: &CliProcessFixture,
     cwd: &std::path::Path,
@@ -424,6 +427,46 @@ fn direct_and_proxy_targets_agree_and_caller_values_outrank_proxy_with() {
             "caller values must produce the same prepared target and outrank proxy.with; stderr:\n{output}"
         );
         assert!(!output.contains("ROUTE=decoy/overlay"), "{output}");
+    }
+}
+
+/// Setters after a provider switch are reclaimed as caller overrides through
+/// the same call as setters before it: a file reference among them anchors at
+/// the caller's directory (not the repository root or a prompt's directory),
+/// outranks `proxy.with`, and never reaches the provider's argv.
+#[test]
+fn setters_after_a_provider_switch_keep_caller_file_provenance() {
+    let fixture = CliProcessFixture::named("caller-file-after-switch");
+    fixture.initialize_repository();
+    fixture.seed_user_config();
+    install_goose(&fixture);
+
+    let caller_dir = fixture.cwd().join("pkg");
+    write(&caller_dir.join("cases/original/spec.md"), "---\nmarker: original\n---\n");
+    write(&fixture.cwd().join("cases/original/spec.md"), "---\nmarker: root-decoy\n---\n");
+    write(&fixture.cwd().join("cases/decoy/spec.md"), "---\nmarker: decoy\n---\n");
+    let target = fixture.cwd().join("prompts/target.md");
+    write(
+        &target,
+        "---\n$schema:\n  spec: 'file(required)'\n  choice: 'string(required)'\nmarker: \"{{ frontmatter(spec, 'marker') }}\"\n---\nROUTE={{ marker }}/{{ choice }}\n",
+    );
+    let router = fixture.cwd().join("prompts/router.md");
+    write(
+        &router,
+        "---\ninitialize:\n  stack:\n    - action: {action: proxy, target: './target.md', with: {spec: 'cases/decoy/spec.md', choice: overlay}}\n---\nRouter.\n",
+    );
+    // `--fixture-flag` is no researched Goose switch, so it never takes a setter.
+    let arguments = ["--fixture-flag", "spec=cases/original/spec.md", "choice=caller"];
+
+    for document in [&target, &router] {
+        let output = run_compose(&fixture, &caller_dir, document, &arguments);
+        assert!(output.contains("ROUTE=original/caller"), "{}: stderr:\n{output}", document.display());
+        let provider_args = std::fs::read_to_string(fixture.home().join("provider-prompt")).unwrap();
+        assert!(provider_args.contains("--fixture-flag"), "{provider_args}");
+        assert!(
+            !provider_args.contains("spec=") && !provider_args.contains("choice="),
+            "reclaimed setters are not provider data: {provider_args}"
+        );
     }
 }
 
@@ -883,6 +926,7 @@ fn inline_compose_proxy_uses_the_caller_origin_and_closes_over_the_target() {
     );
 }
 
+#[cfg(feature = "test-fixtures")]
 #[test]
 fn direct_and_proxy_file_failures_keep_equivalent_caller_diagnostics() {
     for (case, schema, expression, raw) in [
@@ -998,6 +1042,7 @@ fn direct_and_proxy_file_failures_keep_equivalent_caller_diagnostics() {
     }
 }
 
+#[cfg(feature = "test-fixtures")]
 #[test]
 fn dynamic_array_selection_keeps_complete_direct_and_proxy_diagnostics() {
     let fixture = CliProcessFixture::named("caller-file-dynamic-array-diagnostic");

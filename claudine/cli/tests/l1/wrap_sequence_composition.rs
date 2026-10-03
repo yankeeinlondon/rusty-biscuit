@@ -529,6 +529,49 @@ fn sequence_live_no_agent_aborts_without_launching_provider() {
     );
 }
 
+/// Shell steps get no review row, but that does not relax the gate: a
+/// shell-only sequence with no `agent` still aborts in a no-TTY session, and
+/// its shell step never runs. `--yolo` approves the shell at pre-flight so the
+/// run reaches the agent gate.
+#[cfg(unix)]
+#[test]
+fn sequence_live_shell_only_no_agent_still_aborts_headless() {
+    let fixture = CliProcessFixture::named("wrap-sequence-composition");
+    fixture.seed_user_config();
+    write_executable(&fixture.bin_dir().join("claude"), "#!/bin/sh\nexit 0\n");
+
+    let sentinel = fixture.cwd().join("shell-ran.flag");
+    fs::write(
+        fixture.cwd().join("compose.md"),
+        format!(
+            "---\nsequence:\n  - name: stage\n    shell: \": > '{}'\"\n---\nSEQ_BODY_MARKER\n",
+            sentinel.display()
+        ),
+    )
+    .unwrap();
+    let stdin_file = fixture.cwd().join("empty-stdin.txt");
+    fs::write(&stdin_file, "").unwrap();
+
+    let output = fixture
+        .command_builder()
+        // Restrict PATH to the fake bin so only the `claude` stub counts.
+        .fake_only_path()
+        .build()
+        .pipe_stdin(&stdin_file)
+        .unwrap()
+        .args(["sequence", "compose.md", "--yolo"])
+        .output()
+        .unwrap();
+
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    assert!(!sentinel.exists(), "the shell step ran; stderr:\n{stderr}");
+    assert_eq!(output.status.code(), Some(1), "must abort; stderr:\n{stderr}");
+    assert!(
+        stderr.contains("agent resolution failed") && stderr.contains("didn't specify the Agent"),
+        "abort must be the no-agent breakdown; stderr:\n{stderr}"
+    );
+}
+
 /// A scalar invalid `agent` (`agent: not-real`) aborts live in no-TTY mode
 /// with the imperative `Invalid Agent:` message — it must NOT fall back to the
 /// only installed provider.

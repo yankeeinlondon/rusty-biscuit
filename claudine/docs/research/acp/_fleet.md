@@ -30,7 +30,7 @@ success:
               - message: "🎉  the **ACP** research on **{{state.name}}** completed successfully"
 failure:
     message: "💥 the ACP research on **{{state.name}}** failed to complete!"
-    warn: "The ACP research on **{{state.name}}** failed to complete! (err: {{err.message}})"
+    warn: "The ACP research on **{{state.name}}** failed to complete! (err: {{ err.msg }})"
 ---
 # ACP Research on {{state.name}}
 
@@ -50,10 +50,9 @@ proprietary stream/output protocols; this topic covers only the Agent Client Pro
 (JSON-RPC) surface and its adapters — mention a proprietary protocol only where an
 adapter translates it to ACP.
 
-Prior-generation research files in this directory (`gemini-cli.md`, `kimi-code-cli.md`)
-are validation assets for humans — do NOT open, paraphrase, or cite them. The standalone
-`json-rpc.md` background document is likewise not provider evidence for this run; your
-research must be independent.
+Sibling provider research files in this directory are research **outputs**, not
+sources — do not open, paraphrase, or cite another provider's document; your research
+must be independent.
 
 ## Document Structure
 

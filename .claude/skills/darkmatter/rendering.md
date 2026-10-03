@@ -50,6 +50,13 @@ Code-block mode defaults to inverse page color for contrast and supports
 same resolved mode. A direct component theme or `md code-block --theme` wins
 over page/context defaults.
 
+`CodeBlockMeta::start_line` (`CodeBlock::with_start_line`) offsets gutter
+numbers and highlight lookup for excerpts; `None` numbers from 1. It has no
+fence key, so `CodeBlock::code_node` carries it across the render tree as the
+`darkmatter.code.start_line` extension hint, which `TerminalCodeRenderer`
+reads only when the node's `data` bag is non-empty (keeping the
+`structural_gate` zero-access check green for ordinary fences).
+
 The CLI command is:
 
 ```text

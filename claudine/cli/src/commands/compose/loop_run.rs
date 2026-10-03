@@ -68,6 +68,13 @@ pub(crate) fn emit_rate_limit_halt(error: &claudine::composition::CompositionErr
 /// provider/model attribution so the engine can apply the configured
 /// [`claudine::composition::OnRateLimit`] policy between iterations.
 ///
+/// A handoff the iteration surfaced travels on the output whichever branch
+/// builds it: the engine ends the loop on it and returns it to the
+/// active-document coordinator, which is the only owner that can adopt the
+/// target. Dropping it here would leave the harness's committed hop in the
+/// ledger with nothing adopted, and the next iteration's identical request
+/// would be refused as a cycle.
+///
 /// [`SingleCompositionOutcome`]:
 ///     crate::commands::wrap::composition::SingleCompositionOutcome
 pub(crate) fn build_loop_iteration_output(
@@ -80,8 +87,9 @@ pub(crate) fn build_loop_iteration_output(
     let exit_reason = signals.exit_reason.clone();
     let provider_id = signals.provider_id.clone();
     let model_id = signals.model_id.clone();
+    let handoff = outcome.handoff;
 
-    if outcome.exit_code == 0 {
+    let mut output = if outcome.exit_code == 0 {
         // The captured entry this iteration committed to `outputs` is the same
         // text `_loop_last_output` names, so the two agree by construction
         // rather than the ambient reporting a placeholder empty string.
@@ -119,13 +127,37 @@ pub(crate) fn build_loop_iteration_output(
             .with_exit_reason(exit_reason)
             .with_attribution(provider_id, model_id)
             .with_terminal_signal(outcome.terminal_signal)
-    }
+    };
+    output.handoff = handoff;
+    output
+}
+
+/// Translate an iteration whose `success` stack raised an `error()` that no
+/// recovery took into a failed iteration.
+///
+/// The provider ran and every terminal event fired, so this is the loop's
+/// "prompt run failed" case — `fail_fast` halts on it, and under
+/// `fail_fast: false` the loop gate still runs — not an iteration that could
+/// not run. The authored `error` carries no classifiable code, so there is no
+/// snapshot to project.
+pub(crate) fn downgraded_loop_iteration_output(
+    iteration: usize,
+    prompt_path: &std::path::Path,
+    downgrade: &crate::commands::wrap::harness_orch::UnrecoveredLifecycleDowngrade,
+) -> claudine::composition::LoopIterationOutput {
+    let error = claudine::composition::CompositionError::LoopIterationFailed {
+        iteration,
+        prompt_path: prompt_path.to_path_buf(),
+        exit_code: 1,
+        reason: downgrade.message.clone(),
+        exit_reason: None,
+        snapshot: None,
+    };
+    claudine::composition::LoopIterationOutput::failure("", 1, error)
+        .with_terminal_signal(Some(claudine::composition::LifecycleSignal::Failure))
 }
 
 /// Run a composition loop seeded from resolved control variables.
-///
-/// Returns `Ok(None)` when the source has no `loop` frontmatter, matching
-/// [`claudine::composition::execute_loop`].
 ///
 /// The caller is responsible for building the loop seed (control-variable
 /// frontmatter) and the lifecycle runtime dependencies. This function wraps

@@ -1,0 +1,80 @@
+---
+source: worktree/cli/tests/list_table.rs
+expression: labeled(cases)
+---
+## published within the wait
+badges: PR #104, PR #7, PR #99
+(none)
+
+
+## published within the wait, head still running
+badges: PR #104, PR #7, PR #99
+ - running this command again will provide updated metrics; alternatively use the --refresh / -r flags to force refresh immediately
+
+
+## published an empty answer
+badges: (none)
+(none)
+
+
+## ignored, an old answer stored
+badges: (none)
+(none)
+
+
+## unsupported origin
+badges: (none)
+(none)
+
+
+## still running at 3 s, answer 12 min old
+badges: PR #104, PR #7, PR #99
+ - PRs as of 12 min ago
+ - running this command again will provide updated metrics; alternatively use the --refresh / -r flags to force refresh immediately
+
+
+## still running at 3 s, answer 10 s old
+badges: PR #104, PR #7, PR #99
+ - running this command again will provide updated metrics; alternatively use the --refresh / -r flags to force refresh immediately
+
+
+## still running at 3 s, empty answer 5 min old
+badges: (none)
+ - PRs as of 5 min ago
+ - running this command again will provide updated metrics; alternatively use the --refresh / -r flags to force refresh immediately
+
+
+## still running at 3 s, nothing stored
+badges: (none)
+ - running this command again will provide updated metrics; alternatively use the --refresh / -r flags to force refresh immediately
+
+
+## failed, answer 10 s old
+badges: PR #104, PR #7, PR #99
+ - PRs as of less than 1 min ago (couldn't refresh)
+
+
+## failed, answer 12 min old
+badges: PR #104, PR #7, PR #99
+ - PRs as of 12 min ago (couldn't refresh)
+
+
+## failed, empty answer 5 min old
+badges: (none)
+ - PRs as of 5 min ago (couldn't refresh)
+
+
+## failed, nothing stored
+badges: (none)
+ - couldn't get open PRs
+
+
+## failed, head still running at 3 s
+badges: PR #104, PR #7, PR #99
+ - PRs as of less than 1 min ago (couldn't refresh)
+ - running this command again will provide updated metrics; alternatively use the --refresh / -r flags to force refresh immediately
+
+
+## no origin
+badges: (none)
+(none)

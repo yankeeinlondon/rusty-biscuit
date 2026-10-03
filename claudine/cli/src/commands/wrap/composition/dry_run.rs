@@ -135,7 +135,9 @@ impl DryRunRender {
             area,
             document_path: request.prepared.resolved_path.clone(),
             deferred_lifecycle_keys: request.prepared.deferred_lifecycle_keys.clone(),
-            provider_args: crate::commands::wrap::env::redact_sensitive_args(&request.provider_args),
+            provider_args: crate::commands::wrap::env::redact_sensitive_args(
+                request.provider_tail.launch_args(),
+            ),
         }
     }
 }
@@ -240,16 +242,26 @@ pub(crate) fn render_metadata_table(render: &DryRunRender, term: &Terminal) -> S
             .map(|n| n.to_string())
             .unwrap_or_else(|| relative_or_abs(&render.document_path))
     });
+    let document_label = Prose::escape_text(&document_label);
     let document_markup = crate::cli_utils::file_url(&render.document_path).map_or_else(
         || format!("<blue>{document_label}</blue>"),
-        |href| format!("<blue><a href=\"{href}\">{document_label}</a></blue>"),
+        |href| {
+            format!(
+                "<blue><a href={}>{document_label}</a></blue>",
+                Prose::quoted_attr(href.as_str())
+            )
+        },
     );
     let document_cell = Prose::new(document_markup).render(term);
     table.add_row(vec!["Document".into(), document_cell.into()]);
 
-    // Description: only when present, italic + dim.
+    // Description: only when present, italic + dim, shown exactly as authored.
     if let Some(description) = &render.description {
-        let cell = Prose::new(format!("<i><dim>{description}</dim></i>")).render(term);
+        let cell = Prose::new(format!(
+            "<i><dim>{}</dim></i>",
+            Prose::escape_text(description)
+        ))
+        .render(term);
         table.add_row(vec!["Description".into(), cell.into()]);
     }
 
@@ -259,7 +271,7 @@ pub(crate) fn render_metadata_table(render: &DryRunRender, term: &Terminal) -> S
 
     // Model: resolved model, else a default placeholder.
     let model_cell = match &render.model {
-        Some(model) => Prose::new(model.clone()).render(term),
+        Some(model) => Prose::new(Prose::escape_text(model)).render(term),
         None => Prose::new("<i><dim>default</dim></i>").render(term),
     };
     table.add_row(vec!["Model".into(), model_cell.into()]);
@@ -293,7 +305,7 @@ pub(crate) fn render_metadata_table(render: &DryRunRender, term: &Terminal) -> S
     // Provider args: the forwarded (redacted) agent tail, shown so a dry-run
     // can audit exactly what would reach the child. Only when non-empty.
     if !render.provider_args.is_empty() {
-        let joined = render.provider_args.join(" ");
+        let joined = Prose::escape_text(&render.provider_args.join(" "));
         let cell = Prose::new(format!("<dim>{joined}</dim>")).render(term);
         table.add_row(vec!["Provider args".into(), cell.into()]);
     }

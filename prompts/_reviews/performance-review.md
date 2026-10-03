@@ -339,5 +339,5 @@ To complete this task you must
 - set the `agent` Frontmatter property to "{{env.AGENT}}"
 - set the `model` Frontmatter property to "{{env.MODEL}}"
 - set the `repo` Frontmatter property to "{{ctx.repo}}"
-- set the `created` Frontmatter property to "{{today}} at {{time}}"
+- set the `created` Frontmatter property to "{{today}} at {{ctx.time}}"
 - ensure all Frontmatter properties have been saved to "{{area}}/reviews/{{today}}-performance-review/review.md" and that the review content is in the body of the document

@@ -42,7 +42,6 @@ impl BlockError for CompositionError {
             // Lifecycle authoring / evaluation family.
             CompositionError::LifecycleInvalid { .. }
             | CompositionError::LifecycleNestedSpanInLiteral { .. }
-            | CompositionError::LifecycleUndefinedVariable { .. }
             | CompositionError::LifecycleEvaluationError { .. }
             | CompositionError::RemovedValidationKey { .. }
             | CompositionError::LifecycleStackInvalidShape { .. }
@@ -85,6 +84,7 @@ impl BlockError for CompositionError {
             | CompositionError::MissingProperties { .. }
             | CompositionError::CompletionBodyUnchanged { .. }
             | CompositionError::CompletionSchemaFailed { .. }
+            | CompositionError::InlineAgentFrontmatterRejected { .. }
             | CompositionError::UnsupportedInteractiveSchema { .. } => schema::status_block(self),
 
             // Selection / target family.
@@ -167,8 +167,8 @@ pub(super) fn render_file_link(path: &std::path::Path) -> String {
     });
     match absolute.and_then(|path| url::Url::from_file_path(path).ok()) {
         Some(href) => format!(
-            "<a href=\"{}\">{escaped_label}</a>",
-            escape_prose_path(href.as_str())
+            "<a href={}>{escaped_label}</a>",
+            Prose::quoted_attr(href.as_str())
         ),
         None => escaped_label,
     }
@@ -180,18 +180,10 @@ fn optional_line(line: usize) -> Value {
     if line > 0 { json!(line) } else { Value::Null }
 }
 
+/// Escape author or diagnostic text for splicing into Prose markup, so paths,
+/// identifiers such as `_loop_count`, and messages render exactly as written.
 pub(super) fn escape_prose_path(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    for ch in input.chars() {
-        match ch {
-            '\\' | '<' | '>' | '{' | '"' => {
-                out.push('\\');
-                out.push(ch);
-            }
-            other => out.push(other),
-        }
-    }
-    out
+    Prose::escape_text(input)
 }
 
 /// Map a `ComposeFailed`'s inner [`MarkdownError`] to a composition code,
@@ -230,7 +222,7 @@ fn compose_failed_code(md: &MarkdownError) -> &'static str {
 /// [`null_detail_for`] so every declared key is present. `kind` is the catalog
 /// snake_case slug, never the `Debug` form. `suggestions` reuses the **same**
 /// render-time did-you-mean computation as the interpolation block (a missing
-/// reference, `base_dir`-joined, ranked against its siblings) so
+/// reference, joined onto the diagnostic's `cwd`, ranked against its siblings) so
 /// `err.detail.suggestions` is byte-for-byte what the human report shows.
 ///
 /// A schema-projected caller value also carries its raw authoring context and
@@ -244,7 +236,7 @@ fn file_reference_detail(diagnostic: &FileReferenceDiagnostic) -> Value {
     // for a *missing* reference — a malformed/remote reference has no sibling
     // hint, so the array stays empty rather than fabricating one.
     let suggestions = if matches!(diagnostic.kind, FileRefFailure::NotFound) {
-        let expected = diagnostic.base_dir.join(&diagnostic.reference);
+        let expected = diagnostic.cwd.join(&diagnostic.reference);
         suggest_sibling_files(&expected, DEFAULT_MAX_SUGGESTIONS)
     } else {
         Vec::new()
@@ -252,7 +244,9 @@ fn file_reference_detail(diagnostic: &FileReferenceDiagnostic) -> Value {
     let mut base = null_detail_for("composition.invalid_file_reference");
     base["reference"] = json!(diagnostic.reference);
     base["kind"] = json!(diagnostic.kind.as_str());
-    base["base_dir"] = json!(biscuit_file::to_portable_string(&diagnostic.base_dir));
+    // The published key predates the `cwd` vocabulary; it is the document
+    // directory, not the tree root.
+    base["base_dir"] = json!(biscuit_file::to_portable_string(&diagnostic.cwd));
     base["suggestions"] = json!(suggestions);
     base["fallback_dir"] = json!(
         diagnostic
@@ -300,7 +294,7 @@ fn caller_schema_file_reference_detail(md: &MarkdownError) -> Option<Value> {
         darkmatter::markdown::schemas::FileReferenceDiagnostic::InvalidSyntax { .. } => "malformed",
         _ => "not_found",
     });
-    detail["base_dir"] = json!(biscuit_file::to_portable_string(caller.origin.base_dir()));
+    detail["base_dir"] = json!(biscuit_file::to_portable_string(caller.origin.cwd()));
     detail["source_path"] = json!(caller
         .origin
         .source_path()
@@ -381,6 +375,11 @@ impl Diagnostic for CompositionError {
                 "composition.invalid_file_reference"
             }
             CompositionError::CompletionBodyUnchanged { .. } => "composition.body_unchanged",
+            // The agent produced the document, so its output postcondition
+            // failed, not the author's document.
+            CompositionError::InlineAgentFrontmatterRejected { .. } => {
+                "document.invalid_frontmatter"
+            }
             CompositionError::CompletionSchemaFailed { .. } => "composition.completion_schema",
             CompositionError::InlineArtifactUnreadable { .. } => "io.read_failed",
             CompositionError::InlineGuardMissing { .. } => "usage.invalid_argument",
@@ -410,7 +409,6 @@ impl Diagnostic for CompositionError {
             | CompositionError::LifecycleSayConflict(_)
             | CompositionError::LifecycleUnknownEffect(..)
             | CompositionError::LifecycleNestedSpanInLiteral { .. }
-            | CompositionError::LifecycleUndefinedVariable { .. }
             | CompositionError::LifecycleStackInvalidShape { .. }
             | CompositionError::LifecycleWhenExpressionInvalid { .. }
             | CompositionError::LifecycleActionInvalidShortForm { .. }
@@ -616,6 +614,13 @@ impl Diagnostic for CompositionError {
             | CompositionError::InlineRollbackFailed { path, .. } => {
                 base["path"] = json!(biscuit_file::to_portable_string(path));
             }
+            // `document.invalid_frontmatter` declares `doc`, `property`,
+            // `problems`.
+            CompositionError::InlineAgentFrontmatterRejected { path, rejection } => {
+                base["doc"] = json!(biscuit_file::to_portable_string(path));
+                base["property"] = json!(rejection.property);
+                base["problems"] = json!([rejection.to_string()]);
+            }
             // `io.read_failed` declares `path`.
             CompositionError::InlineArtifactUnreadable { path, .. } => {
                 base["path"] = json!(biscuit_file::to_portable_string(path));
@@ -812,7 +817,6 @@ impl Diagnostic for CompositionError {
             CompositionError::LifecycleSayConflict(property)
             | CompositionError::LifecycleUnknownEffect(property, _)
             | CompositionError::LifecycleNestedSpanInLiteral { property, .. }
-            | CompositionError::LifecycleUndefinedVariable { property, .. }
             // These two cardinality errors carry no dedicated `message` field,
             // so synthesize one from the `#[error]` rendering like the other
             // message-less lifecycle variants above.

@@ -93,7 +93,7 @@ struct HarnessLoopCtx<'a, 'guard> {
     initial_transition: DocumentTransition,
     // The ledger of the coordinator that owns this run, when one exists: the
     // invocation-wide ledger for `compose`/`inline-compose`, or a `sequence`
-    // step's own per-step ledger. A terminal-event proxy commits against it and
+    // step's or `prompt:` task's own ledger. A terminal-event proxy commits against it and
     // surfaces the committed handoff up rather than adopting in place. `None`
     // only for the direct wrapper passthrough, which prepares no active document
     // and therefore refuses a hand-off instead of consuming one — see
@@ -132,7 +132,7 @@ use coordinator::{ActiveDocumentCoordinator, BootstrapStage};
 use error_routing::*;
 use lifecycle_events::*;
 use proxy::*;
-pub(crate) use target_launch::LaunchRebuildIntent;
+pub(crate) use target_launch::{LaunchRebuildIntent, planned_fallback_model};
 use target_launch::{RebuiltLaunchIdentity, rebuild_launch_identity, rebuild_target_launch};
 #[allow(unused_imports)] // entirely dead_code until the rendezvous backend lands
 use requeue::*;
@@ -167,8 +167,8 @@ pub(crate) fn run_harness_loop(
     // commits a proxy raised by a terminal event — one commit point, one set
     // of resolution and cycle semantics, no second channel.
     initial_transition: DocumentTransition,
-    // The shared invocation ledger (compose/inline-compose), or `None` for a
-    // sequence step / direct passthrough. See [`HarnessLoopCtx::handoff_ledger`].
+    // The owning coordinator's ledger, or `None` for the direct wrapper
+    // passthrough. See [`HarnessLoopCtx::handoff_ledger`].
     handoff_ledger: Option<SharedRunLedger>,
     // An already-committed proxy handoff whose target this run adopts for its
     // staged bootstrap, or `None` for a directly-invoked document. See
@@ -467,6 +467,10 @@ struct ExecutedHarnessAttempt {
     provider: Provider,
     /// The profile paired with [`Self::provider`], from the same bundle.
     profile: &'static dyn crate::commands::wrap::profile::WrapperProfile,
+    /// The provider process exit as the failure report classifies it.
+    native_exit: crate::output::native_exit::NativeExit,
+    /// The forwarded tail this attempt launched with, from the same bundle.
+    provider_tail: claudine::composition::ProviderTail,
 }
 
 enum PhaseResult<T> {
@@ -783,7 +787,7 @@ fn run_start_lifecycle_event(
     err: Option<&LifecycleErrorInfo>,
     loop_start: std::time::Instant,
 ) -> LifecycleEventOutcome {
-    observe_reentry_lifecycle_context(prompt_state, materialized);
+    install_reentry_lifecycle_context(prompt_state, lifecycle_guard, materialized);
     run_lifecycle_event(
         lifecycle_guard,
         LifecycleSignal::Start,
@@ -797,20 +801,25 @@ fn run_start_lifecycle_event(
     )
 }
 
-fn observe_reentry_lifecycle_context(
+/// A retried or resumed attempt is a new composition run: its lifecycle reads
+/// the attempt's own capture, not the snapshot of the attempt it replaced.
+fn install_reentry_lifecycle_context(
     prompt_state: &HarnessPromptState,
+    lifecycle_guard: &mut claudine::composition::LifecycleRunGuard<'_>,
     materialized: &MaterializedHarnessPrompt,
 ) {
     if matches!(
         prompt_state.entry,
         claudine::composition::DocumentEntryReason::Retry
             | claudine::composition::DocumentEntryReason::Resume
-    ) && materialized.compose_context.is_some()
-        && let Some(epoch) = materialized.document_epoch.as_ref()
+    ) && let Some(context) = materialized.compose_context.as_ref()
     {
-        epoch.record_prepared_context_consumer(
-            claudine::invocation_context::PreparedContextConsumer::Lifecycle,
-        );
+        lifecycle_guard.set_run_prepared_context(context.clone());
+        if let Some(epoch) = materialized.document_epoch.as_ref() {
+            epoch.record_prepared_context_consumer(
+                claudine::invocation_context::PreparedContextConsumer::Lifecycle,
+            );
+        }
     }
 }
 
@@ -1081,7 +1090,7 @@ fn bootstrap_adopted_document_phase(
         apply_target_env_overrides(materialized, &rebuild.env_overrides);
         lifecycle
             .guard
-            .set_proxy_prepared_context(rebuild.prepared_context);
+            .set_run_prepared_context(rebuild.prepared_context);
 
         if prompt.effective_non_interactive {
             crate::output::log_compose_prompt(
@@ -1120,10 +1129,11 @@ fn bootstrap_adopted_document_phase(
 ///   up as a [`LoopStep::Return`] carrying it. The harness never repoints its own
 ///   active document; the command coordinator re-prepares the resolved target
 ///   through the full canonical launch pipeline — the same rebuild a direct
-///   invocation performs (R6). Both the top-level `compose`/`inline-compose`
-///   coordinator and each `sequence` step's contained coordinator take this arm:
-///   a sequence step surfaces to the step's own per-step ledger, staying inside
-///   the step while still rebuilding launch state above the harness (R1).
+///   invocation performs (R6). The top-level `compose`/`inline-compose`
+///   coordinator, each `--loop` iteration, and each `sequence` step's or
+///   `prompt:` task's contained coordinator take this arm: a step or task
+///   surfaces to its own ledger, staying inside the step while still rebuilding
+///   launch state above the harness (R1, R8).
 /// - **Unowned** (`handoff_ledger` is `None`): the direct provider wrappers
 ///   (`claudine claude`, `claudine goose`, …) prepare no active document, so
 ///   there is no coordinator to surface to. The request is refused with a typed
@@ -1782,6 +1792,7 @@ fn execute_attempt_phase(
         provider,
         profile,
         base_args,
+        &rebuilt.provider_tail,
         base_env,
         resume_session.as_deref(),
         &materialized,
@@ -1982,7 +1993,7 @@ fn execute_attempt_phase(
     // `resolve_guard_inputs`/`compile_for_model`) or while delivering the
     // prompt. This is still post-`start`, so route through the typed
     // failure + finalize stacks (with `err`) before propagating.
-    let (outcome, perf, iteration_signals) = attempt_result
+    let (outcome, perf, iteration_signals, native_exit) = attempt_result
     .map_err(|e| {
         let err_info = LifecycleErrorInfo::from_error_or_action("harness_attempt", e.as_ref());
         rollback_inline_document(inline.as_mut(), term);
@@ -2033,6 +2044,8 @@ fn execute_attempt_phase(
         iteration_signals,
         provider,
         profile,
+        native_exit,
+        provider_tail: rebuilt.provider_tail.clone(),
     })
 }
 
@@ -2068,6 +2081,8 @@ fn classify_attempt_phase(
         iteration_signals,
         provider,
         profile,
+        native_exit,
+        provider_tail,
     } = executed;
     if outcome.termination == claudine::harness::ProcessTermination::Interrupted {
         // Surface the interrupt to the user before we let the guard
@@ -2206,6 +2221,23 @@ fn classify_attempt_phase(
                 );
             }
             TerminalRecovery::Completed => {}
+        }
+        // Recovery is exhausted, so this is the terminal failure: the one
+        // place a provider's rejection of the forwarded tail is reported.
+        // Other causes keep the failure reporting above.
+        let native_exit = if show_checks {
+            native_exit.with_shown_headline(&message)
+        } else {
+            native_exit
+        };
+        let native = crate::output::error_report::AgentErrorReport::for_native_exit(
+            provider,
+            &native_exit,
+            &provider_tail,
+            None,
+        );
+        if native.correlated {
+            native.report.render(term);
         }
         // For provider-level failures, preserve the exit code at the
         // boundary rather than converting it into an `eyre` error. This
@@ -2379,8 +2411,9 @@ fn classify_attempt_phase(
     // `resume`/`retry`/`proxy`/`requeue` (e.g. the agent finished but an
     // expected artifact is missing, so `resume` it), or an `error()` that
     // downgrades the run to failure (handled inside `execute_terminal_event`,
-    // which then carries an `err` into `finalize`). Both surface as
-    // `success.outcome.control`, so dispatch it uniformly.
+    // which then carries an `err` into `finalize`; left unrecovered, it comes
+    // back as this call's `Err`). Both surface as `success.outcome.control`, so
+    // dispatch it uniformly.
     let recovery = {
         let shared_guard = handoff_ledger.as_ref().map(|l| l.lock().unwrap());
         let ledger_ref: &RunLedger =

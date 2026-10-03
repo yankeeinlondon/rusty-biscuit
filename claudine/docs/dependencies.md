@@ -13,10 +13,22 @@
   `test_layout` gate in its consolidated `l1` test binary. The dev entry adds
   no crate to the workspace; it brings `fs4` into the dev graph, which is
   already in `Cargo.lock`.
+- The `claudine` library enables Tokio's `test-util` feature in its dev
+  dependencies. It gives the delivery-tracker unit tests a paused clock, so a
+  10-second drain deadline is asserted exactly and costs no wall time.
+- The `claudine` library takes `proc-macro2` (with `span-locations`, as
+  `claudine-cli` already does) as a dev dependency for the messaging spawn
+  guard. The guard lexes `src/messaging/` instead of searching its text, so a
+  spawn named in a comment or string cannot trip it, and it reports the line
+  and column of a real one. Both crates are already in `Cargo.lock`.
 - All three crates take `biscuit-test-harness` as a dev dependency for
   `manifest_dir!`, which resolves the crate directory at run time. A fixture
   path baked in at compile time names the *building* host's checkout, which is
   the wrong directory when a `cargo nextest archive` is executed elsewhere.
+- `claudine-cli` takes `xpty` 0.3.6 as a Windows-only dev dependency. It opens
+  a ConPTY pseudoconsole with no window, so a test can type Ctrl+C into a real
+  console during the exit drain. `unchained-ai` and `worktree-cli` already
+  build it, so it adds no crate to `Cargo.lock`.
 
 ## Audio Handoff
 
@@ -81,6 +93,21 @@ edges exist to serve.
   target. Required-feature declarations keep those binaries out of local L1;
   CI and the tier recipes enable them. The contract and CLI `real-tests`
   features similarly keep live-provider targets opt-in.
+
+## Steering Routing
+
+See [Steering Routing](topics/steering-routing.md).
+
+- `claudine` (library) depends on `uuid` (`v4`, the version the CLI already
+  uses) for random steering execution and request identifiers.
+- `claudine-cli` depends on `tokio-stream` (already in the graph through
+  `rendezvous-daemon`) for the owner's outbound `SteeringControl` request
+  stream. Its dev-dependency on `tokio` adds `test-util` so the control link's
+  retry backoff is asserted on a paused clock. The wrapper's process-start
+  identity reuses the `sysinfo` edge described under Budget Ledger Process
+  Identity (`cli_utils::process_start`).
+- `rendezvous-client` adds `tokio-stream` as a dev-dependency for the
+  steering round-trip test's owner stream.
 
 ## Lifecycle Requeue
 

@@ -1,0 +1,57 @@
+# Named types for the reasoning-level research contract.
+kind: schema
+types:
+    normalized_level: enum(off,minimal,low,medium,high,very_high,maximum,outside_scale) -> Claudine's provider-neutral scale, used to compare levels between providers; outside_scale marks a mode that is not a point on the provider's scale
+
+    level:
+        native: string(required; pattern(^[A-Za-z0-9_.:-]+$)) -> The exact token the provider accepts, copied as observed and never tidied up
+        normalized: normalized_level(required)@this -> The closest point on Claudine's scale, judged by the provider's own ordering of its levels
+        meaning: string(required; not-empty) -> What the provider says this level does, in the provider's terms
+        evidence_ids: identifier[](required)@../_types.yaml -> Evidence that the provider accepts this exact token
+
+    default_level:
+        native: string(pattern(^[A-Za-z0-9_.:-]+$)) -> The level used when none is chosen; omitted when it cannot be established
+        decided_by: enum(provider,model,account,unknown; required) -> What determines the default, since it may differ by model or by subscription
+        evidence_ids: identifier[](required)@../_types.yaml -> Evidence for the default and for what determines it
+
+    control:
+        id: identifier(required)@../_types.yaml -> Stable name the precedence list and the reporting entry use to refer to this control
+        kind: enum(launch_flag,config_override_flag,config_file_key,environment_variable,model_suffix,session_command,request_field; required) -> How the caller expresses the choice
+        name: string(required; pattern(^[A-Za-z0-9_./:-]+$)) -> The exact flag, key, variable, or command, copied as observed
+        value: enum(level_token,token_budget,on_or_off; required) -> Whether the control takes a named level, a number of reasoning tokens, or only a switch
+        arguments: string[](required) -> Command-line arguments that apply this control at launch, one argument per entry, with <level> where the level goes; empty for an environment variable, a configuration key, a session command, or a request field
+        launch_modes: launch_mode[](required)@../_types.yaml -> Launch modes in which the control works
+        lasts: enum(one_request,one_session,until_changed,unknown; required) -> How long the choice stays in force
+        changes_running_session: enum(yes,no,unknown; required) -> Whether the control can change the level of a session that has already started
+        evidence_ids: identifier[](required)@../_types.yaml -> Evidence that the control exists under this exact name and behaves as recorded
+
+    model_levels:
+        model: string(required; pattern(^[A-Za-z0-9_./:@*-]+$)) -> The exact model identifier the provider accepts, or a pattern with * that covers every model sharing these levels
+        accepts: string[](required) -> Native level tokens this model accepts; empty when the model has no adjustable reasoning
+        default: string(pattern(^[A-Za-z0-9_.:-]+$)) -> The level this model uses when none is chosen, where it differs from the provider default
+        evidence_ids: identifier[](required)@../_types.yaml -> Evidence for which levels this model accepts
+
+    invalid_level:
+        behavior: enum(refuses_to_start,fails_the_request,uses_nearest_level,uses_default,unknown; required) -> What the provider does with the run when the level is not accepted
+        warns: enum(yes,no,unknown; required) -> Whether the provider tells the caller the requested level was not used; without a warning a caller cannot trust its own request
+        message: string -> The exact error text, when the provider reports one
+        evidence_ids: identifier[](required)@../_types.yaml -> Evidence from an attempt with a level the provider does not accept
+
+    reporting:
+        source: enum(stream_event,session_record,log_file,status_command,nowhere,unknown; required) -> Where the provider states the level a run actually used
+        locator: string(pattern(^[A-Za-z0-9_~<>./*:-]+$)) -> The event name or file pattern that holds it, with <placeholders> for the parts that vary; omitted when the source is a command or nowhere
+        command: string[] -> The command that prints it, one argument per entry, with <placeholders> for the parts that vary; present only when the source is status_command
+        notes: string -> What a reader needs to find the value that the locator and field cannot express
+        field: pointer@../_types.yaml -> Where in that event or record the level appears
+        evidence_ids: identifier[](required)@../_types.yaml -> Evidence that the reported value matches the level that was requested
+
+    reasoning_output:
+        reaches_caller: enum(full_text,summary,hidden,unknown; required) -> How much of the reasoning a non-interactive caller receives
+        control_id: identifier@../_types.yaml -> The control that shows or hides it, when one exists
+        evidence_ids: identifier[](required)@../_types.yaml -> Evidence for what a caller receives
+
+    gap:
+        area: enum(levels,default_level,controls,precedence,models,invalid_level,reporting,reasoning_output,other; required) -> Which part of this document the gap is in, so gaps can be compared between providers
+        entry: string(pattern(^[A-Za-z0-9_./:@*-]+$)) -> The level, control, or model the gap concerns, named exactly as this document names it; omitted when the gap concerns the whole area
+        detail: string(required; not-empty) -> What is not known, stated precisely enough for someone else to investigate
+        next_check: string(required; not-empty) -> The specific check that would close the gap

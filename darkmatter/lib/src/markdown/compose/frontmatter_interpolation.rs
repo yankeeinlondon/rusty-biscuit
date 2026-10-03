@@ -10,10 +10,12 @@
 //! ## Incremental Seed Semantics
 //!
 //! Top-level frontmatter entries are partitioned into:
-//! - **Seed** values: contain no `{{ }}` expressions
-//! - **Templated** values: contain at least one `{{ }}` expression
-//! - **Shell-pending** values: top-level strings that start with `$(` and
-//!   await frontmatter shell expansion
+//! - **Seed** values: contain no authored `{{ }}` expression. A data value
+//!   (see [`value_origin`](super::value_origin)) is always a seed, even when
+//!   it contains `{{`.
+//! - **Templated** values: contain at least one authored `{{ }}` expression
+//! - **Shell-pending** values: top-level strings whose authored value is a
+//!   whole-value `$( … )` awaiting frontmatter shell expansion
 //!
 //! Templated keys are resolved in dependency order: a key is only processed
 //! once all other templated keys it references have been resolved. After
@@ -24,13 +26,14 @@
 //!
 //! When `defer_shell_pending` is enabled, templated keys whose references
 //! include shell-pending keys are deferred — they remain unresolved so the
-//! caller can run frontmatter shell expansion and then call this function a
-//! second time to resolve those keys against the shell-expanded values.
+//! caller can run frontmatter shell expansion and then run
+//! [`FrontmatterPass::Deferred`] over exactly those keys. Every authored string
+//! is scanned once; its result, like shell output, is data.
 
 use super::context::catalog::CONTEXT_VARIABLE_DESCRIPTORS;
 use super::expression::{
-    EvaluationLookup, Expr, ExpressionError, ExpressionFinder, ResolutionContext, doc_namespace,
-    parse,
+    EvaluationLookup, Expr, ExpressionError, ExpressionFinder, ResolutionContext, ResolvedBinding,
+    doc_namespace, parse,
 };
 use super::interpolation::{
     Evaluator, ExpressionFailurePolicy, LocatedInterpolationError, convert_literals,
@@ -38,7 +41,9 @@ use super::interpolation::{
 };
 use super::expression::absence::MissingRoot;
 use super::{ComposeContext, ComposeWarning};
+use super::value_origin::{DataPaths, FrontmatterProvenance};
 use crate::markdown::frontmatter::Frontmatter;
+use crate::markdown::literal_token::{self, TokenError};
 use crate::markdown::types::{AuthoredSpan, MarkdownError, SourceRef};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -129,18 +134,23 @@ impl EvaluationLookup for FrontmatterSeedState {
             return doc_namespace::resolve_doc_namespace_in_map(path, &self.data);
         }
 
-        // ctx.* prefix
+        // The `ctx` and `env` namespaces, their exact roots included, so a
+        // frontmatter key of either name is reachable only as `doc.<name>`.
         if let Some(ctx_key) = path.strip_prefix("ctx.") {
             return self.context.get_effective(ctx_key);
         }
-
-        // env.* prefix
+        if path == "ctx" {
+            return Some(Value::Object(self.context.values().clone()));
+        }
         if let Some(env_key) = path.strip_prefix("env.") {
             return self
                 .context
                 .env()
                 .get(env_key)
                 .map(|v| Value::String(v.clone()));
+        }
+        if path == "env" {
+            return Some(self.context.env_value());
         }
 
         // Dotted nested path in seed data
@@ -155,34 +165,24 @@ impl EvaluationLookup for FrontmatterSeedState {
         self.data.get(path).cloned()
     }
 
-    fn get_checked(&self, path: &str) -> Result<Option<Value>, ExpressionError> {
-        if let Some(resolved) = self.current.resolve(path, &self.context) {
-            return resolved;
-        }
-        match path.strip_prefix("ctx.") {
-            Some(ctx_key) => self.context.classify_ctx_key(ctx_key).into_checked(|| self.context.get_effective(ctx_key)),
-            None => Ok(self.get(path)),
-        }
+    fn resolve(&self, path: &str) -> Result<ResolvedBinding, ExpressionError> {
+        let value = if let Some(resolved) = self.current.resolve(path, &self.context) {
+            resolved?
+        } else {
+            match path.strip_prefix("ctx.") {
+                Some(ctx_key) => self
+                    .context
+                    .classify_ctx_key(ctx_key)
+                    .into_checked(|| self.context.get_effective(ctx_key))?,
+                None => self.get(path),
+            }
+        };
+        Ok(ResolvedBinding::classify(path, value))
     }
 
-    fn get_string(&self, path: &str) -> String {
-        let value = self.get(path);
-        if let Some(resolved) = &value
-            && let Some(name) = super::context::effective_state::coerce_named_object(
-                path,
-                resolved,
-                &self.name_coercion_keys,
-            )
-        {
-            return name;
-        }
-        match value {
-            None | Some(Value::Null) => String::new(),
-            Some(Value::String(s)) => s,
-            Some(Value::Number(n)) => n.to_string(),
-            Some(Value::Bool(b)) => b.to_string(),
-            Some(v) => v.to_string(),
-        }
+    fn format_resolved(&self, path: &str, value: &Value) -> String {
+        super::context::effective_state::coerce_named_object(path, value, &self.name_coercion_keys)
+            .unwrap_or_else(|| super::expression::default_format(value))
     }
 
     fn resolution_context(&self) -> Option<ResolutionContext> {
@@ -217,16 +217,6 @@ impl EvaluationLookup for FrontmatterSeedState {
         NAMES.as_slice()
     }
 
-    /// Known to this pass: a reserved namespace, a key resolved so far, or a
-    /// bare runtime-context name. Pass 1 runs before schema validation and
-    /// shell expansion, so an unknown root here is only a candidate; the
-    /// document pipeline reconciles it against the final state and schema.
-    fn is_known_variable_root(&self, root: &str) -> bool {
-        super::expression::absence::is_reserved_root(root)
-            || self.data.contains_key(root)
-            || self.is_valid_context_variable(root)
-    }
-
     fn begin_expression_scope(&self) {
         self.current.begin_expression_scope();
     }
@@ -246,19 +236,39 @@ fn get_nested(value: &Value, path: &str) -> Option<Value> {
     Some(current.clone())
 }
 
+/// Where one frontmatter value sits, and which of its leaves are data.
+struct LeafScope<'a> {
+    /// Segments from the frontmatter root to the value.
+    segments: Vec<ValuePathSegment>,
+    /// Display path (`key`, `key.child`, `key[0]`) for warning scopes.
+    display: String,
+    data: &'a DataPaths,
+    /// Authored strings this rewrite scanned. Their results are data.
+    scanned: Vec<Vec<ValuePathSegment>>,
+}
+
 /// Recursively rewrites interpolation expressions in a JSON value tree.
 ///
-/// `path` names the value (`key`, `key.child`, `key[0]`); each string is a
-/// separately scanned text, so its expression-failure warnings are scoped to it.
-/// A failure records where below this value its expression sits.
+/// Each authored string is scanned once, for `{{ … }}` expressions and
+/// `{{{ … }}}` literals together, and recorded in `scope.scanned` so its
+/// result is data from then on. A data leaf is returned unchanged. Each
+/// string is a separately scanned text, so its expression-failure warnings
+/// are scoped to it. A failure records where below this value its expression
+/// sits.
 fn rewrite_value<L: EvaluationLookup>(
     value: &Value,
     evaluator: &Evaluator<L>,
     policy: ExpressionFailurePolicy,
-    path: &str,
+    scope: &mut LeafScope<'_>,
 ) -> Result<(Value, usize, Vec<ComposeWarning>), LocatedFrontmatterError> {
+    if scope.data.is_data(&scope.segments) {
+        return Ok((value.clone(), 0, vec![]));
+    }
     match value {
         Value::String(s) => {
+            if !s.contains("{{") {
+                return Ok((value.clone(), 0, vec![]));
+            }
             // A whole-value `{{ expr }}` is executable state, not text: it is
             // parsed and evaluated directly (preserving its typed result), and
             // a parse/eval failure is always fatal. Mixed text rewrites as a
@@ -266,7 +276,9 @@ fn rewrite_value<L: EvaluationLookup>(
             let (value, count, warnings) =
                 interpolate_value_located(s, evaluator, policy, "frontmatter-interpolation")
                     .map_err(|failure| LocatedFrontmatterError::in_string(s, failure))?;
-            let warnings = warnings.into_iter().map(|warning| warning.in_scope(path)).collect();
+            let warnings =
+                warnings.into_iter().map(|warning| warning.in_scope(&scope.display)).collect();
+            scope.scanned.push(scope.segments.clone());
             Ok((value, count, warnings))
         }
         Value::Array(arr) => {
@@ -274,9 +286,14 @@ fn rewrite_value<L: EvaluationLookup>(
             let mut total_count = 0;
             let mut all_warnings = Vec::new();
             for (index, item) in arr.iter().enumerate() {
+                let child = format!("{}[{index}]", scope.display);
+                let display = std::mem::replace(&mut scope.display, child);
+                scope.segments.push(ValuePathSegment::Index(index));
+                let outcome = rewrite_value(item, evaluator, policy, scope);
+                scope.segments.pop();
+                scope.display = display;
                 let (new_val, count, warnings) =
-                    rewrite_value(item, evaluator, policy, &format!("{path}[{index}]"))
-                        .map_err(|failure| failure.within(ValuePathSegment::Index(index)))?;
+                    outcome.map_err(|failure| failure.within(ValuePathSegment::Index(index)))?;
                 new_arr.push(new_val);
                 total_count += count;
                 all_warnings.extend(warnings);
@@ -288,9 +305,14 @@ fn rewrite_value<L: EvaluationLookup>(
             let mut total_count = 0;
             let mut all_warnings = Vec::new();
             for (key, val) in obj {
-                let (new_val, count, warnings) =
-                    rewrite_value(val, evaluator, policy, &format!("{path}.{key}"))
-                        .map_err(|failure| failure.within(ValuePathSegment::Key(key.clone())))?;
+                let child = format!("{}.{key}", scope.display);
+                let display = std::mem::replace(&mut scope.display, child);
+                scope.segments.push(ValuePathSegment::Key(key.clone()));
+                let outcome = rewrite_value(val, evaluator, policy, scope);
+                scope.segments.pop();
+                scope.display = display;
+                let (new_val, count, warnings) = outcome
+                    .map_err(|failure| failure.within(ValuePathSegment::Key(key.clone())))?;
                 new_obj.insert(key.clone(), new_val);
                 total_count += count;
                 all_warnings.extend(warnings);
@@ -299,6 +321,107 @@ fn rewrite_value<L: EvaluationLookup>(
         }
         // Number, Bool, Null — pass through
         other => Ok((other.clone(), 0, vec![])),
+    }
+}
+
+/// Replaces each authored whole-leaf literal token below `segments` with the
+/// string it holds and records the leaf's path, so the decoded text is data.
+///
+/// A malformed token, or one that is not the whole leaf, fails under every
+/// policy, best-effort included: it never falls back to expression parsing.
+/// The failure's path is relative to the top-level key, which the caller adds.
+fn decode_authored_tokens(
+    value: &mut Value,
+    segments: &mut Vec<ValuePathSegment>,
+    data: &DataPaths,
+    decoded: &mut Vec<Vec<ValuePathSegment>>,
+) -> Result<(), LocatedFrontmatterError> {
+    if data.is_data(segments) {
+        return Ok(());
+    }
+    match value {
+        Value::String(s) => {
+            let Some((span, whole)) = literal_token::first_token(s) else {
+                return Ok(());
+            };
+            let outcome = if whole { literal_token::decode(s) } else { Err(TokenError::Embedded) };
+            match outcome {
+                Ok(text) => {
+                    *s = text;
+                    decoded.push(segments.clone());
+                }
+                Err(cause) => {
+                    return Err(LocatedFrontmatterError {
+                        error: Box::new(MarkdownError::Interpolation {
+                            key: None,
+                            expression: s[span.clone()].to_string(),
+                            source: Box::new(SourceRef::Effective {
+                                rendered: s[span.clone()].to_string(),
+                                origin_key: None,
+                            }),
+                            cause: Box::new(ExpressionError::MalformedLiteralToken(cause)),
+                        }),
+                        location: Some(FrontmatterExpressionLocation {
+                            path: segments[1..].to_vec(),
+                            scanned: s.clone(),
+                            span,
+                        }),
+                    });
+                }
+            }
+        }
+        Value::Array(items) => {
+            for (index, item) in items.iter_mut().enumerate() {
+                segments.push(ValuePathSegment::Index(index));
+                let outcome = decode_authored_tokens(item, segments, data, decoded);
+                segments.pop();
+                outcome?;
+            }
+        }
+        Value::Object(map) => {
+            for (key, item) in map.iter_mut() {
+                segments.push(ValuePathSegment::Key(key.clone()));
+                let outcome = decode_authored_tokens(item, segments, data, decoded);
+                segments.pop();
+                outcome?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Converts the `{{{ … }}}` literals in every authored string of `value` to
+/// `{{ … }}`, recording each converted leaf so its result stays data.
+fn convert_authored_literals(
+    value: &mut Value,
+    segments: &mut Vec<ValuePathSegment>,
+    data: &DataPaths,
+    converted: &mut Vec<Vec<ValuePathSegment>>,
+) {
+    if data.is_data(segments) {
+        return;
+    }
+    match value {
+        Value::String(s) if s.contains("{{{") => {
+            *s = convert_literals(s, ScanMode::Plain);
+            converted.push(segments.clone());
+        }
+        Value::Array(items) => {
+            for (index, item) in items.iter_mut().enumerate() {
+                segments.push(ValuePathSegment::Index(index));
+                convert_authored_literals(item, segments, data, converted);
+                segments.pop();
+            }
+        }
+        Value::Object(map) => {
+            for (key, item) in map.iter_mut() {
+                segments.push(ValuePathSegment::Key(key.clone()));
+                convert_authored_literals(item, segments, data, converted);
+                segments.pop();
+            }
+        }
+        _ => {}
     }
 }
 
@@ -326,12 +449,7 @@ pub(crate) struct FrontmatterExpressionLocation {
     pub span: Range<usize>,
 }
 
-/// One step of a [`FrontmatterExpressionLocation::path`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ValuePathSegment {
-    Key(String),
-    Index(usize),
-}
+pub(crate) use super::value_origin::ValuePathSegment;
 
 impl From<MarkdownError> for LocatedFrontmatterError {
     fn from(error: MarkdownError) -> Self {
@@ -456,58 +574,6 @@ fn column_of(text: &str, offset: usize) -> usize {
     text[line_start..offset].chars().count()
 }
 
-/// Converts `{{{ ... }}}` interpolation literals in every string value of
-/// `frontmatter` to `{{ ... }}`.
-///
-/// This is applied once, after the final interpolation pass, so literals
-/// survive both frontmatter passes when shell expansion is enabled. The
-/// replacement is not counted as an interpolation replacement.
-/// Returns `true` when any string in the JSON value tree contains the `{{{`
-/// interpolation-literal marker (F14 fast-path guard).
-fn value_contains_literal_marker(value: &Value) -> bool {
-    match value {
-        Value::String(s) => s.contains("{{{"),
-        Value::Array(arr) => arr.iter().any(value_contains_literal_marker),
-        Value::Object(obj) => obj.values().any(value_contains_literal_marker),
-        _ => false,
-    }
-}
-
-pub(crate) fn convert_frontmatter_literals(frontmatter: &mut Frontmatter) {
-    // Fast path (F14): a `{{{ … }}}` literal is impossible without the `{{{`
-    // sequence, so scanning and copying every string value is a provable no-op
-    // when no value contains it. `convert_literals` on a `{{{`-free string
-    // returns it unchanged, so this is byte-identical.
-    if !frontmatter
-        .as_map()
-        .values()
-        .any(value_contains_literal_marker)
-    {
-        return;
-    }
-    fn convert_value(value: &mut Value) {
-        match value {
-            Value::String(s) => {
-                *value = Value::String(convert_literals(s, ScanMode::Plain));
-            }
-            Value::Array(arr) => {
-                for item in arr.iter_mut() {
-                    convert_value(item);
-                }
-            }
-            Value::Object(obj) => {
-                for (_, val) in obj.iter_mut() {
-                    convert_value(val);
-                }
-            }
-            _ => {}
-        }
-    }
-    for val in frontmatter.as_map_mut().values_mut() {
-        convert_value(val);
-    }
-}
-
 /// Attaches the receiving frontmatter `key` to a whole-value interpolation
 /// failure so the rendered error names the offending property as structured
 /// scope rather than as a prose prefix. Non-`Interpolation` errors pass through
@@ -557,34 +623,48 @@ pub(crate) struct FrontmatterInterpolationReport {
     /// Best-effort only: the first key error that was a missing runtime
     /// context capture. The compose pass raises the same error for that key.
     pub missing_runtime_context: Option<MarkdownError>,
-    /// Unknown-root reads, each with the top-level key whose value read it.
+    /// Undeclared-property reads, each with the top-level key whose value read it.
     /// Candidates only: this pass may run before the final state and schema
     /// exist. Best-effort (discovery) runs record none.
     pub missing_roots: Vec<(String, MissingRoot)>,
+    /// Templated keys left unscanned because they read a shell-pending value.
+    /// [`FrontmatterPass::Deferred`] scans exactly these after shell expansion.
+    pub deferred_keys: Vec<String>,
 }
 
-/// Interpolates templated frontmatter values using seed (non-templated) values.
+/// Which frontmatter keys one interpolation pass scans.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum FrontmatterPass<'a> {
+    /// Pass 1: every authored key. With `defer_shell_pending`, a templated key
+    /// that reads a whole-value `$( … )` key (directly or through another
+    /// templated key) is left for pass 2.
+    First { defer_shell_pending: bool },
+    /// Pass 2: only the keys pass 1 deferred, scanned once from their authored
+    /// text. Everything else, shell output included, is a seed value.
+    Deferred(&'a [String]),
+}
+
+/// Interpolates templated frontmatter values using seed values.
 ///
-/// Classifies top-level frontmatter entries into seed values (no `{{ }}`)
-/// and templated values (contain `{{ }}`). Templated keys are resolved in
-/// dependency order: a key is only processed once all other templated keys
-/// it references have been resolved. After each key is resolved its value
-/// is added to the seed map so that later keys can reference it.
+/// A **templated** key holds at least one authored `{{ }}` expression; every
+/// other key is a **seed**. Templated keys are resolved in dependency order: a
+/// key is only processed once all other templated keys it references have been
+/// resolved. After each key is resolved its value is added to the seed map so
+/// that later keys can reference it.
 ///
-/// When `defer_shell_pending` is `true`, top-level string values that begin
-/// with `$(` are treated as shell-pending. Templated keys that reference any
-/// shell-pending key are left unresolved so a caller can run frontmatter
-/// shell expansion and invoke this function again to finish the work.
-///
-/// `resolution_context` enables the read-side expression functions
-/// (`file_exists`, `frontmatter`, `absolute`, `relative`, …) during both
-/// interpolation passes. Pass `None` for context-free callers (e.g. tests).
+/// Each authored string is scanned exactly once, for expressions and
+/// `{{{ … }}}` literals together, and its result is recorded as data in
+/// `provenance`. A data leaf is never scanned, so a seed may contain `{{`.
 ///
 /// `exclude_keys` names top-level keys deferred from every compose-time
 /// resolution pass (DM1). An excluded key is neither classified as seed nor
 /// templated — its value survives raw and is invisible to other keys'
 /// resolution. A non-excluded templated key that references an excluded key
 /// is rejected during dependency analysis (DM1a).
+///
+/// `resolution_context` enables the read-side expression functions
+/// (`file_exists`, `frontmatter`, `absolute`, `relative`, …) during both
+/// interpolation passes. Pass `None` for context-free callers (e.g. tests).
 ///
 /// A whole-value expression that cannot be parsed or evaluated is always
 /// fatal; mixed text follows `policy`, which a full-document pass sets to
@@ -593,20 +673,23 @@ pub(crate) struct FrontmatterInterpolationReport {
 /// A failure reports where its `{{ … }}` sits in the frontmatter, so the
 /// compose pipeline can anchor it to its authored span
 /// ([`LocatedFrontmatterError::into_anchored`]).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn interpolate_frontmatter_located(
     frontmatter: &mut Frontmatter,
+    provenance: &mut FrontmatterProvenance,
     context: &ComposeContext,
     policy: ExpressionFailurePolicy,
-    defer_shell_pending: bool,
+    pass: FrontmatterPass<'_>,
     resolution_context: Option<ResolutionContext>,
     exclude_keys: &HashSet<String>,
     name_coercion_keys: &[String],
 ) -> Result<FrontmatterInterpolationReport, LocatedFrontmatterError> {
     interpolate_frontmatter_impl(
         frontmatter,
+        provenance,
         context,
         policy,
-        defer_shell_pending,
+        pass,
         resolution_context,
         false,
         exclude_keys,
@@ -614,8 +697,9 @@ pub(crate) fn interpolate_frontmatter_located(
     )
 }
 
-/// [`interpolate_frontmatter_located`] without the location, for unit tests
-/// that inspect only the error.
+/// [`interpolate_frontmatter_located`] for a pass 1 over a document whose
+/// values are all authored, without the location, for unit tests that inspect
+/// only the error.
 #[cfg(test)]
 pub(crate) fn interpolate_frontmatter(
     frontmatter: &mut Frontmatter,
@@ -626,11 +710,13 @@ pub(crate) fn interpolate_frontmatter(
     exclude_keys: &HashSet<String>,
     name_coercion_keys: &[String],
 ) -> Result<FrontmatterInterpolationReport, MarkdownError> {
+    let mut provenance = FrontmatterProvenance::all_authored(frontmatter);
     interpolate_frontmatter_located(
         frontmatter,
+        &mut provenance,
         context,
         policy,
-        defer_shell_pending,
+        FrontmatterPass::First { defer_shell_pending },
         resolution_context,
         exclude_keys,
         name_coercion_keys,
@@ -638,7 +724,7 @@ pub(crate) fn interpolate_frontmatter(
     .map_err(|failure| *failure.error)
 }
 
-/// Best-effort variant for condition-blind pre-flight shell-command collection.
+/// Best-effort pass 1 for condition-blind pre-flight shell-command collection.
 ///
 /// Identical to [`interpolate_frontmatter_located`] except that a per-key evaluation
 /// failure is swallowed for that one key instead of aborting the whole pass.
@@ -662,6 +748,7 @@ pub(crate) fn interpolate_frontmatter(
 /// command text available.
 pub(crate) fn interpolate_frontmatter_best_effort(
     frontmatter: &mut Frontmatter,
+    provenance: &mut FrontmatterProvenance,
     context: &ComposeContext,
     defer_shell_pending: bool,
     resolution_context: Option<ResolutionContext>,
@@ -670,9 +757,10 @@ pub(crate) fn interpolate_frontmatter_best_effort(
 ) -> Result<FrontmatterInterpolationReport, MarkdownError> {
     interpolate_frontmatter_impl(
         frontmatter,
+        provenance,
         context,
         ExpressionFailurePolicy::Lenient,
-        defer_shell_pending,
+        FrontmatterPass::First { defer_shell_pending },
         resolution_context,
         true,
         exclude_keys,
@@ -695,30 +783,83 @@ fn record_missing_runtime_context(first: &mut Option<MarkdownError>, error: Mark
 #[allow(clippy::too_many_arguments)]
 fn interpolate_frontmatter_impl(
     frontmatter: &mut Frontmatter,
+    provenance: &mut FrontmatterProvenance,
     context: &ComposeContext,
     policy: ExpressionFailurePolicy,
-    defer_shell_pending: bool,
+    pass: FrontmatterPass<'_>,
     resolution_context: Option<ResolutionContext>,
     best_effort: bool,
     exclude_keys: &HashSet<String>,
     name_coercion_keys: &[String],
 ) -> Result<FrontmatterInterpolationReport, LocatedFrontmatterError> {
-    let fm = frontmatter.as_map();
+    // Pass 1 first decodes every authored whole-leaf literal token, so no scan
+    // below ever sees one. Excluded (event-time) keys keep their raw text for
+    // the caller that evaluates them.
+    if let FrontmatterPass::First { .. } = pass {
+        let mut decoded = Vec::new();
+        let data = provenance.data().clone();
+        for (key, value) in frontmatter.as_map_mut().iter_mut() {
+            if exclude_keys.contains(key) {
+                continue;
+            }
+            let mut segments = vec![ValuePathSegment::Key(key.clone())];
+            decode_authored_tokens(value, &mut segments, &data, &mut decoded)
+                .map_err(|failure| key_scoped_failure(key, failure))?;
+        }
+        for path in decoded {
+            provenance.data_mut().mark(path);
+        }
+    }
 
+    // Pass 1 scans every authored seed's `{{{ … }}}` literals once, before any
+    // key reads it, so a dependent sees the converted text as a data value.
+    // Excluded (event-time) keys keep their raw text here too: converting
+    // `{{{ x }}}` to an unmarked `{{ x }}` would turn the caller's literal
+    // escape into an expression its event-time evaluation then runs.
+    if let FrontmatterPass::First { .. } = pass {
+        let mut converted = Vec::new();
+        let data = provenance.data().clone();
+        for (key, value) in frontmatter.as_map_mut().iter_mut() {
+            if exclude_keys.contains(key) {
+                continue;
+            }
+            let mut segments = vec![ValuePathSegment::Key(key.clone())];
+            if contains_interpolation(&data.authored_view(&mut segments, value)) {
+                continue;
+            }
+            convert_authored_literals(value, &mut segments, &data, &mut converted);
+        }
+        for path in converted {
+            provenance.data_mut().mark(path);
+        }
+    }
+
+    let fm = frontmatter.as_map();
+    let data = provenance.data().clone();
+
+    let defer_shell_pending = matches!(pass, FrontmatterPass::First { defer_shell_pending: true });
     let shell_pending_keys: HashSet<String> = if defer_shell_pending {
-        fm.iter()
-            .filter_map(|(k, v)| {
-                if exclude_keys.contains(k) {
-                    return None;
-                }
-                match v {
-                    Value::String(s) if s.starts_with("$(") => Some(k.clone()),
-                    _ => None,
-                }
-            })
+        fm.keys()
+            .filter(|k| !exclude_keys.contains(*k) && provenance.is_authored_shell_candidate(k))
+            .cloned()
             .collect()
     } else {
         HashSet::new()
+    };
+
+    // What each key authored: data leaves read as `null`, so classification and
+    // dependency analysis only ever see authored templates.
+    let authored_values: HashMap<String, Value> = fm
+        .iter()
+        .filter(|(k, _)| !exclude_keys.contains(k.as_str()))
+        .map(|(k, v)| {
+            let mut segments = vec![ValuePathSegment::Key(k.clone())];
+            (k.clone(), data.authored_view(&mut segments, v))
+        })
+        .collect();
+    let in_pass = |key: &str| match pass {
+        FrontmatterPass::First { .. } => true,
+        FrontmatterPass::Deferred(keys) => keys.iter().any(|deferred| deferred == key),
     };
 
     // Excluded keys are deferred from resolution (DM1): they are neither
@@ -727,29 +868,28 @@ fn interpolate_frontmatter_impl(
     // references one is rejected by the DM1a dependency check below).
     let mut seed_map: HashMap<String, Value> = HashMap::new();
     let templated_keys: Vec<String> = fm
-        .iter()
-        .filter(|(k, v)| !exclude_keys.contains(k.as_str()) && contains_interpolation(v))
-        .map(|(k, _)| k.clone())
+        .keys()
+        .filter(|k| {
+            in_pass(k) && authored_values.get(k.as_str()).is_some_and(contains_interpolation)
+        })
+        .cloned()
         .collect();
+    let templated_set: HashSet<String> = templated_keys.iter().cloned().collect();
 
     for (key, value) in fm.iter() {
-        if exclude_keys.contains(key) {
+        if exclude_keys.contains(key) || templated_set.contains(key) {
             continue;
         }
-        if !contains_interpolation(value) {
-            seed_map.insert(key.clone(), value.clone());
-        }
+        seed_map.insert(key.clone(), value.clone());
     }
 
     if templated_keys.is_empty() {
-        if shell_pending_keys.is_empty() {
-            convert_frontmatter_literals(frontmatter);
-        }
         return Ok(FrontmatterInterpolationReport {
             replacements: 0,
             warnings: vec![],
             missing_runtime_context: None,
             missing_roots: Vec::new(),
+            deferred_keys: Vec::new(),
         });
     }
 
@@ -757,13 +897,17 @@ fn interpolate_frontmatter_impl(
         .iter()
         .filter_map(|k| fm.get(k).cloned().map(|v| (k.clone(), v)))
         .collect();
+    let authored_templates: HashMap<String, Value> = templated_keys
+        .iter()
+        .filter_map(|k| authored_values.get(k).cloned().map(|v| (k.clone(), v)))
+        .collect();
 
     // DM1a: a compose-time (non-deferred) key must not read a deferred
     // (excluded) key. Such a reference would inject a raw lifecycle subtree
     // into an early-bound value and make the result depend on a binding-time
     // accident. Reject with a clear error naming both keys before resolution.
     if !exclude_keys.is_empty() {
-        for (composed_key, original) in &original_values {
+        for (composed_key, original) in &authored_templates {
             if let Some(deferred_key) =
                 collect_deferred_key_references(original, exclude_keys).into_iter().next()
             {
@@ -776,8 +920,6 @@ fn interpolate_frontmatter_impl(
         }
     }
 
-    let templated_set: HashSet<String> = templated_keys.iter().cloned().collect();
-
     // F11: extract each templated key's interpolation dependencies **once**,
     // then drive the fixpoint from maintained dependency counts + reverse edges
     // instead of re-parsing every value on every sweep. `dep_count[key]` is the
@@ -787,7 +929,9 @@ fn interpolate_frontmatter_impl(
     // shell-pending (`$(...)`) value and therefore defer to the fallback pass.
     let refs_by_key: HashMap<String, Vec<String>> = templated_keys
         .iter()
-        .filter_map(|k| original_values.get(k).map(|v| (k.clone(), extract_frontmatter_key_refs(v))))
+        .filter_map(|k| {
+            authored_templates.get(k).map(|v| (k.clone(), extract_frontmatter_key_refs(v)))
+        })
         .collect();
     let mut dep_count: HashMap<String, usize> = HashMap::with_capacity(templated_keys.len());
     let mut dependents: HashMap<String, Vec<String>> = HashMap::new();
@@ -823,10 +967,30 @@ fn interpolate_frontmatter_impl(
     let mut total_replacements = 0;
     let mut all_warnings = Vec::new();
     let mut missing_roots = Vec::new();
+    let mut scanned_leaves: Vec<Vec<ValuePathSegment>> = Vec::new();
     fn evaluator_for(state: &FrontmatterSeedState, best_effort: bool) -> Evaluator<'_, FrontmatterSeedState> {
         let evaluator = Evaluator::new(state);
         if best_effort { evaluator } else { evaluator.observing_missing_roots() }
     }
+    // Rewrites one templated key's authored leaves; its data leaves pass
+    // through untouched.
+    let rewrite_key = |key: &str,
+                       original: &Value,
+                       evaluator: &Evaluator<'_, FrontmatterSeedState>,
+                       scanned_leaves: &mut Vec<Vec<ValuePathSegment>>| {
+        let mut scope = LeafScope {
+            segments: vec![ValuePathSegment::Key(key.to_string())],
+            display: key.to_string(),
+            data: &data,
+            scanned: Vec::new(),
+        };
+        let outcome = rewrite_value(original, evaluator, policy, &mut scope)
+            .map_err(|e| key_scoped_failure(key, e));
+        if outcome.is_ok() {
+            scanned_leaves.extend(scope.scanned);
+        }
+        outcome
+    };
 
     // F11/F12: a single reused lookup whose seed map is mutated **in place** as
     // keys resolve, instead of cloning the whole seed map, the `ComposeContext`,
@@ -896,8 +1060,7 @@ fn interpolate_frontmatter_impl(
             // `state.data` below.
             let outcome = {
                 let evaluator = evaluator_for(&state, best_effort);
-                let outcome = rewrite_value(original, &evaluator, policy, key)
-                    .map_err(|e| key_scoped_failure(key, e));
+                let outcome = rewrite_key(key, original, &evaluator, &mut scanned_leaves);
                 missing_roots.extend(
                     evaluator.take_missing_roots().into_iter().map(|root| (key.clone(), root)),
                 );
@@ -945,11 +1108,12 @@ fn interpolate_frontmatter_impl(
     // through `review`, and finalizing it here would bake in an empty `review`.
     let shell_blocked = transitively_shell_blocked_keys(
         &templated_keys,
-        &original_values,
+        &authored_templates,
         &shell_pending_keys,
         &state.data,
     );
 
+    let mut deferred_keys = Vec::new();
     for key in &templated_keys {
         if resolved.contains(key) {
             continue;
@@ -961,6 +1125,7 @@ fn interpolate_frontmatter_impl(
         };
 
         if shell_blocked.contains(key) {
+            deferred_keys.push(key.clone());
             continue;
         }
 
@@ -978,8 +1143,7 @@ fn interpolate_frontmatter_impl(
 
         let outcome = {
             let evaluator = evaluator_for(&state, best_effort);
-            let outcome = rewrite_value(original, &evaluator, policy, key)
-                .map_err(|e| key_scoped_failure(key, e));
+            let outcome = rewrite_key(key, original, &evaluator, &mut scanned_leaves);
             missing_roots.extend(
                 evaluator.take_missing_roots().into_iter().map(|root| (key.clone(), root)),
             );
@@ -1008,8 +1172,8 @@ fn interpolate_frontmatter_impl(
         all_warnings.extend(warnings);
     }
 
-    if shell_pending_keys.is_empty() {
-        convert_frontmatter_literals(frontmatter);
+    for path in scanned_leaves {
+        provenance.data_mut().mark(path);
     }
 
     Ok(FrontmatterInterpolationReport {
@@ -1017,6 +1181,7 @@ fn interpolate_frontmatter_impl(
         warnings: all_warnings,
         missing_runtime_context,
         missing_roots,
+        deferred_keys,
     })
 }
 
@@ -1436,6 +1601,28 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    /// [`interpolate_frontmatter_best_effort`] over a frontmatter whose values
+    /// are all authored.
+    fn best_effort_authored(
+        frontmatter: &mut Frontmatter,
+        context: &ComposeContext,
+        defer_shell_pending: bool,
+        resolution_context: Option<ResolutionContext>,
+        exclude_keys: &HashSet<String>,
+        name_coercion_keys: &[String],
+    ) -> Result<FrontmatterInterpolationReport, MarkdownError> {
+        let mut provenance = FrontmatterProvenance::all_authored(frontmatter);
+        interpolate_frontmatter_best_effort(
+            frontmatter,
+            &mut provenance,
+            context,
+            defer_shell_pending,
+            resolution_context,
+            exclude_keys,
+            name_coercion_keys,
+        )
+    }
+
     mod contains_interpolation_tests {
         use super::*;
 
@@ -1665,7 +1852,7 @@ mod tests {
             // command collector relies on `dir` reaching its final shape so the
             // approval set matches what execution runs.
             let mut fm = review_feature_shape();
-            interpolate_frontmatter_best_effort(&mut fm, &test_context(), true, None, &HashSet::new(), &[])                .expect("best-effort tolerates the per-key error");
+            best_effort_authored(&mut fm, &test_context(), true, None, &HashSet::new(), &[])                .expect("best-effort tolerates the per-key error");
 
             // `dir`'s `{{ spec || design }}` is fully resolved — no template left.
             assert_eq!(
@@ -1699,7 +1886,7 @@ mod tests {
                 "exists": "{{ file_exists('existing.md') }}",
                 "cmd": "$(echo '{{ exists }}')",
             }));
-            interpolate_frontmatter_best_effort(&mut fm, &test_context(), true, None, &HashSet::new(), &[])                .expect("best-effort tolerates the per-key error");
+            best_effort_authored(&mut fm, &test_context(), true, None, &HashSet::new(), &[])                .expect("best-effort tolerates the per-key error");
 
             // The errored key is left untouched (its real error surfaces later
             // with a resolution context).
@@ -1728,7 +1915,7 @@ mod tests {
                 "mid": "{{ exists }}-suffix",
                 "cmd": "$(echo '{{ mid }}')",
             }));
-            interpolate_frontmatter_best_effort(&mut fm, &test_context(), true, None, &HashSet::new(), &[])                .expect("best-effort tolerates the per-key error");
+            best_effort_authored(&mut fm, &test_context(), true, None, &HashSet::new(), &[])                .expect("best-effort tolerates the per-key error");
 
             assert_eq!(
                 fm.as_map().get("mid"),
@@ -1780,7 +1967,7 @@ mod tests {
             let mut a = make();
             let mut b = make();
             interpolate_frontmatter(&mut a, &test_context(), ExpressionFailurePolicy::Strict, true, None, &HashSet::new(), &[]).unwrap();
-            interpolate_frontmatter_best_effort(&mut b, &test_context(), true, None, &HashSet::new(), &[]).unwrap();
+            best_effort_authored(&mut b, &test_context(), true, None, &HashSet::new(), &[]).unwrap();
             assert_eq!(a.as_map().get("dir"), b.as_map().get("dir"));
             assert_eq!(
                 a.as_map().get("dir"),
@@ -2078,7 +2265,7 @@ mod tests {
                 "name": "x",
                 "note": "{{ name }} {{ > invalid }}"
             }));
-            let report = interpolate_frontmatter_best_effort(
+            let report = best_effort_authored(
                 &mut fm,
                 &test_context(),
                 false,
@@ -2434,6 +2621,32 @@ mod tests {
                 Some(&json!("{{ area }}")),
                 "whole-value expansion must be skipped for excluded keys"
             );
+        }
+
+        /// The caller evaluates an excluded key itself, so its literal escape
+        /// must reach that caller still meaning "literal"; a pass-1 rewrite to
+        /// `{{ title }}` would hand it an expression instead.
+        #[test]
+        fn excluded_key_keeps_triple_brace_escape_as_authored() {
+            let mut fm = fm_from_json(json!({
+                "title": "probe",
+                "note": "N=[{{{ title }}}]",
+                "initialize": {
+                    "stderr": "A=[{{{ title }}}]",
+                    "set": { "stored": "{{{ title }}}" }
+                }
+            }));
+            let exclude = ["initialize"].into_iter().map(String::from).collect::<HashSet<_>>();
+            interpolate_frontmatter(&mut fm, &test_context(), ExpressionFailurePolicy::Strict, false, None, &exclude, &[]).unwrap();
+            assert_eq!(
+                fm.as_map().get("initialize"),
+                Some(&json!({
+                    "stderr": "A=[{{{ title }}}]",
+                    "set": { "stored": "{{{ title }}}" }
+                })),
+            );
+            // An ordinary key still converts its escape to literal text.
+            assert_eq!(fm.as_map().get("note"), Some(&json!("N=[{{ title }}]")));
         }
 
         #[test]

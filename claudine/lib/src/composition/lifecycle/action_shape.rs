@@ -180,6 +180,7 @@ fn build_non_control_positional_action(
             kind: LifecycleActionKind::Shell(ShellAction {
                 command: args.into_iter().next().expect("arity checked"),
                 on_error: None,
+                pre_resolved: false,
             }),
             no_error: false,
         });
@@ -344,7 +345,7 @@ pub(super) fn did_you_mean_verb(verb: &str) -> Option<&'static str> {
 ///
 /// The `when`/`until`/`while` keys are **not** action parameters — they remain
 /// boolean expressions parsed by [`parse_condition`].
-pub(super) fn action_value_to_expr(value: &serde_json::Value) -> Result<Expr, ActionExprError> {
+pub(crate) fn action_value_to_expr(value: &serde_json::Value) -> Result<Expr, ActionExprError> {
     match value {
         serde_json::Value::String(s) => {
             let trimmed = s.trim();
@@ -453,7 +454,11 @@ pub(super) fn build_action_from_params(
         let on_error = params_map.remove("on_error");
         reject_extra_params(verb, &params_map, property, source_file)?;
         return Ok(LifecycleAction {
-            kind: LifecycleActionKind::Shell(ShellAction { command, on_error }),
+            kind: LifecycleActionKind::Shell(ShellAction {
+                command,
+                on_error,
+                pre_resolved: false,
+            }),
             no_error,
         });
     }

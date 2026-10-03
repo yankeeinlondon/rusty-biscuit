@@ -1,4 +1,5 @@
 use super::*;
+use super::supplied::rebase_caller_file_problems;
 
 pub(in crate::composition) fn schema_error_to_composition_error(
     source_path: &std::path::Path,
@@ -76,7 +77,7 @@ pub(super) fn translate_schema_failure(
     source: &ResolvedCompositionSource,
     options: PrepareOptions,
     mode: &PrepareMode,
-    problems: Vec<ValidationProblem>,
+    mut problems: Vec<ValidationProblem>,
     summary: String,
     schema_source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
     dropped: &mut Vec<DroppedOptional>,
@@ -115,6 +116,9 @@ pub(super) fn translate_schema_failure(
         ));
     }
 
+    // Darkmatter names the base it resolved from, which for a caller value can
+    // be the document's directory; report the caller's instead (R4).
+    rebase_caller_file_problems(&mut problems, &options.caller_input_records);
     let effective = load_effective_schema(source, options.file_ref_fallback_dir.as_deref())?;
     let phase = match mode {
         PrepareMode::Inline => Some(SchemaPhase::Launch),
@@ -171,6 +175,7 @@ pub(super) fn translate_schema_failure(
                     source,
                     retry_err,
                     options.file_ref_fallback_dir.as_deref(),
+                    &options.caller_input_records,
                     phase,
                 )
             }
@@ -199,16 +204,18 @@ pub(super) fn handle_retry_error(
     source: &ResolvedCompositionSource,
     err: CompositionError,
     file_ref_fallback_dir: Option<&std::path::Path>,
+    caller_input_records: &darkmatter::markdown::compose::CallerInputRecords,
     phase: Option<SchemaPhase>,
 ) -> Result<PreparedComposition, CompositionError> {
     let CompositionError::ComposeFailed(MarkdownError::SchemaValidationFailed {
-        problems,
+        mut problems,
         summary,
         ..
     }) = err
     else {
         return Err(err);
     };
+    rebase_caller_file_problems(&mut problems, caller_input_records);
 
     let effective = load_effective_schema(source, file_ref_fallback_dir)?;
     let categorized = categorize_problems(&problems, effective.as_ref(), phase);

@@ -1,25 +1,27 @@
-//! Shared interpolation conformance matrix (Phase 12).
+//! Shared interpolation conformance matrix.
 //!
-//! One matrix, two engines. The loop action renderer
+//! One matrix, every engine. The loop action renderer
 //! (`looping::actions::render_action_value`, driven here through the public
-//! `ActionStaging` `set` path) and the lifecycle DM2 substrate
-//! (`darkmatter::markdown::compose::subtree::SubtreeCompose`) are the two
-//! interpolation surfaces the frontmatter action grammar exposes. Both consume
-//! the *same* Darkmatter expression core (`parse` / `evaluate` /
-//! `ExpressionFinder` / `scalar_string`) over an `EvaluationLookup`; the loop is
-//! not a parallel expression engine, only a loop-specific value renderer.
+//! `ActionStaging` `set` path), the lifecycle DM2 substrate
+//! (`darkmatter::markdown::compose::subtree::SubtreeCompose`), and the sequence
+//! source renderer (`sequence::expr::render_interpolated`) are the
+//! interpolation surfaces the frontmatter grammar exposes. All consume the
+//! *same* Darkmatter expression core over an `EvaluationLookup`.
 //!
-//! [`overlap_cases`] enumerates the syntax both engines support and asserts they
-//! produce the *same* value from the *same* input and state. The `divergence_*`
-//! tests pin the two documented, intentional differences that keep the loop
-//! renderer separate. See `docs/topics/flow-control/looping.md`
-//! (§"When templates inside action values are rendered") and
-//! `docs/topics/composition.md` (§"Loop vs lifecycle interpolation") for the
-//! rationale.
+//! [`overlap_cases`] enumerates the syntax every engine supports and asserts
+//! they produce the *same* value from the *same* input and state.
+//! [`missing_property_cases`] is the one missing-property and escape table —
+//! the inputs of Darkmatter's `absent_property_contract` — shared with the
+//! lifecycle executor's own run of it (`executor/tests/binding_contract.rs`),
+//! so no consumer can drift from Darkmatter's semantics. The `divergence_*`
+//! test pins the one documented, intentional difference (the loop's error
+//! type). See `docs/topics/flow-control/looping.md` (§"When templates inside
+//! action values are rendered") and `docs/topics/composition.md` (§"Loop vs
+//! lifecycle interpolation").
 
 use std::collections::HashMap;
 
-use darkmatter::markdown::compose::subtree::{SubtreeCompose, SubtreeStrictness};
+use darkmatter::markdown::compose::subtree::SubtreeCompose;
 use darkmatter::markdown::compose::{ComposeContext, EffectiveState, EffectiveStateBuilder};
 use darkmatter::markdown::MarkdownError;
 use serde_json::{Map, Value, json};
@@ -46,17 +48,14 @@ fn loop_render(value: &Value, frontmatter: &Map<String, Value>) -> Result<Value,
 }
 
 /// Render `value` through the lifecycle DM2 substrate against the same
-/// frontmatter and the given strictness. Lifecycle text runs in `Strict`.
+/// frontmatter.
 fn dm2_render(
     value: &Value,
     frontmatter: &Map<String, Value>,
-    strictness: SubtreeStrictness,
     context: &ComposeContext,
 ) -> Result<Value, MarkdownError> {
     let state = effective_state(frontmatter, context);
-    SubtreeCompose::new(value, &state)
-        .with_strictness(strictness)
-        .compose()
+    SubtreeCompose::new(value, &state).compose()
 }
 
 fn effective_state(
@@ -83,12 +82,12 @@ fn obj(value: Value) -> Map<String, Value> {
 }
 
 /// A single overlap case: the same input rendered against the same state must
-/// produce `expected` from *both* engines.
-struct OverlapCase {
-    name: &'static str,
-    input: Value,
-    frontmatter: Map<String, Value>,
-    expected: Value,
+/// produce `expected` from every engine.
+pub(crate) struct OverlapCase {
+    pub(crate) name: &'static str,
+    pub(crate) input: Value,
+    pub(crate) frontmatter: Map<String, Value>,
+    pub(crate) expected: Value,
 }
 
 fn overlap_cases() -> Vec<OverlapCase> {
@@ -206,14 +205,7 @@ fn loop_and_lifecycle_agree_on_shared_syntax() {
             case.name
         );
 
-        // Lifecycle text runs in strict mode; every overlap case uses only
-        // known roots, so strict and lenient resolve identically here.
-        let dm2_result = dm2_render(
-            &case.input,
-            &case.frontmatter,
-            SubtreeStrictness::Strict,
-            &context,
-        )
+        let dm2_result = dm2_render(&case.input, &case.frontmatter, &context)
         .unwrap_or_else(|error| panic!("DM2 engine failed for `{}`: {error}", case.name));
         assert_eq!(
             dm2_result, case.expected,
@@ -223,12 +215,12 @@ fn loop_and_lifecycle_agree_on_shared_syntax() {
     }
 }
 
-/// Divergence 1 — the loop renderer re-parses a mixed-string result as JSON, so
-/// a concatenation that happens to form valid JSON lands typed; the lifecycle
-/// DM2 substrate keeps every mixed string as a string. Documented in
-/// `looping.md` ("After rendering, the result is re-parsed as JSON").
+/// A mixed string stays a string in both engines, even when the concatenation
+/// happens to form valid JSON: the inserted values are data, so the loop
+/// renderer no longer re-parses the result (`looping.md`, "When templates
+/// inside action values are rendered").
 #[test]
-fn divergence_mixed_string_json_reparse() {
+fn mixed_string_stays_a_string_in_both_engines() {
     let input = json!("{{a}}{{b}}");
     let frontmatter = obj(json!({ "a": 1, "b": 2 }));
     let context = prepared_context();
@@ -236,65 +228,103 @@ fn divergence_mixed_string_json_reparse() {
     let loop_result = loop_render(&input, &frontmatter).expect("loop renders");
     assert_eq!(
         loop_result,
-        json!(12),
-        "loop re-parses the concatenated `12` as a JSON number"
+        json!("12"),
+        "the loop keeps the concatenated `12` as a string"
     );
 
-    let dm2_strict = dm2_render(
-        &input,
-        &frontmatter,
-        SubtreeStrictness::Strict,
-        &context,
-    )
-    .expect("DM2 renders");
+    let dm2_result = dm2_render(&input, &frontmatter, &context).expect("DM2 renders");
     assert_eq!(
-        dm2_strict,
+        dm2_result,
         json!("12"),
         "DM2 keeps the mixed string as a string"
     );
-    let dm2_lenient =
-        dm2_render(&input, &frontmatter, SubtreeStrictness::Lenient, &context)
-            .expect("DM2 renders");
-    assert_eq!(dm2_lenient, json!("12"), "DM2 mode does not change typing");
 }
 
-/// Divergence 2 — an unknown root in a mixed string is lenient in the loop
-/// renderer (resolves empty, matching loop condition evaluation) but fails
-/// closed in lifecycle DM2 strict mode (no side effect dispatches with an
-/// unresolved reference).
+/// The missing-property and escape table, with the inputs of Darkmatter's
+/// `absent_property_contract` L1 tests: an absent property is `null` as a whole
+/// value and empty in a mixed string, takes a ternary's falsy branch and a
+/// fallback's next operand, and never reads `ctx`; every escape form is inert;
+/// inserted data is never evaluated again.
+pub(crate) fn missing_property_cases() -> Vec<OverlapCase> {
+    let case = |name, input: &str, frontmatter: Value, expected: Value| OverlapCase {
+        name,
+        input: Value::String(input.to_string()),
+        frontmatter: obj(frontmatter),
+        expected,
+    };
+    vec![
+        case("absent bare whole value", "{{ missing }}", json!({}), json!(null)),
+        case("absent doc whole value", "{{ doc.missing }}", json!({}), json!(null)),
+        case("absent descendant", "{{ missing.deep }}", json!({}), json!(null)),
+        case("absent in mixed text", "x {{ missing }} y", json!({}), json!("x  y")),
+        case("absent bare and doc in mixed text", "[{{ missing }}][{{ doc.missing }}]", json!({}), json!("[][]")),
+        case("absent is null", "{{ is_null(missing) }}", json!({}), json!(true)),
+        case("ternary falsy branch", "{{ missing ? 'yes' : 'no' }}", json!({}), json!("no")),
+        case(
+            "fallback chain skips empty",
+            "{{ missing || blank || 'last' }}",
+            json!({"blank": ""}),
+            json!("last"),
+        ),
+        case("a context key is not a bare name", "[{{ repo }}]", json!({}), json!("[]")),
+        case("triple-brace whole value", "{{{ ghost }}}", json!({}), json!("{{ ghost }}")),
+        case("triple-brace in mixed text", "a {{{ ghost }}} b", json!({}), json!("a {{ ghost }} b")),
+        // A backslash escape is inert and kept as authored, as in Darkmatter's
+        // composed body; the Markdown renderer later drops the backslash.
+        case("single-backslash whole value", "\\{{ ghost }}", json!({}), json!("\\{{ ghost }}")),
+        case("single-backslash in mixed text", "a \\{{ ghost }} b", json!({}), json!("a \\{{ ghost }} b")),
+        case("double-backslash whole value", "\\{\\{ ghost }}", json!({}), json!("\\{\\{ ghost }}")),
+        case("double-backslash in mixed text", "a \\{\\{ ghost }} b", json!({}), json!("a \\{\\{ ghost }} b")),
+        case(
+            "inserted braces are data",
+            "{{ body }}",
+            json!({"body": "agent wrote {{ x }} and $(y)"}),
+            json!("agent wrote {{ x }} and $(y)"),
+        ),
+        case(
+            "inserted braces in mixed text are data",
+            "> {{ body }}",
+            json!({"body": "{{ x }}"}),
+            json!("> {{ x }}"),
+        ),
+    ]
+}
+
+/// Every engine renders the missing-property and escape table exactly as
+/// Darkmatter's subtree compose does, with no strict-versus-lenient split.
 #[test]
-fn divergence_unknown_root_strictness() {
-    let input = json!("x={{typo}}");
-    let frontmatter = obj(json!({}));
+fn every_engine_agrees_on_missing_properties_and_escapes() {
     let context = prepared_context();
+    for case in missing_property_cases() {
+        let dm2 = dm2_render(&case.input, &case.frontmatter, &context)
+            .unwrap_or_else(|error| panic!("DM2 failed for `{}`: {error}", case.name));
+        assert_eq!(dm2, case.expected, "DM2 for `{}`", case.name);
 
-    let loop_result = loop_render(&input, &frontmatter).expect("loop tolerates unknown root");
-    assert_eq!(loop_result, json!("x="), "loop resolves the unknown root empty");
+        let Value::String(raw) = &case.input else { unreachable!() };
+        let lookup = super::sequence::expr::SourceExpressionLookup::new(
+            &case.frontmatter,
+            std::path::Path::new("."),
+        );
+        let source = super::sequence::expr::render_interpolated(raw, &lookup)
+            .unwrap_or_else(|error| panic!("sequence source failed for `{}`: {error}", case.name));
+        assert_eq!(source, case.expected, "sequence source for `{}`", case.name);
 
-    // Lifecycle strict fails closed on the unknown root.
-    let dm2_strict = dm2_render(
-        &input,
-        &frontmatter,
-        SubtreeStrictness::Strict,
-        &context,
-    );
-    let error = dm2_strict.expect_err("DM2 strict rejects the unknown root");
-    assert!(
-        error.to_string().contains("unknown root") && error.to_string().contains("typo"),
-        "DM2 strict names the unknown root: {error}"
-    );
-
-    // DM2 lenient matches the loop's tolerant behavior.
-    let dm2_lenient =
-        dm2_render(&input, &frontmatter, SubtreeStrictness::Lenient, &context)
-            .expect("DM2 lenient renders");
-    assert_eq!(dm2_lenient, json!("x="), "DM2 lenient matches the loop engine");
+        // The loop action renderer does not recognize `{{{ … }}}` escapes; it
+        // is outside this contract's migration (loop action handling is not
+        // reworked here), so only its escape rows are excluded.
+        if case.name.starts_with("triple-brace") {
+            continue;
+        }
+        let looped = loop_render(&case.input, &case.frontmatter)
+            .unwrap_or_else(|error| panic!("loop failed for `{}`: {error}", case.name));
+        assert_eq!(looped, case.expected, "loop for `{}`", case.name);
+    }
 }
 
 /// Both engines fail closed on a malformed expression — the shared invariant —
 /// but with the error type each surface needs: the loop renderer's contextual
 /// `LoopActionExpressionInvalid` (carrying iteration/action index plus the typed
-/// parse cause) and DM2's `Transform`.
+/// parse cause) and DM2's typed `Interpolation`.
 #[test]
 fn divergence_malformed_expression_both_fail_closed() {
     let input = json!("{{ >bad }}");
@@ -310,20 +340,9 @@ fn divergence_malformed_expression_both_fail_closed() {
         "loop surfaces a contextual LoopActionExpressionInvalid: {loop_error}"
     );
 
-    let dm2_error = dm2_render(
-        &input,
-        &frontmatter,
-        SubtreeStrictness::Strict,
-        &context,
-    )
-        .expect_err("DM2 strict fails closed");
+    let dm2_error = dm2_render(&input, &frontmatter, &context).expect_err("DM2 fails closed");
     assert!(
-        matches!(dm2_error, MarkdownError::Transform(_)),
-        "DM2 surfaces a Transform error: {dm2_error}"
-    );
-    // Fail-closed on a malformed whole-value span holds in lenient mode too.
-    assert!(
-        dm2_render(&input, &frontmatter, SubtreeStrictness::Lenient, &context).is_err(),
-        "a malformed whole-value span is fatal in both DM2 modes"
+        matches!(dm2_error, MarkdownError::Interpolation { .. }),
+        "DM2 surfaces a typed Interpolation error: {dm2_error}"
     );
 }

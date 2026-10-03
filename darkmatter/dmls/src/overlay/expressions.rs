@@ -12,10 +12,12 @@ use darkmatter::markdown::compose::context::{
     ContextVariableDescriptor, context_variable_descriptors,
 };
 use darkmatter::markdown::compose::expression::{
-    BinaryOp, ExpressionFinder, ExpressionFunctionDescriptor, ExpressionLintKind, ParseError,
+    BinaryOp, ExpressionError, ExpressionFinder, ExpressionFunctionDescriptor, ExpressionLintKind,
+    ParseError,
     ParseMode, SpannedExpr, SpannedExprKind, expression_function_descriptors,
-    identifier_prefix_start, is_statically_known_root, is_whole_value_span, lint_expression,
-    parse_condition_spanned, parse_spanned, static_variable_reads,
+    BindingView, ReservedRootDescriptor, RootMembers, identifier_prefix_start,
+    is_whole_value_span, lint_expression, parse_condition_spanned, parse_spanned,
+    reserved_root_descriptors, static_variable_reads, validate_expression,
 };
 use darkmatter::markdown::schemas::{DecodedScalar, decode_scalar};
 use darkmatter::markdown::span::SourceSpan;
@@ -574,6 +576,26 @@ pub fn context_descriptors() -> &'static [ContextVariableDescriptor] {
     context_variable_descriptors()
 }
 
+/// The eager reserved root whose members are the context variables (`ctx`),
+/// taken from Darkmatter's [`reserved_root_descriptors`] so DMLS keeps no root
+/// name of its own.
+pub fn context_root() -> &'static ReservedRootDescriptor {
+    eager_root(RootMembers::ContextVariables)
+}
+
+/// The reserved root whose members are the document's frontmatter (`doc`),
+/// from Darkmatter's catalog.
+pub fn document_root() -> &'static ReservedRootDescriptor {
+    eager_root(RootMembers::DocumentFrontmatter)
+}
+
+fn eager_root(members: RootMembers) -> &'static ReservedRootDescriptor {
+    reserved_root_descriptors()
+        .iter()
+        .find(|root| root.members == members && root.mirrors.is_none())
+        .expect("Darkmatter catalogs exactly one eager root per member set")
+}
+
 /// The context-variable descriptor whose bare tail name is `name` (e.g.
 /// `"today"`, `"packages"`), if any. The lookup is exact and case-sensitive.
 pub fn ctx_descriptor(name: &str) -> Option<&'static ContextVariableDescriptor> {
@@ -757,7 +779,7 @@ pub fn completion_candidates(partial: &str, frontmatter_keys: &[String]) -> Vec<
     }
 
     for descriptor in context_descriptors() {
-        let label = format!("ctx.{}", descriptor.name);
+        let label = format!("{}.{}", context_root().name, descriptor.name);
         if label.starts_with(partial) {
             items.push(ExprCompletion {
                 insert_text: label.clone(),
@@ -874,7 +896,10 @@ fn hover_markdown_from(
     let Some(name) = root_identifier(sub_expr) else {
         return value;
     };
-    if let Some(tail) = name.strip_prefix("ctx.") {
+    if let Some(tail) = name
+        .strip_prefix(context_root().name)
+        .and_then(|rest| rest.strip_prefix('.'))
+    {
         if let Some(descriptor) = ctx_descriptor(tail) {
             value.push_str(&format!(
                 "\n\n{}\n\nThe `ctx` variable is evaluated at _compose_ time (rather than now).",
@@ -891,22 +916,23 @@ fn hover_markdown_from(
     value
 }
 
-/// Whether a bare identifier `name` names nothing DMLS can resolve — no
-/// frontmatter key, schema property, reserved root, bare runtime-context name,
-/// or expression function. The single authority for the unknown-root check so
-/// the body-interpolation and frontmatter-expression diagnostics agree.
+/// Whether a bare root `name` is an undeclared document property: one the
+/// Darkmatter binding `view` classifies as a document property (not a reserved
+/// namespace, declared global, or `null`) that no frontmatter key, schema
+/// property, or expression function names. The single authority for the check
+/// so the body-interpolation and frontmatter-expression diagnostics agree.
 ///
-/// Reserved roots (`ctx`, `env`, `doc`, `current`, `current_env`, `null`) and
-/// bare runtime-context names come from the library's
-/// [`is_statically_known_root`], so the editor never flags a root the compose
-/// runtime knows. Any dotted path is treated as known; callers pass a root.
-/// The caller supplies frontmatter-key and schema-property membership.
-pub fn is_unknown_root(
+/// DMLS passes [`BindingView::baseline`]: it supplies no host descriptors, so
+/// a host global such as Claudine's `err` reads as a document property here.
+/// Any dotted path is treated as declared; callers pass a root. The caller
+/// supplies frontmatter-key and schema-property membership.
+pub fn is_undeclared_property(
     name: &str,
+    view: &BindingView,
     is_frontmatter_key: impl Fn(&str) -> bool,
     is_schema_property: impl Fn(&str) -> bool,
 ) -> bool {
-    if is_statically_known_root(name) || name.contains('.') {
+    if name.contains('.') || !view.names_document_property(name) {
         return false;
     }
     if function_description(name).is_some() {
@@ -916,6 +942,29 @@ pub fn is_unknown_root(
         return false;
     }
     !is_schema_property(name)
+}
+
+/// Each call in `expr` to a function outside Darkmatter's closed catalog, as
+/// `(name, span)` with the span on the name in `source` (the text `expr` was
+/// parsed from). Darkmatter's passive [`validate_expression`] decides against
+/// the baseline view, in every branch, without evaluating anything.
+pub fn unknown_function_calls(expr: &SpannedExpr, source: &str) -> Vec<(String, SourceSpan)> {
+    validate_expression(expr, &BindingView::baseline())
+        .into_iter()
+        .filter_map(|(call, error)| match error {
+            ExpressionError::UnknownFunction { name } => {
+                let name_span = call.start..call.start + name.len();
+                let span = if source.get(name_span.clone()) == Some(name.as_str()) { name_span } else { call };
+                Some((name, span))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// The message for a `dm.expression.unknown_function` diagnostic.
+pub fn unknown_function_message(name: &str) -> String {
+    format!("`{name}` is not a Darkmatter expression function")
 }
 
 /// The replacement a dash-separated-key quick-fix applies over its
@@ -930,12 +979,12 @@ pub struct KeyReferenceFix {
     pub replacement: String,
 }
 
-/// One `dm.expression.unknown_identifier` finding. Spans index the expression
-/// text.
+/// One `dm.expression.undeclared_property` finding. Spans index the
+/// expression text.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum UnknownIdentifierFinding {
-    /// An unhandled `Variable` whose root names nothing DMLS can resolve.
-    Identifier {
+pub enum UndeclaredPropertyFinding {
+    /// An unhandled `Variable` whose root is an undeclared document property.
+    Property {
         /// The root (first dotted segment).
         root: String,
         /// The `Variable` node's span.
@@ -956,11 +1005,11 @@ pub enum UnknownIdentifierFinding {
     },
 }
 
-/// Every unknown-identifier finding for one parsed expression.
+/// Every undeclared-property finding for one parsed expression.
 ///
 /// `reparse` is the dialect `expr` was parsed with; a quick-fix is offered
 /// only when the edited expression reparses with the replacement as a single
-/// reference to the key. `is_unknown` classifies a root; `is_key` answers
+/// reference to the key. `is_undeclared` classifies a root; `is_key` answers
 /// whether a top-level frontmatter key is present or declared.
 /// `forbidden_quote` is a quote character the replacement must not contain
 /// (the YAML quote style around a frontmatter value).
@@ -968,33 +1017,33 @@ pub enum UnknownIdentifierFinding {
 /// Absence handling follows the library's static walk
 /// ([`static_variable_reads`]), so the editor suppresses what the runtime
 /// suppresses; it flags both branches because it cannot know which runs.
-pub fn unknown_identifier_findings(
+pub fn undeclared_property_findings(
     expr: &SpannedExpr,
     source: &str,
     reparse: fn(&str) -> Result<SpannedExpr, ParseError>,
-    is_unknown: impl Fn(&str) -> bool,
+    is_undeclared: impl Fn(&str) -> bool,
     is_key: impl Fn(&str) -> bool,
     forbidden_quote: Option<char>,
-) -> Vec<UnknownIdentifierFinding> {
-    let unknown: Vec<(String, SourceSpan)> = static_variable_reads(expr)
+) -> Vec<UndeclaredPropertyFinding> {
+    let undeclared: Vec<(String, SourceSpan)> = static_variable_reads(expr)
         .into_iter()
-        .filter(|read| !read.handles_absence && is_unknown(read.root()))
+        .filter(|read| !read.handles_absence && is_undeclared(read.root()))
         .map(|read| (read.root().to_string(), read.span))
         .collect();
-    if unknown.is_empty() {
+    if undeclared.is_empty() {
         return Vec::new();
     }
 
     let mut dash_keys = Vec::new();
-    collect_dash_keys(expr, source, &unknown, &is_key, &mut dash_keys);
+    collect_dash_keys(expr, source, &undeclared, &is_key, &mut dash_keys);
 
-    let mut findings: Vec<UnknownIdentifierFinding> = unknown
+    let mut findings: Vec<UndeclaredPropertyFinding> = undeclared
         .into_iter()
         .filter(|(_, span)| !dash_keys.iter().any(|(chain, _)| contains(chain, span)))
-        .map(|(root, span)| UnknownIdentifierFinding::Identifier { root, span })
+        .map(|(root, span)| UndeclaredPropertyFinding::Property { root, span })
         .collect();
     findings.extend(dash_keys.into_iter().map(|(span, key)| {
-        UnknownIdentifierFinding::DashSeparatedKey {
+        UndeclaredPropertyFinding::DashSeparatedKey {
             authored: source[span.clone()].to_string(),
             fix: key_reference_fix(source, &span, &key, reparse, forbidden_quote),
             key,
@@ -1002,8 +1051,8 @@ pub fn unknown_identifier_findings(
         }
     }));
     findings.sort_by_key(|finding| match finding {
-        UnknownIdentifierFinding::Identifier { span, .. }
-        | UnknownIdentifierFinding::DashSeparatedKey { span, .. } => span.start,
+        UndeclaredPropertyFinding::Property { span, .. }
+        | UndeclaredPropertyFinding::DashSeparatedKey { span, .. } => span.start,
     });
     findings
 }
@@ -1013,19 +1062,19 @@ fn contains(outer: &SourceSpan, inner: &SourceSpan) -> bool {
 }
 
 /// The outermost subtraction chains (`a- b`, `foo--bar`, `a - b - c`) whose
-/// whitespace-free source is a key and which contain an unknown read. A chain
+/// whitespace-free source is a key and which contain an undeclared read. A chain
 /// holds only variables, unary minus, and subtraction; any literal or other
 /// operator makes it ordinary arithmetic.
 fn collect_dash_keys(
     expr: &SpannedExpr,
     source: &str,
-    unknown: &[(String, SourceSpan)],
+    undeclared: &[(String, SourceSpan)],
     is_key: &impl Fn(&str) -> bool,
     out: &mut Vec<(SourceSpan, String)>,
 ) {
     if matches!(expr.kind, SpannedExprKind::Binary { op: BinaryOp::Sub, .. })
         && is_dash_chain(expr)
-        && unknown.iter().any(|(_, span)| contains(&expr.span, span))
+        && undeclared.iter().any(|(_, span)| contains(&expr.span, span))
         && let Some(authored) = source.get(expr.span.clone())
     {
         let key: String = authored.chars().filter(|c| !c.is_whitespace()).collect();
@@ -1035,7 +1084,7 @@ fn collect_dash_keys(
         }
     }
     for child in children(expr) {
-        collect_dash_keys(child, source, unknown, is_key, out);
+        collect_dash_keys(child, source, undeclared, is_key, out);
     }
 }
 
@@ -1066,7 +1115,7 @@ fn key_reference_fix(
         .into_iter()
         .find(|quote| Some(*quote) != forbidden_quote && !key.contains(*quote))
         .filter(|_| !key.contains('\\'));
-    let bracket = quote.map(|quote| format!("doc[{quote}{key}{quote}]"));
+    let bracket = quote.map(|quote| format!("{}[{quote}{key}{quote}]", document_root().name));
     std::iter::once(bare)
         .chain(bracket)
         .find(|replacement| {
@@ -1087,7 +1136,7 @@ fn references_key(node: &SpannedExpr, key: &str) -> bool {
     match &node.kind {
         SpannedExprKind::Variable(path) => path == key,
         SpannedExprKind::Index { base, index } => {
-            matches!(&base.kind, SpannedExprKind::Variable(root) if root == "doc")
+            matches!(&base.kind, SpannedExprKind::Variable(root) if root == document_root().name)
                 && matches!(&index.kind, SpannedExprKind::StringLiteral(literal) if literal == key)
         }
         _ => false,
@@ -1129,18 +1178,19 @@ fn children(expr: &SpannedExpr) -> Vec<&SpannedExpr> {
 
 /// The human-readable message for a finding. Code actions read
 /// [`KeyReferenceFix`] from `Diagnostic.data`, never this text.
-pub fn unknown_identifier_message(finding: &UnknownIdentifierFinding) -> String {
+pub fn undeclared_property_message(finding: &UndeclaredPropertyFinding) -> String {
     match finding {
-        UnknownIdentifierFinding::Identifier { root, .. } => format!(
-            "`{root}` matches no frontmatter key, schema property, `ctx.*`, `env.*`, or function"
+        UndeclaredPropertyFinding::Property { root, .. } => format!(
+            "`{root}` is an undeclared document property (unknown type; `null` unless supplied at \
+             runtime)"
         ),
-        UnknownIdentifierFinding::DashSeparatedKey {
+        UndeclaredPropertyFinding::DashSeparatedKey {
             authored, key, fix: Some(fix), ..
         } => format!(
             "`{authored}` is a subtraction, but frontmatter key `{key}` exists; reference it as `{}`",
             fix.replacement
         ),
-        UnknownIdentifierFinding::DashSeparatedKey { authored, key, .. } => format!(
+        UndeclaredPropertyFinding::DashSeparatedKey { authored, key, .. } => format!(
             "`{authored}` is a subtraction, but frontmatter key `{key}` exists"
         ),
     }
@@ -1169,13 +1219,13 @@ mod tests {
 
     /// Findings for a value-dialect `source` where `keys` are the document's
     /// frontmatter keys.
-    fn findings_for(source: &str, keys: &[&str], forbidden_quote: Option<char>) -> Vec<UnknownIdentifierFinding> {
+    fn findings_for(source: &str, keys: &[&str], forbidden_quote: Option<char>) -> Vec<UndeclaredPropertyFinding> {
         let expr = parse(source).unwrap();
-        unknown_identifier_findings(
+        undeclared_property_findings(
             &expr,
             source,
             parse,
-            |root| is_unknown_root(root, |name| keys.contains(&name), |_| false),
+            |root| is_undeclared_property(root, &BindingView::baseline(), |name| keys.contains(&name), |_| false),
             |key| keys.contains(&key),
             forbidden_quote,
         )
@@ -1185,7 +1235,7 @@ mod tests {
         findings_for(source, keys, None)
             .into_iter()
             .map(|finding| match finding {
-                UnknownIdentifierFinding::Identifier { root, span } => (root, source[span].to_string()),
+                UndeclaredPropertyFinding::Property { root, span } => (root, source[span].to_string()),
                 other => panic!("{source}: expected only generic findings, got {other:?}"),
             })
             .collect()
@@ -1193,7 +1243,7 @@ mod tests {
 
     fn dash(source: &str, keys: &[&str], forbidden_quote: Option<char>) -> (String, String, Option<String>) {
         match findings_for(source, keys, forbidden_quote).as_slice() {
-            [UnknownIdentifierFinding::DashSeparatedKey { authored, key, span, fix }] => {
+            [UndeclaredPropertyFinding::DashSeparatedKey { authored, key, span, fix }] => {
                 assert_eq!(&source[span.clone()], authored);
                 (authored.clone(), key.clone(), fix.as_ref().map(|fix| fix.replacement.clone()))
             }
@@ -1226,7 +1276,6 @@ mod tests {
             "is_null(maybe)",
             "isEmpty(maybe)",
             "ok ? known : null",
-            "repo",
             "current.cwd",
             "doc.anything-at-all",
             "ctx.nope",
@@ -1236,6 +1285,8 @@ mod tests {
             assert!(found.is_empty(), "{source}: {found:?}");
         }
         assert_eq!(generic("is_empty(lower(nested))", &[]), [pair("nested", "nested")]);
+        // A bare runtime-context name is a document property, never `ctx.repo`.
+        assert_eq!(generic("repo", &[]), [pair("repo", "repo")]);
     }
 
     #[test]
@@ -1253,7 +1304,7 @@ mod tests {
         // Only the chain that spells the key is replaced; the outer subtraction
         // stays arithmetic after the fix.
         let (authored, _, fix) = match findings_for("a- b - known", &["a-b", "known"], None).as_slice() {
-            [UnknownIdentifierFinding::DashSeparatedKey { authored, key, fix, .. }] => {
+            [UndeclaredPropertyFinding::DashSeparatedKey { authored, key, fix, .. }] => {
                 (authored.clone(), key.clone(), fix.clone())
             }
             other => panic!("{other:?}"),

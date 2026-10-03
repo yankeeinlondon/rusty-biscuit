@@ -7,7 +7,6 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use biscuit_file::to_portable_string;
-use globset::{Glob, GlobSet, GlobSetBuilder};
 
 use darkmatter::markdown::schemas::{completion as dm_completion, CompletionKind, EffectiveSchema};
 
@@ -323,87 +322,7 @@ fn format_array_candidate(property: &str, prefix_segments: &[String], selected: 
     format!("{property}='{joined}'")
 }
 
-/// Compiled positive + negative globset pair for a Darkmatter
-/// `file(match(...))` constraint.
-///
-/// Implements `file(match(...))` glob semantics for completion filtering: a
-/// path is accepted iff (a) at least one positive pattern matches AND (b) no
-/// negative pattern matches. When the constraint contains only negative
-/// patterns, every non-rejected path is accepted (`positive: None`).
-///
-/// `match(...)` is suggestion metadata only — Darkmatter no longer validates
-/// against it — so these globs shape completion candidates, not validation.
-///
-/// Each pattern is added to the globset twice — once with its raw shape
-/// (which may contain path separators like `src/**/*.rs`) and once as a
-/// `**/`-anchored variant so filename-only patterns like `*.png` continue
-/// to match files in subdirectories: `*.md` accepts `docs/api.md` because the
-/// resolved filename `api.md` is one of the views tested.
-pub(super) struct MatchGlobs {
-    positive: Option<GlobSet>,
-    negative: GlobSet,
-}
-
-impl MatchGlobs {
-    pub(super) fn compile(patterns: &[String]) -> Option<Self> {
-        let mut positive = GlobSetBuilder::new();
-        let mut negative = GlobSetBuilder::new();
-        let mut has_positive = false;
-        let mut has_negative = false;
-        for raw in patterns {
-            let (target, is_negative) = match raw.strip_prefix('!') {
-                Some(stripped) => (stripped, true),
-                None => (raw.as_str(), false),
-            };
-            let primary = Glob::new(target).ok()?;
-            // Anchor filename-only patterns so they match anywhere in the
-            // tree. Skip when the pattern already contains a path separator
-            // or is itself a recursive prefix.
-            let secondary = if target.contains('/') || target.starts_with("**") {
-                None
-            } else {
-                Glob::new(&format!("**/{target}")).ok()
-            };
-            if is_negative {
-                negative.add(primary);
-                if let Some(g) = secondary {
-                    negative.add(g);
-                }
-                has_negative = true;
-            } else {
-                positive.add(primary);
-                if let Some(g) = secondary {
-                    positive.add(g);
-                }
-                has_positive = true;
-            }
-        }
-        let positive = if has_positive {
-            Some(positive.build().ok()?)
-        } else {
-            None
-        };
-        let negative = if has_negative {
-            negative.build().ok()?
-        } else {
-            GlobSetBuilder::new().build().ok()?
-        };
-        Some(Self { positive, negative })
-    }
-
-    /// Returns true when the relative path is accepted by the constraint.
-    ///
-    /// Both `rel_path` (e.g. `src/lib.rs`) and `file_name` (e.g. `lib.rs`)
-    /// are tested so that patterns can target either view. Negation wins:
-    /// a negative match against any view rejects the path even if a
-    /// positive pattern would accept it.
-    pub(super) fn is_match(&self, rel_path: &str, file_name: &str) -> bool {
-        if self.negative.is_match(rel_path) || self.negative.is_match(file_name) {
-            return false;
-        }
-        match &self.positive {
-            Some(set) => set.is_match(rel_path) || set.is_match(file_name),
-            None => true,
-        }
-    }
-}
+/// Compiled `file(match(...))` globs. Darkmatter owns the comparison so the
+/// candidates offered here are exactly the files a root-union arm that
+/// contests the glob accepts.
+pub(super) use darkmatter::markdown::schemas::file_match::FileMatchGlobs as MatchGlobs;

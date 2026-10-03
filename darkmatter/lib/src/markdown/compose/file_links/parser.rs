@@ -15,7 +15,19 @@ use crate::markdown::compose::parse_utils::{Cursor, find_code_regions, is_in_cod
 pub fn parse_file_links_directives(
     content: &str,
 ) -> Result<Vec<FileLinksDirective>, FileLinksError> {
-    let code_regions = find_code_regions(content);
+    parse_file_links_directives_in(content, None)
+}
+
+/// [`parse_file_links_directives`] over a body whose `data` bytes were inserted by an earlier stage:
+/// a directive counts only when its line start, prefix, and keyword are
+/// authored, and code regions are found in the masked view.
+pub(crate) fn parse_file_links_directives_in(
+    content: &str,
+    data: Option<&crate::markdown::compose::body_origin::DataRanges>,
+) -> Result<Vec<FileLinksDirective>, FileLinksError> {
+    let code_regions = find_code_regions(
+        &crate::markdown::compose::parse_utils::structural_view(content, data),
+    );
     let mut directives = Vec::new();
 
     let bytes = content.as_bytes();
@@ -35,7 +47,13 @@ pub fn parse_file_links_directives(
 
         if is_file_links_keyword(trimmed) {
             let first_non_ws = line_start + line.len().saturating_sub(line.trim_start().len());
-            if !is_in_code_region(first_non_ws, &code_regions) {
+            if !is_in_code_region(first_non_ws, &code_regions)
+                && crate::markdown::compose::parse_utils::authored_directive(
+                    data,
+                    line_start,
+                    first_non_ws + "::file-links".len(),
+                )
+            {
                 let indent = &content[line_start..first_non_ws];
                 let inferred_indent = if indent.is_empty() {
                     infer_indent_from_previous_line(content, line_start)

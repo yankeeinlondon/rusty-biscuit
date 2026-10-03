@@ -335,16 +335,21 @@ mod classification_tests {
                 E::InvalidSyntax(_)
                 | E::UnsupportedScheme { .. }
                 | E::UnsupportedUserHome(_)
+                | E::ForeignAbsolutePath { .. }
                 | E::InvalidUrl(_) => "invalid_syntax",
                 E::MissingEnvironmentVariable { .. }
                 | E::BareRepository
                 | E::VaultNotConfigured
                 | E::MissingHomeContext
                 | E::OutsideRepository { .. }
-                | E::RepositoryRootNotContainingSource { .. } => "missing_context",
+                | E::RepositoryRootNotContainingSource { .. }
+                | E::CwdOutsideBaseDir { .. }
+                | E::RelativeContextDirectory { .. }
+                | E::BaseDirNotRepositoryRoot { .. } => "missing_context",
                 E::CurrentDirectory(_)
                 | E::Git(_)
                 | E::RepositoryEscape { .. }
+                | E::RelativeTreeEscape { .. }
                 | E::RelativePath { .. }
                 | E::Io { .. } => "permission_io",
                 E::RemoteNotLocal(_) => "unsupported_remote",
@@ -362,6 +367,9 @@ mod classification_tests {
                 reference: "ftp://example.com/spec.md".to_string(),
             },
             FileReferenceError::UnsupportedUserHome("other".to_string()),
+            FileReferenceError::ForeignAbsolutePath {
+                path: r"C:\spec.md".to_string(),
+            },
             FileReferenceError::MissingHomeContext,
             FileReferenceError::OutsideRepository {
                 sigil: '^',
@@ -382,6 +390,23 @@ mod classification_tests {
                 reference: "&escape/spec.md".to_string(),
                 repository_root: PathBuf::from("/repo"),
                 escaped_candidate: PathBuf::from("/outside/spec.md"),
+            },
+            FileReferenceError::CwdOutsideBaseDir {
+                base_dir: PathBuf::from("/docs"),
+                cwd: PathBuf::from("/elsewhere"),
+            },
+            FileReferenceError::RelativeContextDirectory {
+                anchor: biscuit_file::ContextAnchor::WorkingDirectory,
+                path: PathBuf::from("docs"),
+            },
+            FileReferenceError::BaseDirNotRepositoryRoot {
+                base_dir: PathBuf::from("/repo/docs"),
+                repository_root: PathBuf::from("/repo"),
+            },
+            FileReferenceError::RelativeTreeEscape {
+                base_dir: PathBuf::from("/repo"),
+                candidate: PathBuf::from("/outside.md"),
+                reference: "../../outside.md".to_string(),
             },
             FileReferenceError::RemoteNotLocal("http://x".to_string()),
             FileReferenceError::InvalidUrl("not a URL".to_string()),

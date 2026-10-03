@@ -166,8 +166,23 @@ fn ensure_grace_exit_watcher() {
 ///   dropping this guard while a sequence registration or a child wait loop is
 ///   still live leaves the shared handler installed.
 pub(crate) fn install_user_interrupt_guard(prompt_argv: &str) -> UserInterruptGuard {
-    let bytes = std::sync::Arc::new(format_user_interrupt_message(prompt_argv).into_bytes());
-    let presses = std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0));
+    install_ladder(format_user_interrupt_message(prompt_argv), 0)
+}
+
+/// Install the same ladder for the exit-time delivery drain of a command that
+/// holds no compose registration (`sequence`, the provider wrappers).
+///
+/// A user who already pressed Ctrl+C during the run starts on the second
+/// rung, so their next press force-exits instead of printing a notice. On
+/// Windows that already follows from the handler's process-wide press count.
+pub(crate) fn install_drain_interrupt_guard() -> UserInterruptGuard {
+    let earlier_presses = u8::from(crate::output::user_interrupt_observed());
+    install_ladder(format_drain_interrupt_message(), earlier_presses)
+}
+
+fn install_ladder(notice: String, earlier_presses: u8) -> UserInterruptGuard {
+    let bytes = std::sync::Arc::new(notice.into_bytes());
+    let presses = std::sync::Arc::new(std::sync::atomic::AtomicU8::new(earlier_presses));
 
     #[cfg(unix)]
     {
@@ -424,6 +439,19 @@ pub(crate) fn format_user_interrupt_message(prompt_argv: &str) -> String {
         .state(StatusState::Info)
         .render(&term);
 
+    format!("\n{body}")
+}
+
+/// The notice for a first press during the exit-time delivery drain.
+pub(crate) fn format_drain_interrupt_message() -> String {
+    use biscuit_terminal::components::renderable::TerminalRenderable;
+    use biscuit_terminal::components::status::{Status, StatusState};
+
+    let body = Status::from_prose(
+        "User interrupted while waiting for outbound messages; press Ctrl+C again to exit now",
+    )
+    .state(StatusState::Info)
+    .render(&crate::log::terminal());
     format!("\n{body}")
 }
 

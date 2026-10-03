@@ -72,6 +72,10 @@ Your high level task is to convert the following documents into a high confidenc
 - If there are any aspects of the specification/design for this feature which you feel are unclear or require rulings on you should make sure that these rulings are explicitly mentioned and are attached to Phase 1
     - add an H3 heading `### Necessary Rules` directly under 
 - After _rulings_ we need to consider if there are "spikes" that should be run to lower the risk for this implementation or to better inform the specification and/or design
+    - a spike runs once, before the work it informs; do not schedule it again as a re-check in later phases
+    - a performance spike is one host and a quick sample, unless the spec names a known cost that is specific to one OS
+    - if the spec's own figures already answer a spike's question, record that as a ruling and drop the spike
+    - do not widen a spike beyond what the spec asks for; list any wider measurement you think is needed as a ruling for the author to decide
 ::end-block
 ::block when="review"
 - If there are any aspects of the review which you feel are unclear or require rulings on you should make sure that these rulings are explicitly mentioned and are attached to Phase 1

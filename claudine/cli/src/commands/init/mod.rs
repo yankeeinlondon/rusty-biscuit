@@ -193,6 +193,7 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
         harvest_unmatched: false,
         exit_expressions: None,
         guard_settings: Default::default(),
+        steering: Default::default(),
     };
 
     // Phase 5: Write and Register
@@ -516,6 +517,7 @@ fn default_config(repo_scope: bool) -> Result<ClaudineConfig> {
         harvest_unmatched: false,
         exit_expressions: None,
         guard_settings: Default::default(),
+        steering: Default::default(),
     })
 }
 
@@ -628,6 +630,7 @@ mod tests {
             harvest_unmatched: false,
             exit_expressions: None,
             guard_settings: Default::default(),
+            steering: Default::default(),
         }
     }
 

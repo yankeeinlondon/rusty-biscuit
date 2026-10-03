@@ -2,6 +2,12 @@
 
 ## Recent Dependency Notes
 
+- `biscuit-test-harness` adds a Linux-only `x11rb = "0.13.2"` edge with
+  `default-features = false` and only the `xtest` feature (2026-09-28). The
+  crate is pure Rust and was already in the graph through `clipboard-rs`, so
+  the lockfile gains one edge and no package. `src/xvfb.rs` uses it to focus a
+  window and press keys through XTEST on a private `Xvfb` display, which
+  avoids depending on an installed `xdotool`.
 - `sniff` adds `jsonc-parser` 0.33.2 (`serde` feature) (2026-09-26,
   `2026-09-26-lockfile-corroboration`) for `bun.lock`, `rush.json`, and Rush
   configuration, all JSON with comments. It is the only new crate in the
@@ -214,7 +220,8 @@
   `level2_graph_in_kitty.rs`. No new external crate was added; both were
   already in the workspace graph. `xpty` 0.3.6 is a Windows-only development
   dependency that opens the ConPTY pseudoconsole `level2_powershell_remove.rs`
-  runs PowerShell in; `unchained-ai/lib` already builds it (as `portable-pty`).
+  runs PowerShell in; `unchained-ai/lib` already builds it (as `portable-pty`),
+  and `claudine-cli` uses it the same way for a typed Ctrl+C test.
   `sysinfo` 0.38 (development) finds the detached `wt internal-refresh`
   worker in `list_prs.rs` and reads its working directory on every OS;
   `sniff` already builds the same version. The workspace's own
@@ -277,6 +284,9 @@
   precedence (Feature C) can emit negative-lookahead `patternProperties`: such
   schemas opt into `jsonschema`'s backtracking `fancy-regex` engine, while every
   lookaround-free schema stays on the linear (ReDoS-safe) `regex` engine.
+- `darkmatter/lib` takes a direct `base64` dependency (already in the tree) for
+  the payload of the `{{!data:v1:…}}` literal token, which stores one
+  frontmatter string as data (unpadded URL-safe alphabet).
 - `darkmatter/dmls` (`dmls`) is the Darkmatter Language Server. Protocol
   stack: `lsp-server` (stdio framing, in-memory test connections) +
   `lsp-types` (LSP 3.17 types) + `crossbeam-channel` (the channel family
@@ -1177,6 +1187,12 @@ This is a Rust workspace with the following modules:
     _Unicode XID_Start/XID_Continue predicates, the identifier rules Rust itself uses. `test-toolkit`'s layout gate tokenizes Rust source with them._
 
     _Tags: unicode, identifiers, parsing_
+
+- [unicode-segmentation](https://crates.io/crates/unicode-segmentation) _v1_
+
+    _Splits text into grapheme clusters (user-perceived characters). `biscuit-tui` clips static table cells on cluster boundaries so a combining accent or joined emoji is never split._
+
+    _Tags: unicode, text, terminal_
 
 - [unicode-width](https://crates.io/crates/unicode-width) _v0.2_
 

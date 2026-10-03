@@ -21,7 +21,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use claudine::composition::{
-    self, CompositionError, LIFECYCLE_EVENT_KEYS, PrepareOptions, PreparedComposition,
+    self, CompositionError, LayeredOverrides, PrepareOptions, PreparedComposition,
     ResolvedCompositionSource, ResolvedExecutionTarget, SequencePlan,
 };
 use serde_json::Value;
@@ -49,6 +49,10 @@ pub(super) struct StepComposeContext<'a> {
     /// Immutable CLI caller values, kept separate from task and runtime layers.
     pub(super) caller_input_records: &'a darkmatter::markdown::compose::CallerInputRecords,
     pub(super) invocation: &'a claudine::invocation_context::InvocationContext,
+    /// The composition run a step's documents join: the sequence document
+    /// composed for the step, its task, and the task's prompt document are
+    /// one run. `None` opens a new run per preparation.
+    pub(super) run_evidence: Option<&'a claudine::invocation_context::RunEvidence>,
 }
 
 impl<'ctx> StepComposeContext<'ctx> {
@@ -79,21 +83,26 @@ pub(super) struct StepComposition {
     pub(super) approved: HashSet<String>,
 }
 
-/// Fold this step's `set_overrides` from the four just-in-time layers.
+/// Fold this step's overrides from the four just-in-time layers.
 ///
 /// Lowest precedence first: user setters, accumulated runtime mutations, then
 /// the reserved per-step overlay. The live document's own frontmatter is
-/// Darkmatter's base and sits below all of them. Passing `runtime: None` yields
-/// the initial view — empty `outputs`, no mutations — which is what the
-/// validation pass and `--dry-run` compose against.
+/// Darkmatter's base and sits below all of them. Only the user setters are
+/// authored; the runtime layers and the overlay are data. Passing
+/// `runtime: None` yields the initial view — empty `outputs`, no mutations —
+/// which is what the validation pass and `--dry-run` compose against.
 pub(super) fn step_set_overrides(
     plan: &SequencePlan,
     step_index: usize,
     user_setters: Option<&Value>,
     runtime: Option<&composition::RuntimeSnapshot>,
-) -> Value {
+) -> LayeredOverrides {
     let overlay = reserved_overlay(plan, step_index);
-    composition::layered_set_overrides(user_setters, runtime, Some(&overlay))
+    composition::layered_set_overrides(
+        LayeredOverrides::authored(user_setters),
+        runtime,
+        Some(&overlay),
+    )
 }
 
 /// This step's reserved overlay alone — `state`, `previous`, `next`,
@@ -112,11 +121,7 @@ pub(super) fn step_env_overrides(
     shared: &SharedComposeArgs,
     target: Option<&ResolvedExecutionTarget>,
 ) -> BTreeMap<String, String> {
-    let mut env: BTreeMap<String, String> = BTreeMap::new();
-    env.insert(
-        "CLAUDINE_FAIL_FAST".to_string(),
-        effective_fail_fast.to_string(),
-    );
+    let mut env = step_owned_env(effective_fail_fast);
     // A `--dry-run` step with an unresolved agent state has no target; leaving
     // `AGENT` unset makes `{{env.AGENT}}` resolve empty exactly as the direct
     // compose `--dry-run` path does.
@@ -128,6 +133,16 @@ pub(super) fn step_env_overrides(
     }
     env.insert("YOLO".to_string(), shared.yolo.to_string());
     env
+}
+
+/// The part of [`step_env_overrides`] that belongs to the step rather than to
+/// the document it runs, so a proxy target inside the step keeps it while
+/// installing its own `AGENT`/`MODEL`/`YOLO`.
+pub(super) fn step_owned_env(effective_fail_fast: bool) -> BTreeMap<String, String> {
+    BTreeMap::from([(
+        "CLAUDINE_FAIL_FAST".to_string(),
+        effective_fail_fast.to_string(),
+    )])
 }
 
 /// Validate, approve, and compose one step against `source`.
@@ -148,7 +163,7 @@ pub(super) fn step_env_overrides(
 pub(super) fn compose_step(
     source: &ResolvedCompositionSource,
     ctx: &StepComposeContext<'_>,
-    set_overrides: &Value,
+    set_overrides: &LayeredOverrides,
     env_overrides: &BTreeMap<String, String>,
     approved: HashSet<String>,
     allow_empty_body: bool,
@@ -157,9 +172,9 @@ pub(super) fn compose_step(
     // frontmatter is missing required values must report that rather than let
     // Darkmatter's compose surface a raw `SchemaValidationFailed`, which would
     // hide the property names the caller needs to collect or report.
-    let pre = composition::pre_validate_schema_for_mode(
+    let pre = composition::pre_validate_layered_for_mode(
         source,
-        Some(set_overrides),
+        set_overrides,
         ctx.launch_area,
         if ctx.inline_mode {
             composition::CompositionMode::InlineFrontmatterPrompt
@@ -169,19 +184,9 @@ pub(super) fn compose_step(
     )?;
     emit_dropped_optional_warnings(&pre.dropped_optionals);
     let step_source = pre.source;
-    let step_overrides = pre
-        .set_overrides
-        .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
-
-    let (compose_options, prepared_context, document_epoch) = build_template_preflight_options(
-        env_overrides,
-        &step_source.resolved_path,
-        &step_source.markdown,
-        (&step_overrides, ctx.caller_input_records),
-        ctx.launch_area,
-        Some(ctx.file_resolution_context),
-        Some(ctx.invocation),
-    );
+    // Pre-validation may drop invalid optional keys; the rest keep their origin.
+    let step_overrides =
+        LayeredOverrides::from_parts(pre.set_overrides.as_ref(), set_overrides.data_keys());
 
     let approval_options = super::super::apply_composition_shell_overrides(
         super::super::build_harness_shell_options_for_source_with_cache(
@@ -193,46 +198,15 @@ pub(super) fn compose_step(
         ctx.shared.yolo,
     );
 
+    // Discovery and preparation share one option set, so the template audit
+    // approves exactly the bytes the step's compose executes.
+    let mut prepare_options =
+        step_prepare_options(&step_source, ctx, step_overrides, env_overrides, allow_empty_body);
     let mut approved = approved;
-    document_epoch
-        .as_ref()
-        .expect("canonical sequence preparation owns an epoch")
-        .record_prepared_context_consumer(
-        claudine::invocation_context::PreparedContextConsumer::Preflight,
-    );
-    let template_preflight = composition::resolve_shell_approvals(
-        Some(&step_source.markdown),
-        Some(&compose_options),
-        &approval_options,
-        None,
-        None,
-    )?;
+    let template_preflight =
+        composition::approve_document_shell(&step_source, &prepare_options, &approval_options)?;
     approved.extend(template_preflight.approved_commands.iter().cloned());
-
-    let prepare_options = PrepareOptions {
-        set_overrides: Some(step_overrides),
-        pre_approved_commands: Some(approved.clone()),
-        env_overrides: env_overrides.clone(),
-        perf_enabled: ctx.shared.perf,
-        source_repo_root: ctx.source_repo_root.map(Path::to_path_buf),
-        shell_working_directory: Some(ctx.child_cwd.to_path_buf()),
-        // The shell audit and canonical preparation must expand against the
-        // same captured snapshot even if the process CWD changes between them.
-        prepared_context: Some(prepared_context),
-        file_ref_fallback_dir: ctx.launch_area.map(Path::to_path_buf),
-        file_resolution_context: Some(ctx.file_resolution_context.clone()),
-        caller_input_records: ctx.caller_input_records.clone(),
-        // `{{state}}`/`{{previous}}`/`{{next}}` render their `name` in string
-        // context; whole-value/dotted access keeps the typed object.
-        name_coercion_keys: composition::sequence::reserved::NAME_COERCION_KEYS
-            .iter()
-            .map(|s| (*s).to_string())
-            .collect(),
-        allow_empty_body,
-        defer_schema_verdict: false,
-        invocation_context: Some(ctx.invocation.clone()),
-        document_epoch,
-    };
+    prepare_options.pre_approved_commands = Some(approved.clone());
 
     // Inline steps prepare via `prepare_inline_with_schema` so the composed
     // `prompt` frontmatter becomes the agent prompt and the prepared closure is
@@ -259,86 +233,54 @@ pub(super) fn compose_step(
     Ok(StepComposition { prepared, approved })
 }
 
-/// Build the Darkmatter `ComposeOptions` for a step's template SHELL preflight.
+/// The options one step both discovers its template shell commands with and
+/// prepares with.
 ///
-/// The document path and request snapshot determine file-reference resolution.
-/// `launch_area` is retained as diagnostic metadata and is not a candidate for
-/// references authored by the template. `None` preserves the library-only
-/// compatibility boundary.
-pub(super) fn build_template_preflight_options(
+/// Each call opens the step's own document epoch: one launch-anchored
+/// snapshot, constructed through the invocation owner and never from the step
+/// document's location, so moving the document cannot change launch-facing
+/// `ctx.*`, while its `SourceContext` (`ctx.file_resolution_context`) drives
+/// file resolution. The epoch joins `ctx.run_evidence` when the step supplies
+/// one, so every document of one step observes one view of Git state. `{{state}}`/`{{previous}}`/`{{next}}` render their `name`
+/// in string context; whole-value and dotted access keep the typed object.
+pub(super) fn step_prepare_options(
+    source: &ResolvedCompositionSource,
+    ctx: &StepComposeContext<'_>,
+    overrides: LayeredOverrides,
     env_overrides: &BTreeMap<String, String>,
-    source_path: &Path,
-    markdown: &darkmatter::markdown::Markdown,
-    composition_inputs: (
-        &Value,
-        &darkmatter::markdown::compose::CallerInputRecords,
-    ),
-    launch_area: Option<&Path>,
-    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
-    invocation: Option<&claudine::invocation_context::InvocationContext>,
-) -> (
-    darkmatter::markdown::compose::ComposeOptions,
-    darkmatter::markdown::compose::ComposeContext,
-    Option<claudine::invocation_context::DocumentEpoch>,
-) {
-    let (set_overrides, caller_input_records) = composition_inputs;
-    let anchor = launch_area
-        .or_else(|| source_path.parent())
-        .unwrap_or_else(|| Path::new("."));
-    let derived_source_context = invocation.map(|invocation| {
-        invocation
-            .derive_source(source_path)
-            .expect("resolved sequence document always has a parent directory")
-    });
-    // One launch-anchored snapshot per step epoch: constructed through the
-    // invocation owner, never from this document's source context, so moving
-    // the step document cannot change launch-facing `ctx.*`.
-    let document_epoch = invocation.map(|invocation| invocation.begin_document_epoch());
-    let mut ctx = match document_epoch.as_ref() {
-        Some(epoch) => {
-            let requirements =
-                darkmatter::markdown::compose::ContextRequirements::for_document(markdown);
-            epoch.capture_launch_context(&requirements)
-        }
-        None => darkmatter::markdown::compose::ComposeContext::capture_for_document(anchor, markdown),
+    allow_empty_body: bool,
+) -> PrepareOptions {
+    let document_epoch = match ctx.run_evidence {
+        Some(run) => ctx.invocation.begin_document_epoch_in(run),
+        None => ctx.invocation.begin_document_epoch(),
     };
+    let requirements =
+        darkmatter::markdown::compose::ContextRequirements::for_document(&source.markdown);
+    let mut prepared_context = document_epoch.capture_launch_context(&requirements);
     for (key, value) in env_overrides {
-        ctx.env_mut().insert(key.clone(), value.clone());
+        prepared_context.env_mut().insert(key.clone(), value.clone());
     }
-    let authority = match document_epoch.as_ref() {
-        Some(epoch) => epoch.compose_context_authority(),
-        None => darkmatter::markdown::compose::ContextAuthority::DarkmatterOwned,
-    };
-    let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(ctx.clone())
-        .with_context_authority(authority)
-        .with_source_file(source_path)
-        // Defer the lifecycle event keys (DM1), matching the main prepare pass.
-        // The preflight compose exists only to discover template `::shell`
-        // directives; without the exclusion it resolves the deferred lifecycle
-        // subtree at compose time, so a `success`/`failure` read-side file
-        // reference (a file a later event creates) trips the fatal file-ref
-        // check before that event fires. Lifecycle shell commands are audited
-        // separately via `collect_lifecycle_shell_commands`.
-        .with_exclude_keys(LIFECYCLE_EVENT_KEYS.iter().copied());
-    if let Some(source_context) = derived_source_context.as_ref() {
-        opts = opts.with_file_resolution_context(source_context.file_resolution_context().clone());
-    } else if let Some(context) = file_resolution_context {
-        opts = opts.with_file_resolution_context(context.clone());
-    }
-    if let Some(launch_area) = launch_area {
-        opts = opts.with_file_ref_fallback_dir(launch_area.to_path_buf());
-    }
-    opts = opts.with_set_overrides(set_overrides.clone());
-    opts = opts.with_caller_input_records(caller_input_records.clone());
-    // Coerce `{{state}}`/`{{previous}}`/`{{next}}` to their `name` in string
-    // context so a shell command's approved bytes match its executed bytes.
-    opts = opts.with_name_coercion_keys(
-        composition::sequence::reserved::NAME_COERCION_KEYS
+    PrepareOptions {
+        pre_approved_commands: None,
+        env_overrides: env_overrides.clone(),
+        perf_enabled: ctx.shared.perf,
+        source_repo_root: ctx.source_repo_root.map(Path::to_path_buf),
+        shell_working_directory: Some(ctx.child_cwd.to_path_buf()),
+        prepared_context: Some(prepared_context),
+        file_ref_fallback_dir: ctx.launch_area.map(Path::to_path_buf),
+        file_resolution_context: Some(ctx.file_resolution_context.clone()),
+        caller_input_records: ctx.caller_input_records.clone(),
+        name_coercion_keys: composition::sequence::reserved::NAME_COERCION_KEYS
             .iter()
             .map(|s| (*s).to_string())
             .collect(),
-    );
-    (opts, ctx, document_epoch)
+        allow_empty_body,
+        defer_schema_verdict: false,
+        invocation_context: Some(ctx.invocation.clone()),
+        document_epoch: Some(document_epoch),
+        ..PrepareOptions::default()
+    }
+    .with_layered_overrides(overrides)
 }
 
 #[cfg(test)]

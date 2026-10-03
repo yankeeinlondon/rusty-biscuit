@@ -17,6 +17,7 @@ use crate::config::claudine_config::{ClaudineConfig, RepoOverrideConfig};
 ///   the user value is preserved.
 /// - `guard_settings`: repo fully replaces the user's scalar settings if
 ///   the repo declares them.
+/// - `steering.automatic.enabled`: repo overrides user only when it sets it.
 pub(crate) fn merge_repo_override(user: &mut ClaudineConfig, repo: &RepoOverrideConfig) {
     // canonical_provider: repo overrides user if set
     if repo.canonical_provider.is_some() {
@@ -52,6 +53,12 @@ pub(crate) fn merge_repo_override(user: &mut ClaudineConfig, repo: &RepoOverride
     // guard_settings: repo fully replaces user's scalar settings.
     if let Some(repo_guards) = &repo.guard_settings {
         user.guard_settings = repo_guards.clone();
+    }
+
+    // steering: each value the repo sets overrides the user's; an absent
+    // one keeps it (an absent repo value must not erase a user opt-out).
+    if let Some(enabled) = repo.steering.automatic.enabled {
+        user.steering.automatic.enabled = Some(enabled);
     }
 }
 
