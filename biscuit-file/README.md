@@ -128,6 +128,30 @@ let root = PathIdentity::new(Path::new("/opt/config"));
 assert!(!PathIdentity::new(Path::new("/opt/config-old/a.toml")).starts_with(&root));
 ```
 
+## Canonical Paths and the Home Directory
+
+`canonicalize_simplified` (unfeatured) follows symlinks like
+`std::fs::canonicalize` but, on native Windows, returns `C:\work\repo` instead
+of the verbatim `\\?\C:\work\repo` whenever both name the same file. Use it
+whenever a canonical path is returned, stored, shown, or parsed again; a raw
+`canonicalize` belongs only inside a comparison where both sides are
+canonicalized the same way.
+
+`home_dir()` (feature `file-reference`) is the one home reader: `HOME` on macOS
+and Linux, `USERPROFILE` on native Windows (setting only `HOME` there changes
+nothing), the platform profile lookup when the variable is unset, and `None`
+for a relative value. The result is used as spelled, never canonicalized.
+
+```rust
+let home = biscuit_file::home_dir();                       // Option<PathBuf>
+let here = biscuit_file::canonicalize_simplified(std::path::Path::new("."))?;
+# let _ = (home, here);
+# Ok::<(), std::io::Error>(())
+```
+
+See [Home](./docs/topics/file-references.md#home-) and
+[Canonicalizing Paths](./docs/topics/file-references.md#canonicalizing-paths).
+
 ## Supported Formats
 
 | Format                 | Read | Write |

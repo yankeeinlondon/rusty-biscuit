@@ -219,6 +219,38 @@ To relocate home on native Windows, set `USERPROFILE`; setting only `HOME`
 is not enough. The environment is an input chosen by whoever launches the
 process, not proof of a trusted filesystem boundary.
 
+```mermaid
+flowchart TD
+    A["home_dir()"] --> B{"Which OS?"}
+    B -- "macOS / Linux" --> C{"HOME set?"}
+    B -- "native Windows" --> D{"USERPROFILE set?<br/>(HOME is never read)"}
+    C -- yes --> E["value of HOME"]
+    C -- no --> F["platform profile lookup"]
+    D -- yes --> G["value of USERPROFILE"]
+    D -- no --> F
+    E --> H{"absolute?"}
+    G --> H
+    F --> H
+    H -- yes --> I["home, used exactly as spelled<br/>(no canonicalization, no existence check)"]
+    H -- no --> J["no home: ~ fails with MissingHomeContext"]
+```
+
+Code that needs the home calls `biscuit_file::home_dir()` rather than
+`dirs::home_dir()` or `std::env::home_dir()`. On Windows `dirs::home_dir()`
+asks the OS for the profile folder and ignores `USERPROFILE`, so a program
+using it would read one home while `~` resolved against another. A caller
+that serves one request captures the value once and passes it down, so every
+read in that request sees the same home:
+
+```rust
+use biscuit_file::FileResolutionContext;
+
+// Captures home_dir() once; every `~` in this context uses that value.
+let ctx = FileResolutionContext::new("/work/repo");
+let home = ctx.home_dir();
+# let _ = home;
+```
+
 If the explicit context has no home directory, resolution fails with the
 typed `MissingHomeContext` — not a silent miss.
 
@@ -1085,6 +1117,74 @@ The first occurrence survives with its own text:
 
 Containment additionally checks where a candidate really lands; see
 [Trust boundaries and containment](#trust-boundaries-and-containment).
+
+## Canonicalizing Paths
+
+Canonicalizing asks the filesystem for a path's real location: symlinks are
+followed, `.` and `..` are resolved, and the file must exist. On native
+Windows, `std::fs::canonicalize` also rewrites the result into the verbatim
+form `\\?\C:\...`. Most other code cannot use that form:
+
+- `FileReference` rejects it as an unsupported device prefix;
+- Git reports repositories in the ordinary form, so a verbatim path never
+  matches a Git root by prefix;
+- a `file://` URL or a message built from it shows `\\?\` to the user.
+
+`biscuit_file::canonicalize_simplified` (no feature needed) canonicalizes the
+same way but returns the ordinary spelling whenever it names the same file.
+On macOS and Linux it is exactly `std::fs::canonicalize`.
+
+```rust
+use std::path::Path;
+
+let real = biscuit_file::canonicalize_simplified(Path::new("."))?;
+// Windows: C:\work\repo   (std::fs::canonicalize: \\?\C:\work\repo)
+// macOS:   /private/var/... for a path under /var, as before
+# let _ = real;
+# Ok::<(), std::io::Error>(())
+```
+
+**The rule:** if the canonical path leaves the spot where it was computed
+(returned, stored, persisted, shown, put in a URL, parsed again, or compared
+with a path someone else produced), use `canonicalize_simplified`. A raw
+`std::fs::canonicalize`, `.canonicalize()`, or `dunce::canonicalize` is
+acceptable only for a *private comparison*: both sides are canonicalized the
+same way and only the yes/no answer is kept.
+
+```rust
+use std::path::Path;
+
+// Private comparison: both sides get the same treatment, only the bool escapes.
+fn same_file(a: &Path, b: &Path) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
+}
+# let _ = same_file;
+```
+
+A cache or lookup key counts as private only when every producer of keys uses
+the same function, including any fallback taken when canonicalization fails.
+A key that is the canonical path on success and the authored path on failure
+mixes two spellings on Windows, so it uses `canonicalize_simplified`.
+
+```mermaid
+flowchart TD
+    A["Need a path's real location"] --> B{"Does the result leave<br/>this comparison?"}
+    B -- "returned, stored, shown,<br/>URL, reparsed, hashed into a shared key" --> C["canonicalize_simplified"]
+    B -- "no: both sides canonicalized<br/>the same way, only the answer kept" --> D{"In biscuit-file, Claudine,<br/>or Darkmatter?"}
+    D -- yes --> E["raw call allowed only with an entry<br/>in the package's path_lookup_guard test"]
+    D -- no --> F["raw call allowed"]
+```
+
+In `biscuit-file`, `claudine`, `claudine-cli`, `darkmatter`, and
+`darkmatter-cli`, a Level 1 source guard (`path_lookup_guard`) fails on any
+direct canonicalize call in production code unless that package's guard file
+lists it, by file, enclosing function, and operation, with the invariant that
+makes it private. The failure message names the file and line and prints an
+entry to paste. The same guard rejects a direct `dirs::home_dir` or
+`std::env::home_dir` in Claudine; use `biscuit_file::home_dir()` there.
 
 ## Glob References: `GlobReference`
 

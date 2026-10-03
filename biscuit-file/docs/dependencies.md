@@ -24,7 +24,11 @@
   separately against the relative boundary.
 - `dunce` is unconditional and reduces a Windows `\\?\` verbatim path to its
   legacy spelling — but only when the legacy spelling is equivalent — at the
-  crate's two boundaries:
+  crate's three boundaries:
+  - `canonicalize_simplified` (unfeatured), the crate's only
+    `dunce::canonicalize` call. Every filesystem canonicalization in
+    biscuit-file, Claudine, and Darkmatter whose result leaves a private
+    comparison goes through it, including the resolver's containment check.
   - `simplify_root` (behind `file-reference`), the resolver's root boundary.
     Anchors reach the resolver in both spellings (`std::fs::canonicalize` yields
     verbatim; `gix` and an environment-read home usually yield legacy), and Win32 applies no path
