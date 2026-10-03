@@ -625,18 +625,23 @@ property and dispatches by `CompletionKind`:
   it, and only when `match()` validation would accept it there, so a
   `!fixes/**` exclusion judged from the package is not undone by the
   repository-root pass. The walk shares the scope walker's exclusion
-  rules — `.gitignore` plus the `_`-prefix and curated skip-list
-  (`target`, `node_modules`, …) — so archived `_completed/` artefacts
-  never surface (validation still accepts one you type), and a file
-  symlink whose target leaves the repository is left out.
+  rules — hidden files and directories, `.gitignore`, plus the
+  `_`-prefix and curated skip-list (`target`, `node_modules`, …) — so
+  archived `_completed/` artefacts never surface. These rules only
+  shape the suggestions: validation still accepts a hidden, ignored, or
+  `_`-prefixed file you type. A file symlink that a bare, `./`, or `../`
+  pattern matches and whose target leaves the file tree is left out
+  silently; completion reports no warning for it.
 
   Candidates keep the search order (nearest folder first, then
   shallowest, then by path component); they are not re-sorted
   alphabetically. Each is spelled so that it resolves back to the same
   file from where you are: a file under the launch directory keeps its
-  plain relative path (`fixes/…/spec.md`), and any other file takes the
-  first of `../x.md` or `../sibling/x.md`, `&path`, `~/path`, or the
-  absolute path that does. The typed value partial is a
+  plain relative path (`fixes/…/spec.md`, never `./fixes/…/spec.md`),
+  and any other file takes the first of `../x.md` or `../sibling/x.md`,
+  `&path`, `~/path`, or the absolute path that does. A `{{VAR}}`
+  spelling is never offered, because a placeholder reads oddly in a
+  shell argument. The typed value partial is a
   case-insensitive substring (`*partial*`) over that spelling, so a
   directory fragment like `spec=features/real` narrows candidates that
   share a basename. An empty `match(...)` list falls back to the
@@ -706,6 +711,9 @@ Runtime operation-file recovery distinguishes three outcomes for
    operation-file recovery runs.
 2. **Unresolved bare discovery name** — a single-component implicit name
    such as `access` or `access.md` is eligible for the interactive picker.
+   A name containing `*`, `?`, or `[` (such as `*.md`) is not: it is
+   reported as an explicit miss, because a file reference reads those
+   characters literally.
 3. **Unresolved explicit reference** — a typed path or reference such as
    `./docs/access.md`, `~/access.md`, or `@access.md` reports the existing
    `composition.invalid_file_reference` typed no-match diagnostic without
@@ -724,6 +732,13 @@ is `failure: invalid-reference`. A bare name whose picker cannot open, finds
 nothing, finds too much, or is cancelled is also `failure: no-match`, because
 the picker runs only after the name matched no file. The classes are listed in
 [File Reference Failures](../../../../darkmatter/docs/errors/file-reference-failures.md).
+
+An explicit miss whose reference contains `*`, `?`, or `[`
+(`claudine compose --dry-run 'docs/*.md'`) also explains that a file
+reference reads those characters literally and that a set of files needs a
+form that accepts a glob reference, such as `::file-links`. A plain missing
+name (`docs/missing.md`) and a failure other than `no-match` carry no such
+hint.
 
 Interactive file collection also applies to **missing `$schema`
 properties**: when a frontmatter schema declares
@@ -751,7 +766,8 @@ the wrapper's `switch_process_cwd`, so its `cwd` is still the launch
 area) for markdown files, excluding prompt directories so composition
 prompts do not leak into generic file values. Both walks share the scope walker's exclusion rules —
 `.gitignore`, the `_`-prefix elision, and the curated skip-list
-(`target`, `node_modules`, …).
+(`target`, `node_modules`, …) — and the `match(...)` walk also skips
+hidden files and directories.
 
 ### Layout
 

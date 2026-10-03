@@ -296,13 +296,13 @@ fn contains_ci(haystack: &str, needle: &str) -> bool {
         .contains(&needle.to_ascii_lowercase())
 }
 
-/// Substring-match `active` against `path`'s repo-relative form (falling back
-/// to the basename when `path` is not under `base`).
+/// Substring-match `active` against `path` relative to `base`, the launch
+/// directory (falling back to the basename when `path` is not under `base`).
 ///
-/// Used by the bare-`file` default-glob branch so it filters on the same
-/// repo-relative path the match-glob branch does — what the user types is a
-/// fragment of the path that will be inserted, and shared basenames make
-/// basename-only matching useless for `file(match(...))` candidates.
+/// Used by the bare-`file` default-glob branch so that, like the match-glob
+/// branch, it filters on the path that will be inserted: what the user types
+/// is a fragment of that path, and shared basenames make basename-only
+/// matching useless.
 fn rel_or_name_matches(path: &Path, base: &Path, active: &str) -> bool {
     let target = path
         .strip_prefix(base)

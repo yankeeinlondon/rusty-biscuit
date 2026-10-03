@@ -56,7 +56,9 @@ pub fn resolve_sequence_reference(
         })?
         .ok_or_else(|| CompositionError::SequenceExternalLoad {
             context: format!("`{raw}`"),
-            source: SequenceLoadCause::NotFound,
+            source: SequenceLoadCause::NotFound {
+                glob_hint: biscuit_file::ResolutionFailure::NoMatch.glob_hint(raw),
+            },
         })
 }
 

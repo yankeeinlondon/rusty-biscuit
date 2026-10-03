@@ -116,6 +116,7 @@ mod preflight_execution_parity;
 mod pr_flow_rehearsal;
 mod prompt_guide_defects;
 mod lifecycle_set_shell_values;
+mod literal_glob_hint;
 #[cfg(unix)]
 mod prompt_reporting;
 // Installs the `claudine-fake-pi` fixture binary, which only `test-fixtures`

@@ -148,6 +148,7 @@
 pub(crate) mod codex_model;
 pub(crate) mod completion;
 pub(crate) mod drain_interrupt;
+pub(crate) mod fs_capability;
 pub(crate) mod host_tools;
 pub(crate) mod incomplete_subagents;
 #[cfg(unix)]

@@ -159,11 +159,11 @@ pub enum CompositionError {
     /// New top-level resolution uses [`Self::FileReferenceNoMatch`] so the
     /// candidate record is retained. This arm remains for compatibility with
     /// callers that construct the historical error directly.
-    #[error("file not found: {0}")]
+    #[error("{}", darkmatter::markdown::errors::with_glob_hint(format!("file not found: {}", .0), biscuit_file::ResolutionFailure::NoMatch, .0))]
     FileNotFound(String),
 
     /// A top-level operation-file reference produced a clean resolver no-match.
-    #[error("file not found: {reference}")]
+    #[error("{}", darkmatter::markdown::errors::with_glob_hint(format!("file not found: {}", .reference), biscuit_file::ResolutionFailure::NoMatch, .reference))]
     FileReferenceNoMatch {
         /// The exact reference authored at the command boundary.
         reference: String,
@@ -2670,8 +2670,13 @@ pub enum SequenceLoadCause {
     #[error(transparent)]
     Read(#[from] std::io::Error),
     /// The reference resolved but no file exists at the resolved path.
-    #[error("file not found")]
-    NotFound,
+    /// `glob_hint` is the reference's literal-glob hint
+    /// ([`ResolutionFailure::glob_hint`](biscuit_file::ResolutionFailure::glob_hint)).
+    #[error("{}", darkmatter::markdown::errors::with_hint_line("file not found", *glob_hint))]
+    NotFound {
+        /// The literal-glob hint, when the reference's text looks like a glob.
+        glob_hint: Option<&'static str>,
+    },
     /// `~` expansion failed because no home directory is known.
     #[error("unable to resolve home directory")]
     HomeDir,
@@ -3112,6 +3117,19 @@ impl CompositionError {
             | Self::AutocompleteOverCap { .. }
             | Self::AutocompleteNotInteractive
             | Self::AutocompleteCancelled { .. } => Some(ResolutionFailure::NoMatch),
+            _ => None,
+        }
+    }
+
+    /// The literal-glob hint for a file-reference no-match whose authored
+    /// text looks like a glob
+    /// ([`ResolutionFailure::glob_hint`](biscuit_file::ResolutionFailure::glob_hint));
+    /// `None` for every other error, including a no-match the picker reached.
+    pub fn glob_hint(&self) -> Option<&'static str> {
+        match self {
+            Self::FileNotFound(reference) | Self::FileReferenceNoMatch { reference, .. } => {
+                biscuit_file::ResolutionFailure::NoMatch.glob_hint(reference)
+            }
             _ => None,
         }
     }

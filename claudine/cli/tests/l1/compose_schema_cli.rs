@@ -1753,6 +1753,113 @@ fn completion_file_match_honors_negated_path_qualified_glob() {
     );
 }
 
+/// Criterion 26 for completion: an authored directory name is
+/// case-sensitive in an absolute pattern as in a bare one, so `DOCS` does not
+/// offer `docs/a.md`, even on a case-insensitive filesystem where it opens.
+#[test]
+fn completion_file_match_directory_names_are_case_sensitive() {
+    assert_completion_judges_directory_spelling("complete-schema-file-match-directory-case", "docs", "DOCS", None);
+}
+
+/// Criterion 26 for completion with Unicode aliases that lowercasing does not
+/// reveal (`ς` for a stored `Σ`, `ß` for a stored `SS`). Where the alias
+/// does not open, the checks still run.
+#[test]
+fn completion_file_match_directory_names_reject_unicode_case_aliases() {
+    for (label, stored, authored) in
+        [("complete-schema-file-match-sigma", "Σ", "ς"), ("complete-schema-file-match-sharp-s", "SS", "ß")]
+    {
+        assert_completion_judges_directory_spelling(label, stored, authored, None);
+    }
+}
+
+/// Criterion 26 for completion below a traversal-only ancestor (mode
+/// `0111`): being unable to list it must not offer the mismatched `DOCS`.
+#[cfg(unix)]
+#[test]
+fn completion_file_match_directory_names_below_a_traversal_only_ancestor_are_case_sensitive() {
+    assert_completion_judges_directory_spelling(
+        "complete-schema-file-match-traversal-only",
+        "locked/anchor/docs",
+        "locked/anchor/DOCS",
+        Some("locked"),
+    );
+}
+
+/// Shipped `__complete` offers nothing for absolute and bare patterns
+/// spelling the stored directory `stored` as `authored`, and offers the file
+/// for the stored spelling. With `traversal_only`, that directory is set to
+/// mode `0111` first.
+fn assert_completion_judges_directory_spelling(label: &str, stored: &str, authored: &str, traversal_only: Option<&str>) {
+    let ws = common::TestWorkspace::named(label);
+    seed_cargo_workspace(ws.path(), &["pkg"]);
+    write_file(&ws.path().join(stored).join("a.md"), "# A\n");
+    common::fs_capability::probe_directory_alias(ws.path(), stored, authored);
+    let root = biscuit_file::to_portable_string(ws.path());
+    let offered = |pattern: &str| {
+        write_file(
+            &ws.path().join("prompts").join("plan.md"),
+            &format!("---\n$schema:\n  spec: \"file(match('{pattern}'))\"\n---\nSee {{{{spec}}}}.\n"),
+        );
+        run_complete(ws.path(), &["compose", "prompts/plan.md", "spec="])
+            .into_iter()
+            .filter(|candidate| candidate.contains("a.md"))
+            .collect::<Vec<_>>()
+    };
+    #[cfg(unix)]
+    let _guard = match traversal_only {
+        Some(dir) => match TraversalOnly::new(&ws.path().join(dir)) {
+            Some(guard) => Some(guard),
+            None => return,
+        },
+        None => None,
+    };
+
+    for mismatched in [format!("{root}/{authored}/*.md"), format!("{authored}/*.md")] {
+        assert_eq!(offered(&mismatched), Vec::<String>::new(), "`{mismatched}`");
+    }
+    let suffix = format!("{stored}/a.md'");
+    let mut exact_patterns = vec![format!("{root}/{stored}/*.md")];
+    // A bare pattern's walk starts at the workspace and cannot list a
+    // traversal-only folder, so it offers nothing there by design.
+    if traversal_only.is_none() {
+        exact_patterns.push(format!("{stored}/*.md"));
+    }
+    for exact in exact_patterns {
+        let got = offered(&exact);
+        assert!(got.iter().any(|candidate| candidate.ends_with(&suffix)), "`{exact}`: {got:?}");
+    }
+}
+
+/// Sets a directory to mode `0o111` (traversal only) and restores `0o755` on
+/// drop. `None` when this user can still list it (a privileged user).
+#[cfg(unix)]
+struct TraversalOnly(std::path::PathBuf);
+
+#[cfg(unix)]
+impl TraversalOnly {
+    fn new(dir: &std::path::Path) -> Option<Self> {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(dir, fs::Permissions::from_mode(0o111)).expect("chmod 111");
+        let guard = Self(dir.to_path_buf());
+        match fs::read_dir(dir) {
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => Some(guard),
+            other => {
+                eprintln!("skipping: {} is still listable after chmod 111 ({other:?})", dir.display());
+                None
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for TraversalOnly {
+    fn drop(&mut self) {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o755));
+    }
+}
+
 // ============================================================================
 // Caller-supplied file references (2026-09-27-union-partial-file-completion)
 // ============================================================================

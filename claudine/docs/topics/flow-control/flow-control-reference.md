@@ -74,7 +74,7 @@ Targets resolve through the shared `biscuit-file::FileReference` contract, relat
 | `^other.md` | Package, then package-area, then repository roots |
 | `~/other.md` | Your home directory only |
 
-The target must exist. A missing target fails with a typed `Unresolvable file reference` error. When a target writes its own `proxy`, relative lookups start from the target.
+The target must exist. A missing target fails with a typed `Unresolvable file reference` error. The target is one file, never a glob: a missing `docs/*.md` names a file called `*.md`, and its error says so. When a target writes its own `proxy`, relative lookups start from the target.
 
 ### Passing values with `with:`
 

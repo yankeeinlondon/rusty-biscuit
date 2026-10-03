@@ -300,9 +300,10 @@ pub(super) fn rebase_caller_file_problems(
 
 /// The unresolved-reference text, naming the caller's base directory.
 fn caller_no_match_reason(provided: &str, origin: &FileResolutionContext) -> String {
-    format!(
-        "{NO_MATCH} `{provided}` while resolving from `{}`",
-        origin.cwd().display(),
+    darkmatter::markdown::errors::with_glob_hint(
+        format!("{NO_MATCH} `{provided}` while resolving from `{}`", origin.cwd().display()),
+        biscuit_file::ResolutionFailure::NoMatch,
+        provided,
     )
 }
 

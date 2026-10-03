@@ -89,7 +89,7 @@ pub(super) fn status_block(err: &CompositionError, term: &Terminal) -> StatusBlo
                     "Unresolvable file reference",
                 ))
                 .body(body)
-                .hint("Correct the reference and try again.")
+                .hint(err.glob_hint().unwrap_or("Correct the reference and try again."))
         }
         _ => {
             let msg = super::with_failure_row(err.to_string(), err);

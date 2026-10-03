@@ -868,7 +868,7 @@ $schema:
 
 `claudine compose plan spec=everywhere` (with no literal `everywhere` file) now:
 
-1. walks the `match(**/*spec*.md)` glob from the **launch area** (the same `property_value_root` anchor completion uses, so *offered == accepted*),
+1. walks the `match(**/*spec*.md)` glob exactly as TAB completion does, so *offered == accepted*: a bare pattern searches the **launch area** first and then the repository root, and `./`, `&`, `^`, `~`, and `@` name their own folders (see [Property values](./completions/shell-completions.md#property-values-after-)),
 2. filters candidates whose path contains `everywhere` (case-insensitive), and
 3. drives a **confirmation dialog** on a single match or a **chooser** on multiple, then records the selected path in the effective override and caller provenance before continuing preparation. Each unresolved supplied input is handled, including individual file-array elements.
 

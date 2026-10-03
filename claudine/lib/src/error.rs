@@ -386,9 +386,25 @@ pub enum ClaudineError {
     #[error("launch context detection failed: {0}")]
     LaunchContextDetection(#[source] Arc<sniff::SniffError>),
 
-    /// System prompt file not found.
-    #[error("system prompt file not found: {0}")]
+    /// An explicit system prompt file reference matched no file
+    /// ([`ResolutionFailure::NoMatch`](biscuit_file::ResolutionFailure::NoMatch)).
+    /// The message carries the reference's literal-glob hint
+    /// ([`ResolutionFailure::glob_hint`](biscuit_file::ResolutionFailure::glob_hint)).
+    #[error("{}", darkmatter::markdown::errors::with_glob_hint(format!("system prompt file not found: {}", .0), biscuit_file::ResolutionFailure::NoMatch, .0))]
     SystemPromptFileNotFound(String),
+
+    /// An explicit system prompt file reference failed for a reason other
+    /// than a missing file: malformed syntax, an absent anchor, a relative
+    /// path leaving its tree, or an I/O probe failure. Its class is
+    /// `source.resolution_failure()`.
+    #[error("system prompt file reference `{reference}` could not be resolved: {source}")]
+    SystemPromptFileUnresolvable {
+        /// The reference exactly as supplied.
+        reference: String,
+        /// The resolver's typed failure. Boxed to keep the error small.
+        #[source]
+        source: Box<biscuit_file::FileReferenceError>,
+    },
 
     /// System prompt composition through Darkmatter failed.
     ///
@@ -432,9 +448,9 @@ impl Diagnostic for ClaudineError {
                 _ => "io.read_failed",
             },
             ClaudineError::HttpError(_) | ClaudineError::UrlError(_) => "io.network",
-            ClaudineError::Sqlite(_) | ClaudineError::SystemPromptFileNotFound(_) => {
-                "io.read_failed"
-            }
+            ClaudineError::Sqlite(_)
+            | ClaudineError::SystemPromptFileNotFound(_)
+            | ClaudineError::SystemPromptFileUnresolvable { .. } => "io.read_failed",
             ClaudineError::LockError { .. } | ClaudineError::LinkingError(_) => "io.write_failed",
             // `config.*` — Claudine/user configuration is invalid.
             ClaudineError::ConfigNotFound(_)
@@ -535,7 +551,8 @@ impl Diagnostic for ClaudineError {
                 base["message"] = json!(self.to_string());
             }
             // `io.read_failed` declares `path`.
-            ClaudineError::SystemPromptFileNotFound(path) => {
+            ClaudineError::SystemPromptFileNotFound(path)
+            | ClaudineError::SystemPromptFileUnresolvable { reference: path, .. } => {
                 base["path"] = json!(path);
             }
             // `io.write_failed` declares `path`.

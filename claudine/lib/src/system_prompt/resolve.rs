@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use biscuit_file::{FileReference, FileResolutionContext};
 
@@ -19,12 +19,17 @@ const NON_INTERACTIVE_FILENAME: &str = "non-interactive.md";
 /// ## Returns
 ///
 /// Returns `Ok(Some((source, text)))` if a prompt file is found, `Ok(None)` if
-/// no file exists in the search path, or `Err` if file I/O fails.
+/// no file exists in the search path, or `Err` if file I/O fails, including a
+/// candidate whose metadata cannot be read: a more local prompt that cannot
+/// be inspected never yields to a less local one.
 ///
 /// ## Errors
 ///
-/// Returns `ClaudineError::SystemPromptFileNotFound` if an explicit file path
-/// does not exist. Returns `ClaudineError::Io` if reading any file fails.
+/// Returns `ClaudineError::SystemPromptFileNotFound` if an explicit file
+/// reference matches no file, and
+/// `ClaudineError::SystemPromptFileUnresolvable` if it fails to parse or
+/// resolve for another reason. Returns `ClaudineError::Io` if reading any
+/// file fails.
 ///
 /// ## Examples
 ///
@@ -76,13 +81,15 @@ fn resolve_explicit_file_with_context(
     mode: SystemPromptMode,
     resolution_context: &FileResolutionContext,
 ) -> Result<Option<(SystemPromptSource, String)>, crate::error::ClaudineError> {
-    let not_found =
-        || crate::error::ClaudineError::SystemPromptFileNotFound(file_ref.to_string());
-    let reference = FileReference::new(file_ref).map_err(|_| not_found())?;
+    let unresolvable = |source| crate::error::ClaudineError::SystemPromptFileUnresolvable {
+        reference: file_ref.to_string(),
+        source: Box::new(source),
+    };
+    let reference = FileReference::new(file_ref).map_err(unresolvable)?;
     let path = reference
         .resolve_in_context(resolution_context)
-        .map_err(|_| not_found())?
-        .ok_or_else(not_found)?;
+        .map_err(unresolvable)?
+        .ok_or_else(|| crate::error::ClaudineError::SystemPromptFileNotFound(file_ref.to_string()))?;
     let text = std::fs::read_to_string(&path)?;
     Ok(Some((SystemPromptSource::ExplicitFile { path, mode }, text)))
 }
@@ -102,7 +109,7 @@ fn discover_standard_file(
     let scope_dirs = build_scope_list(context);
     for (dir, scope) in &scope_dirs {
         let candidate = dir.join(STANDARD_FILENAME);
-        if candidate.is_file() {
+        if is_present_file(&candidate)? {
             let text = std::fs::read_to_string(&candidate)?;
             return Ok(Some((
                 SystemPromptSource::StandardDiscovered {
@@ -117,7 +124,7 @@ fn discover_standard_file(
     // User-home fallback
     let user_home = home_dir.map(|h| h.join(".claudine").join(STANDARD_FILENAME));
     if let Some(ref home_path) = user_home
-        && home_path.is_file()
+        && is_present_file(home_path)?
     {
         let text = std::fs::read_to_string(home_path)?;
         return Ok(Some((
@@ -151,7 +158,7 @@ fn resolve_non_interactive_candidates_with_home(
 
     if let Some(repo_root) = &context.repo_root {
         let repo_path = repo_root.join(".claudine").join(NON_INTERACTIVE_FILENAME);
-        if repo_path.is_file() {
+        if is_present_file(&repo_path)? {
             candidates.push((
                 SystemPromptSource::NonInteractiveFile {
                     path: repo_path.clone(),
@@ -164,7 +171,7 @@ fn resolve_non_interactive_candidates_with_home(
 
     if let Some(home_path) =
         home_dir.map(|h| h.join(".claudine").join(NON_INTERACTIVE_FILENAME))
-        && home_path.is_file()
+        && is_present_file(&home_path)?
     {
         candidates.push((
             SystemPromptSource::NonInteractiveFile {
@@ -209,6 +216,28 @@ fn build_scope_list(context: &LaunchContext) -> Vec<(PathBuf, StandardPromptScop
         list
     } else {
         vec![(context.cwd.clone(), StandardPromptScope::CurrentDirectory)]
+    }
+}
+
+/// Whether `path` is a regular file. Only a path that is not there
+/// (`NotFound`, or a non-directory ancestor) is `false`; any other metadata
+/// failure, such as an ancestor without search permission, is an I/O error
+/// naming `path`, so discovery never falls through to a less local file.
+fn is_present_file(path: &Path) -> Result<bool, crate::error::ClaudineError> {
+    match std::fs::metadata(path) {
+        Ok(metadata) => Ok(metadata.is_file()),
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+            ) =>
+        {
+            Ok(false)
+        }
+        Err(error) => Err(crate::error::ClaudineError::Io(std::io::Error::new(
+            error.kind(),
+            format!("{}: {error}", path.display()),
+        ))),
     }
 }
 

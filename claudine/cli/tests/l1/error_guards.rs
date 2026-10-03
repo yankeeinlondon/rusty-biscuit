@@ -948,6 +948,15 @@ mod corpus {
                 Box::new(ClaudineError::SystemPromptFileNotFound("sp.md".to_string())),
             ),
             (
+                "ClaudineError::SystemPromptFileUnresolvable",
+                Box::new(ClaudineError::SystemPromptFileUnresolvable {
+                    reference: "~user/sp.md".to_string(),
+                    source: Box::new(biscuit_file::FileReferenceError::UnsupportedUserHome(
+                        "~user/sp.md".to_string(),
+                    )),
+                }),
+            ),
+            (
                 "ClaudineError::LockError",
                 Box::new(ClaudineError::LockError {
                     path: PathBuf::from("/tmp/x.lock"),
