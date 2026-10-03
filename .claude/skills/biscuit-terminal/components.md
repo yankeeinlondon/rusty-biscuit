@@ -28,7 +28,8 @@ Every component owns a `Layout` for margins, alignment, word-wrap, and row-fill.
 | `PadLeft` | `pad.rs` | No | Right-align content by padding with spaces on the left |
 | `PadRight` | `pad.rs` | No | Left-align content by padding with spaces on the right |
 | `Progress` | `progress.rs` | No | Progress indicator rendering |
-| `Prose` | `prose.rs` | No | Styled text with inline tokens (atomic + block) |
+| `InlineProse` | `prose/inline_prose.rs` | No | Inline styled text (phrasing only) for cells, labels, values in a line |
+| `Prose` | `prose/prose.rs` | No | Block styled text: paragraphs + fenced code, `Layout`, `ProseTag` |
 | `Section` | `section.rs` | Yes | Heading (h1-h6) with content body |
 | `Spinner` | `spinner.rs` | No | Live stderr activity spinner; not a `TerminalRenderable` (see below) |
 | `Status` | `status.rs` | No | Status items with icons (success, failure, warning, info, active, not-started) |

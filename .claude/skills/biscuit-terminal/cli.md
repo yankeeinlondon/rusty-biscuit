@@ -297,7 +297,8 @@ Options:
 
 ## Prose Command
 
-Render styled prose text with bracketed tags or a Markdown subset:
+Render a block `Prose` (blank line = new paragraph, single newline = soft
+break, `\` + newline = hard break) with bracketed tags or a Markdown subset:
 
 ```bash
 # Block tags
@@ -310,6 +311,7 @@ bt prose "<a href='https://example.com'>Click here</a>"
 bt prose "<purple-800>Dark purple</purple-800>" --md-plus
 bt prose "<b>Bold</b>" --margin-left 4 --md
 bt prose "<b>Bold</b>" --margin-left 4 --html
+bt prose 'run `md hash` now' --html   # <p>run <code>md hash</code> now</p>
 
 # With margins and alignment
 bt prose --margin-left 4 "Indented content"
@@ -331,7 +333,15 @@ Options:
 
 Supported syntax:
 - **Block tags**: `<b>`, `<i>`, `<u>`, `<uu>`, `<~>`, `<a href="...">`, `<red>`, `<rgb R,G,B>`, `<bg-rgb R,G,B>`, `<bg-coral>`, `<bg-red-800>`
-- **Markdown subset**: `[desc](url)`, `**bold**`, `_italic_`
+- **Markdown subset**: `[desc](url)`, `**bold**`, `_italic_`, code spans (inline code), fenced code blocks
+
+`--html` output is rendered by `Prose` itself: one `<p>` per paragraph, its
+`Layout` (all four margins) as CSS on one wrapping `<div>`, and no
+`class="prose"`. Only `--alignment` adds a CLI `<div style="text-align: …">`
+wrapper (`shared::render_html_with_alignment`, also used by `bt section` and
+`bt list`), because `renderable`'s CSS lowering expresses alignment only via
+`max_width` + auto margins. `bt section --content` items are `Prose` too, so
+each is its own paragraph.
 
 ## Content Analysis
 
