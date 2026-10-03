@@ -51,6 +51,7 @@ mod expression_regression;
 mod frontmatter_surface_projection;
 mod git_context_integration;
 mod glob_consumers;
+mod glob_implementation_guard;
 mod horizontal_rule_integration;
 mod horizontal_rule_snapshots;
 mod html_inversion;
