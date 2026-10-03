@@ -134,22 +134,50 @@ No spikes are scheduled. The spec's own figures answer the performance question 
 
 The work changes readers of two on-disk formats: the PR store (`<hash>.prs.json`, format 5) and the completion receipt (`<hash>.refresh-receipt.<id>.json`). Outcomes below are asserted through the public result (`select_cached` / `stored_publication` for the store; the wait result for the receipt), not through the parser's return value.
 
-Store (`pull_requests`), per load-bearing field:
+Store (`pull_requests`), per load-bearing envelope field:
 
-| Shape | `format_version` | `publication` | `origin_digest` | `fetched_at` | answer list | one element |
+| Shape | `format_version` | `publication` | `origin_digest` | `fetched_at` | `source_repo` | `pull_requests` (answer list) |
 |---|---|---|---|---|---|---|
-| absent | Miss | Miss | Miss | Miss | Miss (not empty) | n/a |
-| explicit null | Miss | Miss | Miss | Miss | Miss (not empty) | Miss |
-| wrong type, whole field | Miss | Miss | Miss | Miss | Miss | n/a |
-| wrong type, one element | n/a | n/a | n/a | n/a | Miss (never filtered) | Miss |
-| wrong type, every element | n/a | n/a | n/a | n/a | Miss (not empty) | Miss |
-| empty (`[]`, `""`) | `""` Miss | `""` Miss (no usable id) | `""` Miss | n/a | `[]` valid empty answer | n/a |
+| absent | Miss | Miss | Miss | Miss | Miss | Miss (not empty) |
+| explicit null | Miss | Miss | Miss | Miss | valid: unknown repository | Miss (not empty) |
+| wrong type, whole field | Miss | Miss | Miss | Miss | Miss | Miss |
+| `[]` | Miss | Miss | Miss | Miss | Miss | valid empty answer |
+| `{}` | Miss | Miss | Miss | Miss | Miss | Miss |
+| `""` | Miss | Miss (no usable id) | Miss | Miss | valid: a repository no PR matches | Miss |
 | duplicate key | Miss | Miss | Miss | Miss | Miss | Miss |
+| one invalid element among valid ones | n/a | n/a | n/a | n/a | n/a | Miss (never filtered) |
+| every element invalid | n/a | n/a | n/a | n/a | n/a | Miss (not empty) |
 | trailing/invalid content | Miss | Miss | Miss | Miss | Miss | Miss |
 | format 4 (`writer` present) | Miss | | | | | |
-| future `fetched_at`, other origin | | | | Miss | | |
+| future, other origin / stale | | | other origin: Miss | future: Miss; stale: Stale, id kept | | |
 
-Receipt, per load-bearing field (`id`, `origin_digest`, `branch`, timestamp, `head`, `prs`): every row above (absent, null, wrong type, empty, duplicate, trailing) is **"missing receipt"**, never an empty or default outcome, and never a PR success. Wrong id, origin, branch, an invalid or pre-attempt timestamp, and an unknown `prs` variant are "missing" too. A `prs` of `Ok` with no store publication is still the receipt's answer, not an invented one.
+Store, per field of one PR element (any invalid element makes the whole store a Miss):
+
+| Shape | `number` | `url` | `source_repo` | `source_branch` | `target_branch` |
+|---|---|---|---|---|---|
+| absent | Miss | Miss | Miss | Miss | Miss |
+| explicit null | Miss | valid: no link | valid: unknown repository | Miss | Miss |
+| wrong type | Miss | Miss | Miss | Miss | Miss |
+| `[]`, `{}` | Miss | Miss | Miss | Miss | Miss |
+| `""` | Miss | valid: empty link | valid: matches no repository | valid: matches no branch | valid: placed by an empty target |
+| duplicate key | Miss | Miss | Miss | Miss | Miss |
+
+Unknown fields, in the envelope or an element, are ignored.
+
+Receipt, per load-bearing envelope field (`attempt_id`, `origin_digest`, `branch`, `finished_at`, `head`, `prs`, `format_version`): every row above (absent, null, `[]`, `{}`, wrong type, `""`, duplicate, trailing) is **"missing receipt"**, never an empty or default outcome, and never a PR success. Wrong id, origin, branch, an invalid or pre-attempt timestamp, and an unknown `prs` variant are "missing" too. A `prs` of `Ok` with no store publication is still the receipt's answer, not an invented one.
+
+Receipt, per nested field, for each failure that carries fields (`credentials-rejected`, `credentials-insufficient`, `rate-limited`); "missing" means the wait reports a generic PR failure and keeps the finished head:
+
+| Shape | `prs.kind` | `prs.failure` | `prs.failure.kind` | `prs.failure.key` | `prs.failure.authenticated` (rate limit) |
+|---|---|---|---|---|---|
+| absent | missing | missing | missing | missing | missing |
+| explicit null | missing | missing | missing | valid: the failure, naming no variable | missing |
+| wrong type (integer `kind` included) | missing | missing | missing | missing | missing |
+| `[]`, `{}` | missing | missing | missing | missing | missing |
+| `""` / not a variable name | missing | missing | missing | missing | missing |
+| unknown variant | missing | n/a | missing | n/a | n/a |
+| duplicate key | missing | missing | missing | missing | missing |
+| `false` | n/a | n/a | n/a | n/a | valid: unauthenticated rate limit |
 
 Rules:
 

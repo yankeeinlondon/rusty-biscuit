@@ -23,7 +23,8 @@ status: draft-spec
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-02
-review_iterations: 0
+review_iterations: 4
+completed: true
 clarified: false
 implemented: true
 related:
