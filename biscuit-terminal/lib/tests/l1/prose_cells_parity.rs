@@ -1,13 +1,15 @@
-//! Phase 4 verification tests for `StyledProse` table cells.
+//! Verification tests for `StyledInlineProse` table cells: a table cell is
+//! phrasing content, so it embeds an `InlineProse`.
 //!
 //! Covers every acceptance criterion from
-//! `renderable/features/2026-06-08-prose-cells/spec.md`.
+//! `renderable/features/2026-06-08-prose-cells/spec.md` and the table half of
+//! the fenced-code-in-`InlineProse` rule.
 
 #[allow(clippy::duplicate_mod)]
 #[path = "parity_helpers.rs"]
 mod parity_helpers;
 
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{InlineProse, LineBreaks};
 use biscuit_terminal::components::renderable::{BrowserRenderable, TerminalRenderable};
 use biscuit_terminal::components::table::types::{ColumnType, Currency};
 use biscuit_terminal::components::table::{Table, TableCellContent, TableColumn};
@@ -26,8 +28,8 @@ fn prose_table() -> Table {
     Table::new()
         .with_columns(vec![TableColumn::new("Status"), TableColumn::new("Owner")])
         .with_data(vec![vec![
-            TableCellContent::from(Prose::new("<dim>inactive</dim>")),
-            TableCellContent::from(Prose::new("<b>Alice</b>")),
+            TableCellContent::from(InlineProse::new("<dim>inactive</dim>")),
+            TableCellContent::from(InlineProse::new("<b>Alice</b>")),
         ]])
 }
 
@@ -54,20 +56,20 @@ fn first_data_cell(node: &RenderNode) -> &RenderNode {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn prose_into_produces_styled_prose() {
-    let cell: TableCellContent = Prose::new("hello").into();
+fn inline_prose_into_produces_styled_inline_prose() {
+    let cell: TableCellContent = InlineProse::new("hello").into();
     assert!(
-        matches!(cell, TableCellContent::StyledProse(_)),
-        "Prose::into() must produce StyledProse, got {cell:?}"
+        matches!(cell, TableCellContent::StyledInlineProse(_)),
+        "InlineProse::into() must produce StyledInlineProse, got {cell:?}"
     );
 }
 
 #[test]
-fn prose_into_boxed_correctly() {
-    let prose = Prose::new("<b>bold</b>");
+fn inline_prose_into_boxed_correctly() {
+    let prose = InlineProse::new("<b>bold</b>");
     let cell: TableCellContent = prose.into();
-    let TableCellContent::StyledProse(boxed) = &cell else {
-        panic!("expected StyledProse");
+    let TableCellContent::StyledInlineProse(boxed) = &cell else {
+        panic!("expected StyledInlineProse");
     };
     assert_eq!(boxed.content(), "<b>bold</b>");
 }
@@ -80,7 +82,7 @@ fn prose_into_boxed_correctly() {
 fn bold_prose_projects_strong_child() {
     let table = Table::new()
         .with_columns(vec![TableColumn::new("Col")])
-        .with_data(vec![vec![TableCellContent::from(Prose::new(
+        .with_data(vec![vec![TableCellContent::from(InlineProse::new(
             "<b>bold</b>",
         ))]]);
     let node = table.render_tree_node().expect("tree node");
@@ -99,7 +101,7 @@ fn bold_prose_projects_strong_child() {
 fn italic_prose_projects_emphasis_child() {
     let table = Table::new()
         .with_columns(vec![TableColumn::new("Col")])
-        .with_data(vec![vec![TableCellContent::from(Prose::new(
+        .with_data(vec![vec![TableCellContent::from(InlineProse::new(
             "<i>italic</i>",
         ))]]);
     let node = table.render_tree_node().expect("tree node");
@@ -118,7 +120,7 @@ fn italic_prose_projects_emphasis_child() {
 fn strikethrough_prose_projects_delete_child() {
     let table = Table::new()
         .with_columns(vec![TableColumn::new("Col")])
-        .with_data(vec![vec![TableCellContent::from(Prose::new(
+        .with_data(vec![vec![TableCellContent::from(InlineProse::new(
             "<~>strike</~>",
         ))]]);
     let node = table.render_tree_node().expect("tree node");
@@ -137,7 +139,7 @@ fn strikethrough_prose_projects_delete_child() {
 fn link_prose_projects_link_child() {
     let table = Table::new()
         .with_columns(vec![TableColumn::new("Col")])
-        .with_data(vec![vec![TableCellContent::from(Prose::new(
+        .with_data(vec![vec![TableCellContent::from(InlineProse::new(
             r#"<a href="https://example.com">go</a>"#,
         ))]]);
     let node = table.render_tree_node().expect("tree node");
@@ -155,7 +157,7 @@ fn link_prose_projects_link_child() {
 fn colored_prose_projects_span_child() {
     let table = Table::new()
         .with_columns(vec![TableColumn::new("Col")])
-        .with_data(vec![vec![TableCellContent::from(Prose::new(
+        .with_data(vec![vec![TableCellContent::from(InlineProse::new(
             "<red>warn</red>",
         ))]]);
     let node = table.render_tree_node().expect("tree node");
@@ -173,10 +175,10 @@ fn colored_prose_projects_span_child() {
 }
 
 #[test]
-fn styled_prose_does_not_project_flat_text() {
+fn styled_inline_prose_does_not_project_flat_text() {
     let table = Table::new()
         .with_columns(vec![TableColumn::new("Col")])
-        .with_data(vec![vec![TableCellContent::from(Prose::new(
+        .with_data(vec![vec![TableCellContent::from(InlineProse::new(
             "<b>bold</b> plain",
         ))]]);
     let node = table.render_tree_node().expect("tree node");
@@ -204,7 +206,7 @@ fn styled_prose_does_not_project_flat_text() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn styled_prose_cell_hints() {
+fn styled_inline_prose_cell_hints() {
     let table = prose_table();
     let node = table.render_tree_node().expect("tree node");
     let cell = first_data_cell(&node);
@@ -212,39 +214,17 @@ fn styled_prose_cell_hints() {
         .attrs
         .table_cell_hints()
         .expect("cell must carry hints");
-    assert_eq!(hints.kind, "styled_prose");
+    assert_eq!(hints.kind, "styled_inline_prose");
     assert!(hints.raw_value.is_null(), "raw_value must be null");
 }
 
 // ---------------------------------------------------------------------------
-// Fenced-code degradation
+// Fenced code in a cell becomes inline code
 // ---------------------------------------------------------------------------
 
 #[test]
-fn fenced_code_in_prose_degrades_to_text() {
-    // Standalone fence lines: a fence is recognized only when the trimmed line
-    // starts with three backticks, so the fence must own its own line for Prose
-    // to lift it into a `Code` node (and thus exercise `degrade_code_nodes`).
-    let prose = Prose::new("before\n```rust\nfn main() {}\n```\nafter");
-
-    // Precondition: the raw Prose projection really does carry a fenced `Code`
-    // node — otherwise the degradation below would be a no-op false positive.
-    let root = renderable::tree::TreeRenderable::render_tree(&prose);
-    let code = root
-        .children()
-        .iter()
-        .find_map(|c| match &c.kind {
-            NodeKind::Code { lang, value, .. } => Some((lang.clone(), value.clone())),
-            _ => None,
-        })
-        .expect("Prose::render_tree must contain a fenced Code block");
-    assert_eq!(code.0.as_deref(), Some("rust"), "fence language is captured");
-    assert!(
-        code.1.contains("fn main()"),
-        "code body present before degradation: {:?}",
-        code.1
-    );
-
+fn multiline_fence_in_a_cell_is_one_inline_code_value() {
+    let prose = InlineProse::new("before\n```rust\nfn main() {}\nlet x = 1;\n```\nafter");
     let table = Table::new()
         .with_columns(vec![TableColumn::new("Col")])
         .with_data(vec![vec![TableCellContent::from(prose)]]);
@@ -252,7 +232,7 @@ fn fenced_code_in_prose_degrades_to_text() {
     let report = validate(&node, ValidationMode::Full);
     assert!(
         !report.has_errors(),
-        "table with degraded code must validate cleanly: {:?}",
+        "table with a fenced cell must validate cleanly: {:?}",
         report.errors().collect::<Vec<_>>()
     );
 
@@ -260,49 +240,41 @@ fn fenced_code_in_prose_degrades_to_text() {
     let NodeKind::TableCell { children } = &cell.kind else {
         panic!("expected TableCell");
     };
-    let has_code = children.iter().any(|c| matches!(c.kind, NodeKind::Code { .. }));
-    assert!(
-        !has_code,
-        "fenced code block must be degraded to Text, not remain as Code"
-    );
-    let text_content: String = children
+    let codes: Vec<&str> = children
         .iter()
         .filter_map(|c| match &c.kind {
-            NodeKind::Text { value } => Some(value.as_str()),
+            NodeKind::InlineCode { value } => Some(value.as_str()),
             _ => None,
         })
-        .collect::<Vec<_>>()
-        .join("");
+        .collect();
+    assert_eq!(codes, ["fn main() {} let x = 1;"], "cell children: {children:?}");
     assert!(
-        text_content.contains("fn main()"),
-        "degraded code body must appear as text: {text_content}"
-    );
-    assert!(
-        !text_content.contains("```") && !text_content.contains("rust"),
-        "degraded text must drop fence and language metadata: {text_content}"
+        !children
+            .iter()
+            .any(|c| matches!(c.kind, NodeKind::Code { .. } | NodeKind::HardBreak)),
+        "no block and no forced line break in the cell: {children:?}"
     );
 
-    // Acceptance criterion 6: deterministic cross-target degradation. Every
-    // target must surface the literal code body and never re-emit the fence or
-    // language tag.
     let term = test_terminal(80);
     let terminal = strip_ansi(&table.render(&term));
+    assert!(
+        terminal.contains("before fn main() {} let x = 1; after"),
+        "terminal keeps the cell on one line: {terminal}"
+    );
     let markdown = table.render_markdown();
-    let markdown_plus = table.render_markdown_plus();
+    assert!(
+        markdown.contains("| before `fn main() {} let x = 1;` after |"),
+        "markdown cell holds one code span: {markdown}"
+    );
     let browser = table.render_html_fragment().render();
-    for (target, out) in [
-        ("terminal", terminal),
-        ("markdown", markdown),
-        ("markdown_plus", markdown_plus),
-        ("browser", browser),
-    ] {
-        assert!(
-            out.contains("fn main()"),
-            "{target} must surface the degraded code body: {out}"
-        );
+    assert!(
+        browser.contains("<code>fn main() {} let x = 1;</code>") && !browser.contains("<pre"),
+        "browser cell holds inline code: {browser}"
+    );
+    for (target, out) in [("terminal", terminal), ("markdown", markdown), ("browser", browser)] {
         assert!(
             !out.contains("```") && !out.contains("rust"),
-            "{target} must not re-emit fence or language metadata: {out}"
+            "{target} must not emit the fence or its language hint: {out}"
         );
     }
 }
@@ -312,8 +284,9 @@ fn fenced_code_in_prose_degrades_to_text() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn prose_layout_does_not_become_cell_layout() {
-    let prose = Prose::new("<b>bold</b>").with_left_margin(TargetValue::universal(Length::ch(4)));
+fn inline_prose_layout_does_not_become_cell_layout() {
+    let mut prose = InlineProse::new("<b>bold</b>");
+    prose.layout_mut().margin.left = TargetValue::universal(Length::ch(4));
     let table = Table::new()
         .with_columns(vec![TableColumn::new("Col")])
         .with_data(vec![vec![TableCellContent::from(prose)]]);
@@ -322,7 +295,7 @@ fn prose_layout_does_not_become_cell_layout() {
     let cell_layout = cell.attrs.layout();
     assert!(
         cell_layout.is_none(),
-        "Prose's outer layout must not bleed into the cell node attrs"
+        "InlineProse's layout must not bleed into the cell node attrs"
     );
 }
 
@@ -366,8 +339,8 @@ fn table_for_no_color() -> Table {
     Table::new()
         .with_columns(vec![TableColumn::new("Status"), TableColumn::new("Owner")])
         .with_data(vec![vec![
-            TableCellContent::from(Prose::new("<dim>inactive</dim>")),
-            TableCellContent::from(Prose::new("<b>Alice</b>")),
+            TableCellContent::from(InlineProse::new("<dim>inactive</dim>")),
+            TableCellContent::from(InlineProse::new("<b>Alice</b>")),
         ]])
 }
 
@@ -379,9 +352,10 @@ fn table_for_no_color() -> Table {
 fn multiline_styled_cell_does_not_bleed_into_borders() {
     let table = Table::new()
         .with_columns(vec![TableColumn::new("Msg")])
-        .with_data(vec![vec![TableCellContent::from(Prose::new(
+        .with_data(vec![vec![TableCellContent::from(InlineProse::new(
             "<b>line one\nline two</b>",
-        ))]]);
+        )
+        .with_line_breaks(LineBreaks::Hard))]]);
     let term = test_terminal(80);
     let out = table.render(&term);
     let plain = strip_ansi(&out);
@@ -411,9 +385,10 @@ fn multiline_styled_cell_balances_sgr_per_line() {
     // observe this — assert on the raw escapes here.
     let table = Table::new()
         .with_columns(vec![TableColumn::new("Msg")])
-        .with_data(vec![vec![TableCellContent::from(Prose::new(
+        .with_data(vec![vec![TableCellContent::from(InlineProse::new(
             "<b>line one\nline two</b>",
-        ))]]);
+        )
+        .with_line_breaks(LineBreaks::Hard))]]);
     let term = test_terminal(80);
     let out = table.render(&term);
     for raw_line in out.lines() {
@@ -456,7 +431,7 @@ fn mixed_type_row_retains_formatting_and_alignment() {
             TableColumn::new("Price").with_type(ColumnType::Currency(Currency::USD)),
         ])
         .with_data(vec![vec![
-            TableCellContent::from(Prose::new("<b>active</b>")),
+            TableCellContent::from(InlineProse::new("<b>active</b>")),
             TableCellContent::Integer(1234567),
             TableCellContent::Float(3.5),
             TableCellContent::Currency(Currency::USD, 99.99),
@@ -476,7 +451,7 @@ fn mixed_type_row_retains_formatting_and_alignment() {
         panic!("expected data row");
     };
     let status_hints = cells[0].attrs.table_cell_hints().expect("hints");
-    assert_eq!(status_hints.kind, "styled_prose");
+    assert_eq!(status_hints.kind, "styled_inline_prose");
     assert_eq!(status_hints.alignment, "left");
 
     let count_hints = cells[1].attrs.table_cell_hints().expect("hints");
@@ -509,18 +484,18 @@ fn bespoke_standard_and_cursor_paths_produce_same_visible_content() {
 
 #[test]
 fn bespoke_resolves_prose_once() {
-    // Three StyledProse cells across two rows; the rest are typed/text cells
+    // Three StyledInlineProse cells across two rows; the rest are typed/text cells
     // that must not count as Prose resolutions.
     let table = Table::new()
         .with_columns(vec![TableColumn::new("A"), TableColumn::new("B")])
         .with_data(vec![
             vec![
-                TableCellContent::from(Prose::new("<b>one</b>")),
+                TableCellContent::from(InlineProse::new("<b>one</b>")),
                 TableCellContent::Integer(42),
             ],
             vec![
-                TableCellContent::from(Prose::new("<i>two</i>")),
-                TableCellContent::from(Prose::new("<red>three</red>")),
+                TableCellContent::from(InlineProse::new("<i>two</i>")),
+                TableCellContent::from(InlineProse::new("<red>three</red>")),
             ],
         ])
         .prefer_cursor_alignment();
@@ -532,7 +507,7 @@ fn bespoke_resolves_prose_once() {
     let (out, resolved) = table.render_bespoke_instrumented(&term);
     assert_eq!(
         resolved, 3,
-        "each of the 3 StyledProse cells must be resolved exactly once before \
+        "each of the 3 StyledInlineProse cells must be resolved exactly once before \
          planning (typed/text cells excluded)"
     );
     let plain = strip_ansi(&out);
@@ -547,7 +522,7 @@ fn bespoke_resolves_prose_once() {
 fn html_preserves_semantic_emphasis_in_td() {
     let table = Table::new()
         .with_columns(vec![TableColumn::new("Col")])
-        .with_data(vec![vec![TableCellContent::from(Prose::new(
+        .with_data(vec![vec![TableCellContent::from(InlineProse::new(
             "<b>bold</b> and <i>italic</i>",
         ))]]);
     let html = table.render_html_fragment().render();
@@ -566,7 +541,7 @@ fn html_preserves_semantic_emphasis_in_td() {
 fn html_preserves_link_in_td() {
     let table = Table::new()
         .with_columns(vec![TableColumn::new("Link")])
-        .with_data(vec![vec![TableCellContent::from(Prose::new(
+        .with_data(vec![vec![TableCellContent::from(InlineProse::new(
             r#"<a href="https://example.com">click</a>"#,
         ))]]);
     let html = table.render_html_fragment().render();
@@ -588,7 +563,7 @@ fn html_preserves_link_in_td() {
 fn markdown_preserves_bold_italic_strikethrough() {
     let table = Table::new()
         .with_columns(vec![TableColumn::new("Col")])
-        .with_data(vec![vec![TableCellContent::from(Prose::new(
+        .with_data(vec![vec![TableCellContent::from(InlineProse::new(
             "<b>bold</b> <i>italic</i> <~>strike</~>",
         ))]]);
     let md = table.render_markdown();
@@ -601,7 +576,7 @@ fn markdown_preserves_bold_italic_strikethrough() {
 fn markdown_preserves_links() {
     let table = Table::new()
         .with_columns(vec![TableColumn::new("Col")])
-        .with_data(vec![vec![TableCellContent::from(Prose::new(
+        .with_data(vec![vec![TableCellContent::from(InlineProse::new(
             r#"<a href="https://example.com">go</a>"#,
         ))]]);
     let md = table.render_markdown();
@@ -615,7 +590,7 @@ fn markdown_preserves_links() {
 fn markdown_pipe_in_prose_does_not_corrupt_gfm() {
     let table = Table::new()
         .with_columns(vec![TableColumn::new("Col")])
-        .with_data(vec![vec![TableCellContent::from(Prose::new(
+        .with_data(vec![vec![TableCellContent::from(InlineProse::new(
             "left|right",
         ))]]);
     let md = table.render_markdown();
@@ -639,9 +614,10 @@ fn markdown_pipe_in_prose_does_not_corrupt_gfm() {
 fn markdown_newline_in_prose_does_not_corrupt_gfm() {
     let table = Table::new()
         .with_columns(vec![TableColumn::new("Col")])
-        .with_data(vec![vec![TableCellContent::from(Prose::new(
+        .with_data(vec![vec![TableCellContent::from(InlineProse::new(
             "line one\nline two",
-        ))]]);
+        )
+        .with_line_breaks(LineBreaks::Hard))]]);
     let md = table.render_markdown();
     let data_row = md
         .lines()
@@ -691,29 +667,29 @@ fn one_cell_body(md: &str) -> String {
 fn one_prose_cell_table(markup: &str) -> Table {
     Table::new()
         .with_columns(vec![TableColumn::new("Col")])
-        .with_data(vec![vec![TableCellContent::from(Prose::new(markup))]])
+        .with_data(vec![vec![TableCellContent::from(InlineProse::new(markup))]])
 }
 
 #[test]
-fn portable_markdown_cell_matches_standalone_prose() {
+fn portable_markdown_cell_matches_standalone_inline_prose() {
     for &item in MARKDOWN_PARITY_CORPUS {
-        let standalone = Prose::new(item).render_markdown();
+        let standalone = InlineProse::new(item).render_markdown();
         let cell = one_cell_body(&one_prose_cell_table(item).render_markdown());
         assert_eq!(
             cell, standalone,
-            "portable Markdown cell body must equal standalone Prose for {item:?}"
+            "portable Markdown cell body must equal standalone InlineProse for {item:?}"
         );
     }
 }
 
 #[test]
-fn markdown_plus_cell_matches_standalone_prose() {
+fn markdown_plus_cell_matches_standalone_inline_prose() {
     for &item in MARKDOWN_PARITY_CORPUS {
-        let standalone = Prose::new(item).render_markdown_plus();
+        let standalone = InlineProse::new(item).render_markdown_plus();
         let cell = one_cell_body(&one_prose_cell_table(item).render_markdown_plus());
         assert_eq!(
             cell, standalone,
-            "MarkdownPlus cell body must equal standalone Prose for {item:?}"
+            "MarkdownPlus cell body must equal standalone InlineProse for {item:?}"
         );
     }
 }
@@ -833,7 +809,7 @@ use biscuit_browser_harness::{BrowserHarness, ChromeHarness, require_browser, wr
 fn browser_cell_page(markup: &str) -> String {
     let table = Table::new()
         .with_columns(vec![TableColumn::new("Col")])
-        .with_data(vec![vec![TableCellContent::from(Prose::new(markup))]]);
+        .with_data(vec![vec![TableCellContent::from(InlineProse::new(markup))]]);
     wrap_fragment(&table.render_html_fragment().render(), "#ffffff")
 }
 

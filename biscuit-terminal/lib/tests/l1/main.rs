@@ -43,6 +43,7 @@ mod perf_gate;
 mod prelude_exports;
 mod progress_parity;
 mod prose_cells_parity;
+mod prose_containers;
 mod prose_grammar;
 mod render_comparison;
 mod render_tree_code_context;
