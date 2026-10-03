@@ -17,6 +17,10 @@
 //! reference's diagnostic (`data: {"resolution_failure": "<Class>"}`), never
 //! from a message.
 //!
+//! Glob rows: published diagnostics validate `match()` for a frontmatter
+//! value. A candidate is admitted when its document has no error
+//! diagnostic; DMLS evaluates no expression and lists no `::file-links` glob.
+//!
 //! Because that folder indexes every target, a second test opens only a
 //! `docs/` folder below the repository root, so each target is an existing
 //! file the editor never indexed.
@@ -36,7 +40,10 @@ use dmls::context::RepositoryContexts;
 use dmls::graph::{EdgeKind, EdgeTarget, NodeId, NodeKind, WorkspaceGraph};
 use dmls::workspace::{SilentProgress, index_workspace};
 use common::{LspFixture, LspWorkspace};
-use matrix::{ChainCase, ChainOutcome, Consumer, DocumentCell, HASH_CONSUMERS, EntryPoint, Observed, Owner, ParityFixture, ParityReport, Row, rows_for};
+use matrix::{
+    ChainCase, ChainOutcome, Consumer, DocumentCell, GlobConsumer, GlobDocumentCell, HASH_CONSUMERS, EntryPoint, Observed,
+    Owner, ParityFixture, ParityReport, Row, rows_for,
+};
 use serde_json::{Value, json};
 
 const CLASSES: [ResolutionFailure; 5] = [
@@ -286,6 +293,24 @@ fn code_actions(session: &mut LspFixture<'_>, consumer: Consumer, state: &Docume
     }
 }
 
+/// A Table 1 `match()` validation cell through published diagnostics: each
+/// candidate's document is admitted when DMLS publishes no error for it.
+fn glob_match_diagnostics(session: &mut LspFixture<'_>, fixture: &ParityFixture, cell: &GlobDocumentCell) -> Observed {
+    let outcomes = fixture
+        .glob_match_documents(cell)
+        .into_iter()
+        .map(|(candidate, document)| {
+            let state = open_document(session, &document);
+            session.notify("textDocument/didClose", json!({ "textDocument": { "uri": state.uri } }));
+            let errors: Vec<&Value> =
+                state.diagnostics.iter().filter(|diagnostic| diagnostic["severity"] == json!(1)).collect();
+            let outcome = if errors.is_empty() { Ok(()) } else { Err(format!("{errors:?}")) };
+            (candidate, outcome)
+        })
+        .collect();
+    matrix::validation_verdicts(outcomes)
+}
+
 /// Opens `document`, then records what DMLS published and linked for it.
 fn open_document(session: &mut LspFixture<'_>, document: &Path) -> DocumentState {
     let document_uri = uri(document);
@@ -331,9 +356,17 @@ fn dmls_entry_points_agree_on_every_reference() {
     // written before startup, so the startup index holds every target and
     // every cell document.
     let mut documents: Vec<(PathBuf, Vec<(Row, DocumentCell)>)> = Vec::new();
+    let mut glob_cells: Vec<(Row, GlobDocumentCell)> = Vec::new();
     for row in rows_for(Owner::Dmls) {
-        let Row::Document(cell) = row else {
-            panic!("DMLS runs Table 1 only: {row:?}");
+        let cell = match row {
+            Row::Document(cell) => cell,
+            Row::GlobDocument(cell) => {
+                assert_eq!(cell.consumer, GlobConsumer::MatchValidation, "{row:?}");
+                fixture.write_glob_match_documents(&cell);
+                glob_cells.push((row, cell));
+                continue;
+            }
+            Row::Value(_) | Row::GlobValue(_) => panic!("DMLS runs Table 1 only: {row:?}"),
         };
         let path = fixture.write_document(&cell);
         match documents.iter_mut().find(|(document, _)| *document == path) {
@@ -375,11 +408,16 @@ fn dmls_entry_points_agree_on_every_reference() {
                 | EntryPoint::ClaudineComposition
                 | EntryPoint::ClaudineCompletion
                 | EntryPoint::ClaudinePromptArgument
-                | EntryPoint::ClaudineSuppliedValue => unreachable!("{:?} is not DMLS's", cell.entry),
+                | EntryPoint::ClaudineSuppliedValue
+                | EntryPoint::ClaudineChooser => unreachable!("{:?} is not DMLS's", cell.entry),
             };
             report.record(&fixture, row, &fixture.expected_document(cell), &observed);
         }
         session.notify("textDocument/didClose", json!({ "textDocument": { "uri": state.uri } }));
+    }
+    for (row, cell) in &glob_cells {
+        let observed = glob_match_diagnostics(&mut session, &fixture, cell);
+        report.record(&fixture, row, &fixture.expected_glob_document(cell), &observed);
     }
     session.shutdown();
     report.assert_parity();

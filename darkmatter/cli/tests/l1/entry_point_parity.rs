@@ -10,18 +10,22 @@
 //! `--magic-root`, so `@configured-doc.md` resolves through the flag. A
 //! failure's class is read only from the stable `failure: <name>` row `md`
 //! renders for a failed file reference, never from message text.
+//!
+//! Glob rows: `md compose` lists `::file-links` and `find_files()` and, with
+//! `md schema validate`, validates `match()` for a frontmatter value; the
+//! document's `--set` value is the library runner's Table 2 row.
 
 #[path = "../../../lib/tests/common/entry_point_parity/mod.rs"]
 mod matrix;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Output;
 
 use biscuit_file::{ResolutionFailure, to_portable_string};
 use biscuit_terminal::utils::escape_codes::strip_escape_codes;
 use matrix::{
-    Consumer, CrossRepositoryFixture, DocumentCell, EntryPoint, Expected, LAUNCH_MAGIC, MdRoute, Observed, Owner,
-    ParityFixture, ParityReport, Row, SOURCE_MAGIC, ValueCell, rows_for,
+    Consumer, CrossRepositoryFixture, DocumentCell, EntryPoint, Expected, GlobConsumer, GlobDocumentCell, LAUNCH_MAGIC,
+    MdRoute, Observed, Owner, ParityFixture, ParityReport, Row, SOURCE_MAGIC, ValueCell, rows_for,
 };
 
 use crate::common::CliProcessFixture;
@@ -111,6 +115,70 @@ fn md_schema_validate(cli: &CliProcessFixture, fixture: &ParityFixture, cell: &D
         Observed::Unexpected(_) if output.status.success() => Observed::Accepted,
         observed => observed,
     }
+}
+
+/// `md --magic-root <root> <args…> <document>` from the repository root.
+fn md_on(cli: &CliProcessFixture, fixture: &ParityFixture, args: &[&str], document: &Path) -> Output {
+    cli.command_builder()
+        .ambient_context(&fixture.repo())
+        .build()
+        .arg("--magic-root")
+        .arg(fixture.configured_magic_root())
+        .args(args)
+        .arg(document_argument(fixture, document))
+        .output()
+        .expect("run md")
+}
+
+/// `md compose` of a `::file-links` or `find_files()` cell: the files it
+/// lists, or the class on its failure row.
+fn md_glob_listing(cli: &CliProcessFixture, fixture: &ParityFixture, cell: &GlobDocumentCell) -> Observed {
+    let output = md_on(cli, fixture, &["compose"], &fixture.glob_document(cell));
+    let stdout = strip_escape_codes(String::from_utf8_lossy(&output.stdout).as_ref());
+    let stderr = strip_escape_codes(String::from_utf8_lossy(&output.stderr).as_ref());
+    if let Some(failure) = failure_row(&stderr).or_else(|| failure_row(&stdout)) {
+        return Observed::Failure(failure);
+    }
+    if !output.status.success() {
+        return Observed::Unexpected(format!("{} without a failure row: {stderr}", output.status));
+    }
+    match cell.consumer {
+        GlobConsumer::FileLinks => match fixture.file_links_listed(&stdout) {
+            files if files.is_empty() => Observed::Unexpected(format!("no `::file-links` tree in {stdout:?}")),
+            files => Observed::FileSet(files),
+        },
+        GlobConsumer::FindFiles => fixture
+            .find_files_listed(&stdout)
+            .map_or_else(|| Observed::Unexpected(format!("no `find_files()` line in {stdout:?}")), Observed::Files),
+        GlobConsumer::MatchValidation | GlobConsumer::MatchCompletion => unreachable!("{cell:?} lists no files"),
+    }
+}
+
+/// `md compose` or `md schema validate` of each candidate's `match()`
+/// document.
+fn md_glob_match(cli: &CliProcessFixture, fixture: &ParityFixture, cell: &GlobDocumentCell) -> Observed {
+    let args: &[&str] = match cell.entry {
+        EntryPoint::MdCompose => &["compose"],
+        EntryPoint::MdSchemaValidate => &["schema", "validate"],
+        other => unreachable!("{other:?} validates no md glob document"),
+    };
+    let outcomes: Vec<(PathBuf, Result<(), String>)> = fixture
+        .glob_match_documents(cell)
+        .into_iter()
+        .map(|(candidate, document)| {
+            let output = md_on(cli, fixture, args, &document);
+            let outcome = if output.status.success() {
+                Ok(())
+            } else {
+                Err(strip_escape_codes(
+                    format!("{}{}", String::from_utf8_lossy(&output.stderr), String::from_utf8_lossy(&output.stdout))
+                        .as_str(),
+                ))
+            };
+            (candidate, outcome)
+        })
+        .collect();
+    matrix::validation_verdicts(outcomes)
 }
 
 /// The document a delta route compares the value against: no target
@@ -270,6 +338,15 @@ fn mermaid_nodes(fixture: &ParityFixture, stdout: &str) -> Vec<std::path::PathBu
 
 fn run(cli: &CliProcessFixture, fixture: &ParityFixture, row: &Row) -> (Expected, Observed) {
     match row {
+        Row::GlobDocument(cell) => {
+            let observed = match cell.consumer {
+                GlobConsumer::FileLinks | GlobConsumer::FindFiles => md_glob_listing(cli, fixture, cell),
+                GlobConsumer::MatchValidation => md_glob_match(cli, fixture, cell),
+                GlobConsumer::MatchCompletion => unreachable!("md completes nothing: {row:?}"),
+            };
+            (fixture.expected_glob_document(cell), observed)
+        }
+        Row::GlobValue(_) => unreachable!("md runs no Table 2 glob row: {row:?}"),
         Row::Document(cell) => {
             let observed = match cell.entry {
                 EntryPoint::MdCompose => md_compose(cli, fixture, cell),
@@ -286,7 +363,8 @@ fn run(cli: &CliProcessFixture, fixture: &ParityFixture, row: &Row) -> (Expected
                 | EntryPoint::ClaudineComposition
                 | EntryPoint::ClaudineCompletion
                 | EntryPoint::ClaudinePromptArgument
-                | EntryPoint::ClaudineSuppliedValue => unreachable!("{row:?} is not a darkmatter-cli document row"),
+                | EntryPoint::ClaudineSuppliedValue
+                | EntryPoint::ClaudineChooser => unreachable!("{row:?} is not a darkmatter-cli document row"),
             };
             (fixture.expected_document(cell), observed)
         }
@@ -306,7 +384,8 @@ fn run(cli: &CliProcessFixture, fixture: &ParityFixture, row: &Row) -> (Expected
                 | EntryPoint::ClaudineComposition
                 | EntryPoint::ClaudineCompletion
                 | EntryPoint::ClaudinePromptArgument
-                | EntryPoint::ClaudineSuppliedValue => unreachable!("{row:?} is not a darkmatter-cli value row"),
+                | EntryPoint::ClaudineSuppliedValue
+                | EntryPoint::ClaudineChooser => unreachable!("{row:?} is not a darkmatter-cli value row"),
             };
             (fixture.expected_value(cell), observed)
         }
@@ -338,6 +417,15 @@ fn md_entry_points_agree_on_every_reference() {
             Row::Value(cell) => {
                 fixture.value(cell);
             }
+            Row::GlobDocument(cell) => match cell.consumer {
+                GlobConsumer::MatchValidation => {
+                    fixture.write_glob_match_documents(cell);
+                }
+                _ => {
+                    fixture.write_glob_document(cell);
+                }
+            },
+            Row::GlobValue(_) => {}
         }
     }
     const THREADS: usize = 8;
