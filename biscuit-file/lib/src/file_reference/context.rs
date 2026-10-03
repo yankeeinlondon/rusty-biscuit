@@ -1456,18 +1456,23 @@ pub fn find_git_root(from: &Path) -> Result<Option<PathBuf>, FileReferenceError>
     }
 }
 
-/// Get the user's home directory from the cross-platform provider.
+/// Get the user's home directory from the process environment.
 ///
-/// On POSIX this honors `$HOME` (with a passwd fallback); on native Windows it
-/// resolves the profile directory through the OS known-folder API rather than
-/// the frequently-unset `HOME` variable, so `~` and the HOME leg of magic
-/// search stay valid there (D11).
+/// This is the one home reader for the workspace: it is
+/// [`std::env::home_dir`], so `HOME` on POSIX (with a passwd fallback) and
+/// `USERPROFILE` on native Windows (with the OS profile fallback). Setting
+/// only `HOME` does not relocate home on native Windows. The result is not
+/// canonicalized, not checked for existence, and not rebased.
 ///
-/// A relative `$HOME` is reported as no home directory: it is not a usable
-/// anchor, and capturing it would make every [`FileResolutionContext::new`]
-/// fail [`validate`](FileResolutionContext::validate).
+/// A relative home is reported as no home directory, with no second lookup
+/// that could defeat the override: it is not a usable anchor, and capturing
+/// it would make every [`FileResolutionContext::new`] fail
+/// [`validate`](FileResolutionContext::validate).
+///
+/// The environment is an input, not proof of a trusted filesystem boundary:
+/// whoever launches the process chooses it.
 pub fn home_dir() -> Option<PathBuf> {
-    dirs::home_dir().filter(|home| home.is_absolute())
+    std::env::home_dir().filter(|home| home.is_absolute())
 }
 
 /// Snapshot the process environment for `{{VAR}}` interpolation.

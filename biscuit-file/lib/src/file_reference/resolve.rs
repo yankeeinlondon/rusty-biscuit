@@ -833,8 +833,8 @@ fn magic_chain_inputs<'a>(
 /// Strip a Windows `\\?\` verbatim prefix from a search root. No-op elsewhere.
 ///
 /// Roots arrive in whichever spelling the caller produced: `std::fs::canonicalize`
-/// yields a verbatim path, while `gix` worktree discovery and `dirs` yield the
-/// legacy form. Both spellings must be collapsed *before* anything is joined
+/// yields a verbatim path, while `gix` worktree discovery and a home read from
+/// the environment usually yield the legacy form. Both spellings must be collapsed *before* anything is joined
 /// onto a root, because Win32 performs no path normalization under a verbatim
 /// prefix -- a reference's own `/` separators would stay literal filename
 /// characters and every probe would miss. Collapsing here also makes two

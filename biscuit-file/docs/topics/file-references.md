@@ -200,10 +200,27 @@ rejected at parse time with `FileReferenceError::UnsupportedUserHome`.
 ~/.config/app.toml  → <home>/.config/app.toml
 ```
 
-The home directory comes from the resolution context (or the cross-platform
-home provider in ambient mode). If the explicit context has no home
-directory, resolution fails with the typed `MissingHomeContext` — not a
-silent miss.
+The home directory comes from the resolution context, which captures it
+once with `biscuit_file::home_dir()` (ambient mode reads it the same way).
+That reader is the process environment: `HOME` on macOS and Linux,
+`USERPROFILE` on native Windows, each with the platform's own profile lookup
+as the fallback when the variable is unset. A relative value counts as no
+home at all; there is no second lookup that could undo an override. The home
+is used exactly as spelled: not canonicalized, not checked for existence.
+
+```text
+HOME=/tmp/fixture         (macOS/Linux)  ~/app.toml → /tmp/fixture/app.toml
+USERPROFILE=D:\fixture    (Windows)      ~/app.toml → D:\fixture\app.toml
+HOME=D:\fixture only      (Windows)      ~ still follows USERPROFILE
+HOME=relative/dir                        no home → MissingHomeContext
+```
+
+To relocate home on native Windows, set `USERPROFILE`; setting only `HOME`
+is not enough. The environment is an input chosen by whoever launches the
+process, not proof of a trusted filesystem boundary.
+
+If the explicit context has no home directory, resolution fails with the
+typed `MissingHomeContext` — not a silent miss.
 
 Note the difference from magic references: `@` *includes* HOME in its search
 list, but `~` is home-*pinned* with no other candidate.
@@ -479,7 +496,7 @@ assert_eq!(nested.cwd(), repo_root.join("includes"));
 ```
 
 `FileResolutionContext::new(cwd)` captures the process environment and
-the cross-platform home directory once. Variables whose name or value is not
+the home directory (`home_dir()`, see [Home](#home-)) once. Variables whose name or value is not
 valid Unicode are left out of the snapshot, so a reference naming one fails
 with `MissingEnvironmentVariable`. `with_env(map)` **replaces** that snapshot
 rather than adding to it — after
@@ -513,7 +530,7 @@ differently after a `chdir`. Three inputs keep their own, different rules and
 may be relative: environment values (a relative `{{VAR}}` expansion resolves
 like any relative reference), configured magic roots (anchored on the
 captured request directory), and vault roots. The ambient `home_dir()`
-provider reports a relative `$HOME` as no home directory, so `new()` never
+reader reports a relative home as no home directory, so `new()` never
 captures one. `new()` reads the environment through the public
 `capture_env()`; a caller that builds with `from_snapshot` and wants the same
 process values calls `home_dir()` and `capture_env()` itself.

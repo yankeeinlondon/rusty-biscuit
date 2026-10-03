@@ -112,8 +112,8 @@ fn explicit_context_can_clear_the_ambient_home_snapshot() {
     assert!(matches!(error, FileReferenceError::MissingHomeContext));
 }
 
-/// Native Windows must discover the user's home from the OS profile API, not
-/// the frequently-unset `HOME` variable (D11 / Acceptance Criterion 11).
+/// Native Windows must discover the user's home from `USERPROFILE` (or the OS
+/// profile fallback), not the frequently-unset `HOME` variable.
 ///
 /// Unlike the injected-`with_home_dir` case above, this exercises default
 /// discovery at the capture boundary: `HOME` is cleared, yet `~/...` still

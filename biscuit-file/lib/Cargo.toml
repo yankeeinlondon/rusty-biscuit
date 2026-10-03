@@ -26,7 +26,7 @@ lopdf = ["dep:lopdf"]
 pdfium = ["dep:pdfium-render"]
 
 # File reference resolution
-file-reference = ["dep:gix", "dep:walkdir", "dep:globset", "dep:dirs", "url"]
+file-reference = ["dep:gix", "dep:walkdir", "dep:globset", "url"]
 
 # URL support (automatically enabled by file-reference)
 url = ["dep:url"]
@@ -71,9 +71,6 @@ gix = { version = "=0.84.0", optional = true, default-features = false, features
 walkdir = { version = "2", optional = true }
 globset = { version = "0.4", optional = true }
 url = { version = "2.5", optional = true }
-
-# Cross-platform home directory (Windows-correct, unlike `$HOME` alone)
-dirs = { version = "6", optional = true }
 
 # Windows `\\?\` verbatim-prefix stripping (no-op on every other target).
 # Unconditional: it serves the resolver's root boundary (`simplify_root`, behind
@@ -124,3 +121,6 @@ required-features = ["fetch"]
 # tests and the `l1-fetch` target (wiremock; no external network).
 [package.metadata.ci.tests]
 features = ["fetch"]
+# The path lookup guard includes darkmatter-cli's shared engine by `#[path]`
+# and spells both files in its test.
+source-inputs = ["darkmatter/cli/tests/common/path_lookup_guard.rs", "darkmatter/cli/tests/common/source_scan.rs"]
