@@ -1,5 +1,5 @@
 //! The `wt list` output around the git work: the caption, the credentials
-//! line, the table, the legend, the status list (the PR age line and the
+//! line, the table, the legend, the status list (this run's PR item and the
 //! refresh hint), and the closing notes, plus [`assemble`], which puts them and the graph and
 //! verbose sections in their order.
 //!
@@ -57,8 +57,11 @@ pub struct TableFacts<'a> {
     pub remote: Option<RemoteFacts<'a>>,
     /// The §5 line, only for a condition this run observed.
     pub credential_line: Option<CredentialLine>,
-    /// The listing rendered while the worker was still working (§6).
-    pub unfinished: bool,
+    /// This run's PR half; `None` without an `origin`, or when the answer it
+    /// would describe belongs to an `origin` that changed during the wait.
+    pub pr_outcome: Option<PrOutcome>,
+    /// The wait ran out before both halves had a result (§6 hint).
+    pub timed_out: bool,
     /// §9: set only after a completed check or fetch, with the default
     /// branch strictly behind.
     pub ff_suggestion: Option<FfSuggestion>,
@@ -66,6 +69,24 @@ pub struct TableFacts<'a> {
     pub ff_notice: Option<FfNotice>,
     /// §8: the variables that would let `wt` use the provider API.
     pub fallback_notice: Option<Vec<String>>,
+}
+
+/// What this run's PR half came to, for the badges and the status list. The
+/// stored answer ([`TableFacts::prs`]) tells a failure with an answer from
+/// one with nothing stored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrOutcome {
+    /// A successful publication was observed within the wait, this run's or
+    /// a shared one; an empty answer clears the badges.
+    Published,
+    /// The repository is in `~/.wt.json`: no badges.
+    Ignored,
+    /// `origin` has no provider to ask: no badges. Not a failure.
+    Unsupported,
+    /// Still running when the wait ended.
+    Pending,
+    /// The refresh failed, or its result could not be observed.
+    Failed,
 }
 
 /// What the caption can say about `origin`'s default branch.
@@ -160,7 +181,8 @@ impl<'a> TableFacts<'a> {
             prs,
             remote,
             credential_line: None,
-            unfinished: false,
+            pr_outcome: None,
+            timed_out: false,
             ff_suggestion: None,
             ff_notice: None,
             fallback_notice: None,
@@ -198,14 +220,28 @@ pub fn render(facts: &TableFacts<'_>, terminal: &Terminal, now: u64) -> String {
     out
 }
 
-/// The status list: the PR age line, then the §6 hint when the listing
-/// rendered with work unfinished; `None` when neither applies.
+impl TableFacts<'_> {
+    /// The answer the badges show: none for an ignored repository or an
+    /// `origin` without a provider, whatever is stored.
+    pub fn badges(&self) -> &PrListing {
+        static NO_PRS: PrListing = PrListing { source_repo: None, pull_requests: Vec::new(), fetched_at: None };
+        match self.pr_outcome {
+            Some(PrOutcome::Ignored | PrOutcome::Unsupported) => &NO_PRS,
+            _ => self.prs,
+        }
+    }
+}
+
+/// The status list: this run's PR item ([`pr_status_markup`]), then the §6
+/// hint when the wait timed out; `None` when neither applies.
 ///
 /// `now` is Unix seconds, for the PR age.
 pub fn render_status(facts: &TableFacts<'_>, terminal: &Terminal, now: u64) -> Option<String> {
-    let lines: Vec<String> = pr_age_markup(facts.prs, now)
+    let lines: Vec<String> = facts
+        .pr_outcome
+        .and_then(|outcome| pr_status_markup(outcome, facts.prs, now))
         .into_iter()
-        .chain(facts.unfinished.then(|| format!("<dim>{REFRESH_HINT}</dim>")))
+        .chain(facts.timed_out.then(|| format!("<dim>{REFRESH_HINT}</dim>")))
         .collect();
     (!lines.is_empty()).then(|| notes_list(lines, terminal))
 }
@@ -446,14 +482,26 @@ pub fn legend_markup() -> [String; 2] {
     ]
 }
 
-/// The PR age line, shown whenever the badges are older than the freshness
-/// window at `now`.
-pub fn pr_age_markup(prs: &PrListing, now: u64) -> Option<String> {
-    if !prs.is_stale_at(now) {
-        return None;
-    }
-    let minutes = prs.age_minutes(now)?;
-    Some(format!("<dim>PRs as of {} ago</dim>", age_text(minutes * 60)))
+/// The status item for this run's PR half, given the stored answer `prs`:
+///
+/// - none after a publication, for an ignored repository, or for an `origin`
+///   without a provider;
+/// - `PRs as of <age> ago` while still running, only once the answer is as
+///   old as the freshness window, and nothing with no answer stored;
+/// - `PRs as of <age> ago (couldn't refresh)` after a failure, at any age,
+///   or `couldn't get open PRs` with no answer stored.
+pub fn pr_status_markup(outcome: PrOutcome, prs: &PrListing, now: u64) -> Option<String> {
+    let as_of = |minutes: u64| format!("PRs as of {} ago", age_text(minutes * 60));
+    let text = match outcome {
+        PrOutcome::Published | PrOutcome::Ignored | PrOutcome::Unsupported => return None,
+        PrOutcome::Pending if prs.is_stale_at(now) => as_of(prs.age_minutes(now)?),
+        PrOutcome::Pending => return None,
+        PrOutcome::Failed => match prs.age_minutes(now) {
+            Some(minutes) => format!("{} (couldn't refresh)", as_of(minutes)),
+            None => "couldn't get open PRs".to_string(),
+        },
+    };
+    Some(format!("<dim>{text}</dim>"))
 }
 
 /// The table, one row per tree row, with the current worktree's row
@@ -539,7 +587,7 @@ impl<'f, 'a> RowCells<'f, 'a> {
         let prs = match (branch, status) {
             // Badges follow a worktree's branch; a parent row without a
             // worktree has empty target cells.
-            (Some(branch), Some(_)) => facts.prs.for_branch(branch).collect(),
+            (Some(branch), Some(_)) => facts.badges().for_branch(branch).collect(),
             _ => Vec::new(),
         };
         Self {
