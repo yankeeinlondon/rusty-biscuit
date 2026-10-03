@@ -2948,3 +2948,228 @@ fn unresolved_prompt_arguments_render_their_failure_class() {
         }
     }
 }
+
+// -- literal code-span contents --------------------------------------------
+//
+// A code span's contents are literal, so a value a diagnostic places between
+// backticks must reach the terminal exactly as authored: Prose escaping there
+// would show its backslashes. Each value carries an underscore pair, brackets,
+// braces, and a backslash.
+
+/// The authored value for one diagnostic field, tagged so each argument of a
+/// multi-value diagnostic is asserted separately.
+fn code_value(tag: &str) -> String {
+    format!(r"{tag}_a_[x]{{{{ctx.area}}}}a\b")
+}
+
+/// Render `err` on a wide, colorless terminal and assert every value appears
+/// exactly as authored, with no Prose escape added to any of them.
+fn assert_code_values_render_literally(err: &CompositionError, values: &[String]) {
+    use biscuit_terminal::errors::BlockError;
+    use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+
+    let term = Terminal::builder()
+        .width(500)
+        .color_depth(biscuit_terminal::discovery::detection::ColorDepth::None)
+        .build();
+    let rendered = strip_escape_codes(err.report_block_error(&term));
+    for value in values {
+        assert!(rendered.contains(value.as_str()), "{err:?}: `{value}` must render literally:\n{rendered}");
+    }
+    for escaped in [r"\_", r"\[", r"\{", r"a\\b"] {
+        assert!(!rendered.contains(escaped), "{err:?}: escape `{escaped}` leaked into:\n{rendered}");
+    }
+}
+
+#[test]
+fn lifecycle_diagnostics_show_code_span_values_literally() {
+    let source_path = || PathBuf::from("prompts/review.md");
+    let v = code_value;
+    let cases = vec![
+        (
+            CompositionError::LifecycleNestedSpanInLiteral {
+                source_path: source_path(),
+                property: "success.say".into(),
+                literal: v("literal"),
+                nested: v("nested"),
+                suggestion: None,
+            },
+            vec![v("literal"), v("nested"), "`{{ … }}` inside a quoted string".to_string()],
+        ),
+        (
+            CompositionError::LifecycleUndefinedVariable {
+                source_path: source_path(),
+                property: "start.say".into(),
+                variable: v("variable"),
+            },
+            vec![v("variable")],
+        ),
+        (
+            CompositionError::LifecycleEvaluationError {
+                source_path: source_path(),
+                event: "start".into(),
+                surface: "say".into(),
+                message: "boom".into(),
+                property: Some(v("property")),
+                reason: Box::new(LifecycleEvaluationReason::Expression),
+            },
+            vec![v("property")],
+        ),
+        (
+            CompositionError::RemovedValidationKey {
+                source_path: source_path(),
+                key: v("key"),
+                replacement: "use a stack".into(),
+            },
+            vec![v("key")],
+        ),
+        (
+            CompositionError::LifecycleActionInvalidShortForm {
+                source_path: source_path(),
+                property: "start".into(),
+                raw: v("raw"),
+                message: "bad".into(),
+            },
+            vec![v("raw")],
+        ),
+        (
+            CompositionError::LifecycleSetInvalidKey {
+                source_path: source_path(),
+                property: "start".into(),
+                path: "set".into(),
+                key: v("key"),
+                message: "bad".into(),
+            },
+            vec![v("key")],
+        ),
+        (
+            CompositionError::LifecycleProxyWithWholeMapping {
+                source_path: source_path(),
+                property: "start".into(),
+                path: "with".into(),
+                raw: v("raw"),
+            },
+            vec![v("raw")],
+        ),
+        (
+            CompositionError::LifecycleProxyWithDynamicKey {
+                source_path: source_path(),
+                property: "start".into(),
+                path: "with".into(),
+                key: v("key"),
+            },
+            vec![v("key")],
+        ),
+        (
+            CompositionError::LifecycleProxyWithEvaluationFailed {
+                source_path: source_path(),
+                property: "start".into(),
+                path: "with.spec".into(),
+                target: v("target"),
+                message: "boom".into(),
+            },
+            vec![v("target")],
+        ),
+        (
+            CompositionError::LifecycleProxyWithoutOwningCoordinator {
+                source_path: source_path(),
+                property: "start".into(),
+                target: v("target"),
+                command: "claude".into(),
+            },
+            vec![v("target")],
+        ),
+        (
+            CompositionError::LifecycleProxyCycle {
+                source_path: source_path(),
+                target: v("target"),
+                chain: vec![v("first"), v("second")],
+                limit: 8,
+            },
+            vec![v("target"), v("first"), v("second")],
+        ),
+        (
+            CompositionError::LifecycleShortFormRemoved {
+                source_path: source_path(),
+                property: "start".into(),
+                raw: v("raw"),
+                rewrite: v("rewrite"),
+            },
+            vec![v("raw"), v("rewrite")],
+        ),
+        (
+            CompositionError::InvalidFileReference {
+                context: Box::new(FileReferenceContext {
+                    source_path: source_path(),
+                    event: Some("initialize".to_string()),
+                    property: "initialize".to_string(),
+                    reference: v("reference"),
+                    hint: "A `proxy` target must name an existing Markdown document.".to_string(),
+                }),
+                source: crate::harness::HarnessError::PathResolutionFailed {
+                    raw: "nope.md".to_string(),
+                    failure: crate::harness::PathResolutionFailure::TargetMissing,
+                    source_path: Some(PathBuf::from("/repo/run.md")),
+                    resolved: Some(PathBuf::from("/repo/nope.md")),
+                    resolution: None,
+                },
+            },
+            vec![v("reference")],
+        ),
+    ];
+    for (err, values) in cases {
+        assert_code_values_render_literally(&err, &values);
+    }
+}
+
+#[test]
+fn nested_span_suggestion_names_the_wrapper_without_escapes() {
+    let err = CompositionError::LifecycleNestedSpanInLiteral {
+        source_path: PathBuf::from("prompts/review.md"),
+        property: "success.say".into(),
+        literal: "'a {{x}}'".into(),
+        nested: "{{x}}".into(),
+        suggestion: Some("'a ' + x".into()),
+    };
+    assert_code_values_render_literally(&err, &["its `{{ }}` wrapper".to_string()]);
+}
+
+#[test]
+fn selection_diagnostics_show_code_span_values_literally() {
+    let query = code_value("query");
+    let cases = [
+        CompositionError::AutocompleteNoMatches { query: query.clone() },
+        CompositionError::AutocompleteOverCap { query: query.clone(), cap: 50 },
+        CompositionError::AutocompleteCancelled { query: query.clone() },
+    ];
+    for err in cases {
+        assert_code_values_render_literally(&err, std::slice::from_ref(&query));
+    }
+}
+
+#[test]
+fn selection_query_holding_a_backtick_stays_one_code_span() {
+    use biscuit_terminal::errors::BlockError;
+    use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+
+    let err = CompositionError::AutocompleteNoMatches { query: "q`_a_`".into() };
+    let term = Terminal::builder()
+        .width(500)
+        .color_depth(biscuit_terminal::discovery::detection::ColorDepth::None)
+        .build();
+    let rendered = strip_escape_codes(err.report_block_error(&term));
+    // A double-backtick fence keeps the value's own backtick inside one span.
+    assert!(rendered.contains("query `` q`_a_` ``."), "{rendered}");
+}
+
+#[test]
+fn schema_parse_diagnostic_shows_the_property_literally() {
+    let property = code_value("property");
+    let err = CompositionError::SchemaParse {
+        source_path: PathBuf::from("prompts/review.md"),
+        property: Some(property.clone()),
+        message: "bad type".into(),
+        span: None,
+    };
+    assert_code_values_render_literally(&err, &[property]);
+}

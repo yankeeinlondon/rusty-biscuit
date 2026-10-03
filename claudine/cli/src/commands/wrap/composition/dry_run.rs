@@ -257,7 +257,7 @@ pub(crate) fn render_metadata_table(render: &DryRunRender, term: &Terminal) -> S
     if let Some(description) = &render.description {
         let cell = Prose::new(format!(
             "<i><dim>{}</dim></i>",
-            Prose::escape_text(description)
+            Prose::escape_text_outside_code_spans(description)
         ))
         .render(term);
         table.add_row(vec!["Description".into(), cell.into()]);

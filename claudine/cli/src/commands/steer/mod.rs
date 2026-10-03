@@ -184,7 +184,7 @@ struct Mode {
 
 fn usage(console: &mut impl Console, problem: &str) -> i32 {
     let term = console.terminal();
-    console.status(&Prose::new(format!("<red><bold>Error:</bold></red> {}", Prose::escape_text(problem))).render(&term));
+    console.status(&Prose::new(format!("<red><bold>Error:</bold></red> {}", Prose::escape_text_outside_code_spans(problem))).render(&term));
     EXIT_USAGE
 }
 
@@ -199,7 +199,7 @@ async fn discover(service: &impl SteeringService, console: &mut impl Console) ->
                     &Prose::new(format!(
                         "<orange><bold>warning:</bold></orange> discovery from {} failed: {}",
                         Prose::escape_text(&error.source),
-                        Prose::escape_text(&error.message())
+                        Prose::escape_text_outside_code_spans(&error.message())
                     ))
                     .render(&term),
                 );
@@ -213,7 +213,7 @@ async fn discover(service: &impl SteeringService, console: &mut impl Console) ->
                 &Prose::new(format!(
                     "<red><bold>Error:</bold></red> session discovery failed for every source ({}). Is the local \
                      Rendezvous daemon running?",
-                    Prose::escape_text(&causes.join("; "))
+                    Prose::escape_text_outside_code_spans(&causes.join("; "))
                 ))
                 .render(&term),
             );
@@ -279,7 +279,7 @@ impl<S: SteeringService, I: Interaction, C: Console> Send<'_, S, I, C> {
             }
             Err(prompt) => {
                 let failure = render_chain("the session picker failed", &prompt);
-                self.status(&format!("<red><bold>Error:</bold></red> {}. Nothing was sent.", Prose::escape_text(&failure)));
+                self.status(&format!("<red><bold>Error:</bold></red> {}. Nothing was sent.", Prose::escape_text_outside_code_spans(&failure)));
                 Err(EXIT_NOT_CONFIRMED)
             }
         }

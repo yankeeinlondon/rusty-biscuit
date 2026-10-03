@@ -6,6 +6,7 @@
 
 use super::super::*;
 use super::{escape_prose_path, render_file_link};
+use renderable::markdown::code_span;
 
 /// Render the [`StatusBlock`] for a schema/frontmatter-family
 /// [`CompositionError`].
@@ -42,7 +43,7 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             // value. Each gets the remediation that actually applies.
             let (scope, hint) = match property {
                 Some(prop) => (
-                    format!(" for property <cyan>`{}`</cyan>", Prose::escape_text(prop)),
+                    format!(" for property <cyan>{}</cyan>", code_span(prop)),
                     "Check the SimplifiedSchema type-and-constraint syntax. Constraints are \
                      separated by `;` and a constraint's arguments by `,` — e.g. \
                      `file(required; match(**/*.md))`.",

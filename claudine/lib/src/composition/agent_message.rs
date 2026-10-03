@@ -59,7 +59,7 @@ pub fn agent_state_breakdown(state: &AgentResolutionState) -> String {
 /// document; the Prose layer downgrades it to plain text when the terminal
 /// does not support OSC8.
 pub fn invalid_agent_message(hint: &str, file_link: &str) -> String {
-    let hint = Prose::escape_text(hint);
+    let hint = Prose::escape_text_outside_code_spans(hint);
     format!(
         "<red><b>Invalid Agent:</b></red> the {file_link} references an invalid Agent provider \
          '{hint}'. Choose from the installed agents on this host:"
@@ -76,7 +76,7 @@ fn invalid_suggestions_trailer(invalid: &[String]) -> String {
         "\nThe following agents were suggested but are <b><red>NOT</red></b> valid Agents:\n",
     );
     for hint in invalid {
-        out.push_str(&format!("- {}\n", Prose::escape_text(hint)));
+        out.push_str(&format!("- {}\n", Prose::escape_text_outside_code_spans(hint)));
     }
     out
 }
@@ -90,7 +90,7 @@ fn no_agent_breakdown() -> String {
 }
 
 fn single_invalid_breakdown(hint: &str) -> String {
-    let hint = Prose::escape_text(hint);
+    let hint = Prose::escape_text_outside_code_spans(hint);
     format!(
         "<red><b>Invalid Agent</b></red>(<dim>{hint}</dim>) <i>defined in Markdown's \
          <inverse>agent</inverse> Frontmatter! Caller will be prompted to choose a valid Agent \

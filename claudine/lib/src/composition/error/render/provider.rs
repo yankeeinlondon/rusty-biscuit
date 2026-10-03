@@ -10,6 +10,7 @@ use biscuit_file::{FileReference, FileReferenceKind, RootProvenance};
 use biscuit_terminal::components::list::UnorderedList;
 use crate::composition::types::CompositionMode;
 use crate::harness::ResolutionDetail;
+use renderable::markdown::code_span;
 
 /// Render the [`StatusBlock`] for a provider/execution/file-reference-family
 /// [`CompositionError`], or the generic block for any remaining variant.
@@ -118,8 +119,8 @@ fn render_magic_no_match_body(
     let parsed = FileReference::new(reference).ok();
     let payload = parsed.as_ref().map_or(reference, FileReference::payload);
     let mut body = Prose::new(format!(
-        "<cyan>`{}`</cyan> was not found under any directory an <b>`@` reference</b> searches:",
-        Prose::escape_text(payload),
+        "<cyan>{}</cyan> was not found under any directory an <b>`@` reference</b> searches:",
+        code_span(payload),
     ))
     .render(term);
     body.push('\n');
@@ -128,8 +129,8 @@ fn render_magic_no_match_body(
         let path = biscuit_file::to_portable_string(root.path());
         let marker = (root.provenance() == RootProvenance::Magic).then_some(" (*)");
         roots.add(Prose::new(format!(
-            "<cyan>`{}`</cyan>{}",
-            Prose::escape_text(&path),
+            "<cyan>{}</cyan>{}",
+            code_span(&path),
             marker.unwrap_or_default(),
         )));
     }
@@ -156,9 +157,9 @@ fn render_candidate_no_match_body(
     term: &Terminal,
 ) -> String {
     let mut body = Prose::new(format!(
-        "Cannot resolve <cyan>`{}`</cyan> from launch directory <cyan>`{}`</cyan>.",
-        Prose::escape_text(reference),
-        Prose::escape_text(&biscuit_file::to_portable_string(resolution.base_dir())),
+        "Cannot resolve <cyan>{}</cyan> from launch directory <cyan>{}</cyan>.",
+        code_span(reference),
+        code_span(&biscuit_file::to_portable_string(resolution.base_dir())),
     ))
     .render(term);
 
@@ -181,8 +182,8 @@ fn render_candidate_no_match_body(
             };
             let path = biscuit_file::to_portable_string(probed.candidate().path());
             candidates.add(Prose::new(format!(
-                "<b>{provenance}</b>: <cyan>`{}`</cyan>",
-                Prose::escape_text(&path),
+                "<b>{provenance}</b>: <cyan>{}</cyan>",
+                code_span(&path),
             )));
         }
         body.push_str(&candidates.render(term));
@@ -202,8 +203,8 @@ fn append_suggestions(body: &mut String, suggestions: &[String], term: &Terminal
     let mut paths = UnorderedList::empty();
     for path in suggestions {
         paths.add(Prose::new(format!(
-            "<cyan>`{}`</cyan>",
-            Prose::escape_text(path),
+            "<cyan>{}</cyan>",
+            code_span(path),
         )));
     }
     body.push_str(&paths.render(term));

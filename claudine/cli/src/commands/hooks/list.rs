@@ -258,7 +258,7 @@ fn format_action(action: &HookAction) -> String {
         HookAction::Speak { message, .. } => {
             format!(
                 "<cyan>Speak</cyan>({DI}\"{}\"{DI_R})",
-                Prose::escape_text(&truncate_string(message, 40))
+                Prose::escape_text_outside_code_spans(&truncate_string(message, 40))
             )
         }
         HookAction::SoundEffect {

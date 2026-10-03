@@ -7,6 +7,7 @@
 
 use super::super::*;
 use super::{escape_prose_path, render_file_link};
+use renderable::markdown::code_span;
 
 /// Render the [`StatusBlock`] for a lifecycle-family [`CompositionError`].
 pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
@@ -85,21 +86,20 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             let file_link = render_file_link(source_path);
             let mut body = format!(
                 "Lifecycle property <cyan>`{property}`</cyan> in {file_link} writes \
-                 <cyan>`{}`</cyan> inside the string literal <cyan>`{}`</cyan>. A \
-                 `{}` inside a quoted string is literal text, and this surface is \
-                 evaluated once, so it is never interpolated.",
-                Prose::escape_text(nested),
-                Prose::escape_text(literal),
-                Prose::escape_text("{{ … }}")
+                 <cyan>{}</cyan> inside the string literal <cyan>{}</cyan>. A \
+                 `{{{{ … }}}}` inside a quoted string is literal text, and this surface \
+                 is evaluated once, so it is never interpolated.",
+                code_span(nested),
+                code_span(literal),
             );
             if let Some(suggestion) = suggestion {
                 // Bare expression text: it may hold either quote character, so
                 // no single YAML scalar style is safe to present as paste-ready.
                 body.push_str(
                     "\n\n<b>Concatenate with `+` instead</b> (expression shown without \
-                     its `\\{\\{ }}` wrapper or YAML quoting):\n\n",
+                     its `{{ }}` wrapper or YAML quoting):\n\n",
                 );
-                body.push_str(&Prose::escape_text(suggestion));
+                body.push_str(&Prose::escape_text_outside_code_spans(suggestion));
             }
 
             StatusBlock::new(StatusState::Error)
@@ -121,9 +121,9 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             let file_link = render_file_link(source_path);
             let body = format!(
                 "Lifecycle property <cyan>`{property}`</cyan> in {file_link} references \
-                 undefined variable <cyan>`{}`</cyan>, which composition resolves to an \
+                 undefined variable <cyan>{}</cyan>, which composition resolves to an \
                  empty string.",
-                escape_prose_path(variable)
+                code_span(variable)
             );
 
             StatusBlock::new(StatusState::Error)
@@ -147,7 +147,7 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
         } => {
             let file_link = render_file_link(source_path);
             let surface_label = match property {
-                Some(property) => format!("<cyan>`{}`</cyan>", Prose::escape_text(property)),
+                Some(property) => format!("<cyan>{}</cyan>", code_span(property)),
                 None => lifecycle_evaluation_surface_label(surface),
             };
             let reason_text = match reason.as_ref() {
@@ -181,10 +181,10 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
         } => {
             let file_link = render_file_link(source_path);
             let body = format!(
-                "The validation/handler key <cyan>`{}`</cyan> in {file_link} has been \
+                "The validation/handler key <cyan>{}</cyan> in {file_link} has been \
                  removed. Use the lifecycle stack model instead.\n\n\
                  <b>Replacement:</b> {}",
-                escape_prose_path(key),
+                code_span(key),
                 escape_prose_path(replacement)
             );
 
@@ -234,9 +234,9 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
         } => {
             let file_link = render_file_link(source_path);
             let body = format!(
-                "Short-form lifecycle action <cyan>`{}`</cyan> in <cyan>`{property}`</cyan> \
+                "Short-form lifecycle action <cyan>{}</cyan> in <cyan>`{property}`</cyan> \
                  in {file_link} could not be parsed.\n\n{message}",
-                escape_prose_path(raw)
+                code_span(raw)
             );
             StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
@@ -400,7 +400,7 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             property,
             path,
             "invalid `set` destination",
-            &format!("Destination key <cyan>`{}`</cyan> is invalid: {message}.", escape_prose_path(key)),
+            &format!("Destination key <cyan>{}</cyan> is invalid: {message}.", code_span(key)),
         ),
         CompositionError::LifecycleProxyWithNotMapping {
             source_path,
@@ -431,11 +431,11 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             let file_link = render_file_link(source_path);
             let body = format!(
                 "Lifecycle action <cyan>`proxy`</cyan> field <cyan>`{property}.{path}`</cyan> in \
-                 {file_link} was supplied as the whole-mapping interpolation <cyan>`{}`</cyan>.\
+                 {file_link} was supplied as the whole-mapping interpolation <cyan>{}</cyan>.\
                  \n\nSupplying the entire mapping from one expression is not supported in this \
                  version and is a named follow-up. Author the keys explicitly; each value may \
                  still be a whole-value interpolation carrying an object or array.",
-                escape_prose_path(raw)
+                code_span(raw)
             );
             StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
@@ -456,10 +456,10 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             let file_link = render_file_link(source_path);
             let body = format!(
                 "Lifecycle action <cyan>`proxy`</cyan> field <cyan>`{property}.{path}`</cyan> in \
-                 {file_link} has the dynamic key <cyan>`{}`</cyan>.\n\n\
+                 {file_link} has the dynamic key <cyan>{}</cyan>.\n\n\
                  <cyan>`with`</cyan> keys name top-level frontmatter properties of the target \
                  and are never interpolated. Only values resolve.",
-                escape_prose_path(key)
+                code_span(key)
             );
             StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
@@ -478,11 +478,11 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
         } => {
             let file_link = render_file_link(source_path);
             let body = format!(
-                "Lifecycle action <cyan>`proxy`</cyan> to <cyan>`{}`</cyan> in {file_link} could \
+                "Lifecycle action <cyan>`proxy`</cyan> to <cyan>{}</cyan> in {file_link} could \
                  not resolve <cyan>`{property}.{path}`</cyan>.\n\n{message}\n\n\
                  The whole <cyan>`with`</cyan> mapping resolves at the source before the handoff, \
                  so nothing was passed to the target and the source is still active.",
-                escape_prose_path(target)
+                code_span(target)
             );
             StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
@@ -551,14 +551,14 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             let file_link = render_file_link(source_path);
             let body = format!(
                 "A lifecycle <cyan>`proxy`</cyan> in <cyan>`{property}`</cyan> in \
-                 {file_link} hands off to <cyan>`{}`</cyan>, but <cyan>`{command}`</cyan> \
+                 {file_link} hands off to <cyan>{}</cyan>, but <cyan>`{command}`</cyan> \
                  runs a provider memory file with a prompt supplied on the command \
                  line — it prepares no active document, so it owns no coordinator that \
                  can bring the target up.\n\nRunning the target from here would launch \
                  it with this invocation's own profile, argv, and MCP servers instead \
                  of the ones the target's own frontmatter selects, so the hand-off is \
                  refused rather than run against the wrong launch configuration.",
-                escape_prose_path(target)
+                code_span(target)
             );
             StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
@@ -582,15 +582,15 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             let file_link = render_file_link(source_path);
             let rendered_chain = chain
                 .iter()
-                .map(|hop| format!("<cyan>`{}`</cyan>", escape_prose_path(hop)))
+                .map(|hop| format!("<cyan>{}</cyan>", code_span(hop)))
                 .collect::<Vec<_>>()
                 .join(" → ");
             let body = format!(
                 "A lifecycle <cyan>`proxy`</cyan> in {file_link} hands off to \
-                 <cyan>`{}`</cyan>, which would re-enter a document already on the \
+                 <cyan>{}</cyan>, which would re-enter a document already on the \
                  active chain or exceed the hop limit of {limit}.\n\nActive chain: \
                  {rendered_chain}",
-                escape_prose_path(target)
+                code_span(target)
             );
             StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
@@ -683,11 +683,11 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
         } => {
             let file_link = render_file_link(source_path);
             let body = format!(
-                "Short-form lifecycle action <cyan>`{}`</cyan> in <cyan>`{property}`</cyan> \
+                "Short-form lifecycle action <cyan>{}</cyan> in <cyan>`{property}`</cyan> \
                  in {file_link} has been removed.\n\n\
-                 <b>Rewrite to positional form:</b> <cyan>`{}`</cyan>",
-                escape_prose_path(raw),
-                escape_prose_path(rewrite)
+                 <b>Rewrite to positional form:</b> <cyan>{}</cyan>",
+                code_span(raw),
+                code_span(rewrite)
             );
             StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
@@ -820,13 +820,10 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                 ),
                 None => format!("<cyan>`{property}`</cyan> in {file_link}"),
             };
-            // `escape_prose_path` escapes `"` for `<a href="…">` attributes;
-            // it over-escapes body text, and this source's `Display` quotes
-            // the reference. `Prose::escape_text` is the body-text escape.
             let mut body = format!(
-                "Cannot resolve <cyan>`{}`</cyan>, referenced by {surface}.\n\n{}",
-                escape_prose_path(reference),
-                Prose::escape_text(&source.to_string())
+                "Cannot resolve <cyan>{}</cyan>, referenced by {surface}.\n\n{}",
+                code_span(reference),
+                Prose::escape_text_outside_code_spans(&source.to_string())
             );
             // Enumerate the ordered plan only when the resolver tried more than
             // one candidate: the single-candidate `Display` above already names

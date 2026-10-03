@@ -191,7 +191,7 @@ fn cell(text: &str, selectable: bool) -> InlineProse {
 }
 
 fn details(row: &SessionListing) -> Vec<RenderableTerminalContent> {
-    let escape = |text: &str| Prose::escape_text(text).to_string();
+    let escape = |text: &str| Prose::escape_text_outside_code_spans(text).to_string();
     let mut items: Vec<RenderableTerminalContent> = Vec::new();
     let availability = &row.availability;
     if let Some(operation) = availability.operation {
@@ -351,7 +351,7 @@ pub(crate) fn receipt(delivery: &Delivery, term: &Terminal) -> String {
         heading.push_str(&format!(" · via `{mechanism}`"));
     }
     let mut items: Vec<RenderableTerminalContent> =
-        vec![Prose::new(Prose::escape_text(outcome_explanation(result.outcome)).to_string()).into()];
+        vec![Prose::new(Prose::escape_text_outside_code_spans(outcome_explanation(result.outcome)).to_string()).into()];
     if let Some(phases) = result.interruption {
         let replacement = match phases.replacement {
             Some(outcome) => format!("the replacement message was {}", outcome_word(outcome)),
@@ -360,7 +360,7 @@ pub(crate) fn receipt(delivery: &Delivery, term: &Terminal) -> String {
         items.push(Prose::new(format!("Interruption: {}; {replacement}.", cancellation_words(phases.cancellation))).into());
     }
     if let Some(detail) = delivery.detail.as_ref() {
-        items.push(Prose::new(format!("<bold>Detail:</bold> {}", Prose::escape_text(detail.as_str()))).into());
+        items.push(Prose::new(format!("<bold>Detail:</bold> {}", Prose::escape_text_outside_code_spans(detail.as_str()))).into());
     }
     items.push(Prose::new(format!("<dim>Request {}</dim>", result.request_id)).into());
     [line(heading).render(term), UnorderedList::from(items).render(term)].join("\n")

@@ -199,7 +199,8 @@ pub(crate) fn render_watchdog_error_to_stream(
     }
 }
 
-/// Escape the termination message so it renders exactly as written inside Prose markup.
+/// Escape the termination message so it renders exactly as written inside
+/// Prose markup; code spans it marks with backticks stay literal.
 fn escape_prose(input: &str) -> String {
-    biscuit_terminal::components::prose::Prose::escape_text(input)
+    biscuit_terminal::components::prose::Prose::escape_text_outside_code_spans(input)
 }

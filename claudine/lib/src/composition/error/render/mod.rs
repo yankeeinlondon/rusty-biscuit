@@ -196,8 +196,13 @@ fn optional_line(line: usize) -> Value {
 
 /// Escape author or diagnostic text for splicing into Prose markup, so paths,
 /// identifiers such as `_loop_count`, and messages render exactly as written.
+/// Code spans a message marks with backticks stay literal.
+///
+/// Never use it for a value placed inside a code span: a span's contents are
+/// literal, so the added backslashes would show. Fence such a value with
+/// [`renderable::markdown::code_span`] instead.
 pub(super) fn escape_prose_path(input: &str) -> String {
-    Prose::escape_text(input)
+    Prose::escape_text_outside_code_spans(input)
 }
 
 /// Map a `ComposeFailed`'s inner [`MarkdownError`] to a composition code,
