@@ -25,40 +25,19 @@ reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-02
 review_iterations: 0
 clarified: false
-implemented: false
+implemented: true
 related:
     - 2026-09-27-list-freshness-ux
     - 2026-09-25-list-remove-performance
 human_review: false
 message_to_agent: |-
-    Phase 3 was verification: Phase 2 had already wired `list.rs`. Phase 3 added two L1 tests in `cli/src/commands/list/tests.rs`
-    (`gather::an_ignored_or_unsupported_pr_half_is_this_runs_outcome_and_no_failure`,
-    `observations::a_confirmed_head_condition_outranks_this_runs_pr_failure`) and changed no production code.
-    `just test` (827 passed) and `just lint` pass in `worktree/`. Read the `## Phase 2` and `## Phase 3` log sections first.
-
-    Phase 4 must fix these failures; all are caused by the intended change and are unchanged since Phase 2:
-    - `just test-l2` (3, all in `level2_list_verbose.rs`): `level2_list_credentials_warning_is_a_dim_line_beneath_the_caption_in_tmux` and
-      `level2_list_clears_the_spinner_before_the_caption_and_shows_a_dim_hint_in_tmux` assert `requests == 0` for a fresh answer
-      (now 1). `level2_list_styles_follow_the_design_in_tmux` asserts no age line, but its PR request now fails against the refused proxy
-      and shows `(couldn't refresh)`. Give that fixture a PR answer that succeeds, or assert the new item.
-    - `just test-perf` (2): `perf_list_meets_sla_when_the_pr_request_hits_its_deadline` (remove it) and
-      `perf_list_meets_sla_with_a_stale_answer_and_a_failing_refresh` (update it).
-    - Already rewritten minimally so `just test` stays green; extend them, don't redo them: `list_prs` (`a_fresh_pr_store_is_asked_again_…`,
-      `concurrent_lists_…_the_next_worker_asks_again`, `a_detached_workers_answer_…`, `an_origin_change_during_the_wait_…`),
-      `list_flags::refresh_waits_for_both_halves_and_asks_again_like_every_listing`, and
-      `list_remote_head::a_worker_records_the_given_attempt_and_a_receipt_for_both_halves`.
-    - Still unproven at the binary level, and planned for Phase 4's `list_prs` track: `--ff` with a **failing** PR half still
-      fast-forwards. `list_flags::fast_forward_*` use a local bare origin, so their PR half is `unsupported`, not failed.
-      The code path is independent (`fast_forward_default` runs after the wait and reads nothing from `waited.prs`).
-
-    Other facts:
-    - The surface: `wait::wait` returns `WaitEnd { head: HeadEnd, prs: PrEnd, timed_out }`; `LaunchArgs { attempt }` has no `force`;
-      `list_table::PrOutcome`, `TableFacts { pr_outcome, timed_out }`; `ListSeams { launch, wait_budget, forced_budget }`.
-    - A listing makes two `git remote get-url origin` calls (before the launch, and the recheck after the wait).
-    - `.claude/skills/worktree/SKILL.md` still names the perf gate `perf_list_meets_sla_with_a_stale_answer_and_a_failing_refresh`
-      (300 ms `pr gather`). Fix that sentence in the same change that alters the gate.
-    - Shell gotcha (still true): use absolute paths under `/Volumes/coding/wt/rusty-biscuit/fix-wt-touchup`. The shell's directory
-      sometimes resets between commands.
+    All five phases are implemented; this is the final phase, so the next step is review, not implementation.
+    Read the `## Phase 5` log section. Gates on macOS: `just test` 836 passed, `just test-l2` 29 passed (tmux required),
+    `just test-perf` 30 passed, `just lint` clean. Phase 5 changed docs (`docs/cli/list.md`, `README.md`,
+    `docs/performance-testing.md`) and three drift fixes: the `--refresh` help string (it said "ignoring recent answers";
+    snapshot `list_flags__global_flag_completions.snap` updated), the `pr_gather` field doc in `list.rs`, and a test doc
+    in `remote_head.rs`. The authenticated GitHub sample was not taken: no API token was set in the session; the doc
+    says so. The spec's `status` field was deliberately left unchanged.
 ---
 
 # Refresh open pull requests on every `wt list` run

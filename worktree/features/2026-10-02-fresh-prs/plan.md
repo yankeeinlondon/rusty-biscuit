@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-10-02
-phase: 3
+phase: 5
 agent: claude/sonnet
 yolo: true
 source_files_during_phase_1:
@@ -36,6 +36,53 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+    - worktree/cli/tests/list_prs.rs
+    - worktree/cli/tests/list_flags.rs
+    - worktree/cli/tests/perf_pr_request.rs
+    - worktree/cli/tests/perf_support/mod.rs
+    - worktree/cli/tests/level2_list_verbose.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/worktree/SKILL.md
+source_files_during_phase_5:
+    - worktree/cli/src/args.rs
+    - worktree/cli/src/commands/list.rs
+    - worktree/lib/src/remote_head.rs
+    - worktree/cli/tests/snapshots/list_flags__global_flag_completions.snap
+docs_updated_during_phase_5:
+    - worktree/docs/cli/list.md
+    - worktree/README.md
+    - worktree/docs/performance-testing.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+source_code:
+    - worktree/lib/src/pull_requests.rs
+    - worktree/lib/src/remote_head.rs
+    - worktree/cli/src/args.rs
+    - worktree/cli/src/main.rs
+    - worktree/cli/src/commands/refresh_worker.rs
+    - worktree/cli/src/commands/list.rs
+    - worktree/cli/src/commands/list/wait.rs
+    - worktree/cli/src/commands/list/wait/tests.rs
+    - worktree/cli/src/commands/list/tests.rs
+    - worktree/cli/src/commands/list_table.rs
+    - worktree/cli/tests/list_table.rs
+    - worktree/cli/tests/snapshots/list_table__pr_presentation_every_row.snap
+    - worktree/cli/tests/list_prs.rs
+    - worktree/cli/tests/list_flags.rs
+    - worktree/cli/tests/list_remote_head.rs
+    - worktree/cli/tests/level2_list_verbose.rs
+    - worktree/cli/tests/perf_support/mod.rs
+    - worktree/cli/tests/perf_pr_request.rs
+    - worktree/cli/tests/snapshots/list_flags__global_flag_completions.snap
+documentation:
+    - worktree/docs/cli/list.md
+    - worktree/README.md
+    - worktree/docs/performance-testing.md
+completed_phase: 5
+implemented: true
 packages:
     - worktree
     - worktree-cli
@@ -56,12 +103,12 @@ Net effect is mostly deletion: `fetch_and_publish`, `LIST_DEADLINE`, `ListSeams:
 
 **Done means** (the spec's Acceptance, made observable):
 
-- [ ] Two sequential `wt list` runs each make one logical PR query even with a fresh store; both halves finishing inside 3 s shows the new answer with no status item and no hint.
-- [ ] A failing PR request shows `- PRs as of <age> ago (couldn't refresh)` (or `- couldn't get open PRs` with nothing stored); a stored empty answer is kept as an answer.
-- [ ] Head done + PR held: one 3 s wait, completed head caption, refresh hint. PR published + head held: new badges, no PR item, timeout hint.
-- [ ] Overlapping listings keep at most one PR query in flight; no wait is extended by contention.
-- [ ] `grep` shows no PR-store write outside the worker path.
-- [ ] `just test`, `just test-l2`, `just test-perf`, `just lint` pass in `worktree/`; docs and code comments match the new behavior.
+- [x] Two sequential `wt list` runs each make one logical PR query even with a fresh store; both halves finishing inside 3 s shows the new answer with no status item and no hint.
+- [x] A failing PR request shows `- PRs as of <age> ago (couldn't refresh)` (or `- couldn't get open PRs` with nothing stored); a stored empty answer is kept as an answer.
+- [x] Head done + PR held: one 3 s wait, completed head caption, refresh hint. PR published + head held: new badges, no PR item, timeout hint.
+- [x] Overlapping listings keep at most one PR query in flight; no wait is extended by contention.
+- [x] `grep` shows no PR-store write outside the worker path.
+- [x] `just test`, `just test-l2`, `just test-perf`, `just lint` pass in `worktree/`; docs and code comments match the new behavior.
 
 Constraints for every task: US English; never run `cargo fmt`; never commit; no agent attribution; the sub-agent tree is non-interactive; L2 tests must not focus any window; on completion the agent stops at "implementation complete, ready for review" (never moves the spec to `_completed`). Read the `worktree`, `rust-testing`, and `biscuit-terminal` skills before starting; load `os` before touching path comparison or Windows cache-path isolation in tests.
 
@@ -188,16 +235,16 @@ Goal: prove the behavior end to end. Tests are independent files, so authors run
 
 ### Wave 4 (three concurrent tracks)
 
-- [ ] **`list_prs` binary tests** (`cli/tests/list_prs.rs`, `cli/tests/perf_support`)
+- [x] **`list_prs` binary tests** (`cli/tests/list_prs.rs`, `cli/tests/perf_support`)
     - Replace `a_fresh_pr_store_makes_no_request_and_shows_its_badges`. Two sequential listings each make one logical PR query (one-page fixture, one HTTP request per query).
     - A PR answer arriving within the wait is shown by the same listing; a failed refresh shows `(couldn't refresh)`; failure with nothing stored shows `couldn't get open PRs`; a held PR request ends at the 3 s budget with the hint; concurrent listings make one PR query at a time; an empty successful answer clears cached badges and has no failure item.
     - No origin: no request or item; ignored repositories make no provider request and suppress even seeded badges; local-path and unsupported origins keep the Git head check and show no PR badges or item; an origin change during the wait never shows the previous repository's badges or credentials warning.
     - `-r` and `--ff` retain budgets; PR failure does not block a permitted fast-forward. Credentials: a 401 on the PR request in an ordinary listing shows the credentials line; head-condition precedence and ambiguous errors unchanged.
     - Update `list_flags` cases that asserted forced-only receipts or the contending-holder relaunch to the new rules.
-- [ ] **Perf** (`cli/tests/perf_*`)
+- [x] **Perf** (`cli/tests/perf_*`)
     - Remove `perf_list_meets_sla_when_the_pr_request_hits_its_deadline`. Add a held-PR-request test costing only the 3 s wait plus the existing local-work allowance, mirroring `perf_a_held_live_head_check_costs_the_listing_only_its_wait`. `perf_command_sla` keeps its bound with a worker whose halves answer at once.
     - Update the stale-answer and failing-refresh cases (`perf_list_meets_sla_with_a_stale_answer_and_a_failing_refresh`) that relied on a background-only PR request; local gather and render bounds unchanged; check `.config/nextest.toml` overrides still cover any test that now runs longer.
-- [ ] **L2 (tmux, no window focus)** (`cli/tests/level2_list_*.rs`)
+- [x] **L2 (tmux, no window focus)** (`cli/tests/level2_list_*.rs`)
     - `level2_list_stale_pr_answer_shows_a_dim_age_line_in_tmux` asserts the age item and refresh hint after the 3 s wait.
     - New case: close the PR request with an error and assert the dim `(couldn't refresh)` item; cover PR-only waiting so the spinner clears and the completed head caption does not say "still checking."
     - Use the Test Toolkit and shared harness; run with `BISCUIT_TEST_REQUIRED_BACKENDS=tmux` to avoid silent skips.
@@ -210,18 +257,18 @@ Goal: the `docs/` tree and skills describe current behavior, and the one require
 
 ### Wave 5 (concurrent doc tracks; they touch different files)
 
-- [ ] **`worktree/docs/cli/list.md`**: rewrite "PR badges", "Status list", and "Checking origin" (one wait for both halves). Audience is a developer new to the repo: lead with what the reader can do, a compact example per rule, a Mermaid diagram for the wait/receipt flow. Never link to or name the feature directory.
-- [ ] **`worktree/README.md`**: the `wt list` PR bullet and the ordinary-versus-`--refresh` wait explanation.
-- [ ] **`.claude/skills/worktree/SKILL.md`**: the `pull_requests` (format 5, no `writer`, no foreground writer), `remote_head` receipt (every attempt), and `wait` paragraphs; remove the stale `fetch_and_publish`/`Writer`/forced-only claims and the old test names.
-- [ ] **`worktree/docs/performance-testing.md`**: update the "PR Request" section and stale-gate notes; label the historical tables as historical.
+- [x] **`worktree/docs/cli/list.md`**: rewrite "PR badges", "Status list", and "Checking origin" (one wait for both halves). Audience is a developer new to the repo: lead with what the reader can do, a compact example per rule, a Mermaid diagram for the wait/receipt flow. Never link to or name the feature directory.
+- [x] **`worktree/README.md`**: the `wt list` PR bullet and the ordinary-versus-`--refresh` wait explanation.
+- [x] **`.claude/skills/worktree/SKILL.md`**: the `pull_requests` (format 5, no `writer`, no foreground writer), `remote_head` receipt (every attempt), and `wait` paragraphs; remove the stale `fetch_and_publish`/`Writer`/forced-only claims and the old test names.
+- [x] **`worktree/docs/performance-testing.md`**: update the "PR Request" section and stale-gate notes; label the historical tables as historical.
 
 ### Wave 6 (after Wave 5's perf page edit; sequential)
 
-- [ ] **Before/after sample**: on the development host, one quick sample of `wt list` wait time against GitHub with and without authentication, before (checkout of `main`) and after this change; record it in `docs/performance-testing.md` as an observation, not a threshold. No extra hosts or statistics (ruling 6). If GitHub is unreachable or no credentials are available, record that fact instead of a number.
+- [x] **Before/after sample**: on the development host, one quick sample of `wt list` wait time against GitHub with and without authentication, before (checkout of `main`) and after this change; record it in `docs/performance-testing.md` as an observation, not a threshold. No extra hosts or statistics (ruling 6). If GitHub is unreachable or no credentials are available, record that fact instead of a number.
 
 ### Wave 7 (final gate, sequential)
 
-- [ ] Run `just test`, `just test-l2`, `just test-perf`, `just lint` in `worktree/` and read the output rather than the exit code.
-- [ ] Drift pass: re-read every touched symbol's `///`/`//!` and inline comments; `docs/dependencies.md` unchanged (no crates added or removed; confirm).
-- [ ] Set the spec's frontmatter `status` to `implemented` only if the author's process requires it of the implementer; do not move the directory to `_completed` and do not run `just complete`.
-- [ ] Report: what changed, any departure from the spec (corrected in docs, recorded in the implementation log), tests not run on Windows/WSL2.
+- [x] Run `just test`, `just test-l2`, `just test-perf`, `just lint` in `worktree/` and read the output rather than the exit code.
+- [x] Drift pass: re-read every touched symbol's `///`/`//!` and inline comments; `docs/dependencies.md` unchanged (no crates added or removed; confirm).
+- [x] Set the spec's frontmatter `status` to `implemented` only if the author's process requires it of the implementer; do not move the directory to `_completed` and do not run `just complete`.
+- [x] Report: what changed, any departure from the spec (corrected in docs, recorded in the implementation log), tests not run on Windows/WSL2.

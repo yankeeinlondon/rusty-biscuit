@@ -35,6 +35,53 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+    - worktree/cli/tests/list_prs.rs
+    - worktree/cli/tests/list_flags.rs
+    - worktree/cli/tests/perf_pr_request.rs
+    - worktree/cli/tests/perf_support/mod.rs
+    - worktree/cli/tests/level2_list_verbose.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/worktree/SKILL.md
+source_files_during_phase_5:
+    - worktree/cli/src/args.rs
+    - worktree/cli/src/commands/list.rs
+    - worktree/lib/src/remote_head.rs
+    - worktree/cli/tests/snapshots/list_flags__global_flag_completions.snap
+docs_updated_during_phase_5:
+    - worktree/docs/cli/list.md
+    - worktree/README.md
+    - worktree/docs/performance-testing.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+source_code:
+    - worktree/lib/src/pull_requests.rs
+    - worktree/lib/src/remote_head.rs
+    - worktree/cli/src/args.rs
+    - worktree/cli/src/main.rs
+    - worktree/cli/src/commands/refresh_worker.rs
+    - worktree/cli/src/commands/list.rs
+    - worktree/cli/src/commands/list/wait.rs
+    - worktree/cli/src/commands/list/wait/tests.rs
+    - worktree/cli/src/commands/list/tests.rs
+    - worktree/cli/src/commands/list_table.rs
+    - worktree/cli/tests/list_table.rs
+    - worktree/cli/tests/snapshots/list_table__pr_presentation_every_row.snap
+    - worktree/cli/tests/list_prs.rs
+    - worktree/cli/tests/list_flags.rs
+    - worktree/cli/tests/list_remote_head.rs
+    - worktree/cli/tests/level2_list_verbose.rs
+    - worktree/cli/tests/perf_support/mod.rs
+    - worktree/cli/tests/perf_pr_request.rs
+    - worktree/cli/tests/snapshots/list_flags__global_flag_completions.snap
+documentation:
+    - worktree/docs/cli/list.md
+    - worktree/README.md
+    - worktree/docs/performance-testing.md
+completed_phase: 5
+implemented: true
 packages:
     - worktree
     - worktree-cli
@@ -219,3 +266,146 @@ Scope: the listing flow in `cli/src/commands/list.rs`. Phase 2 had already lande
 - Checkpoint grep `fetch_and_publish|LIST_DEADLINE|AlreadyFresh|SkippedFresh|origin_pr_source|Writer|PrConnect` over `worktree/` and the skill: hits only in `fixes/_completed/*` history and this feature's spec, plan, and log.
 - Not run in this phase: `just test-l2` (3 known failures) and `just test-perf` (2 known failures). Both are unchanged from the Phase 2 list and are Phase 4's to fix. No cross-OS run: no path, `cfg`, or process code changed, and the new tests are pure or use the existing temp-repo fixture.
 - Skill: `.claude/skills/worktree/SKILL.md` already describes the Phase 3 flow (Phase 2 updated it), so it was not changed.
+
+## Phase 4
+
+Scope: end-to-end proof through the real binary, the perf suite, and tmux L2. No production code changed. Phase 2 had already rewritten the binary tests that asserted removed behavior (so `just test` stayed green). This phase added the missing cases, fixed the three L2 and two perf tests left red by the behavior change, and fixed comment drift in the test helpers.
+
+### What changed
+
+`cli/tests/list_prs.rs` (L1 binary, `autotests` target)
+
+- New: `two_sequential_listings_each_make_one_pr_query_and_show_the_answer_they_waited_for` (a fresh store is asked again; one Gitea request per listing on a one-page answer; each listing shows the answer it waited for, with no item and no hint), `a_failed_refresh_with_nothing_stored_says_it_couldnt_get_open_prs`, `a_held_pr_request_with_nothing_stored_ends_at_the_budget_with_only_the_hint` (3–5 s, the hint only, the head caption not "still checking"), `an_empty_answer_clears_the_stored_badges_and_shows_no_item` (stored as a `Fresh` empty answer), `without_an_origin_nothing_is_asked_and_no_pr_item_or_hint_shows`, `local_path_and_unsupported_origins_keep_the_head_check_and_show_no_pr_badges_or_item` (an unsupported host's *seeded* badge is suppressed and its head attempt is recorded; a local path's head check answers through Git), `a_rejected_key_on_the_pr_request_shows_the_credentials_line_in_an_ordinary_listing` (names `GITEA_TOKEN`, never its value; the item stays `- PRs as of 12 min ago (couldn't refresh)` with no reason; the head half's 404 with a key asserts nothing; then, with `origin` changed during the wait, neither the rejection nor badges show), `a_rejected_key_on_the_head_check_outranks_the_pr_requests_rate_limit`, `a_pr_failure_never_blocks_a_permitted_fast_forward` (`--ff` with the PR half answering 500: `main` moves to the fetched tip, the caption says "updated from origin just now", the item says `couldn't get open PRs`).
+- Strengthened: `a_failed_or_unauthorized_refresh_keeps_the_stored_answer` now asserts the listing's own `(couldn't refresh)` item, no hint, and no credentials line for a 401 without a key.
+- Module doc rewritten for the every-run refresh; one stale "fresh answer has no age line" message fixed.
+
+`cli/tests/perf_support/mod.rs`
+
+- New `MixedFixture::serve_gitea_origin_one_commit_ahead(&gitea)` and `wt_command_via_gitea_git(&gitea)`: a real `origin` behind `FakeGitea` (`git http-backend`, the same mechanism L2 already used), so a binary test can fetch and fast-forward while the PR half fails.
+- Drift fixed: `FakeGitea::before_reply` no longer cites the removed 300 ms foreground request. `seed_remote_head_store` no longer claims a fresh head stops the worker or its check.
+
+`cli/tests/list_flags.rs`
+
+- `refresh_waits_for_both_halves_and_asks_again_like_every_listing`: the ordinary listing shows the answer it waited for and leaves no receipt (every attempt's receipt is deleted by its wait).
+- `ignore_api::the_repository_is_recorded_before_the_run_and_no_provider_is_asked` now seeds a young store first, so "no badges" is proven against a stored answer. It also asserts no PR item or hint, with and without the flag.
+- No case still asserted forced-only receipts. The contending-holder relaunch cases already matched the new rules (forced relaunch once, ordinary failure), so they are unchanged.
+
+`cli/tests/perf_pr_request.rs`
+
+- Removed `perf_list_meets_sla_when_the_pr_request_hits_its_deadline` (it tested the deleted foreground request).
+- New `perf_a_held_pr_request_costs_the_listing_only_its_wait`: `FakeGitea::hold`, two listings (the second one's worker is contended). Each `remote wait` is in [3 s, 3.3 s) and each full run is under 4 s, with pending item plus hint. One PR request in total, still held after both listings return.
+- `perf_list_meets_sla_with_a_stale_answer_and_a_failing_refresh`: the fresh runs now make two requests per worker (PR + head), exactly `2 × 11` then `2 × 21`. The stale samples show `(couldn't refresh)` and no hint. `pr gather` (store reads only) stays under 300 ms and the full run under 1 s. `PR_DEADLINE` was renamed `STAGE_SLACK`: the deadline it named no longer exists.
+- `.config/nextest.toml`: no change needed. The new test runs about 7 s, inside the default 30 s ceiling.
+
+`cli/tests/level2_list_verbose.rs`
+
+- `DesignFixture`'s stored answer now names the origin's own repository (`o/r` for Gitea), so a Gitea-origin fixture can show a badge. New `with_gitea_pr_age`. Existing Gitea scenes are unaffected: their PR request now succeeds with an empty answer, which clears the badge anyway.
+- `level2_list_stale_pr_answer_shows_a_dim_age_line_in_tmux` rewritten. The PR request is held at `FakeGitea` (plain HTTP). The old hanging `ProxyStub` raced sniff's 3 s connect timeout against the 3 s wait. The test asserts the spinner drew `updating` mid-wait; after the wait: the badge, the dim age item beneath the legend, the dim hint after it, no spinner frame or text, a caption saying "couldn't check origin" (not "still checking"), the request still held, one PR request, nothing stored.
+- New `level2_list_failed_pr_refresh_shows_a_dim_couldnt_refresh_item_in_tmux`: Gitea 500 → dim `- PRs as of 12 min ago (couldn't refresh)` beneath the legend, badge kept, no hint, nothing stored.
+- Fixed for the new behavior: `level2_list_styles_follow_the_design_in_tmux` (the refused PR request now gives `- PRs as of less than 1 min ago (couldn't refresh)` right after the legend, asserted instead of "no age line"), `level2_list_credentials_warning_…` and `level2_list_clears_the_spinner_…` (one PR request, not zero).
+
+`.claude/skills/worktree/SKILL.md`: the held-PR perf gate, the rewritten and new L2 scenes, the `FakeGitea`-not-`ProxyStub` rule for holding a PR request, and the served-origin fixture.
+
+### Requirement-to-test mapping (Phase 4 bullets)
+
+| Requirement | Test(s) |
+|---|---|
+| Two sequential listings each make one logical PR query, fresh store included; in-time answer shown, no item, no hint | `list_prs::two_sequential_listings_each_make_one_pr_query_and_show_the_answer_they_waited_for`; `list_flags::refresh_waits_for_both_halves_and_asks_again_like_every_listing` |
+| Failed refresh shows `(couldn't refresh)` | `list_prs::a_failed_or_unauthorized_refresh_keeps_the_stored_answer`, `a_fresh_pr_store_is_asked_again_and_a_failed_request_keeps_its_badges`; L2 `level2_list_failed_pr_refresh_shows_a_dim_couldnt_refresh_item_in_tmux` |
+| Failure with nothing stored: `couldn't get open PRs` | `list_prs::a_failed_refresh_with_nothing_stored_says_it_couldnt_get_open_prs`, `a_pr_failure_never_blocks_a_permitted_fast_forward` |
+| Held PR request ends at 3 s with the hint | `list_prs::a_held_pr_request_with_nothing_stored_ends_at_the_budget_with_only_the_hint`, `a_detached_workers_answer_replaces_the_stale_one_on_the_next_list`; perf `perf_a_held_pr_request_costs_the_listing_only_its_wait`; L2 stale scene |
+| Concurrent listings: one PR query at a time; no wait extended | `list_prs::concurrent_lists_and_workers_make_one_request_and_the_next_worker_asks_again`; perf held-PR test (second listing contended, same 3 s) |
+| Empty successful answer clears badges, no item | `list_prs::an_empty_answer_clears_the_stored_badges_and_shows_no_item` |
+| No origin: no request, item, or hint | `list_prs::without_an_origin_nothing_is_asked_and_no_pr_item_or_hint_shows` |
+| Ignored: no provider request; seeded badges suppressed | `list_flags::ignore_api::the_repository_is_recorded_before_the_run_and_no_provider_is_asked` (Unix-only, as before: native Windows ignores `HOME`) |
+| Local-path and unsupported origins: head check kept, no PR badges or item | `list_prs::local_path_and_unsupported_origins_keep_the_head_check_and_show_no_pr_badges_or_item` |
+| Origin change during the wait: no old badges, no old credentials warning | `list_prs::an_origin_change_during_the_wait_shows_no_badges_from_the_old_origin`, second half of `a_rejected_key_on_the_pr_request_…` |
+| `-r` / `--ff` keep their budgets; PR failure does not block a permitted fast-forward | perf `perf_refresh_against_a_held_check_…`, `perf_fast_forward_against_a_held_fetch_…` (unchanged, passing); `list_prs::a_pr_failure_never_blocks_a_permitted_fast_forward` |
+| 401 on the PR request in an ordinary listing: credentials line | `list_prs::a_rejected_key_on_the_pr_request_shows_the_credentials_line_in_an_ordinary_listing` |
+| Head-condition precedence; ambiguous errors unchanged | `list_prs::a_rejected_key_on_the_head_check_outranks_the_pr_requests_rate_limit`; the 404-with-key assertion in `a_rejected_key_on_the_pr_request_…`; no line for a keyless 401 in `a_failed_or_unauthorized_…` |
+| L2: stale age item and hint after the 3 s wait; PR-only wait clears the spinner, completed caption | `level2_list_stale_pr_answer_shows_a_dim_age_line_in_tmux` |
+| L2: dim `(couldn't refresh)` | `level2_list_failed_pr_refresh_shows_a_dim_couldnt_refresh_item_in_tmux`, `level2_list_styles_follow_the_design_in_tmux` |
+
+Fail-before evidence: the original defect was "a fresh store makes no PR request." `two_sequential_…` asserts `requests == listing + 1` with a 10-second-old store. Before this feature, `list_prs::a_fresh_pr_store_makes_no_request_and_shows_its_badges` asserted exactly zero requests for that input. That test was removed in Phase 2 because it described the defect. The new L2 and perf failures listed at the end of Phase 2 were the red state for the L2 and perf rewrites.
+
+Three of the new `list_prs` assertions failed on their first run, and each was a test mistake, not a product defect: the `--perf` tree follows the PR item, the head half's keyless 404 legitimately names `GITEA_TOKEN`, and the caption itself says "couldn't check origin". The assertions were narrowed to the item line and to the PR-specific wording.
+
+### Gates run (macOS)
+
+- `just test`: **836 run, 836 passed, 30 skipped**.
+- `just test-l2` with `BISCUIT_TEST_REQUIRED_BACKENDS=tmux`: **29 run, 29 passed** (the 3 Phase 2 failures fixed, plus the new scene).
+- `just test-perf`: **30 run, 30 passed**. Measured: held PR request remote wait 3.00 s, full 3.11–3.16 s; stale answer with a failing refresh full 167 ms, `pr gather` about 10 ms.
+- `just lint`: clean.
+- `just check-tier-coverage worktree`: 0 stranded. The new tests sit in existing auto-discovered binaries (`list_prs`, `list_flags`, `perf_pr_request`) and the `terminal-tests` L2 binary. Tier markers are only `perf_` / `level2_`, and both have live recipes.
+
+### Cross-OS (`just cross-check worktree-cli`, whole L1 suite)
+
+- Linux (build-linux): **531 passed, 61 skipped**.
+- Native Windows (build-win-native): **512 passed, 51 skipped**. This includes the new `list_prs` cases. `a_pr_failure_never_blocks_a_permitted_fast_forward` relies on `git http-backend` behind `FakeGitea`, and Git for Windows serves it. The `--ignore-api` binary test is still Unix-only (native Windows ignores `HOME`).
+- WSL2: not run. CI's nightly leg covers it. No path, `cfg`, or process code changed.
+- The filter forms that do not work, learned here: `just cross-check` runs both remote legs from a nextest archive, so `--test <binary>` is rejected. A filterset with parentheses (`-E 'binary(…)'`) breaks the recipe's bash, and a bare substring matches test names only. Run the package unfiltered (2–4 min per leg here).
+
+### Not run / left for Phase 5
+
+- `just test-l2` ran on macOS only. tmux L2 runs on CI's Linux and macOS legs; Windows hosts no `l2-backends`.
+- Plan "Done means" boxes are left for Phase 5's final gate (Wave 7). Docs (`docs/cli/list.md`, README, `docs/performance-testing.md`) are Phase 5's.
+
+## Phase 5
+
+Scope: docs, the before/after measurement, and the final gate. No behavior changed. The only source edits are a help string, two comments, and the snapshot that records the help string.
+
+### What changed
+
+`worktree/docs/cli/list.md`
+
+- "Checking origin" now describes one background process with two halves (head and PR), one 3 s wait for both, the spinner's return to `updating` once only the PR half is left, and "no `origin`, nothing asked". A new subsection, "How the wait knows both halves are done", explains the per-attempt receipt with a Mermaid flowchart, the independent head/PR reporting (three cases), publication ids, and overlapping listings (one PR request in flight; ordinary listings fail, `-r`/`--ff` retry once; the budget is never extended).
+- "PR badges" was rewritten. Every listing asks, and only the background process asks (10 s, complete answers only, failures never stored, an empty answer clears the badges). It adds the six-row outcome table (the spec's §5), a worked `(couldn't refresh)` example, and the origin-change rule. The 300 ms foreground request and the "fresh answers are not asked again" text are gone.
+- "Status list": the PR item follows this run's outcome, and the hint appears only when the wait ran out.
+- "Credentials warning": the PR request's rejected key or rate limit counts in every listing, and the head check's line takes precedence.
+- Flags table and `--refresh`: `-r` no longer "ignores recent answers" (every run asks); it only waits longer, and retries once after an unproductive contention.
+
+`worktree/README.md`: the `origin` bullet (two questions side by side; 3 s ordinary, 75 s with `-r`/`--ff`), the PR badge bullet, and the notes bullet (the credentials line also covers the PR request; the hint means the wait ran out).
+
+`worktree/docs/performance-testing.md`
+
+- "PR Request" was rewritten for the worker-only, every-run request; `pr gather` is now the origin lookup plus the post-wait origin recheck and store read.
+- New subsection "Before and after: waiting for the PR request" (Wave 6 sample, below).
+- "Live Remote Head": the wait polls the attempt **and** the receipt; every attempt writes a receipt (it was "each forced attempt"). The full-command contract table gains the held-PR row.
+- The dated tables are labeled as historical records that name removed gates. A new 2026-10-02 table holds this phase's `just test-perf` figures.
+
+Source (drift found while checking the docs against the code):
+
+- `cli/src/args.rs`: `--refresh` help said "ignoring recent answers". That was drift: Phase 2 removed the freshness skip, so there are no recent answers to ignore. It now reads "Wait for a full update from origin, up to 75 s instead of 3 s (listing only)". `cli/tests/snapshots/list_flags__global_flag_completions.snap` updated to match. `list_flags::completion_offers_every_listing_flag` passed with it.
+- `cli/src/commands/list.rs`: the `pr_gather` field doc omitted the post-wait origin recheck (a second `git remote get-url`), which is what the stage measures. Corrected.
+- `lib/src/remote_head.rs`: a test doc said "two overlapping *forced* attempts" keep their own receipts; every attempt now writes one. Dropped "forced".
+
+`.claude/skills/worktree/SKILL.md`: no edit needed. Phases 2 and 4 already rewrote the `pull_requests`, receipt, and `wait` paragraphs. Every function, type, and test name the skill cites was checked against the tree, and all exist (the four misses were external crate paths, `biscuit_hash::…`, `dirs::home_dir`, and `biscuit_test_harness::…`, plus file names).
+
+### Before/after sample (Wave 6)
+
+Release builds of `wt` from a `git archive main` snapshot (before) and this worktree (after), run unauthenticated in this checkout against GitHub (`origin` is `git@github.com:yankeeinlondon/rusty-biscuit.git`):
+
+- before: run 1 (format-5 store, so a miss for the format-4 reader) made the foreground request, `pr gather` 82.5 ms, `remote wait` 141.6 ms; runs 2–3 asked nothing, `pr gather` 4.5–4.9 ms, `remote wait` 119.1–139.1 ms.
+- after: 5 runs, each published a new answer (new publication id, `fetched_at` age 0 after each run); `pr gather` 10.1–10.4 ms, `remote wait` 108.0–138.3 ms.
+- Authenticated: **not sampled**. `GITHUB_TOKEN`, `GH_TOKEN`, and `SNIFF_GITHUB_TOKEN` were all unset in this session, and sniff reads only environment variables. Recorded as such in the doc, per the plan.
+- Side effect: the last run was the "before" binary, so the user's PR store for this repository is left at format 4, which matches an installed `wt` built from `main`.
+
+### Gates (macOS)
+
+- `just test`: **836 run, 836 passed, 30 skipped**.
+- `BISCUIT_TEST_REQUIRED_BACKENDS=tmux just test-l2`: **29 run, 29 passed** (backend proof: tmux run=23 skip=0).
+- `just test-perf`: **30 run, 30 passed** (figures in the perf page's 2026-10-02 table: held PR request `remote wait` 3.00 s, full 3.12–3.13 s; stale failing refresh full 163.7 ms, `pr gather` 9.5–10.4 ms; `-r` held 10.29 s; `--ff` held 60.20 s).
+- `just lint`: clean.
+- `just check-tier-coverage worktree` (repo root): 0 stranded. No test was added or renamed in this phase.
+- `docs/dependencies.md`: unchanged. `worktree/lib/Cargo.toml` and `worktree/cli/Cargo.toml` are identical to `main`.
+- "No PR-store write outside the worker": `pull_requests::publish` is called only from `refresh`, and production code calls `refresh` only from `refresh_worker.rs`. The other calls are stub workers in `list/tests.rs` and `list/wait/tests.rs`.
+
+### Requirement-to-test mapping (Phase 5)
+
+Phase 5 changed no behavior, so its only test obligation is the help-string snapshot (`list_flags::completion_offers_every_listing_flag`). The spec's Acceptance items map to the Phase 4 tests listed in that section's table; all of them passed again in this phase's runs.
+
+### Not run / departures
+
+- Windows and WSL2: not run in this phase (doc and comment changes only; the help string has no platform code). Phase 4's cross-check covered Linux and native Windows; CI covers Windows on push to `main` and WSL2 nightly.
+- Spec `status` was left as it was. The plan makes that change conditional on the author's process, and the instructions for this phase ask only for `implemented: true`.
+- Departure from the spec: none in behavior. The spec's Docs list did not mention the `--refresh` help text; it was drift and was fixed here.
