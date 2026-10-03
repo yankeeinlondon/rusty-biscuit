@@ -1402,7 +1402,7 @@ pub(crate) fn validate_containment(
 ) -> Result<(), FileReferenceError> {
     validate_lexical(boundary, reference, candidate)?;
     let root = boundary.root();
-    let canonical_root = match dunce::canonicalize(root) {
+    let canonical_root = match crate::canonicalize_simplified(root) {
         Ok(canonical) => canonical,
         // A tree root that does not exist contains no file, so no candidate
         // inside it can land elsewhere; the lexical check already decided.
@@ -1420,7 +1420,7 @@ pub(crate) fn validate_containment(
         }
     };
     let existing = deepest_existing_ancestor(candidate)?;
-    let canonical_existing = dunce::canonicalize(&existing).map_err(|source| {
+    let canonical_existing = crate::canonicalize_simplified(&existing).map_err(|source| {
         FileReferenceError::Io {
             path: existing.clone(),
             source,

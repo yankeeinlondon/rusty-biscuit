@@ -291,7 +291,7 @@ fn spelled_as_stored(dir: &Path, name: &OsStr, path: &Path, meta: &std::fs::Meta
         }
     }
     if cfg!(any(target_os = "macos", windows)) && !meta.file_type().is_symlink() {
-        return std::fs::canonicalize(path)
+        return canonicalize_simplified(path)
             .is_ok_and(|canonical| canonical.file_name() == Some(name));
     }
     !folds_case(dir, name, meta)
