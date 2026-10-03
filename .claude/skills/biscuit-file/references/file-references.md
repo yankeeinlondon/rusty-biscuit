@@ -46,8 +46,10 @@ tier — containment in the local root decides, never containment in `$HOME`.
 `add_magic_path_with_tier(path, position, MagicPathTier::User)` forces the
 user tier, which a caller needs for home conventions when the local root *is*
 `$HOME`. `PathPosition` orders a root only within its tier (`Start` before
-that tier's intrinsic roots, `End` after). Roots are deduplicated after
-ordering, keeping first-seen provenance. A relative configured root joins onto
+that tier's intrinsic roots, `End` after). Roots (and candidate plans) are
+deduplicated after ordering by `PathIdentity` (`first_seen_by_identity` in
+`portable/path_identity.rs`), keeping first-seen provenance and spelling; an
+unreducible verbatim path is a duplicate of its legacy spelling. A relative configured root joins onto
 the captured request directory — for ambient `resolve_from(cwd)`, onto
 `cwd` rather than the process CWD.
 

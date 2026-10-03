@@ -256,8 +256,9 @@ wins over inference in every layout. Plain `add_magic_path` means
 `PathPosition` therefore orders a root only **within its tier**: `Start`
 precedes and `End` follows that tier's intrinsic roots. No position can move a
 user-tier root ahead of a local one. After ordering, roots are deduplicated by
-normalized path, keeping the first occurrence and its provenance — a
-configured root equal to an intrinsic root is searched once, as `Magic`.
+[`PathIdentity`](#path-identity), keeping the first occurrence, its
+provenance, and its spelling — a configured root equal to an intrinsic root is
+searched once, as `Magic`.
 
 A relative configured root is joined onto the captured request directory, not
 the process working directory, and the tier test uses that same absolute path.
@@ -960,8 +961,8 @@ which belongs to the optional fetching API rather than local resolution.
    | Vault | Configured roots, then captured `$VAULT` paths |
    | Remote URL | No local candidates |
 
-   Plans are lexically deduplicated preserving first-seen order, and every
-   entry retains its root provenance. With an explicit context, every
+   Plans are deduplicated by `PathIdentity`, preserving first-seen order, and
+   every entry retains its root provenance and spelling. With an explicit context, every
    relative candidate must lie lexically inside a boundary
    [tree root](#the-file-tree-base_dir-and-the-relative-boundary), and every
    `&`/`^` candidate inside the repository, or the plan fails before
@@ -1054,8 +1055,18 @@ C:\..\..\repo       → C:\repo          (and at a drive root)
 ```
 
 A verbatim path without dot segments is then reduced to its legacy spelling,
-so `\\?\C:\repo` and `C:\repo` select the same tree. Containment additionally
-checks where a candidate really lands; see
+so `\\?\C:\repo` and `C:\repo` select the same tree.
+
+Deduplication compares identities rather than these reduced spellings, so a
+verbatim path too long to reduce is still a duplicate of its legacy spelling.
+The first occurrence survives with its own text:
+
+```text
+1. \\?\C:\repo\<300-character name>\x.md   (Repository)   kept, prefix and all
+2. C:\repo\<300-character name>\x.md       (Source)       dropped as a duplicate
+```
+
+Containment additionally checks where a candidate really lands; see
 [Trust boundaries and containment](#trust-boundaries-and-containment).
 
 ## Glob References: `GlobReference`
