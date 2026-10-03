@@ -1,6 +1,6 @@
 //! The background refresh behind `wt list`: a detached
-//! `wt internal-refresh <main checkout> [--attempt <id>] [--force]` that the
-//! listing launches and never joins.
+//! `wt internal-refresh <main checkout> [--attempt <id>]` that the listing
+//! launches and never joins.
 //!
 //! The worker has two independent halves, run concurrently: the open-PR answer
 //! ([`refresh`]) and the update of `origin/<default>`
@@ -9,9 +9,9 @@
 //! other is blocked, contended, unsupported, failing, or has panicked. A
 //! repository in `~/.wt.json` makes no provider request in either half.
 //!
-//! With `--force` (`wt list --refresh`), the PR half ignores its freshness
-//! window, and once both halves are done the worker writes the completion
-//! receipt the foreground waits for.
+//! The PR half asks whenever it wins the PR lock, and once both halves are
+//! done the worker writes the completion receipt the foreground waits for, on
+//! every attempt.
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -49,11 +49,11 @@ pub fn launch(main: &Path, args: &LaunchArgs) -> std::io::Result<WorkerHandle> {
 
 fn spawn_worker(exe: &Path, main: &Path, args: &LaunchArgs) -> std::io::Result<Child> {
     let mut command = Command::new(exe);
-    command.arg(SUBCOMMAND).arg(main).arg("--attempt").arg(&args.attempt);
-    if args.force {
-        command.arg("--force");
-    }
     command
+        .arg(SUBCOMMAND)
+        .arg(main)
+        .arg("--attempt")
+        .arg(&args.attempt)
         .current_dir(main)
         .env_remove("WT_SHELL_WRAPPER")
         .env_remove("COMPLETE")
@@ -67,7 +67,7 @@ fn spawn_worker(exe: &Path, main: &Path, args: &LaunchArgs) -> std::io::Result<C
 /// The worker: runs attempt `attempt` (a new id when `None`) for `repo` when
 /// it is a main checkout, and does nothing otherwise. It prints nothing and
 /// never fails, since nobody reads its output or exit status.
-pub fn run(repo: &Path, attempt: Option<&str>, force: bool) {
+pub fn run(repo: &Path, attempt: Option<&str>) {
     let Some(main) = main_checkout(repo) else {
         return;
     };
@@ -78,22 +78,16 @@ pub fn run(repo: &Path, attempt: Option<&str>, force: bool) {
     let ignore_api = origin.as_deref().is_some_and(|origin| {
         api_preference::preference_path().is_some_and(|path| api_preference::load(&path).ignores_origin(origin))
     });
-    // The receipt speaks for the origin and branch the attempt started with.
-    let receipt = match (force, origin, default_branch_in(&main), refresh_receipt_path(&main, &id)) {
-        (true, Some(origin), Ok(branch), Ok(path)) => {
-            Some(ReceiptTarget { path, attempt_id: id.clone(), origin_digest: origin_digest(&origin), branch })
-        }
-        _ => None,
-    };
+    let receipt = receipt_target(&main, &id, origin.as_deref());
     run_and_record(
         &main,
         receipt.as_ref(),
-        |main| pr_half(main, force, ignore_api),
+        |main| pr_half(main, ignore_api),
         |main| head_half(main, &id, ignore_api),
     );
 }
 
-/// Where a forced run's completion receipt goes, and what it binds to.
+/// Where an attempt's completion receipt goes, and what it binds to.
 struct ReceiptTarget {
     path: PathBuf,
     attempt_id: String,
@@ -101,10 +95,21 @@ struct ReceiptTarget {
     branch: String,
 }
 
-/// Runs both halves ([`run_halves`]) and then, for a forced run, sweeps
-/// stale receipts and writes this attempt's own; a half that panicked is
-/// recorded as failed. The write is best effort: the foreground's wait is
-/// bounded without it.
+/// Every attempt's receipt target, bound to the origin and branch the attempt
+/// started with. `None` without an origin or a default branch: there is
+/// nothing to bind a receipt to, and the foreground's wait is bounded
+/// without one.
+fn receipt_target(main: &Path, id: &str, origin: Option<&str>) -> Option<ReceiptTarget> {
+    let branch = default_branch_in(main).ok()?;
+    let path = refresh_receipt_path(main, id).ok()?;
+    Some(ReceiptTarget { path, attempt_id: id.to_string(), origin_digest: origin_digest(origin?), branch })
+}
+
+/// Runs both halves ([`run_halves`]) and then sweeps stale receipts and
+/// writes this attempt's own; a half that panicked is recorded as failed. The
+/// write is best effort: the foreground's wait is bounded without it, and a
+/// successful PR publication is proven by the store's publication id, not by
+/// the receipt.
 fn run_and_record(
     main: &Path,
     receipt: Option<&ReceiptTarget>,
@@ -143,9 +148,9 @@ fn run_halves<P: Send, H: Send>(
     })
 }
 
-fn pr_half(main: &Path, force: bool, ignore_api: bool) -> PrStatus {
+fn pr_half(main: &Path, ignore_api: bool) -> PrStatus {
     match pr_store_path(main) {
-        Ok(store) => pr_status(&store, main, force, ignore_api, worker_source),
+        Ok(store) => pr_status(&store, main, ignore_api, worker_source),
         Err(_) => PrStatus::Failed { failure: PrFailure::Other },
     }
 }
@@ -155,16 +160,15 @@ fn pr_half(main: &Path, force: bool, ignore_api: bool) -> PrStatus {
 fn pr_status(
     store: &Path,
     main: &Path,
-    force: bool,
     ignore_api: bool,
     connect: impl FnOnce(&str) -> Box<dyn OpenPrSource>,
 ) -> PrStatus {
     if ignore_api {
         return PrStatus::Ignored;
     }
-    match refresh(store, main, unix_now, force, connect) {
+    match refresh(store, main, unix_now, connect) {
         RefreshOutcome::Refreshed => PrStatus::Ok,
-        RefreshOutcome::AlreadyFresh => PrStatus::SkippedFresh,
+        RefreshOutcome::Unsupported => PrStatus::Unsupported,
         RefreshOutcome::Contended => PrStatus::Contended,
         RefreshOutcome::Failed(failure) => PrStatus::Failed { failure },
         RefreshOutcome::LockFailed
@@ -217,7 +221,7 @@ mod tests {
 
     use sniff::remote::blocking::PrUnavailable;
     use worktree::live_remote::GitFailure;
-    use worktree::pull_requests::{CachedPrs, OpenPullRequest, select_cached};
+    use worktree::pull_requests::{CachedPrs, OpenPullRequest, PrRequestError, select_cached};
     use worktree::remote_head::{Attempt, load_receipt, read_store};
     use worktree::remote_update::{AttemptEnd, BranchHeadSource, GitRemote};
 
@@ -256,7 +260,7 @@ mod tests {
         let root = tempfile::tempdir().expect("temp dir");
         let missing = root.path().join("no-such-wt");
 
-        let args = LaunchArgs { attempt: ID.into(), force: false };
+        let args = LaunchArgs { attempt: ID.into() };
         let started = spawn_worker(&missing, root.path(), &args);
 
         assert!(started.is_err(), "{started:?}");
@@ -315,11 +319,7 @@ mod tests {
 
         /// The PR half against this fixture's store, with `source`.
         fn refresh_prs(&self, main: &Path, source: impl OpenPrSource + 'static) -> PrStatus {
-            self.refresh_prs_with(main, false, source)
-        }
-
-        fn refresh_prs_with(&self, main: &Path, force: bool, source: impl OpenPrSource + 'static) -> PrStatus {
-            pr_status(&self.pr_store(), main, force, false, move |_| Box::new(source) as Box<dyn OpenPrSource>)
+            pr_status(&self.pr_store(), main, false, move |_| Box::new(source) as Box<dyn OpenPrSource>)
         }
 
         /// The real update attempt against this fixture's store, with the
@@ -347,11 +347,11 @@ mod tests {
                 _ => Some("owner/repo".into()),
             }
         }
-        fn fetch(&self) -> Result<Vec<OpenPullRequest>, PrFailure> {
+        fn fetch(&self) -> Result<Vec<OpenPullRequest>, PrRequestError> {
             match self {
                 Pr::Answer => Ok(Vec::new()),
-                Pr::Fail => Err(PrFailure::CredentialsRejected { key: Some("GITHUB_TOKEN".into()) }),
-                Pr::Unsupported => Err(PrFailure::Other),
+                Pr::Fail => Err(PrFailure::CredentialsRejected { key: Some("GITHUB_TOKEN".into()) }.into()),
+                Pr::Unsupported => Err(PrRequestError::Unsupported),
             }
         }
     }
@@ -451,8 +451,7 @@ mod tests {
     #[test]
     fn a_failing_or_unsupported_pr_half_leaves_the_head_half_publishing() {
         let rejected = PrStatus::Failed { failure: PrFailure::CredentialsRejected { key: Some("GITHUB_TOKEN".into()) } };
-        let other = PrStatus::Failed { failure: PrFailure::Other };
-        for (source, expected) in [(Pr::Fail, rejected), (Pr::Unsupported, other)] {
+        for (source, expected) in [(Pr::Fail, rejected), (Pr::Unsupported, PrStatus::Unsupported)] {
             let fixture = Fixture::new();
 
             let (prs, _) = run_halves(
@@ -461,14 +460,14 @@ mod tests {
                 |main| fixture.refresh_head(main, &present()),
             );
 
-            assert_eq!(prs, Some(expected), "the failure itself reaches the receipt");
-            assert!(!fixture.pr_store().exists(), "a failure is never stored");
+            assert_eq!(prs, Some(expected), "the outcome itself reaches the receipt");
+            assert!(!fixture.pr_store().exists(), "nothing is stored");
             assert!(fixture.head_published(), "the head half published anyway");
         }
     }
 
     #[test]
-    fn a_contended_pr_half_leaves_the_head_half_publishing() {
+    fn a_contended_pr_half_is_in_the_receipt_and_leaves_the_head_half_publishing() {
         let fixture = Fixture::new();
         let main = fixture.main();
         // Another worker holds the PR lock, blocked in its request.
@@ -482,10 +481,10 @@ mod tests {
             fn source_repo(&self) -> Option<String> {
                 Some("owner/repo".into())
             }
-            fn fetch(&self) -> Result<Vec<OpenPullRequest>, PrFailure> {
+            fn fetch(&self) -> Result<Vec<OpenPullRequest>, PrRequestError> {
                 let _ = self.entered.send(());
                 let _ = self.released.lock().unwrap().recv_timeout(WAIT);
-                Err(PrFailure::Other)
+                Err(PrFailure::Other.into())
             }
         }
 
@@ -501,12 +500,14 @@ mod tests {
             });
             holder_entered.recv_timeout(WAIT).expect("the holder is in its request");
 
-            let (prs, _) = run_halves(
+            run_and_record(
                 &main,
+                Some(&fixture.receipt_target()),
                 |main| fixture.refresh_prs(main, Pr::Answer),
-                |main| fixture.refresh_head(main, &present()),
+                |main| fixture.refresh_head(main, &present()).head_status(),
             );
-            assert_eq!(prs, Some(PrStatus::Contended));
+            assert_eq!(fixture.receipt().map(|receipt| receipt.prs), Some(PrStatus::Contended), "the receipt says so");
+            assert!(!fixture.pr_published(), "a contender makes no request");
             assert!(fixture.head_published(), "contention did not stop the head half");
 
             signal(&release);
@@ -613,10 +614,88 @@ mod tests {
     }
 
     #[test]
-    fn an_unforced_run_writes_no_receipt() {
+    fn every_attempt_has_a_receipt_target_bound_to_its_origin_and_branch() {
         let fixture = Fixture::new();
-        run_and_record(&fixture.main(), None, |_| PrStatus::Ok, |_| HeadStatus::Ok);
-        assert!(!fixture.receipt_target().path.exists());
+        let target = receipt_target(&fixture.main(), ID, Some(ORIGIN)).expect("a target with no --force");
+        assert_eq!(
+            (target.attempt_id.as_str(), target.origin_digest, target.branch.as_str()),
+            (ID, origin_digest(ORIGIN), "main")
+        );
+        assert!(target.path.to_string_lossy().ends_with(&format!("refresh-receipt.{ID}.json")), "{:?}", target.path);
+
+        assert!(receipt_target(&fixture.main(), ID, None).is_none(), "no origin, nothing to bind");
+        assert!(receipt_target(&fixture.main(), "not-an-id", Some(ORIGIN)).is_none(), "an invalid id");
+    }
+
+    /// The receipt every attempt writes carries the PR half's own status,
+    /// from the real PR half against each kind of source.
+    #[test]
+    fn every_attempt_writes_a_receipt_with_its_pr_status() {
+        let rejected = PrStatus::Failed { failure: PrFailure::CredentialsRejected { key: Some("GITHUB_TOKEN".into()) } };
+        type PrHalf = Box<dyn Fn(&Fixture, &Path) -> PrStatus + Sync>;
+        let cases: [(&str, PrHalf, PrStatus); 4] = [
+            ("ok", Box::new(|fixture, main| fixture.refresh_prs(main, Pr::Answer)), PrStatus::Ok),
+            ("failed", Box::new(|fixture, main| fixture.refresh_prs(main, Pr::Fail)), rejected),
+            ("unsupported", Box::new(|fixture, main| fixture.refresh_prs(main, Pr::Unsupported)), PrStatus::Unsupported),
+            (
+                "ignored",
+                Box::new(|fixture, main| {
+                    pr_status(&fixture.pr_store(), main, true, |_| -> Box<dyn OpenPrSource> {
+                        panic!("an ignored repository makes no PR request")
+                    })
+                }),
+                PrStatus::Ignored,
+            ),
+        ];
+        for (label, pr, expected) in cases {
+            let fixture = Fixture::new();
+            run_and_record(&fixture.main(), Some(&fixture.receipt_target()), |main| pr(&fixture, main), |_| HeadStatus::Ok);
+            let receipt = fixture.receipt().unwrap_or_else(|| panic!("{label}: a receipt"));
+            assert_eq!((receipt.head, receipt.prs), (HeadStatus::Ok, expected), "{label}");
+        }
+    }
+
+    /// Ages `path`'s modification time by `age`.
+    fn age_file(path: &Path, age: Duration) {
+        let file = std::fs::OpenOptions::new().write(true).open(path).unwrap();
+        file.set_modified(std::time::SystemTime::now() - age).unwrap();
+    }
+
+    #[test]
+    fn writing_a_receipt_sweeps_only_old_receipts() {
+        let fixture = Fixture::new();
+        let target = fixture.receipt_target();
+        let dir = fixture.root.path();
+        let old = dir.join("refresh-receipt.11111111111111111111111111111111.json");
+        let active = dir.join("refresh-receipt.22222222222222222222222222222222.json");
+        let other_repo = dir.join("other.refresh-receipt.33333333333333333333333333333333.json");
+        for path in [&old, &active, &other_repo] {
+            std::fs::write(path, "{}").unwrap();
+        }
+        age_file(&old, worktree::remote_head::ATTEMPT_MAX_AGE + Duration::from_secs(5));
+        age_file(&other_repo, worktree::remote_head::ATTEMPT_MAX_AGE + Duration::from_secs(5));
+        age_file(&active, worktree::remote_head::ATTEMPT_MAX_AGE - Duration::from_secs(5));
+
+        run_and_record(&fixture.main(), Some(&target), |_| PrStatus::Ok, |_| HeadStatus::Ok);
+
+        assert!(!old.exists(), "an old receipt is swept");
+        assert!(active.exists(), "another attempt's young receipt is kept");
+        assert!(other_repo.exists(), "another repository's receipt is never touched");
+        assert!(fixture.receipt().is_some(), "and this attempt's own is written");
+    }
+
+    #[test]
+    fn a_receipt_that_cannot_be_written_leaves_the_published_answer() {
+        let fixture = Fixture::new();
+        // The receipt's directory is a file, so the write fails.
+        let blocked = fixture.root.path().join("blocked");
+        std::fs::write(&blocked, "").unwrap();
+        let target = ReceiptTarget { path: blocked.join(format!("refresh-receipt.{ID}.json")), ..fixture.receipt_target() };
+
+        run_and_record(&fixture.main(), Some(&target), |main| fixture.refresh_prs(main, Pr::Answer), |_| HeadStatus::Ok);
+
+        assert!(!target.path.exists());
+        assert!(fixture.pr_published(), "the store, not the receipt, holds the answer");
     }
 
     /// Counts requests and answers with no PRs.
@@ -626,33 +705,33 @@ mod tests {
         fn source_repo(&self) -> Option<String> {
             Some("owner/repo".into())
         }
-        fn fetch(&self) -> Result<Vec<OpenPullRequest>, PrFailure> {
+        fn fetch(&self) -> Result<Vec<OpenPullRequest>, PrRequestError> {
             self.0.fetch_add(1, Ordering::SeqCst);
             Ok(Vec::new())
         }
     }
 
     #[test]
-    fn a_forced_pr_half_asks_even_when_the_answer_is_fresh() {
+    fn the_pr_half_asks_on_every_attempt_even_when_the_answer_is_fresh() {
         let fixture = Fixture::new();
         let main = fixture.main();
         assert_eq!(fixture.refresh_prs(&main, Pr::Answer), PrStatus::Ok);
+        assert!(fixture.pr_published(), "control: a fresh answer is stored");
         let calls = Arc::new(AtomicUsize::new(0));
-        let status = |force| {
+        let status = || {
             let calls = calls.clone();
-            pr_status(&fixture.pr_store(), &main, force, false, move |_| Box::new(Counting(calls)) as Box<dyn OpenPrSource>)
+            pr_status(&fixture.pr_store(), &main, false, move |_| Box::new(Counting(calls)) as Box<dyn OpenPrSource>)
         };
 
-        assert_eq!(status(false), PrStatus::SkippedFresh);
-        assert_eq!(calls.load(Ordering::SeqCst), 0);
-        assert_eq!(status(true), PrStatus::Ok);
-        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(status(), PrStatus::Ok);
+        assert_eq!(status(), PrStatus::Ok);
+        assert_eq!(calls.load(Ordering::SeqCst), 2, "one request per attempt");
     }
 
     #[test]
     fn an_ignored_repository_makes_no_pr_request() {
         let fixture = Fixture::new();
-        let status = pr_status(&fixture.pr_store(), &fixture.main(), true, true, |_| -> Box<dyn OpenPrSource> {
+        let status = pr_status(&fixture.pr_store(), &fixture.main(), true, |_| -> Box<dyn OpenPrSource> {
             panic!("an ignored repository makes no PR request")
         });
         assert_eq!(status, PrStatus::Ignored);

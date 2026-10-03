@@ -116,10 +116,6 @@ pub enum Commands {
         /// The attempt id to record (default: a new one)
         #[arg(long, value_name = "ID")]
         attempt: Option<String>,
-
-        /// Ignore the open-PR freshness window and write a completion receipt
-        #[arg(long)]
-        force: bool,
     },
 }
 

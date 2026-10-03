@@ -32,11 +32,11 @@
 //!   `<repo hash>.remote-head.lock` and never unlink it; each writer is a
 //!   read-modify-write of one half. Publication is an atomic rename, so
 //!   readers take no lock and never see a partial document.
-//! - Each forced attempt's completion receipt ([`Receipt`]) is its own file,
-//!   `<repo hash>.refresh-receipt.<attempt id>.json`, so overlapping forced
-//!   runs never replace each other's. Its run deletes it once the wait ends;
-//!   one left behind (a run that timed out) is deleted by the next forced
-//!   worker once older than [`ATTEMPT_MAX_AGE`] ([`remove_stale_receipts`]).
+//! - Every attempt's completion receipt ([`Receipt`]) is its own file,
+//!   `<repo hash>.refresh-receipt.<attempt id>.json`, so overlapping runs
+//!   never replace each other's. Its run deletes it once the wait ends; one
+//!   left behind (a run that timed out) is deleted by the next worker once
+//!   older than [`ATTEMPT_MAX_AGE`] ([`remove_stale_receipts`]).
 
 use std::fs;
 use std::io;
@@ -344,7 +344,7 @@ const RECEIPT_INFIX: &str = "refresh-receipt.";
 /// Deletes this repository's receipts, beside `receipt`, last modified more
 /// than [`ATTEMPT_MAX_AGE`] before `now`; best effort.
 ///
-/// No run waits on such a receipt: a forced wait lasts at most
+/// No run waits on such a receipt: no wait lasts longer than
 /// [`ATTEMPT_MAX_AGE`] from its launch, and its worker writes the receipt
 /// after that launch. Only names of the form
 /// `<repo prefix>refresh-receipt.<anything>.json` are touched.
@@ -596,7 +596,7 @@ impl PrFailure {
     }
 }
 
-/// How the live-head half of a forced refresh ended.
+/// How the live-head half of a refresh attempt ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum HeadStatus {
@@ -606,7 +606,7 @@ pub enum HeadStatus {
     AdoptedElsewhere,
 }
 
-/// How the PR half of a forced refresh ended. Serialized as
+/// How the PR half of a refresh attempt ended. Serialized as
 /// `{"kind": "ok"}`, `{"kind": "failed", "failure": {..}}`, and so on.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
@@ -622,8 +622,7 @@ pub enum PrStatus {
     Contended,
 }
 
-/// Written by the worker after both halves of an `--refresh`/`--ff` attempt
-/// have finished.
+/// Written by the worker after both halves of every attempt have finished.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Receipt {
     pub attempt_id: String,
