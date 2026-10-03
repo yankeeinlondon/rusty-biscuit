@@ -244,6 +244,17 @@ fn match_rejects_patterns_that_are_not_glob_references() {
             assert!(error.contains(pattern), "{pattern}: names the pattern: {error}");
         }
     }
+    // List-shape rows: an invalid pattern beside a valid one fails the whole
+    // constraint rather than leaving the valid pattern to stand alone.
+    for (definition, fragment) in [
+        ("file(match())", "requires at least one glob"),
+        ("file(match(*.md, docs/[))", "`docs/[`"),
+        ("file(match(docs/[, notes/[))", "`docs/[`"),
+    ] {
+        let error = parse(definition).expect_err(definition).to_string();
+        assert!(error.contains("spec"), "{definition}: names the property: {error}");
+        assert!(error.contains(fragment), "{definition}: expected `{fragment}` in: {error}");
+    }
 }
 
 /// Criterion 14: a bare or `./` glob that climbs above the repository is a
@@ -355,10 +366,215 @@ fn an_out_of_tree_file_symlink_is_skipped_with_one_warning() {
     assert!(names_link_and_target(&warnings[0]), "{:?}", warnings[0]);
 }
 
+/// Criterion 26 for every Darkmatter glob consumer: an absolute pattern's
+/// authored directory names are case-sensitive, also when a `{{VAR}}` value
+/// makes the pattern absolute. The temporary directory is used as spelled
+/// (macOS `/var` is a symlink), so the correct-case controls also prove a
+/// symlinked root still works. On a case-insensitive filesystem `DOCS`
+/// reaches `docs`; on a case-sensitive one it does not exist.
+#[test]
+fn absolute_glob_directories_are_case_sensitive_in_every_consumer() {
+    assert_consumers_judge_directory_spelling("docs", "DOCS", None);
+}
+
+/// Criterion 26 with Unicode aliases that lowercasing does not reveal: `ς`
+/// opens a stored `Σ` and `ß` a stored `SS` on a case-insensitive APFS
+/// volume. Where the alias does not open, the checks still run.
+#[test]
+fn absolute_glob_directories_reject_unicode_case_aliases_in_every_consumer() {
+    for (stored, authored) in [("Σ", "ς"), ("SS", "ß")] {
+        assert_consumers_judge_directory_spelling(stored, authored, None);
+    }
+}
+
+/// Criterion 26 below a traversal-only ancestor (mode `0111`): being unable
+/// to list `locked` must not approve the mismatched `DOCS`, and the correct
+/// spelling is still admitted.
+#[cfg(unix)]
+#[test]
+fn absolute_glob_directories_below_a_traversal_only_ancestor_stay_case_sensitive() {
+    assert_consumers_judge_directory_spelling("locked/anchor/docs", "locked/anchor/DOCS", Some("locked"));
+}
+
+/// `find_files()`, `::file-links`, and `FileMatchGlobs` reject the absolute
+/// and `{{ROOT}}` patterns spelled `authored` over the stored directory
+/// `stored`, and admit the stored spelling. With `traversal_only`, that
+/// directory is set to mode `0111` first.
+fn assert_consumers_judge_directory_spelling(stored: &str, authored: &str, traversal_only: Option<&str>) {
+    let workspace = tempfile::tempdir().expect("temp dir");
+    let repo = workspace.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    assert!(Command::new("git").args(["init", "-q"]).current_dir(&repo).status().unwrap().success());
+    let file = repo.join(stored).join("a.md");
+    write(&file, "# A\n");
+    crate::fs_capability::probe_directory_alias(&repo, stored, authored);
+    #[cfg(unix)]
+    let _guard = match traversal_only {
+        Some(dir) => match Locked::with_mode(&repo.join(dir), 0o111) {
+            Some(guard) => Some(guard),
+            None => return,
+        },
+        None => None,
+    };
+    #[cfg(not(unix))]
+    let _ = traversal_only;
+    let repo_text = biscuit_file::to_portable_string(&repo);
+    let env = std::collections::HashMap::from([("ROOT".to_string(), repo_text.clone())]);
+    let snapshot = darkmatter::markdown::compose::RequestSnapshot::new(&repo)
+        .with_home(biscuit_file::home_dir())
+        .with_env(env);
+    let env_context = darkmatter::markdown::compose::build_resolution_context(&snapshot).expect("context");
+    let compose_in_repo = |name: &str, body: &str| -> Markdown {
+        let document = repo.join(name);
+        write(&document, body);
+        let options = ComposeOptions::new().with_source_file(&document);
+        let request = darkmatter::markdown::compose::ComposeRequest::prepare(options, &snapshot).expect("request");
+        let (composed, _) = Markdown::try_from(document.as_path())
+            .unwrap()
+            .compose_with(&request)
+            .unwrap_or_else(|error| panic!("{body}: {error:?}"));
+        composed
+    };
+    let find_files = |pattern: &str| -> Vec<PathBuf> {
+        let yaml = format!("{{{{ find_files('{pattern}') }}}}").replace('\'', "''");
+        let composed = compose_in_repo("probe.md", &format!("---\nv: '{yaml}'\n---\nBody\n"));
+        listed(composed.frontmatter().as_map().get("v").unwrap_or(&Value::Null))
+    };
+    let file_links = |pattern: &str| -> String {
+        compose_in_repo("index.md", &format!("# Index\n\n::file-links {pattern}\n")).content().to_string()
+    };
+    let value = biscuit_file::to_portable_string(&file);
+    let admits = |pattern: &str| file_match_admits(&value, &[pattern.to_string()], &env_context);
+
+    for mismatched in [format!("{repo_text}/{authored}/*.md"), format!("{{{{ROOT}}}}/{authored}/*.md")] {
+        assert!(find_files(&mismatched).is_empty(), "find_files('{mismatched}')");
+        assert!(!admits(&mismatched), "match({mismatched})");
+    }
+    for exact in [format!("{repo_text}/{stored}/*.md"), format!("{{{{ROOT}}}}/{stored}/*.md")] {
+        assert_eq!(find_files(&exact), [canonical(&repo, &format!("{stored}/a.md"))], "find_files('{exact}')");
+        assert!(admits(&exact), "match({exact})");
+    }
+    // In a document body `{{ROOT}}` is a Darkmatter expression, interpolated
+    // before the directive reads it, so `::file-links` has no `{{VAR}}` row.
+    let mismatched_links = file_links(&format!("{repo_text}/{authored}/*.md"));
+    assert!(!mismatched_links.contains("a.md"), "{mismatched_links}");
+    let links = file_links(&format!("{repo_text}/{stored}/*.md"));
+    assert!(links.contains("a.md"), "{links}");
+}
+
 fn link_file(target: &Path, link: &Path) {
     #[cfg(unix)]
     std::os::unix::fs::symlink(target, link).expect("symlink");
     #[cfg(windows)]
     std::os::windows::fs::symlink_file(target, link)
         .expect("creating a file symlink needs Developer Mode or SeCreateSymbolicLinkPrivilege");
+}
+
+/// Removes every permission from a directory and restores them on drop, so a
+/// failing assertion still leaves a fixture the temporary directory can
+/// delete. `None` when this user can still read the directory (a privileged
+/// user reads through any mode).
+#[cfg(unix)]
+struct Locked(PathBuf);
+
+#[cfg(unix)]
+impl Locked {
+    fn new(dir: &Path) -> Option<Self> {
+        Self::with_mode(dir, 0o000)
+    }
+
+    /// Set `dir` to `mode`, which must deny listing (`0o111` permits
+    /// traversal only).
+    fn with_mode(dir: &Path, mode: u32) -> Option<Self> {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(mode)).expect("chmod");
+        let locked = Self(dir.to_path_buf());
+        match std::fs::read_dir(dir) {
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => Some(locked),
+            other => {
+                eprintln!(
+                    "skipping: {} is still readable after chmod {mode:o} ({other:?}); running as a privileged user?",
+                    dir.display()
+                );
+                None
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for Locked {
+    fn drop(&mut self) {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+    }
+}
+
+/// A directory a glob search must enter but cannot read fails `find_files()`
+/// and `::file-links` with the typed glob I/O cause naming that directory,
+/// never a partial or empty result; a `--dir` scan that reaches it fails the
+/// same way.
+#[cfg(unix)]
+#[test]
+fn an_unreadable_search_directory_fails_find_files_and_file_links() {
+    let fixture = tempfile::tempdir().expect("temp dir");
+    let root = std::fs::canonicalize(fixture.path()).expect("canonical temp dir");
+    write(&root.join("docs/a.md"), "# A\n");
+    write(&root.join("docs/locked/secret.md"), "# Secret\n");
+    let locked = root.join("docs/locked");
+    let Some(_guard) = Locked::new(&locked) else { return };
+
+    let names_locked = |source: &GlobReferenceError| {
+        matches!(source, GlobReferenceError::Io { path, .. } if *path == locked)
+    };
+    for pattern in ["docs/**/*.md", "docs/locked/*.md"] {
+        let error = expression_value(&root, &format!("find_files('{pattern}')")).expect_err(pattern);
+        assert!(
+            matches!(
+                &error,
+                MarkdownError::Interpolation { cause, .. } if matches!(
+                    cause.as_ref(),
+                    ExpressionError::GlobReference { source, .. } if names_locked(source)
+                )
+            ),
+            "find_files('{pattern}'): {error:?}"
+        );
+        assert_eq!(error.resolution_failure(), Some(ResolutionFailure::Io), "{error:?}");
+
+        let body = format!("# Index\n\n::file-links {pattern}\n");
+        let error = compose(&root.join("index.md"), &body, ComposeOptions::new().with_fail_fast(true))
+            .expect_err(pattern);
+        assert!(
+            matches!(&error, MarkdownError::FileLinks(FileLinksError::GlobReference { source, .. }) if names_locked(source)),
+            "::file-links {pattern}: {error:?}"
+        );
+        // Lenient composition replaces the directive with a failure notice
+        // and an I/O warning naming the directory, not a shorter tree.
+        let (composed, report) = compose(&root.join("index.md"), &body, ComposeOptions::new()).expect(pattern);
+        assert!(!composed.content().contains("a.md"), "{}", composed.content());
+        let warning = report
+            .warnings
+            .iter()
+            .find(|warning| warning.resolution_failure == Some(ResolutionFailure::Io))
+            .unwrap_or_else(|| panic!("::file-links {pattern} reports an I/O warning: {report:?}"));
+        assert!(warning.message.contains(&locked.display().to_string()), "{warning:?}");
+    }
+
+    let error = compose(
+        &root.join("index.md"),
+        "# Index\n\n::file-links --dir docs --depth 1\n",
+        ComposeOptions::new().with_fail_fast(true),
+    )
+    .expect_err("--dir");
+    assert!(
+        matches!(&error, MarkdownError::FileLinks(FileLinksError::Unreadable { path, .. }) if *path == locked),
+        "::file-links --dir: {error:?}"
+    );
+
+    // A directory deeper than the search reaches hides nothing.
+    let (value, _) = expression_value(&root, "find_files('docs/*.md')").expect("docs/*.md");
+    assert_eq!(listed(&value), [root.join("docs/a.md")]);
+    let (composed, _) = compose(&root.join("index.md"), "# Index\n\n::file-links --dir docs --depth 0\n", ComposeOptions::new())
+        .expect("--depth 0 does not enter docs/locked");
+    assert!(composed.content().contains("a.md"), "{}", composed.content());
 }

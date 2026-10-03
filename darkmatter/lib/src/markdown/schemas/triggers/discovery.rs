@@ -21,8 +21,11 @@
 //! - A file that claims the envelope but is malformed is a hard load error.
 //! - Loading is **transactional**: if any unshadowed opted-in trigger is
 //!   invalid, no registry is installed from that scan.
+//! - A root folder whose metadata or entries cannot be read fails the scan
+//!   with an I/O error naming it; it is never treated as absent.
 //!
-//! See `darkmatter/features/2026-07-10-schema-triggers/spec.md`.
+//! The user-facing contract is the "Repository Trigger Schemas" section of
+//! `darkmatter/docs/topics/schemas/definition.md`.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -46,7 +49,7 @@ pub struct LoadedTrigger {
     pub source: PathBuf,
     /// The parsed, lint-clean trigger envelope.
     pub envelope: TriggerEnvelope,
-    /// The `cwd` of the trigger's bare and `./` `$path` patterns (see
+    /// The `cwd` of the trigger's bare, `./`, and `../` `$path` patterns (see
     /// [`SearchedRoot::pattern_cwd`](crate::markdown::schemas::roots::SearchedRoot::pattern_cwd)).
     pub pattern_cwd: PathBuf,
 }
@@ -140,7 +143,13 @@ fn enumerate_root(root: &Path) -> Result<Vec<RootFile>, SchemaError> {
     };
 
     let mut files: Vec<RootFile> = Vec::new();
-    for entry in entries.flatten() {
+    for entry in entries {
+        // A failed entry read leaves the root's trigger set unknown; loading
+        // what was read would install a registry missing that trigger.
+        let entry = entry.map_err(|source| SchemaError::Io {
+            path: root.to_path_buf(),
+            source,
+        })?;
         let path = entry.path();
 
         // Do not follow symlinks: check the entry's file type directly.
@@ -220,13 +229,14 @@ fn check_case_fold_collision(
 /// folder): the package and package-area roots are the document's, and the
 /// registry judges `$path` patterns in it.
 ///
-/// Loading is **transactional**: if any unshadowed opted-in trigger file is
-/// malformed or its payload fails to resolve (missing file, cyclic reference,
-/// non-mergeable shape), no registry is installed (an error is returned).
+/// Loading is **transactional**: if any root folder cannot be inspected or
+/// read, or any unshadowed opted-in trigger file is malformed or its payload
+/// fails to resolve (missing file, cyclic reference, non-mergeable shape), no
+/// registry is installed (an error is returned).
 /// Payload resolution runs regardless of whether any current document matches
 /// the trigger, so a registry is never installed with a known-bad payload.
 pub fn scan(context: &FileResolutionContext) -> Result<TriggerRegistry, SchemaError> {
-    let roots = SchemaRoots::for_document(context);
+    let roots = SchemaRoots::for_document(context)?;
 
     // Apply filename shadowing: the first root wins by filename.
     let mut first_by_name: HashMap<String, PathBuf> = HashMap::new();
@@ -383,6 +393,41 @@ mod tests {
         let registry = scan_for(&repo.path().join("doc.md"), repo.path()).unwrap();
         assert!(registry.roots.searched().is_empty(), "symlinked schema root must be excluded");
         assert!(registry.is_empty());
+    }
+
+    /// A schema root that exists but cannot be read fails the scan naming
+    /// it, so no registry is installed without that root's triggers.
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_schema_root_fails_the_scan() {
+        use std::os::unix::fs::PermissionsExt;
+
+        struct Restore(PathBuf);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o755));
+            }
+        }
+
+        let repo = repo_fixture();
+        let schemas = repo.path().join("schemas");
+        fs::create_dir_all(&schemas).unwrap();
+        fs::write(schemas.join("a.yaml"), VALID_TRIGGER).unwrap();
+        fs::set_permissions(&schemas, fs::Permissions::from_mode(0o000)).unwrap();
+        let _restore = Restore(schemas.clone());
+        match fs::read_dir(&schemas) {
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {}
+            other => {
+                eprintln!("skipping: {} is still readable after chmod 000 ({other:?})", schemas.display());
+                return;
+            }
+        }
+
+        let result = scan_for(&repo.path().join("doc.md"), repo.path());
+        assert!(
+            matches!(&result, Err(SchemaError::Io { path, .. }) if *path == schemas),
+            "{result:?}"
+        );
     }
 
     #[test]

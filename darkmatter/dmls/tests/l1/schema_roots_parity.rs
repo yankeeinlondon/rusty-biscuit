@@ -56,6 +56,8 @@ fn add_trigger(folder: &Path, name: &str, path_pattern: &str) {
 
 struct Fixture {
     root: PathBuf,
+    /// The folder `SCHEMAS_DIR` names: `dm-defs` unless a test moves it.
+    defs: PathBuf,
 }
 
 impl Fixture {
@@ -71,7 +73,8 @@ impl Fixture {
     /// | `{home}/schemas` | trigger `home`, a shadowed `repo.trigger.yaml`, `claudine.yaml`, `user.yaml` |
     /// | `{pkg}/docs/schemas` | trigger `between` and `between.yaml`, never searched |
     fn new(workspace: &Path) -> Self {
-        let fixture = Self { root: canonicalize_simplified(workspace).unwrap() };
+        let root = canonicalize_simplified(workspace).unwrap();
+        let fixture = Self { defs: root.join("dm-defs"), root };
         let repo = fixture.repo();
         init_repository(&repo);
         write(&repo.join("Cargo.toml"), "[workspace]\nmembers = [\"area/pkg\"]\n");
@@ -110,7 +113,7 @@ impl Fixture {
     }
 
     fn defs(&self) -> PathBuf {
-        self.root.join("dm-defs")
+        self.defs.clone()
     }
 
     /// The snapshot both `md` and the server take: fixture home, and
@@ -128,7 +131,9 @@ impl Fixture {
 /// What one side decided for a document.
 #[derive(Debug, PartialEq)]
 struct Verdict {
-    roots: SchemaRoots,
+    /// The document's schema roots, or the error naming a root that could
+    /// not be inspected.
+    roots: Result<SchemaRoots, String>,
     /// The `from_*` properties the effective schema declares, sorted, or the
     /// assembly error.
     properties: Result<Vec<String>, String>,
@@ -163,7 +168,11 @@ fn md_verdict(fixture: &Fixture, document: &Path, text: &str) -> Verdict {
         Ok(None) => (Ok(Vec::new()), Vec::new()),
         Err(error) => (Err(error.to_string()), Vec::new()),
     };
-    Verdict { roots: SchemaRoots::for_document(&context), properties, dependencies }
+    Verdict {
+        roots: SchemaRoots::for_document(&context).map_err(|error| error.to_string()),
+        properties,
+        dependencies,
+    }
 }
 
 /// DMLS's verdict: the server's per-repository context for the document and
@@ -185,7 +194,11 @@ fn dmls_verdict(fixture: &Fixture, document: &Path, text: &str) -> Verdict {
         SchemaOutcome::Ready(None) => (Ok(Vec::new()), Vec::new()),
         SchemaOutcome::Failed(error) => (Err(error.to_string()), Vec::new()),
     };
-    Verdict { roots: SchemaRoots::for_document(&context), properties, dependencies }
+    Verdict {
+        roots: SchemaRoots::for_document(&context).map_err(|error| error.to_string()),
+        properties,
+        dependencies,
+    }
 }
 
 fn names(names: &[&str]) -> Result<Vec<String>, String> {
@@ -251,7 +264,7 @@ fn md_and_dmls_give_the_same_roots_triggers_and_bare_names() {
         assert!(!canonical.contains(&case.not_resolved), "{canonical:?}");
     }
 
-    let package_roots = md_verdict(&fixture, &package_doc, package_text).roots;
+    let package_roots = md_verdict(&fixture, &package_doc, package_text).roots.expect("schema roots");
     let searched: Vec<(SchemaRootKind, PathBuf)> = package_roots
         .searched()
         .iter()
@@ -278,6 +291,53 @@ fn md_and_dmls_give_the_same_roots_triggers_and_bare_names() {
     assert_eq!(md, dmls);
     let error = md.properties.expect_err("an in-between schema does not resolve");
     assert!(error.contains("between.yaml"), "{error}");
+}
+
+/// A `SCHEMAS_DIR` folder behind an ancestor neither side can search is the
+/// same I/O error naming it in `md` and DMLS, never a schema without its
+/// trigger or home's same-named `policy.yaml` in its place.
+#[cfg(unix)]
+#[test]
+fn md_and_dmls_report_an_inaccessible_schema_root_as_the_same_error() {
+    use std::os::unix::fs::PermissionsExt;
+
+    struct Restore(PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+        }
+    }
+
+    let workspace = LspWorkspace::new();
+    let mut fixture = Fixture::new(workspace.path());
+    let locked = fixture.root.join("locked");
+    fixture.defs = locked.join("anchor/schemas");
+    write(&fixture.defs().join("policy.yaml"), "$schema:\n  from_hidden: string(required)\n");
+    write(&fixture.defs().join("hidden.trigger.yaml"), &trigger("**/*.md", "policy.yaml"));
+    write(&fixture.home().join("schemas/policy.yaml"), "$schema:\n  from_fallback: string\n");
+    let document = fixture.repo().join("docs/policy.md");
+    let text = "---\n$schema: policy.yaml\n---\n";
+    write(&document, text);
+
+    // Readable control: the preferred `policy.yaml` applies on both sides.
+    let md = md_verdict(&fixture, &document, text);
+    assert_eq!(md, dmls_verdict(&fixture, &document, text));
+    let properties = md.properties.expect("readable control");
+    assert!(properties.contains(&"from_hidden".to_string()), "{properties:?}");
+    assert!(!properties.contains(&"from_fallback".to_string()), "{properties:?}");
+
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let _restore = Restore(locked.clone());
+    if std::fs::read_dir(&locked).is_ok() {
+        eprintln!("skipping: {} is still listable after chmod 000", locked.display());
+        return;
+    }
+    let md = md_verdict(&fixture, &document, text);
+    let dmls = dmls_verdict(&fixture, &document, text);
+    assert_eq!(md, dmls);
+    let expected = format!("io error reading `{}`", fixture.defs().display());
+    assert_eq!(md.roots.as_ref().err(), Some(&expected), "{md:?}");
+    assert_eq!(md.properties.as_ref().err(), Some(&expected), "{md:?}");
 }
 
 fn initialize_params(folder: &Path) -> Value {

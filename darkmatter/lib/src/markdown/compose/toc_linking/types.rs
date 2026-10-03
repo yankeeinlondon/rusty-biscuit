@@ -24,11 +24,14 @@ pub enum TocLinkingError {
     /// No target in the chain resolved to a file and the chain does not end
     /// in `| false`. `failure` is the class of the first (authored) target's
     /// failure; `None` when that failure was not a file-reference failure.
-    #[error("Could not resolve '{path}' at line {line}")]
+    /// `glob_hint` is that target's literal-glob hint
+    /// ([`ResolutionFailure::glob_hint`](biscuit_file::ResolutionFailure::glob_hint)).
+    #[error("{}", crate::markdown::errors::with_hint_line(format!("Could not resolve '{}' at line {}", .path, .line), *.glob_hint))]
     Unresolved {
         path: String,
         line: usize,
         failure: Option<biscuit_file::ResolutionFailure>,
+        glob_hint: Option<&'static str>,
     },
 
     /// A glob pattern failed to compile.
@@ -113,7 +116,7 @@ impl biscuit_terminal::errors::BlockError for TocLinkingError {
                 ))
                 .hint("Heading levels must be integers between <cyan>1</cyan> and <cyan>6</cyan>."),
 
-            TocLinkingError::Unresolved { path, line, failure } => StatusBlock::new(StatusState::Error)
+            TocLinkingError::Unresolved { path, line, failure, glob_hint } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("TocLinkingError", "file reference failure"))
                 .body(
                     [
@@ -124,6 +127,7 @@ impl biscuit_terminal::errors::BlockError for TocLinkingError {
                                 crate::markdown::errors::resolution_failure_name(failure)
                             )
                         }),
+                        glob_hint.map(|hint| format!("<dim>hint:</dim> {hint}")),
                     ]
                     .into_iter()
                     .flatten()

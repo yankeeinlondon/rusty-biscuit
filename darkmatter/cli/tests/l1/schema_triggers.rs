@@ -382,6 +382,82 @@ fn schema_validate_applies_triggers_from_schemas_dir_and_home() {
     assert!(!stdout.contains("team_owner") && stdout.contains("note_owner"), "{stdout}");
 }
 
+/// `text` without SGR escape sequences (`ESC [ ... m`).
+#[cfg(unix)]
+fn strip_ansi(text: &str) -> String {
+    let mut plain = String::with_capacity(text.len());
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' {
+            chars.by_ref().find(|c| *c == 'm');
+        } else {
+            plain.push(c);
+        }
+    }
+    plain
+}
+
+/// A `SCHEMAS_DIR` folder behind an ancestor `md` cannot search is an I/O
+/// error naming it from `schema validate` and `schema triggers`; home's
+/// same-named `policy.yaml` never stands in for it.
+#[cfg(unix)]
+#[test]
+fn an_inaccessible_schema_root_fails_validate_and_triggers() {
+    use std::os::unix::fs::PermissionsExt;
+
+    struct Restore(PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+        }
+    }
+
+    let process = CliProcessFixture::new();
+    monorepo(&process);
+    let locked = process.workspace_path().join("locked");
+    let schemas = locked.join("anchor/schemas");
+    write(&schemas, "policy.yaml", "$schema:\n  hidden_rule: string(required)\n");
+    write(&schemas, "hidden.trigger.yaml", &path_trigger("**/*.md", "policy.yaml"));
+    write(process.home(), "schemas/policy.yaml", "$schema:\n  fallback_rule: string\n");
+    let document = write(process.cwd(), "docs/doc.md", "---\n$schema: policy.yaml\n---\nBody\n");
+    let run = |subcommand: &str| {
+        process
+            .command_builder()
+            .plain_terminal(1000, 50)
+            .application_input("SCHEMAS_DIR", &schemas)
+            .build()
+            .args(["schema", subcommand])
+            .arg(&document)
+            .output()
+            .unwrap()
+    };
+
+    // Readable control: the preferred `policy.yaml` applies.
+    let control = run("validate");
+    assert_eq!(control.status.code(), Some(1), "{control:?}");
+    assert!(stdout_of(&control).contains("hidden_rule"), "{control:?}");
+
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let _restore = Restore(locked.clone());
+    if std::fs::read_dir(&locked).is_ok() {
+        eprintln!("skipping: {} is still listable after chmod 000", locked.display());
+        return;
+    }
+    for subcommand in ["validate", "triggers"] {
+        let output = run(subcommand);
+        let text = compact(&strip_ansi(&format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )))
+        .replace('┃', "");
+        assert!(!output.status.success(), "{subcommand}: {output:?}");
+        assert!(text.contains("PermissionDenied"), "{subcommand}: {output:?}");
+        assert!(text.contains(&compact(&schemas.display().to_string())), "{subcommand}: {output:?}");
+        assert!(!text.contains("fallback_rule") && !text.contains("Schemaroots"), "{subcommand}: {output:?}");
+    }
+}
+
 #[test]
 fn schema_validate_reports_a_forbidden_path_prefix_naming_the_pattern() {
     let process = CliProcessFixture::new();

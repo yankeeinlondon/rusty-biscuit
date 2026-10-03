@@ -333,6 +333,9 @@ pub(crate) fn interpolation_block(
             // Did-you-mean: for a *missing* (not malformed/remote) reference, rank
             // the siblings of the expected path against its leaf name. Computed
             // here at render time only — the hot eval loop never touches disk.
+            if let Some(hint) = diagnostic.glob_hint() {
+                body.push(Prose::new(format!("<dim>hint:</dim> {hint}")));
+            }
             if matches!(diagnostic.kind, FileRefFailure::NotFound) {
                 let expected = diagnostic.cwd.join(&diagnostic.reference);
                 let suggestions = suggest_sibling_files(&expected, DEFAULT_MAX_SUGGESTIONS);

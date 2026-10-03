@@ -434,12 +434,24 @@ pub enum TransclusionError {
 ///
 /// It stays an `Io` error of kind `NotFound` (callers match on that), and this
 /// type is what lets [`TransclusionError::resolution_failure`] tell a no-match
-/// from a real I/O failure without reading the message.
-#[derive(Debug, Error)]
-#[error("File not found: {reference}")]
+/// from a real I/O failure without reading the message. Its message carries
+/// the literal-glob hint (see [`crate::markdown::errors::with_glob_hint`]).
+#[derive(Debug)]
 pub(crate) struct TargetNotFound {
     pub(crate) reference: String,
 }
+
+impl std::fmt::Display for TargetNotFound {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&crate::markdown::errors::with_glob_hint(
+            format!("File not found: {}", self.reference),
+            biscuit_file::ResolutionFailure::NoMatch,
+            &self.reference,
+        ))
+    }
+}
+
+impl std::error::Error for TargetNotFound {}
 
 impl TransclusionError {
     /// The no-match error for the file reference spelled `reference`.

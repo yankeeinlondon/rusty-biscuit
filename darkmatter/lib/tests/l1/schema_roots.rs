@@ -132,7 +132,7 @@ fn effective_properties(context: &FileResolutionContext, document: &Path) -> Vec
 }
 
 fn search_paths(context: &FileResolutionContext) -> Vec<PathBuf> {
-    SchemaRoots::for_document(context)
+    SchemaRoots::for_document(context).expect("schema roots")
         .search_paths()
         .iter()
         .map(|path| canonical(path))
@@ -166,7 +166,7 @@ fn schema_roots_are_package_area_tree_schemas_dir_then_home() {
     let defs = fixture.defs();
     let context = fixture.context(&document, &[("SCHEMAS_DIR", defs.to_str().unwrap())]);
 
-    let roots = SchemaRoots::for_document(&context);
+    let roots = SchemaRoots::for_document(&context).expect("schema roots");
     let kinds: Vec<SchemaRootKind> = roots.entries().iter().map(|root| root.kind).collect();
     assert_eq!(
         kinds,
@@ -192,7 +192,7 @@ fn schema_roots_are_package_area_tree_schemas_dir_then_home() {
     // The package and area are the document's, not the launch directory's: a
     // document at the repository root has neither.
     let top = fixture.context(&fixture.repo().join("top.md"), &[]);
-    let roots = SchemaRoots::for_document(&top);
+    let roots = SchemaRoots::for_document(&top).expect("schema roots");
     assert_eq!(state_of(&roots, SchemaRootKind::Package), SchemaRootState::NotApplicable);
     assert_eq!(state_of(&roots, SchemaRootKind::PackageArea), SchemaRootState::NotApplicable);
     assert_eq!(search_paths(&top), [fixture.repo().join("schemas"), fixture.home().join("schemas")]);
@@ -211,7 +211,9 @@ fn schemas_dir_and_home_input_matrix() {
     let home_schemas = fixture.home().join("schemas");
     let missing = fixture.root().join("no-such-folder");
 
-    let roots = |env: &[(&str, &str)]| SchemaRoots::for_document(&fixture.context(&document, env));
+    let roots = |env: &[(&str, &str)]| {
+        SchemaRoots::for_document(&fixture.context(&document, env)).expect("schema roots")
+    };
 
     // Control: an absolute, existing folder is root 4, searched itself.
     let control = roots(&[("SCHEMAS_DIR", defs)]);
@@ -263,7 +265,7 @@ fn schemas_dir_and_home_input_matrix() {
     // No home in the snapshot: root 5 does not apply, and nothing panics.
     let homeless = fixture.context_with_home(&document, None, &[]);
     assert_eq!(
-        state_of(&SchemaRoots::for_document(&homeless), SchemaRootKind::Home),
+        state_of(&SchemaRoots::for_document(&homeless).expect("schema roots"), SchemaRootKind::Home),
         SchemaRootState::NotApplicable
     );
 }
@@ -344,7 +346,7 @@ fn schemas_dir_names_the_schemas_folder_itself() {
         .unwrap()
         .effective_for(&markdown);
     assert!(
-        matches!(result, Err(SchemaError::Unresolved { .. })),
+        matches!(result, Err(SchemaError::NoMatch { bare_name: true, .. })),
         "a schema only in SCHEMAS_DIR/schemas/ must not resolve: {:?}",
         result.err()
     );
@@ -378,7 +380,7 @@ fn in_between_schemas_folders_are_not_discovered() {
         .unwrap()
         .effective_for(&markdown);
     assert!(
-        matches!(result, Err(SchemaError::Unresolved { .. })),
+        matches!(result, Err(SchemaError::NoMatch { bare_name: true, .. })),
         "a bare name in an in-between folder must not resolve: {:?}",
         result.err()
     );
@@ -512,7 +514,7 @@ fn path_field_input_matrix() {
             "  $path: \"^docs/**\"\n  $path: \"^other/**\"",
             Outcome::LoadError(&["duplicate"]),
         ),
-        ("invalid content", "  $path: \"^**/[x\"", Outcome::LoadError(&["`^**/[x`", "not a valid glob"])),
+        ("invalid glob", "  $path: \"^**/[x\"", Outcome::LoadError(&["`^**/[x`", "not a valid glob"])),
         ("forbidden @", "  $path: \"@x/**\"", Outcome::LoadError(&["`@x/**`", "`@`"])),
         ("forbidden %", "  $path: \"%x.md\"", Outcome::LoadError(&["`%x.md`"])),
         ("forbidden vault", "  $path: \"vault:x/**\"", Outcome::LoadError(&["`vault:x/**`", "vault"])),
@@ -524,8 +526,30 @@ fn path_field_input_matrix() {
         ),
     ];
 
-    for (shape, line, expected) in rows {
-        write(&schemas.join("matrix.trigger.yaml"), &PATH_TRIGGER.replace("$PATH_LINE", line));
+    // Source-text rows: the control trigger with one fragment appended. A
+    // trigger file holds exactly one YAML document, so neither row may load
+    // the valid leading document and ignore what follows it.
+    //
+    // | Shape                            | Outcome                            |
+    // | -------------------------------- | ---------------------------------- |
+    // | valid document plus a second one | load error: more than one document |
+    // | valid document plus invalid YAML | load error at the appended line    |
+    let control = PATH_TRIGGER.replace("$PATH_LINE", "  $path: \"^docs/**\"");
+    let trailing: &[(&str, &str, Outcome)] = &[
+        (
+            "second document",
+            "---\nkind: trigger-schema\nmatch:\n  $path: \"^other/**\"\n$schema: payload.yaml\n",
+            Outcome::LoadError(&["more than one document"]),
+        ),
+        ("invalid trailing content", "extra: [unclosed\n", Outcome::LoadError(&["not valid YAML", "line 5"])),
+    ];
+
+    let cells = rows
+        .iter()
+        .map(|(shape, line, expected)| (*shape, PATH_TRIGGER.replace("$PATH_LINE", line), expected))
+        .chain(trailing.iter().map(|(shape, suffix, expected)| (*shape, format!("{control}{suffix}"), expected)));
+    for (shape, text, expected) in cells {
+        write(&schemas.join("matrix.trigger.yaml"), &text);
         let scanned = darkmatter::markdown::schemas::scan(&context);
         match expected {
             Outcome::Applies => {
@@ -605,4 +629,387 @@ fn path_triggers_and_match_validation_give_the_same_verdicts() {
             assert_eq!(trigger, validation, "{pattern_list:?} on {}", document.display());
         }
     }
+}
+
+/// Criterion 26 for `$path`: an absolute pattern's authored directory names
+/// are case-sensitive, and the trigger applies exactly when `match()` admits.
+/// `$path` takes no `{{VAR}}`, so only `match()` has the interpolated row. On
+/// a case-insensitive filesystem `DOCS` reaches `docs`; on a case-sensitive
+/// one it does not exist.
+#[test]
+fn absolute_path_triggers_reject_a_directory_spelled_in_another_case() {
+    assert_path_triggers_judge_directory_spelling("docs", "DOCS", None);
+}
+
+/// Criterion 26 for `$path` with Unicode aliases that lowercasing does not
+/// reveal (`ς` for a stored `Σ`, `ß` for a stored `SS`). Where the alias
+/// does not open, the checks still run.
+#[test]
+fn absolute_path_triggers_reject_a_unicode_case_alias() {
+    for (stored, authored) in [("Σ", "ς"), ("SS", "ß")] {
+        assert_path_triggers_judge_directory_spelling(stored, authored, None);
+    }
+}
+
+/// Criterion 26 for `$path` below a traversal-only ancestor (mode `0111`):
+/// being unable to list it must not approve the mismatched `DOCS`.
+#[cfg(unix)]
+#[test]
+fn absolute_path_triggers_below_a_traversal_only_ancestor_stay_case_sensitive() {
+    assert_path_triggers_judge_directory_spelling("locked/anchor/docs", "locked/anchor/DOCS", Some("locked"));
+}
+
+/// The `$path` trigger and `match()` reject absolute (and `{{PKG}}`)
+/// patterns spelling the package's `stored` directory as `authored`, and
+/// apply to the stored spelling, directly and through a scan. With
+/// `traversal_only`, that package directory is set to mode `0111` first.
+fn assert_path_triggers_judge_directory_spelling(stored: &str, authored: &str, traversal_only: Option<&str>) {
+    let fixture = Fixture::new();
+    let package = fixture.package();
+    let document = package.join(stored).join("guide.md");
+    write(&document, "---\ntitle: x\n---\n");
+    crate::fs_capability::probe_directory_alias(&package, stored, authored);
+    let package_text = biscuit_file::to_portable_string(&package);
+    let env = [("PKG", package_text.as_str())];
+    let document_context = fixture.context(&document, &env);
+    let value_context = fixture.context(&package.join("value.md"), &env);
+    let schemas = fixture.repo().join("schemas");
+    write(&schemas.join("upper.trigger.yaml"), &trigger(&format!("{package_text}/{authored}/*.md"), "upper.yaml"));
+    write(&schemas.join("upper.yaml"), "$schema:\n  upper: string\n");
+    write(&schemas.join("lower.trigger.yaml"), &trigger(&format!("{package_text}/{stored}/*.md"), "lower.yaml"));
+    write(&schemas.join("lower.yaml"), "$schema:\n  lower: string\n");
+    #[cfg(unix)]
+    let _guard = match traversal_only {
+        Some(dir) => match Locked::traversal_only(&package.join(dir)) {
+            Some(guard) => Some(guard),
+            None => return,
+        },
+        None => None,
+    };
+    #[cfg(not(unix))]
+    let _ = traversal_only;
+    let admits = |pattern: &str| {
+        FileMatchGlobs::new(&[pattern.to_string()]).expect("valid match()").matches(&document, &value_context)
+    };
+
+    for (pattern, expected) in [
+        (format!("{package_text}/{authored}/*.md"), false),
+        (format!("{package_text}/{stored}/*.md"), true),
+    ] {
+        let expr = MatchExpr::Path(PathGlobs::new(vec![pattern.clone()]).expect("valid $path"));
+        let trigger = matches(
+            &expr,
+            &json!({}),
+            &PathSubject::new(&document, &document_context).with_pattern_cwd(&package),
+        );
+        assert_eq!((trigger, admits(&pattern)), (expected, expected), "`{pattern}`");
+    }
+    assert!(!admits(&format!("{{{{PKG}}}}/{authored}/*.md")));
+    assert!(admits(&format!("{{{{PKG}}}}/{stored}/*.md")));
+
+    // Through a scan: the mismatched trigger does not apply.
+    assert_eq!(effective_properties(&document_context, &document), ["lower"]);
+}
+
+// ── Inaccessible schema roots ───────────────────────────────────────────
+
+/// A fixture whose `kind` root is `{locked}/anchor/schemas`, holding
+/// `policy.yaml` (`hidden_rule: string(required)`) and a trigger applying it
+/// to every document. A readable fixture home holds a same-named
+/// `policy.yaml` (`fallback_rule: string`) unless `kind` is the home root.
+/// The document names `$schema: policy.yaml`.
+#[cfg(unix)]
+struct InaccessibleRoot {
+    dir: tempfile::TempDir,
+    kind: SchemaRootKind,
+}
+
+#[cfg(unix)]
+impl InaccessibleRoot {
+    fn new(kind: SchemaRootKind) -> Self {
+        let fixture = Self { dir: tempfile::tempdir().expect("temp dir"), kind };
+        let repo = fixture.repo();
+        std::fs::create_dir_all(&repo).unwrap();
+        let status = Command::new("git").args(["init", "-q"]).current_dir(&repo).status().expect("run git");
+        assert!(status.success());
+        let member = match kind {
+            SchemaRootKind::Package => Some("locked/anchor"),
+            SchemaRootKind::PackageArea => Some("locked/anchor/pkg"),
+            _ => None,
+        };
+        if let Some(member) = member {
+            write(&repo.join("Cargo.toml"), &format!("[workspace]\nmembers = [\"{member}\"]\n"));
+            write(
+                &repo.join(member).join("Cargo.toml"),
+                "[package]\nname = \"pkg\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+            );
+            write(&repo.join(member).join("src/lib.rs"), "");
+        }
+        let schemas = fixture.schemas();
+        write(&schemas.join("policy.yaml"), "$schema:\n  hidden_rule: string(required)\n");
+        write(&schemas.join("hidden.trigger.yaml"), &trigger("**/*.md", "policy.yaml"));
+        if kind != SchemaRootKind::Home {
+            write(&fixture.root().join("home/schemas/policy.yaml"), "$schema:\n  fallback_rule: string\n");
+        }
+        write(&fixture.document(), "---\n$schema: policy.yaml\n---\nBody\n");
+        fixture
+    }
+
+    fn root(&self) -> PathBuf {
+        canonical(self.dir.path())
+    }
+
+    fn locked(&self) -> PathBuf {
+        self.root().join(if matches!(self.kind, SchemaRootKind::Package | SchemaRootKind::PackageArea) {
+            "repo/locked"
+        } else {
+            "locked"
+        })
+    }
+
+    fn anchor(&self) -> PathBuf {
+        self.locked().join("anchor")
+    }
+
+    fn schemas(&self) -> PathBuf {
+        self.anchor().join("schemas")
+    }
+
+    fn repo(&self) -> PathBuf {
+        if self.kind == SchemaRootKind::Tree { self.anchor() } else { self.root().join("repo") }
+    }
+
+    fn document(&self) -> PathBuf {
+        match self.kind {
+            SchemaRootKind::Package | SchemaRootKind::PackageArea => self.anchor().join("docs/doc.md"),
+            _ => self.repo().join("docs/doc.md"),
+        }
+    }
+
+    /// The document's context, built while every folder is readable.
+    fn context(&self) -> FileResolutionContext {
+        let home = if self.kind == SchemaRootKind::Home { self.anchor() } else { self.root().join("home") };
+        let schemas = self.schemas();
+        let mut env = HashMap::new();
+        if self.kind == SchemaRootKind::SchemasDir {
+            env.insert("SCHEMAS_DIR".to_string(), schemas.to_string_lossy().into_owned());
+        }
+        let snapshot = RequestSnapshot::new(self.document().parent().unwrap()).with_home(Some(home)).with_env(env);
+        build_resolution_context(&snapshot).expect("fixture context")
+    }
+}
+
+/// The document's effective properties after discovery, or the error.
+#[cfg(unix)]
+fn bare_name_result(context: &FileResolutionContext, markdown: &Markdown) -> Result<Vec<String>, SchemaError> {
+    let effective = DarkmatterSchemas::new(context.clone()).with_trigger_discovery()?.effective_for(markdown)?;
+    let mut properties: Vec<String> = effective
+        .and_then(|effective| effective.json_schema["properties"].as_object().map(|map| map.keys().cloned().collect()))
+        .unwrap_or_default();
+    properties.sort();
+    Ok(properties)
+}
+
+#[cfg(unix)]
+fn is_io_error_naming(result: &Result<impl std::fmt::Debug, SchemaError>, expected: &Path) -> bool {
+    matches!(result, Err(SchemaError::Io { path, .. }) if path == expected)
+}
+
+#[cfg(unix)]
+#[test]
+fn an_inaccessible_package_schema_root_is_an_error() {
+    assert_inaccessible_root_is_an_error(SchemaRootKind::Package);
+}
+
+#[cfg(unix)]
+#[test]
+fn an_inaccessible_package_area_schema_root_is_an_error() {
+    assert_inaccessible_root_is_an_error(SchemaRootKind::PackageArea);
+}
+
+#[cfg(unix)]
+#[test]
+fn an_inaccessible_tree_schema_root_is_an_error() {
+    assert_inaccessible_root_is_an_error(SchemaRootKind::Tree);
+}
+
+#[cfg(unix)]
+#[test]
+fn an_inaccessible_schemas_dir_root_is_an_error() {
+    assert_inaccessible_root_is_an_error(SchemaRootKind::SchemasDir);
+}
+
+#[cfg(unix)]
+#[test]
+fn an_inaccessible_home_schema_root_is_an_error() {
+    assert_inaccessible_root_is_an_error(SchemaRootKind::Home);
+}
+
+/// A `kind` root behind an ancestor this user cannot search is an I/O error
+/// naming it from the root list, the scan, and bare-name resolution, and
+/// never lets the later same-named `policy.yaml` win. A directly unreadable
+/// root fails at enumeration; a missing one is skipped and the later root
+/// wins.
+#[cfg(unix)]
+fn assert_inaccessible_root_is_an_error(kind: SchemaRootKind) {
+    let fixture = InaccessibleRoot::new(kind);
+    let context = fixture.context();
+    let document = fixture.document();
+    let markdown =
+        Markdown::try_from(document.as_path()).unwrap().with_source(ComposeSource::File(document.clone()));
+    let schemas = fixture.schemas();
+
+    // Readable control: this kind searches the folder, its trigger loads,
+    // and the bare name resolves to it.
+    let roots = SchemaRoots::for_document(&context).expect("readable roots");
+    assert_eq!(state_of(&roots, kind), SchemaRootState::Searched(schemas.clone()), "{kind:?}");
+    let registry = darkmatter::markdown::schemas::scan(&context).expect("readable scan");
+    assert_eq!(registry.triggers.len(), 1, "{kind:?}");
+    assert_eq!(bare_name_result(&context, &markdown).expect("readable"), ["hidden_rule"], "{kind:?}");
+
+    // An ancestor without search permission.
+    {
+        let Some(_locked) = Locked::with_mode(&fixture.locked(), 0o000) else { return };
+        let probe = std::fs::symlink_metadata(&schemas);
+        assert!(
+            matches!(&probe, Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied),
+            "{kind:?}: {probe:?}"
+        );
+        let roots = SchemaRoots::for_document(&context);
+        assert!(is_io_error_naming(&roots, &schemas), "{kind:?}: {roots:?}");
+        let scanned = darkmatter::markdown::schemas::scan(&context);
+        assert!(is_io_error_naming(&scanned, &schemas), "{kind:?}: {scanned:?}");
+        let resolved = bare_name_result(&context, &markdown);
+        assert!(is_io_error_naming(&resolved, &schemas), "{kind:?}: {resolved:?}");
+    }
+
+    // The folder itself unreadable, its ancestors searchable: listed as
+    // searched, and enumeration fails.
+    {
+        let Some(_locked) = Locked::with_mode(&schemas, 0o000) else { return };
+        let roots = SchemaRoots::for_document(&context).expect("inspectable roots");
+        assert_eq!(state_of(&roots, kind), SchemaRootState::Searched(schemas.clone()), "{kind:?}");
+        let scanned = darkmatter::markdown::schemas::scan(&context);
+        assert!(is_io_error_naming(&scanned, &schemas), "{kind:?}: {scanned:?}");
+        let resolved = bare_name_result(&context, &markdown);
+        assert!(is_io_error_naming(&resolved, &schemas), "{kind:?}: {resolved:?}");
+    }
+
+    // Missing: skipped, so the later root's same-named schema applies
+    // (home has no later root, so nothing matches).
+    std::fs::remove_dir_all(&schemas).unwrap();
+    let roots = SchemaRoots::for_document(&context).expect("roots without the folder");
+    assert_eq!(state_of(&roots, kind), SchemaRootState::Absent(schemas.clone()), "{kind:?}: {roots:?}");
+    let resolved = bare_name_result(&context, &markdown);
+    if kind == SchemaRootKind::Home {
+        assert!(matches!(resolved, Err(SchemaError::NoMatch { .. })), "{resolved:?}");
+    } else {
+        assert_eq!(resolved.expect("fallback"), ["fallback_rule"], "{kind:?}");
+    }
+}
+
+/// Sets a directory to mode `0o111` (traversal only) and restores `0o755` on
+/// drop. `None` when this user can still list it (a privileged user).
+#[cfg(unix)]
+struct Locked(PathBuf);
+
+#[cfg(unix)]
+impl Locked {
+    fn traversal_only(dir: &Path) -> Option<Self> {
+        Self::with_mode(dir, 0o111)
+    }
+
+    /// `dir` at `mode`, which must deny listing it.
+    fn with_mode(dir: &Path, mode: u32) -> Option<Self> {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(mode)).expect("chmod");
+        let locked = Self(dir.to_path_buf());
+        match std::fs::read_dir(dir) {
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => Some(locked),
+            other => {
+                eprintln!("skipping: {} is still listable after chmod {mode:o} ({other:?})", dir.display());
+                None
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for Locked {
+    fn drop(&mut self) {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+    }
+}
+
+// ── Criterion 34: the documented variable name ──────────────────────────
+
+fn repo_root() -> PathBuf {
+    // CARGO_MANIFEST_DIR is `<repo>/darkmatter/lib`.
+    biscuit_test_harness::manifest_dir!()
+        .ancestors()
+        .nth(2)
+        .expect("repository root is two levels above darkmatter/lib")
+        .to_path_buf()
+}
+
+fn documentation_files(dir: &Path, files: &mut Vec<PathBuf>) {
+    let entries = std::fs::read_dir(dir).unwrap_or_else(|err| panic!("read {}: {err}", dir.display()));
+    for entry in entries {
+        let entry = entry.expect("directory entry");
+        let file_type = entry.file_type().expect("file type");
+        let path = entry.path();
+        // A symlink (the Claudine skill's `topics` link to `claudine/docs`)
+        // points at a tree this walk already covers.
+        if file_type.is_symlink() {
+            continue;
+        }
+        if file_type.is_dir() {
+            documentation_files(&path, files);
+        } else if matches!(path.extension().and_then(|e| e.to_str()), Some("md" | "yaml" | "yml")) {
+            files.push(path);
+        }
+    }
+}
+
+/// `SCHEMA_DIR` as a whole word, so `SCHEMAS_DIR` and `MY_SCHEMA_DIR_X` do
+/// not count.
+fn names_singular_variable(text: &str) -> bool {
+    let is_word = |c: char| c.is_ascii_alphanumeric() || c == '_';
+    text.match_indices("SCHEMA_DIR").any(|(at, needle)| {
+        let before = text[..at].chars().next_back();
+        let after = text[at + needle.len()..].chars().next();
+        !before.is_some_and(is_word) && !after.is_some_and(is_word)
+    })
+}
+
+#[test]
+fn no_doc_or_skill_names_the_singular_schema_variable() {
+    assert!(names_singular_variable("set `SCHEMA_DIR` to"));
+    assert!(!names_singular_variable("set `SCHEMAS_DIR` to"));
+    assert!(!names_singular_variable("MY_SCHEMA_DIR_X"));
+
+    let root = repo_root();
+    let dirs = [
+        root.join("darkmatter/docs"),
+        root.join("claudine/docs"),
+        root.join("biscuit-file/docs"),
+        root.join(".claude/skills/darkmatter"),
+        root.join(".claude/skills/claudine"),
+        root.join(".claude/skills/biscuit-file"),
+    ];
+    let mut files = Vec::new();
+    for dir in &dirs {
+        documentation_files(dir, &mut files);
+    }
+    assert!(
+        files.iter().any(|f| f.ends_with("topics/schemas/definition.md")),
+        "the walk must reach the schema definition page"
+    );
+    let offenders: Vec<_> = files
+        .iter()
+        .filter(|file| std::fs::read_to_string(file).is_ok_and(|text| names_singular_variable(&text)))
+        .map(|file| file.strip_prefix(&root).unwrap_or(file).display().to_string())
+        .collect();
+    assert!(offenders.is_empty(), "rename `SCHEMA_DIR` to `SCHEMAS_DIR` in: {offenders:?}");
 }

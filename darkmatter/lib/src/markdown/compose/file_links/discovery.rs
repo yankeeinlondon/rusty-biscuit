@@ -3,8 +3,9 @@
 //! A glob target is a [`GlobReference`] listed in the containing document's
 //! context, so it takes every reference prefix and the merged, most-local-first
 //! roots of `find_files()`. A `--dir` target is a directory relative to the
-//! document. Both are held to the context's tree root (`base_dir()`), never
-//! to the process's current directory. The result carries the rendering
+//! document. A `--dir` scan and a bare, `./`, or `../` glob are held to the
+//! context's tree root (`base_dir()`), never to the process's current
+//! directory. The result carries the rendering
 //! metadata consumed by the
 //! [`FileSystem`](biscuit_terminal::components::filesystem::FileSystem)
 //! component.
@@ -152,7 +153,8 @@ fn discover_dir(
     let component_root = canonicalize(&target);
 
     let mut candidates = BTreeMap::new();
-    walk_recursive(&target, 0, depth, boundary, source_canonical, &mut candidates);
+    walk_recursive(&target, 0, depth, boundary, source_canonical, &mut candidates)
+        .map_err(|(path, source)| FileLinksError::Unreadable { path, line, source })?;
 
     Ok((candidates.into_values().collect(), component_root))
 }
@@ -170,6 +172,10 @@ fn discover_dir(
 /// - The source document itself is excluded.
 /// - Symlinked directories are not descended into; symlinked files whose
 ///   target escapes `boundary` are dropped.
+/// - A dangling symlink, or an entry that vanished during the scan, is
+///   skipped. Any other failure to read a directory or an entry is returned
+///   with the path that failed, so an unreadable directory is never a
+///   silently shorter tree.
 fn walk_recursive(
     dir: &Path,
     current_depth: u32,
@@ -177,20 +183,18 @@ fn walk_recursive(
     boundary: &Path,
     source_canonical: &Path,
     out: &mut BTreeMap<PathBuf, PathBuf>,
-) {
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return,
-    };
+) -> Result<(), (PathBuf, std::io::Error)> {
+    let entries = std::fs::read_dir(dir).map_err(|error| (dir.to_path_buf(), error))?;
 
-    for entry in entries.flatten() {
+    for entry in entries {
+        let entry = entry.map_err(|error| (dir.to_path_buf(), error))?;
         let entry_path = entry.path();
 
         // Skip symlinked directories to avoid loops; include symlinked files.
         let is_symlink = entry
             .file_type()
-            .map(|ft| ft.is_symlink())
-            .unwrap_or(false);
+            .map_err(|error| (entry_path.clone(), error))?
+            .is_symlink();
 
         let canonical = canonicalize(&entry_path);
 
@@ -207,7 +211,8 @@ fn walk_recursive(
         // Determine real file type (follows symlinks).
         let metadata = match std::fs::metadata(&entry_path) {
             Ok(m) => m,
-            Err(_) => continue,
+            Err(error) if vanished(&error) => continue,
+            Err(error) => return Err((entry_path, error)),
         };
 
         if metadata.is_file() {
@@ -225,9 +230,19 @@ fn walk_recursive(
                 boundary,
                 source_canonical,
                 out,
-            );
+            )?;
         }
     }
+    Ok(())
+}
+
+/// A dangling symlink, or an entry removed (or replaced by a file) after its
+/// directory was listed.
+fn vanished(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+    )
 }
 
 /// A matched file's display path: its canonical parent directory joined with

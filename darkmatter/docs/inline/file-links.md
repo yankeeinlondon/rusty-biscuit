@@ -50,6 +50,16 @@ two folders is listed once. The full pattern grammar is in biscuit-file's
 [file references](../../../biscuit-file/docs/topics/file-references.md)
 ("Glob References").
 
+A glob lists exactly the files the
+[`find_files()`](../topics/darkmatter-expressions.md#finding-files) expression
+function returns for the same pattern, less the files the extension filter and
+self-exclusion drop. `find_files()` returns them in native order (most local
+folder first); the tree shows them in directory order instead — directories
+before files, then case-insensitively by name — because a tree has only one
+place for each file. No other filter applies: hidden, gitignored, and
+`_`-prefixed files are listed (dotfiles in italics, gitignored entries
+dimmed), so a `&**/*.md` glob also reaches build output such as `target/`.
+
 ### Directory Form
 
 ```md
@@ -82,8 +92,9 @@ excluded.
 
 ## Source-Relative Resolution
 
-A bare or `./` glob starts at the directory containing the source document, and
-a `--dir` path is resolved relative to it. If the document has no source file
+A bare or `./` glob starts at the directory containing the source document (a
+bare glob then also searches the repository root), and a `--dir` path is
+resolved relative to that directory. If the document has no source file
 context (e.g. composed from stdin), the directive errors with a
 missing-source-context message.
 
@@ -200,7 +211,15 @@ The tree is indented to preserve list placement.
 | `MissingSourceContext` | The directive requires a source file but none was provided |
 | `TargetNotFound` | The `--dir` path does not exist |
 | `TargetNotDirectory` | The `--dir` path is a file |
-| `GlobReference` | The glob is not a valid glob reference, a relative glob leaves the file tree (`RelativeTreeEscape`), or `&`/`^` is used outside a repository |
+| `GlobReference` | The glob is not a valid glob reference, a relative glob leaves the file tree (`RelativeTreeEscape`), `&`/`^` is used outside a repository, or the search must enter a directory it cannot read (`Io`, naming the directory) |
+| `Unreadable` | A `--dir` scan reached a directory (within `--depth`) or an entry it cannot read; names the path |
+
+An unreadable directory is never rendered as a shorter tree or as "no
+matching files". In strict mode composition fails; in permissive mode the
+directive does not render and the compose report gets a warning naming the
+directory, with `resolution_failure` `Io` for a glob. A directory the search never needs to
+enter is not an error: `::file-links "docs/*.md"` and `--dir docs --depth 0`
+ignore an unreadable `docs/locked/`. A dangling symlink is skipped.
 
 All errors render as line-aware `StatusBlock` diagnostics with hints showing
 valid syntax.

@@ -268,7 +268,10 @@ impl OverlayState {
                 Ok(Some(_)) => {
                     let mut cache = self.inner.lock().expect("overlay lock poisoned");
                     if let Ok(context) = resolution.context() {
-                        cache.trigger_registry(path, workspace_roots, context);
+                        // A root I/O failure reaches the documents it governs
+                        // through `schema_for`; this envelope's own load error
+                        // is read below.
+                        let _ = cache.trigger_registry(path, workspace_roots, context);
                     }
                     if let Some(error) = cache
                         .trigger_load_errors
@@ -406,7 +409,13 @@ impl OverlayCache {
             self.schema.remove(uri_key);
             return SchemaOutcome::Ready(None);
         };
-        let registry = self.trigger_registry(path, workspace_roots, context);
+        let registry = match self.trigger_registry(path, workspace_roots, context) {
+            Ok(registry) => registry,
+            Err(error) => {
+                self.schema.remove(uri_key);
+                return SchemaOutcome::Failed(error);
+            }
+        };
         let registry_key = registry
             .as_ref()
             .map(|registry| xx_hash_bytes(format!("{registry:?}").as_bytes()))
@@ -442,13 +451,19 @@ impl OverlayCache {
         outcome
     }
 
+    /// The document's trigger registry. A trigger-file load error keeps the
+    /// last-good registry (the file is likely mid-edit, and its own diagnostic
+    /// reports the error); a schema-root I/O error is returned instead, since
+    /// any registry would silently lack that root's triggers and bare names.
     fn trigger_registry(
         &mut self,
         path: &Path,
         workspace_roots: &[PathBuf],
         context: &FileResolutionContext,
-    ) -> Option<TriggerRegistry> {
-        let boundary = schema::trigger_boundary(path, workspace_roots)?;
+    ) -> Result<Option<TriggerRegistry>, Arc<SchemaError>> {
+        let Some(boundary) = schema::trigger_boundary(path, workspace_roots) else {
+            return Ok(None);
+        };
         let document_dir = path.parent().unwrap_or(path).to_path_buf();
         let key = (boundary.clone(), document_dir);
         // The schema roots are the document's: its package, package area,
@@ -462,8 +477,9 @@ impl OverlayCache {
                         error: None,
                     });
                 }
-                Some(registry)
+                Ok(Some(registry))
             }
+            Err(error @ SchemaError::Io { .. }) => Err(Arc::new(error)),
             Err(error) => {
                 tracing::warn!(path = %path.display(), %error, "retaining last-good trigger registry");
                 if let SchemaError::TriggerLoad { path, .. } = &error {
@@ -487,7 +503,7 @@ impl OverlayCache {
                         });
                     }
                 }
-                self.trigger_registries.get(&key).cloned()
+                Ok(self.trigger_registries.get(&key).cloned())
             }
         }
     }

@@ -1093,9 +1093,12 @@ functions:
       order: 64
       description:
           Returns every file a glob reference matches (`&dir/**/name.md`, `^docs/*.md`),
-          as absolute paths merged across every root of its prefix, most local first;
-          a bare pattern searches the document's folder, then the repository root. A file
-          symlink leaving the file tree is skipped with a `dm.glob.skipped_symlink` warning.
+          as absolute paths merged across every root of its prefix in native order (most
+          local root first, then shallowest, then by path component). A bare pattern searches
+          the document's folder, then the repository root. A file symlink a bare, `./`, or
+          `../` pattern matches whose target leaves the file tree is skipped with a
+          `dm.glob.skipped_symlink` warning. A directory the search must enter but
+          cannot read fails the expression with an I/O failure instead of shortening the list.
       overloads:
           - parameters:
                 - name: pattern

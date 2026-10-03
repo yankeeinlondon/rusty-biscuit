@@ -14,7 +14,8 @@
 //! in the registry). Later layers win per top-level property via the existing
 //! [`super::super::resolve::merge_baseline`] contract.
 //!
-//! See `darkmatter/features/2026-07-10-schema-triggers/spec.md`.
+//! The user-facing contract is the "Repository Trigger Schemas" section of
+//! `darkmatter/docs/topics/schemas/definition.md`.
 
 use std::path::{Path, PathBuf};
 
@@ -30,7 +31,7 @@ use super::discovery::{LoadedTrigger, TriggerRegistry};
 use super::envelope::parse_trigger_envelope_from_str;
 use super::matcher::{self, PathSubject};
 
-// ── Pure matching entry ─────────────────────────────────────────────────────
+// ── Matching entry ──────────────────────────────────────────────────────────
 
 /// The result of evaluating one trigger against a document snapshot.
 #[derive(Debug, Clone)]
@@ -79,8 +80,8 @@ pub struct TriggerArmTrace {
 }
 
 /// The subject one trigger's `$path` patterns judge: `document` in the
-/// registry's context, with the trigger's own `cwd` for bare and `./`
-/// patterns.
+/// registry's context, with the trigger's own `cwd` for bare, `./`, and
+/// `../` patterns.
 fn subject_for<'a>(
     registry: &'a TriggerRegistry,
     trigger: &'a LoadedTrigger,

@@ -448,7 +448,24 @@ fn display_file_reference(diagnostic: &FileReferenceDiagnostic) -> String {
                 diagnostic.function, diagnostic.reference
             )
         }
-        _ => format!("invalid file path: {}", diagnostic.reference),
+        _ => crate::markdown::errors::with_hint_line(
+            format!("invalid file path: {}", diagnostic.reference),
+            diagnostic.glob_hint(),
+        ),
+    }
+}
+
+impl FileReferenceDiagnostic {
+    /// The literal-glob hint for a clean miss (a [`FileRefFailure::NotFound`]
+    /// with no underlying error) of a reference whose text looks like a glob;
+    /// see [`biscuit_file::ResolutionFailure::glob_hint`].
+    pub fn glob_hint(&self) -> Option<&'static str> {
+        match (self.kind, &self.source) {
+            (FileRefFailure::NotFound, None) => {
+                biscuit_file::ResolutionFailure::NoMatch.glob_hint(&self.reference)
+            }
+            _ => None,
+        }
     }
 }
 
@@ -472,7 +489,9 @@ impl ExpressionError {
     ///   misses is surfaced rather than silently swallowed.
     ///
     /// - [`GlobReference`] — a glob reference that cannot be parsed or rooted
-    ///   is an authoring mistake for the same reason.
+    ///   is an authoring mistake for the same reason, and one whose search
+    ///   cannot read a directory it must enter would otherwise be a silently
+    ///   shorter list.
     ///
     /// - [`Provider`] — a focused provider failure (denied host, missing or
     ///   rejected credentials, rate limit, unsupported capability, incomplete

@@ -22,6 +22,8 @@ use std::path::{Path, PathBuf};
 
 use biscuit_file::{FileResolutionContext, PathIdentity, canonicalize_simplified};
 
+use crate::markdown::schemas::SchemaError;
+
 /// The environment variable naming the fourth schema root.
 pub const SCHEMAS_DIR_VARIABLE: &str = "SCHEMAS_DIR";
 
@@ -56,9 +58,9 @@ impl SchemaRootKind {
         }
     }
 
-    /// Whether a bare or `./` trigger pattern from this root is read from the
-    /// checked document's tree root rather than from the folder holding the
-    /// root's `schemas/` directory. A user-level root holds no repository
+    /// Whether a bare, `./`, or `../` trigger pattern from this root is read
+    /// from the checked document's tree root rather than from the folder
+    /// holding the root's `schemas/` directory. A user-level root holds no repository
     /// documents, so it has no folder of its own to read from.
     fn reads_patterns_from_tree_root(self) -> bool {
         matches!(self, Self::SchemasDir | Self::Home)
@@ -80,7 +82,10 @@ pub enum InvalidSchemasDir {
 pub enum SchemaRootState {
     /// The folder exists and is searched.
     Searched(PathBuf),
-    /// The root applies but its folder does not exist, so it is skipped.
+    /// The root applies but its folder is not there, so it is skipped: the
+    /// path does not exist, is not a directory, or (for the package,
+    /// package-area, and tree roots) is a symlink. A folder whose metadata
+    /// cannot be read is never `Absent`; see [`SchemaRoots::for_document`].
     Absent(PathBuf),
     /// The folder is the same as an earlier root's, which searches it.
     Duplicate {
@@ -110,17 +115,18 @@ pub struct SchemaRoot {
     pub state: SchemaRootState,
 }
 
-/// A searched root: its folder and where its triggers' bare and `./` `$path`
-/// patterns are read from.
+/// A searched root: its folder and where its triggers' bare, `./`, and `../`
+/// `$path` patterns are read from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchedRoot {
     /// Which root this is.
     pub kind: SchemaRootKind,
     /// The folder whose files are read.
     pub path: PathBuf,
-    /// The `cwd` of a bare or `./` `$path` pattern in a trigger from this
-    /// root: the folder holding `schemas/` for the package, package-area, and
-    /// tree roots, and the document's tree root for `SCHEMAS_DIR` and home.
+    /// The `cwd` of a bare, `./`, or `../` `$path` pattern in a trigger from
+    /// this root: the folder holding `schemas/` for the package, package-area,
+    /// and tree roots, and the document's tree root for `SCHEMAS_DIR` and
+    /// home.
     pub pattern_cwd: PathBuf,
 }
 
@@ -143,8 +149,15 @@ impl SchemaRoots {
     /// real directories (a symlinked `schemas/` in a repository is not
     /// followed); `SCHEMAS_DIR` and `~/schemas` are user configuration and
     /// may be symlinks to a directory.
-    #[must_use]
-    pub fn for_document(ctx: &FileResolutionContext) -> Self {
+    ///
+    /// ## Errors
+    ///
+    /// [`SchemaError::Io`] naming the folder when its metadata cannot be read
+    /// for any reason other than the path not existing (for example an
+    /// ancestor without search permission). Treating that folder as absent
+    /// would let discovery succeed without its triggers and let a bare-name
+    /// `$schema` fall through to a less local root.
+    pub fn for_document(ctx: &FileResolutionContext) -> Result<Self, SchemaError> {
         let tree_root = ctx.base_dir().to_path_buf();
         let candidates = [
             (
@@ -177,7 +190,7 @@ impl SchemaRoots {
                     } else {
                         seen.push((identity, kind));
                         let user_level = kind.reads_patterns_from_tree_root();
-                        if is_searchable_directory(&path, user_level) {
+                        if is_searchable_directory(&path, user_level)? {
                             let pattern_cwd = if user_level {
                                 tree_root.clone()
                             } else {
@@ -198,11 +211,11 @@ impl SchemaRoots {
             entries.push(SchemaRoot { kind, state });
         }
         let search_paths = searched.iter().map(|root| root.path.clone()).collect();
-        Self {
+        Ok(Self {
             entries,
             searched,
             search_paths,
-        }
+        })
     }
 
     /// No roots at all, for a registry built without discovery.
@@ -291,12 +304,31 @@ fn identity_of(path: &Path) -> PathIdentity {
     PathIdentity::new(&canonical)
 }
 
-fn is_searchable_directory(path: &Path, follow_symlink: bool) -> bool {
-    if follow_symlink {
-        return path.is_dir();
+/// Whether `path` is a folder to search. Only a path that is not there
+/// (`NotFound`, or a non-directory ancestor) is absent; any other metadata
+/// failure is an error, never absence.
+fn is_searchable_directory(path: &Path, follow_symlink: bool) -> Result<bool, SchemaError> {
+    let metadata = if follow_symlink {
+        std::fs::metadata(path)
+    } else {
+        std::fs::symlink_metadata(path)
+    };
+    match metadata {
+        Ok(metadata) => {
+            let file_type = metadata.file_type();
+            Ok(file_type.is_dir() && !file_type.is_symlink())
+        }
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+            ) =>
+        {
+            Ok(false)
+        }
+        Err(source) => Err(SchemaError::Io {
+            path: path.to_path_buf(),
+            source,
+        }),
     }
-    std::fs::symlink_metadata(path).is_ok_and(|metadata| {
-        let file_type = metadata.file_type();
-        file_type.is_dir() && !file_type.is_symlink()
-    })
 }

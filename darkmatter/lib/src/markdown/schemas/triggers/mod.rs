@@ -18,7 +18,8 @@
 //! Bare-name resolution (Phase 3) and effective-schema assembly (Phase 4)
 //! build on top of these.
 //!
-//! See `darkmatter/features/2026-07-10-schema-triggers/spec.md`.
+//! The user-facing contract is the "Repository Trigger Schemas" section of
+//! `darkmatter/docs/topics/schemas/definition.md`.
 
 pub mod assemble;
 pub mod discovery;

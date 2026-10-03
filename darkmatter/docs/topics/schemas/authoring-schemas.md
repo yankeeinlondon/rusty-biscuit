@@ -191,9 +191,11 @@ To make an exported schema apply automatically, place its definition in one of t
 4. the folder the `SCHEMAS_DIR` environment variable names, when it is set (the folder itself, which can be any folder you choose; no `schemas/` is appended)
 5. `~/schemas`
 
-`{root}` is the document's file tree root: the root of its repository when it is in one, otherwise the tree it was opened in (often the document's own folder). Package and package area are the document's, not those of the directory you launched from. `schemas/` folders anywhere else are not searched.
+`{root}` is the document's file tree root: the root of its repository when it is in one, otherwise the tree it was opened in (often the document's own folder). `md` searches these folders only for a document in a repository; DMLS searches them for any document inside an open workspace folder. Package and package area are the document's, not those of the directory you launched from. `schemas/` folders anywhere else, such as `{package-root}/docs/schemas`, are not searched. An earlier folder shadows a file of the same name in every later one.
 
-Recognized standalone schemas with an exported `$schema` augment the Darkmatter baseline within their discovery scope. Automatically discovered package-area and package schemas do not apply to sibling scopes. `SCHEMAS_DIR` adds explicitly selected definitions with workspace-wide applicability; it does not replace normal discovery. Types-only libraries remain available for imports without automatically applying a schema. Arbitrary YAML files are not schema inputs.
+Today only a `kind: trigger-schema` file in these folders applies automatically (see [Repository Trigger Schemas](./definition.md#repository-trigger-schemas)). Any other schema file there is used when a document names it with a bare `$schema`, such as `$schema: claudine.yaml`. The automatic application of an exported standalone schema described next is not implemented yet.
+
+Recognized standalone schemas with an exported `$schema` augment the Darkmatter baseline within their discovery scope. Automatically discovered package-area and package schemas do not apply to sibling scopes. The `SCHEMAS_DIR` folder and `~/schemas` are in every document's roots, so their definitions can apply to documents in any repository; they add to the package, package-area, and `{root}` folders rather than replacing them. Types-only libraries remain available for imports without automatically applying a schema. Arbitrary YAML files are not schema inputs.
 
 Direct, explicitly supplied always-on schemas remain supported independently of automatic discovery.
 

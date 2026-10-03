@@ -1279,9 +1279,13 @@ fn resolve_caller_file_value(
                 );
             }
             failure(
-                format!(
-                    "file reference `{raw}` did not match a file from `{}`",
-                    context.cwd().display()
+                crate::markdown::errors::with_glob_hint(
+                    format!(
+                        "file reference `{raw}` did not match a file from `{}`",
+                        context.cwd().display()
+                    ),
+                    biscuit_file::ResolutionFailure::NoMatch,
+                    raw,
                 ),
                 FileReferenceDiagnostic::NoMatch {
                     raw: raw.to_string(),

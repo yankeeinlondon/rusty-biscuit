@@ -74,7 +74,7 @@ A few details worth knowing:
 - the cache is also keyed on the document's file-resolution context: its repository, its folder, its tree root and how that was chosen, the home folder, the environment (so `SCHEMAS_DIR`), and the extra `@` roots. A `$schema: ^shape.yaml` that resolves to a package's `shape.yaml` is never served to the same text once the package root changes; the schema is assembled again for the new context
 - when a schema fails to load, DMLS keeps the **last good** bundle serving completion and hover rather than flapping to nothing mid-keystroke
 
-DMLS searches the same five [schema roots](./definition.md#schema-roots) as `md`, for the document being edited, so the editor and the terminal apply the same triggers and resolve the same bare-name `$schema`. `SCHEMAS_DIR` and the home folder come from the environment the editor started the server with: a GUI editor that was not launched from your shell may lack `SCHEMAS_DIR`, and a changed value takes effect after a server restart. Additional always-on baselines arrive through [configuration](#extensibility-through-configuration).
+DMLS searches the same five [schema roots](./definition.md#schema-roots) as `md`, for the document being edited (when it is inside an open workspace folder), so the editor and the terminal apply the same triggers and resolve the same bare-name `$schema`. `SCHEMAS_DIR` and the home folder come from the environment the editor started the server with: a GUI editor that was not launched from your shell may lack `SCHEMAS_DIR`, and a changed value takes effect after a server restart. Additional always-on baselines arrive through [configuration](#extensibility-through-configuration).
 
 ## Implemented LSP Features
 

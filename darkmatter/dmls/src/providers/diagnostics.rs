@@ -63,7 +63,11 @@ fn link_diagnostics(ctx: &DocumentContext, doc_id: crate::graph::DocumentId, out
         let (code_value, message, data) = match kind {
             LinkDiagnostic::BrokenPath { failure } => (
                 code::BROKEN_PATH,
-                format!("broken link: no document matches `{}`", link.raw_target),
+                darkmatter::markdown::errors::with_glob_hint(
+                    format!("broken link: no document matches `{}`", link.raw_target),
+                    failure,
+                    &link.raw_target,
+                ),
                 Some(resolution_failure_data(failure)),
             ),
             LinkDiagnostic::MissingAnchor => (

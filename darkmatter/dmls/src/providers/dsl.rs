@@ -753,12 +753,16 @@ fn transclusion_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
                 DiagnosticSeverity::WARNING,
                 code::TRANSCLUSION_BROKEN_PATH,
                 source::COMPOSE,
-                match directive.kind {
-                    DirectiveKind::TocLinking => {
-                        format!("broken `::toc-linking` target: no file matches {matches}")
-                    }
-                    _ => format!("broken transclusion: no file matches {matches}"),
-                },
+                darkmatter::markdown::errors::with_glob_hint(
+                    match directive.kind {
+                        DirectiveKind::TocLinking => {
+                            format!("broken `::toc-linking` target: no file matches {matches}")
+                        }
+                        _ => format!("broken transclusion: no file matches {matches}"),
+                    },
+                    failure,
+                    alternatives.first().map_or("", String::as_str),
+                ),
             );
             broken.data = Some(resolution_failure_data(failure));
             out.push(broken);

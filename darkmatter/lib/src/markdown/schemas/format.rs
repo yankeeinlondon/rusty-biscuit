@@ -171,8 +171,8 @@ fn valid_iso8601_time(value: &str) -> bool {
 /// `base_dir`, when `Some`, is the prompt document directory: implicit bare
 /// references resolve from the document directory first, then the repository root, and
 /// explicit `./`/`../` from the document directory only. When `None` (the bare
-/// validator API with no document anchor) the validator resolves against the
-/// ambient process CWD.
+/// validator API with no document anchor) the validator resolves from
+/// `context`'s `cwd`; it never reads the process's directory.
 ///
 /// `fallback` (the captured launch area) is retained for structural
 /// compatibility with the validator-cache anchors but is **not** a resolution
@@ -344,14 +344,20 @@ impl fmt::Display for FileReferenceFailure {
             Self::Resolution { raw, err } => {
                 write!(f, "could not resolve file reference `{raw}`: {err}")
             }
-            Self::NoMatch { raw, resolved_from } => match resolved_from {
-                Some(dir) => write!(
-                    f,
-                    "no existing file matched reference `{raw}` while resolving from `{}`",
-                    dir.display()
-                ),
-                None => write!(f, "no existing file matched reference `{raw}`"),
-            },
+            Self::NoMatch { raw, resolved_from } => {
+                let message = match resolved_from {
+                    Some(dir) => format!(
+                        "no existing file matched reference `{raw}` while resolving from `{}`",
+                        dir.display()
+                    ),
+                    None => format!("no existing file matched reference `{raw}`"),
+                };
+                f.write_str(&crate::markdown::errors::with_glob_hint(
+                    message,
+                    biscuit_file::ResolutionFailure::NoMatch,
+                    raw,
+                ))
+            }
         }
     }
 }

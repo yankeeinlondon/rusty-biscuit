@@ -113,14 +113,25 @@ pub enum FileLinksError {
     #[error("Target '{path}' is not a directory (line {line})")]
     TargetNotDirectory { path: String, line: usize },
 
-    /// The glob reference could not be parsed or rooted: an invalid glob or
-    /// prefix, a relative glob leaving the file tree, or `&`/`^` outside a
-    /// repository.
+    /// The glob reference could not be parsed, rooted, or listed: an invalid
+    /// glob or prefix, a relative glob leaving the file tree, `&`/`^` outside
+    /// a repository, or a search root that cannot be read.
     #[error("{source} (line {line})")]
     GlobReference {
         line: usize,
         #[source]
         source: biscuit_file::GlobReferenceError,
+    },
+
+    /// A `--dir` scan reached a directory it could not read, or an entry
+    /// whose type could not be determined. The scan fails rather than
+    /// rendering a tree with that directory's files left out.
+    #[error("cannot read '{}' (line {line}): {source}", path.display())]
+    Unreadable {
+        path: std::path::PathBuf,
+        line: usize,
+        #[source]
+        source: std::io::Error,
     },
 
     /// I/O error during discovery.
@@ -187,6 +198,14 @@ impl biscuit_terminal::errors::BlockError for FileLinksError {
                 ))
                 .hint("<cyan>--dir</cyan> requires a directory; use a glob (e.g. <cyan>::file-links \"docs/*.md\"</cyan>) to match a file."),
 
+            FileLinksError::GlobReference { line, source: source @ biscuit_file::GlobReferenceError::Io { path, .. } } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "FileLinksError",
+                    "glob search failed",
+                ))
+                .body(format!("<dim>Line:</dim> {line}\n<dim>Path:</dim> <cyan>{}</cyan>\n<dim>Message:</dim> {source}", path.display()))
+                .hint("Make the directory readable, or narrow the glob so its search does not enter it."),
+
             FileLinksError::GlobReference { line, source } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
                     "FileLinksError",
@@ -194,6 +213,14 @@ impl biscuit_terminal::errors::BlockError for FileLinksError {
                 ))
                 .body(format!("<dim>Line:</dim> {line}\n<dim>Message:</dim> {source}"))
                 .hint("A glob takes a file-reference prefix (<cyan>&</cyan>, <cyan>^</cyan>, <cyan>@</cyan>, <cyan>~/</cyan>, <cyan>./</cyan>) and stays inside the file tree unless it names its root."),
+
+            FileLinksError::Unreadable { path, line, source } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("FileLinksError", "directory unreadable"))
+                .body(format!(
+                    "<dim>Path:</dim> <cyan>{}</cyan>\n<dim>Line:</dim> {line}\n<dim>Message:</dim> {source}",
+                    path.display()
+                ))
+                .hint("Make the directory readable, or lower <cyan>--depth</cyan> so the scan does not enter it."),
 
             FileLinksError::Io(source) => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("FileLinksError", "I/O error"))

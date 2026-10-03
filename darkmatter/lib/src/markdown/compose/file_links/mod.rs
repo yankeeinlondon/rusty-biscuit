@@ -19,9 +19,9 @@
 //! Only files with the allowed document extensions (`.md`, `.txt`, `.doc`,
 //! `.docx`, `.xls`, `.xlsx`, `.pdf`) are included, compared case-insensitively.
 //! The containing document is excluded, and symlinked directories are never
-//! descended. Both forms are bounded by the document context's tree root: a
-//! relative glob may not leave it, and a file symlink whose target does is
-//! left out (a glob reports it as a warning).
+//! descended. A `--dir` scan and a bare, `./`, or `../` glob are bounded by
+//! the document context's tree root: such a glob may not leave it, and a file
+//! symlink whose target does is left out (a glob reports it as a warning).
 
 mod discovery;
 mod parser;

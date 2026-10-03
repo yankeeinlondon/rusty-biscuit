@@ -99,8 +99,9 @@ pub struct PathGlobs {
 #[derive(Debug, Clone)]
 pub(crate) struct PathPattern {
     pub negated: bool,
-    /// Bare and `./` patterns are read from the trigger's own folder; every
-    /// other prefix from the document's context.
+    /// Bare, `./`, and `../` patterns are read from the trigger's
+    /// [`pattern_cwd`](super::LoadedTrigger::pattern_cwd); every other prefix
+    /// from the document's context.
     pub relative: bool,
     pub reference: GlobReference,
 }

@@ -71,17 +71,17 @@ pub const DEFAULT_CACHE_SIZE: usize = 64;
 /// document-first, then repository-relative candidate plan of their document.
 /// The request's file-resolution context, passed per call, is part of cache
 /// identity too, since it supplies the repository tier of that plan.
-/// [`Self::file_ref_fallback_dir`] is also part of cache identity: it anchors
-/// `match()` globs, but is not a resolution candidate for document-authored
-/// references. So are [`Self::with_caller_origins`]: a caller-supplied
-/// property's `match()` globs are judged from the caller's own context.
+/// [`Self::file_ref_fallback_dir`] is also part of cache identity, though it
+/// is not a resolution candidate for document-authored references. So are
+/// [`Self::with_caller_origins`]: a caller-supplied property's `match()` globs
+/// are judged from the caller's own context.
 ///
 /// [`Self::structural_validator_for`] serves validators that judge file values
 /// by syntax alone, for callers with no request (coercion probes, examples).
 #[derive(Clone)]
 pub struct ValidatorCache {
     inner: Arc<Mutex<CacheInner>>,
-    /// Launch-area metadata: a `match()` glob anchor and diagnostic facet.
+    /// Launch-area metadata carried to file-reference diagnostics.
     ///
     /// This is not a resolution candidate for document-authored references.
     file_ref_fallback_dir: Option<PathBuf>,
@@ -192,7 +192,7 @@ impl ValidatorCache {
         }
     }
 
-    /// Records the launch-area anchor for `match()` globs and
+    /// Records the launch-area metadata carried to
     /// `format: darkmatter-file` diagnostics.
     ///
     /// Per D2 the launch area is not a resolution input for a document-authored
@@ -373,10 +373,10 @@ pub(super) fn build_structural_validator(schema: &Value) -> Result<Validator, Sc
 /// anchors `format: darkmatter-file` value resolution: implicit bare
 /// references resolve document-first then repository-root, explicit
 /// `./`/`../` from the document directory only. `file_ref_fallback_dir` (the
-/// launch area) anchors `match()` globs but is **not** a resolution input
-/// (D2). Threading `base_dir` lets schema validation agree with
-/// expression-side `file_exists`/`frontmatter` resolution on the same `file`
-/// value.
+/// launch area) is **not** a resolution input (D2). A document value's
+/// `match()` globs are judged from `base_dir` too. Threading `base_dir` lets
+/// schema validation agree with expression-side `file_exists`/`frontmatter`
+/// resolution on the same `file` value.
 pub(crate) fn build_validator_in_context(
     schema: &Value,
     base_dir: Option<&Path>,

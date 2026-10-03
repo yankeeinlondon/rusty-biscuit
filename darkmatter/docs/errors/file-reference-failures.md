@@ -114,6 +114,33 @@ that actually failed, however deep it is.
 on a failed transclusion, on a schema `file` value (one row per failing
 value, below the problem list), and under a tolerated failure's warning.
 
+## A miss that looks like a glob
+
+A single file reference never reads glob syntax, so `docs/*.md` names one
+file called `*.md`. When such a reference matches nothing, every surface that
+reports the `no-match` adds a `hint:` explaining the literal reading and
+pointing at a form that accepts a glob reference:
+
+```text
+$ md compose 'docs/*.md'
+⤫ FileReferenceError: file argument not resolved
+┃
+┃ The argument docs/*.md did not resolve to a file.
+┃
+┃ failure: no-match
+┃
+┃ `*`, `?`, and `[` are literal in a file reference; to match a set of
+┃ files, use a form that accepts a glob reference (for example `::file-links`)
+```
+
+The same hint follows a `::file`, `::code`, or `::toc-linking` target, a
+read-side function argument such as `markdown_title('docs/*.md')`, a schema
+`file` value, a `$schema` reference, a broken link or transclusion
+diagnostic in the language server, and `claudine compose`'s operation file.
+A plain missing name (`docs/missing.md`) and every class other than
+`no-match` carry no hint. To list or transclude a set of files, use
+`::file-links <glob>` or `find_files()`.
+
 ## From the library
 
 Library callers read the same class without parsing text:

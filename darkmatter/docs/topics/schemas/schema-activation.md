@@ -102,9 +102,11 @@ without falling back to old definitions. A successful refresh restores those
 checks and clears the associated failure.
 
 Failure scope follows discovery scope. A broken automatically discovered package
-rule cannot affect sibling packages. A rule supplied through `SCHEMAS_DIR` can
-have workspace-wide applicability. Intentionally removing an optional rule is
-different from losing an import required by a rule that is still active.
+rule cannot affect sibling packages. A rule in the `SCHEMAS_DIR` folder or
+`~/schemas` is in the schema roots of every document Darkmatter checks, in any
+repository, so a broken one affects all of them until it is fixed.
+Intentionally removing an optional rule is different from losing an import
+required by a rule that is still active.
 
 Runtime validation required by the calling application remains independent of
 whether an optional editor rule is active. Passive activation is a way to select

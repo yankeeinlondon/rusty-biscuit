@@ -1,9 +1,10 @@
-//! Pure trigger-expression matcher.
+//! Trigger-expression matcher.
 //!
 //! [`matches`] evaluates a [`MatchExpr`] against a parsed frontmatter snapshot
 //! and a [`PathSubject`] (the document path and its context). It performs no
-//! I/O beyond what [`GlobReference::matches`] does to judge one known path,
-//! which is lexical, and compiles no validator. This makes it viable
+//! I/O beyond what [`GlobReference::matches`] does to judge one known path
+//! (it canonicalizes the path's existing prefix but never walks), and
+//! compiles no validator. This makes it viable
 //! per-keystroke in DMLS and composes with the content-hash effective-schema
 //! cache.
 //!
@@ -26,7 +27,7 @@
 //! judges a value: case-sensitive on every OS, nearest root, and a pattern
 //! whose glob names no directory (`SKILL.md`) matches that name at any depth.
 //! A path matches when some positive pattern admits it and no `!` pattern
-//! does. Bare and `./` patterns are read from the trigger's
+//! does. Bare, `./`, and `../` patterns are read from the trigger's
 //! [`pattern_cwd`](super::LoadedTrigger::pattern_cwd); every other prefix
 //! from the document's context.
 
