@@ -113,6 +113,48 @@ skills_files_updated_during_phase_4:
   - .claude/skills/biscuit-file/references/file-references.md
   - .claude/skills/os/windows.md
   - .claude/skills/os/macos.md
+source_files_during_phase_5:
+  - biscuit-file/lib/src/file_reference/glob/roots.rs
+  - biscuit-file/lib/src/file_reference/resolve.rs
+  - biscuit-file/lib/tests/l1/path_lookup_guard.rs
+  - claudine/cli/src/commands/compose/interrupt.rs
+  - claudine/cli/src/completion/autocomplete_ui.rs
+  - claudine/cli/tests/l1/path_lookup_guard.rs
+  - claudine/lib/src/composition/error/render/mod.rs
+  - claudine/lib/src/composition/schema/status_render.rs
+  - claudine/lib/src/invocation_context.rs
+  - claudine/lib/src/mcp/state.rs
+  - claudine/lib/src/protect/path.rs
+  - claudine/lib/src/protect/service/tests.rs
+  - claudine/lib/src/provider_overlay/tests.rs
+  - claudine/lib/src/provider_overlay/write_back.rs
+  - claudine/lib/src/render/prompt/system.rs
+  - claudine/lib/src/render/prompt/system/tests.rs
+  - claudine/lib/tests/l1/path_lookup_guard.rs
+  - darkmatter/cli/tests/common/path_lookup_guard.rs
+  - darkmatter/cli/tests/l1/compose_transclusion.rs
+  - darkmatter/lib/src/markdown/compose/cache/hashing.rs
+  - darkmatter/lib/src/markdown/compose/context/report.rs
+  - darkmatter/lib/src/markdown/compose/expression/path_projection.rs
+  - darkmatter/lib/src/markdown/compose/file_links/discovery.rs
+  - darkmatter/lib/src/markdown/compose/link_resolve.rs
+  - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+  - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+  - darkmatter/lib/src/markdown/compose/preflight/mod.rs
+  - darkmatter/lib/src/markdown/compose/tests/frontmatter.rs
+  - darkmatter/lib/src/markdown/compose/transclusion/resolver.rs
+  - darkmatter/lib/src/markdown/mod.rs
+  - darkmatter/lib/src/markdown/schemas/resolve.rs
+  - darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
+  - darkmatter/lib/tests/l1/path_lookup_guard.rs
+  - darkmatter/lib/tests/l1/suggest_constraint_phase4.rs
+  - darkmatter/lib/tests/l1/unknown_identifier_warning.rs
+  - darkmatter/lib/tests/level2/level2_render_tree_terminal/file_links.rs
+docs_updated_during_phase_5:
+  - biscuit-file/docs/dependencies.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/os/macos.md
 packages:
   - biscuit-file
   - biscuit-file-cli
@@ -859,3 +901,193 @@ recorded for follow-up.
   `windows-latest` cell (push to `main` or the `ci:all-os` label). Linux and
   WSL2 behave like macOS for `HOME` and are covered by the PR's
   `ubuntu-latest` cells.
+
+## Phase 5
+
+Phase 5 converts every canonicalization the Phase 1 audit marked "passed
+onward" to `canonicalize_simplified`, removes the guard's last
+`Kind::Temporary` entries, and removes the `Temporary` kind from the engine.
+All six `path_lookup_guard` tests are green with only `Invariant` (private
+comparison) and `Reviewed` entries.
+
+**Behavior scope.** On macOS and Linux `canonicalize_simplified` *is*
+`std::fs::canonicalize` (`dunce::canonicalize` only differs on Windows), so
+nothing in this phase changes behavior on POSIX hosts. On native Windows,
+each converted site stops emitting a `\\?\` verbatim spelling wherever the
+legacy spelling names the same file.
+
+### Conversions (production)
+
+| Package | Site (enclosing item) | Was | Where the result goes |
+| --- | --- | --- | --- |
+| biscuit-file | `resolve.rs` `validate_containment` ×2 | `dunce::canonicalize` | containment; root/candidate path in the escape error |
+| biscuit-file | `glob/roots.rs` `spelled_as_stored` | `std::fs::canonicalize` | final component compared (prefix irrelevant; converted to drop an exception) |
+| claudine | `composition/error/render/mod.rs` `render_file_link` | `.canonicalize()` | file URL |
+| claudine | `composition/schema/status_render.rs` `schema_status_report_prose` | `.canonicalize()` | file URL |
+| claudine | `render/prompt/system.rs` `render_system_prompt_summary` | `.canonicalize()` | label and file URL |
+| claudine | `mcp/state.rs` `canonical_repo_path` | `fs::canonicalize` | repository key persisted in MCP state |
+| claudine | `protect/path.rs` `canonicalize_existing_ancestor` ×2 | `.canonicalize()` | allow-path match, block message (`matched_text`, `target_path`) |
+| claudine | `provider_overlay/write_back.rs` `WriteBack::record` | `fs::canonicalize` | stored `Entry.source` |
+| claudine | `invocation_context.rs` `canonical_key` | `std::fs::canonicalize` | **changed from the Phase 1 plan (except → convert)**, see below |
+| claudine-cli | `compose/interrupt.rs` `format_user_interrupt_message` | `.canonicalize()` | file URL |
+| claudine-cli | `completion/autocomplete_ui.rs` `path_label`, `file_href` | `.canonicalize()` | display label, URL |
+| darkmatter | `link_resolve.rs` `resolve_absolute` | `std::fs::canonicalize` | returned link target |
+| darkmatter | `file_links/discovery.rs` local `canonicalize` | `std::fs::canonicalize` | `display_path`, `component_root` |
+| darkmatter | `context/report.rs` `from_schema_advisory` | `std::fs::canonicalize` | compose-warning path |
+| darkmatter | `markdown/mod.rs` ×4 (`source_context_for_errors`, `full_…`, `loaded_…`, `try_from`) | `.canonicalize()` | `SourceContext` path in diagnostics |
+| darkmatter | `transclusion/resolver.rs` `resolve_file_reference` | `std::fs::canonicalize` | `LocalTarget.canonical` |
+| darkmatter | `cache/hashing.rs` `compose_cache_key`, `pipeline/mod.rs`, `preflight/collect.rs`, `preflight/mod.rs` `canonical_key` | `std::fs::canonicalize` | compose cache / preflight keys (all producers converted together) |
+| darkmatter | `schemas/resolve.rs` `canonical_path`, `schemas/triggers/assemble.rs` local `canonicalize` | `.canonicalize()` | `referenced_files` and the trigger-cycle comparison (PR #66 seam) |
+| darkmatter | `expression/path_projection.rs` `strip_prefix_any_spelling` ×2 | `std::fs::canonicalize` | relative suffix; removes the mixed-spelling comparison |
+
+Error handling and call counts are unchanged at every site (each call is a
+one-for-one replacement; `.ok()`, `?`, `unwrap_or_else` fallbacks kept).
+No site gained an existence requirement.
+
+**Deviation: `invocation_context::canonical_key` converted, not excepted.**
+Phase 1 listed it as a private key ("keys only compared with keys"), pending
+confirmation that every producer is `canonical_key`. Every producer is, but
+`canonical_key` falls back to the *authored* path when canonicalization
+fails, so with the raw call one function produced two spelling families on
+Windows (verbatim on success, legacy on fallback) that were then compared.
+That fails the spec's rule for keys ("private only when every producer
+follows the same spelling contract"), so it converts; its doc comment was
+rewritten to state that reason (the old one described the verbatim prefix
+as something to keep out of projections, which is now moot).
+
+**MCP state persisted keys (Phase 1 open item).** No read-side fallback was
+needed: `resolve_repo_key` already re-canonicalizes every stored key when the
+exact and canonical lookups miss, so a key a Windows host wrote earlier as
+`\\?\C:\…` resolves for `C:\…` and is reused rather than duplicated. A test
+pins this (below).
+
+### Guard and engine
+
+- `Kind::Temporary` entries deleted: biscuit-file 2 (3 calls), claudine 6
+  (7 calls) plus `canonical_key`, claudine-cli 3, darkmatter 15 (16 calls).
+  The per-file `onward` helpers and their now-unused reason constants went
+  with them.
+- `Kind::Temporary` removed from `darkmatter/cli/tests/common/path_lookup_guard.rs`
+  (and from the kind-mismatch diagnostic). It existed only to stage this
+  migration; without it a new direct call can only be accepted as a stated
+  private-comparison invariant.
+- **Consolidation review.** Remaining entries: biscuit-file 1 (the helper),
+  claudine 4 items / 7 calls, claudine-cli 8 items / 10 calls, darkmatter 4
+  items / 6 calls. No duplicates; every reason names a concrete invariant
+  (same-file verdict, dedupe/cycle membership, relative suffix rejoined to
+  the authored root, walk root not hashed, single-producer cache key,
+  containment verdict). `linking/hashing.rs`'s walk root is canonical only
+  when the skill dir is a symlink, which does not matter because only
+  relative paths enter the hash.
+- **Mutation check.** Restoring `fs::canonicalize` in
+  `McpProviderStateStore::canonical_repo_path` failed
+  `claudine::l1 path_lookup_guard::…` with `new canonicalize call
+  \`fs::canonicalize\` in McpProviderStateStore::canonical_repo_path at
+  claudine/lib/src/mcp/state.rs:218` and a paste-ready `Kind::Invariant`
+  entry; the file was restored from a copy and re-checked.
+
+### Collateral test expectations
+
+Tests whose expectation came from raw `fs::canonicalize` while the value
+under test now comes from the helper were switched to the helper (on Windows
+they would otherwise encode the verbatim spelling as correct). Comparisons
+that canonicalize both sides, `to_portable_string` expectations already
+outside a converted seam, and fixture *inputs* were left alone.
+
+- claudine: `render/prompt/system/tests.rs` (the `base` passed to the summary
+  is stripped against the now-simplified absolute path, so a verbatim base
+  would change the label on Windows; also the expected `href`s),
+  `provider_overlay/tests.rs` (fault targets match `Entry.source`),
+  `protect/path.rs` `canonicalize_existing_ancestor_resolves_symlink_parent`.
+- darkmatter: `transclusion/resolver.rs` and `link_resolve.rs` inline tests,
+  `compose/tests/frontmatter.rs`, `tests/l1/suggest_constraint_phase4.rs`
+  (`referenced_files`, `imports`, `examples`),
+  `tests/l1/unknown_identifier_warning.rs`,
+  `darkmatter-cli tests/l1/compose_transclusion.rs` (a negative "no absolute
+  path" assertion that would be vacuous on Windows with a verbatim needle),
+  `tests/level2/level2_render_tree_terminal/file_links.rs` (`component_root`).
+
+### Requirement-to-test mapping
+
+| Requirement | Test |
+| --- | --- |
+| No unlisted direct canonicalize in the five packages; no temporary entries | six `path_lookup_guard::production_source_…` tests (biscuit-file, biscuit-file-cli, claudine, claudine-cli, darkmatter, darkmatter-cli) |
+| Guard red on a reintroduced call, with `file:line` | mutation check above; engine self-tests in `darkmatter-cli::l1 path_lookup_guard::*` (Phase 3) |
+| Protection reports and matches in the shared spelling; an authored absolute allow path still suppresses | **new** `claudine protect::service::tests::an_existing_sensitive_file_is_reported_and_allowed_in_the_shared_canonical_spelling` (all hosts; macOS exercises `/var` → `/private/var`; on Windows it is the verbatim-leak regression) |
+| MCP state: new keys in helper spelling; an earlier raw-spelled key resolves, is reused (one key), and survives save/load/save | **new** `claudine mcp::state::tests::a_repo_key_persisted_in_the_raw_canonical_spelling_still_resolves` (all hosts; on POSIX the two spellings coincide, so the compat half is only load-bearing on Windows) |
+| Converted outputs equal the helper's spelling at public seams | the collateral tests above (each now fails on Windows if its site reverts to the raw call) |
+| PR #66 scenarios stay covered | `darkmatter-cli::l1 schema_triggers::*` (pass), claudine `sequence*` and `propagated_context`, biscuit-file `precedence_flip` (pass in the full runs) |
+
+No new test file or target: both new tests are inline `#[cfg(test)]` tests in
+the claudine lib unit binary, no tier marker, selected by `just test`.
+
+### Results (macOS)
+
+| Area | `just test` | `just lint` |
+| --- | --- | --- |
+| biscuit-file | pass, 1087 run, 1087 passed | pass |
+| claudine | 8110 run: 8104 passed, 6 timed out at 30 s, 9 skipped; the 6 (`direct_composition_runs_shell_in_configured_working_directory`, `refresh_blocking_does_not_panic`, two `runaway::detector` tests, `non_repository_session_runs_shell_in_launch_cwd`, `claudine_entry_points_agree_on_every_reference`) all pass when rerun (host load average was 163 from other sessions); the 2 new tests were added after this run and pass in targeted runs (protect 129/129, mcp::state 8/8) | pass |
+| darkmatter | 8903 run: 8899 passed, 2 failed, 2 timed out; the 2 failures are the **pre-existing** Phase 1 baseline (`current_root_documentation_contract`, `current_root_migration_guard`); `darkmatter_entry_points_agree_on_every_reference` passes on rerun; `md_entry_points_agree_on_every_reference` times out under nextest and passes under `cargo test` in 29.5 s (Phase 4: 29.1 s; this phase cannot change its macOS runtime) | pass |
+
+- Targeted reruns after the collateral edits: darkmatter/darkmatter-cli 143
+  tests (resolver, link_resolve, frontmatter, suggest_constraint_phase4,
+  unknown_identifier_warning, compose_transclusion, guards, schema_triggers)
+  pass; claudine 259 (system prompt, provider_overlay, protect,
+  invocation_context, mcp::state) pass.
+- Windows target: `cargo check --tests --target x86_64-pc-windows-gnu` for all
+  six packages: 0 errors. Windows clippy on the changed files reports only
+  pre-existing lints (`result_large_err` at unchanged signatures) after the
+  two new-test hits (`cloned_ref_to_slice_refs`) were fixed.
+
+### Out-of-scope findings ("Separate work")
+
+No new canonicalize hits outside the five packages beyond the Phase 1 list.
+The `darkmatter/dmls` and `zed-dmls-cli` hits listed there remain
+unconverted and unguarded (they are not among the five packages).
+
+### Docs, skills, comment drift
+
+- **Drift fixed:** `biscuit-file/docs/dependencies.md` said `dunce` is used
+  at "two boundaries" and omitted `canonicalize_simplified`; it now lists the
+  helper as the crate's only `dunce::canonicalize` call.
+- **Comment drift fixed (code is right, comment was stale):**
+  `claudine invocation_context::canonical_key` (described the verbatim prefix
+  as a projection hazard; now states why the key must share the fallback's
+  spelling family); `darkmatter path_projection::strip_prefix_any_spelling`
+  (listed "Windows verbatim prefixes" as a spelling a canonical candidate
+  carries, which the helper no longer produces; now "a symlinked ancestor").
+- The `biscuit-file` skill's canonicalization bullet still describes the guard
+  correctly (it never mentioned temporary entries); no skill change. Topic
+  pages and the Mermaid decision diagram are Phase 6.
+
+### Evidence gaps
+
+- **Native Windows (the only platform where this phase changes behavior).**
+  `just cross-check claudine --os windows mcp::state protect::
+  render::prompt::system provider_overlay path_lookup_guard` built and
+  archived on build-win-native (MSVC compile of every claudine test target,
+  including both new tests, succeeded), then stopped at the consume step's
+  storage preflight: 47.5 GiB free, 50 GiB floor, sweep freed 0. The floor
+  was not overridden. The converted seams, the switched collateral
+  expectations, and the two new tests have therefore compiled for Windows but
+  **not run** there. They need build-win-native headroom or the
+  `windows-latest` cell (push to `main`, or the `ci:all-os` label).
+  (A first attempt with a parenthesized `-E` filterset failed in the remote
+  shell before building; plain name filters work.)
+- Linux and WSL2 were not cross-checked: the helper equals
+  `std::fs::canonicalize` there, so this phase is a no-op on both, and the
+  PR's `ubuntu-latest` cells run the guards.
+
+Status: Phase 5 implementation complete, ready for review.
+
+### Incident: edits redirected into the main checkout (resolved)
+
+The host `CDPATH` (already documented in `.claude/skills/os/macos.md`) sent two
+relative `cd darkmatter/lib/src` / `cd claudine/lib/src` edit commands into
+`/Users/ken/coding/personal/rusty-biscuit`. Two files there received this
+phase's edits (`claudine/lib/src/invocation_context.rs`,
+`darkmatter/lib/src/markdown/compose/link_resolve.rs`). Both diffs were
+confirmed to contain only those edits and were reverted with
+`git checkout --`; the main checkout's `git status` is clean. The edits were
+then re-applied in the worktree with absolute paths. The skill gained one
+sentence noting that the trap redirects edits as well as test runs.

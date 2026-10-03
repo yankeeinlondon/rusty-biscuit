@@ -114,6 +114,48 @@ skills_files_updated_during_phase_4:
   - .claude/skills/biscuit-file/references/file-references.md
   - .claude/skills/os/windows.md
   - .claude/skills/os/macos.md
+source_files_during_phase_5:
+  - biscuit-file/lib/src/file_reference/glob/roots.rs
+  - biscuit-file/lib/src/file_reference/resolve.rs
+  - biscuit-file/lib/tests/l1/path_lookup_guard.rs
+  - claudine/cli/src/commands/compose/interrupt.rs
+  - claudine/cli/src/completion/autocomplete_ui.rs
+  - claudine/cli/tests/l1/path_lookup_guard.rs
+  - claudine/lib/src/composition/error/render/mod.rs
+  - claudine/lib/src/composition/schema/status_render.rs
+  - claudine/lib/src/invocation_context.rs
+  - claudine/lib/src/mcp/state.rs
+  - claudine/lib/src/protect/path.rs
+  - claudine/lib/src/protect/service/tests.rs
+  - claudine/lib/src/provider_overlay/tests.rs
+  - claudine/lib/src/provider_overlay/write_back.rs
+  - claudine/lib/src/render/prompt/system.rs
+  - claudine/lib/src/render/prompt/system/tests.rs
+  - claudine/lib/tests/l1/path_lookup_guard.rs
+  - darkmatter/cli/tests/common/path_lookup_guard.rs
+  - darkmatter/cli/tests/l1/compose_transclusion.rs
+  - darkmatter/lib/src/markdown/compose/cache/hashing.rs
+  - darkmatter/lib/src/markdown/compose/context/report.rs
+  - darkmatter/lib/src/markdown/compose/expression/path_projection.rs
+  - darkmatter/lib/src/markdown/compose/file_links/discovery.rs
+  - darkmatter/lib/src/markdown/compose/link_resolve.rs
+  - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+  - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+  - darkmatter/lib/src/markdown/compose/preflight/mod.rs
+  - darkmatter/lib/src/markdown/compose/tests/frontmatter.rs
+  - darkmatter/lib/src/markdown/compose/transclusion/resolver.rs
+  - darkmatter/lib/src/markdown/mod.rs
+  - darkmatter/lib/src/markdown/schemas/resolve.rs
+  - darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
+  - darkmatter/lib/tests/l1/path_lookup_guard.rs
+  - darkmatter/lib/tests/l1/suggest_constraint_phase4.rs
+  - darkmatter/lib/tests/l1/unknown_identifier_warning.rs
+  - darkmatter/lib/tests/level2/level2_render_tree_terminal/file_links.rs
+docs_updated_during_phase_5:
+  - biscuit-file/docs/dependencies.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/os/macos.md
 packages:
   - biscuit-file
   - biscuit-file-cli
@@ -161,7 +203,7 @@ Current-state facts the plan relies on (verified 2026-10-03):
 - [ ] Every row of the spec's lexical table has a test that runs on all hosts
       through production code, plus an ordering/provenance test that fails
       when one comparison rule is deliberately broken.
-- [ ] No unlisted `canonicalize` or `dunce::canonicalize` call, and no
+- [x] No unlisted `canonicalize` or `dunce::canonicalize` call, and no
       direct `dirs::home_dir` / `std::env::home_dir` in Claudine outside the
       approved capture boundary, survives in the five packages; the guard
       enforces this and its fixtures prove it fails on violations and stale
@@ -454,31 +496,31 @@ Phase 4 except for files both touch; sequence per file when they overlap.
 
 ### Tasks
 
-- [ ] **Convert escaping results (Wave 1, per package).** For each audit row
+- [x] **Convert escaping results (Wave 1, per package).** For each audit row
       classified "passed onward" (the PR #66 seams: `preflight::canonical`,
       `LaunchContext` roots, trigger-discovery boundaries), replace the call
       with `biscuit_file::canonicalize_simplified`. Preserve error handling
       and call frequency; do not add existence requirements; no silent
       conversion of errors to empty results; no panicking fallbacks.
-- [ ] **Keep private comparisons (Wave 1).** For rows where both operands get
+- [x] **Keep private comparisons (Wave 1).** For rows where both operands get
       identical canonicalization and the result stays local, add the exception
       entry with its invariant reason. A hash or cache key is private only
       when every producer shares the spelling; otherwise convert.
-- [ ] **Collateral expectations (Wave 1).** Tests that build expectations with
+- [x] **Collateral expectations (Wave 1).** Tests that build expectations with
       raw `fs::canonicalize` (the "5 collateral tests" class) switch to the
       helper so they stop encoding the verbatim spelling. These are test
       edits, not guard exceptions.
-- [ ] **Dependency check (Wave 1).** Darkmatter and Claudine must reach
+- [x] **Dependency check (Wave 1).** Darkmatter and Claudine must reach
       `canonicalize_simplified` through their existing `biscuit-file`
       dependency without a new crate; if a package reaches it only without the
       right feature, log it. The helper is available without
       `file-reference`.
-- [ ] **Consolidate exceptions (Wave 2).** Review the exception list for
+- [x] **Consolidate exceptions (Wave 2).** Review the exception list for
       duplicates and weak reasons; each remaining entry names a concrete
       invariant ("inside biscuit-file" is not a reason).
-- [ ] **Guard green (Wave 2).** Run the guard with no seeded temporary
+- [x] **Guard green (Wave 2).** Run the guard with no seeded temporary
       exceptions; fix any residual hits.
-- [ ] **Out-of-scope findings.** Record canonicalize hits found in other
+- [x] **Out-of-scope findings.** Record canonicalize hits found in other
       packages in the implementation log under "Separate work", unchanged.
 
 Validation checkpoint: `just test` and `just lint` in all three areas; the
@@ -497,7 +539,7 @@ Depends on Phases 2-5.
 
 ### Tasks
 
-- [ ] **Docs (Wave 1).** Update `biscuit-file/docs/topics/file-references.md`
+- [x] **Docs (Wave 1).** Update `biscuit-file/docs/topics/file-references.md`
       (home lookup policy, `USERPROFILE` on native Windows, `HOME` alone
       insufficient, canonicalization rule), affected Claudine topic pages
       under `claudine/docs/topics/`, and Darkmatter docs that mention the two
@@ -505,14 +547,14 @@ Depends on Phases 2-5.
       fix directory. Include a compact example per rule and a Mermaid
       diagram of the home-resolution and canonicalization decision flow; the
       audience is a developer new to the repo.
-- [ ] **Skills (Wave 1).** Update `.claude/skills/biscuit-file/`,
+- [x] **Skills (Wave 1).** Update `.claude/skills/biscuit-file/`,
       `.claude/skills/claudine/`, `.claude/skills/darkmatter/`, and
       `.claude/skills/os/` (Windows `HOME` vs `USERPROFILE` and the
       verbatim-prefix trap) where they describe lookup behavior.
-- [ ] **READMEs (Wave 1).** Update `biscuit-file/README.md`, and the Claudine
+- [x] **READMEs (Wave 1).** Update `biscuit-file/README.md`, and the Claudine
       and Darkmatter READMEs if they describe home lookup. Update
       `docs/dependencies.md` only if a dependency changed (none expected).
-- [ ] **Comment drift pass (Wave 1).** For every changed symbol, fix or
+- [x] **Comment drift pass (Wave 1).** For every changed symbol, fix or
       delete `///`/`//!` and inline comments that no longer match; the
       Darkmatter `from_process` comment is the known one. Report any drift
       found and how it was resolved.
