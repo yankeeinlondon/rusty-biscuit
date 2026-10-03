@@ -189,6 +189,13 @@ outcomes retain a `FileReferenceError`.
 `FileReferenceError::resolution_failure()` returns that same class for any
 error (never `NoMatch`); do not re-derive it.
 
+A consumer that reports a single-file miss appends
+`ResolutionFailure::glob_hint(reference)` (or `DetailedResolution::glob_hint()`):
+the literal-glob hint, `Some` only for `NoMatch` on text containing `*`, `?`,
+or `[`. Never test for wildcards in a consumer; Darkmatter's
+`errors::with_glob_hint(message, failure, reference)` appends it as a `hint:`
+line.
+
 `candidate_plan()` returns the complete ordered, unprobed plan. By contrast,
 `DetailedResolution::candidates()` contains only attempts made before the first
 match or terminal I/O error. Each `ResolutionCandidate` exposes its path and
@@ -236,6 +243,46 @@ repository-scoped candidates receive lexical and canonical containment checks,
 including the deepest existing ancestor for a missing lazy target. This is a
 TOCTOU-aware resolver boundary, not a filesystem sandbox. Quote `&` in shell
 arguments, such as `spec='&docs/plan.md'`.
+
+### Glob references (`GlobReference`)
+
+`GlobReference::new(patterns)` takes `[!][prefix]glob` patterns; the prefix
+selects the same roots as a `FileReference` with that prefix. `new` rejects
+`%` and URL prefixes (`RejectedPrefix`), grammar errors (`MalformedPrefix`),
+bad glob syntax (`InvalidGlob`), and all-exclusion lists
+(`NoPositivePattern`); root failures surface at `list_files` / `take_first`.
+
+- **Native order:** merged roots in precedence order, then fewest components
+  below the root, then component-wise. A file is owned and judged by the first
+  root containing it, so a later root never re-includes an excluded file.
+- `list_files` → `GlobListing { matches, skipped }`; `take_first` → shallowest
+  match under the first root with any, later roots unwalked (this is `%`).
+- **Unreadable directories fail, never shorten.** A directory the walk must
+  enter but cannot read is `GlobReferenceError::Io { path }` (`%` maps it to
+  `FileReferenceError::Io`); a missing search directory is still `Ok` empty.
+  Exempt: a directory deeper than a `**`-free pattern can reach, a vanished
+  entry or dangling link, and (for `take_first`) one whose files would all be
+  deeper than the found match. Never reintroduce `filter_map(Result::ok)` on
+  a walk.
+- `matches` (lexical, never fails), `lists_file` (also drops out-of-tree file
+  symlinks), `roots`, `matches_without_context` (bare/absolute patterns only),
+  `with_file_name_view`, `escape`, `patterns`.
+- Bare/`./`/`../` patterns keep the relative boundary: a search directory
+  outside the tree is `RelativeTreeEscape` unless `allow_external_relative()`;
+  an out-of-tree file symlink is a `SkippedEntry { link, target }`, not a
+  match. Directory symlinks are never followed.
+- Brackets: `FileReference "pages/[id].md"` is literal; glob `[id]` is a
+  character class; `%pages/[id].md` finds the literal file.
+- `*`/`?` do not cross `/`, matching is case-sensitive everywhere (an absolute
+  pattern's authored directory names too: `prepare` drops the root unless each
+  name the filesystem resolves is an exact entry of its parent; never compare
+  by lowercasing, since `ς`/`Σ` and `ß`/`SS` alias on case-insensitive APFS; tests probe the fixture volume, never the OS. An unlistable
+  parent falls back to the canonical name on macOS/Windows, or a proof that the
+  other-case spelling is a different entry; unconfirmed spellings are rejected.
+  Windows 8.3 short names are accepted; `{{VAR}}` and `%` directories are
+  exempt), `\` never
+  escapes (literal on Unix, a separator on Windows), `{{VAR}}` values are
+  literal; no hidden/ignore/underscore filter.
 
 ### Completion/execution parity
 

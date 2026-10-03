@@ -1117,7 +1117,8 @@ fn build_search_roots(
     Ok(candidates)
 }
 
-/// Collect recursive search roots for a local reference's effective anchoring.
+/// Collect the search roots of a local reference's effective anchoring, for
+/// recursive (`%`) resolution and [`reference_roots`].
 fn collect_anchoring_roots(
     anchoring: EffectiveAnchoring,
     interpolated: &str,

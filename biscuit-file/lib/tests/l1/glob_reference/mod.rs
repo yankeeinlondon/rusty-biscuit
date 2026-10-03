@@ -1,6 +1,7 @@
 //! `GlobReference`: the pattern grammar, native order and ownership, the
 //! relative boundary and file symlinks, literal versus class brackets, `%`
-//! rebuilt on `take_first`, and the absence of filters. Every assertion goes
+//! rebuilt on `take_first`, the absence of filters, and unreadable directories
+//! failing a search rather than shortening it. Every assertion goes
 //! through the public API (`list_files`, `take_first`, `matches`, `roots`,
 //! `FileReference`).
 //!
@@ -11,10 +12,13 @@
 //! directory, environment, or current directory.
 
 mod boundary;
+mod directory_case;
 mod grammar;
 mod literal;
 mod order;
 mod unfiltered;
+#[cfg(unix)]
+mod unreadable;
 
 use std::collections::HashMap;
 use std::fs;

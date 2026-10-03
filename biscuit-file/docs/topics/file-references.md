@@ -5,6 +5,12 @@ blast_radius:
 - biscuit-file/lib/src/file_reference/resolve.rs
 - biscuit-file/lib/src/file_reference/context.rs
 - biscuit-file/lib/src/file_reference/error.rs
+- biscuit-file/lib/src/file_reference/glob/mod.rs
+- biscuit-file/lib/src/file_reference/glob/parse.rs
+- biscuit-file/lib/src/file_reference/glob/roots.rs
+- biscuit-file/lib/src/file_reference/glob/list.rs
+- biscuit-file/lib/src/file_reference/glob/matches.rs
+- biscuit-file/lib/src/file_reference/glob/error.rs
 - biscuit-file/lib/src/lib.rs
 - biscuit-file/lib/Cargo.toml
 ---
@@ -362,7 +368,7 @@ whatever the process has. `resolve_target()` is the ambient twin.
 
 A leading `%` turns a reference into a search: it finds the **most local**
 file whose path ends with the payload, below the roots the reference kind
-would otherwise join against. It is the first result of the
+would otherwise join against. It is `take_first` of the
 [glob reference](#glob-references-globreference) `**/<payload>` under the
 same prefix, with the payload kept literal:
 
@@ -1080,22 +1086,58 @@ let roots = specs.roots(&ctx);              // for callers that walk themselves
 |------|---------|------------|
 | `list_files(&ctx)` | `GlobListing { matches, skipped }` | the whole set, in native order |
 | `take_first(&ctx)` | `Option<PathBuf>` | the single most local match (`%` uses this) |
-| `matches(&path, &ctx)` | `bool` | membership of one path, which need not exist |
+| `matches(&path, &ctx)` | `bool` | membership of one path, which need not exist; a relative path is read from the context's `cwd`. Never fails: a pattern whose roots the context cannot supply admits and rejects nothing, and an invalid context admits nothing |
 | `roots(&ctx)` | `Vec<PathBuf>` | the positive patterns' roots, in precedence order |
 | `lists_file(&path, &ctx)` | `bool` | whether `list_files` would list an existing file its walk reached: `matches`, except that a file symlink whose target leaves the tree (a skipped entry) is not listed. For a caller that walks `roots` itself with its own filters, as Claudine's completion does, and must offer exactly what a listing would |
 | `matches_without_context(&path)` | `bool` | membership of an absolute path for a caller with no request: bare patterns read from the filesystem root (`**/fixes/**/spec.md` judges the full path), absolute patterns as written; patterns that need a context admit and reject nothing |
 | `with_file_name_view()` | `GlobReference` | also match a bare file name at any depth when the glob after the prefix has no `/` (`*.md`, `!_*.md`) |
 | `escape(text)` | `String` | make text literal: `[id].md` → `[[]id[]].md` |
+| `patterns()` | iterator of `&str` | the patterns as authored, `!` included |
+
+`new` checks everything it can without a context: the prefix grammar, the
+glob syntax, and that at least one pattern is positive. Root failures (no
+repository, no home, a tree escape) surface when a context is supplied.
+
+### `FileReference` or `GlobReference`?
+
+| You want… | Use |
+|-----------|-----|
+| one file the author named, with a clean `None` on a miss | `FileReference` |
+| the most local file with a given name anywhere below a prefix | `FileReference` with `%` (`%^README.md`) |
+| every file that fits a shape (`^**/*spec*.md`), possibly with exclusions | `GlobReference::list_files` |
+| the most local file that fits a shape | `GlobReference::take_first` |
+| to test a path the user typed against a configured set | `GlobReference::matches` |
+
+The two never reinterpret each other's text. Brackets show the difference:
+
+```text
+FileReference "pages/[id].md"   → the file literally named [id].md
+GlobReference "pages/[id].md"   → pages/i.md or pages/d.md ([id] is a character class)
+GlobReference "pages/[[]id[]].md" (GlobReference::escape("[id].md")) → the literal [id].md
+FileReference "%pages/[id].md"  → the shallowest pages/[id].md below the roots, literally
+```
 
 ### Native order: most local first
 
-Every result follows one order:
+Every result follows one order. The positive patterns' roots are merged into
+one precedence list (each pattern's roots in turn; a root already seen keeps
+its first place), and each root is walked once:
 
 ```mermaid
-flowchart LR
-    A["Roots of the prefix,<br/>most local first<br/>(^: package, area, repository)"] --> B["Under each root:<br/>fewest path components first"]
-    B --> C["Same depth:<br/>compare component by component<br/>(a/x.md before a-b/x.md)"]
+flowchart TD
+    A["Merged roots, most local first<br/>(^: package, area, repository)"] --> B{Another root?}
+    B -- no --> Z[Done]
+    B -- yes --> C["Walk it; skip files an earlier root already owns"]
+    C --> D["Sort this root's matches:<br/>fewest path components first,<br/>then component by component<br/>(a/x.md before a-b/x.md)"]
+    D --> E[Append to the listing]
+    E --> F{take_first and<br/>the listing has a match?}
+    F -- yes --> G["Return the first match;<br/>later roots are never walked"]
+    F -- no --> B
 ```
+
+`take_first` is therefore cheap in the common case: it returns the shallowest
+match under the first root that has any, and never walks the remaining roots.
+It is exactly what a [`%` reference](#recursive-search-) runs.
 
 A file belongs to the **first root that contains it** and is judged only by
 its path relative to that root. A later root never re-includes a file an
@@ -1115,7 +1157,34 @@ For example, with `^**/intro.md` launched in package `pkg` of area `area`:
 - `!` marks an exclusion and takes its own prefix (`!&**/_completed/**`). At
   least one pattern must be positive (`NoPositivePattern` otherwise).
 - `*` and `?` never cross `/`; `**` does. Matching is case-sensitive on every
-  OS. `\` is always a literal character, never an escape; write literal text
+  OS, and that includes the directory names an absolute pattern starts with:
+  with only `/repo/docs/a.md` on disk, `/repo/DOCS/*.md` matches nothing even
+  on a case-insensitive filesystem (the macOS and Windows default), where
+  `/repo/DOCS` opens the same directory. The same holds for any other spelling
+  the filesystem treats as the same name, such as `/repo/ς/*.md` for a stored
+  `Σ` or `/repo/ß/*.md` for a stored `SS` on case-insensitive APFS, and for a
+  Linux directory made case-insensitive with `chattr +F`.
+  Each name you write must be spelled exactly as an entry of its parent, so a
+  symlinked name such as macOS `/var` still works. A pattern whose spelling
+  does not match, or cannot be confirmed, lists nothing and matches nothing;
+  it is not an error. Names a `{{VAR}}` value supplies are a root the context
+  provides and are judged by the directory they reach, like `~` or `&`.
+  - When a parent can be traversed but not listed (mode `0111`), the stored
+    name is read from the canonical path on macOS and Windows, so
+    `/locked/anchor/docs/*.md` still works and `/locked/anchor/DOCS/*.md`
+    still matches nothing. On Linux, and for a symlinked name, the spelling
+    counts as confirmed only when the other-case spelling (`DOCS` for `docs`)
+    does not reach the same entry; inside a case-insensitive folder that
+    cannot be listed, even a correct spelling cannot be confirmed and the
+    pattern matches nothing.
+  - On Windows, an 8.3 short name such as `RUNNER~1` is the filesystem's own
+    alternate name for a folder and is never listed, so a name of that form is
+    accepted as written.
+  - A name that cannot be examined at all (its parent cannot be traversed) is
+    not checked: no judgment below it uses the filesystem's spelling rules,
+    and a listing reports the unreadable directory as an I/O error.
+- `\` is never an escape: it is a literal character on Unix and a path
+  separator on Windows, as in any Windows path; write literal text
   with `GlobReference::escape`. A `{{VAR}}` value is always literal.
 - A pattern with no glob syntax is valid and matches that one path.
 - `%` and `http(s)://` prefixes are rejected (`RejectedPrefix`): a glob is
@@ -1130,21 +1199,113 @@ Bare, `./`, and `../` patterns keep the same
 [relative boundary](#the-file-tree-base_dir-and-the-relative-boundary) as a
 single reference: a search directory outside the tree is a
 `RelativeTreeEscape` error unless the context opted in with
-`allow_external_relative()`. `~`, `@`, absolute, vault, and `{{VAR}}` roots
-are not bound by it; `&` and `^` stay inside the repository.
+`allow_external_relative()`. The check is made on the directory the walk
+starts in, so leading `..` hops count:
 
-A search never follows a directory symlink. In a bare, `./`, or `../`
-pattern, a matched **file** symlink whose target lies outside the tree is left
-out of `matches` and reported in `GlobListing::skipped` (link and target), so
-a caller can say why it is missing. A single `FileReference` to that link
-still fails with `RelativeTreeEscape`.
+```text
+tree: /work/repo          cwd: /work/repo/docs
+
+../**/*.md          → walks /work/repo                 allowed
+../../**/*.md       → walks /work                      RelativeTreeEscape
+~/notes/**/*.md     → not a relative pattern           never checked
+```
+
+`~`, `@`, absolute, and vault roots are not bound by it, nor is a `{{VAR}}`
+that expands to an absolute path (one that expands to a relative path is a
+relative pattern and is bound). `&` and `^` stay inside the repository.
+
+A search never follows a directory symlink. When the context enforces the
+boundary, a bare, `./`, or `../` pattern that matches a **file** symlink whose
+target lies outside the tree leaves it out of `matches` and reports it in
+`GlobListing::skipped` as a `SkippedEntry { link, target }`, so a caller can
+say why it is missing. With `allow_external_relative()` the link is listed
+like any other file. A single `FileReference` to that link still fails with
+`RelativeTreeEscape`.
+
+```text
+tree: /work/repo     docs/shared.md → /opt/team/shared.md
+
+GlobReference "./**/*.md" from /work/repo/docs
+  matches: [/work/repo/docs/a.md]
+  skipped: [SkippedEntry { link: /work/repo/docs/shared.md, target: /opt/team/shared.md }]
+```
+
+### Errors: `GlobReferenceError`
+
+Each variant that concerns one pattern names it as authored, `!` included.
+`resolution_failure()` maps a variant to the same `ResolutionFailure` class a
+`FileReference` failure of the same kind reports.
+
+| Variant | When | Raised by |
+|---------|------|-----------|
+| `RejectedPrefix { pattern, prefix, reason }` | a `%` or `http(s)://` prefix | `new` |
+| `MalformedPrefix { pattern, source }` | text the reference grammar rejects, an empty pattern, or a prefix with no glob after it (`&`, `docs/`) | `new` |
+| `InvalidGlob { pattern, message }` | invalid glob syntax after the prefix (`*.{md`) | `new` |
+| `NoPositivePattern` | an empty list, or only `!` exclusions | `new` |
+| `RelativeTreeEscape { pattern, base_dir, candidate }` | a bare, `./`, or `../` search directory outside the tree | `list_files`, `take_first` |
+| `OutsideRepository { pattern, sigil, reference_cwd }` | a `&` or `^` pattern with no repository containing `cwd` | `list_files`, `take_first` |
+| `Unresolvable { pattern, source }` | a missing home, vault, or environment variable, a repository escape, or an injected sigil | `list_files`, `take_first` |
+| `InvalidContext(source)` | the context fails `validate()` | `list_files`, `take_first` |
+| `Io { path, source }` | a directory the search must enter (a root, a search directory, or any directory below it that could hold a match), or the target of a matched file symlink, exists but cannot be read; `path` names it | `list_files`, `take_first` |
+
+An unreadable directory fails the search; it is never left out of a listing
+that would then look complete. With `docs/` readable and `docs/locked/`
+unreadable (`chmod 000`):
+
+```rust
+GlobReference::new(["docs/**/*.md"])?.list_files(&ctx);     // Err(Io { path: ".../docs/locked", .. })
+GlobReference::new(["docs/locked/*.md"])?.take_first(&ctx); // Err(Io { .. }), not Ok(None)
+FileReference::new("%secret.md")?.resolve_in_context(&ctx); // Err(FileReferenceError::Io { .. })
+GlobReference::new(["docs/*.md"])?.list_files(&ctx);        // Ok: no match can lie inside docs/locked
+```
+
+Three cases are not errors:
+
+- A root or literal search directory that does not exist holds no matches
+  (`missing/*.md` lists nothing).
+- A directory deeper than the pattern can reach hides nothing: without `**`,
+  each `/` bounds how deep a match lies, so `docs/*.md` never needs
+  `docs/locked/`. A `**` pattern (or the file-name view) reaches every depth.
+- An entry that disappears during the walk, and a dangling file symlink, are
+  simply absent. A symlink whose target cannot be examined for another reason
+  (an unreadable directory, a cycle of links) is an `Io` error naming the link.
+
+`take_first` (and so `%`) fails only when the unreadable directory could hold
+a file that precedes its result: under the first root with a match, a
+directory whose files are all deeper than that match cannot change it.
+`matches`, `lists_file`, `matches_without_context`, and `roots` never fail.
 
 ### When a literal reference misses
 
-If a `FileReference` whose text contains `*`, `?`, or `[` finds nothing,
-`DetailedResolution::glob_hint()` returns a hint that the text was read
-literally and a glob-accepting form is needed. Consumers append it to their
-no-match message.
+A `FileReference` never reads glob syntax: `docs/*.md` names one file whose
+name is `*.md`. When such a reference finds nothing, the miss carries a hint
+that the text was read literally and that a set of files needs a form that
+accepts a glob reference, such as `::file-links`. Resolution itself stays
+literal; only the message changes.
+
+The hint belongs to the failure class, so a consumer that reports a miss asks
+for it instead of testing for wildcards itself:
+
+```rust
+use biscuit_file::ResolutionFailure;
+
+assert!(ResolutionFailure::NoMatch.glob_hint("docs/*.md").is_some());
+// A plain missing name, and any failure other than a miss, have none.
+assert!(ResolutionFailure::NoMatch.glob_hint("docs/missing.md").is_none());
+assert!(ResolutionFailure::InvalidReference.glob_hint("../*.md").is_none());
+```
+
+`DetailedResolution::glob_hint()` answers the same question for a resolution
+already in hand. Every consumer that turns a single-file miss into an error or
+warning appends this hint, so the explanation reads the same in `md`,
+`claudine`, and the language server:
+
+| Reference | Outcome | Hint |
+|-----------|---------|------|
+| `docs/*.md` (no such file) | `NoMatch` | yes |
+| `docs/missing.md` | `NoMatch` | no |
+| `../*.md` leaving the tree | `InvalidReference` | no |
+| `docs/a.md` (exists) | match | no |
 
 ## Portable References: `PortablePath`
 

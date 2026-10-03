@@ -12,13 +12,19 @@
   home directory for `home_dir` / `~` (home-pinned) references. It replaces a
   bare `$HOME` read, which is not a complete contract on native Windows.
 - `globset` is gated behind `file-reference` and compiles the glob half of a
-  `GlobReference` (a file-reference prefix followed by a glob); only
-  `file_reference/glob/parse.rs` names it. Darkmatter already depends on the
+  `GlobReference` (a file-reference prefix followed by a glob); only the
+  `file_reference/glob/` module names it, and only `glob/parse.rs` builds a
+  matcher (`roots.rs` holds the compiled `GlobMatcher`). Darkmatter already depends on the
   same `0.4` line, so the workspace gains no new crate. Patterns are built
   with explicit options, never the crate defaults: `literal_separator(true)`,
   case-sensitive, and `backslash_escape(false)` on every OS (the default is on
   for Unix and off for Windows), so a literal `[` or `*` is escaped with
   character classes (`globset::escape`), which read the same everywhere.
+- `walkdir` is gated behind `file-reference` and walks a `GlobReference`'s
+  search directories (`file_reference/glob/list.rs`), which is also how a
+  recursive `%` reference searches. It is used with `follow_links(false)`, so
+  a directory symlink is never descended; file symlinks are judged
+  separately against the relative boundary.
 - `dunce` is unconditional and reduces a Windows `\\?\` verbatim path to its
   legacy spelling — but only when the legacy spelling is equivalent — at the
   crate's two boundaries:

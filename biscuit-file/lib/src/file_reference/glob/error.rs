@@ -70,7 +70,9 @@ pub enum GlobReferenceError {
     #[error("the file resolution context is invalid: {0}")]
     InvalidContext(#[source] FileReferenceError),
 
-    /// A search root exists but could not be read.
+    /// A directory the search must enter (a root, a search directory, or a
+    /// directory below it), or the target of a file symlink it reached,
+    /// exists but could not be read. `path` names it.
     #[error("filesystem error while searching `{path}`: {source}")]
     Io {
         path: PathBuf,

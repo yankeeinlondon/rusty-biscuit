@@ -1,5 +1,5 @@
-//! The pattern grammar: `[!][reference-prefix]glob`, and the only use of the
-//! `globset` crate in biscuit-file.
+//! The pattern grammar: `[!][reference-prefix]glob`, and the only place in
+//! biscuit-file a `globset` matcher is built.
 
 use globset::{GlobBuilder, GlobMatcher};
 
@@ -151,10 +151,11 @@ impl SplitPattern {
 /// Compile glob text into a matcher for a `/`-spelled relative path.
 ///
 /// `*` and `?` never cross `/` (`**` does), matching is case-sensitive on
-/// every OS, and `\` is always a literal character: `globset` would otherwise
-/// read it as an escape on Unix only, so one pattern would mean different
-/// things per host. Literal text is escaped with character classes
-/// ([`escape`]) instead.
+/// every OS, and `\` is never an escape: `globset` would otherwise read it as
+/// one on Unix only, so one pattern would mean different things per host.
+/// Literal text is escaped with character classes ([`escape`]) instead. On
+/// Windows no `\` reaches here, because [`SplitPattern::new`] has already
+/// turned every separator into `/`.
 pub(crate) fn compile(glob: &str) -> Result<GlobMatcher, String> {
     GlobBuilder::new(glob)
         .literal_separator(true)

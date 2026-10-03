@@ -51,7 +51,8 @@ use roots::{PatternInput, authored_pieces, prepare};
 /// re-includes a file an earlier root excluded.
 ///
 /// Matching is case-sensitive on every OS, `*` and `?` do not cross `/`
-/// (`**` does), and `\` is a literal character; escape literal text with
+/// (`**` does), and `\` never escapes: it is a literal character on Unix and
+/// a separator on Windows. Escape literal text with
 /// [`GlobReference::escape`]. No hidden, ignored, or underscore filter
 /// applies.
 #[derive(Debug, Clone)]
@@ -134,7 +135,11 @@ impl GlobReference {
     /// ## Errors
     ///
     /// Any pattern's root failure (see [`GlobReferenceError`]), an invalid
-    /// context, or a search root that exists but cannot be read.
+    /// context, or [`GlobReferenceError::Io`] naming a directory the search
+    /// must enter (a search directory or any directory below it) that exists
+    /// but cannot be read. Such a failure is never an empty or partial
+    /// listing. A search directory that does not exist is not an error: it
+    /// holds no matches.
     pub fn list_files(
         &self,
         ctx: &FileResolutionContext,
@@ -148,7 +153,9 @@ impl GlobReference {
     ///
     /// ## Errors
     ///
-    /// As [`list_files`](Self::list_files).
+    /// As [`list_files`](Self::list_files), for every root it walks: an
+    /// unreadable directory under the first root with a match is an error,
+    /// not `Ok(None)` or a later match.
     pub fn take_first(
         &self,
         ctx: &FileResolutionContext,

@@ -192,3 +192,32 @@ fn a_literal_miss_that_looks_like_a_glob_hints_at_glob_references() {
     assert_eq!(hint("docs/a.md"), None, "a match");
     assert_eq!(hint("&../*.md"), None, "a failure other than a miss");
 }
+
+/// The class-level hint a consumer reads when it reports a single-file
+/// failure: the same text as the detailed accessor for a glob-looking miss,
+/// and nothing for a plain miss or for any class other than `NoMatch`.
+#[test]
+fn resolution_failure_glob_hint_is_the_detailed_hint_for_no_match_only() {
+    use biscuit_file::ResolutionFailure;
+
+    let fx = Fixture::new();
+    let control = fx.file("repo/docs/a.md");
+    let ctx = fx.ctx(&fx.repo);
+    let detailed = FileReference::new("docs/*.md").unwrap().resolve_detailed(&ctx);
+
+    assert_eq!(ResolutionFailure::NoMatch.glob_hint("docs/*.md"), detailed.glob_hint());
+    assert!(ResolutionFailure::NoMatch.glob_hint("docs/*.md").is_some());
+    assert_eq!(ResolutionFailure::NoMatch.glob_hint("docs/missing.md"), None);
+    for failure in [
+        ResolutionFailure::InvalidReference,
+        ResolutionFailure::MissingContext,
+        ResolutionFailure::Io,
+        ResolutionFailure::UnsupportedRemote,
+    ] {
+        assert_eq!(failure.glob_hint("docs/*.md"), None, "{failure:?}");
+    }
+    assert_eq!(
+        FileReference::new("docs/a.md").unwrap().resolve_in_context(&ctx).unwrap(),
+        Some(control)
+    );
+}
