@@ -471,6 +471,21 @@ seeds `ctx.*`. The production-scope rule (`#[cfg(test)]` blanking) lives in
 `semantic_results_never_persist.rs`; files below an inline
 `#[cfg(test)] mod tests { .. }` (its `tests/` directory) are test-only too.
 
+**Glob guard.** `lib/tests/l1/glob_implementation_guard.rs` keeps
+`GlobReference` the one glob implementation. It scans the production source
+of biscuit-file, darkmatter, darkmatter-cli, dmls, claudine, and claudine-cli
+for glob-library identifiers (`globset`, `GlobBuilder`, `GlobSet[Builder]`,
+`GlobMatcher`, `Glob::`, `ignore`'s `OverrideBuilder`/`GitignoreBuilder`/
+`TypesBuilder`, other glob crates) against an exact per-file allowlist (the
+`GlobReference` module's `parse.rs`/`roots.rs`, `toc_linking/filter.rs`, DMLS
+`workspace/discover.rs` and `overlay/schema.rs`), and pins each package's
+non-dev glob-crate dependencies (that is what catches the `glob` crate, whose
+name biscuit-file's `file_reference::glob` module shares). `ignore`'s
+`WalkBuilder` is a walker, not a matcher, and is allowed. Match file
+references with `GlobReference`; extend the allowlist only for globs that are
+not file references (heading text, editor configuration), and add another
+package's allowlisted file to `lib/Cargo.toml` `source-inputs`.
+
 **Entry-point parity matrix.** `lib/tests/common/entry_point_parity/mod.rs`
 holds the fixture (monorepo + fixture `HOME` + `outside.md`), the
 `EntryPoint` enum with exhaustive `owner()`/`rows()`, both tables, and
@@ -501,6 +516,17 @@ result (heading, title, hash, reported path, `Document:` line), Table 2 adds
 an absolute path, the four malformed introducers with matching literal files
 (`ParityFixture::write_route_files`), and `./@`, and the mutating routes
 (`rm`, `edit`) run serially on a restored fixture.
+Glob rows (`Row::GlobDocument`/`GlobValue`, `GlobForm` × `GlobConsumer`)
+cover `::file-links`, `find_files()`, and `match()` validation (Table 1) and
+`match()` completion and caller-value validation (Table 2) against written-out
+native orders (`PACKAGE_ORDER`, `REPOSITORY_ORDER`); a `::file-links` tree and
+per-value validation compare as sets (`Observed::FileSet`), and completion's
+expectation drops `_`-prefixed folders (one-way parity). A `match()` cell is
+a root union whose other arm is `enum(glob-rejected)`, never a missing
+required property, which DMLS does not report outside strict mode. The ENTER
+chooser walk (`file_candidate_paths`) needs a terminal, so its runner is the
+claudine binary's unit test `completion/schema_completion/parity_tests.rs`
+(`EntryPoint::ClaudineChooser`, `Owner::ClaudineCliChooser`).
 Each variant must invoke the feature it names: never stand one entry point in
 for another. A new entry
 point is an `EntryPoint` variant plus rows; a failing cell is an entry-point
