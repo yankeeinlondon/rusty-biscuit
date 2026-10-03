@@ -515,6 +515,8 @@ refresh it after changing the catalog.
 | Filesystem | `join(left, right)` | Joins two path strings with normalized separators. | `join("sub", "note.md")` ⇒ `sub/note.md` |
 | Filesystem | `link(file)` | Creates a Markdown link to a local file, using its relative path as the link text. |  |
 | Filesystem | `link(target, desc)` | Creates a Markdown link to a local file, using its relative path as the link text. |  |
+| Filesystem | `code_link(file)` | Creates a Markdown link whose text is inline code. Arguments, destinations, and errors match link(); the text is a code span, so brackets and backslashes are kept as written rather than escaped. |  |
+| Filesystem | `code_link(target, desc)` | Creates a Markdown link whose text is inline code. Arguments, destinations, and errors match link(); the text is a code span, so brackets and backslashes are kept as written rather than escaped. |  |
 | Filesystem | `has_command(cmd)` | Returns true when the command is found on PATH or is an existing executable absolute path. |  |
 | Context | `has_skill(name)` | Returns true when a skill directory exists in a user-scoped or local-scoped skill root. |  |
 | Context | `has_local_skill(name)` | Returns true when a skill directory exists in a local-scoped skill root. |  |
@@ -771,8 +773,30 @@ merge_status: '$( is_truthy(predict_conflicts("feature/api")) ? "conflicted" : "
   form rejects HTTP(S) URLs because a description is required.
 - `link(target, desc)` — emits `[desc](destination)`. `target` may be a local
   file reference or an HTTP(S) URL; `desc` must be a string. Link text escapes
-  `[` and `]`; destinations that would break CommonMark are wrapped in angle
-  brackets or percent-encoded.
+  `\`, `[`, and `]`; destinations that would break CommonMark (spaces,
+  parentheses, angle brackets, control characters) are wrapped in angle
+  brackets.
+- `code_link(file)` and `code_link(target, desc)` — the same link with the text
+  as inline code. Arguments, null handling, destinations, and errors are
+  `link()`'s; only the text differs.
+
+  ```md
+  The {{code_link(plan)}} _plan_ has been created
+  ```
+
+  With `plan` set to `plans/foo.md`, this composes to
+  `` The [`plans/foo.md`](/abs/plans/foo.md) _plan_ has been created `` and
+  renders as a clickable link with a code-styled label.
+  `{{code_link("https://example.com", "md hash")}}` gives
+  `` [`md hash`](https://example.com) ``.
+
+  Because the text is a code span, it is literal: `[`, `]`, and `\` are kept as
+  written, not escaped, so `code_link(url, "a]b")` gives `` [`a]b`](url) ``. The
+  fence grows past any backtick in the text (`` a`b `` gives
+  ```` [``a`b``](url) ````), line endings become spaces, and an empty text gives
+  the ordinary empty link `[](url)`. Use `code_link()` rather than wrapping
+  `{{link(x)}}` in backticks: a code span around a link shows the literal
+  `[text](url)`.
 
 #### Skill Helpers
 
