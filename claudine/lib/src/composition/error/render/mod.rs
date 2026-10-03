@@ -172,7 +172,7 @@ pub(super) fn with_failure_row(mut body: String, err: &CompositionError) -> Stri
 pub(super) fn render_file_link(path: &std::path::Path) -> String {
     let label = biscuit_file::to_portable_string(path);
     let escaped_label = escape_prose_path(&label);
-    let absolute = path.canonicalize().ok().or_else(|| {
+    let absolute = biscuit_file::canonicalize_simplified(path).ok().or_else(|| {
         if path.is_absolute() {
             Some(path.to_path_buf())
         } else {

@@ -21,6 +21,19 @@ without changing the exit code. Never add a bare spawn in `lib/src/messaging/`
 or a direct `process::exit` in `cli/src`: guard tests fail on both. See
 [Messaging](topics/messaging.md#delivery-tracking).
 
+Every home read in `lib/src` and `cli/src` is `biscuit_file::home_dir()`,
+written qualified (`HOME` on POSIX, `USERPROFILE` on native Windows, relative →
+`None`); never `dirs::home_dir` or `std::env::home_dir`. Request-scoped policy
+code takes a captured home (`PolicyContext::with_home_dir`,
+`SensitivePathChecker::home_dir()`) instead of re-reading. A canonical path that
+is returned, stored (MCP state keys, overlay `Entry.source`), rendered, or put in
+a URL comes from `biscuit_file::canonicalize_simplified`. `tests/l1/path_lookup_guard.rs`
+in lib and cli fails on any other direct home or canonicalize call, and a new
+home read also needs its `context_construction_guard.rs` allowance. Because
+`CliProcessFixture` sets `HOME` and `USERPROFILE`, user-tier and
+`~/.claudine` fixtures run on Windows too: do not gate them `cfg(unix)` for the
+home.
+
 Audio tests must remain silent: real playback uses explicit zero volume and
 recognizable test speech with a pinned provider/voice. A fake agent does not
 suppress lifecycle audio. Tests of literal shipped prompts should set child-only

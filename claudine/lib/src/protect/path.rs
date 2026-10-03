@@ -150,7 +150,7 @@ pub fn normalize_path(path: &str, home: Option<&Path>) -> PathBuf {
 /// unchanged if no ancestor can be resolved.
 pub fn canonicalize_existing_ancestor(path: &std::path::Path) -> PathBuf {
     // Try the full path first
-    if let Ok(canonical) = path.canonicalize() {
+    if let Ok(canonical) = biscuit_file::canonicalize_simplified(path) {
         return canonical;
     }
 
@@ -163,7 +163,7 @@ pub fn canonicalize_existing_ancestor(path: &std::path::Path) -> PathBuf {
             suffix_components.push(file_name.to_os_string());
         }
         if parent.exists()
-            && let Ok(canonical_parent) = parent.canonicalize()
+            && let Ok(canonical_parent) = biscuit_file::canonicalize_simplified(parent)
         {
             let mut result = canonical_parent;
             for component in suffix_components.into_iter().rev() {
@@ -499,7 +499,7 @@ mod tests {
 
         // Canonicalize the expected path too, since tmp.path() might itself
         // be under a symlink (e.g., /var -> /private/var on macOS)
-        let expected = real_dir.canonicalize().unwrap().join("nonexistent.txt");
+        let expected = biscuit_file::canonicalize_simplified(&real_dir).unwrap().join("nonexistent.txt");
         assert_eq!(result, expected);
     }
 

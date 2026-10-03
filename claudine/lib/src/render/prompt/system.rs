@@ -85,7 +85,7 @@ fn render_system_prompt_summary(
         SystemPromptSource::StandardDiscovered { path, .. }
         | SystemPromptSource::ExplicitFile { path, .. }
         | SystemPromptSource::NonInteractiveFile { path, .. } => {
-            let absolute: PathBuf = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+            let absolute: PathBuf = biscuit_file::canonicalize_simplified(path).unwrap_or_else(|_| path.to_path_buf());
             let label = resolve_display_label(&absolute, base_path, term);
             match Url::from_file_path(&absolute) {
                 Ok(href) => format!(

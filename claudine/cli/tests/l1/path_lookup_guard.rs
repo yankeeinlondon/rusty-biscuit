@@ -14,12 +14,6 @@ const fn private(path: &'static str, item: &'static str, operation: &'static str
     Exception { rule: Rule::Canonicalize, kind: Kind::Invariant, path, item, operation, count, reason }
 }
 
-/// A direct call whose result leaves the function; it converts to the shared
-/// helper.
-const fn onward(path: &'static str, item: &'static str, reason: &'static str) -> Exception {
-    Exception { rule: Rule::Canonicalize, kind: Kind::Temporary, path, item, operation: ".canonicalize()", count: 1, reason }
-}
-
 const DEDUPE: &str = "dedupe set: every entry is canonicalized the same way and only membership is read";
 const SAME_FILE: &str = "both operands are canonicalized identically and only the \"same file\" verdict leaves";
 
@@ -50,9 +44,6 @@ const EXCEPTIONS: &[Exception] = &[
         2,
         "the file and its root are canonicalized alike; only the relative suffix leaves, rejoined to the authored root",
     ),
-    onward("claudine/cli/src/commands/compose/interrupt.rs", "format_user_interrupt_message", "a file URL in the interrupt notice"),
-    onward("claudine/cli/src/completion/autocomplete_ui.rs", "path_label", "a completion display label"),
-    onward("claudine/cli/src/completion/autocomplete_ui.rs", "file_href", "a completion file URL"),
 ];
 
 #[test]

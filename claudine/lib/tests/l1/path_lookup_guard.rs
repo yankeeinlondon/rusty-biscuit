@@ -14,14 +14,7 @@ const fn private(path: &'static str, item: &'static str, operation: &'static str
     Exception { rule: Rule::Canonicalize, kind: Kind::Invariant, path, item, operation, count, reason }
 }
 
-/// A direct call whose result leaves the function; it converts to the shared
-/// helper.
-const fn onward(path: &'static str, item: &'static str, operation: &'static str, reason: &'static str) -> Exception {
-    Exception { rule: Rule::Canonicalize, kind: Kind::Temporary, path, item, operation, count: 1, reason }
-}
-
 const SAME_FILE: &str = "both operands are canonicalized identically and only the \"same file\" verdict leaves";
-const FILE_URL: &str = "a file URL in rendered output";
 
 const EXCEPTIONS: &[Exception] = &[
     private(
@@ -40,47 +33,11 @@ const EXCEPTIONS: &[Exception] = &[
     ),
     private("claudine/lib/src/dispatch/loader.rs", "load_claudine_config", ".canonicalize()", 2, SAME_FILE),
     private(
-        "claudine/lib/src/invocation_context.rs",
-        "canonical_key",
-        "std::fs::canonicalize",
-        1,
-        "keys from `canonical_key` are compared only with other keys from `canonical_key`",
-    ),
-    private(
         "claudine/lib/src/linking/hashing.rs",
         "hash_skill_dir",
         "fs::canonicalize",
         1,
         "the walk root only; the hash takes paths relative to it, so the root's spelling never enters it",
-    ),
-    onward("claudine/lib/src/composition/error/render/mod.rs", "render_file_link", ".canonicalize()", FILE_URL),
-    onward("claudine/lib/src/composition/schema/status_render.rs", "schema_status_report_prose", ".canonicalize()", FILE_URL),
-    onward(
-        "claudine/lib/src/render/prompt/system.rs",
-        "render_system_prompt_summary",
-        ".canonicalize()",
-        "a label and file URL in the system-prompt summary",
-    ),
-    onward(
-        "claudine/lib/src/mcp/state.rs",
-        "McpProviderStateStore::canonical_repo_path",
-        "fs::canonicalize",
-        "a repository key persisted in MCP state on disk",
-    ),
-    Exception {
-        rule: Rule::Canonicalize,
-        kind: Kind::Temporary,
-        path: "claudine/lib/src/protect/path.rs",
-        item: "canonicalize_existing_ancestor",
-        operation: ".canonicalize()",
-        count: 2,
-        reason: "a public function whose result is matched against home-based protection patterns",
-    },
-    onward(
-        "claudine/lib/src/provider_overlay/write_back.rs",
-        "WriteBack::record",
-        "fs::canonicalize",
-        "stored in a write-back `Entry`",
     ),
 ];
 

@@ -420,7 +420,8 @@ fn main() {
             ("APPDATA", fixture.home().join("AppData").join("Roaming").display().to_string()),
             ("LOCALAPPDATA", fixture.home().join("AppData").join("Local").display().to_string()),
             ("PATH", path.to_string_lossy().into_owned()),
-            // The known-folder profile would otherwise supply both roots.
+            // Named explicitly so this launch covers the selector and the
+            // storage override, not only the home-derived defaults.
             ("CODEX_HOME", codex.display().to_string()),
             ("CLAUDINE_OVERLAY_DIR", launches.display().to_string()),
             ("NO_COLOR", "1".to_string()),

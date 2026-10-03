@@ -8,7 +8,7 @@ use super::{PropertyState, PropertyStatus, SchemaStatusReport};
 pub fn schema_status_report_prose(report: &SchemaStatusReport) -> Prose {
     let path_display = biscuit_file::to_portable_string(&report.source_path);
     let path_escaped = escape_schema_prose(&path_display);
-    let absolute = report.source_path.canonicalize().ok().or_else(|| {
+    let absolute = biscuit_file::canonicalize_simplified(&report.source_path).ok().or_else(|| {
         report.source_path.is_absolute().then(|| report.source_path.clone())
     });
     let path_reference = absolute
