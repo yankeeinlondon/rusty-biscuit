@@ -1676,8 +1676,10 @@ impl Writer<'_> {
             None
         };
         // Escape Prose-special characters so literal `<b>` etc. in the
-        // rendered inline output are not mis-parsed as tags during wrap.
-        let safe = Prose::escape_text(markup);
+        // rendered inline output are not mis-parsed as tags during wrap. A
+        // colorless terminal keeps inline code as a backtick span, which the
+        // re-parse reads literally, so its contents must stay unescaped.
+        let safe = Prose::escape_text_outside_code_spans(markup);
         let prose = Prose::new(safe).with_word_wrap(WordWrap::WrapProse(None, hang));
         let rendered = prose.render_in_width(term, child_width);
 
@@ -2839,6 +2841,19 @@ mod render_tree_tests {
 
     use crate::terminal::Terminal;
     use crate::utils::escape_codes::strip_escape_codes;
+
+    #[test]
+    fn colorless_list_item_keeps_inline_code_literal() {
+        let code = RenderNode::inline_code(r"_a_[x]{{ctx.area}}a\b");
+        let list = RenderNode::list(false, None, vec![RenderNode::list_item(None, vec![code])]);
+        let term = Terminal::builder()
+            .width(120)
+            .color_depth(crate::discovery::detection::ColorDepth::None)
+            .build();
+        let opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
+        let output = strip_escape_codes(&render_terminal_node(&list, &opts).unwrap().output);
+        assert!(output.contains(r"`_a_[x]{{ctx.area}}a\b`"), "{output:?}");
+    }
 
     fn opts(strictness: RenderStrictness) -> TerminalRenderOptions {
         TerminalRenderOptions::new(&Terminal::new_optimistic(80), strictness)

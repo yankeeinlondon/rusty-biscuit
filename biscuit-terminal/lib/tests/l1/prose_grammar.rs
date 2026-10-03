@@ -554,3 +554,36 @@ fn unstyled_fallback_applies_to_a_directly_built_tree() {
         assert!(!out.contains("\x1b["), "osc8={osc8}: {out:?}");
     }
 }
+
+// ── escaping text that carries its own code spans ───────────────────────
+
+#[test]
+fn escape_text_outside_code_spans_table() {
+    let cases = [
+        // Text outside a span is escaped; the span is copied unchanged.
+        (r"a_b `_a_[x]{y}a\b` c_d", r"a\_b `_a_[x]{y}a\b` c\_d"),
+        // A double-backtick fence holds a single backtick.
+        ("`` q`_a_` `` and x_y", r"`` q`_a_` `` and x\_y"),
+        // A run closes only on a run of the same length.
+        ("``x` y_z``", "``x` y_z``"),
+        // Unmatched runs are ordinary text: what follows them is escaped.
+        ("a ` b_c", r"a ` b\_c"),
+        ("``x` y_z", r"``x` y\_z"),
+        // A span never crosses a blank line.
+        ("`a_b\n\nc_d`", "`a\\_b\n\nc\\_d`"),
+        ("`a_b\nc_d`", "`a_b\nc_d`"),
+        ("", ""),
+    ];
+    for (input, expected) in cases {
+        assert_eq!(Prose::escape_text_outside_code_spans(input), expected, "input {input:?}");
+        assert_eq!(InlineProse::escape_text_outside_code_spans(input), expected, "input {input:?}");
+    }
+}
+
+#[test]
+fn escape_text_outside_code_spans_renders_message_exactly() {
+    let message = r"unknown field `foo_bar`, expected `a[0]` or `{{x}}` in my_file\_a";
+    let prose = InlineProse::new(InlineProse::escape_text_outside_code_spans(message));
+    let rendered = strip(&prose.render(&plain_term()));
+    assert_eq!(rendered, message);
+}

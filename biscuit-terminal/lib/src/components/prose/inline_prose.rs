@@ -69,9 +69,17 @@ impl InlineProse {
         self
     }
 
-    /// Escape text so it renders literally; see [`Prose::escape_text`].
+    /// Escape text so it renders literally outside code; see
+    /// [`Prose::escape_text`]. Never use it inside backticks: code-span
+    /// contents are literal and would show the backslashes.
     pub fn escape_text(s: &str) -> String {
         Prose::escape_text(s)
+    }
+
+    /// Escape text that marks its own code with backticks, leaving each code
+    /// span literal; see [`Prose::escape_text_outside_code_spans`].
+    pub fn escape_text_outside_code_spans(s: &str) -> String {
+        Prose::escape_text_outside_code_spans(s)
     }
 
     /// Build a safely-quoted tag attribute value; see [`Prose::quoted_attr`].

@@ -175,9 +175,9 @@ impl Prose {
     /// Escapes characters that have special meaning in the Prose grammar
     /// (`<`, `>`, `{`, `*`, `_`, `[`, `]`, `(`, `)`, `\`) by prefixing them
     /// with a backslash. Use this for any user-controlled string that is
-    /// interpolated into Prose content, except inside a code span: a code
-    /// span is already opaque and shows its backslashes literally, so text
-    /// placed between backticks must not be escaped.
+    /// interpolated into Prose content, except inside a code span or a fenced
+    /// code block: their contents are literal and show the backslashes, so
+    /// text placed between backticks or fences must not be escaped.
     ///
     /// ## ANSI escape pass-through
     ///
@@ -254,6 +254,52 @@ impl Prose {
             i += ch.len_utf8();
         }
         result
+    }
+
+    /// Escapes text that already marks its code with backticks, such as an
+    /// error message: [`Prose::escape_text`] is applied outside each closed
+    /// code span, and every span is copied through unchanged so its contents
+    /// stay literal.
+    ///
+    /// Spans are recognized as the Prose grammar recognizes them: a backtick
+    /// run opens a span only when a later run of the same length closes it
+    /// before the next blank line. An unmatched run is ordinary text, so the
+    /// text after it is escaped. Use [`Prose::escape_text`] for text with no
+    /// code of its own, and fence a value bound for a code span with
+    /// `renderable::markdown::code_span` instead.
+    ///
+    /// ## Examples
+    ///
+    /// ```rust
+    /// use biscuit_terminal::components::prose::Prose;
+    ///
+    /// let escaped = Prose::escape_text_outside_code_spans("unknown field `foo_bar`, in a_b");
+    /// assert_eq!(escaped, r"unknown field `foo_bar`, in a\_b");
+    ///
+    /// // An unmatched backtick does not open a span.
+    /// assert_eq!(Prose::escape_text_outside_code_spans("a ` b_c"), r"a ` b\_c");
+    /// ```
+    pub fn escape_text_outside_code_spans(s: &str) -> String {
+        let mut escaped = String::with_capacity(s.len());
+        let mut plain_start = 0;
+        let mut index = 0;
+        while let Some(offset) = s[index..].find('`') {
+            let open = index + offset;
+            let ticks = backtick_run(&s[open..]);
+            let content_start = open + ticks;
+            match closing_backtick_run(&s[content_start..], ticks) {
+                Some(close) => {
+                    let end = content_start + close + ticks;
+                    escaped.push_str(&Self::escape_text(&s[plain_start..open]));
+                    escaped.push_str(&s[open..end]);
+                    plain_start = end;
+                    index = end;
+                }
+                None => index = content_start,
+            }
+        }
+        escaped.push_str(&Self::escape_text(&s[plain_start..]));
+        escaped
     }
 
     /// Build a safely-quoted attribute value for Prose block tags.
@@ -415,4 +461,36 @@ impl BrowserRenderable for Prose {
     fn as_any(&self) -> &dyn Any {
         self
     }
+}
+
+/// Length of the backtick run at the start of `s`.
+fn backtick_run(s: &str) -> usize {
+    s.bytes().take_while(|&b| b == b'`').count()
+}
+
+/// Byte offset in `s` of the first backtick run exactly `ticks` long, searching
+/// no further than the next blank line (a code span never crosses one).
+fn closing_backtick_run(s: &str, ticks: usize) -> Option<usize> {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'`' => {
+                let run = backtick_run(&s[i..]);
+                if run == ticks {
+                    return Some(i);
+                }
+                i += run;
+            }
+            b'\n' => {
+                let rest = s[i + 1..].trim_start_matches([' ', '\t', '\r']);
+                if rest.starts_with('\n') {
+                    return None;
+                }
+                i += 1;
+            }
+            _ => i += 1,
+        }
+    }
+    None
 }

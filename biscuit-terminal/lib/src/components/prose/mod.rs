@@ -77,6 +77,7 @@ mod tests {
         // passed through `escape_text`.
         let rendered = plain(&format!("See `{}`.", Prose::escape_text("_a_")));
         assert_eq!(rendered, "See \\_a\\_.");
+        assert_eq!(plain("See `_a_`."), "See _a_.");
     }
 
     #[test]
