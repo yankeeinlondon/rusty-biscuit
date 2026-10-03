@@ -40,6 +40,35 @@ packages:
     - playa-cli
     - homelab-cli
 human_review: false
+message_to_agent: |-
+    Phase 3 (grammar + components) is done; see "## Phase 3" in
+    implementation-log.md. biscuit-terminal `just test`/`just lint` are green.
+    Facts for Phase 4+:
+    - `Prose::to_render_nodes` is gone. Containers currently call a crate-private
+      INTERIM bridge, `Prose::interim_container_nodes()` (prose/tree.rs), from
+      `render_tree/projection.rs::project_renderable_content` and
+      `table/table.rs` (with `degrade_code_nodes`). Phase 4 must delete it and
+      move containers onto `InlineProse::to_render_nodes()` (tables,
+      InlineContent) or `Prose::block_nodes()` (pub(crate); the root's block
+      children, Paragraph+Code, tag applied) with the root layout transferred
+      per R3.
+    - `Prose` has NO `render_tree_node` override yet (returning its Root would
+      nest a Root); decide that alongside the layout transfer in Phase 4.
+      `InlineProse::render_tree_node` returns its neutral Span.
+    - `Prose::render_html_fragment` with default layout concatenates block
+      siblings (no wrapper); with layout it renders the Root (`<div style>`).
+      Shared helper: `prose::tree::concat_html`.
+    - Grammar entry points: `prose::blocks::{parse_blocks, parse_inline}`;
+      `LineBreaks` lives in `prose/blocks.rs`. Literal sentinels are escaped
+      with a backslash by `markdown::lift_fences` (R1).
+    - Downstream darkmatter (50 fail + 1 timeout, 2 unrelated pre-existing) and
+      claudine (33 fail + 1 timeout) are red as expected from newline/code-span
+      semantics; the ledger is in the log. Phase 7 clears them.
+    - `bt prose --html` already stopped double-wrapping (Phase 6 overlap);
+      its help text and code-span examples are still Phase 6 work.
+    - Open conflict for review/Phase 8: Prose resolves relative link hrefs to
+      file:// URLs at tree-build time (pre-existing), so AC 1's literal
+      `href="plan.md"` cannot hold; tests use absolute URLs. See Departures.
 clarified: false
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol

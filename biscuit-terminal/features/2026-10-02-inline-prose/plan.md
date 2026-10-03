@@ -4,6 +4,53 @@ created: 2026-10-03
 phase: 1
 agent: claude/sonnet
 yolo: true
+source_files_during_phase_2:
+    - renderable/Cargo.toml
+    - renderable/src/markdown.rs
+    - renderable/src/tree/attrs.rs
+    - renderable/src/tree/mod.rs
+    - renderable/src/tree/render/browser.rs
+    - renderable/src/tree/render/markdown.rs
+    - renderable/src/tree/validate.rs
+    - Cargo.lock
+docs_updated_during_phase_2:
+    - renderable/docs/tree-rendering.md
+    - docs/dependencies.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/renderable/tree.md
+    - .claude/skills/renderable/markdown.md
+source_files_during_phase_3:
+    - biscuit-terminal/lib/src/components/prose/blocks.rs
+    - biscuit-terminal/lib/src/components/prose/inline_prose.rs
+    - biscuit-terminal/lib/src/components/prose/markdown.rs
+    - biscuit-terminal/lib/src/components/prose/tokens.rs
+    - biscuit-terminal/lib/src/components/prose/prose.rs
+    - biscuit-terminal/lib/src/components/prose/tree.rs
+    - biscuit-terminal/lib/src/components/prose/mod.rs
+    - biscuit-terminal/lib/src/components/prose/parity.rs
+    - biscuit-terminal/lib/src/render_tree/render.rs
+    - biscuit-terminal/lib/src/render_tree/projection.rs
+    - biscuit-terminal/lib/src/components/table/table.rs
+    - biscuit-terminal/lib/src/components/metrics_tree.rs
+    - biscuit-terminal/lib/src/components/block_quote.rs
+    - biscuit-terminal/lib/src/components/list.rs
+    - biscuit-terminal/lib/src/prelude.rs
+    - biscuit-terminal/lib/tests/l1/prose_grammar.rs
+    - biscuit-terminal/lib/tests/l1/main.rs
+    - biscuit-terminal/lib/tests/l1/prelude_exports.rs
+    - biscuit-terminal/lib/tests/l1/prose_cells_parity.rs
+    - "biscuit-terminal/lib/tests/l1/snapshots/l1__layout_matrix__MetricsTree__*.snap (38 files)"
+    - biscuit-terminal/cli/src/commands/prose.rs
+    - biscuit-terminal/cli/tests/l1/integration_test.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/biscuit-terminal/SKILL.md
+packages:
+    - renderable
+    - biscuit-terminal
+    - biscuit-terminal-cli
 ---
 
 # Plan: `Prose` Is a Block, `InlineProse` Is Inline, and Code Spans Are Code
@@ -220,7 +267,7 @@ Goal: the shared renderer pieces everything else builds on. Package area
 
 ### Wave 1 — independent edits (parallel; disjoint files)
 
-- [ ] **Block-element attribute** (`attrs.rs`, `validate.rs`, `render/browser.rs`)
+- [x] **Block-element attribute** (`attrs.rs`, `validate.rs`, `render/browser.rs`)
   - add a typed `BlockElement` enum (`P` default-by-absence, `Div`, `Section`,
     `Article`, `Aside`, `Header`, `Footer`) in `BrowserAttrs`, optional,
     omitted when default; update the sparsity predicate (`is_empty`),
@@ -233,7 +280,7 @@ Goal: the shared renderer pieces everything else builds on. Package area
   - tests: each tag in both browser paths agree; legacy serialized tree
     without the field keeps `<p>`; invalid placement rejected on every
     non-`Paragraph` kind; round-trip serialization (AC 8, 31).
-- [ ] **Safe inline-code fence helper** (new public helper per R6)
+- [x] **Safe inline-code fence helper** (new public helper per R6)
   - fence = backtick run longer than the longest run in the value (1 if none);
     pad one space each side when the value begins/ends with a backtick, or
     begins and ends with a space and is not all spaces;
@@ -244,16 +291,16 @@ Goal: the shared renderer pieces everything else builds on. Package area
 
 ### Wave 2 — Markdown renderer (depends on the helper)
 
-- [ ] **Markdown inline code** (`render/markdown.rs`): `InlineCode` uses the
+- [x] **Markdown inline code** (`render/markdown.rs`): `InlineCode` uses the
   helper; table-cell pipe escaping applied to the value *before* fencing; table
   soft breaks stay spaces.
-- [ ] **Markdown hard break**: `HardBreak` emits `\` + newline outside tables
+- [x] **Markdown hard break**: `HardBreak` emits `\` + newline outside tables
   (was two trailing spaces) for both Markdown dialects; `<br>` inside tables
   unchanged.
-- [ ] **Tests** (AC 19, 30): fence table inside and outside a table cell,
+- [x] **Tests** (AC 19, 30): fence table inside and outside a table cell,
   directly constructed nodes (not only via Prose), both dialects, hard-break
   forms.
-- [ ] **Docs and comments**: `renderable` docs and module docs describing
+- [x] **Docs and comments**: `renderable` docs and module docs describing
   inline-code or hard-break Markdown output; `renderable` skill if it
   documents either behavior.
 
@@ -276,7 +323,7 @@ Agree the interface before starting (first task, done by the orchestrator):
 block splitter's output type (`Vec<Block>` where `Block` is `Paragraph(String)`
 or `Code { lang, body }` plus scope-reopen info for bracketed tags).
 
-- [ ] **1a — Block splitter and newline rules** (new module; `markdown.rs`
+- [x] **1a — Block splitter and newline rules** (new module; `markdown.rs`
   fenced-block recognition retained)
   - normalize CRLF and lone CR to LF first;
   - recognize opaque fenced blocks first (existing rules kept: language hints,
@@ -291,7 +338,7 @@ or `Code { lang, body }` plus scope-reopen info for bracketed tags).
   - leading/trailing blank lines produce no blocks; empty and whitespace-only
     `Prose` produce no blocks;
   - `LineBreaks` enum (`Soft` default, `Hard`) defined here.
-- [ ] **1b — Code-span lifting and sentinel** (`markdown.rs`, `tokens.rs`)
+- [x] **1b — Code-span lifting and sentinel** (`markdown.rs`, `tokens.rs`)
   - lift each span into the lifted-content table with a sentinel placeholder
     (R1: literal sentinel chars in input are pre-escaped);
   - matching rules unchanged (a run opens a span only if a later run of the
@@ -308,7 +355,7 @@ or `Code { lang, body }` plus scope-reopen info for bracketed tags).
   - in `InlineProse` mode a fenced block becomes one `InlineCode` (language
     hint dropped, each line ending → space, other whitespace untouched, no
     code-span stripping; empty body → no node).
-- [ ] **1c — Terminal inline-code rendering** (`render_tree/render.rs`; depends
+- [x] **1c — Terminal inline-code rendering** (`render_tree/render.rs`; depends
   on S2 and the Phase 2 helper)
   - inline code drops backticks when it emits styling (theme background/color
     when present, else dim); when the effective appearance emits **no styling
@@ -323,7 +370,7 @@ or `Code { lang, body }` plus scope-reopen info for bracketed tags).
 
 ### Wave 2 — inline parse and `InlineProse` (depends on Wave 1)
 
-- [ ] **Inline parser** (`parse_inline`): tags, `**`/`_`, links, code spans,
+- [x] **Inline parser** (`parse_inline`): tags, `**`/`_`, links, code spans,
   escapes, soft/hard breaks per mode
   - single `\n` → soft (or hard in `Hard`); discard spaces/tabs around a soft
     break; trailing spaces are never a hard break;
@@ -333,7 +380,7 @@ or `Code { lang, body }` plus scope-reopen info for bracketed tags).
   - two or more `\n` in `InlineProse`/`Soft` = one soft break; `Hard` = each
     `\n` hard (R2);
   - escaped tags/delimiters and sentinel-lookalike input stay user content.
-- [ ] **`InlineProse` type** (new file): `new`, `content`,
+- [x] **`InlineProse` type** (new file): `new`, `content`,
   `with_line_breaks`, escape helpers; **no** margin/width/align/wrap builders
   - `to_render_nodes()` returns the inline sequence; `render_tree()` returns a
     single neutral `Span` (also when empty); one shared projection helper feeds
@@ -347,23 +394,23 @@ or `Code { lang, body }` plus scope-reopen info for bracketed tags).
 
 ### Wave 3 — `Prose` block component (depends on Wave 2)
 
-- [ ] **`Prose` reshape** (`prose.rs`, `tree.rs`, `mod.rs`): sequence of blocks;
+- [x] **`Prose` reshape** (`prose.rs`, `tree.rs`, `mod.rs`): sequence of blocks;
   paragraphs are `InlineProse`-parsed `Paragraph`s, fenced code → `Code`
   blocks under `Root`; `with_line_breaks` forwards the mode to each
   paragraph's parser
-- [ ] **`ProseTag`** enum and `with_tag`; per-paragraph element via the Phase 2
+- [x] **`ProseTag`** enum and `with_tag`; per-paragraph element via the Phase 2
   attribute; code blocks always `<pre><code>`; tag is HTML-only
-- [ ] **Layout on every target**: terminal margins/alignment/wrap as today; CSS
+- [x] **Layout on every target**: terminal margins/alignment/wrap as today; CSS
   on the browser; browser fragment rendered from `render_tree()` like other
   targets; `<span class="prose">` removed; delete the interim-contract doc
   comment on `render_html_fragment`
-- [ ] **Remove `Prose::to_render_nodes`**; update `escape_text` rustdoc (no
+- [x] **Remove `Prose::to_render_nodes`**; update `escape_text` rustdoc (no
   longer promises clean output inside a code span; do not escape text placed in
   a span)
-- [ ] **Exports**: `InlineProse`, `LineBreaks`, `ProseTag` from the component
+- [x] **Exports**: `InlineProse`, `LineBreaks`, `ProseTag` from the component
   module, crate public exports, and `prelude`; update `prelude_exports.rs`
-- [ ] **`parity.rs`** expectations updated for code spans and the new shapes
-- [ ] **Tests** (new files declared in `lib/tests/l1/main.rs`), one cell per
+- [x] **`parity.rs`** expectations updated for code spans and the new shapes
+- [x] **Tests** (new files declared in `lib/tests/l1/main.rs`), one cell per
   case, through public results:
   - paragraph/newline table: `a\nb`, `a\n\nb`, `a\n\n\nb`, `a\n  \nb`,
     `a\\\nb`, `a  \nb`, CRLF and lone-CR twins, `\\` + newline, trailing
