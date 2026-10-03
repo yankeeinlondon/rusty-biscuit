@@ -52,7 +52,7 @@ const INVENTORY: &[(&str, &str, Coverage)] = &[
 /// Every `impl … EvaluationLookup for <Type>` outside a comment, as
 /// `(type, file relative to src/)`.
 fn scanned_implementations() -> Vec<(String, String)> {
-    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let src = biscuit_test_harness::manifest_dir!().join("src");
     let mut found = Vec::new();
     let mut pending = vec![src.clone()];
     while let Some(dir) = pending.pop() {
