@@ -840,8 +840,11 @@ fn column_width_kind(width: ColumnWidth) -> ColumnWidthKind {
 
 /// Projects a column's content into block-level render-tree nodes.
 ///
-/// Inline-only projected content is wrapped in a [`RenderNode::paragraph`] so
-/// the enclosing block quote carries valid block children.
+/// A column is a block region: a [`Prose`] contributes its own `Paragraph`
+/// and `Code` blocks. A run of inline nodes from any other content (a plain
+/// string, an `InlineProse`, a text fallback) is wrapped in a
+/// [`RenderNode::paragraph`] so the enclosing block quote carries valid block
+/// children.
 fn project_column(content: &RenderableTerminalContent) -> Vec<RenderNode> {
     let mut ctx = TreeProjectionContext::default();
     let nodes = content.to_tree_nodes(&mut ctx).nodes;

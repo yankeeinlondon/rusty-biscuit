@@ -13,11 +13,9 @@ use renderable::style::Style;
 use renderable::tree::{ListRenderHints, RenderNode, RenderStrictness, TreeRenderable};
 
 use crate::{
+    components::prose::Prose,
     components::renderable::{BrowserRenderable, RenderableTerminalContent, TerminalRenderable},
-    prelude::Prose,
-    render_tree::projection::{
-        ProjectionMode, fold_prose_nodes_into_blocks, project_renderable_content,
-    },
+    render_tree::projection::{ProjectionMode, project_renderable_content},
     render_tree::{TerminalRenderOptions, render_terminal_node},
     terminal::Terminal,
     utils::{block_constraint::visible_width, layout::Layout},
@@ -367,9 +365,9 @@ impl MarkdownRenderable for OrderedList {
     ///
     /// The tree's [`NodeKind::List`](renderable::tree::NodeKind::List) lowers
     /// to standard CommonMark numbered-list syntax (`1. First\n2. Second\n…`).
-    /// Layout is intentionally ignored by the Markdown renderer; styling on
-    /// child components (for example a [`Prose`] item with `<b>` tokens) is
-    /// degraded to plain text by the cross-target tree projection.
+    /// Layout is intentionally ignored by the Markdown renderer. A [`Prose`]
+    /// item keeps its semantic emphasis (`<b>` becomes `**…**`); color and
+    /// other terminal-only styling have no Markdown form and are dropped.
     fn render_markdown(&self) -> String {
         let node = self.render_tree();
         render_markdown_node(&node, &MarkdownRenderOptions::default())
@@ -434,28 +432,16 @@ impl BrowserRenderable for OrderedList {
 
 /// Projects a list's items into [`NodeKind::ListItem`] nodes.
 ///
-/// Each [`RenderableTerminalContent`] item becomes one `ListItem`. Inline
-/// projection delegates to the shared
-/// [`project_renderable_content`] helper (the fourth migrated container
-/// reusing the Prose-downcast pattern after `BlockQuote`,
-/// [`Compose`](crate::components::compose::Compose), and `OrderedList`).
+/// Each [`RenderableTerminalContent`] item becomes one `ListItem` whose
+/// children come from the shared [`project_renderable_content`] helper.
 ///
-/// When an item is a [`Prose`] component, the helper returns the inline
-/// nodes (and any fenced code block); this projection folds them into
-/// block-level children via
-/// [`fold_prose_nodes_into_blocks`]. A purely inline body collapses to a
-/// single [`Paragraph`](renderable::tree::NodeKind::Paragraph) so the terminal
-/// list renderer carries the prefix through to one wrapped line — without that
-/// single wrapper, sibling inline children after the first would be
-/// misclassified as block children and get `indent_children`-style
-/// indentation. A `Prose` body carrying a fenced code block keeps the
-/// [`Code`](renderable::tree::NodeKind::Code) node as a block-level sibling
-/// instead of nesting it inside a `Paragraph` (which render-tree validation
-/// rejects, leaving the list renderer with empty output).
-///
-/// For any other item the helper's structural fallback is used directly —
-/// block-level children (a nested `List`, `Section`, etc.) become the
-/// `ListItem`'s block children and are indented under the prefix.
+/// A [`Prose`](crate::components::prose::Prose) item is block content, as a
+/// Markdown list item is: its `Paragraph` and `Code` blocks become the
+/// `ListItem`'s children. The list renderer puts the first paragraph on the
+/// marker line (wrapped with the hanging indent) and indents the blocks that
+/// follow. Any other item uses the helper's structural projection directly —
+/// block-level children (a nested `List`, `Section`, etc.) are indented under
+/// the prefix, and inline children are coalesced onto the marker line.
 ///
 /// `terminal_hint` threads the caller's real terminal context through the
 /// shared structural projection so any bespoke-only child component (one
@@ -475,18 +461,8 @@ fn project_list_items(
     items
         .iter()
         .map(|item| {
-            let is_prose = matches!(
-                item,
-                RenderableTerminalContent::Component(c)
-                    if c.as_any().downcast_ref::<Prose>().is_some()
-            );
-            let projected =
+            let children =
                 project_renderable_content(item, ProjectionMode::Structural { terminal_hint });
-            let children = if is_prose {
-                fold_prose_nodes_into_blocks(projected)
-            } else {
-                projected
-            };
             RenderNode::list_item(None, children)
         })
         .collect()
@@ -905,9 +881,9 @@ impl MarkdownRenderable for UnorderedList {
     /// facility for custom bullets, and round-tripping through a
     /// `-`-using renderer is the portable contract.
     ///
-    /// Layout is intentionally ignored by the Markdown renderer; styling on
-    /// child components (for example a [`Prose`] item with `<b>` tokens) is
-    /// degraded to plain text by the cross-target tree projection.
+    /// Layout is intentionally ignored by the Markdown renderer. A [`Prose`]
+    /// item keeps its semantic emphasis (`<b>` becomes `**…**`); color and
+    /// other terminal-only styling have no Markdown form and are dropped.
     fn render_markdown(&self) -> String {
         let node = self.render_tree();
         render_markdown_node(&node, &MarkdownRenderOptions::default())
@@ -1160,7 +1136,8 @@ mod tests {
 
     #[test]
     fn test_unordered_prose_gets_automatic_wrap() {
-        // A Prose with no explicit word wrap gets WrapProse at add time.
+        // A Prose item is block content: the list renderer wraps its
+        // paragraph after the bullet with the hanging indent.
         use crate::components::prose::Prose;
 
         let mut list = UnorderedList::empty();
@@ -1183,8 +1160,8 @@ mod tests {
 
     #[test]
     fn test_unordered_prose_bespoke_wrap_no_double_indent() {
-        // A Prose with BespokeProse(_, _, None) gets hanging indent filled
-        // by the list. No double-indentation.
+        // A Prose with BespokeProse(_, _, None) wraps under the bullet
+        // width. No double-indentation.
         use crate::components::prose::Prose;
 
         let prose = Prose::new("aaa, bbb, ccc, ddd, eee, fff, ggg")
@@ -1222,12 +1199,11 @@ mod tests {
     fn test_prose_explicit_indent_dropped_under_tree_path() {
         // Bespoke parity behavior: an explicit `WordWrap::WrapProse(_, Some(4))`
         // on a Prose item produced 4-space continuation indent on the
-        // bespoke path. After the render-tree migration, the projection
-        // extracts Prose's inline structure (via `interim_container_nodes`) but does
-        // not carry the per-Prose `word_wrap` field — the list renderer
-        // wraps using only the list's bullet width (2 spaces by default for
-        // `- `). This is an accepted divergence documented in `KNOWN_DRIFT`,
-        // following the same "Prose styling loss" pattern as OrderedList.
+        // bespoke path. On the render-tree path the Prose layout moves onto
+        // its paragraph, but the terminal list renderer lays out the marker
+        // line itself and wraps using only the list's bullet width (2 spaces
+        // by default for `- `). This is an accepted divergence documented in
+        // `KNOWN_DRIFT`.
         use crate::components::prose::Prose;
 
         let prose = Prose::new("aaa bbb ccc ddd eee fff")

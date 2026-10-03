@@ -32,6 +32,10 @@ impl TerminalRenderable for Prose {
     fn layout_mut(&mut self) -> &mut Layout {
         &mut self.layout
     }
+
+    fn is_block_level(&self) -> bool {
+        true
+    }
 }
 
 impl Prose {

@@ -28,7 +28,7 @@
 //! never reaches this projection.
 
 use renderable::color::Color;
-use renderable::layout::{Layout, TargetValue};
+use renderable::layout::{Edges, Layout, TargetValue};
 use renderable::style::{PaintColor, PerMode, Style, TextEmphasis};
 use renderable::browser::fragment::{BrowserFragment, Ready};
 use renderable::tree::render::{BrowserRenderOptions, render_browser_node};
@@ -53,32 +53,39 @@ impl Prose {
         blocks
     }
 
-    /// Interim bridge for containers that still expect a flat inline
-    /// sequence: each paragraph's children, consecutive paragraphs joined by
-    /// a literal blank line, and fenced blocks as block-level `Code` nodes
-    /// for the container's own folding.
+    /// The block nodes a container embeds in place of this prose's `Root`.
     ///
-    /// Containers are re-typed onto `InlineProse` or block children (with
-    /// layout transfer) next; this goes away with that change.
-    pub(crate) fn interim_container_nodes(&self) -> Vec<RenderNode> {
-        let mut out = Vec::new();
-        let mut previous_was_paragraph = false;
-        for block in super::blocks::parse_blocks(self.content(), self.line_breaks) {
-            match block.kind {
-                NodeKind::Paragraph { children } => {
-                    if previous_was_paragraph {
-                        out.push(RenderNode::text("\n\n"));
-                    }
-                    out.extend(children);
-                    previous_was_paragraph = true;
-                }
-                _ => {
-                    out.push(block);
-                    previous_was_paragraph = false;
-                }
-            }
+    /// A `Root` is valid only at the top of a tree, so an embedded `Prose`
+    /// contributes its root's children and its layout moves onto them:
+    ///
+    /// - one block carries the whole layout;
+    /// - several blocks each carry the horizontal box (left/right margin and
+    ///   padding, width, max width, alignment, word wrap), while the top
+    ///   margin and padding stay on the first block and the bottom ones on the
+    ///   last, so the stack occupies the same box the root would have.
+    ///
+    /// The enclosing container node never takes the layout: a list item's
+    /// marker and a block quote's border sit outside the prose box, and those
+    /// nodes carry their own layout.
+    pub(crate) fn embedded_nodes(&self) -> Vec<RenderNode> {
+        let mut blocks = self.block_nodes();
+        if self.layout == Layout::default() {
+            return blocks;
         }
-        out
+        let last = blocks.len().saturating_sub(1);
+        for (index, block) in blocks.iter_mut().enumerate() {
+            let mut layout = self.layout.clone();
+            if index > 0 {
+                layout.margin.top = Edges::default().top;
+                layout.padding.top = Edges::default().top;
+            }
+            if index < last {
+                layout.margin.bottom = Edges::default().bottom;
+                layout.padding.bottom = Edges::default().bottom;
+            }
+            block.attrs.set_layout(&layout);
+        }
+        blocks
     }
 }
 

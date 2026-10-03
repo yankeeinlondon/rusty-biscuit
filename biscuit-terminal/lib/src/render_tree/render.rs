@@ -2616,7 +2616,7 @@ fn reconstruct_cell(attrs: &renderable::tree::NodeAttrs, text: String) -> TableC
                 _ => TableCellContent::Text(text),
             }
         }
-        "styled_prose" => TableCellContent::Text(text),
+        "styled_inline_prose" => TableCellContent::Text(text),
         // "text" and anything unrecognized keep the rendered text.
         _ => TableCellContent::Text(text),
     }
