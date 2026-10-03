@@ -42,7 +42,7 @@ Merge metrics are only as good as `origin/<default>`, and PR badges only as good
     ```
 
     Only `refs/remotes/origin/<default>` changes: no tags, no other branches, no `FETCH_HEAD`, and no submodules, whatever your Git configuration says. The leading `+` lets a remote rewind through. Your local default branch is never moved; see `--ff` below. Git runs without credential prompts, with SSH in batch mode, and is killed with its whole process tree at the deadline.
-3. **Wait.** `wt list` waits up to **3 s** for both halves, so an ordinary listing costs the slower of the two, never their sum. While it waits, a spinner on stderr says `updating`, `no API key, using fallback method`, `rate limited, using fallback method`, or `pulling remote updates`, and goes back to `updating` once only the PR half is left. It appears only after 150 ms, only when stderr is a terminal, and its line is cleared before anything else is printed, so captured output and the shell wrapper never see it. Work still running at 3 s carries on in the background, the listing adds the refresh hint, and the next listing shows the result.
+3. **Wait.** `wt list` waits up to **3 s** for both halves, so an ordinary listing costs the slower of the two, never their sum. While it waits, a spinner on stderr says `updating`, `no API key, using fallback method`, `rate limited, using fallback method`, or `pulling remote updates`, and goes back to `updating` whenever only the PR half is left, including after a retried or adopted head operation finishes. It appears only after 150 ms, only when stderr is a terminal, and its line is cleared before anything else is printed, so captured output and the shell wrapper never see it. Work still running at 3 s carries on in the background, the listing adds the refresh hint, and the next listing shows the result.
 4. **Gather.** Only then are the local refs, comparison counts, and graph read, so a fetch that finished during the wait is reflected everywhere at once.
 
 The check's result is stored for later listings (the last successful answer is never erased by a failed check), and at most one check or fetch runs per repository at a time: a listing that finds one already running follows it rather than asking `origin` again. `-r` and `--ff` wait for both halves the same way, only longer: up to 75 s.
@@ -51,7 +51,9 @@ Without an `origin` nothing is asked, nothing is waited for, and no PR item or r
 
 #### How the wait knows both halves are done
 
-The background process writes a small **receipt** file when both halves have finished, on every run. It records how each half ended: the head half's outcome, and whether the PR half published an answer, failed (and why), found another process already asking, was skipped for an ignored repository, or had no provider to ask. The listing reads the receipt for the attempt it launched, and deletes it when its wait ends.
+The background process writes a small **receipt** file when both halves have finished, on every run. It records how each half ended: the head half's outcome, and whether the PR half published an answer, failed (and why), found another process already asking, was skipped for an ignored repository, or had no provider to ask. The listing reads the receipt for the attempt it launched, and tries once, as its wait ends, to delete it.
+
+The wait does not always need the receipt, so it can end before the receipt exists: a new PR answer (see below) and a finished check are enough. For example, a listing that sees both at 0.4 s renders at once, and the background process writes its receipt a moment later. A receipt written after the wait ended, whether the wait finished early or ran out of time, stays in the cache directory until a later background process, before writing its own, deletes this repository's receipts older than 75 s. A leftover receipt is harmless: it names its own attempt, and no other listing reads it.
 
 ```mermaid
 flowchart LR
@@ -60,7 +62,7 @@ flowchart LR
     W --> P[PR half: ask for open PRs]
     H --> R[receipt for this attempt]
     P --> R
-    L -->|polls stores and receipt| D{head outcome and receipt?}
+    L -->|polls stores and receipt| D{head outcome, and a new PR answer or the receipt?}
     D -->|yes| S[render both answers]
     D -->|process exited, no receipt| F[render what was stored; PR refresh failed]
     D -->|3 s elapsed| T[render newest stored answers plus the refresh hint]
@@ -70,11 +72,13 @@ The two halves are reported separately, so one never hides the other:
 
 - **The head finished, PRs did not.** The caption shows the finished check (for example `(updated from origin just now)`), never "still checking"; the status list shows the PR item for an unfinished refresh and the refresh hint.
 - **PRs published, the head did not.** The new badges show with no PR item; the caption says "still checking" (or "still pulling") and the hint follows.
-- **The process exited without a receipt.** What it stored is still shown; the PR refresh counts as failed, with no guessed reason.
+- **The process exited without a receipt.** What it stored is still shown; the PR refresh counts as failed, with no guessed reason. A receipt with any field missing, of the wrong type, or repeated counts as no receipt.
 
 The PR half publishes its answer before the receipt exists, so a new answer is recognized the moment it is stored: every stored answer carries a fresh random publication id, and a listing that sees an id other than the one stored when it started knows the answer is new, even when it arrived in the same second or lists no PRs.
 
 Two listings that overlap (say `wt list` in two checkouts of one repository) never ask for PRs twice at once. The second one's PR half finds the first one asking and makes no request; its listing then waits, within its own 3 s, for the first one to finish, and shows the first one's answer if a new one was published. When nothing new appears the PR refresh counts as failed; `-r` and `--ff` instead try once more, still within their 75 s. Waiting on someone else never extends a listing's budget.
+
+A second try (for PRs here, or for a check held for another origin or branch under `-r` and `--ff`) runs both halves again, so it keeps what the first try already settled: a finished check stays in the caption, and a PR failure the first try explained keeps its reason. Only the second try's own result replaces them; a second try that cannot start, stops, runs out of time, or ends without a receipt leaves them as they were. A second try starts only while the budget lasts: when the first one's holder lets go at or after it, or still holds on, nothing more is launched and the listing ends with what it has plus the refresh hint.
 
 ### The default-branch target
 
