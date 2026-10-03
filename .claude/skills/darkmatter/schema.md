@@ -172,6 +172,13 @@ For grammar or schema changes, cover:
   `SchemaRootState` (`Searched`, `Absent`, `Duplicate { of }`,
   `NotApplicable`, `Invalid`). `md schema triggers` prints exactly these
   states; DMLS and `md` share them through `triggers::scan(&ctx)`.
+- `for_document` is fallible: only `NotFound`/`NotADirectory` (and the
+  package/area/tree symlink policy) make a root `Absent`. Any other metadata
+  failure (e.g. `PermissionDenied` on an ancestor) is `SchemaError::Io`
+  naming the folder, so `scan` never installs a registry missing that root
+  and bare-name lookup never falls through to a less local root. DMLS turns
+  that `Io` scan error into `SchemaOutcome::Failed` instead of keeping its
+  last-good registry (last-good is only for trigger-file load errors).
 - `ctx` must be the checked document's context (compose's
   `source_file_resolution_context`, the CLI's `request.document_context`,
   DMLS's per-document derivation). The registry keeps that context and
@@ -193,3 +200,12 @@ For grammar or schema changes, cover:
   in the workspace `schemas/` must be a repository: outside one, a
   document's tree root is its own folder.
 
+## Authored global catalog
+
+The authored replacement schema entry point is `darkmatter/schemas/darkmatter.yaml`.
+It declares all globals, including `doc`, and imports types from `partials/`.
+Runtime migration is pending: do not confuse the existing embedded document
+baseline with this global catalog. The planned document baseline is its resolved
+`doc` definition; `ctx` and `current` share a context type, and there is no
+`current_env`. Register the global catalog explicitly rather than auto-applying
+its root as frontmatter properties.

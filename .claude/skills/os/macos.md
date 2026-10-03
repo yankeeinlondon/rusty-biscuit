@@ -27,6 +27,24 @@ conditions that masquerade as repository defects.
   `prunable`. Do not treat that state as corruption; `git worktree prune`
   clears the registration, and long-lived worktrees belong under
   `~/.claudine/worktrees`, not `/tmp`.
+- Case-insensitive APFS folds names by a Unicode rule, not by lowercasing: `ς` opens a stored
+  `Σ` and `ß` opens a stored `SS`, though their `to_lowercase()` strings
+  differ. Decide whether a spelling is the stored one by an exact
+  `read_dir` entry, never by comparing folded strings. When the parent can
+  be traversed but not listed (mode `0111`), `fs::canonicalize` still
+  reports the stored final name (`locked/anchor/DOCS` canonicalizes to
+  `…/docs`), unless that name is a symlink. biscuit-file's absolute-glob
+  spelling check relies on both facts (verified 2026-10-02).
+- macOS temporary directories can live on a case-sensitive filesystem. Do
+  not assert that a differently cased ASCII or Unicode name opens merely
+  because `cfg!(target_os = "macos")` is true. Probe the fixture directory's
+  behavior and keep the ordinary exact-name and mismatch assertions on both
+  filesystem types. Reproduced 2026-10-02 with a temporary HFSX image:
+  `hdiutil create -size 40m -fs HFSX -volname glob-review-case -type UDIF /tmp/glob-review-case.dmg`,
+  attach with `hdiutil attach -nobrowse -mountpoint /tmp/glob-review-case-mount /tmp/glob-review-case.dmg`,
+  then set `TMPDIR=/tmp/glob-review-case-mount` on the area's `just test`
+  command. Detach the image and remove it afterward. These commands need no
+  administrator prompt or foreground window.
 - `dirs::home_dir()` honors `HOME` here, which is why a hermetic-home test can
   be green on macOS and read the real home directory on Windows.
 - A Unix socket path holds at most 104 bytes (`sun_path`), and the per-user
