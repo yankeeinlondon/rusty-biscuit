@@ -143,11 +143,13 @@ Key features:
 - Extra cells beyond defined columns are rendered as additional columns
 - Alignment defaults come from `ColumnType` (text left, numeric right); wrapping is resolved per cell/column strategy
 - Striping via `alternate_background_color()` / `with_stripe_bg(Color)` and `alternate_text_color()` / `with_stripe_text(Color)`; `highlight_row(row, Color)` paints one data row (0-based, header excluded; out-of-range is a no-op) and wins over the stripe on that row. Stripe and highlight are terminal-only (`TableTerminalHints`), degrade with color depth, and are ignored by Browser/Markdown
-- `TableCellContent::StyledProse(Box<Prose>)` (`Prose::new(...).into()`) embeds capability-aware inline styling, links, and emphasis in a cell. The tree path projects Prose's semantic inline nodes; the terminal bespoke path resolves each cell to `Text(prose.render(term))` once before width planning. The table owns cell geometry — Prose's own `Layout` is not applied.
+- `TableCellContent::StyledInlineProse(Box<InlineProse>)` (`InlineProse::new(...).into()`; hint kind `styled_inline_prose`) embeds capability-aware inline styling, links, emphasis, and inline code in a cell. Cells take `InlineProse`, never block `Prose` (no `From<Prose>`); a fence in a cell becomes one `InlineCode`, and a cell that needs a line per `\n` uses `.with_line_breaks(LineBreaks::Hard)`. `&str`/`String` cells stay literal `Text`. `TableColumn::header_prose` is `Option<InlineProse>`. The tree path projects the semantic inline nodes; the terminal bespoke path resolves each cell to `Text(prose.render(term))` once before width planning. The table owns cell geometry — the cell value's `Layout` is not applied.
 
 ## Lists (OrderedList, UnorderedList)
 
 Both support nested renderable children (block-level children are indented without bullet/number prefix).
+
+A `Prose` item is block content: its `Paragraph`/`Code` blocks become the `ListItem`'s children (first paragraph on the marker line, the rest indented). `Prose::is_block_level()` is `true`, so lists no longer inject a hanging-indent wrap into its layout.
 
 ```rust
 use biscuit_terminal::prelude::*;
@@ -227,6 +229,8 @@ Full contract: `biscuit-terminal/docs/components/git_graph.md`. The caller runs 
 
 Inline concatenation of items without newlines. Useful for composing multiple elements on a single line.
 
+Styled items are `InlineProse` (`From<InlineProse>`, `add_inline_prose`); there is no `From<Prose>`.
+
 ```rust
 use biscuit_terminal::components::inline_content::InlineContent;
 ```
@@ -247,3 +251,7 @@ pub enum RenderableTerminalContent {
 ```
 
 Implements `From<String>`, `From<&str>`, and `From<T: TerminalRenderable>` for ergonomic construction.
+
+### Embedding `Prose` in a container
+
+Containers project children through `render_tree::projection` (`project_renderable_content` / `RenderableTerminalContent::to_tree_nodes`). A `Prose` child is special-cased there: it contributes `Prose::embedded_nodes()` — its `Paragraph` and `Code` blocks, never its `Root` (a nested `Root` fails validation). Its `Layout` moves onto those blocks (one block: the whole layout; several: the horizontal box on each, the top edge on the first, the bottom edge on the last), never onto the container's node. `Prose::render_tree_node()` stays `None` for that reason; do not add one that returns the `Root`. `Compose` puts a `"\n\n"` text between consecutive blocks of one `Prose` because its sequence has no separator. `StatusBlock::body` items and `TwoColumn` columns embed structurally the same way; `BlockQuote` wraps only a `String` (or an all-inline projection) in a `Paragraph`.

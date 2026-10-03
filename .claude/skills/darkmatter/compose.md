@@ -689,6 +689,8 @@ Numeric strings auto-convert for comparisons.
 
 {{ link(doc.path) }}         // Markdown link using relative text and absolute destination
 {{ link("https://example.com", "Example") }}  // Link with explicit description
+{{ code_link(plan) }}        // Same link, text as inline code: [`plans/foo.md`](/abs/plans/foo.md)
+{{ code_link(url, "a]b") }}  // Code-span text is literal; never wrap {{ link(x) }} in backticks
 {{ has_skill("rust") }}      // true when a skill directory exists in user or local roots
 {{ has_local_skill("rust") }} // true when a skill directory exists in local roots only
 ```

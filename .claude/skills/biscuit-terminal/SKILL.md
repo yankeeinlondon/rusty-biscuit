@@ -21,6 +21,11 @@ library, and renders `renderable::tree` nodes to terminal output.
   grammar: a single `\n` is a soft break unless `.with_line_breaks(LineBreaks::Hard)`,
   `\` before a newline is a hard break, and code spans are `InlineCode`
   (literal contents; never `Prose::escape_text` inside backticks).
+- Pick the shape the container takes: table cells, header labels, and
+  `InlineContent` take `InlineProse`; lists, `BlockQuote`, `TwoColumn`
+  columns, and `StatusBlock::body` embed `Prose` as its own blocks, with its
+  layout moved onto those blocks (see `components.md`, "Embedding `Prose` in
+  a container").
 - For multi-target components, project through `renderable::tree` and share a
   helper between `TreeRenderable::render_tree` and
   `TerminalRenderable::render_tree_node`.
