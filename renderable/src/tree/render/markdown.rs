@@ -266,9 +266,10 @@ impl Writer<'_> {
                 // its own line before the table, separated by a blank line.
                 // An empty or whitespace-only title is ignored.
                 match node.attrs.table_title_ref() {
-                    Some(title) if !title.trim().is_empty() => {
-                        Ok(format!("{}\n\n{table}", escape_text(title.trim())))
-                    }
+                    Some(title) if !title.trim().is_empty() => Ok(format!(
+                        "{}\n\n{table}",
+                        escape_literal_backslashes(&escape_text(title.trim()))
+                    )),
                     _ => Ok(table),
                 }
             }
@@ -289,9 +290,15 @@ impl Writer<'_> {
                 Ok(format!("[^{identifier}]: {body}"))
             }
             NodeKind::Text { value } => Ok(self.render_text(value)),
-            NodeKind::Emphasis { children } => Ok(format!("_{}_", self.render_inline(children)?)),
-            NodeKind::Strong { children } => Ok(format!("**{}**", self.render_inline(children)?)),
-            NodeKind::Delete { children } => Ok(format!("~~{}~~", self.render_inline(children)?)),
+            NodeKind::Emphasis { children } => {
+                Ok(format!("_{}_", self.render_delimited_inline(children)?))
+            }
+            NodeKind::Strong { children } => {
+                Ok(format!("**{}**", self.render_delimited_inline(children)?))
+            }
+            NodeKind::Delete { children } => {
+                Ok(format!("~~{}~~", self.render_delimited_inline(children)?))
+            }
             NodeKind::Span { children } => self.render_span(node, children),
             NodeKind::InlineCode { value } => Ok(if self.table_cell_depth > 0 {
                 // A literal pipe inside inline code still breaks a GFM table
@@ -313,10 +320,11 @@ impl Writer<'_> {
             NodeKind::Image { url, title, alt } => {
                 // The alt text is a literal Markdown segment, so inside a
                 // table cell it is escaped just like a `Text` node.
+                let alt = escape_literal_backslashes(alt);
                 let alt = if self.table_cell_depth > 0 {
-                    escape_table_cell_text(alt)
+                    escape_table_cell_text(&alt)
                 } else {
-                    alt.clone()
+                    alt
                 };
                 Ok(format!("![{alt}]({})", self.link_target(url, title)))
             }
@@ -439,6 +447,56 @@ impl Writer<'_> {
             output.push_str(&self.render(child)?);
         }
         Ok(output)
+    }
+
+    /// Renders the children of an emphasis-style wrapper (`_`, `**`, `~~`).
+    ///
+    /// A `*`, `_`, or `~` that is the first character of a leading `Text`
+    /// child or the last character of a trailing one touches the wrapper's own
+    /// delimiter, where a reader would merge it into the delimiter run
+    /// (`**a***`). Only that edge character is backslash-escaped; the same
+    /// character anywhere else in the text is written as-is.
+    fn render_delimited_inline(&mut self, children: &[RenderNode]) -> Result<String, RenderError> {
+        let last = children.len().saturating_sub(1);
+        let mut output = String::new();
+        for (index, child) in children.iter().enumerate() {
+            match &child.kind {
+                NodeKind::Text { value } if index == 0 || index == last => {
+                    output.push_str(&self.render_edge_text(value, index == 0, index == last));
+                }
+                _ => output.push_str(&self.render(child)?),
+            }
+        }
+        Ok(output)
+    }
+
+    /// Renders a text node whose leading and/or trailing character abuts an
+    /// emphasis delimiter, escaping that character when it is one of `*`,
+    /// `_`, or `~`. The middle goes through [`Self::render_text`] unchanged.
+    fn render_edge_text(&self, value: &str, leading: bool, trailing: bool) -> String {
+        let is_delimiter = |c: char| matches!(c, '*' | '_' | '~');
+        let mut middle = value;
+        let mut lead = None;
+        if leading && let Some(first) = middle.chars().next().filter(|c| is_delimiter(*c)) {
+            lead = Some(first);
+            middle = &middle[first.len_utf8()..];
+        }
+        let mut trail = None;
+        if trailing && let Some(last) = middle.chars().next_back().filter(|c| is_delimiter(*c)) {
+            trail = Some(last);
+            middle = &middle[..middle.len() - last.len_utf8()];
+        }
+        let mut out = String::with_capacity(value.len() + 2);
+        if let Some(c) = lead {
+            out.push('\\');
+            out.push(c);
+        }
+        out.push_str(&self.render_text(middle));
+        if let Some(c) = trail {
+            out.push('\\');
+            out.push(c);
+        }
+        out
     }
 
     /// Renders a two-column block quote.
@@ -664,13 +722,18 @@ impl Writer<'_> {
     }
 
     /// Renders a text node, applying HTML-body escaping inside a MarkdownPlus
-    /// inline-HTML span and GFM table-cell escaping inside a table cell.
+    /// inline-HTML span, literal-backslash escaping everywhere, and GFM
+    /// table-cell escaping inside a table cell.
     fn render_text(&self, value: &str) -> String {
         let mut text = if self.html_depth > 0 {
             escape_inline_html_body(value)
         } else {
             value.to_string()
         };
+        // After the HTML escape, so a backslash is judged against the
+        // character a reader actually sees next (`&`, not `<`); before the
+        // cell escape, whose `\|` must stay a pipe escape.
+        text = escape_literal_backslashes(&text);
         if self.table_cell_depth > 0 {
             text = escape_table_cell_text(&text);
         }
@@ -720,13 +783,16 @@ impl Writer<'_> {
             // GFM-only escaping it already had.
             let dest = escape_cell_link_destination(url);
             return match title {
-                Some(title) => format!("{dest} \"{}\"", escape_table_cell_text(title)),
+                Some(title) => format!(
+                    "{dest} \"{}\"",
+                    escape_table_cell_text(&escape_link_title(title))
+                ),
                 None => dest,
             };
         }
         let dest = escape_markdown_destination(url);
         match title {
-            Some(title) => format!("{dest} \"{title}\""),
+            Some(title) => format!("{dest} \"{}\"", escape_link_title(title)),
             None => dest,
         }
     }
@@ -790,6 +856,48 @@ fn escape_text(text: &str) -> String {
     text.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
+}
+
+/// Backslash-escapes each literal `\` a CommonMark reader would otherwise
+/// consume as an escape.
+///
+/// A backslash is an escape only before ASCII punctuation or a line ending,
+/// so only those backslashes are doubled — `C:\dir` stays byte-identical. A
+/// backslash at the *end* of the value is always doubled because the next
+/// character comes from a sibling node the text cannot see: a soft break's
+/// newline (which would turn into a hard break), a hard break's own `\`, a
+/// table cell's `<br>`, or a wrapper delimiter such as the closing `**` of
+/// [`NodeKind::Strong`].
+///
+/// Other Markdown punctuation in literal text (`*`, `_`, `[`, `#`, …) is left
+/// as-is: escaping it would rewrite nearly every rendered document. The one
+/// place such a character meets node syntax, the edge of an emphasis wrapper,
+/// is handled by `Writer::render_delimited_inline`.
+fn escape_literal_backslashes(text: &str) -> String {
+    if !text.contains('\\') {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len() + 2);
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        out.push(c);
+        if c == '\\' {
+            match chars.peek() {
+                None => out.push('\\'),
+                Some(next) if next.is_ascii_punctuation() || *next == '\n' || *next == '\r' => {
+                    out.push('\\');
+                }
+                Some(_) => {}
+            }
+        }
+    }
+    out
+}
+
+/// Escapes a link title for its double-quoted form: a `"` would end the title
+/// early and a trailing `\\` would escape the closing quote.
+fn escape_link_title(title: &str) -> String {
+    escape_literal_backslashes(title).replace('"', "\\\"")
 }
 
 /// Escapes a text node for safe placement inside a GFM table cell.
@@ -2554,5 +2662,332 @@ mod tests {
             vec![RenderNode::text("go")],
         );
         assert_eq!(render(&link).output, "[go](<https://example.com/a b>)");
+    }
+}
+
+/// Literal backslashes in text must survive a CommonMark reader no matter
+/// which break or wrapper syntax follows them. Every assertion parses the
+/// rendered Markdown with `pulldown-cmark`, an independent reader, and
+/// compares the visible text and break kinds.
+#[cfg(test)]
+mod literal_backslash_tests {
+    use super::*;
+    use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+
+    const DIALECTS: [MarkdownDialect; 2] =
+        [MarkdownDialect::Markdown, MarkdownDialect::MarkdownPlus];
+
+    fn render_in(node: &RenderNode, dialect: MarkdownDialect) -> String {
+        let opts = MarkdownRenderOptions {
+            dialect,
+            strictness: RenderStrictness::Warn,
+            style: None,
+        };
+        render_markdown_node(node, &opts).expect("render").output
+    }
+
+    /// Reads `markdown` back and returns its visible text, with `{SB}` for a
+    /// soft break, `{HB}` for a hard break, `<strong>`/`<em>`/`<del>` markers, `|` at each
+    /// table cell, and inline HTML verbatim.
+    fn read_back(markdown: &str) -> String {
+        let mut out = String::new();
+        let options = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH;
+        for event in Parser::new_ext(markdown, options) {
+            match event {
+                Event::Text(text) => out.push_str(&text),
+                Event::SoftBreak => out.push_str("{SB}"),
+                Event::HardBreak => out.push_str("{HB}"),
+                Event::InlineHtml(html) => out.push_str(&html),
+                Event::Start(Tag::Strong) => out.push_str("<strong>"),
+                Event::End(TagEnd::Strong) => out.push_str("</strong>"),
+                Event::Start(Tag::Emphasis) => out.push_str("<em>"),
+                Event::End(TagEnd::Emphasis) => out.push_str("</em>"),
+                Event::Start(Tag::Strikethrough) => out.push_str("<del>"),
+                Event::End(TagEnd::Strikethrough) => out.push_str("</del>"),
+                Event::Start(Tag::TableCell) => out.push('|'),
+                Event::Start(Tag::Link { title, .. } | Tag::Image { title, .. }) => {
+                    out.push_str(&format!("[title={title}]"));
+                }
+                _ => {}
+            }
+        }
+        out
+    }
+
+    fn breaks() -> [(RenderNode, &'static str); 2] {
+        [
+            (RenderNode::soft_break(), "{SB}"),
+            (RenderNode::hard_break(), "{HB}"),
+        ]
+    }
+
+    #[test]
+    fn text_ending_in_backslashes_keeps_them_before_either_break() {
+        for dialect in DIALECTS {
+            for literal in ["a\\", "a\\\\"] {
+                for (brk, marker) in breaks() {
+                    let para = RenderNode::paragraph(vec![
+                        RenderNode::text(literal),
+                        brk,
+                        RenderNode::text("b"),
+                    ]);
+                    let markdown = render_in(&para, dialect);
+                    assert_eq!(
+                        read_back(&markdown),
+                        format!("{literal}{marker}b"),
+                        "{dialect:?} {literal:?} {marker}\n{markdown}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn text_with_embedded_backslash_newline_stays_literal() {
+        for dialect in DIALECTS {
+            let para = RenderNode::paragraph(vec![RenderNode::text("a\\\nb")]);
+            let markdown = render_in(&para, dialect);
+            assert_eq!(read_back(&markdown), "a\\{SB}b", "{dialect:?}\n{markdown}");
+        }
+    }
+
+    #[test]
+    fn strong_text_ending_in_backslash_keeps_valid_emphasis_before_either_break() {
+        for dialect in DIALECTS {
+            for (brk, marker) in breaks() {
+                let para = RenderNode::paragraph(vec![
+                    RenderNode::strong(vec![RenderNode::text("a\\")]),
+                    brk,
+                    RenderNode::text("b"),
+                ]);
+                let markdown = render_in(&para, dialect);
+                assert_eq!(
+                    read_back(&markdown),
+                    format!("<strong>a\\</strong>{marker}b"),
+                    "{dialect:?} {marker}\n{markdown}"
+                );
+            }
+        }
+    }
+
+    fn cell_table(cell: Vec<RenderNode>) -> RenderNode {
+        RenderNode::table(
+            vec![ColumnAlign::None],
+            vec![
+                RenderNode::table_row(vec![RenderNode::table_cell(vec![RenderNode::text("H")])]),
+                RenderNode::table_row(vec![RenderNode::table_cell(cell)]),
+            ],
+        )
+    }
+
+    #[test]
+    fn table_cell_text_ending_in_backslash_keeps_it_before_either_break() {
+        for dialect in DIALECTS {
+            for (brk, marker) in breaks() {
+                let cell_marker = if marker == "{SB}" { " " } else { "<br>" };
+                let table = cell_table(vec![RenderNode::text("a\\"), brk, RenderNode::text("b")]);
+                let markdown = render_in(&table, dialect);
+                assert_eq!(
+                    read_back(&markdown),
+                    format!("|H|a\\{cell_marker}b"),
+                    "{dialect:?} {marker}\n{markdown}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn strong_in_table_cell_keeps_trailing_backslash_inside_valid_emphasis() {
+        for dialect in DIALECTS {
+            for (brk, marker) in breaks() {
+                let cell_marker = if marker == "{SB}" { " " } else { "<br>" };
+                let table = cell_table(vec![
+                    RenderNode::strong(vec![RenderNode::text("a\\")]),
+                    brk,
+                    RenderNode::text("b"),
+                ]);
+                let markdown = render_in(&table, dialect);
+                assert_eq!(
+                    read_back(&markdown),
+                    format!("|H|<strong>a\\</strong>{cell_marker}b"),
+                    "{dialect:?} {marker}\n{markdown}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn table_cell_backslash_before_pipe_stays_literal() {
+        for dialect in DIALECTS {
+            let table = cell_table(vec![RenderNode::text("a\\|b")]);
+            let markdown = render_in(&table, dialect);
+            assert_eq!(read_back(&markdown), "|H|a\\|b", "{dialect:?}\n{markdown}");
+        }
+    }
+
+    #[test]
+    fn styled_span_body_keeps_backslash_before_escaped_markup() {
+        let span = RenderNode::span(vec!["x".to_string()], vec![RenderNode::text("a\\<b>\\")]);
+        let para =
+            RenderNode::paragraph(vec![span, RenderNode::hard_break(), RenderNode::text("c")]);
+        let markdown = render_in(&para, MarkdownDialect::MarkdownPlus);
+        assert_eq!(
+            read_back(&markdown),
+            "<span class=\"x\">a\\<b>\\</span>{HB}c",
+            "{markdown}"
+        );
+    }
+
+    #[test]
+    fn link_text_image_alt_and_titles_keep_trailing_backslashes() {
+        for dialect in DIALECTS {
+            let para = RenderNode::paragraph(vec![
+                RenderNode::link(
+                    "https://e.io",
+                    Some("say \"hi\"\\".to_string()),
+                    vec![RenderNode::text("go\\")],
+                ),
+                RenderNode::text(" "),
+                RenderNode::image("i.png", None, "alt\\"),
+            ]);
+            let markdown = render_in(&para, dialect);
+            assert_eq!(
+                read_back(&markdown),
+                "[title=say \"hi\"\\]go\\ [title=]alt\\",
+                "{dialect:?}\n{markdown}"
+            );
+        }
+    }
+
+    #[test]
+    fn backslash_before_ordinary_characters_is_byte_identical() {
+        for dialect in DIALECTS {
+            let para = RenderNode::paragraph(vec![RenderNode::text("C:\\dir\\file.txt")]);
+            assert_eq!(
+                render_in(&para, dialect),
+                "C:\\dir\\file.txt",
+                "{dialect:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn plain_breaks_without_backslashes_are_unchanged() {
+        for dialect in DIALECTS {
+            for (brk, expected) in [
+                (RenderNode::soft_break(), "a\nb"),
+                (RenderNode::hard_break(), "a\\\nb"),
+            ] {
+                let para =
+                    RenderNode::paragraph(vec![RenderNode::text("a"), brk, RenderNode::text("b")]);
+                assert_eq!(render_in(&para, dialect), expected, "{dialect:?}");
+            }
+        }
+    }
+
+    type Wrap = fn(Vec<RenderNode>) -> RenderNode;
+
+    const WRAPPERS: [(Wrap, &str); 3] = [
+        (RenderNode::emphasis, "em"),
+        (RenderNode::strong, "strong"),
+        (RenderNode::delete, "del"),
+    ];
+
+    /// Every delimiter character at the leading edge, the trailing edge, both
+    /// edges, and as the whole text.
+    fn edge_texts() -> Vec<String> {
+        ['*', '_', '~']
+            .into_iter()
+            .flat_map(|c| {
+                [
+                    format!("{c}a"),
+                    format!("a{c}"),
+                    format!("{c}a{c}"),
+                    c.to_string(),
+                ]
+            })
+            .collect()
+    }
+
+    #[test]
+    fn delimiter_at_a_wrapper_edge_stays_literal_inside_the_wrapper() {
+        for dialect in DIALECTS {
+            for (wrap, tag) in WRAPPERS {
+                for text in edge_texts() {
+                    let para = RenderNode::paragraph(vec![
+                        RenderNode::text("x "),
+                        wrap(vec![RenderNode::text(text.as_str())]),
+                        RenderNode::text(" y"),
+                    ]);
+                    let markdown = render_in(&para, dialect);
+                    assert_eq!(
+                        read_back(&markdown),
+                        format!("x <{tag}>{text}</{tag}> y"),
+                        "{dialect:?} {tag} {text:?}\n{markdown}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn delimiter_at_a_wrapper_edge_stays_literal_in_a_table_cell() {
+        for dialect in DIALECTS {
+            for (wrap, tag) in WRAPPERS {
+                for text in edge_texts() {
+                    let table = cell_table(vec![wrap(vec![RenderNode::text(text.as_str())])]);
+                    let markdown = render_in(&table, dialect);
+                    assert_eq!(
+                        read_back(&markdown),
+                        format!("|H|<{tag}>{text}</{tag}>"),
+                        "{dialect:?} {tag} {text:?}\n{markdown}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn edge_delimiter_and_trailing_backslash_combine() {
+        for dialect in DIALECTS {
+            let para = RenderNode::paragraph(vec![
+                RenderNode::strong(vec![RenderNode::text("*a\\*")]),
+                RenderNode::hard_break(),
+                RenderNode::text("b"),
+            ]);
+            let markdown = render_in(&para, dialect);
+            assert_eq!(
+                read_back(&markdown),
+                "<strong>*a\\*</strong>{HB}b",
+                "{dialect:?}\n{markdown}"
+            );
+        }
+    }
+
+    #[test]
+    fn nested_wrapper_edges_are_escaped_at_the_innermost_text() {
+        for dialect in DIALECTS {
+            let para =
+                RenderNode::paragraph(vec![RenderNode::strong(vec![RenderNode::emphasis(vec![
+                    RenderNode::text("*a*"),
+                ])])]);
+            let markdown = render_in(&para, dialect);
+            assert_eq!(
+                read_back(&markdown),
+                "<strong><em>*a*</em></strong>",
+                "{dialect:?}\n{markdown}"
+            );
+        }
+    }
+
+    #[test]
+    fn delimiters_away_from_wrapper_edges_are_byte_identical() {
+        for dialect in DIALECTS {
+            let para = RenderNode::paragraph(vec![
+                RenderNode::text("*x* "),
+                RenderNode::strong(vec![RenderNode::text("a*b_c~d")]),
+            ]);
+            assert_eq!(render_in(&para, dialect), "*x* **a*b_c~d**", "{dialect:?}");
+        }
     }
 }

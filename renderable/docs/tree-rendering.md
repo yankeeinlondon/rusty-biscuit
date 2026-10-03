@@ -207,6 +207,35 @@ space, and an empty value renders as nothing. The same rule is public as
 `renderable::markdown::code_span`, so any other producer of a code span
 spells it identically.
 
+A `Text` value is literal, so a backslash in it must reach a Markdown reader
+as a backslash. The renderer doubles each backslash that a reader would
+otherwise take as an escape: one before ASCII punctuation or a line ending,
+and one at the end of the value, because the next character comes from a
+neighboring node (a break, a closing `**`, a table cell's `<br>`):
+
+| Tree | Markdown | A reader sees |
+|------|----------|---------------|
+| `Text("a\")`, `SoftBreak`, `Text("b")` | `a\\`, newline, `b` | `a\`, soft break, `b` |
+| `Text("a\")`, `HardBreak`, `Text("b")` | `a\\\`, newline, `b` | `a\`, hard break, `b` |
+| `Strong[Text("a\")]` | `**a\\**` | bold `a\` |
+| `Text("C:\dir")` | `C:\dir` (unchanged) | `C:\dir` |
+
+The same rule covers image alt text, a table title, and a link title (which
+also escapes `"`).
+
+Inside `Emphasis`, `Strong`, and `Delete`, a `*`, `_`, or `~` that touches
+the wrapper's delimiter is escaped too: the first character of a leading
+`Text` child and the last character of a trailing one. `Strong[Text("a*")]`
+is written `**a\***`, which a reader sees as bold `a*`; without the escape it
+would merge into the closing `**`. The same character elsewhere in the text
+is untouched.
+
+Other Markdown punctuation in a `Text` value is written as-is: text
+containing `*` or `_` away from a wrapper edge can still be read as markup.
+Beyond backslashes and wrapper edges, only two contexts escape text: a table cell (pipes and
+newlines) and the body of an HTML element the MarkdownPlus dialect emits
+(HTML escaping).
+
 ### Choosing a paragraph's HTML element
 
 A `Paragraph` renders as `<p>` in the browser unless its `BrowserAttrs`
