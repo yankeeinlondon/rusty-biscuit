@@ -2,7 +2,7 @@
 
 Lists all git worktrees along with their status. This is the default command -- running `wt` with no subcommand is equivalent to `wt list`.
 
-Before it lists anything, `wt list` checks whether `origin/<default>` is current and fetches it when it is not; see [Checking origin](#checking-origin). The output is then, in order: a caption, an optional credentials warning, the worktree table, a two-line legend, the git graph (image-capable terminals only), a status list holding the optional PR age line and refresh hint, the verbose section (`-v` only), and, after a blank line, any closing notes. Everything is written to stderr.
+Before it lists anything, `wt list` checks whether `origin/<default>` is current (fetching it when it is not) and asks for the open pull requests, both in one short wait; see [Checking origin](#checking-origin). The output is then, in order: a caption, an optional credentials warning, the worktree table, a two-line legend, the git graph (image-capable terminals only), a status list holding this run's PR item and the refresh hint, the verbose section (`-v` only), and, after a blank line, any closing notes. Everything is written to stderr.
 
 ## Output
 
@@ -31,10 +31,10 @@ Before it lists anything, `wt list` checks whether `origin/<default>` is current
 
 ### Checking origin
 
-Merge metrics are only as good as `origin/<default>`, so every listing with an `origin` and a default branch checks it first:
+Merge metrics are only as good as `origin/<default>`, and PR badges only as good as the last answer about open pull requests, so every listing with an `origin` asks `origin` both questions before it lists anything. A detached background `wt` process does the asking, in two halves that run side by side: the **head half** (steps 1 and 2) and the **PR half** (see [PR badges](#pr-badges)). The listing waits for both (step 3).
 
-1. **Check.** A detached background `wt` process asks `origin` for the default branch's current commit. For a provider `sniff` supports (GitHub, GitLab, Gitea, Bitbucket) it asks the provider's API, using the same API key variables as the PR badges (`GITHUB_TOKEN` or `GH_TOKEN`, and so on). For any other remote (a local bare repository, an SSH alias, an unsupported host), or when the API request fails (a missing or rejected key, a 404, a rate limit, or any other error with time left), it runs `git ls-remote origin refs/heads/<default>` instead. The whole check, fallback included, is capped at 10 s. Only a complete `ls-remote` answer without the branch counts as the branch being absent; an API 404 alone proves nothing, because providers answer a private repository that way.
-2. **Fetch, only when origin differs.** When the answer differs from `origin/<default>`, the process fetches that one ref, capped at 60 s:
+1. **Check.** The head half asks `origin` for the default branch's current commit. For a provider `sniff` supports (GitHub, GitLab, Gitea, Bitbucket) it asks the provider's API, using the same API key variables as the PR badges (`GITHUB_TOKEN` or `GH_TOKEN`, and so on). For any other remote (a local bare repository, an SSH alias, an unsupported host), or when the API request fails (a missing or rejected key, a 404, a rate limit, or any other error with time left), it runs `git ls-remote origin refs/heads/<default>` instead. The whole check, fallback included, is capped at 10 s. Only a complete `ls-remote` answer without the branch counts as the branch being absent; an API 404 alone proves nothing, because providers answer a private repository that way.
+2. **Fetch, only when origin differs.** When the answer differs from `origin/<default>`, the head half fetches that one ref, capped at 60 s:
 
     ```bash
     git -c maintenance.auto=false -c gc.auto=0 fetch --no-write-fetch-head --no-tags \
@@ -42,10 +42,39 @@ Merge metrics are only as good as `origin/<default>`, so every listing with an `
     ```
 
     Only `refs/remotes/origin/<default>` changes: no tags, no other branches, no `FETCH_HEAD`, and no submodules, whatever your Git configuration says. The leading `+` lets a remote rewind through. Your local default branch is never moved; see `--ff` below. Git runs without credential prompts, with SSH in batch mode, and is killed with its whole process tree at the deadline.
-3. **Wait.** `wt list` waits up to **3 s** for the result. While it waits, a spinner on stderr says `updating`, `no API key, using fallback method`, `rate limited, using fallback method`, or `pulling remote updates`. It appears only after 150 ms, only when stderr is a terminal, and its line is cleared before anything else is printed, so captured output and the shell wrapper never see it. Work still running at 3 s carries on in the background, and the next listing shows its result.
+3. **Wait.** `wt list` waits up to **3 s** for both halves, so an ordinary listing costs the slower of the two, never their sum. While it waits, a spinner on stderr says `updating`, `no API key, using fallback method`, `rate limited, using fallback method`, or `pulling remote updates`, and goes back to `updating` once only the PR half is left. It appears only after 150 ms, only when stderr is a terminal, and its line is cleared before anything else is printed, so captured output and the shell wrapper never see it. Work still running at 3 s carries on in the background, the listing adds the refresh hint, and the next listing shows the result.
 4. **Gather.** Only then are the local refs, comparison counts, and graph read, so a fetch that finished during the wait is reflected everywhere at once.
 
-The check's result is stored for later listings (the last successful answer is never erased by a failed check), and at most one check or fetch runs per repository at a time: a listing that finds one already running follows it rather than asking `origin` again. `-r` and `--ff` wait for the full check, fetch, and PR refresh, up to 75 s.
+The check's result is stored for later listings (the last successful answer is never erased by a failed check), and at most one check or fetch runs per repository at a time: a listing that finds one already running follows it rather than asking `origin` again. `-r` and `--ff` wait for both halves the same way, only longer: up to 75 s.
+
+Without an `origin` nothing is asked, nothing is waited for, and no PR item or refresh hint is shown.
+
+#### How the wait knows both halves are done
+
+The background process writes a small **receipt** file when both halves have finished, on every run. It records how each half ended: the head half's outcome, and whether the PR half published an answer, failed (and why), found another process already asking, was skipped for an ignored repository, or had no provider to ask. The listing reads the receipt for the attempt it launched, and deletes it when its wait ends.
+
+```mermaid
+flowchart LR
+    L[wt list] -->|launch, attempt id| W[background wt]
+    W --> H[head half: check, fetch when origin differs]
+    W --> P[PR half: ask for open PRs]
+    H --> R[receipt for this attempt]
+    P --> R
+    L -->|polls stores and receipt| D{head outcome and receipt?}
+    D -->|yes| S[render both answers]
+    D -->|process exited, no receipt| F[render what was stored; PR refresh failed]
+    D -->|3 s elapsed| T[render newest stored answers plus the refresh hint]
+```
+
+The two halves are reported separately, so one never hides the other:
+
+- **The head finished, PRs did not.** The caption shows the finished check (for example `(updated from origin just now)`), never "still checking"; the status list shows the PR item for an unfinished refresh and the refresh hint.
+- **PRs published, the head did not.** The new badges show with no PR item; the caption says "still checking" (or "still pulling") and the hint follows.
+- **The process exited without a receipt.** What it stored is still shown; the PR refresh counts as failed, with no guessed reason.
+
+The PR half publishes its answer before the receipt exists, so a new answer is recognized the moment it is stored: every stored answer carries a fresh random publication id, and a listing that sees an id other than the one stored when it started knows the answer is new, even when it arrived in the same second or lists no PRs.
+
+Two listings that overlap (say `wt list` in two checkouts of one repository) never ask for PRs twice at once. The second one's PR half finds the first one asking and makes no request; its listing then waits, within its own 3 s, for the first one to finish, and shows the first one's answer if a new one was published. When nothing new appears the PR refresh counts as failed; `-r` and `--ff` instead try once more, still within their 75 s. Waiting on someone else never extends a listing's budget.
 
 ### The default-branch target
 
@@ -85,6 +114,8 @@ When `origin` is a supported provider and this run's API request failed for a co
 | No key set, and the provider rate limited the request | `GitHub rate limited the request for updated information. Add the GITHUB_TOKEN or GH_TOKEN API key to get larger rate limits.` |
 | A key is set, and the provider still rate limited the request | `GitHub rate limited the request for updated information. Try again in a few minutes.` |
 
+The PR request counts too, in every listing, not only under `-r`: a rejected key or a rate limit on it prints the same line. When both requests failed for a confirmed reason, the `origin` check's line wins, and the PR item's `(couldn't refresh)` does not repeat the reason.
+
 Nothing is printed when the request succeeded, with or without a key, or when no key was set and `ls-remote` answered (the closing notice below covers that). A 404 on its own is ambiguous and produces no line. Only failures this listing observed count; a background refresh that fails after the listing rendered never adds a line to it.
 
 The table is never narrower than the legend beneath it; a table with short content widens its last column to match. In the legend the `conflicts` sample sits in the same column as the source-files dot above it.
@@ -114,7 +145,7 @@ Comparison results are cached by the pair of commit SHAs, so a warm `wt list` ru
 
 ### PR badges
 
-Open pull requests on `origin` whose source is this repository show as a green `PR #n` badge:
+Every listing asks `origin` for its open pull requests, whatever the age of the last answer, and shows the answer that arrives within its wait. Open pull requests whose source is this repository show as a green `PR #n` badge:
 
 - in the `-> {target}` cell when the PR targets the default branch, after any counts
 - in the `-> parent` cell when it targets the branch's fork parent
@@ -122,9 +153,22 @@ Open pull requests on `origin` whose source is this repository show as a green `
 
 A PR from a fork with a same-named branch is never shown. In terminals that support OSC 8 hyperlinks the badge links to the PR; elsewhere it shows the number only, with no visible URL, so the table always fits.
 
-A successful answer is stored with the `origin` it came from, and `wt list` shows a stored answer for the current `origin` whatever its age. Once it is 60 seconds old a dim `- PRs as of N min ago` item opens the status list after the graph (see [Status list](#status-list)), and the same background process that checks `origin` (see [Checking origin](#checking-origin)) asks again and replaces the stored answer. The two run independently, and neither blocks the other. An answer that arrives during the 3 s wait is shown in this listing; a later one is shown by the next. At most one PR refresh makes a request at a time, and a refresh that fails leaves the stored answer as it was.
+The request is made only by the background process's PR half (see [Checking origin](#checking-origin)), never by `wt list` itself, with a 10 s deadline. It asks for the complete list, which can take more than one HTTP request on some providers, and stores the answer only when it is complete and `origin` has not changed meanwhile. A failure is never stored, so the last good answer survives it. Each answer is stored with the `origin` it came from; an answer for a different `origin` is never shown. An empty answer is an answer: it clears the badges.
 
-With no stored answer for the current `origin` (the first run, a cleared cache, or a changed or removed `origin`), `wt list` makes the request itself before starting the background process, and gives it 300 ms. Its answer is stored only when nothing else stored an answer while the request was in flight and no background refresh is storing one at that moment; otherwise the newer stored answer is kept, and this listing shows it after its wait. So when two listings overlap, say `wt list` in one terminal and `wt -r` in another, the slower request can never put older badges back. Under `-r` and `--ff` it leaves that request to the background process, which it waits for. An answer stored for a different `origin` is never shown. A failure is never stored, and with no network and no usable stored answer the table shows no badges. A repository listed in `~/.wt.json` (see `--ignore-api`) makes no PR request and shows no badges.
+What the listing shows depends on how this run's PR half ended:
+
+| This run's PR half | Badges | Status item |
+|---|---|---|
+| published an answer within the wait (its own, or one another listing published) | the new answer | none |
+| finished but published nothing, or its result could not be observed | the last stored answer | `- PRs as of <age> ago (couldn't refresh)`, at any age |
+| the same, with nothing stored | none | `- couldn't get open PRs` |
+| still running at 3 s | the last stored answer | `- PRs as of <age> ago` when that answer is 60 s old or more; the refresh hint follows either way |
+| repository listed in `~/.wt.json` (see `--ignore-api`) | none | none |
+| `origin` is a local path or a host with no supported provider | none | none |
+
+For example, a refresh that fails right after a good answer from 10 s ago keeps that answer's badges and reads `- PRs as of less than 1 min ago (couldn't refresh)`. A local-path or unsupported `origin` is not a failure: it simply has no provider to ask, and its head check still runs through Git.
+
+If `origin` changes or disappears during the wait, the old `origin`'s badges and its PR failure reasons are dropped from this listing, and no second refresh starts.
 
 ### Git Graph
 
@@ -152,8 +196,10 @@ There is no minimum terminal width: the graph is sized from its natural width an
 
 A Markdown-style list of dim items follows the graph (or the legend when no graph is drawn), before the verbose section. It is left out when it has no items:
 
-- the PR age, when the shown PR badges are at least 60 seconds old (see [PR badges](#pr-badges))
-- the refresh hint, when the listing rendered while work was still unfinished (the 3 s wait ran out, or a PR refresh is still running)
+- this run's PR item, when its PR refresh failed or was still running with an answer at least 60 seconds old (see the table under [PR badges](#pr-badges))
+- the refresh hint, when the wait ran out before both halves finished
+
+A failed refresh adds the hint only when the wait also ran out (the head half was still running). A refresh still running at 3 s:
 
 ```text
 - PRs as of 12 min ago
@@ -195,7 +241,7 @@ After a blank line, the output can end with up to three kinds of note, in this o
 |------|-------|-------------|
 | `--width <WIDTH>` | `-w` | Set the graph width (e.g. `70`, `70ch`, `50%`) and turn off trimming |
 | `--verbose` | `-v` | Show the commit history of the current branch |
-| `--refresh` | `-r` | Ignore recent answers and wait for the full check, fetch, and PR refresh |
+| `--refresh` | `-r` | Wait for the full check, fetch, and PR refresh, up to 75 s instead of 3 s |
 | `--ignore-api` | | Check `origin` with Git only, never the provider API, for this repository from now on |
 | `--fast-forward` | `--ff` | Wait like `--refresh`, then fast-forward the local default branch to `origin/<default>` |
 | `--perf` | | Print a per-stage timing report to stderr |
@@ -204,7 +250,7 @@ After a blank line, the output can end with up to three kinds of note, in this o
 
 ### `--refresh` / `-r`
 
-Asks again even when the stored PR answer is younger than 60 s, and waits for both the `origin` check (with any fetch) and the PR refresh to finish, up to 75 s (the 10 s check and 60 s fetch caps plus a short allowance) instead of 3 s. When a check is already running for the same `origin` and branch, `-r` follows it; one for another branch is waited out and then a fresh one starts. A failure is reported in the caption or credentials line as usual and does not fail the listing.
+Waits for both the `origin` check (with any fetch) and the PR refresh to finish, up to 75 s (the 10 s check and 60 s fetch caps plus a short allowance) instead of 3 s. Every listing asks both questions anyway; `-r` only waits longer for the answers. When a check is already running for the same `origin` and branch, `-r` follows it; one for another branch is waited out and then a fresh one starts. When another listing was already asking for PRs and published nothing, `-r` asks once more. A failure is reported in the caption or credentials line as usual and does not fail the listing.
 
 ### `--ignore-api`
 
