@@ -4,6 +4,7 @@ use biscuit_terminal::components::list::OrderedList;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
+use renderable::markdown::code_span;
 use color_eyre::eyre::Result;
 use darkmatter::markdown::Markdown;
 use crate::io::{DocumentOutsideRepository, open_argument};
@@ -113,7 +114,7 @@ fn describe_root(root: &SchemaRoot) -> String {
                 InvalidSchemasDir::Empty => "invalid (empty)",
                 InvalidSchemasDir::Relative => "invalid (not an absolute path)",
             };
-            format!("{label}: `{}` <red>{reason}</red>", Prose::escape_text(value))
+            format!("{label}: {} <red>{reason}</red>", code_span(value))
         }
     }
 }

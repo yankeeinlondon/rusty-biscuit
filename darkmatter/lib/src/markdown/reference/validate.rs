@@ -152,7 +152,7 @@ impl biscuit_terminal::components::renderable::TerminalRenderable for Validation
         use std::collections::BTreeMap;
 
         use biscuit_terminal::components::list::UnorderedList;
-        use biscuit_terminal::components::prose::Prose;
+        use biscuit_terminal::components::prose::{LineBreaks, Prose};
 
         let errors: Vec<_> = self
             .report
@@ -222,7 +222,7 @@ impl biscuit_terminal::components::renderable::TerminalRenderable for Validation
                         text
                     }
                     None => item_text,
-                }));
+                }).with_line_breaks(LineBreaks::Hard));
             }
 
             out.push_str(&list.render(term));

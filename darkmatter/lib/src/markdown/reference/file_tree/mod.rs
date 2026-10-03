@@ -66,6 +66,7 @@ impl biscuit_terminal::errors::BlockError for FileTreeError {
         &self,
         term: &biscuit_terminal::terminal::Terminal,
     ) -> biscuit_terminal::components::status_block::StatusBlock {
+        use biscuit_terminal::components::prose::{LineBreaks, Prose};
         use biscuit_terminal::components::status::StatusState;
         use biscuit_terminal::components::status_block::StatusBlock;
         use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
@@ -78,10 +79,10 @@ impl biscuit_terminal::errors::BlockError for FileTreeError {
                     .unwrap_or_else(|| path.display().to_string());
                 StatusBlock::new(StatusState::Error)
                     .error_header(ErrorHeader::new("FileTreeError", "path not found"))
-                    .body(format!(
+                    .body(Prose::new(format!(
                         "<dim>Path:</dim> <cyan>{}</cyan>\n<dim>Resolved:</dim> {absolute}",
                         path.display()
-                    ))
+                    )).with_line_breaks(LineBreaks::Hard))
                     .hint("Invoke with a path that exists, e.g. <cyan>md graph ./docs/root.md</cyan>.")
             }
 
@@ -92,10 +93,10 @@ impl biscuit_terminal::errors::BlockError for FileTreeError {
                     .unwrap_or_else(|| path.display().to_string());
                 StatusBlock::new(StatusState::Error)
                     .error_header(ErrorHeader::new("FileTreeError", "not a file"))
-                    .body(format!(
+                    .body(Prose::new(format!(
                         "<dim>Path:</dim> <cyan>{}</cyan>\n<dim>Resolved:</dim> {absolute}",
                         path.display()
-                    ))
+                    )).with_line_breaks(LineBreaks::Hard))
                     .hint("Pass a regular file (markdown document) rather than a directory or symlink target.")
             }
 

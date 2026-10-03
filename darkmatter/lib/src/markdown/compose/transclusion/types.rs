@@ -151,6 +151,7 @@ impl biscuit_terminal::errors::BlockError for DeferredSetError {
         &self,
         _term: &biscuit_terminal::terminal::Terminal,
     ) -> biscuit_terminal::components::status_block::StatusBlock {
+        use biscuit_terminal::components::prose::{LineBreaks, Prose};
         use biscuit_terminal::components::status::StatusState;
         use biscuit_terminal::components::status_block::StatusBlock;
         use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
@@ -161,9 +162,9 @@ impl biscuit_terminal::errors::BlockError for DeferredSetError {
                     "DeferredSetError",
                     "invalid set assignment",
                 ))
-                .body(format!(
+                .body(Prose::new(format!(
                     "<dim>Line:</dim> {line}\n<dim>Value:</dim> <cyan>{raw}</cyan>\n<dim>Reason:</dim> {reason}"
-                ))
+                )).with_line_breaks(LineBreaks::Hard))
                 .hint(
                     "Use a JSON5 object like <cyan>set={ key: \"value\" }</cyan> or a property form like <cyan>set.key=\"value\"</cyan>.",
                 ),
@@ -484,7 +485,7 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
         &self,
         _term: &biscuit_terminal::terminal::Terminal,
     ) -> biscuit_terminal::components::status_block::StatusBlock {
-        use biscuit_terminal::components::prose::Prose;
+        use biscuit_terminal::components::prose::{LineBreaks, Prose};
         use biscuit_terminal::components::status::StatusState;
         use biscuit_terminal::components::status_block::StatusBlock;
         use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
@@ -753,11 +754,11 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
                     "TransclusionError",
                     "JSON5 parse failure in options",
                 ))
-                .body(format!(
+                .body(Prose::new(format!(
                     "{source}\n<dim>Position:</dim> line {}, column {}",
                     source.line(),
                     source.column()
-                ))
+                )).with_line_breaks(LineBreaks::Hard))
                 .hint("Directive options use JSON5; check braces, quoting, and commas."),
         }
     }

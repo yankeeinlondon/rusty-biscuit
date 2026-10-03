@@ -4,7 +4,7 @@ use std::ops::Range;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use crate::markdown::compose::shell_expansion::types::{
     ErrorHandling, ShellCommandOrigin, ShellExpansionError, ShellPipeline,
 };
@@ -212,7 +212,7 @@ impl biscuit_terminal::errors::BlockError for ShellBlockError {
                 }
                 StatusBlock::new(StatusState::Error)
                     .error_header(ErrorHeader::new("ShellBlockError", "parse failed"))
-                    .body(body)
+                    .body(Prose::new(body).with_line_breaks(LineBreaks::Hard))
                     .hint("Shell block parameters use <cyan>key=\"value\"</cyan> syntax, not <cyan>--flag</cyan> syntax.")
             }
 
@@ -239,7 +239,7 @@ impl biscuit_terminal::errors::BlockError for ShellBlockError {
                 }
                 StatusBlock::new(StatusState::Error)
                     .error_header(ErrorHeader::new("ShellBlockError", "unterminated block"))
-                    .body(body)
+                    .body(Prose::new(body).with_line_breaks(LineBreaks::Hard))
                     .hint("Add <cyan>::end-block</cyan> to close the block.")
             }
 
@@ -275,7 +275,7 @@ impl biscuit_terminal::errors::BlockError for ShellBlockError {
                             context.push_str(&format!("<dim>---</dim>\n{dimmed}\n"));
                         }
                     }
-                    body.push(Prose::new(context));
+                    body.push(Prose::new(context).with_line_breaks(LineBreaks::Hard));
 
                     let excerpt_line = origin.line_number();
                     let show_excerpt = match origin {
@@ -310,11 +310,11 @@ impl biscuit_terminal::errors::BlockError for ShellBlockError {
                     if !stderr_section.is_empty() || !stdout_section.is_empty() {
                         body.push(Prose::new(format!(
                             "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}\n<dim>Exit code:</dim> {code}{stderr_section}{stdout_section}"
-                        )));
+                        )).with_line_breaks(LineBreaks::Hard));
                     } else {
                         body.push(Prose::new(format!(
                             "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}\n<dim>Exit code:</dim> {code}"
-                        )));
+                        )).with_line_breaks(LineBreaks::Hard));
                     }
 
                     StatusBlock::new(StatusState::Error)
@@ -352,7 +352,7 @@ impl biscuit_terminal::errors::BlockError for ShellBlockError {
                     }
                     let mut block = StatusBlock::new(StatusState::Error)
                         .error_header(ErrorHeader::new("ShellBlockError", "command failed"))
-                        .body(body);
+                        .body(Prose::new(body).with_line_breaks(LineBreaks::Hard));
 
                     let hint = match source.as_ref() {
                         ShellExpansionError::ParseDirective { .. } => "Check the command syntax.",

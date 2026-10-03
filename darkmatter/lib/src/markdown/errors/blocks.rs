@@ -14,10 +14,11 @@
 //! [`StatusBlock`]: biscuit_terminal::components::status_block::StatusBlock
 
 use biscuit_file::YamlParseError;
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use biscuit_terminal::components::status::StatusState;
 use biscuit_terminal::components::status_block::StatusBlock;
 use biscuit_terminal::errors::{ErrorHeader, SourceContext, StatusBlockExt, YamlKeyPath};
+use renderable::markdown::code_span;
 
 use crate::markdown::compose::expression::file_suggestions::DEFAULT_MAX_SUGGESTIONS;
 use crate::markdown::compose::expression::{
@@ -36,7 +37,7 @@ pub(crate) fn file_load_block(source: &std::io::Error) -> StatusBlock {
     );
     StatusBlock::new(StatusState::Error)
         .error_header(ErrorHeader::new("MarkdownError", "file load failed"))
-        .body(body)
+        .body(Prose::new(body).with_line_breaks(LineBreaks::Hard))
         .hint("Confirm the path exists and your process has permission to read it.")
 }
 
@@ -56,7 +57,7 @@ pub(crate) fn url_fetch_block(source: &reqwest::Error) -> StatusBlock {
 
     StatusBlock::new(StatusState::Error)
         .error_header(ErrorHeader::new("MarkdownError", "URL fetch failed"))
-        .body(body)
+        .body(Prose::new(body).with_line_breaks(LineBreaks::Hard))
         .hint("Verify the URL is reachable and that any required auth headers are set.")
 }
 
@@ -189,7 +190,7 @@ fn frontmatter_excerpt_prose(ctx: &SourceContext, line: usize, context: usize) -
         let _ = writeln!(buf, "<dim>{marker} {n:>gutter_width$} │</dim> {content}");
     }
 
-    Prose::new(buf.trim_end_matches('\n').to_string())
+    Prose::new(buf.trim_end_matches('\n').to_string()).with_line_breaks(LineBreaks::Hard)
 }
 
 /// Build the [`StatusBlock`] for [`MarkdownError::FrontmatterMerge`].
@@ -199,7 +200,7 @@ pub(crate) fn frontmatter_merge_block(message: &str) -> StatusBlock {
             "MarkdownError",
             "frontmatter merge failed",
         ))
-        .body(message.to_string())
+        .body(Prose::new(message.to_string()).with_line_breaks(LineBreaks::Hard))
         .hint("Review the frontmatter merge strategy for conflicting keys.")
 }
 
@@ -207,7 +208,7 @@ pub(crate) fn frontmatter_merge_block(message: &str) -> StatusBlock {
 pub(crate) fn theme_load_block(message: &str) -> StatusBlock {
     StatusBlock::new(StatusState::Error)
         .error_header(ErrorHeader::new("MarkdownError", "theme load failed"))
-        .body(message.to_string())
+        .body(Prose::new(message.to_string()).with_line_breaks(LineBreaks::Hard))
         .hint("Use `md --list-themes` to see available theme names.")
 }
 
@@ -215,7 +216,7 @@ pub(crate) fn theme_load_block(message: &str) -> StatusBlock {
 pub(crate) fn ast_parse_block(message: &str) -> StatusBlock {
     StatusBlock::new(StatusState::Error)
         .error_header(ErrorHeader::new("MarkdownError", "AST parse failed"))
-        .body(message.to_string())
+        .body(Prose::new(message.to_string()).with_line_breaks(LineBreaks::Hard))
         .hint("The document is not well-formed GFM markdown — check the reported location.")
 }
 
@@ -223,7 +224,7 @@ pub(crate) fn ast_parse_block(message: &str) -> StatusBlock {
 pub(crate) fn invalid_line_range_block(message: &str) -> StatusBlock {
     StatusBlock::new(StatusState::Error)
         .error_header(ErrorHeader::new("MarkdownError", "invalid line range"))
-        .body(message.to_string())
+        .body(Prose::new(message.to_string()).with_line_breaks(LineBreaks::Hard))
         .hint("Line ranges are 1-based and must satisfy `start <= end` within the file.")
 }
 
@@ -236,7 +237,7 @@ pub(crate) fn serialization_block(source: &serde_json::Error) -> StatusBlock {
     );
     StatusBlock::new(StatusState::Error)
         .error_header(ErrorHeader::new("MarkdownError", "serialization failed"))
-        .body(body)
+        .body(Prose::new(body).with_line_breaks(LineBreaks::Hard))
         .hint("Check the input for invalid JSON tokens or unsupported types.")
 }
 
@@ -244,7 +245,7 @@ pub(crate) fn serialization_block(source: &serde_json::Error) -> StatusBlock {
 pub(crate) fn transform_block(message: &str) -> StatusBlock {
     StatusBlock::new(StatusState::Error)
         .error_header(ErrorHeader::new("MarkdownError", "transform failed"))
-        .body(message.to_string())
+        .body(Prose::new(message.to_string()).with_line_breaks(LineBreaks::Hard))
         .hint("Review the transform pipeline inputs and any configured rules.")
 }
 
@@ -324,8 +325,8 @@ pub(crate) fn interpolation_block(
                         )));
                     }
                     body.push(Prose::new(format!(
-                        "<dim>Expression:</dim> `{}`",
-                        Prose::escape_text(rendered)
+                        "<dim>Expression:</dim> {}",
+                        code_span(rendered)
                     )));
                 }
             }
@@ -347,7 +348,7 @@ pub(crate) fn interpolation_block(
                             Prose::escape_text(&suggestion)
                         ));
                     }
-                    body.push(Prose::new(hint));
+                    body.push(Prose::new(hint).with_line_breaks(LineBreaks::Hard));
                 }
             }
             StatusBlock::new(StatusState::Error)
@@ -361,8 +362,8 @@ pub(crate) fn interpolation_block(
         ExpressionError::ContextNotCaptured { .. }
         | ExpressionError::ContextProjectionInvariant { .. } => {
             let mut body = vec![Prose::new(format!(
-                "{scope} failed to evaluate <dim>`{}`</dim>:\n\n{}",
-                Prose::escape_text(expression),
+                "{scope} failed to evaluate <dim>{}</dim>:\n\n{}",
+                code_span(expression),
                 Prose::escape_text(&cause.to_string())
             ))];
             match source {
@@ -397,8 +398,8 @@ pub(crate) fn interpolation_block(
         }
         ExpressionError::MalformedLiteralToken(reason) => {
             let mut body = vec![Prose::new(format!(
-                "{scope} holds <dim>`{}`</dim>, which is not a valid literal token:\n\n{}",
-                Prose::escape_text(expression),
+                "{scope} holds <dim>{}</dim>, which is not a valid literal token:\n\n{}",
+                code_span(expression),
                 Prose::escape_text(&reason.to_string())
             ))];
             push_on_disk_locus(&mut body, key, expression, source);
@@ -413,8 +414,8 @@ pub(crate) fn interpolation_block(
         }
         other => {
             let mut body = vec![Prose::new(format!(
-                "{scope} failed to evaluate <dim>`{}`</dim>:\n\n{}",
-                Prose::escape_text(expression),
+                "{scope} failed to evaluate <dim>{}</dim>:\n\n{}",
+                code_span(expression),
                 Prose::escape_text(&other.to_string())
             ))];
             push_on_disk_locus(&mut body, key, expression, source);
@@ -580,7 +581,7 @@ fn collect_frontmatter_roots(expr: &Expr, names: &mut Vec<String>) {
 pub(crate) fn render_tree_block(message: &str) -> StatusBlock {
     StatusBlock::new(StatusState::Error)
         .error_header(ErrorHeader::new("MarkdownError", "render failed"))
-        .body(message.to_string())
+        .body(Prose::new(message.to_string()).with_line_breaks(LineBreaks::Hard))
         .hint("The document produced a render tree the target renderer rejected.")
 }
 
@@ -593,7 +594,7 @@ pub(crate) fn malformed_stored_hash_block(property: &str, reason: &str) -> Statu
     );
     StatusBlock::new(StatusState::Error)
         .error_header(ErrorHeader::new("MarkdownError", "malformed stored hash"))
-        .body(body)
+        .body(Prose::new(body).with_line_breaks(LineBreaks::Hard))
         .hint("Fix or remove the `hash` frontmatter property, or rerun `md hash --save` to rewrite it.")
 }
 
@@ -607,7 +608,7 @@ pub(crate) fn malformed_disclosure_block(reason: &str, range: &std::ops::Range<u
     );
     StatusBlock::new(StatusState::Error)
         .error_header(ErrorHeader::new("MarkdownError", "malformed disclosure block"))
-        .body(body)
+        .body(Prose::new(body).with_line_breaks(LineBreaks::Hard))
         .hint("Disclosure blocks need `::disclosure`, `::details`, and `::end-disclosure`; the summary must contain only phrasing content.")
 }
 
@@ -625,7 +626,7 @@ pub(crate) fn parameter_binding_block(
     );
     StatusBlock::new(StatusState::Error)
         .error_header(ErrorHeader::new("MarkdownError", "parameter binding failed"))
-        .body(body)
+        .body(Prose::new(body).with_line_breaks(LineBreaks::Hard))
         .hint("Use `file(eager)` when the reference needs filesystem search or recursive matching.")
 }
 
@@ -682,7 +683,7 @@ pub(crate) fn schema_validation_failed_block(
                 "MarkdownError",
                 "schema validation failed",
             ))
-            .body(body_lines.join("\n"))
+            .body(Prose::new(body_lines.join("\n")).with_line_breaks(LineBreaks::Hard))
             .hint(
                 "Check that the document's $schema (or the baseline schema) is well-formed and resolvable.",
             );
@@ -747,7 +748,7 @@ pub(crate) fn schema_validation_failed_block(
 
     StatusBlock::new(StatusState::Error)
         .error_header(ErrorHeader::new("MarkdownError", "schema validation failed"))
-        .body(body_lines.join("\n"))
+        .body(Prose::new(body_lines.join("\n")).with_line_breaks(LineBreaks::Hard))
         .hint("Correct the frontmatter so it satisfies the declared $schema (or baseline schema).")
 }
 

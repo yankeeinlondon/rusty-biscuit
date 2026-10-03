@@ -215,6 +215,7 @@ impl biscuit_terminal::errors::BlockError for StylesheetBlockError {
         &self,
         _term: &biscuit_terminal::terminal::Terminal,
     ) -> biscuit_terminal::components::status_block::StatusBlock {
+        use biscuit_terminal::components::prose::LineBreaks;
         use biscuit_terminal::components::status::StatusState;
         use biscuit_terminal::components::status_block::StatusBlock;
         use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
@@ -249,9 +250,9 @@ impl biscuit_terminal::errors::BlockError for StylesheetBlockError {
                         "StylesheetError",
                         "property/value type mismatch",
                     ))
-                    .body(format!(
+                    .body(Prose::new(format!(
                         "<dim>Property:</dim> <cyan>{property}</cyan>\n<dim>Expected:</dim> <b>{expected}</b>\n<dim>Actual:</dim> {actual}\n<dim>Value:</dim> <cyan>{value}</cyan>"
-                    ))
+                    )).with_line_breaks(LineBreaks::Hard))
                     .hint(format!(
                         "Use a <cyan>{expected}</cyan> value (e.g., <cyan>{example}</cyan>)."
                     ))
