@@ -804,6 +804,48 @@ class PackagePolicyTests(unittest.TestCase):
         self.assertTrue(policy["a"]["gates"])
         self.assertEqual(policy["a"]["tiers"], ["L1"])
 
+    def test_empty_tiers_require_a_no_tests_reason(self) -> None:
+        for tests in ({"tiers": []}, {"tiers": [], "no-tests-reason": "  "}):
+            with self.subTest(tests=tests):
+                with self.assertRaises(RuntimeError) as raised:
+                    validate_package_ci(
+                        "a", {"tests": tests}, self.RUNNER_LABELS, root=Path("/"), today=TODAY
+                    )
+                self.assertIn("no-tests-reason", str(raised.exception))
+
+    def test_a_no_tests_reason_needs_empty_tiers(self) -> None:
+        with self.assertRaises(RuntimeError) as raised:
+            validate_package_ci(
+                "a",
+                {"tests": {"tiers": ["L1"], "no-tests-reason": "x"}},
+                self.RUNNER_LABELS,
+                root=Path("/"),
+                today=TODAY,
+            )
+        self.assertIn("tiers = []", str(raised.exception))
+
+    def test_empty_tiers_refuse_test_tier_configuration(self) -> None:
+        with self.assertRaises(RuntimeError) as raised:
+            validate_package_ci(
+                "a",
+                {"tests": {"tiers": [], "no-tests-reason": "x", "l1-include-slow": True}},
+                self.RUNNER_LABELS,
+                root=Path("/"),
+                today=TODAY,
+            )
+        self.assertIn("l1-include-slow", str(raised.exception))
+
+    def test_tiers_without_l1_are_still_refused(self) -> None:
+        with self.assertRaises(RuntimeError) as raised:
+            validate_package_ci(
+                "a",
+                {"tests": {"tiers": ["L2"], "l2-backends": ["tmux"]}},
+                self.RUNNER_LABELS,
+                root=Path("/"),
+                today=TODAY,
+            )
+        self.assertIn("without L1", str(raised.exception))
+
     def test_unknown_field_is_rejected(self) -> None:
         with self.assertRaises(RuntimeError) as raised:
             validate_package_ci(
@@ -1924,6 +1966,87 @@ class GatesFalseScopeTests(unittest.TestCase):
         self.assertEqual(
             policy["excluded"]["exclusion"]["exclusion_class"], "promotion-pending"
         )
+
+
+class DeclaredTestlessPackageTests(unittest.TestCase):
+    """`tiers = []` with a reason: no test cell, compile checks everywhere native.
+
+    An L1 cell over a package with no tests can only fail
+    `completion-expected-empty`, so the absence is declared and the planner
+    replaces the L1 build's compile coverage with a check on each native
+    environment.
+    """
+
+    REASON = "placeholder binary"
+
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        seed_build_inputs(self.root)
+        declared = package(
+            self.root,
+            "bare",
+            "bare/Cargo.toml",
+            ci=ci_policy(tests={"tiers": [], "no-tests-reason": self.REASON}),
+            targets=["lib", "bin"],
+        )
+        self.metadata = {
+            "workspace_members": ["bare"],
+            "packages": [declared],
+            "resolve": {"nodes": [{"id": "bare", "deps": []}]},
+        }
+        self.policy = package_ci_policy(
+            {"bare": declared},
+            runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
+            root=self.root,
+            today=TODAY,
+        )
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def plan(self, environments: list[dict[str, object]]) -> dict:
+        plan = calculate_scope(
+            ["bare/src/lib.rs"], self.root, self.metadata, environments, self.policy
+        )
+        self.assertEqual([], schema.validate_resolved_plan(plan))
+        return plan
+
+    def test_no_test_cell_and_a_check_on_every_native_environment(self) -> None:
+        plan = self.plan(environments_for_tests())
+        cells = {(cell["environment"], cell["gate"]): cell for cell in plan["cells"]}
+        self.assertFalse(
+            [key for key in cells if key[1] in schema.BUILD_GATES],
+            "a package declaring no tests must own no test cell",
+        )
+        self.assertEqual(
+            {"ubuntu-latest", "windows-latest", "macos-latest"},
+            {environment for environment, gate in cells if gate == "check"},
+        )
+        check = cells[("windows-latest", "check")]
+        self.assertEqual(["lib", "bin"], check["target_kinds"])
+        self.assertIn(self.REASON, check["selection_reason"])
+        self.assertEqual([], plan["builds"])
+        (record,) = plan["packages"]
+        self.assertEqual([], record["tiers"])
+        self.assertEqual(self.REASON, record["no_tests_reason"])
+        self.assertEqual("-p bare --lib --bins", record["check_args"])
+
+    def test_an_archive_only_schedule_gives_it_no_cells_and_no_exclusion(self) -> None:
+        guest_only = [
+            environment
+            for environment in environments_for_tests()
+            if environment["name"] == "wsl2-ubuntu"
+        ]
+        plan = self.plan(guest_only)
+        self.assertEqual([], plan["cells"])
+        (record,) = plan["packages"]
+        self.assertEqual([], record["gates"])
+        self.assertNotIn("exclusion", record)
+        # The rollup's policy must not read the empty gate list as `gates = false`.
+        (policy,) = legacy_scope_document(plan)["policy"]
+        self.assertTrue(policy["gates"])
+        self.assertEqual([], policy["tiers"])
 
 
 class NonPropagationTests(unittest.TestCase):
@@ -5963,7 +6086,14 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn(pattern, current)
         self.assertIn("github-token: ${{ github.token }}", newest)
         self.assertIn("run-id: ${{ github.run_id }}", newest)
-        self.assertIn(pattern, newest)
+        # The overlay spends the run's shared REST budget per artifact, so it
+        # runs only on a rerun and fetches only this area's packages.
+        overlay_step = rollup_downloads.split(
+            "- name: Overlay newest run-wide result and status artifacts", 1
+        )[1]
+        self.assertIn("if: ${{ github.run_attempt > 1 }}", overlay_step.split("uses:", 1)[0])
+        self.assertIn("pattern: ${{ steps.area.outputs.overlay }}", newest)
+        self.assertIn('"build-status-*"', plan)
 
 
 # --- helpers ---------------------------------------------------------------

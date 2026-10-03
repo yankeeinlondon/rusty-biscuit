@@ -1114,8 +1114,27 @@ class ResolvedPlanValidationTests(unittest.TestCase):
         )
         self.assertIn(
             "malformed-receipt: package claudine carries an exclusion exactly when it "
-            "gates nothing",
+            "gates nothing without a no_tests_reason",
             schema.validate_resolved_plan(document),
+        )
+
+    def test_a_package_declaring_no_tests_may_gate_nothing_without_an_exclusion(self):
+        document = plan(
+            packages=[package(gates=[], tiers=[], no_tests_reason="placeholder")]
+        )
+        self.assertNotIn(
+            "malformed-receipt: package claudine carries an exclusion exactly when it "
+            "gates nothing without a no_tests_reason",
+            schema.validate_resolved_plan(document),
+        )
+
+    def test_a_no_tests_reason_on_a_package_with_tiers_is_refused(self):
+        self.assertIn(
+            "malformed-receipt: package claudine no_tests_reason must be a non-empty "
+            "string on a package whose tiers are empty",
+            schema.validate_resolved_plan(
+                plan(packages=[package(no_tests_reason="placeholder")])
+            ),
         )
 
     def test_a_dependent_seam_that_is_not_an_object_is_refused(self):

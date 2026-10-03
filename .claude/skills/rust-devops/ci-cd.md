@@ -714,7 +714,7 @@ That is not an oversight: it is the always-runs merge-gate binary, it links none
 of the monorepo's crates, and its only output target is GitHub's own renderer.
 `ci-plan` and `ci-build` do render through `TerminalRenderable`.
 
-## Two traps in the workflow files themselves
+## Traps in the workflow files themselves
 
 `actionlint`'s `github` context model **does not include `run_started_at`**,
 even though GitHub documents and populates it. A workflow that reads it lints
@@ -750,6 +750,20 @@ workspace entry, so its `SUITE_REGISTRY` entry `artifact-publisher` is the only
 thing that schedules it. The fixture lives outside `scripts/ci/` because
 `build_baseline_revision.py` carries it with the instrument and refuses a
 constructed revision that adds a `scripts/ci/` path.
+
+**Every job in a run shares one REST budget.** `github.token` is an
+installation token limited to 1,000 REST requests an hour for the whole run,
+plus a secondary limit on bursts. `actions/download-artifact` with `run-id:`
+and `github-token:` costs one request per listed page **and one per artifact
+downloaded**; the tokenless in-run form does not touch that budget. A
+full-scope nightly run carries ~350 artifacts across ~30 areas, and an
+unnarrowed run-wide overlay in every area's `coverage-audit` spent ~7,500
+requests. That failed the nightly audits and then the `ci-infra-retry` that
+read the same run (2026-09-28 → 2026-10-03). So the overlay runs only when
+`github.run_attempt > 1` and downloads only the area's own packages, and
+`runner_loss.py` classifies only the area's jobs and waits out a rate limit
+(15 minutes at most) instead of failing. Scale any new REST-reading step by
+area count × artifact count before adding it.
 
 ## Where CI's own suites run, and where area drift is enforced
 
@@ -975,6 +989,15 @@ the tracked work that ends the gap. A plain `false` is an *ungoverned* absence.
 - Do not put a policy gap in `ci-baseline.toml`; gaps are planner-owned
   governance records, while the baseline contains only exact skip budgets.
 
+A package with no tests declares `[package.metadata.ci.tests] tiers = []`
+plus a non-empty `no-tests-reason`; never leave it on the default L1 tier,
+whose empty listing fails `completion-expected-empty`. It gets no test cell
+and no archive, only lint and a `check` cell on every native environment the
+event schedules, with `--lib`/`--bins`/`--tests` selectors added to
+`check_args`. The plan carries the reason as `no_tests_reason`; on the
+nightly WSL2-only schedule such a package has no cells and an empty gate list
+without an `exclusion`.
+
 A `gates = false` package owns no plan cells at all. Its governed
 `NOT SCHEDULED` entries come from the resolved-package policy document, which is
 the only place its owner, class, and expiry live — that document cannot be
@@ -1182,6 +1205,11 @@ Do not introduce a second version authority, publish from a feature branch, or
 silently turn on crates.io. A new registry, installer generator, signing path,
 or binary matrix is a separate design decision whose credentials, target
 coverage, checksums, and rollback behavior must be explicit.
+
+**Planned:** installable binaries (GitHub Release archives, cargo-binstall,
+Homebrew, shell/PowerShell, npm, PyPI) built by `dist` from release-plz's
+tags, and crates.io publication where a crate's name is free. The design and
+its open questions are in `2026-10-03-binary-releases`.
 
 ## Verification boundaries
 

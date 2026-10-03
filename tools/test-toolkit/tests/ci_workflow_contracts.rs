@@ -2093,7 +2093,7 @@ fn every_producer_job_emits_an_explicit_status_artifact() {
 /// gate command is a test, lint, or compile command whose failure must fail the
 /// producer while its status artifact retains the cell-level diagnosis.
 const GATE_STEPS: [(&str, &str, &str, &str); 8] = [
-    ("_package-ci.yml", "  check:", "check", "cargo check (declared example/bench kinds)"),
+    ("_package-ci.yml", "  check:", "check", "cargo check (declared kinds no test gate compiles)"),
     ("_package-ci.yml", "  check:", "dependents", "Compile unchanged dependents"),
     ("_package-ci.yml", "  test:", "gate", "Tests"),
     ("_package-ci.yml", "  test:", "companion", "Companion suites"),

@@ -9,13 +9,17 @@ import unittest
 from pathlib import Path
 
 from runner_loss import (
+    RATE_LIMIT_MAX_WAIT_SECONDS,
+    SECONDARY_RATE_LIMIT_WAIT_SECONDS,
     classify,
+    concerns,
     failed_step,
     failure_stage,
     interrupted_step,
     is_non_producer,
     parse_build_job_name,
     parse_job_name,
+    rate_limit_delay,
     selected_packages,
     should_rerun,
     status_directory,
@@ -198,6 +202,47 @@ class JobNameTests(unittest.TestCase):
             "status-playa-cli-L1-wsl2-ubuntu",
             status_directory({"package": "playa-cli", "job": "L1", "environment": "wsl2-ubuntu"}),
         )
+
+
+class RateLimitDelayTests(unittest.TestCase):
+    PRIMARY = "gh: API rate limit exceeded for installation. (HTTP 403)"
+    SECONDARY = "You have exceeded a secondary rate limit. Please wait a few minutes"
+
+    def test_primary_limit_waits_until_just_after_reset(self) -> None:
+        self.assertEqual(rate_limit_delay(self.PRIMARY, reset=1_100, now=1_000.0), 105.0)
+
+    def test_primary_limit_beyond_the_cap_is_not_waited_for(self) -> None:
+        reset = 1_000 + RATE_LIMIT_MAX_WAIT_SECONDS + 60
+        self.assertIsNone(rate_limit_delay(self.PRIMARY, reset=reset, now=1_000.0))
+
+    def test_primary_limit_without_a_known_reset_fails(self) -> None:
+        self.assertIsNone(rate_limit_delay(self.PRIMARY, reset=None, now=1_000.0))
+
+    def test_reset_already_past_still_waits_briefly(self) -> None:
+        self.assertEqual(rate_limit_delay(self.PRIMARY, reset=900, now=1_000.0), 1.0)
+
+    def test_secondary_limit_backs_off_a_fixed_minute(self) -> None:
+        self.assertEqual(
+            rate_limit_delay(self.SECONDARY, reset=None, now=0.0),
+            float(SECONDARY_RATE_LIMIT_WAIT_SECONDS),
+        )
+
+    def test_other_errors_are_not_rate_limits(self) -> None:
+        self.assertIsNone(rate_limit_delay("HTTP 502: Bad Gateway", reset=1_100, now=1_000.0))
+
+
+class ConcernsTests(unittest.TestCase):
+    def test_own_package_row_is_kept(self) -> None:
+        self.assertTrue(concerns(LOST_WSL_JOB, {"playa-cli"}))
+
+    def test_other_area_row_is_dropped(self) -> None:
+        self.assertFalse(concerns(LOST_WSL_JOB, {"darkmatter"}))
+
+    def test_build_jobs_are_always_kept(self) -> None:
+        self.assertTrue(concerns({"name": "build (ubuntu-latest)"}, {"darkmatter"}))
+
+    def test_non_producer_jobs_are_dropped(self) -> None:
+        self.assertFalse(concerns({"name": "ci-gate"}, {"darkmatter"}))
 
 
 class ClassifyTests(unittest.TestCase):

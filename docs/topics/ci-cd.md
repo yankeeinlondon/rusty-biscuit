@@ -257,6 +257,28 @@ compile coverage came from, and an archive-only environment names the runner tha
 archive rather than claiming to have compiled anything. This alone took the full-scope job
 estimate from 486 to 432.
 
+**A package with no tests says so.** Every gating package runs L1 by default, and an L1 cell
+whose listing finds no test fails its completeness check (`completion-expected-empty`): CI
+cannot tell "this package has no tests" from "a filter silently dropped them". A package that
+genuinely has none declares it, with the reason:
+
+```toml
+[package.metadata.ci.tests]
+tiers = []
+no-tests-reason = "placeholder binary that only prints a greeting"
+```
+
+The planner then schedules no L1, L2, or browser cell for it, and no build archive. Instead it
+gets lint plus a `check` cell on **every** native environment the event schedules (not just
+`ubuntu-latest`), running `cargo check` with explicit selectors for all of its declared kinds
+(`--lib`, `--bins`, `--tests`, `--examples`, `--benches`). The reason travels in the resolved
+plan as the package record's `no_tests_reason` and in each check cell's selection reason. The
+archive-only WSL2 guest compiles nothing, so on the nightly schedule, which runs only WSL2,
+such a package has no cells at all. The declaration is refused without a non-empty reason, or
+together with fields that only configure a test tier (`l1-include-slow`, `runner-tools`,
+`companion-suites`, `requires-toolchain`, `archive-includes`, `sidecars`, `source-inputs`).
+Adding the package's first test means deleting both lines.
+
 Per-package policy — L2/browser tier ownership, native libraries, Cargo features, runner tools,
 and companion suites — lives in each package's `[package.metadata.ci]`; environment capabilities
 live in `.github/ci/environments.json`. Documentation, manifests, lockfiles, Just recipes, and

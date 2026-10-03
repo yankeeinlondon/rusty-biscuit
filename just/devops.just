@@ -2598,7 +2598,8 @@ _coverage pkg *args="": _storage_preflight
 # Run a cargo-fuzz target. Requires nightly toolchain pinned in the
 # package's `fuzz/rust-toolchain.toml`.
 #
-# Usage: `just _fuzz <pkg-fuzz-dir> <target> [-- libfuzzer-args]`
+# Usage: `just _fuzz <crate-dir> <target> [-- libfuzzer-args]`, where
+# `<crate-dir>` is the crate holding the `fuzz/` workspace (e.g. `lib`).
 _fuzz fuzz_dir target *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
@@ -2606,6 +2607,9 @@ _fuzz fuzz_dir target *args="": _storage_preflight
     echo -e "🦠 Fuzzing {{ bold }}{{ target }}{{ reset }} {{ dim }}({{ fuzz_dir }}){{ reset }}"
     echo
     cd "{{ fuzz_dir }}"
+    # The fuzz crate is its own workspace; seeding its lock from the root one
+    # fuzzes the dependency versions that ship (see `.gitignore`).
+    cp "$(git rev-parse --show-toplevel)/Cargo.lock" fuzz/Cargo.lock
     cargo +nightly fuzz run "{{ target }}" {{ args }}
 
 # Composite "everything that is part of the PR gate" runner.

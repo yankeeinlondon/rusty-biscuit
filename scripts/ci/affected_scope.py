@@ -522,7 +522,24 @@ CI_TEST_FIELDS = {
     #: out of that scan, so such a test runs only when its own package changes
     #: (see `test_input_references`).
     "source-inputs",
+    #: Why a package declaring `tiers = []` has no tests. Required exactly
+    #: then: the planner gives such a package compile-only `check` cells, and
+    #: the plan carries this text so the absence is stated, never inferred.
+    "no-tests-reason",
 }
+
+# `tests` fields that configure only a test tier's execution. A package that
+# declares `tiers = []` has no test cell for them to reach, so setting one is a
+# configuration that silently does nothing and is refused instead.
+TEST_TIER_ONLY_FIELDS = frozenset({
+    "l1-include-slow",
+    "runner-tools",
+    "companion-suites",
+    "requires-toolchain",
+    "archive-includes",
+    "sidecars",
+    "source-inputs",
+})
 EXCLUSION_FIELDS = {"exclusion-class", "owner", "reason", "expiry"}
 
 # Where `_package-ci.yml` runs clippy. A cell carries it so the lint gate's
@@ -532,7 +549,9 @@ LINT_ENVIRONMENT = "ubuntu-latest"
 # Where the `example` and `bench` kinds are compiled. One environment, like
 # lint: compiling them once is the coverage, compiling them per operating
 # system was cost (fixes/2026-09-18-ci-cadence, decision 3). The archive-only
-# guest this host builds for is stood for here as before.
+# guest this host builds for is stood for here as before. A package declaring
+# `tiers = []` is the exception: its check replaces an L1 build, so it runs on
+# every native environment.
 CHECK_ENVIRONMENT = "ubuntu-latest"
 
 # The gates the L1 build itself compiles. A separate check cell is scheduled
@@ -1461,10 +1480,29 @@ def validate_package_ci(
         )
     if len(set(tiers)) != len(tiers):
         raise RuntimeError(f"{label}.tests field 'tiers' has duplicates: {tiers}")
-    if "L1" not in tiers:
+    no_tests_reason = tests.get("no-tests-reason")
+    if not tiers:
+        if not isinstance(no_tests_reason, str) or not no_tests_reason.strip():
+            raise RuntimeError(
+                f"{label}.tests declares 'tiers = []' and must give a non-empty "
+                "'no-tests-reason'; a package without tests says why"
+            )
+        test_only = sorted(TEST_TIER_ONLY_FIELDS & tests.keys())
+        if test_only:
+            raise RuntimeError(
+                f"{label}.tests declares 'tiers = []' and sets {test_only}, which "
+                "configure only a test tier"
+            )
+    elif "no-tests-reason" in tests:
         raise RuntimeError(
-            f"{label}.tests declares {tiers} without L1; a gating package always runs "
-            "L1 — 'gates = false' is how a package opts out"
+            f"{label}.tests gives 'no-tests-reason' while declaring tiers {tiers}; "
+            "it belongs only to 'tiers = []'"
+        )
+    elif "L1" not in tiers:
+        raise RuntimeError(
+            f"{label}.tests declares {tiers} without L1; a package with tests always "
+            "runs L1 — 'tiers = []' declares a package without tests, and "
+            "'gates = false' is how a package opts out"
         )
 
     backends = tests.get("l2-backends", [])
@@ -1741,7 +1779,8 @@ def package_ci_policy(
     """Resolve every workspace package's CI policy from its own manifest.
 
     A package with no `[package.metadata.ci]` defaults to `gates = true` and
-    the L1 tier. Non-gating is never inferred from zero observed tests.
+    the L1 tier. Non-gating is never inferred from zero observed tests, and
+    neither is having none: `tiers = []` with a `no-tests-reason` declares it.
     """
     today = today or date.today()
     policy: dict[str, dict[str, Any]] = {}
@@ -1768,6 +1807,8 @@ def package_ci_policy(
             "sidecars": tests.get("sidecars", []),
             "source_inputs": tests.get("source-inputs", []),
         }
+        if not record["tiers"]:
+            record["no_tests_reason"] = tests["no-tests-reason"]
         for path in record["source_inputs"]:
             own = manifest_directory(root, package).as_posix()
             if own in (".", "") or path.startswith(own + "/"):
@@ -1883,15 +1924,24 @@ def uncovered_target_kinds(target_kinds: Sequence[str]) -> list[str]:
     return [kind for kind in TARGET_KINDS if kind in target_kinds and kind not in L1_TARGET_KINDS]
 
 
-def check_arguments(package: str, target_kinds: Sequence[str], features: str) -> str:
+def check_arguments(
+    package: str, target_kinds: Sequence[str], features: str, tested: bool = True
+) -> str:
     """The `cargo check` arguments for a package's uncovered target kinds.
 
     Explicit selectors only (`--examples`, `--benches`): the L1 build already
     compiled `lib`, `bin`, and `test`, so a check that re-selects them claims
     nothing new and costs a second compile. A package with no uncovered kind
     owns no check cell, and its arguments are just the selector and features.
+    A package declaring `tiers = []` (`tested` false) has no L1 build, so every
+    declared kind is uncovered and selected explicitly.
     """
-    selectors = [CHECK_SELECTORS[kind] for kind in uncovered_target_kinds(target_kinds)]
+    kinds = (
+        uncovered_target_kinds(target_kinds)
+        if tested
+        else [kind for kind in TARGET_KINDS if kind in target_kinds]
+    )
+    selectors = [CHECK_SELECTORS.get(kind) or DEPENDENT_SELECTORS[kind] for kind in kinds]
     return " ".join(part for part in ["-p", package, *selectors, features] if part)
 
 
@@ -2864,7 +2914,16 @@ def package_cells(
             ),
         )
 
-    unchecked = uncovered_target_kinds(target_kinds)
+    # A package that declares `tiers = []` has no L1 build to compile its
+    # `lib`, `bin`, and `test` kinds, so every declared kind is checked, and on
+    # every native environment rather than once: the L1 it does not have would
+    # have compiled them on each.
+    tested = "no_tests_reason" not in record
+    unchecked = (
+        uncovered_target_kinds(target_kinds)
+        if tested
+        else [kind for kind in TARGET_KINDS if kind in target_kinds]
+    )
     seam = sorted(dependents)
     seam_reason = (
         f"also compiles {len(seam)} unchanged dependent(s) against {package}'s "
@@ -2876,7 +2935,7 @@ def package_cells(
         # checks nowhere, and its L1 builds still compile the L1 kinds.
         for environment in native_environments(environments):
             name = environment["name"]
-            if name != CHECK_ENVIRONMENT:
+            if tested and name != CHECK_ENVIRONMENT:
                 continue
             # The guest whose archive this runner builds never compiles, so
             # this cell is the only compile coverage those kinds get there.
@@ -2891,8 +2950,13 @@ def package_cells(
                 "check",
                 unchecked,
                 "check",
-                f"{', '.join(unchecked)} target(s) are compiled by no test gate; "
-                f"checked on {name} only"
+                (
+                    f"{', '.join(unchecked)} target(s) are compiled by no test gate; "
+                    f"checked on {name} only"
+                    if tested
+                    else f"{package} declares no tests ({record['no_tests_reason']}); "
+                    f"{', '.join(unchecked)} target(s) checked on {name}"
+                )
                 + (
                     f", which also stands for {', '.join(stands_for)} "
                     "(archive built here, never compiles)"
@@ -3032,9 +3096,11 @@ def policy_record(
     shaped = {
         "package": record["package"],
         "area": record["area"],
-        # A gating package always owns at least its lint cell, so an empty
-        # gate list is exactly `gates = false`.
-        "gates": bool(record["gates"]),
+        # A gating package with tests always owns at least its lint cell, so an
+        # empty gate list is `gates = false` — unless the package declares no
+        # tests, whose only cells are compile checks that an event scheduling
+        # no native environment (the nightly WSL2 run) never creates.
+        "gates": bool(record["gates"]) or "no_tests_reason" in record,
         "tiers": record["tiers"] if testing else [],
         "l2_backends": record["l2_backends"],
         # The rollup needs to know a companion suite was DECLARED: a green
@@ -3050,7 +3116,7 @@ def policy_record(
             )
         ],
     }
-    if not record["gates"]:
+    if not shaped["gates"]:
         shaped["exclusion"] = record["exclusion"]
     return shaped
 
@@ -3670,7 +3736,9 @@ def calculate_scope(
             "targets": target_kinds,
             "tiers": record["tiers"],
             "test_args": features,
-            "check_args": check_arguments(name, target_kinds, features),
+            "check_args": check_arguments(
+                name, target_kinds, features, tested="no_tests_reason" not in record
+            ),
             "l2_backends": record["l2_backends"],
             "runner_tools": record["runner_tools"],
             "companion_suites": record["companion_suites"],
@@ -3683,6 +3751,8 @@ def calculate_scope(
                 package_id, root, metadata, packages
             ),
         }
+        if "no_tests_reason" in record:
+            package_record["no_tests_reason"] = record["no_tests_reason"]
         if seam:
             seam["native"] = sorted({
                 prerequisite

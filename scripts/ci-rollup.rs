@@ -1109,8 +1109,9 @@ struct PackagePolicy {
     area: String,
     #[serde(default = "default_true")]
     gates: bool,
-    /// CI-gating tiers this package owns. Always contains L1 for a gating
-    /// package; L2 and browser are declared opt-ins.
+    /// CI-gating tiers this package owns. Contains L1 for a gating package
+    /// with tests; L2 and browser are declared opt-ins. Empty for a gating
+    /// package that declares `tiers = []`, whose only cells are compile checks.
     #[serde(default = "default_tiers")]
     tiers: Vec<Tier>,
     /// L2 terminal backends the package's tests require.

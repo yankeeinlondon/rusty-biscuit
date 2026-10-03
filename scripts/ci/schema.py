@@ -562,6 +562,11 @@ PACKAGE_FIELDS: dict[str, bool] = {
     #: reason, expiry. Present exactly when `gates` is empty, because the
     #: rollup's policy document is projected from the plan and reads it there.
     "exclusion": False,
+    #: Why a package that declares `tiers = []` has no tests. Present exactly
+    #: when that declaration was made: its `tiers` are empty, and its cells are
+    #: compile-only checks, which an event scheduling no native environment
+    #: does not create, so its gate list may be empty without an exclusion.
+    "no_tests_reason": False,
     #: Repository-relative manifest directories of the package's build closure,
     #: dev-dependencies included. The gate-input identity of spec section 3.3
     #: is computed over these plus the gate's global inputs. Optional: a plan
@@ -1436,10 +1441,20 @@ def validate_resolved_plan(document: Any, today: Any = None) -> list[str]:
             problems.append(
                 f"malformed-receipt: package {entry['package']} l1_include_slow must be a boolean"
             )
-        if ("exclusion" in entry) != (entry.get("gates") == []):
+        untested = "no_tests_reason" in entry
+        if untested and (
+            not isinstance(entry["no_tests_reason"], str)
+            or not entry["no_tests_reason"].strip()
+            or entry.get("tiers") != []
+        ):
+            problems.append(
+                f"malformed-receipt: package {entry['package']} no_tests_reason must "
+                "be a non-empty string on a package whose tiers are empty"
+            )
+        if ("exclusion" in entry) != (entry.get("gates") == [] and not untested):
             problems.append(
                 f"malformed-receipt: package {entry['package']} carries an exclusion "
-                "exactly when it gates nothing"
+                "exactly when it gates nothing without a no_tests_reason"
             )
         if "dependent_seam" in entry:
             problems += _dependent_seam(entry["package"], entry["dependent_seam"])

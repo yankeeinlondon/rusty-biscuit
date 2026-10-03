@@ -229,7 +229,7 @@ jobs:
           set -euo pipefail
           just _ci_build_counter "check ${{ matrix.environment }}"
       # Gate command. Its outcome is both the producer and cell outcome.
-      - name: cargo check (declared example/bench kinds)
+      - name: cargo check (declared kinds no test gate compiles)
         id: check
         env:
           # COMMAND-SCOPED, exactly as each test tier binds it. `check` is its
@@ -317,9 +317,9 @@ jobs:
           detail=""
           if [ "$result" = "success" ]; then
             if [ "$GATE" = "failure" ] && [ "$DEPENDENTS_GATE" = "failure" ]; then
-              detail="both halves failed to compile: the package's own example/bench kinds and its unchanged dependents"
+              detail="both halves failed to compile: the package's own checked kinds and its unchanged dependents"
             elif [ "$GATE" = "failure" ]; then
-              detail="the package's own example/bench kinds failed to compile (the unchanged dependents did not fail)"
+              detail="the package's own checked kinds failed to compile (the unchanged dependents did not fail)"
             elif [ "$DEPENDENTS_GATE" = "failure" ]; then
               detail="an unchanged dependent failed to compile against this package's public API (the package's own targets compiled)"
             fi

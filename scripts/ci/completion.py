@@ -873,9 +873,11 @@ def comparison_problems(
 
     if not expected and not cell.get("companions"):
         problems.append(
-            "completion-expected-empty: the listing expected no test at all and the "
-            "plan records no reason for it; an empty expected set with a green, "
-            "empty report is a drifted filter wearing evidence"
+            "completion-expected-empty: the listing expected no test at all; an "
+            "empty expected set with a green, empty report is a drifted filter "
+            "wearing evidence. A package that genuinely has no tests declares "
+            "`tiers = []` with a `no-tests-reason` in [package.metadata.ci.tests], "
+            "and the planner gives it compile-only check cells instead"
         )
 
     for identity in sorted(expected - set(observed)):

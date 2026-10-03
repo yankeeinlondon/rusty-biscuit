@@ -131,6 +131,10 @@ ownership. A cell whose `area` disagrees with its package record is invalid.
   describing downstream packages compiled inside this package's own check.
   A `gates = false` package holds a record with an empty gate list and no
   cells: a governed absence stays visible without demanding a result.
+  A package that declares `tiers = []` carries `no_tests_reason` and empty
+  `tiers`; its cells are `lint` and `check` only, so on an event that
+  schedules no native environment its gate list is empty without an
+  `exclusion`.
 - `source_packages[]` and `reverse_dependencies[]` — which packages *changed*,
   and which direct reverse dependents were reported but selected nowhere. An
   unchanged dependent receives no area, package record, or cell (AC1); its
@@ -140,7 +144,8 @@ ownership. A cell whose `area` disagrees with its package record is invalid.
   resolved against, verbatim: the runner labels, native keys, and capabilities
   that evidence application and the legacy projection read.
 - `l1_include_slow` on a package record, and `exclusion` on exactly the
-  records whose `gates` list is empty — the policy facts the legacy matrix and
+  records whose `gates` list is empty and that carry no `no_tests_reason` —
+  the policy facts the legacy matrix and
   rollup policy documents are projected from.
 - `input_paths[]` on a package record — the manifest directories of its build
   closure, dev-dependencies included. The gate-input identity of a cell is
@@ -458,7 +463,7 @@ so an unreadable input is never reported as an invented test failure.
 | `completion-test-unexpected` | a reported identity the listing did not expect |
 | `completion-test-failed` | the final attempt failed |
 | `completion-skip-unapproved` | an observed skip with no unexpired approval |
-| `completion-expected-empty` | nothing expected and no plan-recorded reason |
+| `completion-expected-empty` | nothing expected; a package without tests declares `tiers = []` instead and gets no test cell |
 | `completion-companion-incomplete` / `completion-companion-failed` | a declared suite did not complete, or failed |
 | `completion-backend-unproven` | a declared L2 backend that nothing proves drove a test |
 | `completion-test-stranded` | an L1 listing excluded a test by a tier marker (`level2_`, `level3_`, `browser_`, `real_`, on any path segment) whose area's `test-<tier>` recipe is a stub, so it runs in no tier |

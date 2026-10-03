@@ -453,10 +453,57 @@ def plan_builds(path: str | None) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
+#: The longest `gh_api` sleeps, in total, for a rate limit to lift. Every job
+#: in a run shares one installation budget, and a job that waits it out is
+#: cheaper than a red audit or a retry decision that was never taken.
+RATE_LIMIT_MAX_WAIT_SECONDS = 15 * 60
+
+#: GitHub publishes no reset time for its secondary limit and asks callers to
+#: back off for at least a minute.
+SECONDARY_RATE_LIMIT_WAIT_SECONDS = 60
+
+
+def rate_limit_delay(stderr: str, reset: int | None, now: float) -> float | None:
+    """Seconds to wait before retrying a rate-limited call, or `None` to fail.
+
+    `reset` is the primary limit's reset epoch. A primary limit whose reset is
+    further away than [`RATE_LIMIT_MAX_WAIT_SECONDS`] is not waited for.
+    """
+    lowered = stderr.lower()
+    if "secondary rate limit" in lowered:
+        return float(SECONDARY_RATE_LIMIT_WAIT_SECONDS)
+    if "rate limit exceeded" not in lowered or reset is None:
+        return None
+    delay = reset - now + 5
+    if delay > RATE_LIMIT_MAX_WAIT_SECONDS:
+        return None
+    return max(delay, 1.0)
+
+
+def primary_reset() -> int | None:
+    """The primary rate limit's reset epoch; `/rate_limit` is not itself counted."""
+    result = subprocess.run(
+        ["gh", "api", "rate_limit", "--jq", ".resources.core.reset"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    try:
+        return int(result.stdout.strip()) if result.returncode == 0 else None
+    except ValueError:
+        return None
+
+
 def gh_api(path: str, *args: str, attempts: int = 3) -> str:
-    """`gh api` stdout, retried on the transient 5xx the API served all day."""
+    """`gh api` stdout, retried on transient 5xx and waited out on rate limits.
+
+    A rate-limited call does not spend an attempt: it sleeps until the limit
+    lifts, within [`RATE_LIMIT_MAX_WAIT_SECONDS`] for the whole call.
+    """
     last_error = ""
-    for attempt in range(1, attempts + 1):
+    attempt = 0
+    waited = 0.0
+    while attempt < attempts:
         result = subprocess.run(
             ["gh", "api", path, *args],
             capture_output=True,
@@ -466,6 +513,17 @@ def gh_api(path: str, *args: str, attempts: int = 3) -> str:
         if result.returncode == 0:
             return result.stdout
         last_error = result.stderr.strip()
+        if "rate limit" in last_error.lower():
+            delay = rate_limit_delay(last_error, primary_reset(), time.time())
+            if delay is not None and waited + delay <= RATE_LIMIT_MAX_WAIT_SECONDS:
+                print(
+                    f"gh api {path}: rate limited; waiting {delay:.0f}s before retrying",
+                    file=sys.stderr,
+                )
+                time.sleep(delay)
+                waited += delay
+                continue
+        attempt += 1
         if attempt < attempts:
             time.sleep(5 * attempt)
     raise RuntimeError(f"gh api {path} failed after {attempts} attempts: {last_error}")
@@ -528,9 +586,27 @@ def selected_packages(raw: list[str]) -> set[str] | None:
     return names or None
 
 
+def concerns(job: dict[str, Any], packages: set[str]) -> bool:
+    """Whether an area narrowed to `packages` needs this job classified.
+
+    Build jobs always do: which package a build serves is only known from the
+    plan, and [`synthesize_build_status`] narrows them there.
+    """
+    name = str(job.get("name"))
+    if parse_build_job_name(name) is not None:
+        return True
+    cell = parse_job_name(name)
+    return cell is not None and cell["package"] in packages
+
+
 def main() -> int:
     args = parse_args()
     jobs = fetch_jobs(args.repo, args.run_id, args.attempt)
+    selected = selected_packages(args.package)
+    if args.command == "attribute" and selected is not None:
+        # Every area's audit runs this; classifying only its own jobs keeps the
+        # per-failed-job annotation requests from multiplying by the area count.
+        jobs = [job for job in jobs if concerns(job, selected)]
     classification = classify(jobs, fetch_annotations(args.repo, jobs))
     rerun, reason = should_rerun(classification, args.attempt)
     report = {**classification, "attempt": args.attempt, "rerun": rerun, "reason": reason}
@@ -539,7 +615,6 @@ def main() -> int:
         if not args.artifacts:
             print("attribute requires --artifacts", file=sys.stderr)
             return 2
-        selected = selected_packages(args.package)
         report["synthesized"] = synthesize_status(
             classification["runner_lost"], Path(args.artifacts), selected
         )
