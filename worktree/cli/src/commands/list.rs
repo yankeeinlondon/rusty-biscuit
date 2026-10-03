@@ -88,8 +88,8 @@ struct RemoteAnswers {
     origin_changed: bool,
     /// `None` without an `origin`: nothing was launched.
     waited: Option<WaitEnd>,
-    /// The `pr gather` perf stage: the origin lookup and the stored PR answer
-    /// read after the wait.
+    /// The `pr gather` perf stage: the origin lookup, and the origin recheck
+    /// and stored PR answer read after the wait.
     pr_gather: Duration,
     /// The `remote wait` perf stage: the launch and the wait.
     remote_wait: Duration,

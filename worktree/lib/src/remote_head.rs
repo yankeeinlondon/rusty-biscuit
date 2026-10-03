@@ -1304,7 +1304,7 @@ mod tests {
         assert!(load_receipt(&path, &Attempt { started_at: NOW + 30, ..ours }).is_some());
     }
 
-    /// Two overlapping forced attempts each keep their own receipt.
+    /// Two overlapping attempts each keep their own receipt.
     #[test]
     fn receipts_of_different_attempts_never_replace_each_other() {
         let (_dir, store) = temp_store();

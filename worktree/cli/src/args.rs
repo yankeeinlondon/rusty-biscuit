@@ -27,7 +27,7 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub perf: bool,
 
-    /// Wait for a full update from origin, ignoring recent answers (listing only)
+    /// Wait for a full update from origin, up to 75 s instead of 3 s (listing only)
     #[arg(long, short = 'r', global = true)]
     pub refresh: bool,
 
