@@ -597,3 +597,49 @@ fn local_append_root_beats_home_for_path_shaped_magic() {
         "the local append root precedes the home intrinsic root",
     );
 }
+
+/// The `@` chain's emitted spelling, pinned apart from its identity: a safe
+/// verbatim root is reported in its legacy spelling, and the legacy duplicate
+/// that follows it collapses onto it, keeping the earlier provenance. Needs a
+/// Windows host because only there does `Path` parse `\\?\` and only there
+/// does the prefix reduction run.
+#[cfg(windows)]
+#[test]
+fn a_safe_verbatim_root_is_emitted_legacy_and_absorbs_its_duplicate() {
+    let home = abs("h");
+    let launch = abs("h/scratch");
+    let verbatim = PathBuf::from(r"\\?\C:\h\scratch");
+    let ctx = snapshot(&launch, &home).add_magic_path(&verbatim, PathPosition::Start);
+
+    let roots: Vec<(PathBuf, RootProvenance)> = ctx
+        .magic_search_roots()
+        .iter()
+        .map(|root| (root.path().to_path_buf(), root.provenance()))
+        .collect();
+    assert_eq!(
+        roots,
+        vec![
+            (launch.clone(), RootProvenance::Magic),
+            (home.clone(), RootProvenance::Home),
+        ],
+    );
+}
+
+/// A verbatim root too long for a legacy spelling keeps its prefix, and the
+/// legacy spelling of the same directory later in the chain still collapses
+/// onto it: identity, not emitted text, decides duplicates.
+#[cfg(windows)]
+#[test]
+fn an_unreducible_verbatim_root_keeps_its_prefix_and_absorbs_its_duplicate() {
+    let long = "a".repeat(300);
+    let verbatim = PathBuf::from(format!(r"\\?\C:\h\{long}"));
+    let legacy = PathBuf::from(format!(r"C:\h\{long}"));
+    let ctx = snapshot(&verbatim, &legacy);
+
+    let roots: Vec<(PathBuf, RootProvenance)> = ctx
+        .magic_search_roots()
+        .iter()
+        .map(|root| (root.path().to_path_buf(), root.provenance()))
+        .collect();
+    assert_eq!(roots, vec![(verbatim, RootProvenance::LocalRoot)]);
+}

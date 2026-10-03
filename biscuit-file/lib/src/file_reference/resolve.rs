@@ -7,7 +7,7 @@ use crate::file_reference::context::{
 };
 use crate::file_reference::error::FileReferenceError;
 use crate::file_reference::parse;
-use crate::file_reference::portable::{PathIdentity, normalize_native};
+use crate::file_reference::portable::{PathIdentity, first_seen_by_identity, normalize_native};
 use crate::file_reference::{
     CompletionEntryForm, DetailedOutcome, FileReferenceKind, MagicPathList, ParsedReference,
     PartialCompletion, PathTemplate, ProbeDisposition, ProbedCandidate, ReferenceKind,
@@ -777,11 +777,7 @@ fn build_magic_chain(inputs: &MagicChainInputs) -> Vec<RootEntry> {
     }
     roots.extend(user_appends);
 
-    // Roots are already normalized, so the dedupe key is the path itself;
-    // first-seen provenance wins.
-    let mut seen = std::collections::HashSet::new();
-    roots.retain(|root| seen.insert(root.path.clone()));
-    roots
+    first_seen_by_identity(roots, |root| PathIdentity::new(&root.path))
 }
 
 /// The ordered `@` search roots for an explicit [`FileResolutionContext`]:
@@ -1204,18 +1200,12 @@ pub(crate) fn reference_roots(
 
 /// Remove lexically duplicate candidates while preserving first-seen order.
 ///
-/// The dedupe key is [`normalize_components`], so `<root>/x` reached via two
-/// roots that name the same directory -- including one spelled verbatim and one
-/// legacy -- collapses to one entry; the earlier provenance wins.
+/// The dedupe key is [`PathIdentity`], so `<root>/x` reached via two roots that
+/// name the same directory -- including one spelled verbatim and one legacy,
+/// even when the verbatim path is too long to reduce -- collapses to one entry;
+/// the earlier candidate keeps its provenance and its spelling.
 fn dedupe_candidates(candidates: Vec<ResolutionCandidate>) -> Vec<ResolutionCandidate> {
-    let mut seen = std::collections::HashSet::new();
-    let mut out = Vec::with_capacity(candidates.len());
-    for candidate in candidates {
-        if seen.insert(normalize_components(candidate.path())) {
-            out.push(candidate);
-        }
-    }
-    out
+    first_seen_by_identity(candidates, |candidate| PathIdentity::new(candidate.path()))
 }
 
 /// Build the ordered candidate plan without probing the filesystem.

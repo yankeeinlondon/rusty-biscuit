@@ -190,3 +190,125 @@ fn replacing_the_catalog_selects_the_second_repository() {
     assert_eq!(context.repository_root(), Some(second_repo.as_path()));
     assert_eq!(context.package_root(), Some(second_package.as_path()));
 }
+
+// ---- constructor validation, separate from containment -------------------
+
+/// Each unnormalized root is an explicit `RootNotNormalized` naming that root,
+/// never a catalog that later selects nothing.
+#[test]
+fn constructor_names_the_unnormalized_root_it_rejects() {
+    let temp = TempDir::new().unwrap();
+    let repo = temp.path().join("repo");
+
+    let dotted_repo = repo.join("docs/..");
+    assert_eq!(
+        RepositoryScopeCatalog::new(
+            dotted_repo.clone(),
+            Vec::<PathBuf>::new(),
+            Vec::<PathBuf>::new(),
+            PackageAreaFallback::None,
+        ),
+        Err(RepositoryScopeCatalogError::RootNotNormalized {
+            root_kind: "repository",
+            path: dotted_repo,
+        })
+    );
+
+    let dotted_package = repo.join("apps").join("..").join("apps").join("web");
+    assert_eq!(
+        RepositoryScopeCatalog::new(
+            repo.clone(),
+            Vec::<PathBuf>::new(),
+            vec![dotted_package.clone()],
+            PackageAreaFallback::None,
+        ),
+        Err(RepositoryScopeCatalogError::RootNotNormalized {
+            root_kind: "package",
+            path: dotted_package,
+        })
+    );
+}
+
+/// A reducible `\\?\` root is a spelling the caller must simplify first
+/// (`biscuit_file::canonicalize_simplified`); the constructor reports it rather
+/// than storing a root no legacy document path would ever start with. Needs a
+/// Windows host: elsewhere `\\?\C:\…` is a relative file name.
+#[cfg(windows)]
+#[test]
+fn constructor_rejects_a_reducible_verbatim_root_as_unnormalized() {
+    let verbatim_repo = PathBuf::from(r"\\?\C:\work\repo");
+    assert_eq!(
+        RepositoryScopeCatalog::new(
+            verbatim_repo.clone(),
+            Vec::<PathBuf>::new(),
+            Vec::<PathBuf>::new(),
+            PackageAreaFallback::None,
+        ),
+        Err(RepositoryScopeCatalogError::RootNotNormalized {
+            root_kind: "repository",
+            path: verbatim_repo,
+        })
+    );
+
+    let verbatim_package = PathBuf::from(r"\\?\C:\work\repo\apps\web");
+    assert_eq!(
+        RepositoryScopeCatalog::new(
+            PathBuf::from(r"C:\work\repo"),
+            Vec::<PathBuf>::new(),
+            vec![verbatim_package.clone()],
+            PackageAreaFallback::None,
+        ),
+        Err(RepositoryScopeCatalogError::RootNotNormalized {
+            root_kind: "package",
+            path: verbatim_package,
+        })
+    );
+}
+
+/// Containment against an already-valid catalog: whole components only, and
+/// dot segments in the document path are collapsed before comparison.
+#[test]
+fn containment_in_a_valid_catalog_uses_whole_components() {
+    let temp = TempDir::new().unwrap();
+    let repo = temp.path().join("repo");
+    let package = repo.join("apps").join("web");
+    let catalog = catalog(repo.clone(), Vec::new(), vec![package.clone()]);
+
+    let sibling = catalog.scope_for(&temp.path().join("repo-old").join("x.md"));
+    assert_eq!(sibling, Default::default());
+
+    let dotted = catalog.scope_for(&package.join("src").join("..").join("x.md"));
+    assert_eq!(dotted.package_root(), Some(package.as_path()));
+    assert_eq!(dotted.repository_root(), Some(repo.as_path()));
+
+    let escaping = catalog.scope_for(&repo.join("..").join("repo-old").join("x.md"));
+    assert_eq!(escaping.repository_root(), None);
+}
+
+/// A document reaching a valid legacy catalog in verbatim or mixed-separator
+/// spelling is inside it; a sibling sharing the root's text is not. Needs a
+/// Windows host for the native `\\?\` and drive grammar.
+#[cfg(windows)]
+#[test]
+fn containment_accepts_verbatim_and_mixed_spellings_of_a_document() {
+    let repo = PathBuf::from(r"C:\work\repo");
+    let package = PathBuf::from(r"C:\work\repo\apps\web");
+    let catalog = catalog(repo.clone(), Vec::new(), vec![package.clone()]);
+
+    for document in [
+        r"\\?\C:\work\repo\apps\web\x.md",
+        r"C:\work\repo\apps/web/x.md",
+        r"c:\work\repo\apps\web\x.md",
+    ] {
+        let scope = catalog.scope_for(std::path::Path::new(document));
+        assert_eq!(scope.package_root(), Some(package.as_path()), "{document}");
+        assert_eq!(scope.repository_root(), Some(repo.as_path()), "{document}");
+    }
+    for outside in [r"C:\work\repo-old\x.md", r"\\?\C:\work\repo-old\x.md", r"D:\work\repo\x.md"] {
+        assert_eq!(
+            catalog.scope_for(std::path::Path::new(outside)),
+            Default::default(),
+            "{outside}"
+        );
+    }
+}
