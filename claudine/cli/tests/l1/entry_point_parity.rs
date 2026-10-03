@@ -16,6 +16,13 @@
 //! [`ParityFixture::targets`]), so completion names the file it resolved.
 //! Composition and supplied values run in a fixture with plain targets.
 //!
+//! Glob rows: composition lists `::file-links` and `find_files()` and
+//! validates `match()` for a frontmatter value (Table 1); completion offers a
+//! `file(match(...))` property's candidates (`claudine __complete … compose
+//! <prompt> spec=`) and a supplied `spec=<value>` is validated, from each
+//! launch directory (Table 2). The chooser's walk is the binary's unit test
+//! (`completion/schema_completion/parity_tests.rs`).
+//!
 //! Every spawn goes through `CliProcessFixture`, whose `home/` is the child's
 //! `HOME` (`USERPROFILE` on Windows) and the fixture `HOME` of the matrix; the
 //! binary captures that process as its request snapshot on every OS. The
@@ -33,8 +40,8 @@ use std::process::Output;
 
 use biscuit_file::{ResolutionFailure, to_portable_string};
 use matrix::{
-    Consumer, CrossRepositoryFixture, DocumentCell, EntryPoint, Expected, LAUNCH_MAGIC, Observed, Owner,
-    ParityFixture, ParityReport, Row, SOURCE_MAGIC, ValueCell, rows_for,
+    Consumer, CrossRepositoryFixture, DocumentCell, EntryPoint, Expected, GlobConsumer, GlobDocumentCell, GlobValueCell,
+    LAUNCH_MAGIC, Observed, Owner, ParityFixture, ParityReport, Row, SOURCE_MAGIC, ValueCell, rows_for,
 };
 
 use crate::common::{CliProcessFixture, strip_ansi};
@@ -203,6 +210,112 @@ fn supplied_value(cli: &CliProcessFixture, fixture: &ParityFixture, cell: &Value
     observe(fixture, Consumer::SchemaFile, &fixture.repo(), &output)
 }
 
+/// A failed run's output, for [`matrix::validation_verdicts`].
+fn outcome(output: &Output) -> Result<(), String> {
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(strip_ansi(&format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stderr),
+            String::from_utf8_lossy(&output.stdout)
+        )))
+    }
+}
+
+/// `claudine compose --dry-run <document>` from the repository root.
+fn dry_run(cli: &CliProcessFixture, fixture: &ParityFixture, document: &Path) -> Output {
+    cli.command_builder()
+        .ambient_context(&fixture.repo())
+        .build()
+        .args(["compose", "--dry-run"])
+        .arg(document_argument(fixture, document))
+        .output()
+        .expect("run claudine compose --dry-run")
+}
+
+/// Composition of a Table 1 glob cell: the files `::file-links` or
+/// `find_files()` lists, or each `match()` candidate's verdict.
+fn compose_glob(cli: &CliProcessFixture, fixture: &ParityFixture, cell: &GlobDocumentCell) -> Observed {
+    if cell.consumer == GlobConsumer::MatchValidation {
+        let outcomes = fixture
+            .glob_match_documents(cell)
+            .into_iter()
+            .map(|(candidate, document)| (candidate, outcome(&dry_run(cli, fixture, &document))))
+            .collect();
+        return matrix::validation_verdicts(outcomes);
+    }
+    let output = dry_run(cli, fixture, &fixture.glob_document(cell));
+    let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    if let Some(failure) = failure_row(&stderr).or_else(|| failure_row(&stdout)) {
+        return Observed::Failure(failure);
+    }
+    if !output.status.success() {
+        return Observed::Unexpected(format!("{} without a failure row: {stderr}", output.status));
+    }
+    let body = composed_body(&stdout);
+    match cell.consumer {
+        GlobConsumer::FileLinks => match fixture.file_links_listed(body) {
+            files if files.is_empty() => Observed::Unexpected(format!("no `::file-links` tree in {body:?}")),
+            files => Observed::FileSet(files),
+        },
+        GlobConsumer::FindFiles => fixture
+            .find_files_listed(body)
+            .map_or_else(|| Observed::Unexpected(format!("no `find_files()` line in {body:?}")), Observed::Files),
+        GlobConsumer::MatchValidation | GlobConsumer::MatchCompletion => unreachable!("{cell:?} lists no files"),
+    }
+}
+
+/// `claudine __complete … compose <prompt> spec=` from the cell's launch
+/// directory: the files the candidates name, in order.
+fn complete_glob(cli: &CliProcessFixture, fixture: &ParityFixture, cell: &GlobValueCell) -> Observed {
+    let output = cli
+        .command_builder()
+        .ambient_context(&fixture.launch_dir(cell.launch))
+        .build()
+        .args(["__complete", "--current", "3", "--", "claudine", "compose"])
+        .arg(fixture.glob_value_document(cell))
+        .arg("spec=")
+        .output()
+        .expect("run claudine __complete");
+    if !output.status.success() {
+        return Observed::Unexpected(format!("{}: {}", output.status, String::from_utf8_lossy(&output.stderr)));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut files = Vec::new();
+    for line in stdout.lines().filter(|line| !line.is_empty()) {
+        match line.strip_prefix("spec='").and_then(|rest| rest.strip_suffix('\'')) {
+            Some(value) => files.push(fixture.completion_path(value, cell.launch)),
+            None => return Observed::Unexpected(format!("suggestion {line:?} is not a `spec` value")),
+        }
+    }
+    if files.is_empty() { Observed::Unresolved } else { Observed::Files(files) }
+}
+
+/// `claudine compose --dry-run <prompt> spec=<candidate>` from the cell's
+/// launch directory, for each candidate.
+fn supplied_glob_value(cli: &CliProcessFixture, fixture: &ParityFixture, cell: &GlobValueCell) -> Observed {
+    let prompt = fixture.glob_value_document(cell);
+    let outcomes = fixture
+        .glob_candidates()
+        .into_iter()
+        .map(|candidate| {
+            let output = cli
+                .command_builder()
+                .ambient_context(&fixture.launch_dir(cell.launch))
+                .build()
+                .args(["compose", "--dry-run"])
+                .arg(&prompt)
+                .arg(format!("spec={}", to_portable_string(&candidate)))
+                .output()
+                .expect("run claudine compose --dry-run with a supplied value");
+            (candidate, outcome(&output))
+        })
+        .collect();
+    matrix::validation_verdicts(outcomes)
+}
+
 /// The two fixtures the claudine-cli rows run in.
 struct Fixtures {
     /// Plain targets: composition and supplied values.
@@ -228,7 +341,8 @@ impl Fixtures {
             | EntryPoint::DmlsDocumentLinks
             | EntryPoint::DmlsLinkGraph
             | EntryPoint::DmlsDefinition
-            | EntryPoint::DmlsCodeActions => &self.plain,
+            | EntryPoint::DmlsCodeActions
+            | EntryPoint::ClaudineChooser => &self.plain,
         };
         (cli, fixture)
     }
@@ -237,6 +351,18 @@ impl Fixtures {
 fn run(fixtures: &Fixtures, row: &Row) -> (Expected, Observed) {
     let (cli, fixture) = fixtures.for_entry(row.entry());
     match row {
+        Row::GlobDocument(cell) => {
+            assert_eq!(cell.entry, EntryPoint::ClaudineComposition, "{row:?}");
+            (fixture.expected_glob_document(cell), compose_glob(cli, fixture, cell))
+        }
+        Row::GlobValue(cell) => {
+            let observed = match cell.entry {
+                EntryPoint::ClaudineCompletion => complete_glob(cli, fixture, cell),
+                EntryPoint::ClaudineSuppliedValue => supplied_glob_value(cli, fixture, cell),
+                other => unreachable!("{other:?} runs no claudine-cli glob value row"),
+            };
+            (fixture.expected_glob_value(cell), observed)
+        }
         Row::Document(cell) => {
             let observed = match cell.entry {
                 EntryPoint::ClaudineComposition => compose(cli, fixture, cell),
@@ -253,7 +379,8 @@ fn run(fixtures: &Fixtures, row: &Row) -> (Expected, Observed) {
                 | EntryPoint::DmlsDocumentLinks
                 | EntryPoint::DmlsLinkGraph
                 | EntryPoint::DmlsDefinition
-                | EntryPoint::DmlsCodeActions => unreachable!("{row:?} is not a claudine-cli document row"),
+                | EntryPoint::DmlsCodeActions
+                | EntryPoint::ClaudineChooser => unreachable!("{row:?} is not a claudine-cli document row"),
             };
             (fixture.expected_document(cell), observed)
         }
@@ -273,7 +400,8 @@ fn run(fixtures: &Fixtures, row: &Row) -> (Expected, Observed) {
                 | EntryPoint::DmlsDocumentLinks
                 | EntryPoint::DmlsLinkGraph
                 | EntryPoint::DmlsDefinition
-                | EntryPoint::DmlsCodeActions => unreachable!("{row:?} is not a claudine-cli value row"),
+                | EntryPoint::DmlsCodeActions
+                | EntryPoint::ClaudineChooser => unreachable!("{row:?} is not a claudine-cli value row"),
             };
             (fixture.expected_value(cell), observed)
         }
@@ -310,6 +438,17 @@ fn claudine_entry_points_agree_on_every_reference() {
             }
             Row::Value(cell) => {
                 fixture.value(cell);
+            }
+            Row::GlobDocument(cell) => match cell.consumer {
+                GlobConsumer::MatchValidation => {
+                    fixture.write_glob_match_documents(cell);
+                }
+                _ => {
+                    fixture.write_glob_document(cell);
+                }
+            },
+            Row::GlobValue(cell) => {
+                fixture.write_glob_value_document(cell);
             }
         }
     }
