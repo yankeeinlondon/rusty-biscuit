@@ -145,7 +145,7 @@ Resolution differs by render path:
 
 The cell's hint records `kind == "styled_inline_prose"` with a null `raw_value`.
 A layout set on the `InlineProse` is **not** applied as nested cell layout — the
-table owns cell geometry. See [Prose: inline Prose in table cells](../../../../docs/components/prose.md#prose-in-table-cells).
+table owns cell geometry. See [InlineProse in table cells](../../../../docs/components/prose.md#inlineprose-in-table-cells).
 
 ### `Conditional`
 

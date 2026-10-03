@@ -65,7 +65,7 @@ The `biscuit-terminal` package area contains both a Library and CLI which focus 
       `StyledInlineProse` cells that embed capability-aware `InlineProse`
       (links, emphasis, color, inline code) without pre-rendering to terminal
       bytes; see
-      [Prose in table cells](./docs/components/prose.md#prose-in-table-cells)
+      [InlineProse in table cells](./docs/components/prose.md#inlineprose-in-table-cells)
     - [`TerminalImage`](./docs/components/terminal_image.md)
     - [`TextBlock`](./docs/components/text_block.md)
     - [`Todo`](./docs/components/todo.md)

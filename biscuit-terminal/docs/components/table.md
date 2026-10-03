@@ -53,7 +53,7 @@ let cell: TableCellContent = InlineProse::new("run\n```sh\nmd hash\n```").into()
 // renders as: run `md hash`   (the backticks appear only on an unstyled terminal)
 ```
 
-A layout set on the `InlineProse` is never applied — the table owns cell geometry. Header labels are `InlineProse` too (`TableColumn::header_prose`). See [Prose in table cells](./prose.md#prose-in-table-cells) for details.
+A layout set on the `InlineProse` is never applied — the table owns cell geometry. Header labels are `InlineProse` too (`TableColumn::header_prose`). See [InlineProse in table cells](./prose.md#inlineprose-in-table-cells) for details.
 
 ### Key API
 
