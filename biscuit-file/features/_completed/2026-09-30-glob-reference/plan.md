@@ -842,13 +842,13 @@ what the reader can do, give a compact example per rule, and use a Mermaid
 diagram where a flow is easier to see than to read. A `docs/` page never links
 to or names a feature or fix (by path or `{date}-{name}).
 
-- [ ] **biscuit-file docs.** `biscuit-file/docs/topics/file-references.md`:
+- [x] **biscuit-file docs.** `biscuit-file/docs/topics/file-references.md`:
   `GlobReference` section (constructor, the five calls, native order with a
   diagram, `take_first`, relative boundary for globs, skipped symlinks, when
   to choose it over `FileReference`, literal-vs-class brackets); rewrite
   "Recursive Search" as local-first. Update `biscuit-file/README.md` and
   `biscuit-file/docs/dependencies.md`.
-- [ ] **Darkmatter schema docs.**
+- [x] **Darkmatter schema docs.**
   - `darkmatter/docs/topics/schemas/definition.md`: `file` row and
     `match(globs)` section (one example per prefix, the file-name view, the
     advice to use `&`, `^`, or `@` for a fixed meaning, vault example),
@@ -866,24 +866,24 @@ to or names a feature or fix (by path or `{date}-{name}).
     folder itself, any folder the user chooses (criterion 34); verify with
     `grep -rn "SCHEMA_DIR" docs .claude/skills` returning nothing.
   - Module doc of `triggers/discovery.rs` (the ancestor-walk text).
-- [ ] **Darkmatter inline/expression docs.**
+- [x] **Darkmatter inline/expression docs.**
   `darkmatter/docs/inline/file-links.md` (prefixes, merged roots, boundary,
   skipped-symlink warning); `darkmatter/docs/topics/darkmatter-expressions.md`
   and `darkmatter/docs/schemas/expression-functions.yaml` (native order over
   all roots replaces "sorted absolute paths"; the warning).
-- [ ] **Claudine docs.** Any topic page describing `match()` completion
+- [x] **Claudine docs.** Any topic page describing `match()` completion
   (order, `PortablePath` rendering, the omitted skipped symlinks).
-- [ ] **Skills.** Update `.claude/skills/biscuit-file/`, `darkmatter/`, and
+- [x] **Skills.** Update `.claude/skills/biscuit-file/`, `darkmatter/`, and
   `claudine/` for the new types and behavior; add any OS-specific fact learned
   to `.claude/skills/os/` in the same change. Keep each `SKILL.md` under 200
   lines, linking to details. Add the new `GlobReference` names to the
   `biscuit-file` skill description triggers.
-- [ ] **Doc-comment drift pass.** For every symbol whose behavior changed
+- [x] **Doc-comment drift pass.** For every symbol whose behavior changed
   (`FileMatchGlobs`, `find_files_fn`, file-links discovery, `schema_roots`
   replacement, `resolve_recursive_core` replacement), confirm `///`/`//!` and
   inline comments match; where code and comment disagree, the code is right;
   report each drift fixed.
-- [ ] **CLAUDE.md check.** Only edit if a repo-wide convention changed; expect
+- [x] **CLAUDE.md check.** Only edit if a repo-wide convention changed; expect
   no change.
 
 ### Wave 16 (sequential; after Wave 15)
@@ -892,7 +892,7 @@ to or names a feature or fix (by path or `{date}-{name}).
   `just test-l2` for `biscuit-file`, `darkmatter`, `darkmatter-cli` (same
   area), `dmls`, `claudine`, `claudine-cli`. Report each failure with output;
   fix or escalate.
-- [ ] **Criterion-to-test table.** Append to the implementation log one row per
+- [x] **Criterion-to-test table.** Append to the implementation log one row per
   acceptance criterion (1–34) naming its test file and function, and mark any
   criterion without a test as a gap to close before proceeding.
 - [ ] **Windows cross-check** (pre-authorized, Decision 21):
@@ -901,7 +901,7 @@ to or names a feature or fix (by path or `{date}-{name}).
   load the `os` skill first. Record each pass (or failure and fix) under
   "Windows Evidence". `ci:all-os` and extra CI cells are **not**
   pre-authorized; ask first.
-- [ ] **`just ci-local --plan` review.** Confirm the plan's executing cells
+- [x] **`just ci-local --plan` review.** Confirm the plan's executing cells
   match expectations (per the CI discipline in `CLAUDE.md`); do not push.
 - [ ] **Finalize the implementation log:** every changed output
   (`find_files()`, `::file-links`, `%`, schema discovery, `md schema triggers`,

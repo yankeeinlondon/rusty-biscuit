@@ -1577,6 +1577,135 @@ no L2 test, and the one production change is the text of an error block.
 - `.claude/skills/darkmatter/SKILL.md`: the parity-matrix paragraph names the
   glob rows, the chooser runner, and the `glob-rejected` construction.
 
+## Phase 8
+
+Docs, skills, evidence, and hand-off. Packages touched: `biscuit-file`,
+`darkmatter`, and `claudine-cli` (comment-only source edits), plus
+`darkmatter`'s L1 test binary (one new test). No behavior changed in this
+phase.
+
+### Wave 15: docs and skills
+
+Four parallel audits, each against the code (code wins), on disjoint files.
+
+- **biscuit-file docs** (`docs/topics/file-references.md`, `README.md`,
+  `docs/dependencies.md`, the biscuit-file skill): `patterns()` row and the
+  constructor's checks in the call table; a "`FileReference` or
+  `GlobReference`?" subsection with the bracket rules; a fuller native-order
+  Mermaid diagram showing where `take_first` stops; `..` boundary examples;
+  an "Errors: `GlobReferenceError`" subsection; `%` stated as `take_first` of
+  `**/<payload>`; a README overview bullet. Drift fixed: (1) a `{{VAR}}` root
+  is unbound only when it expands to an absolute path (the boundary is
+  decided after interpolation); (2) out-of-tree file symlinks are skipped
+  only when the context enforces a tree boundary; (3) `\` is a separator on
+  Windows, not "always literal"; (4) `dependencies.md` omitted `walkdir` and
+  said only `parse.rs` names `globset` (`roots.rs` does too).
+- **Darkmatter schema docs** (`definition.md`, `dmls-schema-support.md`,
+  `authoring-schemas.md`, `schema-activation.md`, the `triggers/discovery.rs`
+  module doc): one `match()` example per prefix (incl. `../`, `{{VAR}}`, a
+  vault example) and why `&`/`^`/`@` give a fixed meaning. Drift fixed: `@`
+  shared a row that misdescribed its roots; bare-name `$schema` falls back to
+  ordinary bare-path resolution when no root is searched and is shared by
+  imports and `example(file)`; the home root is present only when a home is
+  known; discovery runs only inside a repository (`md`) or a workspace folder
+  (DMLS); `$path` `../` reads from `pattern_cwd` like `./`; only
+  `kind: trigger-schema` files apply automatically; a broken trigger in
+  `SCHEMAS_DIR` or `~/schemas` affects every document. `claudine/docs/rollout-strategy.md`
+  already read `SCHEMAS_DIR` (unchanged). `grep -rn "SCHEMA_DIR\b" docs .claude/skills darkmatter/docs claudine/docs biscuit-file/docs`
+  returns nothing.
+- **Inline, expression, and Claudine docs** (`inline/file-links.md`,
+  `darkmatter-expressions.md`, `schemas/expression-functions.yaml`,
+  `claudine/docs/topics/completions/shell-completions.md`,
+  `claudine/docs/topics/composition.md`): a new "Finding Files" subsection
+  (roots per prefix, native order with a Mermaid diagram, unfiltered results,
+  `target/` reachable, failure rows per class); `::file-links` shows a tree in
+  directory order of the files `find_files()` lists in native order. Drift
+  fixed: `find_files` order now names shallowest-then-component tie-breaks;
+  the symlink skip is limited to bare/`./`/`../` patterns; Claudine's
+  `match()` walk also skips hidden files; the symlink omission is silent and
+  tree- (not repository-) bounded; candidates are never `./` or `{{VAR}}`;
+  the partial resolver walks every root of the prefix, not the launch area
+  only; `OutsideRepository` is `failure: missing-context`.
+- **Doc-comment drift pass** (comment-only; `git diff -U0` shows no code
+  line changed; `cargo check -p darkmatter -p biscuit-file -p claudine-cli --tests`
+  clean). 20 drifts in 14 files plus three found afterwards:
+  `glob/mod.rs` and `glob/parse.rs` (`\` on Windows; `parse.rs` is where the
+  matcher is built, not the only `globset` user); `resolve.rs`
+  `collect_anchoring_roots` also serves `reference_roots`; `schemas/validate.rs`
+  (four places claimed `file_ref_fallback_dir` anchors `match()` globs; it
+  does not); `schemas/format.rs` (no ambient CWD; `context.cwd()`);
+  `file_links/{discovery,mod}.rs` (only `--dir` and bare/`./`/`../` globs are
+  tree-bound); `file_links/types.rs` (listing `Io` also arrives);
+  `triggers/matcher.rs` ("pure", "lexical" corrected); "bare and `./`" →
+  "bare, `./`, and `../`" in `grammar.rs`, `matcher.rs`, `assemble.rs`,
+  `roots.rs`, `discovery.rs`; dead `features/2026-07-10-schema-triggers/spec.md`
+  paths in `triggers/{mod,assemble,envelope}.rs` and `schemas/errors.rs` now
+  name the docs page; `claudine/.../candidates.rs` `rel_or_name_matches`
+  matches the launch-relative inserted value.
+- **Skills.** The darkmatter `SKILL.md` was 554 lines and the claudine one
+  375, against the plan's 200-line rule (333 and 344 on `main`). Detail moved
+  verbatim into supporting files linked from the entry point:
+  darkmatter `requests.md`, `remote-cache.md`, `cli.md`, `expressions.md`,
+  `testing.md` (and the global-catalog paragraph into `schema.md`), now 194
+  lines; claudine `module-map.md`, `cli-commands.md`, `research-index.md`, now
+  183 lines. biscuit-file `SKILL.md` (74 lines) already names
+  `GlobReference`, `GlobReferenceError`, `GlobListing`, and `SkippedEntry` in
+  its triggers; its reference file gained a glob section.
+- **CLAUDE.md:** no repo-wide convention changed; not edited.
+
+### Criterion 34 gets a test
+
+Criterion 34 had only a manual grep, so it was a gap. New L1 test
+`darkmatter::l1 schema_roots::no_doc_or_skill_names_the_singular_schema_variable`
+walks `darkmatter/docs`, `claudine/docs`, `biscuit-file/docs`, and the
+darkmatter, claudine, and biscuit-file skills (root-anchored `repo_root().join(…)`
+directories, so CI schedules it when any file under them changes;
+`docs/cicd/test-inputs.md`), skips symlinks, and fails on a whole-word
+`SCHEMA_DIR`. Mutation check: appending `Set SCHEMA_DIR.` to
+`schema-activation.md` turned it red; restored.
+
+### Criterion-to-test table
+
+| # | Test(s) |
+|---|---|
+| 1 | `claudine-cli` bin `schema_completion::tests::incident_2_completes_a_caret_pattern_from_the_repository_root`; `claudine-cli::l1 compose_schema_cli::completion_file_match_reads_the_caret_prefix_from_the_launch_repository`; validation half `darkmatter::l1 glob_consumers::match_validation_reads_reference_prefixes` |
+| 2 | `darkmatter::l1 glob_implementation_guard::file_references_have_one_glob_implementation` (+ its negative controls) |
+| 3 | `schema_completion::tests::a_nested_launch_lists_each_prefix_in_native_order` |
+| 4 | `biscuit-file::l1 glob_reference::order::a_repository_exclusion_composes_with_a_scoped_pattern`; `schema_completion::tests::a_root_exclusion_removes_files_a_positive_caret_pattern_admits`; `glob_consumers::match_validation_reads_reference_prefixes` |
+| 5 | `glob_reference::order::an_excluded_file_is_not_reincluded_by_a_later_root`; `schema_completion::tests::each_file_is_judged_by_its_nearest_root`, `property_value_bare_match_offers_the_launch_folder_then_the_repository_root` |
+| 6 | `assert_offers_resolve_and_are_admitted`, called by every `schema_completion::tests` case above (every prefix) |
+| 7 | `glob_consumers::a_caller_value_is_judged_from_the_launch_directory` |
+| 8 | `glob_consumers::match_rejects_patterns_that_are_not_glob_references` |
+| 9 | existing `file_match::tests::*` and Claudine `match_globs_*` (unchanged assertions); changed outputs listed under [Changed Outputs](#changed-outputs) |
+| 10 | `glob_consumers::find_files_merges_every_root_most_local_first`, `glob_consumers::file_links_merges_every_root_most_local_first`, `find_files_and_try_frontmatter::find_files_merges_the_document_folder_and_the_repository_root` |
+| 11 | `glob_reference::order::the_file_name_view_widens_only_slashless_patterns`; `glob_consumers::match_validation_reads_reference_prefixes`, `find_files_merges_every_root_most_local_first` |
+| 12 | `schema_completion::tests::a_file_name_negation_is_neither_offered_nor_admitted`; `glob_consumers::match_validation_reads_reference_prefixes` |
+| 13 | `glob_reference::unfiltered::hidden_ignored_and_underscore_files_are_listed`; `find_files_and_try_frontmatter` (`_completed/`); `file_links::discovery::tests::glob_excludes_unsupported_extensions`; `glob_consumers::file_links_merges_every_root_most_local_first` (self-exclusion); `glob_reference::boundary::a_walk_does_not_follow_a_directory_link` |
+| 14 | `glob_reference::boundary::{relative_globs_cannot_leave_the_tree, unbound_roots_may_lie_outside_the_repository, repository_sigils_outside_a_repository_are_typed_errors, a_walk_does_not_follow_a_directory_link}`; `glob_consumers::relative_globs_stay_inside_the_repository`; `file_links_compose::a_relative_glob_leaving_the_repository_is_a_typed_error`; handed-off reads: `context_construction_guard::production_source_builds_contexts_only_through_the_builder` |
+| 15 | `glob_reference::order::list_files_orders_by_root_precedence_then_depth`, `take_first_never_walks_a_later_root` |
+| 16 | `glob_reference::order::ties_break_component_wise` |
+| 17 | `schema_completion::tests::a_nested_launch_lists_each_prefix_in_native_order`; `parity_tests::chooser_offers_every_glob_row_in_native_order` |
+| 18 | `glob_reference::order::an_excluded_file_is_not_reincluded_by_a_later_root` |
+| 19 | `glob_reference::literal::brackets_are_literal_in_a_file_reference_and_a_class_in_a_glob` |
+| 20 | `entry_point_parity::{darkmatter,md,dmls,claudine}_entry_points_agree_on_every_reference`; `parity_tests::chooser_offers_every_glob_row_in_native_order` (macOS and Linux in Phase 7; Windows below) |
+| 21 | `schema_roots::{path_triggers_read_reference_prefixes, forbidden_path_prefixes_are_definition_errors_naming_the_pattern, path_triggers_and_match_validation_give_the_same_verdicts, path_field_input_matrix}`; `dmls::l1 schema_roots_parity::a_forbidden_path_prefix_is_the_same_definition_error_in_md_and_dmls` |
+| 22 | `dmls` `overlay::tests::{schema_cache_keys_on_the_package_root, schema_cache_keys_on_the_snapshot_environment}` |
+| 23 | `glob_reference::literal::recursive_references_are_local_first` |
+| 24 | `schema_completion::tests::candidates_outside_the_launch_folder_take_the_first_form_that_resolves` (+ resolve-back check in every completion test) |
+| 25 | `glob_reference::boundary::a_file_link_out_of_the_tree_is_skipped_by_a_bound_glob` (incl. `FileReference` `RelativeTreeEscape`); `glob_consumers::an_out_of_tree_file_symlink_is_skipped_with_one_warning`; `file_links::discovery::tests::escaping_symlinked_file_is_dropped`; `schema_completion::tests::an_out_of_tree_file_symlink_is_omitted_without_a_warning` (Unix) |
+| 26 | `glob_reference::literal::{matches_is_lexical_for_paths_that_do_not_exist, matching_is_case_sensitive}` |
+| 27 | `schema_roots::schema_roots_are_package_area_tree_schemas_dir_then_home`; `darkmatter-cli::l1 schema_triggers::triggers_command_prints_the_five_schema_roots_in_search_order` |
+| 28 | `schema_roots::an_earlier_root_shadows_a_later_one_by_file_name` |
+| 29 | `schema_roots::{schemas_dir_names_the_schemas_folder_itself, schemas_dir_and_home_input_matrix}`; cli `schema_triggers::schema_validate_applies_triggers_from_schemas_dir_and_home` |
+| 30 | `schema_roots::in_between_schemas_folders_are_not_discovered`; `triggers::discovery::tests::scan_skips_in_between_schemas_folders` |
+| 31 | `schema_roots::home_schemas_apply_in_a_repository_with_no_schemas_folder`; cli `schema_validate_applies_triggers_from_schemas_dir_and_home` |
+| 32 | `dmls::l1 schema_roots_parity::{md_and_dmls_give_the_same_roots_triggers_and_bare_names, a_session_applies_schemas_dir_and_home_like_md}` |
+| 33 | cli `schema_triggers::shipped_external_schema_example_names_its_sibling_explicitly` |
+| 34 | `schema_roots::no_doc_or_skill_names_the_singular_schema_variable` (new, Phase 8) |
+
+Every test named above was confirmed to exist by a `fn <name>` search over
+`biscuit-file`, `darkmatter`, and `claudine`. No criterion is without a test.
+
 ## Appendix: Baseline Inventory
 
 Call sites by `git grep -n -w` over `*.rs`, at the start of Phase 1. This
