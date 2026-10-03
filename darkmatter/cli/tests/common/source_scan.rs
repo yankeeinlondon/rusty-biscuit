@@ -326,3 +326,13 @@ fn relative_key(src: &Path, path: &Path) -> String {
         .collect::<Vec<_>>()
         .join("/")
 }
+
+/// One production file outside a scanned directory (a build script), with
+/// comments, literals, and test-only items blanked. A test-only `mod name;`
+/// it declares is not followed: such a file is never compiled into it.
+pub fn production_file(path: &Path) -> String {
+    let text = std::fs::read_to_string(path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+    let mut bytes = sanitize(&text);
+    blank_test_items(&text, &mut bytes);
+    String::from_utf8(bytes).expect("blanking keeps UTF-8")
+}

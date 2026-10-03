@@ -75,6 +75,7 @@ mod meta_schema_reference_graph;
 mod meta_schema_repo_schemas;
 mod missing_ctx_capture;
 mod more_is_more_literals_and_indexes;
+mod path_lookup_guard;
 mod nested_composition;
 mod persistent_cache_disabled;
 mod predict_conflicts;

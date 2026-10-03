@@ -74,6 +74,7 @@ mod handle_deadline;
 mod handle_message_drain;
 mod handle_repo_config;
 mod handoff_owners;
+mod home_lookup_round_trip;
 mod hooks_cli;
 #[cfg(unix)]
 mod inline_completion_lifecycle;
@@ -112,6 +113,7 @@ mod loop_gate_ambient;
 mod loop_initialize_state;
 mod mcp_cli;
 mod override_boundary_guard;
+mod path_lookup_guard;
 mod preflight_execution_parity;
 mod pr_flow_rehearsal;
 mod prompt_guide_defects;

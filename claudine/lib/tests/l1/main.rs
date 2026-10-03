@@ -18,6 +18,7 @@ mod messaging_delivery;
 mod messaging_spawn_guard;
 mod model_catalog_integration;
 mod opencode_stderr_lifecycle;
+mod path_lookup_guard;
 mod protocol_fixture_replay;
 mod semantic_fidelity;
 mod single_loop_engine;

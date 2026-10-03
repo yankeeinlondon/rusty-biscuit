@@ -13,6 +13,7 @@ mod finalized_reference_resolution;
 mod glob_reference;
 mod implicit_relative;
 mod magic_local_roots;
+mod path_lookup_guard;
 mod parse_count;
 mod portable_path;
 mod precedence_flip;

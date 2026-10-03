@@ -58,6 +58,7 @@ mod layout_flags;
 mod layout_style_frontmatter;
 mod literal_glob_hint;
 mod md_process_fixture;
+mod path_lookup_guard;
 mod prose_escape_guard;
 mod render_basic;
 mod rm;
