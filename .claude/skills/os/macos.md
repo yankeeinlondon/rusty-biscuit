@@ -10,7 +10,7 @@ conditions that masquerade as repository defects.
   `tempfile` path with what a child process reports must canonicalize on
   Unix (the `launched_spelling` helper does) or the two spellings differ.
   This is the macOS half of the same trap Windows has with short names
-  ([windows.md](windows.md)).
+  ([windows-paths.md](windows-paths.md)).
 - The same split reaches production code: a launch directory from
   `current_dir()` is physical (`/private/var/…`) while `$HOME` keeps its
   authored spelling (`/var/…`), so a lexical `launch == home` or
