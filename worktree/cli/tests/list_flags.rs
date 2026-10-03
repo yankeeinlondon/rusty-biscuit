@@ -124,25 +124,25 @@ fn completion_offers_every_listing_flag() {
 
 #[test]
 #[serial]
-fn refresh_waits_for_both_halves_and_asks_again_despite_young_answers() {
+fn refresh_waits_for_both_halves_and_asks_again_like_every_listing() {
     let fixture = MixedFixture::new().with_gitea_origin();
     let _cleanup = RemoveOnDrop(fixture.pr_store());
     fixture.seed_pr_store(Duration::from_secs(10), 99, "divergent-0");
     fixture.seed_remote_head_store(Duration::ZERO, Some("0123456789abcdef0123456789abcdef01234567"));
     let gitea = FakeGitea::new(GiteaReply::Open(vec![(7, "divergent-1")]));
 
-    // Control: an ordinary listing leaves the young PR answer alone.
+    // An ordinary listing asks despite the young answer, too.
     let output = fixture.wt_command_via_gitea(&gitea).arg("list").env("NO_COLOR", "1").output().expect("wt list");
     assert!(output.status.success());
     assert!(wait_for_refresh_workers(fixture.main(), 0, WORKER_WAIT).is_empty());
-    assert_eq!(gitea.requests(), 0, "a young answer is not requested");
+    assert_eq!(gitea.requests(), 1, "a young answer is requested again");
     let checks = gitea.branch_requests();
 
     let output = fixture.wt_command_via_gitea(&gitea).args(["-r"]).env("NO_COLOR", "1").output().expect("wt -r");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(output.status.success(), "{stderr}");
 
-    assert_eq!(gitea.requests(), 1, "the forced PR half asked despite the young answer");
+    assert_eq!(gitea.requests(), 2, "the forced PR half asked despite the young answer");
     assert_eq!(gitea.branch_requests(), checks + 1, "and the live-head half checked again");
     assert!(stderr.contains("PR #7"), "this run shows the answer it waited for:\n{stderr}");
     assert!(!stderr.contains("PR #99"), "{stderr}");

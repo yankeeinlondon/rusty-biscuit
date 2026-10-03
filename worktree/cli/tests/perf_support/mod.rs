@@ -28,7 +28,7 @@ use std::time::{Duration, Instant};
 
 use assert_cmd::cargo::cargo_bin;
 use worktree::pull_requests::{
-    OpenPrSource, OpenPullRequest, RefreshOutcome, SniffOpenPrSource, pr_lock_path, refresh, unix_now,
+    OpenPrSource, OpenPullRequest, PrRequestError, RefreshOutcome, SniffOpenPrSource, pr_lock_path, refresh, unix_now,
 };
 use worktree::remote_head::{PrFailure, refresh_lock_held, remote_head_lock_path, remote_head_store_path};
 
@@ -311,7 +311,6 @@ impl MixedFixture {
             "origin_digest": worktree::pull_requests::origin_digest(&origin),
             "fetched_at": now - age.as_secs(),
             "publication": worktree::remote_head::new_attempt_id().expect("a publication id"),
-            "writer": "refresh",
             "source_repo": source_repo,
             "pull_requests": [{
                 "number": number,
@@ -337,7 +336,6 @@ impl MixedFixture {
             "origin_digest": worktree::pull_requests::origin_digest(&origin),
             "fetched_at": unix_now() - age.as_secs(),
             "publication": worktree::remote_head::new_attempt_id().expect("a publication id"),
-            "writer": "refresh",
             "source_repo": source_repo,
             "pull_requests": [],
         });
@@ -347,7 +345,7 @@ impl MixedFixture {
     /// Runs a refresh the way a competing worker would, with a source that
     /// must never be asked: `Contended` while a worker holds the lock.
     pub fn probe_refresh(&self) -> RefreshOutcome {
-        refresh(&self.pr_store(), &self.main, unix_now, false, |_| Box::new(NoRequest))
+        refresh(&self.pr_store(), &self.main, unix_now, |_| Box::new(NoRequest))
     }
 
     /// Whether a worker holds the live-head lock.
@@ -451,8 +449,8 @@ impl OpenPrSource for NoRequest {
     fn source_repo(&self) -> Option<String> {
         None
     }
-    fn fetch(&self) -> Result<Vec<OpenPullRequest>, PrFailure> {
-        Err(PrFailure::Other)
+    fn fetch(&self) -> Result<Vec<OpenPullRequest>, PrRequestError> {
+        Err(PrFailure::Other.into())
     }
 }
 

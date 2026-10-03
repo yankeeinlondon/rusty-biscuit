@@ -88,25 +88,23 @@ fn an_in_sync_check_fetches_nothing() {
 
 #[test]
 #[serial]
-fn a_forced_worker_records_the_given_attempt_and_a_receipt_for_both_halves() {
+fn a_worker_records_the_given_attempt_and_a_receipt_for_both_halves() {
     const ID: &str = "00112233445566778899aabbccddeeff";
     let fixture = Fixture::new();
     let pushed = fixture.commit_and_push("second");
     let receipt_path = fixture.cache_file(refresh_receipt_path(&fixture.main, ID).expect("receipt path"));
 
-    // Unforced: the attempt runs under the given id, and no receipt is written.
+    // Every attempt runs under the given id and writes its receipt; there is
+    // no `--force`.
     fixture.run_worker(&["--attempt", ID]);
     assert_eq!(fixture.stored_document()["attempt"]["id"], ID);
-    assert!(!receipt_path.exists(), "only a forced run writes a receipt");
-
-    fixture.run_worker(&["--attempt", ID, "--force"]);
     let receipt: serde_json::Value =
         serde_json::from_slice(&fs::read(&receipt_path).expect("a receipt")).expect("json");
     assert_eq!(receipt["attempt_id"], ID);
     assert_eq!(receipt["branch"], "main");
     assert_eq!(receipt["head"], "ok", "{receipt}");
-    // A local origin is no provider, so the PR half fails as `other`.
-    assert_eq!(receipt["prs"], serde_json::json!({ "kind": "failed", "failure": { "kind": "other" } }), "{receipt}");
+    // A local origin has no provider to ask: unsupported, not a failure.
+    assert_eq!(receipt["prs"], serde_json::json!({ "kind": "unsupported" }), "{receipt}");
     assert_eq!(fixture.git(&fixture.main, &["rev-parse", "origin/main"]), pushed);
     let _ = fs::remove_file(receipt_path);
 }
@@ -381,7 +379,6 @@ fn seed_fresh_answers(fixture: &Fixture, head: &str) {
         "origin_digest": digest,
         "fetched_at": now,
         "publication": worktree::remote_head::new_attempt_id().expect("a publication id"),
-        "writer": "refresh",
         "source_repo": null,
         "pull_requests": [],
     });
