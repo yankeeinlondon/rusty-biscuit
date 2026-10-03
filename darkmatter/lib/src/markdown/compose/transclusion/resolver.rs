@@ -175,7 +175,7 @@ fn resolve_file_reference(
     // Canonicalize only for transclusion identity (macOS `/var` versus
     // `/private/var`); the child's own context keeps `path`'s spelling, which
     // is the one its tree root uses.
-    let canonical = std::fs::canonicalize(&path).map_err(|e| {
+    let canonical = biscuit_file::canonicalize_simplified(&path).map_err(|e| {
         TransclusionError::Io(std::io::Error::new(
             e.kind(),
             format!("'{}' (resolved to '{}'): {e}", raw_target, path.display()),
@@ -321,7 +321,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(resolved, std::fs::canonicalize(&child_path).unwrap());
+        assert_eq!(resolved, biscuit_file::canonicalize_simplified(&child_path).unwrap());
     }
 
     #[test]
@@ -357,7 +357,7 @@ mod tests {
             None => unsafe { std::env::remove_var("DARKMATTER_TRANSCLUSION_ROOT") },
         }
 
-        assert_eq!(resolved.unwrap(), std::fs::canonicalize(target).unwrap());
+        assert_eq!(resolved.unwrap(), biscuit_file::canonicalize_simplified(&target).unwrap());
     }
 
     #[test]
@@ -401,7 +401,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(resolved, std::fs::canonicalize(package_target).unwrap());
+        assert_eq!(resolved, biscuit_file::canonicalize_simplified(&package_target).unwrap());
     }
 
     #[test]
@@ -562,7 +562,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(resolved, std::fs::canonicalize(&target_path).unwrap());
+        assert_eq!(resolved, biscuit_file::canonicalize_simplified(&target_path).unwrap());
     }
 
     #[test]

@@ -18,6 +18,11 @@ extension.
   CWD or repository state in a downstream resolver.
 - Resolve file-like values through `biscuit_file::FileReference`. Preserve its
   source context, explicit-vs-implicit syntax, and typed errors.
+- Read the home only through `biscuit_file::home_dir()` (`RequestSnapshot::from_process`
+  is the one production site; tests build expectations with it too). A canonical
+  path that leaves a private comparison (link targets, cache and preflight keys,
+  `referenced_files`, diagnostics) comes from `biscuit_file::canonicalize_simplified`;
+  `path_lookup_guard.rs` in lib and cli rejects any unlisted raw `canonicalize`.
 - Treat composition as effectful and validation as passive. Schema parsing,
   trigger matching, completion, hover, and validation must not perform I/O,
   execute expressions, fetch remotes, or mutate documents.

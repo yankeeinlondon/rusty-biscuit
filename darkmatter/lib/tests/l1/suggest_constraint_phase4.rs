@@ -119,8 +119,8 @@ fn mapping_envelopes_resolve_identically_with_origin_metadata() {
     let pure_resolved = resolve_file(&pure);
     let tagged_resolved = resolve_file(&tagged);
     assert_eq!(pure_resolved.json_schema, tagged_resolved.json_schema);
-    assert_eq!(pure_resolved.referenced_files, vec![pure.canonicalize().unwrap()]);
-    assert_eq!(tagged_resolved.referenced_files, vec![tagged.canonicalize().unwrap()]);
+    assert_eq!(pure_resolved.referenced_files, vec![biscuit_file::canonicalize_simplified(&pure).unwrap()]);
+    assert_eq!(tagged_resolved.referenced_files, vec![biscuit_file::canonicalize_simplified(&tagged).unwrap()]);
     assert_eq!(pure_resolved.origin.uri.as_deref(), Some(pure.as_path()));
     assert_eq!(tagged_resolved.origin.uri.as_deref(), Some(tagged.as_path()));
 }
@@ -164,8 +164,8 @@ fn named_imports_share_pure_and_tagged_mapping_namespaces() {
     let pure_resolved = resolve_file(&pure_consumer);
     let tagged_resolved = resolve_file(&tagged_consumer);
     assert_eq!(pure_resolved.json_schema, tagged_resolved.json_schema);
-    assert_eq!(pure_resolved.imports, vec![pure.canonicalize().unwrap()]);
-    assert_eq!(tagged_resolved.imports, vec![tagged.canonicalize().unwrap()]);
+    assert_eq!(pure_resolved.imports, vec![biscuit_file::canonicalize_simplified(&pure).unwrap()]);
+    assert_eq!(tagged_resolved.imports, vec![biscuit_file::canonicalize_simplified(&tagged).unwrap()]);
 }
 
 #[test]
@@ -185,8 +185,8 @@ fn tagged_schema_resolves_nested_imports_and_examples_from_its_directory() {
     );
 
     let resolved = resolve_file(&schema);
-    assert_eq!(resolved.imports, vec![types.canonicalize().unwrap()]);
-    assert_eq!(resolved.examples, vec![example.canonicalize().unwrap()]);
+    assert_eq!(resolved.imports, vec![biscuit_file::canonicalize_simplified(&types).unwrap()]);
+    assert_eq!(resolved.examples, vec![biscuit_file::canonicalize_simplified(&example).unwrap()]);
 }
 
 #[test]

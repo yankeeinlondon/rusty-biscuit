@@ -30,9 +30,19 @@ let (composed, report) = md.compose_with(&request)?;
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-`from_process` takes the home directory from the environment (`HOME`, or
-`USERPROFILE` on Windows) and falls back to the platform's profile lookup, so
-whoever launches a binary chooses its home through the child's environment.
+`from_process` takes the home directory from `biscuit_file::home_dir()`:
+`HOME` on macOS and Linux, `USERPROFILE` on native Windows (`HOME` alone does
+not move it there), with the platform's profile lookup as the fallback when
+the variable is unset. A relative value is no home at all, so `~` references
+fail instead of resolving against the working directory. Whoever launches a
+binary therefore chooses its home through the child's environment. For a
+document containing `::file ~/x.md`:
+
+```text
+HOME=/tmp/fixture md compose doc.md          transcludes /tmp/fixture/x.md
+USERPROFILE=D:\fixture md compose doc.md     transcludes D:\fixture\x.md (Windows)
+HOME=relative md compose doc.md              fails: missing-context (no home)
+```
 
 A library never reads the process. `RequestSnapshot::new(dir)` starts with no
 home directory and an empty environment, so a library call states every input

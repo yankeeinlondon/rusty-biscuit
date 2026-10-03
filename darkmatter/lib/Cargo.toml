@@ -70,7 +70,6 @@ globset = "0.4"
 shared_child = { version = "1.1", default-features = false }
 chrono = { version = "0.4", default-features = false, features = ["std", "clock", "now"] }
 which = "7"
-dirs = "6"
 
 # HTTP and URLs
 # default-features = false drops reqwest's system-proxy only; see docs/dependencies.md.

@@ -207,7 +207,7 @@ fn resolve_absolute(
     let resolved = resolved?;
     // `canonicalize` can fail on a resolved-but-since-removed (or not-yet-
     // created) path; the resolved absolute path is a correct fallback then.
-    let result = std::fs::canonicalize(&resolved).ok().or(Some(resolved));
+    let result = biscuit_file::canonicalize_simplified(&resolved).ok().or(Some(resolved));
     trace!("resolve_absolute success: {:?}", result);
     result
 }
@@ -234,7 +234,7 @@ mod tests {
         link_resolve(&mut md, &options, &mut report).unwrap();
 
         let resolved_path =
-            biscuit_file::to_portable_string(&fs::canonicalize(&file_b).unwrap());
+            biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(&file_b).unwrap());
         assert!(md.content().contains(&format!("({})", resolved_path)));
         assert!(md.content().contains(&format!("({})", resolved_path)));
         assert_eq!(report.link_resolves_applied, 2);
@@ -270,7 +270,7 @@ mod tests {
         }
 
         result.unwrap();
-        let expected = biscuit_file::to_portable_string(&std::fs::canonicalize(target).unwrap());
+        let expected = biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(&target).unwrap());
         assert!(
             markdown.content().contains(&expected),
             "{}",
@@ -310,7 +310,7 @@ mod tests {
         link_resolve(&mut md, &options, &mut report).unwrap();
 
         let expected =
-            biscuit_file::to_portable_string(&std::fs::canonicalize(package_target).unwrap());
+            biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(&package_target).unwrap());
         assert!(
             md.content().contains(&expected),
             "{}",
@@ -335,7 +335,7 @@ mod tests {
         link_resolve(&mut md, &options, &mut report).unwrap();
 
         let resolved_path =
-            biscuit_file::to_portable_string(&fs::canonicalize(&file_b).unwrap());
+            biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(&file_b).unwrap());
         assert!(md.content().contains(&format!("\"{}\"", resolved_path)));
         assert!(md.content().contains(&format!("\"{}\"", resolved_path)));
         assert!(md.content().contains(&format!("\"{}\"", resolved_path)));
@@ -357,7 +357,7 @@ mod tests {
         link_resolve(&mut md, &options, &mut report).unwrap();
 
         let resolved_path =
-            biscuit_file::to_portable_string(&fs::canonicalize(&file_b).unwrap());
+            biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(&file_b).unwrap());
         assert!(md.content().contains(&format!("\"{}\"", resolved_path)));
         assert_eq!(report.link_resolves_applied, 3);
     }
@@ -382,11 +382,11 @@ mod tests {
         link_resolve(&mut md, &options, &mut report).unwrap();
 
         let resolved_css =
-            biscuit_file::to_portable_string(&fs::canonicalize(&target_css).unwrap());
+            biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(&target_css).unwrap());
         let resolved_font =
-            biscuit_file::to_portable_string(&fs::canonicalize(&target_font).unwrap());
+            biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(&target_font).unwrap());
         let resolved_script =
-            biscuit_file::to_portable_string(&fs::canonicalize(&target_script).unwrap());
+            biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(&target_script).unwrap());
 
         assert!(
             md.content().contains(&format!("\"{}\"", resolved_css)),
@@ -431,13 +431,13 @@ mod tests {
         link_resolve(&mut md, &options, &mut report).unwrap();
 
         let resolved_parens =
-            biscuit_file::to_portable_string(&fs::canonicalize(&target_parens).unwrap());
+            biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(&target_parens).unwrap());
         let resolved_quotes =
-            biscuit_file::to_portable_string(&fs::canonicalize(&target_quotes).unwrap());
+            biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(&target_quotes).unwrap());
         let resolved_mixed =
-            biscuit_file::to_portable_string(&fs::canonicalize(&target_mixed).unwrap());
+            biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(&target_mixed).unwrap());
         let resolved_multi =
-            biscuit_file::to_portable_string(&fs::canonicalize(&target_multi).unwrap());
+            biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(&target_multi).unwrap());
 
         assert!(
             md.content().contains(&format!("(<{}>)", resolved_parens)),
@@ -554,7 +554,7 @@ mod tests {
         link_resolve(&mut md, &options, &mut report).unwrap();
 
         let resolved_path =
-            biscuit_file::to_portable_string(&fs::canonicalize(&logo).unwrap());
+            biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(&logo).unwrap());
 
         // src should be resolved to absolute path
         assert!(
@@ -587,7 +587,7 @@ mod tests {
         link_resolve(&mut md, &options, &mut report).unwrap();
 
         let resolved_path =
-            biscuit_file::to_portable_string(&fs::canonicalize(&target).unwrap());
+            biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(&target).unwrap());
 
         assert!(
             md.content().contains(&format!("\"{}\"", resolved_path)),
@@ -613,7 +613,7 @@ mod tests {
         link_resolve(&mut md, &options, &mut report).unwrap();
 
         let resolved_path =
-            biscuit_file::to_portable_string(&fs::canonicalize(&movie).unwrap());
+            biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(&movie).unwrap());
 
         assert!(
             md.content().contains(&format!("\"{}\"", resolved_path)),
@@ -642,11 +642,11 @@ mod tests {
         link_resolve(&mut md, &options, &mut report).unwrap();
 
         let resolved_b =
-            biscuit_file::to_portable_string(&fs::canonicalize(&file_b).unwrap());
+            biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(&file_b).unwrap());
         let resolved_movie =
-            biscuit_file::to_portable_string(&fs::canonicalize(&file_movie).unwrap());
+            biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(&file_movie).unwrap());
         let resolved_css =
-            biscuit_file::to_portable_string(&fs::canonicalize(&file_css).unwrap());
+            biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(&file_css).unwrap());
 
         assert!(
             md.content().contains(&format!("\"{}\"", resolved_b)),

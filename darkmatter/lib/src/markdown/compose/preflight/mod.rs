@@ -154,7 +154,7 @@ pub struct PreflightGraphNode {
 /// Falls back to the path as-given when it does not exist on disk (e.g. a
 /// remote source recorded as its URL string), so comparison still works.
 fn canonical_key(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    biscuit_file::canonicalize_simplified(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 impl PreflightGraphNode {

@@ -108,9 +108,6 @@ pub enum Kind {
     /// relative suffix leaves), or the shared helper's own call. The reason
     /// names that invariant.
     Invariant,
-    /// A direct call scheduled for migration to the shared helper; the
-    /// reason says where its result goes. Not a permanent state.
-    Temporary,
     /// An unresolved candidate a reviewer judged not to be the guarded
     /// function; the reason names what it calls.
     Reviewed,
@@ -485,7 +482,7 @@ pub fn check(sites: &[Site], exceptions: &[Exception]) -> Vec<String> {
                     problems.push(format!(
                         "exception for {rule} `{operation}` in {item} at {locations} is {:?}, but the site is {}",
                         entry.kind,
-                        if *resolved { "a resolved call (use Invariant or Temporary)" } else { "unresolved (use Reviewed)" }
+                        if *resolved { "a resolved call (use Invariant)" } else { "unresolved (use Reviewed)" }
                     ));
                 }
             }

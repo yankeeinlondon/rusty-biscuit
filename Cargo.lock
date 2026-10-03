@@ -3031,7 +3031,6 @@ dependencies = [
  "criterion",
  "cssparser 0.37.0",
  "dashmap",
- "dirs",
  "fancy-regex 0.19.1",
  "futures-util",
  "getrandom 0.4.2",

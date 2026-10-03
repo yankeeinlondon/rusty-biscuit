@@ -83,7 +83,7 @@ fn require_source_file(source: &ComposeSource, line: usize) -> Result<PathBuf, F
 
 /// Canonicalize a path, falling back to the original on failure.
 fn canonicalize(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    biscuit_file::canonicalize_simplified(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 // ── Glob discovery ──────────────────────────────────────────────────────────

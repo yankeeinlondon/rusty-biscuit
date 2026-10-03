@@ -686,7 +686,7 @@ impl ComposeWarning {
         advisory: &SchemaAdvisory,
         consumer: impl Into<PathBuf>,
     ) -> Self {
-        let path = std::fs::canonicalize(advisory.path())
+        let path = biscuit_file::canonicalize_simplified(advisory.path())
             .unwrap_or_else(|_| advisory.path().to_path_buf());
         Self {
             stage: "schema_validation".to_string(),

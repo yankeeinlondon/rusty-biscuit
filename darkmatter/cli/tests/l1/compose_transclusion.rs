@@ -265,7 +265,7 @@ fn test_compose_link_transcluded_child() {
         "stdout should contain normalized sibling path relative to parent, got:\n{stdout}"
     );
     // Should not contain absolute path
-    let abs_sibling = std::fs::canonicalize(&sibling_file).unwrap();
+    let abs_sibling = biscuit_file::canonicalize_simplified(&sibling_file).unwrap();
     assert!(
         !stdout.contains(abs_sibling.to_string_lossy().as_ref()),
         "stdout should not contain absolute path, got:\n{stdout}"

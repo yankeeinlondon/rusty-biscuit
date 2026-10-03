@@ -417,7 +417,7 @@ mod tests {
 
     #[test]
     fn a_target_under_home_is_home_rooted() {
-        let home = dirs::home_dir().expect("Has home dir");
+        let home = biscuit_file::home_dir().expect("Has home dir");
         let target = home.join("some_file.txt");
         let content = format!("[file]({})\n", biscuit_file::to_portable_string(&target));
 

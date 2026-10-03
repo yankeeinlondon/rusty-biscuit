@@ -1244,7 +1244,7 @@ impl ImportEngine {
 /// the given path when canonicalization fails (it should not, since the path
 /// was just resolved on disk).
 fn canonical_path(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+    biscuit_file::canonicalize_simplified(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 /// Loads a standalone schema file's mapping payload as named types.

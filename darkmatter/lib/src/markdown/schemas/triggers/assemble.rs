@@ -394,7 +394,7 @@ fn describe_payload(payload: &YamlValue) -> String {
 }
 
 fn canonicalize(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+    biscuit_file::canonicalize_simplified(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 #[cfg(test)]

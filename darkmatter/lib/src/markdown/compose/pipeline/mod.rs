@@ -145,7 +145,7 @@ impl Markdown {
         let node = match &options.source {
             ComposeSource::Unknown => None,
             ComposeSource::File(path) => Some((
-                std::fs::canonicalize(path)
+                biscuit_file::canonicalize_simplified(path)
                     .unwrap_or_else(|_| path.clone())
                     .to_string_lossy()
                     .to_string(),
