@@ -11,7 +11,7 @@
 //! printing to stdout.
 
 use biscuit_terminal::components::list::UnorderedList;
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{InlineProse, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::status::{Status, StatusState};
 use biscuit_terminal::components::table::{Table, TableCellContent, TableColumn};
@@ -478,9 +478,7 @@ fn expression_function_signatures_markdown() -> String {
 }
 
 fn prose_cell<T: Into<String>>(text: T) -> TableCellContent {
-    Prose::new(text.into())
-        .with_word_wrap(WordWrap::WrapProse(Some(6), None))
-        .into()
+    InlineProse::new(text.into()).into()
 }
 
 fn format_constraint_use(constraint: &SchemaConstraintDescriptor) -> String {

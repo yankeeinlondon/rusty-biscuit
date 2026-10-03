@@ -7,7 +7,7 @@
 //! `claudine/docs/cli/steer.md`.
 
 use biscuit_terminal::components::list::UnorderedList;
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{InlineProse, Prose};
 use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
 use biscuit_terminal::components::table::table::{Table, TableColumn};
 use biscuit_terminal::terminal::Terminal;
@@ -181,9 +181,13 @@ fn line(markup: impl Into<String>) -> Prose {
     Prose::new(markup.into()).with_word_wrap(WordWrap::WrapProse(None, Some(2)))
 }
 
-fn cell(text: &str, selectable: bool) -> Prose {
+fn cell_markup(text: &str, selectable: bool) -> String {
     let text = Prose::escape_text(text);
-    if selectable { line(text) } else { line(format!("<dim><strikethrough>{text}</strikethrough></dim>")) }
+    if selectable { text } else { format!("<dim><strikethrough>{text}</strikethrough></dim>") }
+}
+
+fn cell(text: &str, selectable: bool) -> InlineProse {
+    InlineProse::new(cell_markup(text, selectable))
 }
 
 fn details(row: &SessionListing) -> Vec<RenderableTerminalContent> {
@@ -242,7 +246,7 @@ impl TerminalRenderable for SessionTable {
             for (index, row) in self.rows.iter().enumerate() {
                 lines.push(String::new());
                 if !tabular {
-                    lines.push(cell(&picker_label(index, row), row.is_selectable()).render(term));
+                    lines.push(line(cell_markup(&picker_label(index, row), row.is_selectable())).render(term));
                 }
                 let id = Prose::escape_text(&row.id.to_string()).to_string();
                 let heading = if tabular { format!("<bold>#{}</bold> {id}", index + 1) } else { format!("  {id}") };

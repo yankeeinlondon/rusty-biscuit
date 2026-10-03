@@ -1,4 +1,4 @@
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::InlineProse;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::{Table, TableCellContent, TableColumn};
 use biscuit_terminal::components::table::types::ColumnType;
@@ -36,10 +36,10 @@ fn title_cell(title: &str, prefix: &str, term: &Terminal) -> TableCellContent {
         return title.to_string().into();
     }
     let url = format!("{ICONIFY_SET_BASE_URL}/{prefix}");
-    Prose::new(format!(
+    InlineProse::new(format!(
         "<blue><a href={href}>{label}</a></blue>",
-        href = Prose::quoted_attr(&url),
-        label = Prose::escape_text(title),
+        href = InlineProse::quoted_attr(&url),
+        label = InlineProse::escape_text(title),
     ))
     .into()
 }
