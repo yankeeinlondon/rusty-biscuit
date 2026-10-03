@@ -6,7 +6,7 @@
 //! A deserialized collection has no repository root, so its files are
 //! unlinked; `cli.rs` covers `file://` links through a real repository.
 
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::discovery::detection::color::ColorDepth;
 use biscuit_terminal::prelude::{WordWrap, strip_escape_codes};
@@ -68,6 +68,11 @@ fn report() -> String {
     commits.to_prose(&options)
 }
 
+/// The report as `recent_commits::run` builds it: every source line is a line.
+fn report_prose() -> Prose {
+    Prose::new(report()).with_line_breaks(LineBreaks::Hard)
+}
+
 fn wide_terminal() -> Terminal {
     Terminal::new_optimistic(400)
 }
@@ -81,14 +86,14 @@ fn visible_lines(rendered: &str) -> Vec<String> {
 
 #[test]
 fn single_render_preserves_every_line_and_blank_line_without_inflation() {
-    let rendered = Prose::new(report()).render(&wide_terminal());
+    let rendered = report_prose().render(&wide_terminal());
     let expected: Vec<&str> = VISIBLE.lines().collect();
     assert_eq!(visible_lines(&rendered), expected);
 }
 
 #[test]
 fn escaped_markup_in_commit_text_renders_literally() {
-    let rendered = Prose::new(report()).render(&wide_terminal());
+    let rendered = report_prose().render(&wide_terminal());
     let visible = strip_escape_codes(&rendered);
     assert!(
         visible.contains("handling <red>now</red> and _em_"),
@@ -100,7 +105,7 @@ fn escaped_markup_in_commit_text_renders_literally() {
 
 #[test]
 fn single_render_emits_styles_and_osc8_links_when_supported() {
-    let rendered = Prose::new(report()).render(&wide_terminal());
+    let rendered = report_prose().render(&wide_terminal());
     assert!(rendered.contains("\x1b[1mabc1234"), "{rendered:?}");
     assert!(rendered.contains("\x1b[34mfeat"), "{rendered:?}");
     assert!(rendered.contains("\x1b[3mat"), "{rendered:?}");
@@ -113,7 +118,7 @@ fn single_render_emits_styles_and_osc8_links_when_supported() {
 fn links_fall_back_to_markdown_without_osc8_support() {
     let mut terminal = wide_terminal();
     terminal.osc_link_support = false;
-    let rendered = Prose::new(report()).render(&terminal);
+    let rendered = report_prose().render(&terminal);
 
     assert!(!rendered.contains("\x1b]8;;"), "{rendered:?}");
     let visible = strip_escape_codes(&rendered);
@@ -129,7 +134,7 @@ fn colorless_terminal_keeps_every_visible_line() {
     let mut terminal = wide_terminal();
     terminal.color_depth = ColorDepth::None;
     terminal.osc_link_support = true;
-    let rendered = Prose::new(report()).render(&terminal);
+    let rendered = report_prose().render(&terminal);
     let expected: Vec<&str> = VISIBLE.lines().collect();
     assert_eq!(visible_lines(&rendered), expected);
 }
@@ -140,7 +145,7 @@ fn colorless_terminal_keeps_every_visible_line() {
 #[test]
 fn word_wrap_layout_keeps_source_lines_and_wraps_within_width() {
     let width = 60;
-    let rendered = Prose::new(report())
+    let rendered = report_prose()
         .with_word_wrap(WordWrap::WrapProse(None, None))
         .render(&Terminal::new_optimistic(width));
     let lines = visible_lines(&rendered);
