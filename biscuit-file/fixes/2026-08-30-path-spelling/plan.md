@@ -4,6 +4,25 @@ created: 2026-10-03
 phase: 1
 agent: claude/sonnet
 yolo: true
+source_files_during_phase_1: []
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - biscuit-file/lib/src/file_reference/portable/path_identity.rs
+  - biscuit-file/lib/src/file_reference/portable/path_identity/tests.rs
+  - biscuit-file/lib/src/file_reference/portable/mod.rs
+  - biscuit-file/lib/src/file_reference/resolve.rs
+  - biscuit-file/lib/tests/l1/magic_local_roots.rs
+  - biscuit-file/lib/tests/l1/repository_scope_catalog.rs
+  - biscuit-file/lib/tests/l1/finalized_reference_resolution.rs
+docs_updated_during_phase_2:
+  - biscuit-file/docs/topics/file-references.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/biscuit-file/references/file-references.md
+packages:
+  - biscuit-file
 ---
 
 # Plan: path spelling tests, canonicalization guard, and consistent home lookup
@@ -110,16 +129,16 @@ Windows `std::env::home_dir` behavior is already exercised by
 
 ### Tasks
 
-- [ ] **Record rulings.** Write R1-R7 outcomes (or confirmation of the
+- [x] **Record rulings.** Write R1-R7 outcomes (or confirmation of the
       assumed defaults) at the top of
       `biscuit-file/fixes/2026-08-30-path-spelling/implementation-log.md`.
-- [ ] **Baseline run.** From each of `biscuit-file/`, `claudine/`,
+- [x] **Baseline run.** From each of `biscuit-file/`, `claudine/`,
       `darkmatter/`, run `just test` and `just lint`; record pass/fail
       so later regressions are attributable.
-- [ ] **Confirm dependency facts.** Check R4 (Claudine's `biscuit-file`
+- [x] **Confirm dependency facts.** Check R4 (Claudine's `biscuit-file`
       features) and R7 (`syn` availability) against the Cargo manifests and
       `docs/dependencies.md`; log the answers.
-- [ ] **Audit table.** Produce the classified canonicalize inventory for all
+- [x] **Audit table.** Produce the classified canonicalize inventory for all
       five packages (production only): file, enclosing item, form
       (`std::fs::`, imported, alias, method, `dunce`), destination
       (private comparison vs passed onward), proposed action. Also list
@@ -144,7 +163,7 @@ parallel with Phase 3's scanner work (Wave 1 below).
 
 ### Tasks
 
-- [ ] **Identity rows (Wave 1).** In `path_identity/tests.rs`, make sure each
+- [x] **Identity rows (Wave 1).** In `path_identity/tests.rs`, make sure each
       row of the spec table has a test via `from_windows_text`. Add only the
       missing ones: safe verbatim vs legacy drive; mixed-separator ordinary
       paths; verbatim with `/`, `.`, `..` kept literal; legacy vs verbatim
@@ -153,34 +172,34 @@ parallel with Phase 3's scanner work (Wave 1 below).
       whole-component containment (`C:\repo` vs `C:\repo-old\x.md`);
       short/long name not unified. Do not duplicate cases already covered;
       list the pre-existing coverage in the log.
-- [ ] **Non-Unicode names (Wave 1).** Windows text entry point takes `&str`
+- [x] **Non-Unicode names (Wave 1).** Windows text entry point takes `&str`
       and cannot express unpaired surrogates. If required, extend it (test-only)
       to accept `&[u16]`, and for Unix add an `OsStr`-bytes test proving two
       distinct raw names stay distinct. Do not make lossy display text the
       identity.
-- [ ] **Extract ordering function (Wave 1).** Locate the production candidate
+- [x] **Extract ordering function (Wave 1).** Locate the production candidate
       dedupe/ordering code (first occurrence wins, provenance retained, in
       `file_reference/resolve.rs` and `context.rs`; confirm with
       `mcp__gitnexus__context`/grep). Extract the smallest internal function
       that takes parsed `PathIdentity` values, keeping the public API and
       host-native interpretation unchanged. Production code calls it.
-- [ ] **Ordering and provenance tests (Wave 1, after extraction).** Using
+- [x] **Ordering and provenance tests (Wave 1, after extraction).** Using
       distinct tags per candidate, assert count and first-seen provenance with
       input in both orders for verbatim/legacy duplicates. Pin emitted
       spelling separately: prefix removed only when safe, preserved when it
       cannot be.
-- [ ] **Catalog constructor vs containment (Wave 1).** For
+- [x] **Catalog constructor vs containment (Wave 1).** For
       `RepositoryScopeCatalog`, one test group asserts a reducible verbatim
       root is rejected as unnormalized (explicit error, not empty result);
       a separate group asserts document containment against an
       already-valid catalog.
-- [ ] **Native-only tests kept (Wave 1).** Verify the existing Windows-gated
+- [x] **Native-only tests kept (Wave 1).** Verify the existing Windows-gated
       tests for real 8.3 aliases, junctions, and platform conversion remain,
       each with a comment saying why it needs the Windows filesystem; make
       8.3 fixtures skip cleanly when generation is disabled rather than
       assume it. Keep canonical symlink/junction escape checks (including
       nearest-existing-ancestor for missing targets) untouched.
-- [ ] **Mutation check (Wave 2).** For the extracted comparison/ordering code,
+- [x] **Mutation check (Wave 2).** For the extracted comparison/ordering code,
       temporarily break one rule (e.g., stop folding drive case, or last-wins
       instead of first-wins), confirm the targeted test fails, restore, and
       record the check in the log. Confirm `git diff` is clean of the break.

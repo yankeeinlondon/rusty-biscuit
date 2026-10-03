@@ -32,6 +32,13 @@ packages:
   - claudine-cli
   - darkmatter
   - darkmatter-cli
+human_review: false
+message_to_agent: |-
+  Phase 1 changed no source. Read the implementation log's "Existing guard that overlaps Phases 3 and 4" section before starting Phase 3 or 4: `darkmatter/cli/tests/common/context_guard.rs` already counts every `dirs::home_dir` / `std::env::home_dir` / `biscuit_file::home_dir` read per file in Claudine and Darkmatter (`context_construction_guard.rs` allowlists in claudine/{lib,cli}/tests/l1 and darkmatter/cli/tests/l1). Phase 4 edits must update those allowlists in the same change, and Phase 3's home-lookup rule should tighten that gate rather than build a second scanner for the same identifiers. The canonicalize audit table (convert/except/ignore per call line) and the home-lookup inventory, including two Claudine sites the plan omits (`linking/paths.rs:55`, `messaging/resolve.rs:161`), are in the log. `mcp/state.rs:218` writes a canonical path into persisted MCP state; converting it changes stored keys on Windows. Phase 4 should add `file-reference` explicitly to claudine/lib's biscuit-file features instead of relying on defaults.
+
+  Baseline: biscuit-file and claudine `just test`/`just lint` pass. darkmatter `just test` has 2 PRE-EXISTING failures (current_root_documentation_contract, current_root_migration_guard) caused by HEAD commit 92c562dcc splitting `.claude/skills/claudine/SKILL.md` into `cli-commands.md`; they are unrelated to path code and must not be attributed to this fix. Phase 6 (skills) is the natural place to fix them; until then darkmatter's suite is red at baseline.
+
+  Phase 2 (done): candidate and `@` root dedupe in biscuit-file now go through `first_seen_by_identity` (crate-internal, `file_reference/portable/path_identity.rs`), keyed on `PathIdentity` instead of `normalize_components`. On Windows this also folds unreducible (long) verbatim paths and verbatim UNC paths onto their legacy spellings; Unix behavior is unchanged. Six new Windows-gated tests (`a_real_short_name_alias_is_one_directory_but_two_identities`, two in `tests/l1/magic_local_roots.rs`, two in `tests/l1/repository_scope_catalog.rs`) compiled on build-win-native but have NOT run: the cross-check consume step hit the 50 GiB storage preflight (47.8 GiB free; the sweep freed nothing). When a later phase cross-checks biscuit-file on Windows, confirm those six pass. `just check-tier-coverage` is a repo-root recipe, not a package-area one.
 ---
 
 # Test path spelling on every host and centralize filesystem path lookup
