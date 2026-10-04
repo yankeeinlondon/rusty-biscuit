@@ -40,44 +40,55 @@ let modules = package.modules();
 
 ## SymbolKind
 
-Symbols are categorized by kind, allowing consumers to distinguish between different type constructs:
+Symbols are categorized by kind, allowing consumers to distinguish between different type constructs.
+The v1 `SymbolKind` and the schema `SymbolKindV2` have the same variants:
 
 ```rust
 pub enum SymbolKind {
-    Function,   // Regular functions
-    Method,     // Methods (functions with self/this)
-    Type,       // Structs, type aliases
-    Class,      // Class definitions
-    Interface,  // Interfaces, protocols
-    Enum,       // Enumeration types
-    Trait,      // Traits (Rust, Scala, PHP)
-    Module,     // Modules, namespaces
-    Namespace,  // Package/namespace declarations
-    Variable,   // Variables, locals
-    Parameter,  // Function parameters
-    Field,      // Struct/class fields
-    Macro,      // Macro definitions
-    Constant,   // Constants
-    Unknown,    // Unrecognized symbols
+    Function,    // Free functions
+    Method,      // Functions declared directly in a type, trait, impl, protocol or extension body
+    Constructor, // TypeScript/JavaScript `constructor`
+    Type,        // Structs, unions, records, Go types, Swift types
+    TypeAlias,   // `type`/`typedef`/`using` aliases
+    Class,       // Class definitions
+    Interface,   // Interfaces, protocols
+    Enum,        // Enumeration types
+    EnumVariant, // Rust variants, Swift `case`
+    Trait,       // Traits (Rust, Scala, PHP)
+    Module,      // Rust `mod`, Perl `package`, Scala `object`
+    Namespace,   // Go/Java `package`, C#/C++ `namespace`
+    Variable,    // Variables, locals, Rust `static` items
+    Parameter,   // Function parameters
+    Field,       // Struct/class fields
+    Property,    // JS/TS class-body properties, TS interface properties, C# properties
+    Macro,       // Macro definitions
+    Constant,    // Constants
+    Unknown,     // Unrecognized symbols
 }
 ```
 
+`is_function()` includes `Constructor`, and `is_type()` includes `TypeAlias`.
+
 ### Language-Specific Mappings
 
-| Language | Type | Class | Interface | Enum | Trait |
-|----------|:----:|:-----:|:---------:|:----:|:-----:|
-| Rust | struct | - | - | enum | trait |
-| TypeScript | type alias | class | interface | enum | - |
-| Java | - | class | - | enum | - |
-| C# | struct, record | class | interface | enum | - |
-| C/C++ | struct | class (C++) | - | enum | - |
-| Swift | struct | class | protocol | enum* | - |
-| Scala | - | class | - | enum | trait |
-| PHP | - | class | interface | enum | trait |
-| Go | type | - | - | - | - |
-| Python | - | class | - | - | - |
+| Language | Type | Class | Interface | Enum | Trait | TypeAlias |
+|----------|:----:|:-----:|:---------:|:----:|:-----:|:---------:|
+| Rust | struct, union | - | - | enum | trait | `type` |
+| TypeScript | - | class | interface | enum | - | `type` |
+| Java | record | class | interface | enum | - | - |
+| C# | struct, record | class | interface | enum | - | - |
+| C | struct, union | - | - | enum | - | `typedef` |
+| C++ | struct, union | class | - | enum | - | `typedef`, `using` |
+| Swift | struct, class, enum* | - | protocol | - | - | - |
+| Scala | - | class | - | enum | trait | - |
+| PHP | - | class | interface | enum | trait | - |
+| Go | type | - | - | - | - | - |
+| Python | - | class | - | - | - | - |
 
-\* Swift enum is captured as Type due to grammar limitations; see Known Limitations.
+\* Swift structs, classes and enums are all captured as Type; see Known Limitations.
+
+The per-language rules for kinds, containers, visibility and `static` are in
+[Symbol Kinds, Visibility and `static`](../docs/symbol-kinds-and-visibility.md).
 
 ## Symbol Metadata
 
@@ -90,24 +101,60 @@ pub struct SymbolInfo {
     pub range: CodeRange,
     pub language: ProgrammingLanguage,
     pub file: PathBuf,
+    pub container_name: Option<String>,
+    pub container_kind: Option<SymbolKind>,
     pub doc_comment: Option<String>,
+    pub visibility: Option<Visibility>, // None = unknown
+    pub is_static: bool,                // member usable without an instance
+    pub is_static_storage: bool,        // storage/linkage `static`
     pub signature: Option<FunctionSignature>,
     pub type_metadata: Option<TypeMetadata>,
 }
 ```
 
+- `visibility` is set for every kind, not only functions. It is the access
+  declared or implied at the declaration (not effective access through
+  enclosing modules), and `None` where no access rules apply or the file
+  cannot tell.
+- `is_static` and `is_static_storage` are independent: a C++ `static` data
+  member has `is_static`, a C `static` function or a Rust `static` item has
+  `is_static_storage`.
+- Every function-like symbol (Function, Method, Constructor) has a
+  `signature`, with an empty parameter list when there are none.
+
+### Visibility
+
+```rust
+pub enum Visibility {
+    Public,
+    Protected,
+    Private,
+    Internal,          // C#/Swift `internal`
+    Package,           // unmarked Java member, Swift `package`, lowercase Go name
+    Crate,             // Rust `pub(crate)`, `pub(super)`, `pub(in path)`
+    ModulePrivate,     // C `static` linkage, Swift `fileprivate`, unexported module-level JS/TS
+    ProtectedInternal, // C# `protected internal`
+    PrivateProtected,  // C# `private protected`
+}
+```
+
+`Visibility` mirrors the schema's `VisibilityLevel` one-to-one, except that
+`VisibilityLevel::Unknown` is `None` in v1.
+
 ### FunctionSignature
 
-For functions and methods:
+For functions, methods and constructors:
 
 ```rust
 pub struct FunctionSignature {
     pub parameters: Vec<ParameterInfo>,
     pub return_type: Option<String>,
-    pub visibility: Option<Visibility>,
-    pub is_static: bool,
+    pub is_static: bool, // copy of SymbolInfo::is_static
 }
 ```
+
+Visibility lives only on `SymbolInfo::visibility`; `FunctionSignature` has no
+visibility field.
 
 ### TypeMetadata
 
@@ -115,18 +162,40 @@ For type definitions:
 
 ```rust
 pub struct TypeMetadata {
-    pub fields: Vec<FieldInfo>,           // Struct fields
+    pub fields: Vec<FieldInfo>,           // Fields and properties only, never methods
     pub variants: Vec<VariantInfo>,       // Enum variants
     pub type_parameters: Vec<String>,     // Generic parameters
 }
 ```
+
+A `FieldInfo`'s `visibility` and `is_static` are copied from the standalone
+Field, Property or Constant symbol of the same name and container, so type
+metadata and standalone symbols agree.
+
+### Schema records
+
+`SymbolRecord` (schema 3.0) carries the same facts:
+
+- `visibility.level` holds the level; `modifiers` holds `Static` for member
+  `static` and `StaticStorage` for storage/linkage `static`.
+- `identity.container_kind` holds the container's kind next to
+  `identity.module_path` (the container name).
+- `source.declaration_text` holds the declaration up to its body, keeping
+  modifiers such as `pub(in crate::a)` that a level cannot express.
+- `relations.implements` lists the trait of a Rust trait-impl member.
+- `visibility.is_exported` comes only from export syntax and the bind pass,
+  never from a Public level; converting a `SymbolInfo` always yields
+  `is_exported: false`.
+
+The `From<SymbolInfo>` / `From<SymbolRecord>` adapters preserve kind,
+visibility, both `static` flags, container kind and signature presence.
 
 ## JSON Summaries
 
 The library provides `FileSummary` and `PackageSummary` structs for JSON output. These types are
 used by the CLI but are also available to library consumers.
 
-Schema v2 output is exposed via `SymbolRecord` and `FileSymbolIndex`, including `schema_version`
+Schema output (version 3.0) is exposed via `SymbolRecord` and `FileSymbolIndex`, including `schema_version`
 and `completed_passes` metadata for staged analysis.
 
 ## Testing
@@ -294,3 +363,21 @@ Swift's tree-sitter grammar uses a single `class_declaration` node for struct, c
 ### Go Interface Detection
 
 Go uses a single `type_declaration` for both struct and interface types. The library captures all as `SymbolKind::Type` since Go's type system treats them uniformly.
+
+`type A = B` aliases are not reported, and struct fields are not reported as
+standalone symbols.
+
+### Unreported Instance Attributes
+
+Python attributes assigned only through `self.x`, and JavaScript properties
+assigned only through `this.x`, are not reported; declarations in the class
+body are. TypeScript never reported `this.x`-only properties.
+
+### Perl
+
+Perl coverage is narrow: named subs (Function), `package` (Module) and names
+declared by `my`, `our` and `state` (Variable, keeping their sigil). `local`
+is never reported, and visibility is always unknown.
+
+The full list, including unresolved visibility cases, is in
+[Symbol Kinds, Visibility and `static`](../docs/symbol-kinds-and-visibility.md#current-limitations).

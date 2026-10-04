@@ -485,10 +485,13 @@ pub struct FieldInfo {
     /// Documentation comment for the field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub doc_comment: Option<String>,
-    /// The visibility/access modifier (public, protected, private).
+    /// Access level; `None` when unknown. Copied from the standalone
+    /// `Field`/`Property`/`Constant` symbol of the same name and container
+    /// when one exists, so it agrees with that symbol's `visibility`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub visibility: Option<Visibility>,
-    /// Whether this is a static field.
+    /// Member usable without an instance; copied like `visibility` from the
+    /// standalone symbol's `is_static`.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub is_static: bool,
 }

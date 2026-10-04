@@ -144,6 +144,9 @@ produced by older rules.
 
 ### SymbolKind
 
+Per-language kind, container, visibility and `static` rules (user-facing):
+[symbol-kinds-and-visibility.md](../../../tree-hugger/docs/symbol-kinds-and-visibility.md).
+
 ```rust
 pub enum SymbolKind {
     Function,     // Regular functions
@@ -156,8 +159,8 @@ pub enum SymbolKind {
     Enum,         // Enumerations
     EnumVariant,  // Enum members / cases
     Trait,        // Traits (Rust, Scala, PHP)
-    Module,       // Modules, namespaces
-    Namespace,    // Package declarations
+    Module,       // Rust `mod`, Perl `package`, Scala `object`
+    Namespace,    // Go/Java `package`, C#/C++ `namespace` (not unified with Module)
     Variable,     // Variables
     Parameter,    // Function parameters
     Field,        // Struct/class fields
@@ -196,9 +199,9 @@ pub enum Visibility {
     Protected,
     Private,
     Internal,           // C# / Swift `internal`
-    Package,            // Java default, Swift `package`
-    Crate,              // Rust `pub(crate)`
-    ModulePrivate,      // Swift `fileprivate`, C `static` linkage
+    Package,            // Java default, Swift `package`, lowercase Go name
+    Crate,              // Rust `pub(crate)`, `pub(super)`, `pub(in path)`
+    ModulePrivate,      // Swift `fileprivate`, C `static` linkage, unexported JS/TS in a module file
     ProtectedInternal,  // C# `protected internal`
     PrivateProtected,   // C# `private protected`
 }

@@ -68,7 +68,7 @@ and `static_flags/` readers behind one dispatcher each); there is no
 post-conversion kind override. Bump `EXTRACTOR_REVISION` with any change to
 extracted records. See [Query System](./query-system.md#capture-to-symbolkind-mapping).
 
-Access lives on `SymbolInfo::visibility` (`None` = Unknown), not on the signature; `is_static` (member without an instance) and `is_static_storage` (storage/linkage `static`) are separate flags. The v1↔v2 adapter round-trips all of them plus `container_kind`; see [API Reference](./api-reference.md#symbolinfo).
+Access lives on `SymbolInfo::visibility` (`None` = Unknown), not on the signature; `is_static` (member without an instance) and `is_static_storage` (storage/linkage `static`) are separate flags. The v1↔v2 adapter round-trips all of them plus `container_kind`; see [API Reference](./api-reference.md#symbolinfo). It does not round-trip `TypeMetadata::type_parameters` (no `TypeData` slot) or a `TypeAlias`'s field metadata (C `typedef struct {…} Alias`; `TypeAliasData` holds only the aliased type); `symbols_adapter::every_fixture_symbol_round_trips_through_the_record` pins both.
 
 - **Readers get a `DeclarationContext`** (`declaration.rs`): language, source, final kind, `is_local`, the captured `name` node (one declaration can name several things: `int a, *b;`, Swift `case east, west`), the file `root` (same-file lookups: Rust trait level, earlier C/C++ `static` prototype, Scala `package` segments) and `is_ecma_module` (computed once per JS/TS file by `is_ecma_module_file`). Add a field here rather than re-scanning the file per symbol.
 - **`FieldInfo` copies the standalone member.** `align_field_metadata` (`tree_file.rs`) overwrites each type-metadata field's `visibility`/`is_static` from the standalone `Field`/`Property`/`Constant` of the same name and container, so `hug classes` and `hug symbols` agree; metadata readers' own keyword reads are only a fallback.
@@ -88,6 +88,7 @@ Access lives on `SymbolInfo::visibility` (`None` = Unknown), not on the signatur
 ## Detailed Documentation
 
 - [API Reference](./api-reference.md) - Complete type definitions and methods
+- [Symbol Kinds, Visibility and `static`](../../../tree-hugger/docs/symbol-kinds-and-visibility.md) - Per-language kinds, containers, visibility levels and defaults, the two meanings of `static`, declaration text, current limitations
 - [Query System](./query-system.md) - Tree Hugger's `.scm` queries, capture conventions, and how to extend them
 - [Diagnostics](./diagnostics.md) - Lint rules, ignore directives, dead code detection
 - [Tree-sitter Internals](./tree-sitter-internals.md) - The underlying runtime: Parser/Tree/Node API, query mechanics, AST debugging, and grammar version/ABI compatibility
@@ -292,8 +293,9 @@ Use `find_unsupported_predicates(query_text)` and `find_hook_predicates(query_te
 
 ## Known Limitations
 
-- **Swift**: All types captured as `SymbolKind::Type` (grammar limitation)
+- **Swift**: structs, classes and enums all captured as `SymbolKind::Type` (an extractor limit; the grammar's `declaration_kind` field could distinguish them)
+- **Constructors**: only TypeScript/JavaScript report `Constructor`; elsewhere they are `Method` or absent
 - **Go**: Struct and interface both captured as `SymbolKind::Type`
 - **Go**: `type A = B` aliases are not reported at all
 - **Python / JavaScript**: instance attributes assigned only through `self.x` / `this.x` are not reported (the catch-all assignment patterns were removed); class-body declarations are
-- **Perl**: variable names keep their sigil (`$name`); `local` is never a declaration; scope lives in the declaration text (`my`/`our`/`state`), not in the level
+- **Perl**: narrow coverage: named subs, `package` (Module) and `my`/`our`/`state` names only; variable names keep their sigil (`$name`); `local` is never a declaration; scope lives in the declaration text (`my`/`our`/`state`), not in the level

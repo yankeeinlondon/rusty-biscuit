@@ -123,7 +123,7 @@ When `--json` is selected, output includes v2 schema metadata and pass-aware sym
 Each `FileSummary` includes:
 
 - `file`, `language`, `hash`
-- `symbols` (for `functions`, `types`, or `symbols`) - each with a `kind` field, and a `visibility` field when the access level is known (omitted for Unknown)
+- `symbols` (for `functions`, `types`, or `symbols`) - each with a `kind` field, and a `visibility` field when the access level is known (omitted for Unknown); see [Symbol Kinds, Visibility and `static`](docs/symbol-kinds-and-visibility.md) for the per-language rules
 - `imports` (for `imports` and `symbols`)
 - `exports` (for `symbols`)
 - `locals` (for `symbols`)

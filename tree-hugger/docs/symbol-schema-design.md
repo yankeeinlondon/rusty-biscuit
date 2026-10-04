@@ -2,7 +2,12 @@
 
 ## Status
 
-Draft design for a major refactor.
+Draft design for a major refactor, partly implemented. `SymbolRecord` and
+`FileSymbolIndex` ship in `lib/src/shared/schema_v2/` and serialize as schema
+**3.0** (the Rust module and type names keep their historical `v2`). Sections
+below describe the implemented shape unless marked **planned**. Per-language
+extraction rules for kinds, visibility and `static` are in
+[Symbol Kinds, Visibility and `static`](./symbol-kinds-and-visibility.md).
 
 ## Context
 
@@ -164,12 +169,30 @@ pub struct IdentityFacet {
     pub name: String,
     pub display_name: String,
     pub qualified_name: Option<String>,
-    pub module_path: Option<String>,
+    pub module_path: Option<String>,               // the container's name
+    pub container_kind: Option<SymbolKindV2>,      // the container's kind
     pub stable_key: String, // language + file + kind + lexical path
 }
 ```
 
 `stable_key` is deterministic and used to produce `SymbolId`.
+
+`module_path` holds the name of the symbol's nearest container (a class, trait,
+module, or the implemented type of a Rust `impl`), and `container_kind` holds
+that container's kind as extracted from its own declaration. `container_kind`
+is omitted when there is no container or the file cannot tell its kind, for
+example a Rust `impl` for a type declared in another file:
+
+```json
+"identity": {
+  "name": "fmt",
+  "qualified_name": "PublicStruct::fmt",
+  "module_path": "PublicStruct",
+  "container_kind": "Type"
+}
+```
+
+**Planned (schema 4.0):** `module_path` is renamed `container_name`.
 
 ### Source Facet
 
@@ -190,6 +213,22 @@ pub struct SourceFacet {
 
 `source_text` and `body_text` should be feature-gated or size-limited for large-scale indexing.
 
+`declaration_text` is filled for every record: the declaration from its start
+up to, but not including, its body, trailing whitespace trimmed (a bodyless
+declaration contributes its whole text). It keeps the modifiers, access
+keywords and attributes the grammar parses inside the declaration node, so
+syntax a `VisibilityLevel` cannot express survives:
+
+| Declaration | `declaration_text` |
+|---|---|
+| `pub(in crate::a) fn f() { … }` | `pub(in crate::a) fn f()` |
+| `public int Count { get; private set; }` | `public int Count { get; private set; }` |
+| `private[Shape] def secret() = 2` | `private[Shape] def secret() =` |
+
+Doc comments and syntax outside the declaration node (a Rust `#[…]` attribute,
+a Python decorator, a TypeScript `export` wrapper) are not included.
+`signature_text` and `body_text` are not yet filled (**planned**).
+
 ### Visibility Facet
 
 ```rust
@@ -202,6 +241,8 @@ pub enum VisibilityLevel {
     Package,
     Crate,
     ModulePrivate,
+    ProtectedInternal, // C# `protected internal`
+    PrivateProtected,  // C# `private protected`
     Unknown,
 }
 
@@ -219,6 +260,20 @@ pub struct VisibilityFacet {
     pub is_experimental: bool,
 }
 ```
+
+**Visibility ownership.** `level` is the only home of a symbol's access level:
+the access declared or implied at the declaration, not effective access
+through enclosing modules or types. `Unknown` covers declarations without
+access rules (parameters, locals, Python, Perl, shell) and access the file
+cannot establish. The v1 model mirrors it as `SymbolInfo::visibility`
+(`Unknown` is `None`); `FunctionSignature` has no visibility, and a type's
+`FieldInfo::visibility` is a copy of the matching standalone field's level.
+
+**Export is separate from visibility.** `is_exported` comes only from export
+syntax (`export` in JavaScript/TypeScript, a `pub…` Rust item; never a member)
+and the bind pass. A Public level never implies an export, so a Public Java
+class or TypeScript class method has `is_exported: false`, and a record
+converted from a v1 `SymbolInfo` is never exported.
 
 ### Documentation Facet
 
@@ -295,24 +350,29 @@ pub struct Attribute {
     pub span: Option<TextSpan>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", content = "value")]
 pub enum Modifier {
+    Static,        // member usable without an instance
+    StaticStorage, // storage or linkage `static`; never implies Static
     Async,
-    Static,
     Const,
-    Abstract,
-    Final,
-    Sealed,
-    Open,
-    Virtual,
-    Override,
-    Unsafe,
-    Extern,
     Readonly,
-    Mutable,
-    Generator,
+    Unsafe,
+    Mut,
+    Custom(String),
 }
 ```
+
+`Static` and `StaticStorage` are the two meanings of the `static` keyword.
+`Static` marks a member used without an instance (Java/C#/TS `static`, Python
+`@classmethod`, a Rust associated function without `self`, a Java interface
+constant). `StaticStorage` marks Rust `static` items and C/C++ file-scope,
+namespace-scope and function-local `static`. The v1 model carries them as
+`SymbolInfo::is_static` and `SymbolInfo::is_static_storage`.
+
+**Planned:** further modifiers (`Abstract`, `Final`, `Sealed`, `Open`,
+`Virtual`, `Override`, `Extern`, `Generator`).
 
 ### Type Facet
 
@@ -386,6 +446,14 @@ pub struct RelationFacet {
     pub related: Vec<SymbolRef>,
 }
 ```
+
+`implements` is filled for Rust trait-impl members: each member of
+`impl Trait for Type` carries one entry named after the trait's last path
+segment without generic arguments (`impl fmt::Display for Point` gives
+`Display`), with `id` set when exactly one trait of that name is declared in
+the same file. Members
+of an inherent impl have an empty list, and the trait never appears in the
+container. Other languages do not fill it yet (**planned**).
 
 ### Semantic Facet
 
@@ -606,6 +674,18 @@ Each pass updates `provenance.parse_pass` and timestamps.
    1. `minor` for additive fields.
    2. `major` for breaking changes (renames, semantic changes, enum variant removals).
 
+Version history:
+
+| Version | Change |
+|---|---|
+| 2.0 | first emitted record shape; no longer emitted |
+| 3.0 (current) | kinds decided at extraction (Constructor, Property, TypeAlias, EnumVariant no longer collapse to Unknown); visibility for every kind with the C# compound levels; `Modifier::StaticStorage`; `identity.container_kind`; `declaration_text`; Rust `relations.implements`; `is_exported` no longer derived from a Public level. Emitted on records, file indexes, CLI envelopes and analyzer fingerprints |
+| 4.0 (**planned**) | `identity.module_path` renamed `container_name`, with the smaller default JSON shape |
+
+The CLI cache key also contains `EXTRACTOR_REVISION`, so a change to
+extraction rules invalidates cached records without a schema bump (see
+[Cache Design](./cache-design.md)).
+
 ## Migration from Current Model
 
 ### Mapping from existing fields
@@ -616,6 +696,14 @@ Each pass updates `provenance.parse_pass` and timestamps.
 4. `SymbolInfo.doc_comment` -> `docs.raw_doc`.
 5. `FunctionSignature` -> `kind_data: FunctionData` (+ `modifiers`).
 6. `TypeMetadata` -> `kind_data: TypeData` or `EnumData`.
+7. `SymbolInfo.visibility` <-> `visibility.level` (`None` <-> `Unknown`).
+8. `SymbolInfo.is_static` <-> `Modifier::Static`; `SymbolInfo.is_static_storage` <-> `Modifier::StaticStorage`.
+9. `SymbolInfo.container_name` / `container_kind` <-> `identity.module_path` / `identity.container_kind`.
+
+Both kind and visibility conversions are wildcard-free `match`es, so a new
+variant on one side fails to compile until the other side handles it. The
+adapter does not carry `declaration_text` or `relations` (v1 has no field for
+them), `TypeMetadata::type_parameters`, or a TypeAlias's field metadata.
 
 ### Recommended migration phases
 
@@ -623,7 +711,7 @@ Each pass updates `provenance.parse_pass` and timestamps.
 2. Add adapters:
    1. `impl From<SymbolInfo> for SymbolRecord`.
    2. `impl TryFrom<SymbolRecord> for SymbolInfo` (best effort).
-3. Update CLI `--json` to opt into `schema_version = 2.x`.
+3. Update CLI `--json` to emit the schema version (done; currently 3.0).
 4. Remove v1 schema after one release cycle.
 
 ## Testing Strategy for the New Schema
