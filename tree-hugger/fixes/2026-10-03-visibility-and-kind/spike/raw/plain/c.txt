@@ -1,0 +1,66 @@
+  - field aliased_tag_field [in AliasedTag] c.c:12:9
+  - type AliasedTag { aliased_tag_field: int } c.c:11:9
+  - field anonymous_struct_field c.c:16:9
+  - type AnonymousStructAlias { anonymous_struct_field: int } c.c:15:1
+  - variable COLOR_GREEN c.c:27:5
+  - variable COLOR_RED c.c:26:5
+  - type CountAlias c.c:23:1
+  - variable extern_declared_variable c.c:39:12
+  - function file_static_function() -> int c.c:46:12
+  - variable file_static_variable c.c:37:12
+  - macro FIXTURE_MACRO c.c:4:9
+  - function function_with_local_static() -> int c.c:56:5
+  - parameter helper_value c.c:52:27
+  - variable local_static_counter c.c:57:16
+  - variable local_value c.c:42:9
+  - enum NamedColor { COLOR_RED, COLOR_GREEN } c.c:25:1
+  - type NamedTag { tag_field: int } c.c:6:1
+  - parameter parameter_value c.c:41:25
+  - function prototyped_helper() -> int c.c:50:12
+  - function prototyped_helper(helper_value: int) -> int c.c:52:5
+  - function public_function(parameter_value: int) -> int c.c:41:5
+  - variable public_global_variable c.c:35:5
+  - field same_name_field [in SameName] c.c:20:9
+  - type SameName { same_name_field: int } c.c:19:1
+  - type SameName { same_name_field: int } c.c:19:9
+  - field tag_field [in NamedTag] c.c:7:9
+  - type TagAlias { aliased_tag_field: int } c.c:11:1
+  - field union_float_field c.c:32:11
+  - field union_int_field c.c:31:9
+=== classes
+c.c (C)
+  type NamedTag [6:1]
+    Instance Fields (1)
+      - tag_field: int
+  type AliasedTag [11:9]
+    Instance Fields (1)
+      - aliased_tag_field: int
+  type TagAlias [11:1]
+    Instance Fields (1)
+      - aliased_tag_field: int
+  type AnonymousStructAlias [15:1]
+    Instance Fields (1)
+      - anonymous_struct_field: int
+  type SameName [19:9]
+    Instance Fields (1)
+      - same_name_field: int
+  type SameName [19:1]
+    Instance Fields (1)
+      - same_name_field: int
+  type CountAlias [23:1]
+
+=== functions
+  - function file_static_function() -> int c.c:46:12
+  - function function_with_local_static() -> int c.c:56:5
+  - function prototyped_helper() -> int c.c:50:12
+  - function prototyped_helper(helper_value: int) -> int c.c:52:5
+  - function public_function(parameter_value: int) -> int c.c:41:5
+=== types
+  - type AliasedTag { aliased_tag_field: int } c.c:11:9
+  - type AnonymousStructAlias { anonymous_struct_field: int } c.c:15:1
+  - type CountAlias c.c:23:1
+  - enum NamedColor { COLOR_RED, COLOR_GREEN } c.c:25:1
+  - type NamedTag { tag_field: int } c.c:6:1
+  - type SameName { same_name_field: int } c.c:19:1
+  - type SameName { same_name_field: int } c.c:19:9
+  - type TagAlias { aliased_tag_field: int } c.c:11:1

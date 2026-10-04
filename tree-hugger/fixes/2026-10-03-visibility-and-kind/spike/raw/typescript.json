@@ -1,0 +1,4810 @@
+{
+  "schema_version": {
+    "major": 2,
+    "minor": 0
+  },
+  "root_dir": "/private/tmp/claude-501/-Volumes-coding-wt-rusty-biscuit-feat-symbols/d63e5266-3b40-40b9-970c-1a0bd24ad9bf/scratchpad/baseline",
+  "language": "TypeScript",
+  "files": [
+    {
+      "file": "typescript.ts",
+      "language": "TypeScript",
+      "hash": "23325740d60b9f94",
+      "symbols": [
+        {
+          "name": "exportedFunction",
+          "kind": "Function",
+          "range": {
+            "start_line": 5,
+            "start_column": 8,
+            "end_line": 5,
+            "end_column": 44,
+            "start_byte": 121,
+            "end_byte": 157
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "moduleFunction",
+          "kind": "Function",
+          "range": {
+            "start_line": 7,
+            "start_column": 1,
+            "end_line": 10,
+            "end_column": 2,
+            "start_byte": 159,
+            "end_byte": 280
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "signature": {
+            "parameters": [
+              {
+                "name": "parameterValue",
+                "type_annotation": "number"
+              }
+            ],
+            "return_type": "number"
+          }
+        },
+        {
+          "name": "parameterValue",
+          "kind": "Parameter",
+          "range": {
+            "start_line": 7,
+            "start_column": 25,
+            "end_line": 7,
+            "end_column": 39,
+            "start_byte": 183,
+            "end_byte": 197
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts"
+        },
+        {
+          "name": "localValue",
+          "kind": "Variable",
+          "range": {
+            "start_line": 8,
+            "start_column": 9,
+            "end_line": 8,
+            "end_column": 19,
+            "start_byte": 225,
+            "end_byte": 235
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts"
+        },
+        {
+          "name": "EXPORTED_CONSTANT",
+          "kind": "Variable",
+          "range": {
+            "start_line": 12,
+            "start_column": 14,
+            "end_line": 12,
+            "end_column": 31,
+            "start_byte": 295,
+            "end_byte": 312
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts"
+        },
+        {
+          "name": "MODULE_CONSTANT",
+          "kind": "Variable",
+          "range": {
+            "start_line": 14,
+            "start_column": 7,
+            "end_line": 14,
+            "end_column": 22,
+            "start_byte": 325,
+            "end_byte": 340
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts"
+        },
+        {
+          "name": "ExportedAlias",
+          "kind": "Unknown",
+          "range": {
+            "start_line": 16,
+            "start_column": 8,
+            "end_line": 16,
+            "end_column": 36,
+            "start_byte": 354,
+            "end_byte": 382
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts"
+        },
+        {
+          "name": "ModuleAlias",
+          "kind": "Unknown",
+          "range": {
+            "start_line": 18,
+            "start_column": 1,
+            "end_line": 18,
+            "end_column": 27,
+            "start_byte": 384,
+            "end_byte": 410
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts"
+        },
+        {
+          "name": "ExportedInterface",
+          "kind": "Interface",
+          "range": {
+            "start_line": 20,
+            "start_column": 8,
+            "end_line": 23,
+            "end_column": 2,
+            "start_byte": 419,
+            "end_byte": 506
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "type_metadata": {
+            "fields": [
+              {
+                "name": "interfaceProperty",
+                "type_annotation": "string"
+              }
+            ]
+          }
+        },
+        {
+          "name": "ModuleInterface",
+          "kind": "Interface",
+          "range": {
+            "start_line": 25,
+            "start_column": 1,
+            "end_line": 27,
+            "end_column": 2,
+            "start_byte": 508,
+            "end_byte": 570
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts"
+        },
+        {
+          "name": "ExportedEnum",
+          "kind": "Enum",
+          "range": {
+            "start_line": 29,
+            "start_column": 8,
+            "end_line": 32,
+            "end_column": 2,
+            "start_byte": 579,
+            "end_byte": 631
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "type_metadata": {
+            "variants": [
+              {
+                "name": "FirstMember"
+              },
+              {
+                "name": "SecondMember"
+              }
+            ]
+          }
+        },
+        {
+          "name": "ModuleEnum",
+          "kind": "Enum",
+          "range": {
+            "start_line": 34,
+            "start_column": 1,
+            "end_line": 36,
+            "end_column": 2,
+            "start_byte": 633,
+            "end_byte": 666
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "type_metadata": {
+            "variants": [
+              {
+                "name": "OnlyMember"
+              }
+            ]
+          }
+        },
+        {
+          "name": "concreteProtectedMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 41,
+            "start_column": 3,
+            "end_line": 41,
+            "end_column": 47,
+            "start_byte": 751,
+            "end_byte": 795
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "ExportedWidget",
+          "kind": "Class",
+          "range": {
+            "start_line": 46,
+            "start_column": 8,
+            "end_line": 79,
+            "end_column": 2,
+            "start_byte": 844,
+            "end_byte": 1606
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "type_metadata": {
+            "fields": [
+              {
+                "name": "publicProperty",
+                "type_annotation": "number",
+                "visibility": "Public"
+              },
+              {
+                "name": "protectedProperty",
+                "visibility": "Protected"
+              },
+              {
+                "name": "privateProperty",
+                "type_annotation": "boolean",
+                "visibility": "Private"
+              },
+              {
+                "name": "unmarkedProperty"
+              },
+              {
+                "name": "staticProperty",
+                "is_static": true
+              },
+              {
+                "name": "privateStaticProperty",
+                "type_annotation": "number",
+                "visibility": "Private",
+                "is_static": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "publicProperty",
+          "kind": "Unknown",
+          "range": {
+            "start_line": 47,
+            "start_column": 3,
+            "end_line": 47,
+            "end_column": 36,
+            "start_byte": 898,
+            "end_byte": 931
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "container_name": "ExportedWidget"
+        },
+        {
+          "name": "protectedProperty",
+          "kind": "Unknown",
+          "range": {
+            "start_line": 48,
+            "start_column": 3,
+            "end_line": 48,
+            "end_column": 36,
+            "start_byte": 935,
+            "end_byte": 968
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "container_name": "ExportedWidget"
+        },
+        {
+          "name": "privateProperty",
+          "kind": "Unknown",
+          "range": {
+            "start_line": 49,
+            "start_column": 3,
+            "end_line": 49,
+            "end_column": 43,
+            "start_byte": 972,
+            "end_byte": 1012
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "container_name": "ExportedWidget"
+        },
+        {
+          "name": "#hashPrivateProperty",
+          "kind": "Unknown",
+          "range": {
+            "start_line": 50,
+            "start_column": 3,
+            "end_line": 50,
+            "end_column": 27,
+            "start_byte": 1016,
+            "end_byte": 1040
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "container_name": "ExportedWidget"
+        },
+        {
+          "name": "unmarkedProperty",
+          "kind": "Unknown",
+          "range": {
+            "start_line": 51,
+            "start_column": 3,
+            "end_line": 51,
+            "end_column": 23,
+            "start_byte": 1044,
+            "end_byte": 1064
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "container_name": "ExportedWidget"
+        },
+        {
+          "name": "staticProperty",
+          "kind": "Unknown",
+          "range": {
+            "start_line": 52,
+            "start_column": 3,
+            "end_line": 52,
+            "end_column": 28,
+            "start_byte": 1068,
+            "end_byte": 1093
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "container_name": "ExportedWidget"
+        },
+        {
+          "name": "privateStaticProperty",
+          "kind": "Unknown",
+          "range": {
+            "start_line": 53,
+            "start_column": 3,
+            "end_line": 53,
+            "end_column": 51,
+            "start_byte": 1097,
+            "end_byte": 1145
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "container_name": "ExportedWidget"
+        },
+        {
+          "name": "constructor",
+          "kind": "Unknown",
+          "range": {
+            "start_line": 55,
+            "start_column": 3,
+            "end_line": 58,
+            "end_column": 4,
+            "start_byte": 1150,
+            "end_byte": 1242
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "container_name": "ExportedWidget",
+          "signature": {
+            "parameters": [
+              {
+                "name": "initialValue",
+                "type_annotation": "number"
+              }
+            ]
+          }
+        },
+        {
+          "name": "initialValue",
+          "kind": "Parameter",
+          "range": {
+            "start_line": 55,
+            "start_column": 15,
+            "end_line": 55,
+            "end_column": 27,
+            "start_byte": 1162,
+            "end_byte": 1174
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "container_name": "ExportedWidget"
+        },
+        {
+          "name": "publicMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 60,
+            "start_column": 3,
+            "end_line": 62,
+            "end_column": 4,
+            "start_byte": 1246,
+            "end_byte": 1313
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "container_name": "ExportedWidget",
+          "signature": {
+            "return_type": "number"
+          }
+        },
+        {
+          "name": "protectedMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 64,
+            "start_column": 3,
+            "end_line": 64,
+            "end_column": 39,
+            "start_byte": 1317,
+            "end_byte": 1353
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "container_name": "ExportedWidget",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "privateMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 66,
+            "start_column": 3,
+            "end_line": 66,
+            "end_column": 35,
+            "start_byte": 1357,
+            "end_byte": 1389
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "container_name": "ExportedWidget",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "unmarkedMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 70,
+            "start_column": 3,
+            "end_line": 70,
+            "end_column": 22,
+            "start_byte": 1426,
+            "end_byte": 1445
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "container_name": "ExportedWidget"
+        },
+        {
+          "name": "staticMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 72,
+            "start_column": 3,
+            "end_line": 74,
+            "end_column": 4,
+            "start_byte": 1449,
+            "end_byte": 1526
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "container_name": "ExportedWidget",
+          "signature": {
+            "return_type": "ExportedWidget"
+          }
+        },
+        {
+          "name": "privateStaticMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 76,
+            "start_column": 3,
+            "end_line": 76,
+            "end_column": 48,
+            "start_byte": 1530,
+            "end_byte": 1575
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "container_name": "ExportedWidget",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "abstractMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 78,
+            "start_column": 3,
+            "end_line": 78,
+            "end_column": 28,
+            "start_byte": 1579,
+            "end_byte": 1604
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "container_name": "ExportedWidget",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "ModuleWidget",
+          "kind": "Class",
+          "range": {
+            "start_line": 81,
+            "start_column": 1,
+            "end_line": 85,
+            "end_column": 2,
+            "start_byte": 1608,
+            "end_byte": 1678
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts"
+        },
+        {
+          "name": "constructor",
+          "kind": "Unknown",
+          "range": {
+            "start_line": 82,
+            "start_column": 3,
+            "end_line": 82,
+            "end_column": 19,
+            "start_byte": 1631,
+            "end_byte": 1647
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "container_name": "ModuleWidget"
+        },
+        {
+          "name": "instanceMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 84,
+            "start_column": 3,
+            "end_line": 84,
+            "end_column": 28,
+            "start_byte": 1651,
+            "end_byte": 1676
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "container_name": "ModuleWidget",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "namespaceFunction",
+          "kind": "Function",
+          "range": {
+            "start_line": 88,
+            "start_column": 10,
+            "end_line": 88,
+            "end_column": 47,
+            "start_byte": 1726,
+            "end_byte": 1763
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "signature": {
+            "return_type": "void"
+          }
+        }
+      ],
+      "imports": [
+        {
+          "name": "readFileSync",
+          "range": {
+            "start_line": 3,
+            "start_column": 10,
+            "end_line": 3,
+            "end_column": 22,
+            "start_byte": 87,
+            "end_byte": 99
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "source": "fs"
+        }
+      ],
+      "exports": [
+        {
+          "name": "exportedFunction",
+          "kind": "Function",
+          "range": {
+            "start_line": 5,
+            "start_column": 8,
+            "end_line": 5,
+            "end_column": 44,
+            "start_byte": 121,
+            "end_byte": 157
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "ExportedAlias",
+          "kind": "Unknown",
+          "range": {
+            "start_line": 16,
+            "start_column": 8,
+            "end_line": 16,
+            "end_column": 36,
+            "start_byte": 354,
+            "end_byte": 382
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts"
+        },
+        {
+          "name": "ExportedInterface",
+          "kind": "Interface",
+          "range": {
+            "start_line": 20,
+            "start_column": 8,
+            "end_line": 23,
+            "end_column": 2,
+            "start_byte": 419,
+            "end_byte": 506
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "type_metadata": {
+            "fields": [
+              {
+                "name": "interfaceProperty",
+                "type_annotation": "string"
+              }
+            ]
+          }
+        },
+        {
+          "name": "ExportedEnum",
+          "kind": "Enum",
+          "range": {
+            "start_line": 29,
+            "start_column": 8,
+            "end_line": 32,
+            "end_column": 2,
+            "start_byte": 579,
+            "end_byte": 631
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "type_metadata": {
+            "variants": [
+              {
+                "name": "FirstMember"
+              },
+              {
+                "name": "SecondMember"
+              }
+            ]
+          }
+        },
+        {
+          "name": "ExportedWidget",
+          "kind": "Class",
+          "range": {
+            "start_line": 46,
+            "start_column": 8,
+            "end_line": 79,
+            "end_column": 2,
+            "start_byte": 844,
+            "end_byte": 1606
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "type_metadata": {
+            "fields": [
+              {
+                "name": "publicProperty",
+                "type_annotation": "number",
+                "visibility": "Public"
+              },
+              {
+                "name": "protectedProperty",
+                "visibility": "Protected"
+              },
+              {
+                "name": "privateProperty",
+                "type_annotation": "boolean",
+                "visibility": "Private"
+              },
+              {
+                "name": "unmarkedProperty"
+              },
+              {
+                "name": "staticProperty",
+                "is_static": true
+              },
+              {
+                "name": "privateStaticProperty",
+                "type_annotation": "number",
+                "visibility": "Private",
+                "is_static": true
+              }
+            ]
+          }
+        }
+      ],
+      "locals": [
+        {
+          "name": "moduleFunction",
+          "kind": "Function",
+          "range": {
+            "start_line": 7,
+            "start_column": 1,
+            "end_line": 10,
+            "end_column": 2,
+            "start_byte": 159,
+            "end_byte": 280
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "signature": {
+            "parameters": [
+              {
+                "name": "parameterValue",
+                "type_annotation": "number"
+              }
+            ],
+            "return_type": "number"
+          }
+        },
+        {
+          "name": "parameterValue",
+          "kind": "Parameter",
+          "range": {
+            "start_line": 7,
+            "start_column": 25,
+            "end_line": 7,
+            "end_column": 39,
+            "start_byte": 183,
+            "end_byte": 197
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts"
+        },
+        {
+          "name": "localValue",
+          "kind": "Variable",
+          "range": {
+            "start_line": 8,
+            "start_column": 9,
+            "end_line": 8,
+            "end_column": 19,
+            "start_byte": 225,
+            "end_byte": 235
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts"
+        },
+        {
+          "name": "EXPORTED_CONSTANT",
+          "kind": "Variable",
+          "range": {
+            "start_line": 12,
+            "start_column": 14,
+            "end_line": 12,
+            "end_column": 31,
+            "start_byte": 295,
+            "end_byte": 312
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts"
+        },
+        {
+          "name": "MODULE_CONSTANT",
+          "kind": "Variable",
+          "range": {
+            "start_line": 14,
+            "start_column": 7,
+            "end_line": 14,
+            "end_column": 22,
+            "start_byte": 325,
+            "end_byte": 340
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts"
+        },
+        {
+          "name": "ModuleAlias",
+          "kind": "Unknown",
+          "range": {
+            "start_line": 18,
+            "start_column": 1,
+            "end_line": 18,
+            "end_column": 27,
+            "start_byte": 384,
+            "end_byte": 410
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts"
+        },
+        {
+          "name": "ModuleInterface",
+          "kind": "Interface",
+          "range": {
+            "start_line": 25,
+            "start_column": 1,
+            "end_line": 27,
+            "end_column": 2,
+            "start_byte": 508,
+            "end_byte": 570
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts"
+        },
+        {
+          "name": "ModuleEnum",
+          "kind": "Enum",
+          "range": {
+            "start_line": 34,
+            "start_column": 1,
+            "end_line": 36,
+            "end_column": 2,
+            "start_byte": 633,
+            "end_byte": 666
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "type_metadata": {
+            "variants": [
+              {
+                "name": "OnlyMember"
+              }
+            ]
+          }
+        },
+        {
+          "name": "concreteProtectedMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 41,
+            "start_column": 3,
+            "end_line": 41,
+            "end_column": 47,
+            "start_byte": 751,
+            "end_byte": 795
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "publicProperty",
+          "kind": "Unknown",
+          "range": {
+            "start_line": 47,
+            "start_column": 3,
+            "end_line": 47,
+            "end_column": 36,
+            "start_byte": 898,
+            "end_byte": 931
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "container_name": "ExportedWidget"
+        },
+        {
+          "name": "protectedProperty",
+          "kind": "Unknown",
+          "range": {
+            "start_line": 48,
+            "start_column": 3,
+            "end_line": 48,
+            "end_column": 36,
+            "start_byte": 935,
+            "end_byte": 968
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "container_name": "ExportedWidget"
+        },
+        {
+          "name": "privateProperty",
+          "kind": "Unknown",
+          "range": {
+            "start_line": 49,
+            "start_column": 3,
+            "end_line": 49,
+            "end_column": 43,
+            "start_byte": 972,
+            "end_byte": 1012
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "container_name": "ExportedWidget"
+        },
+        {
+          "name": "#hashPrivateProperty",
+          "kind": "Unknown",
+          "range": {
+            "start_line": 50,
+            "start_column": 3,
+            "end_line": 50,
+            "end_column": 27,
+            "start_byte": 1016,
+            "end_byte": 1040
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "container_name": "ExportedWidget"
+        },
+        {
+          "name": "unmarkedProperty",
+          "kind": "Unknown",
+          "range": {
+            "start_line": 51,
+            "start_column": 3,
+            "end_line": 51,
+            "end_column": 23,
+            "start_byte": 1044,
+            "end_byte": 1064
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "container_name": "ExportedWidget"
+        },
+        {
+          "name": "staticProperty",
+          "kind": "Unknown",
+          "range": {
+            "start_line": 52,
+            "start_column": 3,
+            "end_line": 52,
+            "end_column": 28,
+            "start_byte": 1068,
+            "end_byte": 1093
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "container_name": "ExportedWidget"
+        },
+        {
+          "name": "privateStaticProperty",
+          "kind": "Unknown",
+          "range": {
+            "start_line": 53,
+            "start_column": 3,
+            "end_line": 53,
+            "end_column": 51,
+            "start_byte": 1097,
+            "end_byte": 1145
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "container_name": "ExportedWidget"
+        },
+        {
+          "name": "constructor",
+          "kind": "Unknown",
+          "range": {
+            "start_line": 55,
+            "start_column": 3,
+            "end_line": 58,
+            "end_column": 4,
+            "start_byte": 1150,
+            "end_byte": 1242
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "container_name": "ExportedWidget",
+          "signature": {
+            "parameters": [
+              {
+                "name": "initialValue",
+                "type_annotation": "number"
+              }
+            ]
+          }
+        },
+        {
+          "name": "initialValue",
+          "kind": "Parameter",
+          "range": {
+            "start_line": 55,
+            "start_column": 15,
+            "end_line": 55,
+            "end_column": 27,
+            "start_byte": 1162,
+            "end_byte": 1174
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "container_name": "ExportedWidget"
+        },
+        {
+          "name": "publicMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 60,
+            "start_column": 3,
+            "end_line": 62,
+            "end_column": 4,
+            "start_byte": 1246,
+            "end_byte": 1313
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "container_name": "ExportedWidget",
+          "signature": {
+            "return_type": "number"
+          }
+        },
+        {
+          "name": "protectedMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 64,
+            "start_column": 3,
+            "end_line": 64,
+            "end_column": 39,
+            "start_byte": 1317,
+            "end_byte": 1353
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "container_name": "ExportedWidget",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "privateMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 66,
+            "start_column": 3,
+            "end_line": 66,
+            "end_column": 35,
+            "start_byte": 1357,
+            "end_byte": 1389
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "container_name": "ExportedWidget",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "unmarkedMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 70,
+            "start_column": 3,
+            "end_line": 70,
+            "end_column": 22,
+            "start_byte": 1426,
+            "end_byte": 1445
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "container_name": "ExportedWidget"
+        },
+        {
+          "name": "staticMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 72,
+            "start_column": 3,
+            "end_line": 74,
+            "end_column": 4,
+            "start_byte": 1449,
+            "end_byte": 1526
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "container_name": "ExportedWidget",
+          "signature": {
+            "return_type": "ExportedWidget"
+          }
+        },
+        {
+          "name": "privateStaticMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 76,
+            "start_column": 3,
+            "end_line": 76,
+            "end_column": 48,
+            "start_byte": 1530,
+            "end_byte": 1575
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "container_name": "ExportedWidget",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "abstractMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 78,
+            "start_column": 3,
+            "end_line": 78,
+            "end_column": 28,
+            "start_byte": 1579,
+            "end_byte": 1604
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "container_name": "ExportedWidget",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "ModuleWidget",
+          "kind": "Class",
+          "range": {
+            "start_line": 81,
+            "start_column": 1,
+            "end_line": 85,
+            "end_column": 2,
+            "start_byte": 1608,
+            "end_byte": 1678
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts"
+        },
+        {
+          "name": "constructor",
+          "kind": "Unknown",
+          "range": {
+            "start_line": 82,
+            "start_column": 3,
+            "end_line": 82,
+            "end_column": 19,
+            "start_byte": 1631,
+            "end_byte": 1647
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "container_name": "ModuleWidget"
+        },
+        {
+          "name": "instanceMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 84,
+            "start_column": 3,
+            "end_line": 84,
+            "end_column": 28,
+            "start_byte": 1651,
+            "end_byte": 1676
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "container_name": "ModuleWidget",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "namespaceFunction",
+          "kind": "Function",
+          "range": {
+            "start_line": 88,
+            "start_column": 10,
+            "end_line": 88,
+            "end_column": 47,
+            "start_byte": 1726,
+            "end_byte": 1763
+          },
+          "language": "TypeScript",
+          "file": "typescript.ts",
+          "signature": {
+            "return_type": "void"
+          }
+        }
+      ],
+      "lint": [
+        {
+          "message": "Imported symbol 'readFileSync' is never used",
+          "range": {
+            "start_line": 3,
+            "start_column": 10,
+            "end_line": 3,
+            "end_column": 22,
+            "start_byte": 87,
+            "end_byte": 99
+          },
+          "severity": "Warning",
+          "rule": "unused-import",
+          "context": {
+            "line_text": "import { readFileSync } from \"fs\";",
+            "underline_column": 9,
+            "underline_length": 12
+          },
+          "metadata": {
+            "category": "Style",
+            "confidence": "Low",
+            "source": "SemanticAnalysis",
+            "default_severity": "Warning",
+            "effective_severity": "Warning"
+          }
+        }
+      ],
+      "syntax": []
+    }
+  ],
+  "symbol_indexes": [
+    {
+      "schema_version": {
+        "major": 2,
+        "minor": 0
+      },
+      "file": "typescript.ts",
+      "language": "TypeScript",
+      "file_hash": "23325740d60b9f94",
+      "completed_passes": [
+        "Parse",
+        "Bind",
+        "Semantic",
+        "Docs"
+      ],
+      "symbols": [
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "143a6391273ec954237727809303fb18d4aec66b88260a64eaa4eb8dfd0959bc",
+          "language": "TypeScript",
+          "kind": "Function",
+          "identity": {
+            "name": "exportedFunction",
+            "display_name": "exportedFunction",
+            "stable_key": "typescript::typescript.ts::Function::exportedFunction::0"
+          },
+          "source": {
+            "file_path": "typescript.ts",
+            "declaration_span": {
+              "start": {
+                "line": 5,
+                "column": 8
+              },
+              "end": {
+                "line": 5,
+                "column": 44
+              },
+              "start_byte": 121,
+              "end_byte": 157
+            },
+            "body_span": {
+              "start": {
+                "line": 5,
+                "column": 42
+              },
+              "end": {
+                "line": 5,
+                "column": 44
+              },
+              "start_byte": 155,
+              "end_byte": 157
+            },
+            "name_span": {
+              "start": {
+                "line": 5,
+                "column": 17
+              },
+              "end": {
+                "line": 5,
+                "column": 33
+              },
+              "start_byte": 130,
+              "end_byte": 146
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": true,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "void",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "void"
+              },
+              {
+                "kind": "Canonical",
+                "text": "void"
+              }
+            ]
+          },
+          "relations": {},
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069304787,
+            "updated_at_epoch_ms": 1791069304907
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "void",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "5caa232334249fded3f158a736110b384295bf6484fbd341d5915ddde25f85ee",
+          "language": "TypeScript",
+          "kind": "Function",
+          "identity": {
+            "name": "moduleFunction",
+            "display_name": "moduleFunction",
+            "stable_key": "typescript::typescript.ts::Function::moduleFunction::0"
+          },
+          "source": {
+            "file_path": "typescript.ts",
+            "declaration_span": {
+              "start": {
+                "line": 7,
+                "column": 1
+              },
+              "end": {
+                "line": 10,
+                "column": 2
+              },
+              "start_byte": 159,
+              "end_byte": 280
+            },
+            "body_span": {
+              "start": {
+                "line": 7,
+                "column": 57
+              },
+              "end": {
+                "line": 10,
+                "column": 2
+              },
+              "start_byte": 215,
+              "end_byte": 280
+            },
+            "name_span": {
+              "start": {
+                "line": 7,
+                "column": 10
+              },
+              "end": {
+                "line": 7,
+                "column": 24
+              },
+              "start_byte": 168,
+              "end_byte": 182
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "number",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "number"
+              },
+              {
+                "kind": "Canonical",
+                "text": "number"
+              }
+            ]
+          },
+          "relations": {
+            "references": [
+              {
+                "id": "eae6cbfbfe9b78d454070e4a8867a254a229420af03650b2c22c2f112ddad92c",
+                "name": "parameterValue"
+              },
+              {
+                "id": "7ccd6af1fa4190e6e1427f3b4ff8a8f897f9165095650bfd61dd00b5b17230f5",
+                "name": "localValue"
+              }
+            ]
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069304787,
+            "updated_at_epoch_ms": 1791069304907
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "parameters": [
+                {
+                  "name": "parameterValue",
+                  "position": 0,
+                  "type_text": "number",
+                  "is_optional": false,
+                  "is_variadic": false,
+                  "is_keyword_only": false,
+                  "is_positional_only": false
+                }
+              ],
+              "return_info": {
+                "type_text": "number",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 1
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "eae6cbfbfe9b78d454070e4a8867a254a229420af03650b2c22c2f112ddad92c",
+          "language": "TypeScript",
+          "kind": "Parameter",
+          "identity": {
+            "name": "parameterValue",
+            "display_name": "parameterValue",
+            "stable_key": "typescript::typescript.ts::Parameter::parameterValue::0"
+          },
+          "source": {
+            "file_path": "typescript.ts",
+            "declaration_span": {
+              "start": {
+                "line": 7,
+                "column": 25
+              },
+              "end": {
+                "line": 7,
+                "column": 39
+              },
+              "start_byte": 183,
+              "end_byte": 197
+            },
+            "name_span": {
+              "start": {
+                "line": 7,
+                "column": 25
+              },
+              "end": {
+                "line": 7,
+                "column": 39
+              },
+              "start_byte": 183,
+              "end_byte": 197
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "referenced_by": [
+              {
+                "id": "5caa232334249fded3f158a736110b384295bf6484fbd341d5915ddde25f85ee",
+                "name": "moduleFunction"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069304787,
+            "updated_at_epoch_ms": 1791069304907
+          },
+          "kind_data": {
+            "kind_data_type": "Parameter",
+            "data": {
+              "name": "parameterValue",
+              "position": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "7ccd6af1fa4190e6e1427f3b4ff8a8f897f9165095650bfd61dd00b5b17230f5",
+          "language": "TypeScript",
+          "kind": "Variable",
+          "identity": {
+            "name": "localValue",
+            "display_name": "localValue",
+            "stable_key": "typescript::typescript.ts::Variable::localValue::0"
+          },
+          "source": {
+            "file_path": "typescript.ts",
+            "declaration_span": {
+              "start": {
+                "line": 8,
+                "column": 9
+              },
+              "end": {
+                "line": 8,
+                "column": 19
+              },
+              "start_byte": 225,
+              "end_byte": 235
+            },
+            "name_span": {
+              "start": {
+                "line": 8,
+                "column": 9
+              },
+              "end": {
+                "line": 8,
+                "column": 19
+              },
+              "start_byte": 225,
+              "end_byte": 235
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "referenced_by": [
+              {
+                "id": "5caa232334249fded3f158a736110b384295bf6484fbd341d5915ddde25f85ee",
+                "name": "moduleFunction"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069304787,
+            "updated_at_epoch_ms": 1791069304907
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "e90b1432434b4338b29fc3cda8a107389f10a7dbafe4015d7d6986ef25822976",
+          "language": "TypeScript",
+          "kind": "Variable",
+          "identity": {
+            "name": "EXPORTED_CONSTANT",
+            "display_name": "EXPORTED_CONSTANT",
+            "stable_key": "typescript::typescript.ts::Variable::EXPORTED_CONSTANT::0"
+          },
+          "source": {
+            "file_path": "typescript.ts",
+            "declaration_span": {
+              "start": {
+                "line": 12,
+                "column": 14
+              },
+              "end": {
+                "line": 12,
+                "column": 31
+              },
+              "start_byte": 295,
+              "end_byte": 312
+            },
+            "name_span": {
+              "start": {
+                "line": 12,
+                "column": 14
+              },
+              "end": {
+                "line": 12,
+                "column": 31
+              },
+              "start_byte": 295,
+              "end_byte": 312
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069304787,
+            "updated_at_epoch_ms": 1791069304907
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "82cffdbf0a986a7a2984e822f1da4cef256f9b07a3bc29afd5c1fe41ac0b16b0",
+          "language": "TypeScript",
+          "kind": "Variable",
+          "identity": {
+            "name": "MODULE_CONSTANT",
+            "display_name": "MODULE_CONSTANT",
+            "stable_key": "typescript::typescript.ts::Variable::MODULE_CONSTANT::0"
+          },
+          "source": {
+            "file_path": "typescript.ts",
+            "declaration_span": {
+              "start": {
+                "line": 14,
+                "column": 7
+              },
+              "end": {
+                "line": 14,
+                "column": 22
+              },
+              "start_byte": 325,
+              "end_byte": 340
+            },
+            "name_span": {
+              "start": {
+                "line": 14,
+                "column": 7
+              },
+              "end": {
+                "line": 14,
+                "column": 22
+              },
+              "start_byte": 325,
+              "end_byte": 340
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069304787,
+            "updated_at_epoch_ms": 1791069304907
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "d64ce6ec8404f7e4b1312ef4cfd8fa1c375a547896bf555015658d1e241c8538",
+          "language": "TypeScript",
+          "kind": "TypeAlias",
+          "identity": {
+            "name": "ExportedAlias",
+            "display_name": "ExportedAlias",
+            "stable_key": "typescript::typescript.ts::TypeAlias::ExportedAlias::0"
+          },
+          "source": {
+            "file_path": "typescript.ts",
+            "declaration_span": {
+              "start": {
+                "line": 16,
+                "column": 8
+              },
+              "end": {
+                "line": 16,
+                "column": 36
+              },
+              "start_byte": 354,
+              "end_byte": 382
+            },
+            "name_span": {
+              "start": {
+                "line": 16,
+                "column": 13
+              },
+              "end": {
+                "line": 16,
+                "column": 26
+              },
+              "start_byte": 359,
+              "end_byte": 372
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": true,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069304787,
+            "updated_at_epoch_ms": 1791069304907
+          },
+          "kind_data": {
+            "kind_data_type": "TypeAlias",
+            "data": {
+              "aliased_type_text": "string",
+              "is_recursive": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "f319a60662d64cb4949dc8bea70cddd6862a63f8719a7b7366a5a399eb734fd3",
+          "language": "TypeScript",
+          "kind": "TypeAlias",
+          "identity": {
+            "name": "ModuleAlias",
+            "display_name": "ModuleAlias",
+            "stable_key": "typescript::typescript.ts::TypeAlias::ModuleAlias::0"
+          },
+          "source": {
+            "file_path": "typescript.ts",
+            "declaration_span": {
+              "start": {
+                "line": 18,
+                "column": 1
+              },
+              "end": {
+                "line": 18,
+                "column": 27
+              },
+              "start_byte": 384,
+              "end_byte": 410
+            },
+            "name_span": {
+              "start": {
+                "line": 18,
+                "column": 6
+              },
+              "end": {
+                "line": 18,
+                "column": 17
+              },
+              "start_byte": 389,
+              "end_byte": 400
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069304787,
+            "updated_at_epoch_ms": 1791069304907
+          },
+          "kind_data": {
+            "kind_data_type": "TypeAlias",
+            "data": {
+              "aliased_type_text": "number",
+              "is_recursive": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "0e60fa0b0c20ff03feab05a330734db2e84f3b679dd5432b2a8d371313a64820",
+          "language": "TypeScript",
+          "kind": "Interface",
+          "identity": {
+            "name": "ExportedInterface",
+            "display_name": "ExportedInterface",
+            "stable_key": "typescript::typescript.ts::Interface::ExportedInterface::0"
+          },
+          "source": {
+            "file_path": "typescript.ts",
+            "declaration_span": {
+              "start": {
+                "line": 20,
+                "column": 8
+              },
+              "end": {
+                "line": 23,
+                "column": 2
+              },
+              "start_byte": 419,
+              "end_byte": 506
+            },
+            "body_span": {
+              "start": {
+                "line": 20,
+                "column": 36
+              },
+              "end": {
+                "line": 23,
+                "column": 2
+              },
+              "start_byte": 447,
+              "end_byte": 506
+            },
+            "name_span": {
+              "start": {
+                "line": 20,
+                "column": 18
+              },
+              "end": {
+                "line": 20,
+                "column": 35
+              },
+              "start_byte": 429,
+              "end_byte": 446
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": true,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069304787,
+            "updated_at_epoch_ms": 1791069304907
+          },
+          "kind_data": {
+            "kind_data_type": "Type",
+            "data": {
+              "fields": [
+                {
+                  "name": "interfaceProperty",
+                  "type_text": "string",
+                  "is_static": false,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                }
+              ],
+              "is_abstract": false,
+              "is_final": false,
+              "is_sealed": false,
+              "is_open": false,
+              "is_partial": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "d0fc2c934944c2df50fa2dab29faca2d41c509b62c623b89f659209e36d2a0eb",
+          "language": "TypeScript",
+          "kind": "Interface",
+          "identity": {
+            "name": "ModuleInterface",
+            "display_name": "ModuleInterface",
+            "stable_key": "typescript::typescript.ts::Interface::ModuleInterface::0"
+          },
+          "source": {
+            "file_path": "typescript.ts",
+            "declaration_span": {
+              "start": {
+                "line": 25,
+                "column": 1
+              },
+              "end": {
+                "line": 27,
+                "column": 2
+              },
+              "start_byte": 508,
+              "end_byte": 570
+            },
+            "body_span": {
+              "start": {
+                "line": 25,
+                "column": 27
+              },
+              "end": {
+                "line": 27,
+                "column": 2
+              },
+              "start_byte": 534,
+              "end_byte": 570
+            },
+            "name_span": {
+              "start": {
+                "line": 25,
+                "column": 11
+              },
+              "end": {
+                "line": 25,
+                "column": 26
+              },
+              "start_byte": 518,
+              "end_byte": 533
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069304787,
+            "updated_at_epoch_ms": 1791069304907
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "4b3a51f41221ce771e6842af6ff2a6968c59d7b6513275b10be2afad834974a7",
+          "language": "TypeScript",
+          "kind": "Enum",
+          "identity": {
+            "name": "ExportedEnum",
+            "display_name": "ExportedEnum",
+            "stable_key": "typescript::typescript.ts::Enum::ExportedEnum::0"
+          },
+          "source": {
+            "file_path": "typescript.ts",
+            "declaration_span": {
+              "start": {
+                "line": 29,
+                "column": 8
+              },
+              "end": {
+                "line": 32,
+                "column": 2
+              },
+              "start_byte": 579,
+              "end_byte": 631
+            },
+            "body_span": {
+              "start": {
+                "line": 29,
+                "column": 26
+              },
+              "end": {
+                "line": 32,
+                "column": 2
+              },
+              "start_byte": 597,
+              "end_byte": 631
+            },
+            "name_span": {
+              "start": {
+                "line": 29,
+                "column": 13
+              },
+              "end": {
+                "line": 29,
+                "column": 25
+              },
+              "start_byte": 584,
+              "end_byte": 596
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": true,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069304787,
+            "updated_at_epoch_ms": 1791069304907
+          },
+          "kind_data": {
+            "kind_data_type": "Enum",
+            "data": {
+              "variants": [
+                {
+                  "name": "FirstMember"
+                },
+                {
+                  "name": "SecondMember"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "6fa3d0ae8f7e93a835e229f07d5497443106bbeb497db3018b0b895a9a998a6f",
+          "language": "TypeScript",
+          "kind": "Enum",
+          "identity": {
+            "name": "ModuleEnum",
+            "display_name": "ModuleEnum",
+            "stable_key": "typescript::typescript.ts::Enum::ModuleEnum::0"
+          },
+          "source": {
+            "file_path": "typescript.ts",
+            "declaration_span": {
+              "start": {
+                "line": 34,
+                "column": 1
+              },
+              "end": {
+                "line": 36,
+                "column": 2
+              },
+              "start_byte": 633,
+              "end_byte": 666
+            },
+            "body_span": {
+              "start": {
+                "line": 34,
+                "column": 17
+              },
+              "end": {
+                "line": 36,
+                "column": 2
+              },
+              "start_byte": 649,
+              "end_byte": 666
+            },
+            "name_span": {
+              "start": {
+                "line": 34,
+                "column": 6
+              },
+              "end": {
+                "line": 34,
+                "column": 16
+              },
+              "start_byte": 638,
+              "end_byte": 648
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069304787,
+            "updated_at_epoch_ms": 1791069304907
+          },
+          "kind_data": {
+            "kind_data_type": "Enum",
+            "data": {
+              "variants": [
+                {
+                  "name": "OnlyMember"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "3e9e7322b5a1100ee40ad4df176c6ce0088e7b99f317a3cf06b3e2806e9974ec",
+          "language": "TypeScript",
+          "kind": "Method",
+          "identity": {
+            "name": "concreteProtectedMethod",
+            "display_name": "concreteProtectedMethod",
+            "stable_key": "typescript::typescript.ts::Method::concreteProtectedMethod::0"
+          },
+          "source": {
+            "file_path": "typescript.ts",
+            "declaration_span": {
+              "start": {
+                "line": 41,
+                "column": 3
+              },
+              "end": {
+                "line": 41,
+                "column": 47
+              },
+              "start_byte": 751,
+              "end_byte": 795
+            },
+            "body_span": {
+              "start": {
+                "line": 41,
+                "column": 45
+              },
+              "end": {
+                "line": 41,
+                "column": 47
+              },
+              "start_byte": 793,
+              "end_byte": 795
+            },
+            "name_span": {
+              "start": {
+                "line": 41,
+                "column": 13
+              },
+              "end": {
+                "line": 41,
+                "column": 36
+              },
+              "start_byte": 761,
+              "end_byte": 784
+            }
+          },
+          "visibility": {
+            "level": "Protected",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "void",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "void"
+              },
+              {
+                "kind": "Canonical",
+                "text": "void"
+              }
+            ]
+          },
+          "relations": {},
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069304787,
+            "updated_at_epoch_ms": 1791069304907
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "void",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "4d8b2acd58453a09e50c9197e27c53602b39788d86202183579e3a0b1af6a21e",
+          "language": "TypeScript",
+          "kind": "Class",
+          "identity": {
+            "name": "ExportedWidget",
+            "display_name": "ExportedWidget",
+            "stable_key": "typescript::typescript.ts::Class::ExportedWidget::0"
+          },
+          "source": {
+            "file_path": "typescript.ts",
+            "declaration_span": {
+              "start": {
+                "line": 46,
+                "column": 8
+              },
+              "end": {
+                "line": 79,
+                "column": 2
+              },
+              "start_byte": 844,
+              "end_byte": 1606
+            },
+            "body_span": {
+              "start": {
+                "line": 46,
+                "column": 58
+              },
+              "end": {
+                "line": 79,
+                "column": 2
+              },
+              "start_byte": 894,
+              "end_byte": 1606
+            },
+            "name_span": {
+              "start": {
+                "line": 46,
+                "column": 14
+              },
+              "end": {
+                "line": 46,
+                "column": 28
+              },
+              "start_byte": 850,
+              "end_byte": 864
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": true,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "members": [
+              {
+                "id": "46a20ab993d9c38ffad3f81e9854d5f613e28e3876bce16cc98c353f0cc9e5b0",
+                "name": "publicProperty",
+                "qualified_name": "ExportedWidget::publicProperty"
+              },
+              {
+                "id": "96e1bf0f3f47e9f744919ec45f7544dd68b346b4a48fad772eebb95be443bf72",
+                "name": "protectedProperty",
+                "qualified_name": "ExportedWidget::protectedProperty"
+              },
+              {
+                "id": "fe3c271344f2678690d65ddee2f1dab617e152f6b1b45bb38783050bc110daf4",
+                "name": "privateProperty",
+                "qualified_name": "ExportedWidget::privateProperty"
+              },
+              {
+                "id": "1c1cbbedbbdd393d5e18a50eafe58d426f84796c3514969a3596070a16af9e9d",
+                "name": "#hashPrivateProperty",
+                "qualified_name": "ExportedWidget::#hashPrivateProperty"
+              },
+              {
+                "id": "43a2b4e83efb447e9841dfe5cd06eefd968b065f340af7a5cfdb00bb025d10fb",
+                "name": "unmarkedProperty",
+                "qualified_name": "ExportedWidget::unmarkedProperty"
+              },
+              {
+                "id": "4e8a21f46b8e547bab119771176620e9d17dddadc961979c6ef05001c2d08e04",
+                "name": "staticProperty",
+                "qualified_name": "ExportedWidget::staticProperty"
+              },
+              {
+                "id": "8c52d59bda1ee795b60061260466dd3c52ee6f5f1cd711dd858a15dfc69a0ccc",
+                "name": "privateStaticProperty",
+                "qualified_name": "ExportedWidget::privateStaticProperty"
+              },
+              {
+                "id": "119a1dc7170dc389b4650570a3938093647dd6f667f191ed61f4088ff7f4d8e7",
+                "name": "constructor",
+                "qualified_name": "ExportedWidget::constructor"
+              },
+              {
+                "id": "473681bb30724a4f9e870eded5cf6dd4789aa4f99c94b63b2cfc35f976c369e4",
+                "name": "initialValue",
+                "qualified_name": "ExportedWidget::initialValue"
+              },
+              {
+                "id": "82cbec95721598da7140e291109f136ca26542a42e06d9ac6daecff2ce2fe41d",
+                "name": "publicMethod",
+                "qualified_name": "ExportedWidget::publicMethod"
+              },
+              {
+                "id": "eac285a79c13f806f05efd2b8fe980b79acfc680501651747c4f108f020232c4",
+                "name": "protectedMethod",
+                "qualified_name": "ExportedWidget::protectedMethod"
+              },
+              {
+                "id": "0b9afc9f0add52a1bbedda7f9126897a2510ca738c6cbf9c7fa04fce71878052",
+                "name": "privateMethod",
+                "qualified_name": "ExportedWidget::privateMethod"
+              },
+              {
+                "id": "1ce9a6a7e11745d7fa41580fee500637ed1fc6fefca823560224d167cb6d9b48",
+                "name": "unmarkedMethod",
+                "qualified_name": "ExportedWidget::unmarkedMethod"
+              },
+              {
+                "id": "6062045bf0f8d5d7aba561769ba3d0d6f5de72c79019f78944d7395f4896dd32",
+                "name": "staticMethod",
+                "qualified_name": "ExportedWidget::staticMethod"
+              },
+              {
+                "id": "baf5753ac59dd8874dde4278e9b507e6c6b1b7363c7952aef7237f2fdbd3fd0d",
+                "name": "privateStaticMethod",
+                "qualified_name": "ExportedWidget::privateStaticMethod"
+              },
+              {
+                "id": "80a2ed1c0c2ccad6d9c8fa487130b4cfa843c089b8aff36e69235e34afad7245",
+                "name": "abstractMethod",
+                "qualified_name": "ExportedWidget::abstractMethod"
+              }
+            ],
+            "referenced_by": [
+              {
+                "id": "6062045bf0f8d5d7aba561769ba3d0d6f5de72c79019f78944d7395f4896dd32",
+                "name": "staticMethod",
+                "qualified_name": "ExportedWidget::staticMethod"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069304787,
+            "updated_at_epoch_ms": 1791069304907
+          },
+          "kind_data": {
+            "kind_data_type": "Type",
+            "data": {
+              "fields": [
+                {
+                  "name": "publicProperty",
+                  "type_text": "number",
+                  "visibility": "Public",
+                  "is_static": false,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                },
+                {
+                  "name": "protectedProperty",
+                  "visibility": "Protected",
+                  "is_static": false,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                },
+                {
+                  "name": "privateProperty",
+                  "type_text": "boolean",
+                  "visibility": "Private",
+                  "is_static": false,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                },
+                {
+                  "name": "unmarkedProperty",
+                  "is_static": false,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                },
+                {
+                  "name": "staticProperty",
+                  "is_static": true,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                },
+                {
+                  "name": "privateStaticProperty",
+                  "type_text": "number",
+                  "visibility": "Private",
+                  "is_static": true,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                }
+              ],
+              "is_abstract": false,
+              "is_final": false,
+              "is_sealed": false,
+              "is_open": false,
+              "is_partial": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "46a20ab993d9c38ffad3f81e9854d5f613e28e3876bce16cc98c353f0cc9e5b0",
+          "language": "TypeScript",
+          "kind": "Property",
+          "identity": {
+            "name": "publicProperty",
+            "display_name": "publicProperty",
+            "qualified_name": "ExportedWidget::publicProperty",
+            "module_path": "ExportedWidget",
+            "stable_key": "typescript::typescript.ts::Property::ExportedWidget::publicProperty::0"
+          },
+          "source": {
+            "file_path": "typescript.ts",
+            "declaration_span": {
+              "start": {
+                "line": 47,
+                "column": 3
+              },
+              "end": {
+                "line": 47,
+                "column": 36
+              },
+              "start_byte": 898,
+              "end_byte": 931
+            },
+            "name_span": {
+              "start": {
+                "line": 47,
+                "column": 10
+              },
+              "end": {
+                "line": 47,
+                "column": 24
+              },
+              "start_byte": 905,
+              "end_byte": 919
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "4d8b2acd58453a09e50c9197e27c53602b39788d86202183579e3a0b1af6a21e",
+              "name": "ExportedWidget"
+            },
+            "container": {
+              "id": "4d8b2acd58453a09e50c9197e27c53602b39788d86202183579e3a0b1af6a21e",
+              "name": "ExportedWidget"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069304787,
+            "updated_at_epoch_ms": 1791069304907
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "publicProperty",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "96e1bf0f3f47e9f744919ec45f7544dd68b346b4a48fad772eebb95be443bf72",
+          "language": "TypeScript",
+          "kind": "Property",
+          "identity": {
+            "name": "protectedProperty",
+            "display_name": "protectedProperty",
+            "qualified_name": "ExportedWidget::protectedProperty",
+            "module_path": "ExportedWidget",
+            "stable_key": "typescript::typescript.ts::Property::ExportedWidget::protectedProperty::0"
+          },
+          "source": {
+            "file_path": "typescript.ts",
+            "declaration_span": {
+              "start": {
+                "line": 48,
+                "column": 3
+              },
+              "end": {
+                "line": 48,
+                "column": 36
+              },
+              "start_byte": 935,
+              "end_byte": 968
+            },
+            "name_span": {
+              "start": {
+                "line": 48,
+                "column": 13
+              },
+              "end": {
+                "line": 48,
+                "column": 30
+              },
+              "start_byte": 945,
+              "end_byte": 962
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "4d8b2acd58453a09e50c9197e27c53602b39788d86202183579e3a0b1af6a21e",
+              "name": "ExportedWidget"
+            },
+            "container": {
+              "id": "4d8b2acd58453a09e50c9197e27c53602b39788d86202183579e3a0b1af6a21e",
+              "name": "ExportedWidget"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069304787,
+            "updated_at_epoch_ms": 1791069304907
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "protectedProperty",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "fe3c271344f2678690d65ddee2f1dab617e152f6b1b45bb38783050bc110daf4",
+          "language": "TypeScript",
+          "kind": "Property",
+          "identity": {
+            "name": "privateProperty",
+            "display_name": "privateProperty",
+            "qualified_name": "ExportedWidget::privateProperty",
+            "module_path": "ExportedWidget",
+            "stable_key": "typescript::typescript.ts::Property::ExportedWidget::privateProperty::0"
+          },
+          "source": {
+            "file_path": "typescript.ts",
+            "declaration_span": {
+              "start": {
+                "line": 49,
+                "column": 3
+              },
+              "end": {
+                "line": 49,
+                "column": 43
+              },
+              "start_byte": 972,
+              "end_byte": 1012
+            },
+            "name_span": {
+              "start": {
+                "line": 49,
+                "column": 11
+              },
+              "end": {
+                "line": 49,
+                "column": 26
+              },
+              "start_byte": 980,
+              "end_byte": 995
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "4d8b2acd58453a09e50c9197e27c53602b39788d86202183579e3a0b1af6a21e",
+              "name": "ExportedWidget"
+            },
+            "container": {
+              "id": "4d8b2acd58453a09e50c9197e27c53602b39788d86202183579e3a0b1af6a21e",
+              "name": "ExportedWidget"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069304787,
+            "updated_at_epoch_ms": 1791069304907
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "privateProperty",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "1c1cbbedbbdd393d5e18a50eafe58d426f84796c3514969a3596070a16af9e9d",
+          "language": "TypeScript",
+          "kind": "Property",
+          "identity": {
+            "name": "#hashPrivateProperty",
+            "display_name": "#hashPrivateProperty",
+            "qualified_name": "ExportedWidget::#hashPrivateProperty",
+            "module_path": "ExportedWidget",
+            "stable_key": "typescript::typescript.ts::Property::ExportedWidget::#hashPrivateProperty::0"
+          },
+          "source": {
+            "file_path": "typescript.ts",
+            "declaration_span": {
+              "start": {
+                "line": 50,
+                "column": 3
+              },
+              "end": {
+                "line": 50,
+                "column": 27
+              },
+              "start_byte": 1016,
+              "end_byte": 1040
+            },
+            "name_span": {
+              "start": {
+                "line": 50,
+                "column": 3
+              },
+              "end": {
+                "line": 50,
+                "column": 23
+              },
+              "start_byte": 1016,
+              "end_byte": 1036
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "4d8b2acd58453a09e50c9197e27c53602b39788d86202183579e3a0b1af6a21e",
+              "name": "ExportedWidget"
+            },
+            "container": {
+              "id": "4d8b2acd58453a09e50c9197e27c53602b39788d86202183579e3a0b1af6a21e",
+              "name": "ExportedWidget"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069304788,
+            "updated_at_epoch_ms": 1791069304907
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "#hashPrivateProperty",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "43a2b4e83efb447e9841dfe5cd06eefd968b065f340af7a5cfdb00bb025d10fb",
+          "language": "TypeScript",
+          "kind": "Property",
+          "identity": {
+            "name": "unmarkedProperty",
+            "display_name": "unmarkedProperty",
+            "qualified_name": "ExportedWidget::unmarkedProperty",
+            "module_path": "ExportedWidget",
+            "stable_key": "typescript::typescript.ts::Property::ExportedWidget::unmarkedProperty::0"
+          },
+          "source": {
+            "file_path": "typescript.ts",
+            "declaration_span": {
+              "start": {
+                "line": 51,
+                "column": 3
+              },
+              "end": {
+                "line": 51,
+                "column": 23
+              },
+              "start_byte": 1044,
+              "end_byte": 1064
+            },
+            "name_span": {
+              "start": {
+                "line": 51,
+                "column": 3
+              },
+              "end": {
+                "line": 51,
+                "column": 19
+              },
+              "start_byte": 1044,
+              "end_byte": 1060
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "4d8b2acd58453a09e50c9197e27c53602b39788d86202183579e3a0b1af6a21e",
+              "name": "ExportedWidget"
+            },
+            "container": {
+              "id": "4d8b2acd58453a09e50c9197e27c53602b39788d86202183579e3a0b1af6a21e",
+              "name": "ExportedWidget"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069304788,
+            "updated_at_epoch_ms": 1791069304907
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "unmarkedProperty",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "4e8a21f46b8e547bab119771176620e9d17dddadc961979c6ef05001c2d08e04",
+          "language": "TypeScript",
+          "kind": "Property",
+          "identity": {
+            "name": "staticProperty",
+            "display_name": "staticProperty",
+            "qualified_name": "ExportedWidget::staticProperty",
+            "module_path": "ExportedWidget",
+            "stable_key": "typescript::typescript.ts::Property::ExportedWidget::staticProperty::0"
+          },
+          "source": {
+            "file_path": "typescript.ts",
+            "declaration_span": {
+              "start": {
+                "line": 52,
+                "column": 3
+              },
+              "end": {
+                "line": 52,
+                "column": 28
+              },
+              "start_byte": 1068,
+              "end_byte": 1093
+            },
+            "name_span": {
+              "start": {
+                "line": 52,
+                "column": 10
+              },
+              "end": {
+                "line": 52,
+                "column": 24
+              },
+              "start_byte": 1075,
+              "end_byte": 1089
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "4d8b2acd58453a09e50c9197e27c53602b39788d86202183579e3a0b1af6a21e",
+              "name": "ExportedWidget"
+            },
+            "container": {
+              "id": "4d8b2acd58453a09e50c9197e27c53602b39788d86202183579e3a0b1af6a21e",
+              "name": "ExportedWidget"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069304788,
+            "updated_at_epoch_ms": 1791069304907
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "staticProperty",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "8c52d59bda1ee795b60061260466dd3c52ee6f5f1cd711dd858a15dfc69a0ccc",
+          "language": "TypeScript",
+          "kind": "Property",
+          "identity": {
+            "name": "privateStaticProperty",
+            "display_name": "privateStaticProperty",
+            "qualified_name": "ExportedWidget::privateStaticProperty",
+            "module_path": "ExportedWidget",
+            "stable_key": "typescript::typescript.ts::Property::ExportedWidget::privateStaticProperty::0"
+          },
+          "source": {
+            "file_path": "typescript.ts",
+            "declaration_span": {
+              "start": {
+                "line": 53,
+                "column": 3
+              },
+              "end": {
+                "line": 53,
+                "column": 51
+              },
+              "start_byte": 1097,
+              "end_byte": 1145
+            },
+            "name_span": {
+              "start": {
+                "line": 53,
+                "column": 18
+              },
+              "end": {
+                "line": 53,
+                "column": 39
+              },
+              "start_byte": 1112,
+              "end_byte": 1133
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "4d8b2acd58453a09e50c9197e27c53602b39788d86202183579e3a0b1af6a21e",
+              "name": "ExportedWidget"
+            },
+            "container": {
+              "id": "4d8b2acd58453a09e50c9197e27c53602b39788d86202183579e3a0b1af6a21e",
+              "name": "ExportedWidget"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069304788,
+            "updated_at_epoch_ms": 1791069304907
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "privateStaticProperty",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "119a1dc7170dc389b4650570a3938093647dd6f667f191ed61f4088ff7f4d8e7",
+          "language": "TypeScript",
+          "kind": "Constructor",
+          "identity": {
+            "name": "constructor",
+            "display_name": "constructor",
+            "qualified_name": "ExportedWidget::constructor",
+            "module_path": "ExportedWidget",
+            "stable_key": "typescript::typescript.ts::Constructor::ExportedWidget::constructor::0"
+          },
+          "source": {
+            "file_path": "typescript.ts",
+            "declaration_span": {
+              "start": {
+                "line": 55,
+                "column": 3
+              },
+              "end": {
+                "line": 58,
+                "column": 4
+              },
+              "start_byte": 1150,
+              "end_byte": 1242
+            },
+            "body_span": {
+              "start": {
+                "line": 55,
+                "column": 37
+              },
+              "end": {
+                "line": 58,
+                "column": 4
+              },
+              "start_byte": 1184,
+              "end_byte": 1242
+            },
+            "name_span": {
+              "start": {
+                "line": 55,
+                "column": 3
+              },
+              "end": {
+                "line": 55,
+                "column": 14
+              },
+              "start_byte": 1150,
+              "end_byte": 1161
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "4d8b2acd58453a09e50c9197e27c53602b39788d86202183579e3a0b1af6a21e",
+              "name": "ExportedWidget"
+            },
+            "container": {
+              "id": "4d8b2acd58453a09e50c9197e27c53602b39788d86202183579e3a0b1af6a21e",
+              "name": "ExportedWidget"
+            },
+            "references": [
+              {
+                "id": "473681bb30724a4f9e870eded5cf6dd4789aa4f99c94b63b2cfc35f976c369e4",
+                "name": "initialValue",
+                "qualified_name": "ExportedWidget::initialValue"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069304788,
+            "updated_at_epoch_ms": 1791069304907
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "parameters": [
+                {
+                  "name": "initialValue",
+                  "position": 0,
+                  "type_text": "number",
+                  "is_optional": false,
+                  "is_variadic": false,
+                  "is_keyword_only": false,
+                  "is_positional_only": false
+                }
+              ],
+              "return_info": {
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 1
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "473681bb30724a4f9e870eded5cf6dd4789aa4f99c94b63b2cfc35f976c369e4",
+          "language": "TypeScript",
+          "kind": "Parameter",
+          "identity": {
+            "name": "initialValue",
+            "display_name": "initialValue",
+            "qualified_name": "ExportedWidget::initialValue",
+            "module_path": "ExportedWidget",
+            "stable_key": "typescript::typescript.ts::Parameter::ExportedWidget::initialValue::0"
+          },
+          "source": {
+            "file_path": "typescript.ts",
+            "declaration_span": {
+              "start": {
+                "line": 55,
+                "column": 15
+              },
+              "end": {
+                "line": 55,
+                "column": 27
+              },
+              "start_byte": 1162,
+              "end_byte": 1174
+            },
+            "name_span": {
+              "start": {
+                "line": 55,
+                "column": 15
+              },
+              "end": {
+                "line": 55,
+                "column": 27
+              },
+              "start_byte": 1162,
+              "end_byte": 1174
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "4d8b2acd58453a09e50c9197e27c53602b39788d86202183579e3a0b1af6a21e",
+              "name": "ExportedWidget"
+            },
+            "container": {
+              "id": "4d8b2acd58453a09e50c9197e27c53602b39788d86202183579e3a0b1af6a21e",
+              "name": "ExportedWidget"
+            },
+            "referenced_by": [
+              {
+                "id": "119a1dc7170dc389b4650570a3938093647dd6f667f191ed61f4088ff7f4d8e7",
+                "name": "constructor",
+                "qualified_name": "ExportedWidget::constructor"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069304788,
+            "updated_at_epoch_ms": 1791069304907
+          },
+          "kind_data": {
+            "kind_data_type": "Parameter",
+            "data": {
+              "name": "initialValue",
+              "position": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "82cbec95721598da7140e291109f136ca26542a42e06d9ac6daecff2ce2fe41d",
+          "language": "TypeScript",
+          "kind": "Method",
+          "identity": {
+            "name": "publicMethod",
+            "display_name": "publicMethod",
+            "qualified_name": "ExportedWidget::publicMethod",
+            "module_path": "ExportedWidget",
+            "stable_key": "typescript::typescript.ts::Method::ExportedWidget::publicMethod::0"
+          },
+          "source": {
+            "file_path": "typescript.ts",
+            "declaration_span": {
+              "start": {
+                "line": 60,
+                "column": 3
+              },
+              "end": {
+                "line": 62,
+                "column": 4
+              },
+              "start_byte": 1246,
+              "end_byte": 1313
+            },
+            "body_span": {
+              "start": {
+                "line": 60,
+                "column": 33
+              },
+              "end": {
+                "line": 62,
+                "column": 4
+              },
+              "start_byte": 1276,
+              "end_byte": 1313
+            },
+            "name_span": {
+              "start": {
+                "line": 60,
+                "column": 10
+              },
+              "end": {
+                "line": 60,
+                "column": 22
+              },
+              "start_byte": 1253,
+              "end_byte": 1265
+            }
+          },
+          "visibility": {
+            "level": "Public",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "number",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "number"
+              },
+              {
+                "kind": "Canonical",
+                "text": "number"
+              }
+            ]
+          },
+          "relations": {
+            "parent": {
+              "id": "4d8b2acd58453a09e50c9197e27c53602b39788d86202183579e3a0b1af6a21e",
+              "name": "ExportedWidget"
+            },
+            "container": {
+              "id": "4d8b2acd58453a09e50c9197e27c53602b39788d86202183579e3a0b1af6a21e",
+              "name": "ExportedWidget"
+            }
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069304788,
+            "updated_at_epoch_ms": 1791069304907
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "number",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "eac285a79c13f806f05efd2b8fe980b79acfc680501651747c4f108f020232c4",
+          "language": "TypeScript",
+          "kind": "Method",
+          "identity": {
+            "name": "protectedMethod",
+            "display_name": "protectedMethod",
+            "qualified_name": "ExportedWidget::protectedMethod",
+            "module_path": "ExportedWidget",
+            "stable_key": "typescript::typescript.ts::Method::ExportedWidget::protectedMethod::0"
+          },
+          "source": {
+            "file_path": "typescript.ts",
+            "declaration_span": {
+              "start": {
+                "line": 64,
+                "column": 3
+              },
+              "end": {
+                "line": 64,
+                "column": 39
+              },
+              "start_byte": 1317,
+              "end_byte": 1353
+            },
+            "body_span": {
+              "start": {
+                "line": 64,
+                "column": 37
+              },
+              "end": {
+                "line": 64,
+                "column": 39
+              },
+              "start_byte": 1351,
+              "end_byte": 1353
+            },
+            "name_span": {
+              "start": {
+                "line": 64,
+                "column": 13
+              },
+              "end": {
+                "line": 64,
+                "column": 28
+              },
+              "start_byte": 1327,
+              "end_byte": 1342
+            }
+          },
+          "visibility": {
+            "level": "Protected",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "void",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "void"
+              },
+              {
+                "kind": "Canonical",
+                "text": "void"
+              }
+            ]
+          },
+          "relations": {
+            "parent": {
+              "id": "4d8b2acd58453a09e50c9197e27c53602b39788d86202183579e3a0b1af6a21e",
+              "name": "ExportedWidget"
+            },
+            "container": {
+              "id": "4d8b2acd58453a09e50c9197e27c53602b39788d86202183579e3a0b1af6a21e",
+              "name": "ExportedWidget"
+            }
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069304788,
+            "updated_at_epoch_ms": 1791069304907
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "void",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "0b9afc9f0add52a1bbedda7f9126897a2510ca738c6cbf9c7fa04fce71878052",
+          "language": "TypeScript",
+          "kind": "Method",
+          "identity": {
+            "name": "privateMethod",
+            "display_name": "privateMethod",
+            "qualified_name": "ExportedWidget::privateMethod",
+            "module_path": "ExportedWidget",
+            "stable_key": "typescript::typescript.ts::Method::ExportedWidget::privateMethod::0"
+          },
+          "source": {
+            "file_path": "typescript.ts",
+            "declaration_span": {
+              "start": {
+                "line": 66,
+                "column": 3
+              },
+              "end": {
+                "line": 66,
+                "column": 35
+              },
+              "start_byte": 1357,
+              "end_byte": 1389
+            },
+            "body_span": {
+              "start": {
+                "line": 66,
+                "column": 33
+              },
+              "end": {
+                "line": 66,
+                "column": 35
+              },
+              "start_byte": 1387,
+              "end_byte": 1389
+            },
+            "name_span": {
+              "start": {
+                "line": 66,
+                "column": 11
+              },
+              "end": {
+                "line": 66,
+                "column": 24
+              },
+              "start_byte": 1365,
+              "end_byte": 1378
+            }
+          },
+          "visibility": {
+            "level": "Private",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "void",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "void"
+              },
+              {
+                "kind": "Canonical",
+                "text": "void"
+              }
+            ]
+          },
+          "relations": {
+            "parent": {
+              "id": "4d8b2acd58453a09e50c9197e27c53602b39788d86202183579e3a0b1af6a21e",
+              "name": "ExportedWidget"
+            },
+            "container": {
+              "id": "4d8b2acd58453a09e50c9197e27c53602b39788d86202183579e3a0b1af6a21e",
+              "name": "ExportedWidget"
+            }
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069304788,
+            "updated_at_epoch_ms": 1791069304907
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "void",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "1ce9a6a7e11745d7fa41580fee500637ed1fc6fefca823560224d167cb6d9b48",
+          "language": "TypeScript",
+          "kind": "Method",
+          "identity": {
+            "name": "unmarkedMethod",
+            "display_name": "unmarkedMethod",
+            "qualified_name": "ExportedWidget::unmarkedMethod",
+            "module_path": "ExportedWidget",
+            "stable_key": "typescript::typescript.ts::Method::ExportedWidget::unmarkedMethod::0"
+          },
+          "source": {
+            "file_path": "typescript.ts",
+            "declaration_span": {
+              "start": {
+                "line": 70,
+                "column": 3
+              },
+              "end": {
+                "line": 70,
+                "column": 22
+              },
+              "start_byte": 1426,
+              "end_byte": 1445
+            },
+            "body_span": {
+              "start": {
+                "line": 70,
+                "column": 20
+              },
+              "end": {
+                "line": 70,
+                "column": 22
+              },
+              "start_byte": 1443,
+              "end_byte": 1445
+            },
+            "name_span": {
+              "start": {
+                "line": 70,
+                "column": 3
+              },
+              "end": {
+                "line": 70,
+                "column": 17
+              },
+              "start_byte": 1426,
+              "end_byte": 1440
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "4d8b2acd58453a09e50c9197e27c53602b39788d86202183579e3a0b1af6a21e",
+              "name": "ExportedWidget"
+            },
+            "container": {
+              "id": "4d8b2acd58453a09e50c9197e27c53602b39788d86202183579e3a0b1af6a21e",
+              "name": "ExportedWidget"
+            }
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069304788,
+            "updated_at_epoch_ms": 1791069304907
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "6062045bf0f8d5d7aba561769ba3d0d6f5de72c79019f78944d7395f4896dd32",
+          "language": "TypeScript",
+          "kind": "Method",
+          "identity": {
+            "name": "staticMethod",
+            "display_name": "staticMethod",
+            "qualified_name": "ExportedWidget::staticMethod",
+            "module_path": "ExportedWidget",
+            "stable_key": "typescript::typescript.ts::Method::ExportedWidget::staticMethod::0"
+          },
+          "source": {
+            "file_path": "typescript.ts",
+            "declaration_span": {
+              "start": {
+                "line": 72,
+                "column": 3
+              },
+              "end": {
+                "line": 74,
+                "column": 4
+              },
+              "start_byte": 1449,
+              "end_byte": 1526
+            },
+            "body_span": {
+              "start": {
+                "line": 72,
+                "column": 41
+              },
+              "end": {
+                "line": 74,
+                "column": 4
+              },
+              "start_byte": 1487,
+              "end_byte": 1526
+            },
+            "name_span": {
+              "start": {
+                "line": 72,
+                "column": 10
+              },
+              "end": {
+                "line": 72,
+                "column": 22
+              },
+              "start_byte": 1456,
+              "end_byte": 1468
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "modifiers": [
+            {
+              "type": "Static"
+            }
+          ],
+          "type_info": {
+            "primary_type": "ExportedWidget",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "ExportedWidget"
+              },
+              {
+                "kind": "Canonical",
+                "text": "ExportedWidget"
+              }
+            ]
+          },
+          "relations": {
+            "parent": {
+              "id": "4d8b2acd58453a09e50c9197e27c53602b39788d86202183579e3a0b1af6a21e",
+              "name": "ExportedWidget"
+            },
+            "container": {
+              "id": "4d8b2acd58453a09e50c9197e27c53602b39788d86202183579e3a0b1af6a21e",
+              "name": "ExportedWidget"
+            },
+            "references": [
+              {
+                "id": "4d8b2acd58453a09e50c9197e27c53602b39788d86202183579e3a0b1af6a21e",
+                "name": "ExportedWidget"
+              }
+            ]
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069304788,
+            "updated_at_epoch_ms": 1791069304907
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "ExportedWidget",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "baf5753ac59dd8874dde4278e9b507e6c6b1b7363c7952aef7237f2fdbd3fd0d",
+          "language": "TypeScript",
+          "kind": "Method",
+          "identity": {
+            "name": "privateStaticMethod",
+            "display_name": "privateStaticMethod",
+            "qualified_name": "ExportedWidget::privateStaticMethod",
+            "module_path": "ExportedWidget",
+            "stable_key": "typescript::typescript.ts::Method::ExportedWidget::privateStaticMethod::0"
+          },
+          "source": {
+            "file_path": "typescript.ts",
+            "declaration_span": {
+              "start": {
+                "line": 76,
+                "column": 3
+              },
+              "end": {
+                "line": 76,
+                "column": 48
+              },
+              "start_byte": 1530,
+              "end_byte": 1575
+            },
+            "body_span": {
+              "start": {
+                "line": 76,
+                "column": 46
+              },
+              "end": {
+                "line": 76,
+                "column": 48
+              },
+              "start_byte": 1573,
+              "end_byte": 1575
+            },
+            "name_span": {
+              "start": {
+                "line": 76,
+                "column": 18
+              },
+              "end": {
+                "line": 76,
+                "column": 37
+              },
+              "start_byte": 1545,
+              "end_byte": 1564
+            }
+          },
+          "visibility": {
+            "level": "Private",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "modifiers": [
+            {
+              "type": "Static"
+            }
+          ],
+          "type_info": {
+            "primary_type": "void",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "void"
+              },
+              {
+                "kind": "Canonical",
+                "text": "void"
+              }
+            ]
+          },
+          "relations": {
+            "parent": {
+              "id": "4d8b2acd58453a09e50c9197e27c53602b39788d86202183579e3a0b1af6a21e",
+              "name": "ExportedWidget"
+            },
+            "container": {
+              "id": "4d8b2acd58453a09e50c9197e27c53602b39788d86202183579e3a0b1af6a21e",
+              "name": "ExportedWidget"
+            }
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069304788,
+            "updated_at_epoch_ms": 1791069304907
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "void",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "80a2ed1c0c2ccad6d9c8fa487130b4cfa843c089b8aff36e69235e34afad7245",
+          "language": "TypeScript",
+          "kind": "Method",
+          "identity": {
+            "name": "abstractMethod",
+            "display_name": "abstractMethod",
+            "qualified_name": "ExportedWidget::abstractMethod",
+            "module_path": "ExportedWidget",
+            "stable_key": "typescript::typescript.ts::Method::ExportedWidget::abstractMethod::0"
+          },
+          "source": {
+            "file_path": "typescript.ts",
+            "declaration_span": {
+              "start": {
+                "line": 78,
+                "column": 3
+              },
+              "end": {
+                "line": 78,
+                "column": 28
+              },
+              "start_byte": 1579,
+              "end_byte": 1604
+            },
+            "body_span": {
+              "start": {
+                "line": 78,
+                "column": 26
+              },
+              "end": {
+                "line": 78,
+                "column": 28
+              },
+              "start_byte": 1602,
+              "end_byte": 1604
+            },
+            "name_span": {
+              "start": {
+                "line": 78,
+                "column": 3
+              },
+              "end": {
+                "line": 78,
+                "column": 17
+              },
+              "start_byte": 1579,
+              "end_byte": 1593
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "void",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "void"
+              },
+              {
+                "kind": "Canonical",
+                "text": "void"
+              }
+            ]
+          },
+          "relations": {
+            "parent": {
+              "id": "4d8b2acd58453a09e50c9197e27c53602b39788d86202183579e3a0b1af6a21e",
+              "name": "ExportedWidget"
+            },
+            "container": {
+              "id": "4d8b2acd58453a09e50c9197e27c53602b39788d86202183579e3a0b1af6a21e",
+              "name": "ExportedWidget"
+            }
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069304788,
+            "updated_at_epoch_ms": 1791069304907
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "void",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "8fd9d961686e9a352ff033580561ade40c5f88c95d59590874b68bb412a435c3",
+          "language": "TypeScript",
+          "kind": "Class",
+          "identity": {
+            "name": "ModuleWidget",
+            "display_name": "ModuleWidget",
+            "stable_key": "typescript::typescript.ts::Class::ModuleWidget::0"
+          },
+          "source": {
+            "file_path": "typescript.ts",
+            "declaration_span": {
+              "start": {
+                "line": 81,
+                "column": 1
+              },
+              "end": {
+                "line": 85,
+                "column": 2
+              },
+              "start_byte": 1608,
+              "end_byte": 1678
+            },
+            "body_span": {
+              "start": {
+                "line": 81,
+                "column": 20
+              },
+              "end": {
+                "line": 85,
+                "column": 2
+              },
+              "start_byte": 1627,
+              "end_byte": 1678
+            },
+            "name_span": {
+              "start": {
+                "line": 81,
+                "column": 7
+              },
+              "end": {
+                "line": 81,
+                "column": 19
+              },
+              "start_byte": 1614,
+              "end_byte": 1626
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "members": [
+              {
+                "id": "a77365d5d4c4900c820e350f06fae048e2d47f7eef8599340f08c6b101f6a310",
+                "name": "constructor",
+                "qualified_name": "ModuleWidget::constructor"
+              },
+              {
+                "id": "4eaf732ce576bae7838ba3ed9f1ff38bd1ca9e5eebabac845faddc7e74b8f6c0",
+                "name": "instanceMethod",
+                "qualified_name": "ModuleWidget::instanceMethod"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069304788,
+            "updated_at_epoch_ms": 1791069304907
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "a77365d5d4c4900c820e350f06fae048e2d47f7eef8599340f08c6b101f6a310",
+          "language": "TypeScript",
+          "kind": "Constructor",
+          "identity": {
+            "name": "constructor",
+            "display_name": "constructor",
+            "qualified_name": "ModuleWidget::constructor",
+            "module_path": "ModuleWidget",
+            "stable_key": "typescript::typescript.ts::Constructor::ModuleWidget::constructor::0"
+          },
+          "source": {
+            "file_path": "typescript.ts",
+            "declaration_span": {
+              "start": {
+                "line": 82,
+                "column": 3
+              },
+              "end": {
+                "line": 82,
+                "column": 19
+              },
+              "start_byte": 1631,
+              "end_byte": 1647
+            },
+            "body_span": {
+              "start": {
+                "line": 82,
+                "column": 17
+              },
+              "end": {
+                "line": 82,
+                "column": 19
+              },
+              "start_byte": 1645,
+              "end_byte": 1647
+            },
+            "name_span": {
+              "start": {
+                "line": 82,
+                "column": 3
+              },
+              "end": {
+                "line": 82,
+                "column": 14
+              },
+              "start_byte": 1631,
+              "end_byte": 1642
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "8fd9d961686e9a352ff033580561ade40c5f88c95d59590874b68bb412a435c3",
+              "name": "ModuleWidget"
+            },
+            "container": {
+              "id": "8fd9d961686e9a352ff033580561ade40c5f88c95d59590874b68bb412a435c3",
+              "name": "ModuleWidget"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069304788,
+            "updated_at_epoch_ms": 1791069304907
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "4eaf732ce576bae7838ba3ed9f1ff38bd1ca9e5eebabac845faddc7e74b8f6c0",
+          "language": "TypeScript",
+          "kind": "Method",
+          "identity": {
+            "name": "instanceMethod",
+            "display_name": "instanceMethod",
+            "qualified_name": "ModuleWidget::instanceMethod",
+            "module_path": "ModuleWidget",
+            "stable_key": "typescript::typescript.ts::Method::ModuleWidget::instanceMethod::0"
+          },
+          "source": {
+            "file_path": "typescript.ts",
+            "declaration_span": {
+              "start": {
+                "line": 84,
+                "column": 3
+              },
+              "end": {
+                "line": 84,
+                "column": 28
+              },
+              "start_byte": 1651,
+              "end_byte": 1676
+            },
+            "body_span": {
+              "start": {
+                "line": 84,
+                "column": 26
+              },
+              "end": {
+                "line": 84,
+                "column": 28
+              },
+              "start_byte": 1674,
+              "end_byte": 1676
+            },
+            "name_span": {
+              "start": {
+                "line": 84,
+                "column": 3
+              },
+              "end": {
+                "line": 84,
+                "column": 17
+              },
+              "start_byte": 1651,
+              "end_byte": 1665
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "void",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "void"
+              },
+              {
+                "kind": "Canonical",
+                "text": "void"
+              }
+            ]
+          },
+          "relations": {
+            "parent": {
+              "id": "8fd9d961686e9a352ff033580561ade40c5f88c95d59590874b68bb412a435c3",
+              "name": "ModuleWidget"
+            },
+            "container": {
+              "id": "8fd9d961686e9a352ff033580561ade40c5f88c95d59590874b68bb412a435c3",
+              "name": "ModuleWidget"
+            }
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069304788,
+            "updated_at_epoch_ms": 1791069304907
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "void",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "5c07955df92dbed46f8e480f9c48b0a3d0d7853f254867328d12d42db756e3ee",
+          "language": "TypeScript",
+          "kind": "Function",
+          "identity": {
+            "name": "namespaceFunction",
+            "display_name": "namespaceFunction",
+            "stable_key": "typescript::typescript.ts::Function::namespaceFunction::0"
+          },
+          "source": {
+            "file_path": "typescript.ts",
+            "declaration_span": {
+              "start": {
+                "line": 88,
+                "column": 10
+              },
+              "end": {
+                "line": 88,
+                "column": 47
+              },
+              "start_byte": 1726,
+              "end_byte": 1763
+            },
+            "body_span": {
+              "start": {
+                "line": 88,
+                "column": 45
+              },
+              "end": {
+                "line": 88,
+                "column": 47
+              },
+              "start_byte": 1761,
+              "end_byte": 1763
+            },
+            "name_span": {
+              "start": {
+                "line": 88,
+                "column": 19
+              },
+              "end": {
+                "line": 88,
+                "column": 36
+              },
+              "start_byte": 1735,
+              "end_byte": 1752
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "void",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "void"
+              },
+              {
+                "kind": "Canonical",
+                "text": "void"
+              }
+            ]
+          },
+          "relations": {},
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069304788,
+            "updated_at_epoch_ms": 1791069304907
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "void",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        }
+      ],
+      "imports": [
+        {
+          "name": "readFileSync",
+          "source": "fs",
+          "span": {
+            "start": {
+              "line": 3,
+              "column": 10
+            },
+            "end": {
+              "line": 3,
+              "column": 22
+            },
+            "start_byte": 87,
+            "end_byte": 99
+          },
+          "statement_span": {
+            "start": {
+              "line": 3,
+              "column": 1
+            },
+            "end": {
+              "line": 3,
+              "column": 35
+            },
+            "start_byte": 78,
+            "end_byte": 112
+          },
+          "symbol": {
+            "name": "readFileSync"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "name": "exportedFunction",
+          "span": {
+            "start": {
+              "line": 5,
+              "column": 17
+            },
+            "end": {
+              "line": 5,
+              "column": 33
+            },
+            "start_byte": 130,
+            "end_byte": 146
+          },
+          "symbol": {
+            "id": "143a6391273ec954237727809303fb18d4aec66b88260a64eaa4eb8dfd0959bc",
+            "name": "exportedFunction"
+          }
+        },
+        {
+          "name": "ExportedAlias",
+          "span": {
+            "start": {
+              "line": 16,
+              "column": 13
+            },
+            "end": {
+              "line": 16,
+              "column": 26
+            },
+            "start_byte": 359,
+            "end_byte": 372
+          },
+          "symbol": {
+            "id": "d64ce6ec8404f7e4b1312ef4cfd8fa1c375a547896bf555015658d1e241c8538",
+            "name": "ExportedAlias"
+          }
+        },
+        {
+          "name": "ExportedInterface",
+          "span": {
+            "start": {
+              "line": 20,
+              "column": 18
+            },
+            "end": {
+              "line": 20,
+              "column": 35
+            },
+            "start_byte": 429,
+            "end_byte": 446
+          },
+          "symbol": {
+            "id": "0e60fa0b0c20ff03feab05a330734db2e84f3b679dd5432b2a8d371313a64820",
+            "name": "ExportedInterface"
+          }
+        },
+        {
+          "name": "ExportedEnum",
+          "span": {
+            "start": {
+              "line": 29,
+              "column": 13
+            },
+            "end": {
+              "line": 29,
+              "column": 25
+            },
+            "start_byte": 584,
+            "end_byte": 596
+          },
+          "symbol": {
+            "id": "4b3a51f41221ce771e6842af6ff2a6968c59d7b6513275b10be2afad834974a7",
+            "name": "ExportedEnum"
+          }
+        },
+        {
+          "name": "ExportedWidget",
+          "span": {
+            "start": {
+              "line": 46,
+              "column": 14
+            },
+            "end": {
+              "line": 46,
+              "column": 28
+            },
+            "start_byte": 850,
+            "end_byte": 864
+          },
+          "symbol": {
+            "id": "4d8b2acd58453a09e50c9197e27c53602b39788d86202183579e3a0b1af6a21e",
+            "name": "ExportedWidget"
+          }
+        }
+      ],
+      "diagnostics": [
+        {
+          "kind": "Semantic",
+          "message": "Imported symbol 'readFileSync' is never used",
+          "range": {
+            "start_line": 3,
+            "start_column": 10,
+            "end_line": 3,
+            "end_column": 22,
+            "start_byte": 87,
+            "end_byte": 99
+          },
+          "severity": "Warning",
+          "rule": "unused-import",
+          "context": {
+            "line_text": "import { readFileSync } from \"fs\";",
+            "underline_column": 9,
+            "underline_length": 12
+          },
+          "metadata": {
+            "category": "Style",
+            "confidence": "Low",
+            "source": "SemanticAnalysis",
+            "default_severity": "Warning",
+            "effective_severity": "Warning"
+          }
+        }
+      ]
+    }
+  ],
+  "adapter_metadata": []
+}

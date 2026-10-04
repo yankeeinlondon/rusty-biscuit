@@ -1,0 +1,21 @@
+  - variable blockLocalValue lua.lua:4:9
+  - function chunkLocalFunction lua.lua:8:1
+  - variable chunkLocalVariable lua.lua:14:7
+  - function globalFunction lua.lua:3:1
+  - variable globalVariable lua.lua:12:1
+  - method methodWithSelf lua.lua:22:1
+  - variable nestedBlockLocal lua.lua:29:9
+  - function nestedBlockLocalFunction lua.lua:30:3
+  - parameter parameterValue lua.lua:3:25
+  - variable tableField lua.lua:26:8
+  - function tableFunction lua.lua:18:1
+  - variable Widget lua.lua:16:7
+=== classes
+=== functions
+  - function chunkLocalFunction lua.lua:8:1
+  - function globalFunction lua.lua:3:1
+  - method methodWithSelf lua.lua:22:1
+  - function nestedBlockLocalFunction lua.lua:30:3
+  - function tableFunction lua.lua:18:1
+=== types
+(no symbols)

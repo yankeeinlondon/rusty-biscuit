@@ -1,0 +1,3686 @@
+{
+  "schema_version": {
+    "major": 2,
+    "minor": 0
+  },
+  "root_dir": "/private/tmp/claude-501/-Volumes-coding-wt-rusty-biscuit-feat-symbols/d63e5266-3b40-40b9-970c-1a0bd24ad9bf/scratchpad/baseline",
+  "language": "Php",
+  "files": [
+    {
+      "file": "php.php",
+      "language": "Php",
+      "hash": "88f7cf0b00c97973",
+      "symbols": [
+        {
+          "name": "topLevelFunction",
+          "kind": "Function",
+          "range": {
+            "start_line": 6,
+            "start_column": 1,
+            "end_line": 10,
+            "end_column": 2,
+            "start_byte": 91,
+            "end_byte": 209
+          },
+          "language": "Php",
+          "file": "php.php",
+          "signature": {
+            "parameters": [
+              {
+                "name": "parameterValue",
+                "type_annotation": "int"
+              }
+            ],
+            "return_type": "int"
+          }
+        },
+        {
+          "name": "parameterValue",
+          "kind": "Parameter",
+          "range": {
+            "start_line": 6,
+            "start_column": 32,
+            "end_line": 6,
+            "end_column": 46,
+            "start_byte": 122,
+            "end_byte": 136
+          },
+          "language": "Php",
+          "file": "php.php"
+        },
+        {
+          "name": "Shape",
+          "kind": "Interface",
+          "range": {
+            "start_line": 12,
+            "start_column": 1,
+            "end_line": 15,
+            "end_column": 2,
+            "start_byte": 211,
+            "end_byte": 265
+          },
+          "language": "Php",
+          "file": "php.php",
+          "type_metadata": {
+            "fields": [
+              {
+                "name": "area",
+                "type_annotation": "public function area(): float;",
+                "visibility": "Public"
+              }
+            ]
+          }
+        },
+        {
+          "name": "area",
+          "kind": "Method",
+          "range": {
+            "start_line": 14,
+            "start_column": 5,
+            "end_line": 14,
+            "end_column": 35,
+            "start_byte": 233,
+            "end_byte": 263
+          },
+          "language": "Php",
+          "file": "php.php",
+          "container_name": "Shape",
+          "signature": {
+            "return_type": "float"
+          }
+        },
+        {
+          "name": "Greets",
+          "kind": "Trait",
+          "range": {
+            "start_line": 17,
+            "start_column": 1,
+            "end_line": 27,
+            "end_column": 2,
+            "start_byte": 267,
+            "end_byte": 457
+          },
+          "language": "Php",
+          "file": "php.php"
+        },
+        {
+          "name": "greet",
+          "kind": "Method",
+          "range": {
+            "start_line": 19,
+            "start_column": 5,
+            "end_line": 22,
+            "end_column": 6,
+            "start_byte": 286,
+            "end_byte": 353
+          },
+          "language": "Php",
+          "file": "php.php",
+          "signature": {
+            "return_type": "string"
+          }
+        },
+        {
+          "name": "traitHelper",
+          "kind": "Method",
+          "range": {
+            "start_line": 24,
+            "start_column": 5,
+            "end_line": 24,
+            "end_column": 44,
+            "start_byte": 359,
+            "end_byte": 398
+          },
+          "language": "Php",
+          "file": "php.php",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "traitStaticMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 26,
+            "start_column": 5,
+            "end_line": 26,
+            "end_column": 56,
+            "start_byte": 404,
+            "end_byte": 455
+          },
+          "language": "Php",
+          "file": "php.php",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "PublicWidget",
+          "kind": "Class",
+          "range": {
+            "start_line": 29,
+            "start_column": 1,
+            "end_line": 62,
+            "end_column": 2,
+            "start_byte": 459,
+            "end_byte": 1207
+          },
+          "language": "Php",
+          "file": "php.php",
+          "type_metadata": {
+            "fields": [
+              {
+                "name": "publicField",
+                "type_annotation": "int",
+                "visibility": "Public"
+              },
+              {
+                "name": "protectedField",
+                "type_annotation": "int",
+                "visibility": "Protected"
+              },
+              {
+                "name": "privateField",
+                "type_annotation": "int",
+                "visibility": "Private"
+              },
+              {
+                "name": "legacyUnmarkedField"
+              },
+              {
+                "name": "publicStaticField",
+                "type_annotation": "int",
+                "visibility": "Public",
+                "is_static": true
+              },
+              {
+                "name": "privateStaticField",
+                "type_annotation": "int",
+                "visibility": "Private",
+                "is_static": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "publicField",
+          "kind": "Field",
+          "range": {
+            "start_line": 33,
+            "start_column": 17,
+            "end_line": 33,
+            "end_column": 28,
+            "start_byte": 530,
+            "end_byte": 541
+          },
+          "language": "Php",
+          "file": "php.php",
+          "container_name": "PublicWidget"
+        },
+        {
+          "name": "protectedField",
+          "kind": "Field",
+          "range": {
+            "start_line": 34,
+            "start_column": 20,
+            "end_line": 34,
+            "end_column": 34,
+            "start_byte": 566,
+            "end_byte": 580
+          },
+          "language": "Php",
+          "file": "php.php",
+          "container_name": "PublicWidget"
+        },
+        {
+          "name": "privateField",
+          "kind": "Field",
+          "range": {
+            "start_line": 35,
+            "start_column": 18,
+            "end_line": 35,
+            "end_column": 30,
+            "start_byte": 603,
+            "end_byte": 615
+          },
+          "language": "Php",
+          "file": "php.php",
+          "container_name": "PublicWidget"
+        },
+        {
+          "name": "legacyUnmarkedField",
+          "kind": "Field",
+          "range": {
+            "start_line": 36,
+            "start_column": 10,
+            "end_line": 36,
+            "end_column": 29,
+            "start_byte": 630,
+            "end_byte": 649
+          },
+          "language": "Php",
+          "file": "php.php",
+          "container_name": "PublicWidget"
+        },
+        {
+          "name": "publicStaticField",
+          "kind": "Field",
+          "range": {
+            "start_line": 37,
+            "start_column": 24,
+            "end_line": 37,
+            "end_column": 41,
+            "start_byte": 678,
+            "end_byte": 695
+          },
+          "language": "Php",
+          "file": "php.php",
+          "container_name": "PublicWidget"
+        },
+        {
+          "name": "privateStaticField",
+          "kind": "Field",
+          "range": {
+            "start_line": 38,
+            "start_column": 25,
+            "end_line": 38,
+            "end_column": 43,
+            "start_byte": 725,
+            "end_byte": 743
+          },
+          "language": "Php",
+          "file": "php.php",
+          "container_name": "PublicWidget"
+        },
+        {
+          "name": "__construct",
+          "kind": "Method",
+          "range": {
+            "start_line": 40,
+            "start_column": 5,
+            "end_line": 43,
+            "end_column": 6,
+            "start_byte": 754,
+            "end_byte": 857
+          },
+          "language": "Php",
+          "file": "php.php",
+          "container_name": "PublicWidget",
+          "signature": {
+            "parameters": [
+              {
+                "name": "initialValue",
+                "type_annotation": "int"
+              }
+            ]
+          }
+        },
+        {
+          "name": "initialValue",
+          "kind": "Parameter",
+          "range": {
+            "start_line": 40,
+            "start_column": 38,
+            "end_line": 40,
+            "end_column": 50,
+            "start_byte": 787,
+            "end_byte": 799
+          },
+          "language": "Php",
+          "file": "php.php",
+          "container_name": "PublicWidget"
+        },
+        {
+          "name": "area",
+          "kind": "Method",
+          "range": {
+            "start_line": 45,
+            "start_column": 5,
+            "end_line": 48,
+            "end_column": 6,
+            "start_byte": 863,
+            "end_byte": 924
+          },
+          "language": "Php",
+          "file": "php.php",
+          "container_name": "PublicWidget",
+          "signature": {
+            "return_type": "float"
+          }
+        },
+        {
+          "name": "protectedMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 50,
+            "start_column": 5,
+            "end_line": 50,
+            "end_column": 50,
+            "start_byte": 930,
+            "end_byte": 975
+          },
+          "language": "Php",
+          "file": "php.php",
+          "container_name": "PublicWidget",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "privateMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 52,
+            "start_column": 5,
+            "end_line": 52,
+            "end_column": 46,
+            "start_byte": 981,
+            "end_byte": 1022
+          },
+          "language": "Php",
+          "file": "php.php",
+          "container_name": "PublicWidget",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "unmarkedMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 54,
+            "start_column": 5,
+            "end_line": 54,
+            "end_column": 39,
+            "start_byte": 1028,
+            "end_byte": 1062
+          },
+          "language": "Php",
+          "file": "php.php",
+          "container_name": "PublicWidget",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "staticFactory",
+          "kind": "Method",
+          "range": {
+            "start_line": 56,
+            "start_column": 5,
+            "end_line": 59,
+            "end_column": 6,
+            "start_byte": 1068,
+            "end_byte": 1152
+          },
+          "language": "Php",
+          "file": "php.php",
+          "container_name": "PublicWidget",
+          "signature": {
+            "return_type": "self"
+          }
+        },
+        {
+          "name": "unmarkedStaticMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 61,
+            "start_column": 5,
+            "end_line": 61,
+            "end_column": 52,
+            "start_byte": 1158,
+            "end_byte": 1205
+          },
+          "language": "Php",
+          "file": "php.php",
+          "container_name": "PublicWidget",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "Suit",
+          "kind": "Enum",
+          "range": {
+            "start_line": 64,
+            "start_column": 1,
+            "end_line": 73,
+            "end_column": 2,
+            "start_byte": 1209,
+            "end_byte": 1328
+          },
+          "language": "Php",
+          "file": "php.php",
+          "type_metadata": {
+            "variants": [
+              {
+                "name": "Hearts"
+              },
+              {
+                "name": "Spades"
+              }
+            ]
+          }
+        },
+        {
+          "name": "label",
+          "kind": "Method",
+          "range": {
+            "start_line": 69,
+            "start_column": 5,
+            "end_line": 72,
+            "end_column": 6,
+            "start_byte": 1260,
+            "end_byte": 1326
+          },
+          "language": "Php",
+          "file": "php.php",
+          "container_name": "Suit",
+          "signature": {
+            "return_type": "string"
+          }
+        }
+      ],
+      "imports": [],
+      "exports": [],
+      "locals": [
+        {
+          "name": "topLevelFunction",
+          "kind": "Function",
+          "range": {
+            "start_line": 6,
+            "start_column": 1,
+            "end_line": 10,
+            "end_column": 2,
+            "start_byte": 91,
+            "end_byte": 209
+          },
+          "language": "Php",
+          "file": "php.php",
+          "signature": {
+            "parameters": [
+              {
+                "name": "parameterValue",
+                "type_annotation": "int"
+              }
+            ],
+            "return_type": "int"
+          }
+        },
+        {
+          "name": "parameterValue",
+          "kind": "Parameter",
+          "range": {
+            "start_line": 6,
+            "start_column": 32,
+            "end_line": 6,
+            "end_column": 46,
+            "start_byte": 122,
+            "end_byte": 136
+          },
+          "language": "Php",
+          "file": "php.php"
+        },
+        {
+          "name": "Shape",
+          "kind": "Interface",
+          "range": {
+            "start_line": 12,
+            "start_column": 1,
+            "end_line": 15,
+            "end_column": 2,
+            "start_byte": 211,
+            "end_byte": 265
+          },
+          "language": "Php",
+          "file": "php.php",
+          "type_metadata": {
+            "fields": [
+              {
+                "name": "area",
+                "type_annotation": "public function area(): float;",
+                "visibility": "Public"
+              }
+            ]
+          }
+        },
+        {
+          "name": "area",
+          "kind": "Method",
+          "range": {
+            "start_line": 14,
+            "start_column": 5,
+            "end_line": 14,
+            "end_column": 35,
+            "start_byte": 233,
+            "end_byte": 263
+          },
+          "language": "Php",
+          "file": "php.php",
+          "container_name": "Shape",
+          "signature": {
+            "return_type": "float"
+          }
+        },
+        {
+          "name": "Greets",
+          "kind": "Trait",
+          "range": {
+            "start_line": 17,
+            "start_column": 1,
+            "end_line": 27,
+            "end_column": 2,
+            "start_byte": 267,
+            "end_byte": 457
+          },
+          "language": "Php",
+          "file": "php.php"
+        },
+        {
+          "name": "greet",
+          "kind": "Method",
+          "range": {
+            "start_line": 19,
+            "start_column": 5,
+            "end_line": 22,
+            "end_column": 6,
+            "start_byte": 286,
+            "end_byte": 353
+          },
+          "language": "Php",
+          "file": "php.php",
+          "signature": {
+            "return_type": "string"
+          }
+        },
+        {
+          "name": "traitHelper",
+          "kind": "Method",
+          "range": {
+            "start_line": 24,
+            "start_column": 5,
+            "end_line": 24,
+            "end_column": 44,
+            "start_byte": 359,
+            "end_byte": 398
+          },
+          "language": "Php",
+          "file": "php.php",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "traitStaticMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 26,
+            "start_column": 5,
+            "end_line": 26,
+            "end_column": 56,
+            "start_byte": 404,
+            "end_byte": 455
+          },
+          "language": "Php",
+          "file": "php.php",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "PublicWidget",
+          "kind": "Class",
+          "range": {
+            "start_line": 29,
+            "start_column": 1,
+            "end_line": 62,
+            "end_column": 2,
+            "start_byte": 459,
+            "end_byte": 1207
+          },
+          "language": "Php",
+          "file": "php.php",
+          "type_metadata": {
+            "fields": [
+              {
+                "name": "publicField",
+                "type_annotation": "int",
+                "visibility": "Public"
+              },
+              {
+                "name": "protectedField",
+                "type_annotation": "int",
+                "visibility": "Protected"
+              },
+              {
+                "name": "privateField",
+                "type_annotation": "int",
+                "visibility": "Private"
+              },
+              {
+                "name": "legacyUnmarkedField"
+              },
+              {
+                "name": "publicStaticField",
+                "type_annotation": "int",
+                "visibility": "Public",
+                "is_static": true
+              },
+              {
+                "name": "privateStaticField",
+                "type_annotation": "int",
+                "visibility": "Private",
+                "is_static": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "publicField",
+          "kind": "Field",
+          "range": {
+            "start_line": 33,
+            "start_column": 17,
+            "end_line": 33,
+            "end_column": 28,
+            "start_byte": 530,
+            "end_byte": 541
+          },
+          "language": "Php",
+          "file": "php.php",
+          "container_name": "PublicWidget"
+        },
+        {
+          "name": "protectedField",
+          "kind": "Field",
+          "range": {
+            "start_line": 34,
+            "start_column": 20,
+            "end_line": 34,
+            "end_column": 34,
+            "start_byte": 566,
+            "end_byte": 580
+          },
+          "language": "Php",
+          "file": "php.php",
+          "container_name": "PublicWidget"
+        },
+        {
+          "name": "privateField",
+          "kind": "Field",
+          "range": {
+            "start_line": 35,
+            "start_column": 18,
+            "end_line": 35,
+            "end_column": 30,
+            "start_byte": 603,
+            "end_byte": 615
+          },
+          "language": "Php",
+          "file": "php.php",
+          "container_name": "PublicWidget"
+        },
+        {
+          "name": "legacyUnmarkedField",
+          "kind": "Field",
+          "range": {
+            "start_line": 36,
+            "start_column": 10,
+            "end_line": 36,
+            "end_column": 29,
+            "start_byte": 630,
+            "end_byte": 649
+          },
+          "language": "Php",
+          "file": "php.php",
+          "container_name": "PublicWidget"
+        },
+        {
+          "name": "publicStaticField",
+          "kind": "Field",
+          "range": {
+            "start_line": 37,
+            "start_column": 24,
+            "end_line": 37,
+            "end_column": 41,
+            "start_byte": 678,
+            "end_byte": 695
+          },
+          "language": "Php",
+          "file": "php.php",
+          "container_name": "PublicWidget"
+        },
+        {
+          "name": "privateStaticField",
+          "kind": "Field",
+          "range": {
+            "start_line": 38,
+            "start_column": 25,
+            "end_line": 38,
+            "end_column": 43,
+            "start_byte": 725,
+            "end_byte": 743
+          },
+          "language": "Php",
+          "file": "php.php",
+          "container_name": "PublicWidget"
+        },
+        {
+          "name": "__construct",
+          "kind": "Method",
+          "range": {
+            "start_line": 40,
+            "start_column": 5,
+            "end_line": 43,
+            "end_column": 6,
+            "start_byte": 754,
+            "end_byte": 857
+          },
+          "language": "Php",
+          "file": "php.php",
+          "container_name": "PublicWidget",
+          "signature": {
+            "parameters": [
+              {
+                "name": "initialValue",
+                "type_annotation": "int"
+              }
+            ]
+          }
+        },
+        {
+          "name": "initialValue",
+          "kind": "Parameter",
+          "range": {
+            "start_line": 40,
+            "start_column": 38,
+            "end_line": 40,
+            "end_column": 50,
+            "start_byte": 787,
+            "end_byte": 799
+          },
+          "language": "Php",
+          "file": "php.php",
+          "container_name": "PublicWidget"
+        },
+        {
+          "name": "area",
+          "kind": "Method",
+          "range": {
+            "start_line": 45,
+            "start_column": 5,
+            "end_line": 48,
+            "end_column": 6,
+            "start_byte": 863,
+            "end_byte": 924
+          },
+          "language": "Php",
+          "file": "php.php",
+          "container_name": "PublicWidget",
+          "signature": {
+            "return_type": "float"
+          }
+        },
+        {
+          "name": "protectedMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 50,
+            "start_column": 5,
+            "end_line": 50,
+            "end_column": 50,
+            "start_byte": 930,
+            "end_byte": 975
+          },
+          "language": "Php",
+          "file": "php.php",
+          "container_name": "PublicWidget",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "privateMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 52,
+            "start_column": 5,
+            "end_line": 52,
+            "end_column": 46,
+            "start_byte": 981,
+            "end_byte": 1022
+          },
+          "language": "Php",
+          "file": "php.php",
+          "container_name": "PublicWidget",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "unmarkedMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 54,
+            "start_column": 5,
+            "end_line": 54,
+            "end_column": 39,
+            "start_byte": 1028,
+            "end_byte": 1062
+          },
+          "language": "Php",
+          "file": "php.php",
+          "container_name": "PublicWidget",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "staticFactory",
+          "kind": "Method",
+          "range": {
+            "start_line": 56,
+            "start_column": 5,
+            "end_line": 59,
+            "end_column": 6,
+            "start_byte": 1068,
+            "end_byte": 1152
+          },
+          "language": "Php",
+          "file": "php.php",
+          "container_name": "PublicWidget",
+          "signature": {
+            "return_type": "self"
+          }
+        },
+        {
+          "name": "unmarkedStaticMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 61,
+            "start_column": 5,
+            "end_line": 61,
+            "end_column": 52,
+            "start_byte": 1158,
+            "end_byte": 1205
+          },
+          "language": "Php",
+          "file": "php.php",
+          "container_name": "PublicWidget",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "Suit",
+          "kind": "Enum",
+          "range": {
+            "start_line": 64,
+            "start_column": 1,
+            "end_line": 73,
+            "end_column": 2,
+            "start_byte": 1209,
+            "end_byte": 1328
+          },
+          "language": "Php",
+          "file": "php.php",
+          "type_metadata": {
+            "variants": [
+              {
+                "name": "Hearts"
+              },
+              {
+                "name": "Spades"
+              }
+            ]
+          }
+        },
+        {
+          "name": "label",
+          "kind": "Method",
+          "range": {
+            "start_line": 69,
+            "start_column": 5,
+            "end_line": 72,
+            "end_column": 6,
+            "start_byte": 1260,
+            "end_byte": 1326
+          },
+          "language": "Php",
+          "file": "php.php",
+          "container_name": "Suit",
+          "signature": {
+            "return_type": "string"
+          }
+        }
+      ],
+      "lint": [],
+      "syntax": []
+    }
+  ],
+  "symbol_indexes": [
+    {
+      "schema_version": {
+        "major": 2,
+        "minor": 0
+      },
+      "file": "php.php",
+      "language": "Php",
+      "file_hash": "88f7cf0b00c97973",
+      "completed_passes": [
+        "Parse",
+        "Bind",
+        "Semantic",
+        "Docs"
+      ],
+      "symbols": [
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "563556e0a11c60f0fdf70d18f8b5a446abf685a1c75d4f294ca1796cc0760210",
+          "language": "Php",
+          "kind": "Function",
+          "identity": {
+            "name": "topLevelFunction",
+            "display_name": "topLevelFunction",
+            "stable_key": "php::php.php::Function::topLevelFunction::0"
+          },
+          "source": {
+            "file_path": "php.php",
+            "declaration_span": {
+              "start": {
+                "line": 6,
+                "column": 1
+              },
+              "end": {
+                "line": 10,
+                "column": 2
+              },
+              "start_byte": 91,
+              "end_byte": 209
+            },
+            "body_span": {
+              "start": {
+                "line": 7,
+                "column": 1
+              },
+              "end": {
+                "line": 10,
+                "column": 2
+              },
+              "start_byte": 143,
+              "end_byte": 209
+            },
+            "name_span": {
+              "start": {
+                "line": 6,
+                "column": 10
+              },
+              "end": {
+                "line": 6,
+                "column": 26
+              },
+              "start_byte": 100,
+              "end_byte": 116
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "int",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "int"
+              },
+              {
+                "kind": "Canonical",
+                "text": "int"
+              }
+            ]
+          },
+          "relations": {
+            "references": [
+              {
+                "id": "37dad1838d15728acb4db33a3e6adafc4d7e07c692c5fc6bc23ef3552594c587",
+                "name": "parameterValue"
+              }
+            ]
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069297281,
+            "updated_at_epoch_ms": 1791069297480
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "parameters": [
+                {
+                  "name": "parameterValue",
+                  "position": 0,
+                  "type_text": "int",
+                  "is_optional": false,
+                  "is_variadic": false,
+                  "is_keyword_only": false,
+                  "is_positional_only": false
+                }
+              ],
+              "return_info": {
+                "type_text": "int",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 1
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "37dad1838d15728acb4db33a3e6adafc4d7e07c692c5fc6bc23ef3552594c587",
+          "language": "Php",
+          "kind": "Parameter",
+          "identity": {
+            "name": "parameterValue",
+            "display_name": "parameterValue",
+            "stable_key": "php::php.php::Parameter::parameterValue::0"
+          },
+          "source": {
+            "file_path": "php.php",
+            "declaration_span": {
+              "start": {
+                "line": 6,
+                "column": 32
+              },
+              "end": {
+                "line": 6,
+                "column": 46
+              },
+              "start_byte": 122,
+              "end_byte": 136
+            },
+            "name_span": {
+              "start": {
+                "line": 6,
+                "column": 32
+              },
+              "end": {
+                "line": 6,
+                "column": 46
+              },
+              "start_byte": 122,
+              "end_byte": 136
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "referenced_by": [
+              {
+                "id": "563556e0a11c60f0fdf70d18f8b5a446abf685a1c75d4f294ca1796cc0760210",
+                "name": "topLevelFunction"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069297281,
+            "updated_at_epoch_ms": 1791069297480
+          },
+          "kind_data": {
+            "kind_data_type": "Parameter",
+            "data": {
+              "name": "parameterValue",
+              "position": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "5b7ff899f23d895dfb691bf1043a29ce3fe8a277df8fe64200ff605631630c9c",
+          "language": "Php",
+          "kind": "Interface",
+          "identity": {
+            "name": "Shape",
+            "display_name": "Shape",
+            "stable_key": "php::php.php::Interface::Shape::0"
+          },
+          "source": {
+            "file_path": "php.php",
+            "declaration_span": {
+              "start": {
+                "line": 12,
+                "column": 1
+              },
+              "end": {
+                "line": 15,
+                "column": 2
+              },
+              "start_byte": 211,
+              "end_byte": 265
+            },
+            "body_span": {
+              "start": {
+                "line": 13,
+                "column": 1
+              },
+              "end": {
+                "line": 15,
+                "column": 2
+              },
+              "start_byte": 227,
+              "end_byte": 265
+            },
+            "name_span": {
+              "start": {
+                "line": 12,
+                "column": 11
+              },
+              "end": {
+                "line": 12,
+                "column": 16
+              },
+              "start_byte": 221,
+              "end_byte": 226
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "members": [
+              {
+                "id": "5e5f75c3669bf741c8bba3af8b3eb430d0e173ff652643d5b1fa07b4eae74bda",
+                "name": "area",
+                "qualified_name": "Shape::area"
+              }
+            ],
+            "referenced_by": [
+              {
+                "id": "7461ecabf0bf05ce8aaac1b3240c8367a48c9c13aef9de8cc57915baf6861d06",
+                "name": "PublicWidget"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069297281,
+            "updated_at_epoch_ms": 1791069297480
+          },
+          "kind_data": {
+            "kind_data_type": "Type",
+            "data": {
+              "fields": [
+                {
+                  "name": "area",
+                  "type_text": "public function area(): float;",
+                  "visibility": "Public",
+                  "is_static": false,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                }
+              ],
+              "is_abstract": false,
+              "is_final": false,
+              "is_sealed": false,
+              "is_open": false,
+              "is_partial": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "5e5f75c3669bf741c8bba3af8b3eb430d0e173ff652643d5b1fa07b4eae74bda",
+          "language": "Php",
+          "kind": "Method",
+          "identity": {
+            "name": "area",
+            "display_name": "area",
+            "qualified_name": "Shape::area",
+            "module_path": "Shape",
+            "stable_key": "php::php.php::Method::Shape::area::0"
+          },
+          "source": {
+            "file_path": "php.php",
+            "declaration_span": {
+              "start": {
+                "line": 14,
+                "column": 5
+              },
+              "end": {
+                "line": 14,
+                "column": 35
+              },
+              "start_byte": 233,
+              "end_byte": 263
+            },
+            "name_span": {
+              "start": {
+                "line": 14,
+                "column": 21
+              },
+              "end": {
+                "line": 14,
+                "column": 25
+              },
+              "start_byte": 249,
+              "end_byte": 253
+            }
+          },
+          "visibility": {
+            "level": "Public",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "float",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "float"
+              },
+              {
+                "kind": "Canonical",
+                "text": "float"
+              }
+            ]
+          },
+          "relations": {
+            "parent": {
+              "id": "5b7ff899f23d895dfb691bf1043a29ce3fe8a277df8fe64200ff605631630c9c",
+              "name": "Shape"
+            },
+            "container": {
+              "id": "5b7ff899f23d895dfb691bf1043a29ce3fe8a277df8fe64200ff605631630c9c",
+              "name": "Shape"
+            }
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069297281,
+            "updated_at_epoch_ms": 1791069297480
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "float",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "289e3437ef3554f67ab1e979e6abed118acb44837d08c3cf8a63f4a8b7ca676f",
+          "language": "Php",
+          "kind": "Trait",
+          "identity": {
+            "name": "Greets",
+            "display_name": "Greets",
+            "stable_key": "php::php.php::Trait::Greets::0"
+          },
+          "source": {
+            "file_path": "php.php",
+            "declaration_span": {
+              "start": {
+                "line": 17,
+                "column": 1
+              },
+              "end": {
+                "line": 27,
+                "column": 2
+              },
+              "start_byte": 267,
+              "end_byte": 457
+            },
+            "body_span": {
+              "start": {
+                "line": 18,
+                "column": 1
+              },
+              "end": {
+                "line": 27,
+                "column": 2
+              },
+              "start_byte": 280,
+              "end_byte": 457
+            },
+            "name_span": {
+              "start": {
+                "line": 17,
+                "column": 7
+              },
+              "end": {
+                "line": 17,
+                "column": 13
+              },
+              "start_byte": 273,
+              "end_byte": 279
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "referenced_by": [
+              {
+                "id": "7461ecabf0bf05ce8aaac1b3240c8367a48c9c13aef9de8cc57915baf6861d06",
+                "name": "PublicWidget"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069297281,
+            "updated_at_epoch_ms": 1791069297480
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "59ac10375c8d23004c81864fb7c17b8baccb86714454058b6bb07ede82708b05",
+          "language": "Php",
+          "kind": "Method",
+          "identity": {
+            "name": "greet",
+            "display_name": "greet",
+            "stable_key": "php::php.php::Method::greet::0"
+          },
+          "source": {
+            "file_path": "php.php",
+            "declaration_span": {
+              "start": {
+                "line": 19,
+                "column": 5
+              },
+              "end": {
+                "line": 22,
+                "column": 6
+              },
+              "start_byte": 286,
+              "end_byte": 353
+            },
+            "body_span": {
+              "start": {
+                "line": 20,
+                "column": 5
+              },
+              "end": {
+                "line": 22,
+                "column": 6
+              },
+              "start_byte": 322,
+              "end_byte": 353
+            },
+            "name_span": {
+              "start": {
+                "line": 19,
+                "column": 21
+              },
+              "end": {
+                "line": 19,
+                "column": 26
+              },
+              "start_byte": 302,
+              "end_byte": 307
+            }
+          },
+          "visibility": {
+            "level": "Public",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "string",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "string"
+              },
+              {
+                "kind": "Canonical",
+                "text": "string"
+              }
+            ]
+          },
+          "relations": {},
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069297281,
+            "updated_at_epoch_ms": 1791069297480
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "string",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "c00d04b32948211e3039636d360183c978c775efd03792467dd6c6b8743565d6",
+          "language": "Php",
+          "kind": "Method",
+          "identity": {
+            "name": "traitHelper",
+            "display_name": "traitHelper",
+            "stable_key": "php::php.php::Method::traitHelper::0"
+          },
+          "source": {
+            "file_path": "php.php",
+            "declaration_span": {
+              "start": {
+                "line": 24,
+                "column": 5
+              },
+              "end": {
+                "line": 24,
+                "column": 44
+              },
+              "start_byte": 359,
+              "end_byte": 398
+            },
+            "body_span": {
+              "start": {
+                "line": 24,
+                "column": 42
+              },
+              "end": {
+                "line": 24,
+                "column": 44
+              },
+              "start_byte": 396,
+              "end_byte": 398
+            },
+            "name_span": {
+              "start": {
+                "line": 24,
+                "column": 22
+              },
+              "end": {
+                "line": 24,
+                "column": 33
+              },
+              "start_byte": 376,
+              "end_byte": 387
+            }
+          },
+          "visibility": {
+            "level": "Private",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "void",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "void"
+              },
+              {
+                "kind": "Canonical",
+                "text": "void"
+              }
+            ]
+          },
+          "relations": {},
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069297281,
+            "updated_at_epoch_ms": 1791069297480
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "void",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "60eef57d991160b218a1566b346f01a1309755c77824fef18dfa9a7ee1d78e0f",
+          "language": "Php",
+          "kind": "Method",
+          "identity": {
+            "name": "traitStaticMethod",
+            "display_name": "traitStaticMethod",
+            "stable_key": "php::php.php::Method::traitStaticMethod::0"
+          },
+          "source": {
+            "file_path": "php.php",
+            "declaration_span": {
+              "start": {
+                "line": 26,
+                "column": 5
+              },
+              "end": {
+                "line": 26,
+                "column": 56
+              },
+              "start_byte": 404,
+              "end_byte": 455
+            },
+            "body_span": {
+              "start": {
+                "line": 26,
+                "column": 54
+              },
+              "end": {
+                "line": 26,
+                "column": 56
+              },
+              "start_byte": 453,
+              "end_byte": 455
+            },
+            "name_span": {
+              "start": {
+                "line": 26,
+                "column": 28
+              },
+              "end": {
+                "line": 26,
+                "column": 45
+              },
+              "start_byte": 427,
+              "end_byte": 444
+            }
+          },
+          "visibility": {
+            "level": "Public",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "modifiers": [
+            {
+              "type": "Static"
+            }
+          ],
+          "type_info": {
+            "primary_type": "void",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "void"
+              },
+              {
+                "kind": "Canonical",
+                "text": "void"
+              }
+            ]
+          },
+          "relations": {},
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069297281,
+            "updated_at_epoch_ms": 1791069297480
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "void",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "7461ecabf0bf05ce8aaac1b3240c8367a48c9c13aef9de8cc57915baf6861d06",
+          "language": "Php",
+          "kind": "Class",
+          "identity": {
+            "name": "PublicWidget",
+            "display_name": "PublicWidget",
+            "stable_key": "php::php.php::Class::PublicWidget::0"
+          },
+          "source": {
+            "file_path": "php.php",
+            "declaration_span": {
+              "start": {
+                "line": 29,
+                "column": 1
+              },
+              "end": {
+                "line": 62,
+                "column": 2
+              },
+              "start_byte": 459,
+              "end_byte": 1207
+            },
+            "body_span": {
+              "start": {
+                "line": 30,
+                "column": 1
+              },
+              "end": {
+                "line": 62,
+                "column": 2
+              },
+              "start_byte": 495,
+              "end_byte": 1207
+            },
+            "name_span": {
+              "start": {
+                "line": 29,
+                "column": 7
+              },
+              "end": {
+                "line": 29,
+                "column": 19
+              },
+              "start_byte": 465,
+              "end_byte": 477
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "members": [
+              {
+                "id": "d6faac21e349e490dae9c3074b311f2cad1748ea24b030a9c557445add338b27",
+                "name": "publicField",
+                "qualified_name": "PublicWidget::publicField"
+              },
+              {
+                "id": "dcc80a0e5ef3af4746c7117ca738f92fe26e9cab19d4928077fd8ae130becc45",
+                "name": "protectedField",
+                "qualified_name": "PublicWidget::protectedField"
+              },
+              {
+                "id": "aed609f2e80129d9d5bf97518d345296fc063d1ab7ceeae942fb2f7b88709c1f",
+                "name": "privateField",
+                "qualified_name": "PublicWidget::privateField"
+              },
+              {
+                "id": "f3ce3028fb575ab560ca885853557b5279f6fb34fed8f690da92e8fcbf68dafd",
+                "name": "legacyUnmarkedField",
+                "qualified_name": "PublicWidget::legacyUnmarkedField"
+              },
+              {
+                "id": "12be3a97c52b5fc5f6daf7db340f9f15ea8a97f56a25d6b4eafbd94bbb0294b2",
+                "name": "publicStaticField",
+                "qualified_name": "PublicWidget::publicStaticField"
+              },
+              {
+                "id": "3745faaaf0f5137bc6f8fd2195ca4bbebee5c6a715eca0d2ccdf5f0d2960d968",
+                "name": "privateStaticField",
+                "qualified_name": "PublicWidget::privateStaticField"
+              },
+              {
+                "id": "b5330dd8fd02fa90152bc49440f5dcd7b6a0eba01e4f69b724fa3ac420945bf2",
+                "name": "__construct",
+                "qualified_name": "PublicWidget::__construct"
+              },
+              {
+                "id": "0d48770fc1ae23455c41f6cad36ddb68d9b9bbe06dc7307096490ba700bf194c",
+                "name": "initialValue",
+                "qualified_name": "PublicWidget::initialValue"
+              },
+              {
+                "id": "5ee45b47d1c68074fbf53357032a5541305537f161ce4af2ee6e9f7e9c7c0878",
+                "name": "area",
+                "qualified_name": "PublicWidget::area"
+              },
+              {
+                "id": "52987fb186fe19f49580cdd4eea9eef0ed7029301867513d6f6f69b82f27697a",
+                "name": "protectedMethod",
+                "qualified_name": "PublicWidget::protectedMethod"
+              },
+              {
+                "id": "850f1bb81103ffc1b3443eea0237239af6979a648b1b7dc71c28d226587736ad",
+                "name": "privateMethod",
+                "qualified_name": "PublicWidget::privateMethod"
+              },
+              {
+                "id": "360e8eeeeaf980fed2b2a6cd18090bf0aef9adcdf53cc840b75f923c7e4f20eb",
+                "name": "unmarkedMethod",
+                "qualified_name": "PublicWidget::unmarkedMethod"
+              },
+              {
+                "id": "8235c06a119193e720c8103ccb4480f07e9274058d16cf20d395159c16209a14",
+                "name": "staticFactory",
+                "qualified_name": "PublicWidget::staticFactory"
+              },
+              {
+                "id": "37612752668c1408bb6e423ae0ddfa86a2056ffc4135f7c4a9dbd98b9bb1ae23",
+                "name": "unmarkedStaticMethod",
+                "qualified_name": "PublicWidget::unmarkedStaticMethod"
+              }
+            ],
+            "references": [
+              {
+                "id": "5b7ff899f23d895dfb691bf1043a29ce3fe8a277df8fe64200ff605631630c9c",
+                "name": "Shape"
+              },
+              {
+                "id": "289e3437ef3554f67ab1e979e6abed118acb44837d08c3cf8a63f4a8b7ca676f",
+                "name": "Greets"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069297281,
+            "updated_at_epoch_ms": 1791069297480
+          },
+          "kind_data": {
+            "kind_data_type": "Type",
+            "data": {
+              "fields": [
+                {
+                  "name": "publicField",
+                  "type_text": "int",
+                  "visibility": "Public",
+                  "is_static": false,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                },
+                {
+                  "name": "protectedField",
+                  "type_text": "int",
+                  "visibility": "Protected",
+                  "is_static": false,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                },
+                {
+                  "name": "privateField",
+                  "type_text": "int",
+                  "visibility": "Private",
+                  "is_static": false,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                },
+                {
+                  "name": "legacyUnmarkedField",
+                  "is_static": false,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                },
+                {
+                  "name": "publicStaticField",
+                  "type_text": "int",
+                  "visibility": "Public",
+                  "is_static": true,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                },
+                {
+                  "name": "privateStaticField",
+                  "type_text": "int",
+                  "visibility": "Private",
+                  "is_static": true,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                }
+              ],
+              "is_abstract": false,
+              "is_final": false,
+              "is_sealed": false,
+              "is_open": false,
+              "is_partial": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "d6faac21e349e490dae9c3074b311f2cad1748ea24b030a9c557445add338b27",
+          "language": "Php",
+          "kind": "Field",
+          "identity": {
+            "name": "publicField",
+            "display_name": "publicField",
+            "qualified_name": "PublicWidget::publicField",
+            "module_path": "PublicWidget",
+            "stable_key": "php::php.php::Field::PublicWidget::publicField::0"
+          },
+          "source": {
+            "file_path": "php.php",
+            "declaration_span": {
+              "start": {
+                "line": 33,
+                "column": 17
+              },
+              "end": {
+                "line": 33,
+                "column": 28
+              },
+              "start_byte": 530,
+              "end_byte": 541
+            },
+            "name_span": {
+              "start": {
+                "line": 33,
+                "column": 17
+              },
+              "end": {
+                "line": 33,
+                "column": 28
+              },
+              "start_byte": 530,
+              "end_byte": 541
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "7461ecabf0bf05ce8aaac1b3240c8367a48c9c13aef9de8cc57915baf6861d06",
+              "name": "PublicWidget"
+            },
+            "container": {
+              "id": "7461ecabf0bf05ce8aaac1b3240c8367a48c9c13aef9de8cc57915baf6861d06",
+              "name": "PublicWidget"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069297281,
+            "updated_at_epoch_ms": 1791069297480
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "publicField",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "dcc80a0e5ef3af4746c7117ca738f92fe26e9cab19d4928077fd8ae130becc45",
+          "language": "Php",
+          "kind": "Field",
+          "identity": {
+            "name": "protectedField",
+            "display_name": "protectedField",
+            "qualified_name": "PublicWidget::protectedField",
+            "module_path": "PublicWidget",
+            "stable_key": "php::php.php::Field::PublicWidget::protectedField::0"
+          },
+          "source": {
+            "file_path": "php.php",
+            "declaration_span": {
+              "start": {
+                "line": 34,
+                "column": 20
+              },
+              "end": {
+                "line": 34,
+                "column": 34
+              },
+              "start_byte": 566,
+              "end_byte": 580
+            },
+            "name_span": {
+              "start": {
+                "line": 34,
+                "column": 20
+              },
+              "end": {
+                "line": 34,
+                "column": 34
+              },
+              "start_byte": 566,
+              "end_byte": 580
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "7461ecabf0bf05ce8aaac1b3240c8367a48c9c13aef9de8cc57915baf6861d06",
+              "name": "PublicWidget"
+            },
+            "container": {
+              "id": "7461ecabf0bf05ce8aaac1b3240c8367a48c9c13aef9de8cc57915baf6861d06",
+              "name": "PublicWidget"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069297281,
+            "updated_at_epoch_ms": 1791069297480
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "protectedField",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "aed609f2e80129d9d5bf97518d345296fc063d1ab7ceeae942fb2f7b88709c1f",
+          "language": "Php",
+          "kind": "Field",
+          "identity": {
+            "name": "privateField",
+            "display_name": "privateField",
+            "qualified_name": "PublicWidget::privateField",
+            "module_path": "PublicWidget",
+            "stable_key": "php::php.php::Field::PublicWidget::privateField::0"
+          },
+          "source": {
+            "file_path": "php.php",
+            "declaration_span": {
+              "start": {
+                "line": 35,
+                "column": 18
+              },
+              "end": {
+                "line": 35,
+                "column": 30
+              },
+              "start_byte": 603,
+              "end_byte": 615
+            },
+            "name_span": {
+              "start": {
+                "line": 35,
+                "column": 18
+              },
+              "end": {
+                "line": 35,
+                "column": 30
+              },
+              "start_byte": 603,
+              "end_byte": 615
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "7461ecabf0bf05ce8aaac1b3240c8367a48c9c13aef9de8cc57915baf6861d06",
+              "name": "PublicWidget"
+            },
+            "container": {
+              "id": "7461ecabf0bf05ce8aaac1b3240c8367a48c9c13aef9de8cc57915baf6861d06",
+              "name": "PublicWidget"
+            },
+            "referenced_by": [
+              {
+                "id": "b5330dd8fd02fa90152bc49440f5dcd7b6a0eba01e4f69b724fa3ac420945bf2",
+                "name": "__construct",
+                "qualified_name": "PublicWidget::__construct"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069297281,
+            "updated_at_epoch_ms": 1791069297480
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "privateField",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "f3ce3028fb575ab560ca885853557b5279f6fb34fed8f690da92e8fcbf68dafd",
+          "language": "Php",
+          "kind": "Field",
+          "identity": {
+            "name": "legacyUnmarkedField",
+            "display_name": "legacyUnmarkedField",
+            "qualified_name": "PublicWidget::legacyUnmarkedField",
+            "module_path": "PublicWidget",
+            "stable_key": "php::php.php::Field::PublicWidget::legacyUnmarkedField::0"
+          },
+          "source": {
+            "file_path": "php.php",
+            "declaration_span": {
+              "start": {
+                "line": 36,
+                "column": 10
+              },
+              "end": {
+                "line": 36,
+                "column": 29
+              },
+              "start_byte": 630,
+              "end_byte": 649
+            },
+            "name_span": {
+              "start": {
+                "line": 36,
+                "column": 10
+              },
+              "end": {
+                "line": 36,
+                "column": 29
+              },
+              "start_byte": 630,
+              "end_byte": 649
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "7461ecabf0bf05ce8aaac1b3240c8367a48c9c13aef9de8cc57915baf6861d06",
+              "name": "PublicWidget"
+            },
+            "container": {
+              "id": "7461ecabf0bf05ce8aaac1b3240c8367a48c9c13aef9de8cc57915baf6861d06",
+              "name": "PublicWidget"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069297281,
+            "updated_at_epoch_ms": 1791069297480
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "legacyUnmarkedField",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "12be3a97c52b5fc5f6daf7db340f9f15ea8a97f56a25d6b4eafbd94bbb0294b2",
+          "language": "Php",
+          "kind": "Field",
+          "identity": {
+            "name": "publicStaticField",
+            "display_name": "publicStaticField",
+            "qualified_name": "PublicWidget::publicStaticField",
+            "module_path": "PublicWidget",
+            "stable_key": "php::php.php::Field::PublicWidget::publicStaticField::0"
+          },
+          "source": {
+            "file_path": "php.php",
+            "declaration_span": {
+              "start": {
+                "line": 37,
+                "column": 24
+              },
+              "end": {
+                "line": 37,
+                "column": 41
+              },
+              "start_byte": 678,
+              "end_byte": 695
+            },
+            "name_span": {
+              "start": {
+                "line": 37,
+                "column": 24
+              },
+              "end": {
+                "line": 37,
+                "column": 41
+              },
+              "start_byte": 678,
+              "end_byte": 695
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "7461ecabf0bf05ce8aaac1b3240c8367a48c9c13aef9de8cc57915baf6861d06",
+              "name": "PublicWidget"
+            },
+            "container": {
+              "id": "7461ecabf0bf05ce8aaac1b3240c8367a48c9c13aef9de8cc57915baf6861d06",
+              "name": "PublicWidget"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069297281,
+            "updated_at_epoch_ms": 1791069297480
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "publicStaticField",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "3745faaaf0f5137bc6f8fd2195ca4bbebee5c6a715eca0d2ccdf5f0d2960d968",
+          "language": "Php",
+          "kind": "Field",
+          "identity": {
+            "name": "privateStaticField",
+            "display_name": "privateStaticField",
+            "qualified_name": "PublicWidget::privateStaticField",
+            "module_path": "PublicWidget",
+            "stable_key": "php::php.php::Field::PublicWidget::privateStaticField::0"
+          },
+          "source": {
+            "file_path": "php.php",
+            "declaration_span": {
+              "start": {
+                "line": 38,
+                "column": 25
+              },
+              "end": {
+                "line": 38,
+                "column": 43
+              },
+              "start_byte": 725,
+              "end_byte": 743
+            },
+            "name_span": {
+              "start": {
+                "line": 38,
+                "column": 25
+              },
+              "end": {
+                "line": 38,
+                "column": 43
+              },
+              "start_byte": 725,
+              "end_byte": 743
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "7461ecabf0bf05ce8aaac1b3240c8367a48c9c13aef9de8cc57915baf6861d06",
+              "name": "PublicWidget"
+            },
+            "container": {
+              "id": "7461ecabf0bf05ce8aaac1b3240c8367a48c9c13aef9de8cc57915baf6861d06",
+              "name": "PublicWidget"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069297281,
+            "updated_at_epoch_ms": 1791069297480
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "privateStaticField",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "b5330dd8fd02fa90152bc49440f5dcd7b6a0eba01e4f69b724fa3ac420945bf2",
+          "language": "Php",
+          "kind": "Method",
+          "identity": {
+            "name": "__construct",
+            "display_name": "__construct",
+            "qualified_name": "PublicWidget::__construct",
+            "module_path": "PublicWidget",
+            "stable_key": "php::php.php::Method::PublicWidget::__construct::0"
+          },
+          "source": {
+            "file_path": "php.php",
+            "declaration_span": {
+              "start": {
+                "line": 40,
+                "column": 5
+              },
+              "end": {
+                "line": 43,
+                "column": 6
+              },
+              "start_byte": 754,
+              "end_byte": 857
+            },
+            "body_span": {
+              "start": {
+                "line": 41,
+                "column": 5
+              },
+              "end": {
+                "line": 43,
+                "column": 6
+              },
+              "start_byte": 805,
+              "end_byte": 857
+            },
+            "name_span": {
+              "start": {
+                "line": 40,
+                "column": 21
+              },
+              "end": {
+                "line": 40,
+                "column": 32
+              },
+              "start_byte": 770,
+              "end_byte": 781
+            }
+          },
+          "visibility": {
+            "level": "Public",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "7461ecabf0bf05ce8aaac1b3240c8367a48c9c13aef9de8cc57915baf6861d06",
+              "name": "PublicWidget"
+            },
+            "container": {
+              "id": "7461ecabf0bf05ce8aaac1b3240c8367a48c9c13aef9de8cc57915baf6861d06",
+              "name": "PublicWidget"
+            },
+            "references": [
+              {
+                "id": "aed609f2e80129d9d5bf97518d345296fc063d1ab7ceeae942fb2f7b88709c1f",
+                "name": "privateField",
+                "qualified_name": "PublicWidget::privateField"
+              },
+              {
+                "id": "0d48770fc1ae23455c41f6cad36ddb68d9b9bbe06dc7307096490ba700bf194c",
+                "name": "initialValue",
+                "qualified_name": "PublicWidget::initialValue"
+              }
+            ]
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069297281,
+            "updated_at_epoch_ms": 1791069297480
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "parameters": [
+                {
+                  "name": "initialValue",
+                  "position": 0,
+                  "type_text": "int",
+                  "is_optional": false,
+                  "is_variadic": false,
+                  "is_keyword_only": false,
+                  "is_positional_only": false
+                }
+              ],
+              "return_info": {
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 1
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "0d48770fc1ae23455c41f6cad36ddb68d9b9bbe06dc7307096490ba700bf194c",
+          "language": "Php",
+          "kind": "Parameter",
+          "identity": {
+            "name": "initialValue",
+            "display_name": "initialValue",
+            "qualified_name": "PublicWidget::initialValue",
+            "module_path": "PublicWidget",
+            "stable_key": "php::php.php::Parameter::PublicWidget::initialValue::0"
+          },
+          "source": {
+            "file_path": "php.php",
+            "declaration_span": {
+              "start": {
+                "line": 40,
+                "column": 38
+              },
+              "end": {
+                "line": 40,
+                "column": 50
+              },
+              "start_byte": 787,
+              "end_byte": 799
+            },
+            "name_span": {
+              "start": {
+                "line": 40,
+                "column": 38
+              },
+              "end": {
+                "line": 40,
+                "column": 50
+              },
+              "start_byte": 787,
+              "end_byte": 799
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "7461ecabf0bf05ce8aaac1b3240c8367a48c9c13aef9de8cc57915baf6861d06",
+              "name": "PublicWidget"
+            },
+            "container": {
+              "id": "7461ecabf0bf05ce8aaac1b3240c8367a48c9c13aef9de8cc57915baf6861d06",
+              "name": "PublicWidget"
+            },
+            "referenced_by": [
+              {
+                "id": "b5330dd8fd02fa90152bc49440f5dcd7b6a0eba01e4f69b724fa3ac420945bf2",
+                "name": "__construct",
+                "qualified_name": "PublicWidget::__construct"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069297281,
+            "updated_at_epoch_ms": 1791069297480
+          },
+          "kind_data": {
+            "kind_data_type": "Parameter",
+            "data": {
+              "name": "initialValue",
+              "position": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "5ee45b47d1c68074fbf53357032a5541305537f161ce4af2ee6e9f7e9c7c0878",
+          "language": "Php",
+          "kind": "Method",
+          "identity": {
+            "name": "area",
+            "display_name": "area",
+            "qualified_name": "PublicWidget::area",
+            "module_path": "PublicWidget",
+            "stable_key": "php::php.php::Method::PublicWidget::area::0"
+          },
+          "source": {
+            "file_path": "php.php",
+            "declaration_span": {
+              "start": {
+                "line": 45,
+                "column": 5
+              },
+              "end": {
+                "line": 48,
+                "column": 6
+              },
+              "start_byte": 863,
+              "end_byte": 924
+            },
+            "body_span": {
+              "start": {
+                "line": 46,
+                "column": 5
+              },
+              "end": {
+                "line": 48,
+                "column": 6
+              },
+              "start_byte": 897,
+              "end_byte": 924
+            },
+            "name_span": {
+              "start": {
+                "line": 45,
+                "column": 21
+              },
+              "end": {
+                "line": 45,
+                "column": 25
+              },
+              "start_byte": 879,
+              "end_byte": 883
+            }
+          },
+          "visibility": {
+            "level": "Public",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "float",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "float"
+              },
+              {
+                "kind": "Canonical",
+                "text": "float"
+              }
+            ]
+          },
+          "relations": {
+            "parent": {
+              "id": "7461ecabf0bf05ce8aaac1b3240c8367a48c9c13aef9de8cc57915baf6861d06",
+              "name": "PublicWidget"
+            },
+            "container": {
+              "id": "7461ecabf0bf05ce8aaac1b3240c8367a48c9c13aef9de8cc57915baf6861d06",
+              "name": "PublicWidget"
+            }
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069297281,
+            "updated_at_epoch_ms": 1791069297480
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "float",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "52987fb186fe19f49580cdd4eea9eef0ed7029301867513d6f6f69b82f27697a",
+          "language": "Php",
+          "kind": "Method",
+          "identity": {
+            "name": "protectedMethod",
+            "display_name": "protectedMethod",
+            "qualified_name": "PublicWidget::protectedMethod",
+            "module_path": "PublicWidget",
+            "stable_key": "php::php.php::Method::PublicWidget::protectedMethod::0"
+          },
+          "source": {
+            "file_path": "php.php",
+            "declaration_span": {
+              "start": {
+                "line": 50,
+                "column": 5
+              },
+              "end": {
+                "line": 50,
+                "column": 50
+              },
+              "start_byte": 930,
+              "end_byte": 975
+            },
+            "body_span": {
+              "start": {
+                "line": 50,
+                "column": 48
+              },
+              "end": {
+                "line": 50,
+                "column": 50
+              },
+              "start_byte": 973,
+              "end_byte": 975
+            },
+            "name_span": {
+              "start": {
+                "line": 50,
+                "column": 24
+              },
+              "end": {
+                "line": 50,
+                "column": 39
+              },
+              "start_byte": 949,
+              "end_byte": 964
+            }
+          },
+          "visibility": {
+            "level": "Protected",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "void",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "void"
+              },
+              {
+                "kind": "Canonical",
+                "text": "void"
+              }
+            ]
+          },
+          "relations": {
+            "parent": {
+              "id": "7461ecabf0bf05ce8aaac1b3240c8367a48c9c13aef9de8cc57915baf6861d06",
+              "name": "PublicWidget"
+            },
+            "container": {
+              "id": "7461ecabf0bf05ce8aaac1b3240c8367a48c9c13aef9de8cc57915baf6861d06",
+              "name": "PublicWidget"
+            }
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069297281,
+            "updated_at_epoch_ms": 1791069297480
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "void",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "850f1bb81103ffc1b3443eea0237239af6979a648b1b7dc71c28d226587736ad",
+          "language": "Php",
+          "kind": "Method",
+          "identity": {
+            "name": "privateMethod",
+            "display_name": "privateMethod",
+            "qualified_name": "PublicWidget::privateMethod",
+            "module_path": "PublicWidget",
+            "stable_key": "php::php.php::Method::PublicWidget::privateMethod::0"
+          },
+          "source": {
+            "file_path": "php.php",
+            "declaration_span": {
+              "start": {
+                "line": 52,
+                "column": 5
+              },
+              "end": {
+                "line": 52,
+                "column": 46
+              },
+              "start_byte": 981,
+              "end_byte": 1022
+            },
+            "body_span": {
+              "start": {
+                "line": 52,
+                "column": 44
+              },
+              "end": {
+                "line": 52,
+                "column": 46
+              },
+              "start_byte": 1020,
+              "end_byte": 1022
+            },
+            "name_span": {
+              "start": {
+                "line": 52,
+                "column": 22
+              },
+              "end": {
+                "line": 52,
+                "column": 35
+              },
+              "start_byte": 998,
+              "end_byte": 1011
+            }
+          },
+          "visibility": {
+            "level": "Private",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "void",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "void"
+              },
+              {
+                "kind": "Canonical",
+                "text": "void"
+              }
+            ]
+          },
+          "relations": {
+            "parent": {
+              "id": "7461ecabf0bf05ce8aaac1b3240c8367a48c9c13aef9de8cc57915baf6861d06",
+              "name": "PublicWidget"
+            },
+            "container": {
+              "id": "7461ecabf0bf05ce8aaac1b3240c8367a48c9c13aef9de8cc57915baf6861d06",
+              "name": "PublicWidget"
+            }
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069297281,
+            "updated_at_epoch_ms": 1791069297480
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "void",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "360e8eeeeaf980fed2b2a6cd18090bf0aef9adcdf53cc840b75f923c7e4f20eb",
+          "language": "Php",
+          "kind": "Method",
+          "identity": {
+            "name": "unmarkedMethod",
+            "display_name": "unmarkedMethod",
+            "qualified_name": "PublicWidget::unmarkedMethod",
+            "module_path": "PublicWidget",
+            "stable_key": "php::php.php::Method::PublicWidget::unmarkedMethod::0"
+          },
+          "source": {
+            "file_path": "php.php",
+            "declaration_span": {
+              "start": {
+                "line": 54,
+                "column": 5
+              },
+              "end": {
+                "line": 54,
+                "column": 39
+              },
+              "start_byte": 1028,
+              "end_byte": 1062
+            },
+            "body_span": {
+              "start": {
+                "line": 54,
+                "column": 37
+              },
+              "end": {
+                "line": 54,
+                "column": 39
+              },
+              "start_byte": 1060,
+              "end_byte": 1062
+            },
+            "name_span": {
+              "start": {
+                "line": 54,
+                "column": 14
+              },
+              "end": {
+                "line": 54,
+                "column": 28
+              },
+              "start_byte": 1037,
+              "end_byte": 1051
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "void",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "void"
+              },
+              {
+                "kind": "Canonical",
+                "text": "void"
+              }
+            ]
+          },
+          "relations": {
+            "parent": {
+              "id": "7461ecabf0bf05ce8aaac1b3240c8367a48c9c13aef9de8cc57915baf6861d06",
+              "name": "PublicWidget"
+            },
+            "container": {
+              "id": "7461ecabf0bf05ce8aaac1b3240c8367a48c9c13aef9de8cc57915baf6861d06",
+              "name": "PublicWidget"
+            }
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069297281,
+            "updated_at_epoch_ms": 1791069297480
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "void",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "8235c06a119193e720c8103ccb4480f07e9274058d16cf20d395159c16209a14",
+          "language": "Php",
+          "kind": "Method",
+          "identity": {
+            "name": "staticFactory",
+            "display_name": "staticFactory",
+            "qualified_name": "PublicWidget::staticFactory",
+            "module_path": "PublicWidget",
+            "stable_key": "php::php.php::Method::PublicWidget::staticFactory::0"
+          },
+          "source": {
+            "file_path": "php.php",
+            "declaration_span": {
+              "start": {
+                "line": 56,
+                "column": 5
+              },
+              "end": {
+                "line": 59,
+                "column": 6
+              },
+              "start_byte": 1068,
+              "end_byte": 1152
+            },
+            "body_span": {
+              "start": {
+                "line": 57,
+                "column": 5
+              },
+              "end": {
+                "line": 59,
+                "column": 6
+              },
+              "start_byte": 1117,
+              "end_byte": 1152
+            },
+            "name_span": {
+              "start": {
+                "line": 56,
+                "column": 28
+              },
+              "end": {
+                "line": 56,
+                "column": 41
+              },
+              "start_byte": 1091,
+              "end_byte": 1104
+            }
+          },
+          "visibility": {
+            "level": "Public",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "modifiers": [
+            {
+              "type": "Static"
+            }
+          ],
+          "type_info": {
+            "primary_type": "self",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "self"
+              },
+              {
+                "kind": "Canonical",
+                "text": "self"
+              }
+            ]
+          },
+          "relations": {
+            "parent": {
+              "id": "7461ecabf0bf05ce8aaac1b3240c8367a48c9c13aef9de8cc57915baf6861d06",
+              "name": "PublicWidget"
+            },
+            "container": {
+              "id": "7461ecabf0bf05ce8aaac1b3240c8367a48c9c13aef9de8cc57915baf6861d06",
+              "name": "PublicWidget"
+            }
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069297281,
+            "updated_at_epoch_ms": 1791069297480
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "self",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "37612752668c1408bb6e423ae0ddfa86a2056ffc4135f7c4a9dbd98b9bb1ae23",
+          "language": "Php",
+          "kind": "Method",
+          "identity": {
+            "name": "unmarkedStaticMethod",
+            "display_name": "unmarkedStaticMethod",
+            "qualified_name": "PublicWidget::unmarkedStaticMethod",
+            "module_path": "PublicWidget",
+            "stable_key": "php::php.php::Method::PublicWidget::unmarkedStaticMethod::0"
+          },
+          "source": {
+            "file_path": "php.php",
+            "declaration_span": {
+              "start": {
+                "line": 61,
+                "column": 5
+              },
+              "end": {
+                "line": 61,
+                "column": 52
+              },
+              "start_byte": 1158,
+              "end_byte": 1205
+            },
+            "body_span": {
+              "start": {
+                "line": 61,
+                "column": 50
+              },
+              "end": {
+                "line": 61,
+                "column": 52
+              },
+              "start_byte": 1203,
+              "end_byte": 1205
+            },
+            "name_span": {
+              "start": {
+                "line": 61,
+                "column": 21
+              },
+              "end": {
+                "line": 61,
+                "column": 41
+              },
+              "start_byte": 1174,
+              "end_byte": 1194
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "modifiers": [
+            {
+              "type": "Static"
+            }
+          ],
+          "type_info": {
+            "primary_type": "void",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "void"
+              },
+              {
+                "kind": "Canonical",
+                "text": "void"
+              }
+            ]
+          },
+          "relations": {
+            "parent": {
+              "id": "7461ecabf0bf05ce8aaac1b3240c8367a48c9c13aef9de8cc57915baf6861d06",
+              "name": "PublicWidget"
+            },
+            "container": {
+              "id": "7461ecabf0bf05ce8aaac1b3240c8367a48c9c13aef9de8cc57915baf6861d06",
+              "name": "PublicWidget"
+            }
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069297281,
+            "updated_at_epoch_ms": 1791069297480
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "void",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "4b7966ff6661dd45051cee05f8b8ac5ca74b023ebca6ca3338f952aba3e66678",
+          "language": "Php",
+          "kind": "Enum",
+          "identity": {
+            "name": "Suit",
+            "display_name": "Suit",
+            "stable_key": "php::php.php::Enum::Suit::0"
+          },
+          "source": {
+            "file_path": "php.php",
+            "declaration_span": {
+              "start": {
+                "line": 64,
+                "column": 1
+              },
+              "end": {
+                "line": 73,
+                "column": 2
+              },
+              "start_byte": 1209,
+              "end_byte": 1328
+            },
+            "body_span": {
+              "start": {
+                "line": 65,
+                "column": 1
+              },
+              "end": {
+                "line": 73,
+                "column": 2
+              },
+              "start_byte": 1219,
+              "end_byte": 1328
+            },
+            "name_span": {
+              "start": {
+                "line": 64,
+                "column": 6
+              },
+              "end": {
+                "line": 64,
+                "column": 10
+              },
+              "start_byte": 1214,
+              "end_byte": 1218
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "members": [
+              {
+                "id": "ebf64ecc85f3c5ae41c56d9aaa8bb905eefde47a9324e2adaa13ef2faac74000",
+                "name": "label",
+                "qualified_name": "Suit::label"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069297281,
+            "updated_at_epoch_ms": 1791069297480
+          },
+          "kind_data": {
+            "kind_data_type": "Enum",
+            "data": {
+              "variants": [
+                {
+                  "name": "Hearts"
+                },
+                {
+                  "name": "Spades"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "ebf64ecc85f3c5ae41c56d9aaa8bb905eefde47a9324e2adaa13ef2faac74000",
+          "language": "Php",
+          "kind": "Method",
+          "identity": {
+            "name": "label",
+            "display_name": "label",
+            "qualified_name": "Suit::label",
+            "module_path": "Suit",
+            "stable_key": "php::php.php::Method::Suit::label::0"
+          },
+          "source": {
+            "file_path": "php.php",
+            "declaration_span": {
+              "start": {
+                "line": 69,
+                "column": 5
+              },
+              "end": {
+                "line": 72,
+                "column": 6
+              },
+              "start_byte": 1260,
+              "end_byte": 1326
+            },
+            "body_span": {
+              "start": {
+                "line": 70,
+                "column": 5
+              },
+              "end": {
+                "line": 72,
+                "column": 6
+              },
+              "start_byte": 1296,
+              "end_byte": 1326
+            },
+            "name_span": {
+              "start": {
+                "line": 69,
+                "column": 21
+              },
+              "end": {
+                "line": 69,
+                "column": 26
+              },
+              "start_byte": 1276,
+              "end_byte": 1281
+            }
+          },
+          "visibility": {
+            "level": "Public",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "string",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "string"
+              },
+              {
+                "kind": "Canonical",
+                "text": "string"
+              }
+            ]
+          },
+          "relations": {
+            "parent": {
+              "id": "4b7966ff6661dd45051cee05f8b8ac5ca74b023ebca6ca3338f952aba3e66678",
+              "name": "Suit"
+            },
+            "container": {
+              "id": "4b7966ff6661dd45051cee05f8b8ac5ca74b023ebca6ca3338f952aba3e66678",
+              "name": "Suit"
+            }
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069297281,
+            "updated_at_epoch_ms": 1791069297480
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "string",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        }
+      ],
+      "imports": [],
+      "exports": [],
+      "diagnostics": []
+    }
+  ],
+  "adapter_metadata": []
+}

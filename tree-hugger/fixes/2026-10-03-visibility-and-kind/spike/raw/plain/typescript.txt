@@ -1,0 +1,79 @@
+  - unknown #hashPrivateProperty typescript.ts:50:3
+  - method abstractMethod(): void [in ExportedWidget] typescript.ts:78:3
+  - method concreteProtectedMethod(): void typescript.ts:41:3
+  - unknown constructor typescript.ts:55:3
+  - unknown constructor typescript.ts:82:3
+  - const EXPORTED_CONSTANT typescript.ts:12:14
+  - unknown ExportedAlias typescript.ts:16:8
+  - enum ExportedEnum { FirstMember, SecondMember } typescript.ts:29:8
+  - function exportedFunction(): void typescript.ts:5:8
+  - interface ExportedInterface { interfaceProperty: string } typescript.ts:20:8
+  - class ExportedWidget { publicProperty: number, protectedProperty, privateProperty: boolean, unmarkedProperty, staticProperty, privateStaticProperty: number } typescript.ts:46:8
+  - parameter initialValue [in ExportedWidget] typescript.ts:55:15
+  - method instanceMethod(): void [in ModuleWidget] typescript.ts:84:3
+  - const localValue typescript.ts:8:9
+  - const MODULE_CONSTANT typescript.ts:14:7
+  - unknown ModuleAlias typescript.ts:18:1
+  - enum ModuleEnum { OnlyMember } typescript.ts:34:1
+  - function moduleFunction(parameterValue: number): number typescript.ts:7:1
+  - interface ModuleInterface typescript.ts:25:1
+  - class ModuleWidget typescript.ts:81:1
+  - function namespaceFunction(): void typescript.ts:88:10
+  - parameter parameterValue typescript.ts:7:25
+  - method privateMethod(): void [in ExportedWidget] typescript.ts:66:3
+  - unknown privateProperty typescript.ts:49:3
+  - method privateStaticMethod(): void [in ExportedWidget] typescript.ts:76:3
+  - unknown privateStaticProperty typescript.ts:53:3
+  - method protectedMethod(): void [in ExportedWidget] typescript.ts:64:3
+  - unknown protectedProperty typescript.ts:48:3
+  - method publicMethod(): number [in ExportedWidget] typescript.ts:60:3
+  - unknown publicProperty typescript.ts:47:3
+  - method staticMethod(): ExportedWidget [in ExportedWidget] typescript.ts:72:3
+  - unknown staticProperty typescript.ts:52:3
+  - method unmarkedMethod [in ExportedWidget] typescript.ts:70:3
+  - unknown unmarkedProperty typescript.ts:51:3
+=== classes
+typescript.ts (TypeScript)
+  class ExportedWidget [46:8]
+    Instance Methods (8)
+      - constructor [55:3]
+      - publicMethod(): number [in ExportedWidget] [60:3]
+      - protectedMethod(): void [in ExportedWidget] [64:3]
+      - privateMethod(): void [in ExportedWidget] [66:3]
+      - unmarkedMethod [in ExportedWidget] [70:3]
+      - staticMethod(): ExportedWidget [in ExportedWidget] [72:3]
+      - privateStaticMethod(): void [in ExportedWidget] [76:3]
+      - abstractMethod(): void [in ExportedWidget] [78:3]
+    Static Fields (2)
+      - staticProperty
+      - private privateStaticProperty: number
+    Instance Fields (4)
+      - public publicProperty: number
+      - protected protectedProperty
+      - private privateProperty: boolean
+      - unmarkedProperty
+  class ModuleWidget [81:1]
+    Instance Methods (2)
+      - constructor [82:3]
+      - instanceMethod(): void [in ModuleWidget] [84:3]
+
+=== functions
+  - method abstractMethod(): void [in ExportedWidget] typescript.ts:78:3
+  - method concreteProtectedMethod(): void typescript.ts:41:3
+  - function exportedFunction(): void typescript.ts:5:8
+  - method instanceMethod(): void [in ModuleWidget] typescript.ts:84:3
+  - function moduleFunction(parameterValue: number): number typescript.ts:7:1
+  - function namespaceFunction(): void typescript.ts:88:10
+  - method privateMethod(): void [in ExportedWidget] typescript.ts:66:3
+  - method privateStaticMethod(): void [in ExportedWidget] typescript.ts:76:3
+  - method protectedMethod(): void [in ExportedWidget] typescript.ts:64:3
+  - method publicMethod(): number [in ExportedWidget] typescript.ts:60:3
+  - method staticMethod(): ExportedWidget [in ExportedWidget] typescript.ts:72:3
+  - method unmarkedMethod [in ExportedWidget] typescript.ts:70:3
+=== types
+  - enum ExportedEnum { FirstMember, SecondMember } typescript.ts:29:8
+  - interface ExportedInterface { interfaceProperty: string } typescript.ts:20:8
+  - class ExportedWidget { publicProperty: number, protectedProperty, privateProperty: boolean, unmarkedProperty, staticProperty, privateStaticProperty: number } typescript.ts:46:8
+  - enum ModuleEnum { OnlyMember } typescript.ts:34:1
+  - interface ModuleInterface typescript.ts:25:1
+  - class ModuleWidget typescript.ts:81:1

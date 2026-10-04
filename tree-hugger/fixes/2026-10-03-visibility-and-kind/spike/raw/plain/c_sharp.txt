@@ -1,0 +1,112 @@
+  - method Area() -> double [in IShape] c_sharp.cs:67:5
+  - method Area() -> double [in Square] c_sharp.cs:80:5
+  - method Draw() -> void [in IShape] c_sharp.cs:69:5
+  - class FileLocalClass c_sharp.cs:57:1
+  - parameter initialValue [in PublicWidget] c_sharp.cs:17:29
+  - class InternalClass c_sharp.cs:55:1
+  - field InternalField [in PublicWidget] c_sharp.cs:11:18
+  - method InternalMethod() -> void [in PublicWidget] c_sharp.cs:28:5
+  - interface IShape { Area: double Area();, Draw: void Draw() { }, IShape: static IShape Unit() => new Square();, Log: private void Log() { } } c_sharp.cs:65:1
+  - field localValue c_sharp.cs:40:13
+  - method Log() -> void [in IShape] c_sharp.cs:75:5
+  - method MethodWithLocals(parameterValue: int) -> int [in PublicWidget] c_sharp.cs:38:5
+  - class NestedHelper c_sharp.cs:73:5
+  - method Paint() -> void [in Square] c_sharp.cs:82:5
+  - parameter parameterValue [in PublicWidget] c_sharp.cs:38:30
+  - field PrivateField [in PublicWidget] c_sharp.cs:10:17
+  - method PrivateMethod() -> void [in PublicWidget] c_sharp.cs:26:5
+  - class PrivateNestedClass c_sharp.cs:44:5
+  - field PrivateProtectedField [in PublicWidget] c_sharp.cs:13:27
+  - method PrivateProtectedMethod() -> void [in PublicWidget] c_sharp.cs:32:5
+  - field ProtectedField [in PublicWidget] c_sharp.cs:9:19
+  - field ProtectedInternalField [in PublicWidget] c_sharp.cs:12:28
+  - method ProtectedInternalMethod() -> void [in PublicWidget] c_sharp.cs:30:5
+  - method ProtectedMethod() -> void [in PublicWidget] c_sharp.cs:24:5
+  - enum PublicColor { Red, Green } c_sharp.cs:85:1
+  - field PublicField [in PublicWidget] c_sharp.cs:8:16
+  - method PublicMethod() -> int [in PublicWidget] c_sharp.cs:22:5
+  - method PublicMethodInPrivateClass() -> void [in PrivateNestedClass] c_sharp.cs:46:9
+  - field PublicStaticField [in PublicWidget] c_sharp.cs:15:23
+  - type PublicStruct { StructPublicField: int, StructUnmarkedField: int } c_sharp.cs:59:1
+  - class PublicWidget { PublicField: int, ProtectedField: int, PrivateField: int, InternalField: int, ProtectedInternalField: int, PrivateProtectedField: int, UnmarkedField: int, PublicStaticField: int } c_sharp.cs:6:1
+  - class Square c_sharp.cs:78:1
+  - method StaticFactory [in PublicWidget] c_sharp.cs:36:5
+  - field StructPublicField [in PublicStruct] c_sharp.cs:61:16
+  - field StructUnmarkedField [in PublicStruct] c_sharp.cs:62:9
+  - method Unit [in IShape] c_sharp.cs:71:5
+  - enum UnmarkedEnum { OnlyMember } c_sharp.cs:91:1
+  - field UnmarkedField [in PublicWidget] c_sharp.cs:14:9
+  - method UnmarkedMethod() -> void [in PublicWidget] c_sharp.cs:34:5
+  - class UnmarkedTopLevelClass c_sharp.cs:50:1
+  - method UnmarkedTopLevelClassMethod() -> void [in UnmarkedTopLevelClass] c_sharp.cs:52:5
+=== classes
+c_sharp.cs (C#)
+  class PublicWidget [6:1]
+    Instance Methods (9)
+      - PublicMethod() -> int [in PublicWidget] [22:5]
+      - ProtectedMethod() -> void [in PublicWidget] [24:5]
+      - PrivateMethod() -> void [in PublicWidget] [26:5]
+      - InternalMethod() -> void [in PublicWidget] [28:5]
+      - ProtectedInternalMethod() -> void [in PublicWidget] [30:5]
+      - PrivateProtectedMethod() -> void [in PublicWidget] [32:5]
+      - UnmarkedMethod() -> void [in PublicWidget] [34:5]
+      - StaticFactory [in PublicWidget] [36:5]
+      - MethodWithLocals(parameterValue: int) -> int [in PublicWidget] [38:5]
+    Static Fields (1)
+      - public PublicStaticField: int
+    Instance Fields (7)
+      - public PublicField: int
+      - protected ProtectedField: int
+      - private PrivateField: int
+      - internal InternalField: int
+      - protected ProtectedInternalField: int
+      - private PrivateProtectedField: int
+      - UnmarkedField: int
+  class PrivateNestedClass [44:5]
+    Instance Methods (1)
+      - PublicMethodInPrivateClass() -> void [in PrivateNestedClass] [46:9]
+  class UnmarkedTopLevelClass [50:1]
+    Instance Methods (1)
+      - UnmarkedTopLevelClassMethod() -> void [in UnmarkedTopLevelClass] [52:5]
+  class InternalClass [55:1]
+  class FileLocalClass [57:1]
+  type PublicStruct [59:1]
+    Instance Fields (2)
+      - public StructPublicField: int
+      - StructUnmarkedField: int
+  class NestedHelper [73:5]
+  class Square [78:1]
+    Instance Methods (2)
+      - Area() -> double [in Square] [80:5]
+      - Paint() -> void [in Square] [82:5]
+
+=== functions
+  - method Area() -> double [in IShape] c_sharp.cs:67:5
+  - method Area() -> double [in Square] c_sharp.cs:80:5
+  - method Draw() -> void [in IShape] c_sharp.cs:69:5
+  - method InternalMethod() -> void [in PublicWidget] c_sharp.cs:28:5
+  - method Log() -> void [in IShape] c_sharp.cs:75:5
+  - method MethodWithLocals(parameterValue: int) -> int [in PublicWidget] c_sharp.cs:38:5
+  - method Paint() -> void [in Square] c_sharp.cs:82:5
+  - method PrivateMethod() -> void [in PublicWidget] c_sharp.cs:26:5
+  - method PrivateProtectedMethod() -> void [in PublicWidget] c_sharp.cs:32:5
+  - method ProtectedInternalMethod() -> void [in PublicWidget] c_sharp.cs:30:5
+  - method ProtectedMethod() -> void [in PublicWidget] c_sharp.cs:24:5
+  - method PublicMethod() -> int [in PublicWidget] c_sharp.cs:22:5
+  - method PublicMethodInPrivateClass() -> void [in PrivateNestedClass] c_sharp.cs:46:9
+  - method StaticFactory [in PublicWidget] c_sharp.cs:36:5
+  - method Unit [in IShape] c_sharp.cs:71:5
+  - method UnmarkedMethod() -> void [in PublicWidget] c_sharp.cs:34:5
+  - method UnmarkedTopLevelClassMethod() -> void [in UnmarkedTopLevelClass] c_sharp.cs:52:5
+=== types
+  - class FileLocalClass c_sharp.cs:57:1
+  - class InternalClass c_sharp.cs:55:1
+  - interface IShape { Area: double Area();, Draw: void Draw() { }, IShape: static IShape Unit() => new Square();, Log: private void Log() { } } c_sharp.cs:65:1
+  - class NestedHelper c_sharp.cs:73:5
+  - class PrivateNestedClass c_sharp.cs:44:5
+  - enum PublicColor { Red, Green } c_sharp.cs:85:1
+  - type PublicStruct { StructPublicField: int, StructUnmarkedField: int } c_sharp.cs:59:1
+  - class PublicWidget { PublicField: int, ProtectedField: int, PrivateField: int, InternalField: int, ProtectedInternalField: int, PrivateProtectedField: int, UnmarkedField: int, PublicStaticField: int } c_sharp.cs:6:1
+  - class Square c_sharp.cs:78:1
+  - enum UnmarkedEnum { OnlyMember } c_sharp.cs:91:1
+  - class UnmarkedTopLevelClass c_sharp.cs:50:1

@@ -1,0 +1,64 @@
+  - method __construct(initialValue: int) [in PublicWidget] php.php:40:5
+  - method area() -> float [in Shape] php.php:14:5
+  - method area() -> float [in PublicWidget] php.php:45:5
+  - method greet() -> string php.php:19:5
+  - trait Greets php.php:17:1
+  - parameter initialValue [in PublicWidget] php.php:40:38
+  - method label() -> string [in Suit] php.php:69:5
+  - field legacyUnmarkedField [in PublicWidget] php.php:36:10
+  - parameter parameterValue php.php:6:32
+  - field privateField [in PublicWidget] php.php:35:18
+  - method privateMethod() -> void [in PublicWidget] php.php:52:5
+  - field privateStaticField [in PublicWidget] php.php:38:25
+  - field protectedField [in PublicWidget] php.php:34:20
+  - method protectedMethod() -> void [in PublicWidget] php.php:50:5
+  - field publicField [in PublicWidget] php.php:33:17
+  - field publicStaticField [in PublicWidget] php.php:37:24
+  - class PublicWidget { publicField: int, protectedField: int, privateField: int, legacyUnmarkedField, publicStaticField: int, privateStaticField: int } php.php:29:1
+  - interface Shape { area: public function area(): float; } php.php:12:1
+  - method staticFactory() -> self [in PublicWidget] php.php:56:5
+  - enum Suit { Hearts, Spades } php.php:64:1
+  - function topLevelFunction(parameterValue: int) -> int php.php:6:1
+  - method traitHelper() -> void php.php:24:5
+  - method traitStaticMethod() -> void php.php:26:5
+  - method unmarkedMethod() -> void [in PublicWidget] php.php:54:5
+  - method unmarkedStaticMethod() -> void [in PublicWidget] php.php:61:5
+=== classes
+php.php (PHP)
+  class PublicWidget [29:1]
+    Instance Methods (7)
+      - __construct(initialValue: int) [in PublicWidget] [40:5]
+      - area() -> float [in PublicWidget] [45:5]
+      - protectedMethod() -> void [in PublicWidget] [50:5]
+      - privateMethod() -> void [in PublicWidget] [52:5]
+      - unmarkedMethod() -> void [in PublicWidget] [54:5]
+      - staticFactory() -> self [in PublicWidget] [56:5]
+      - unmarkedStaticMethod() -> void [in PublicWidget] [61:5]
+    Static Fields (2)
+      - public publicStaticField: int
+      - private privateStaticField: int
+    Instance Fields (4)
+      - public publicField: int
+      - protected protectedField: int
+      - private privateField: int
+      - legacyUnmarkedField
+
+=== functions
+  - method __construct(initialValue: int) [in PublicWidget] php.php:40:5
+  - method area() -> float [in Shape] php.php:14:5
+  - method area() -> float [in PublicWidget] php.php:45:5
+  - method greet() -> string php.php:19:5
+  - method label() -> string [in Suit] php.php:69:5
+  - method privateMethod() -> void [in PublicWidget] php.php:52:5
+  - method protectedMethod() -> void [in PublicWidget] php.php:50:5
+  - method staticFactory() -> self [in PublicWidget] php.php:56:5
+  - function topLevelFunction(parameterValue: int) -> int php.php:6:1
+  - method traitHelper() -> void php.php:24:5
+  - method traitStaticMethod() -> void php.php:26:5
+  - method unmarkedMethod() -> void [in PublicWidget] php.php:54:5
+  - method unmarkedStaticMethod() -> void [in PublicWidget] php.php:61:5
+=== types
+  - trait Greets php.php:17:1
+  - class PublicWidget { publicField: int, protectedField: int, privateField: int, legacyUnmarkedField, publicStaticField: int, privateStaticField: int } php.php:29:1
+  - interface Shape { area: public function area(): float; } php.php:12:1
+  - enum Suit { Hearts, Spades } php.php:64:1

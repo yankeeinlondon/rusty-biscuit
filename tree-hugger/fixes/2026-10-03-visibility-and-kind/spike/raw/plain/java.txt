@@ -1,0 +1,92 @@
+  - method abstractMethod() -> List<String> [in PackageAbstractBase] java.java:84:5
+  - method area() -> double [in PublicShape] java.java:51:5
+  - method describe() -> String [in PublicShape] java.java:53:5
+  - parameter initialValue [in PublicWidget] java.java:16:29
+  - variable localValue java.java:37:13
+  - method lowerName() -> String [in PublicColor] java.java:72:5
+  - method methodWithLocals(parameterValue: int) -> int [in PublicWidget] java.java:36:5
+  - type PackageAbstractBase java.java:83:1
+  - field packageField [in PublicWidget] java.java:12:9
+  - method packageMethod() -> void [in PublicWidget] java.java:28:5
+  - method packageShapeMethod() -> void [in PackageShape] java.java:65:5
+  - method packageStaticMethod() -> void [in PublicWidget] java.java:34:5
+  - type PackageWidget java.java:46:1
+  - method packageWidgetMethod() -> void [in PackageWidget] java.java:47:5
+  - parameter parameterValue [in PublicWidget] java.java:36:30
+  - field PRIVATE_STATIC_CONSTANT [in PublicWidget] java.java:14:30
+  - field privateField [in PublicWidget] java.java:11:17
+  - method privateMethod() -> void [in PublicWidget] java.java:26:5
+  - type PrivateNestedClass java.java:41:5
+  - field protectedField [in PublicWidget] java.java:10:19
+  - method protectedMethod() -> void [in PublicWidget] java.java:24:5
+  - enum PublicColor { RED, GREEN } java.java:68:1
+  - field publicField [in PublicWidget] java.java:9:16
+  - method publicMethod() -> int [in PublicWidget] java.java:20:5
+  - method publicMethodInPrivateClass() -> void [in PrivateNestedClass] java.java:42:9
+  - type PublicPoint { xCoordinate: int, yCoordinate: int } java.java:77:1
+  - field publicStaticField [in PublicWidget] java.java:13:23
+  - type PublicWidget { publicField: int, protectedField: int, privateField: int, packageField: int, publicStaticField: int, PRIVATE_STATIC_CONSTANT: int } java.java:8:1
+  - method staticFactory() -> PublicWidget [in PublicWidget] java.java:30:5
+  - method sum() -> int [in PublicPoint] java.java:78:5
+  - method unit() -> PublicShape [in PublicShape] java.java:57:5
+  - parameter xCoordinate [in PublicPoint] java.java:77:31
+  - parameter yCoordinate [in PublicPoint] java.java:77:48
+=== classes
+java.java (Java)
+  type PublicWidget [8:1]
+    Instance Methods (7)
+      - publicMethod() -> int [in PublicWidget] [20:5]
+      - protectedMethod() -> void [in PublicWidget] [24:5]
+      - privateMethod() -> void [in PublicWidget] [26:5]
+      - packageMethod() -> void [in PublicWidget] [28:5]
+      - staticFactory() -> PublicWidget [in PublicWidget] [30:5]
+      - packageStaticMethod() -> void [in PublicWidget] [34:5]
+      - methodWithLocals(parameterValue: int) -> int [in PublicWidget] [36:5]
+    Static Fields (2)
+      - public publicStaticField: int
+      - private PRIVATE_STATIC_CONSTANT: int
+    Instance Fields (4)
+      - public publicField: int
+      - protected protectedField: int
+      - private privateField: int
+      - packageField: int
+  type PrivateNestedClass [41:5]
+    Instance Methods (1)
+      - publicMethodInPrivateClass() -> void [in PrivateNestedClass] [42:9]
+  type PackageWidget [46:1]
+    Instance Methods (1)
+      - packageWidgetMethod() -> void [in PackageWidget] [47:5]
+  type PublicPoint [77:1]
+    Instance Methods (1)
+      - sum() -> int [in PublicPoint] [78:5]
+    Instance Fields (2)
+      - public xCoordinate: int
+      - public yCoordinate: int
+  type PackageAbstractBase [83:1]
+    Instance Methods (1)
+      - abstractMethod() -> List<String> [in PackageAbstractBase] [84:5]
+
+=== functions
+  - method abstractMethod() -> List<String> [in PackageAbstractBase] java.java:84:5
+  - method area() -> double [in PublicShape] java.java:51:5
+  - method describe() -> String [in PublicShape] java.java:53:5
+  - method lowerName() -> String [in PublicColor] java.java:72:5
+  - method methodWithLocals(parameterValue: int) -> int [in PublicWidget] java.java:36:5
+  - method packageMethod() -> void [in PublicWidget] java.java:28:5
+  - method packageShapeMethod() -> void [in PackageShape] java.java:65:5
+  - method packageStaticMethod() -> void [in PublicWidget] java.java:34:5
+  - method packageWidgetMethod() -> void [in PackageWidget] java.java:47:5
+  - method privateMethod() -> void [in PublicWidget] java.java:26:5
+  - method protectedMethod() -> void [in PublicWidget] java.java:24:5
+  - method publicMethod() -> int [in PublicWidget] java.java:20:5
+  - method publicMethodInPrivateClass() -> void [in PrivateNestedClass] java.java:42:9
+  - method staticFactory() -> PublicWidget [in PublicWidget] java.java:30:5
+  - method sum() -> int [in PublicPoint] java.java:78:5
+  - method unit() -> PublicShape [in PublicShape] java.java:57:5
+=== types
+  - type PackageAbstractBase java.java:83:1
+  - type PackageWidget java.java:46:1
+  - type PrivateNestedClass java.java:41:5
+  - enum PublicColor { RED, GREEN } java.java:68:1
+  - type PublicPoint { xCoordinate: int, yCoordinate: int } java.java:77:1
+  - type PublicWidget { publicField: int, protectedField: int, privateField: int, packageField: int, publicStaticField: int, PRIVATE_STATIC_CONSTANT: int } java.java:8:1

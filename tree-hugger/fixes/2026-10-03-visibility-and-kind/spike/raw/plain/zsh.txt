@@ -1,0 +1,14 @@
+  - function _conventionally_private_function zsh.zsh:17:1
+  - variable GLOBAL_VARIABLE zsh.zsh:21:1
+  - function keyword_function zsh.zsh:9:1
+  - function keyword_with_parens zsh.zsh:13:1
+  - local local_value zsh.zsh:5:9
+  - function paren_function zsh.zsh:4:1
+=== classes
+=== functions
+  - function _conventionally_private_function zsh.zsh:17:1
+  - function keyword_function zsh.zsh:9:1
+  - function keyword_with_parens zsh.zsh:13:1
+  - function paren_function zsh.zsh:4:1
+=== types
+(no symbols)

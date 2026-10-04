@@ -1,0 +1,2808 @@
+{
+  "schema_version": {
+    "major": 2,
+    "minor": 0
+  },
+  "root_dir": "/private/tmp/claude-501/-Volumes-coding-wt-rusty-biscuit-feat-symbols/d63e5266-3b40-40b9-970c-1a0bd24ad9bf/scratchpad/baseline",
+  "language": "JavaScript",
+  "files": [
+    {
+      "file": "javascript.js",
+      "language": "JavaScript",
+      "hash": "495a45b33e2898a6",
+      "symbols": [
+        {
+          "name": "exportedFunction",
+          "kind": "Function",
+          "range": {
+            "start_line": 5,
+            "start_column": 8,
+            "end_line": 5,
+            "end_column": 38,
+            "start_byte": 124,
+            "end_byte": 154
+          },
+          "language": "JavaScript",
+          "file": "javascript.js"
+        },
+        {
+          "name": "moduleFunction",
+          "kind": "Function",
+          "range": {
+            "start_line": 7,
+            "start_column": 1,
+            "end_line": 10,
+            "end_column": 2,
+            "start_byte": 156,
+            "end_byte": 261
+          },
+          "language": "JavaScript",
+          "file": "javascript.js",
+          "signature": {
+            "parameters": [
+              {
+                "name": "parameterValue"
+              }
+            ]
+          }
+        },
+        {
+          "name": "parameterValue",
+          "kind": "Parameter",
+          "range": {
+            "start_line": 7,
+            "start_column": 25,
+            "end_line": 7,
+            "end_column": 39,
+            "start_byte": 180,
+            "end_byte": 194
+          },
+          "language": "JavaScript",
+          "file": "javascript.js"
+        },
+        {
+          "name": "localValue",
+          "kind": "Variable",
+          "range": {
+            "start_line": 8,
+            "start_column": 9,
+            "end_line": 8,
+            "end_column": 19,
+            "start_byte": 206,
+            "end_byte": 216
+          },
+          "language": "JavaScript",
+          "file": "javascript.js"
+        },
+        {
+          "name": "EXPORTED_CONSTANT",
+          "kind": "Variable",
+          "range": {
+            "start_line": 12,
+            "start_column": 14,
+            "end_line": 12,
+            "end_column": 31,
+            "start_byte": 276,
+            "end_byte": 293
+          },
+          "language": "JavaScript",
+          "file": "javascript.js"
+        },
+        {
+          "name": "MODULE_CONSTANT",
+          "kind": "Variable",
+          "range": {
+            "start_line": 14,
+            "start_column": 7,
+            "end_line": 14,
+            "end_column": 22,
+            "start_byte": 306,
+            "end_byte": 321
+          },
+          "language": "JavaScript",
+          "file": "javascript.js"
+        },
+        {
+          "name": "ExportedWidget",
+          "kind": "Class",
+          "range": {
+            "start_line": 16,
+            "start_column": 8,
+            "end_line": 37,
+            "end_column": 2,
+            "start_byte": 335,
+            "end_byte": 754
+          },
+          "language": "JavaScript",
+          "file": "javascript.js"
+        },
+        {
+          "name": "unmarkedProperty",
+          "kind": "Field",
+          "range": {
+            "start_line": 17,
+            "start_column": 3,
+            "end_line": 17,
+            "end_column": 19,
+            "start_byte": 360,
+            "end_byte": 376
+          },
+          "language": "JavaScript",
+          "file": "javascript.js",
+          "container_name": "ExportedWidget"
+        },
+        {
+          "name": "#hashPrivateProperty",
+          "kind": "Field",
+          "range": {
+            "start_line": 18,
+            "start_column": 3,
+            "end_line": 18,
+            "end_column": 23,
+            "start_byte": 384,
+            "end_byte": 404
+          },
+          "language": "JavaScript",
+          "file": "javascript.js",
+          "container_name": "ExportedWidget"
+        },
+        {
+          "name": "staticProperty",
+          "kind": "Field",
+          "range": {
+            "start_line": 19,
+            "start_column": 10,
+            "end_line": 19,
+            "end_column": 24,
+            "start_byte": 419,
+            "end_byte": 433
+          },
+          "language": "JavaScript",
+          "file": "javascript.js",
+          "container_name": "ExportedWidget"
+        },
+        {
+          "name": "#hashPrivateStaticProperty",
+          "kind": "Field",
+          "range": {
+            "start_line": 20,
+            "start_column": 10,
+            "end_line": 20,
+            "end_column": 36,
+            "start_byte": 448,
+            "end_byte": 474
+          },
+          "language": "JavaScript",
+          "file": "javascript.js",
+          "container_name": "ExportedWidget"
+        },
+        {
+          "name": "constructor",
+          "kind": "Unknown",
+          "range": {
+            "start_line": 22,
+            "start_column": 3,
+            "end_line": 24,
+            "end_column": 4,
+            "start_byte": 483,
+            "end_byte": 556
+          },
+          "language": "JavaScript",
+          "file": "javascript.js",
+          "container_name": "ExportedWidget",
+          "signature": {
+            "parameters": [
+              {
+                "name": "initialValue"
+              }
+            ]
+          }
+        },
+        {
+          "name": "initialValue",
+          "kind": "Parameter",
+          "range": {
+            "start_line": 22,
+            "start_column": 15,
+            "end_line": 22,
+            "end_column": 27,
+            "start_byte": 495,
+            "end_byte": 507
+          },
+          "language": "JavaScript",
+          "file": "javascript.js",
+          "container_name": "ExportedWidget"
+        },
+        {
+          "name": "unmarkedProperty",
+          "kind": "Variable",
+          "range": {
+            "start_line": 23,
+            "start_column": 10,
+            "end_line": 23,
+            "end_column": 26,
+            "start_byte": 520,
+            "end_byte": 536
+          },
+          "language": "JavaScript",
+          "file": "javascript.js",
+          "container_name": "ExportedWidget"
+        },
+        {
+          "name": "unmarkedMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 26,
+            "start_column": 3,
+            "end_line": 28,
+            "end_column": 4,
+            "start_byte": 560,
+            "end_byte": 620
+          },
+          "language": "JavaScript",
+          "file": "javascript.js",
+          "container_name": "ExportedWidget"
+        },
+        {
+          "name": "#hashPrivateMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 30,
+            "start_column": 3,
+            "end_line": 30,
+            "end_column": 26,
+            "start_byte": 624,
+            "end_byte": 647
+          },
+          "language": "JavaScript",
+          "file": "javascript.js",
+          "container_name": "ExportedWidget"
+        },
+        {
+          "name": "staticMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 32,
+            "start_column": 3,
+            "end_line": 34,
+            "end_column": 4,
+            "start_byte": 651,
+            "end_byte": 712
+          },
+          "language": "JavaScript",
+          "file": "javascript.js",
+          "container_name": "ExportedWidget"
+        },
+        {
+          "name": "#hashPrivateStaticMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 36,
+            "start_column": 3,
+            "end_line": 36,
+            "end_column": 39,
+            "start_byte": 716,
+            "end_byte": 752
+          },
+          "language": "JavaScript",
+          "file": "javascript.js",
+          "container_name": "ExportedWidget"
+        },
+        {
+          "name": "ModuleWidget",
+          "kind": "Class",
+          "range": {
+            "start_line": 39,
+            "start_column": 1,
+            "end_line": 43,
+            "end_column": 2,
+            "start_byte": 756,
+            "end_byte": 820
+          },
+          "language": "JavaScript",
+          "file": "javascript.js"
+        },
+        {
+          "name": "constructor",
+          "kind": "Unknown",
+          "range": {
+            "start_line": 40,
+            "start_column": 3,
+            "end_line": 40,
+            "end_column": 19,
+            "start_byte": 779,
+            "end_byte": 795
+          },
+          "language": "JavaScript",
+          "file": "javascript.js",
+          "container_name": "ModuleWidget"
+        },
+        {
+          "name": "instanceMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 42,
+            "start_column": 3,
+            "end_line": 42,
+            "end_column": 22,
+            "start_byte": 799,
+            "end_byte": 818
+          },
+          "language": "JavaScript",
+          "file": "javascript.js",
+          "container_name": "ModuleWidget"
+        }
+      ],
+      "imports": [
+        {
+          "name": "readFileSync",
+          "range": {
+            "start_line": 3,
+            "start_column": 10,
+            "end_line": 3,
+            "end_column": 22,
+            "start_byte": 90,
+            "end_byte": 102
+          },
+          "language": "JavaScript",
+          "file": "javascript.js",
+          "source": "fs"
+        }
+      ],
+      "exports": [
+        {
+          "name": "exportedFunction",
+          "kind": "Function",
+          "range": {
+            "start_line": 5,
+            "start_column": 8,
+            "end_line": 5,
+            "end_column": 38,
+            "start_byte": 124,
+            "end_byte": 154
+          },
+          "language": "JavaScript",
+          "file": "javascript.js"
+        },
+        {
+          "name": "ExportedWidget",
+          "kind": "Class",
+          "range": {
+            "start_line": 16,
+            "start_column": 8,
+            "end_line": 37,
+            "end_column": 2,
+            "start_byte": 335,
+            "end_byte": 754
+          },
+          "language": "JavaScript",
+          "file": "javascript.js"
+        }
+      ],
+      "locals": [
+        {
+          "name": "moduleFunction",
+          "kind": "Function",
+          "range": {
+            "start_line": 7,
+            "start_column": 1,
+            "end_line": 10,
+            "end_column": 2,
+            "start_byte": 156,
+            "end_byte": 261
+          },
+          "language": "JavaScript",
+          "file": "javascript.js",
+          "signature": {
+            "parameters": [
+              {
+                "name": "parameterValue"
+              }
+            ]
+          }
+        },
+        {
+          "name": "parameterValue",
+          "kind": "Parameter",
+          "range": {
+            "start_line": 7,
+            "start_column": 25,
+            "end_line": 7,
+            "end_column": 39,
+            "start_byte": 180,
+            "end_byte": 194
+          },
+          "language": "JavaScript",
+          "file": "javascript.js"
+        },
+        {
+          "name": "localValue",
+          "kind": "Variable",
+          "range": {
+            "start_line": 8,
+            "start_column": 9,
+            "end_line": 8,
+            "end_column": 19,
+            "start_byte": 206,
+            "end_byte": 216
+          },
+          "language": "JavaScript",
+          "file": "javascript.js"
+        },
+        {
+          "name": "EXPORTED_CONSTANT",
+          "kind": "Variable",
+          "range": {
+            "start_line": 12,
+            "start_column": 14,
+            "end_line": 12,
+            "end_column": 31,
+            "start_byte": 276,
+            "end_byte": 293
+          },
+          "language": "JavaScript",
+          "file": "javascript.js"
+        },
+        {
+          "name": "MODULE_CONSTANT",
+          "kind": "Variable",
+          "range": {
+            "start_line": 14,
+            "start_column": 7,
+            "end_line": 14,
+            "end_column": 22,
+            "start_byte": 306,
+            "end_byte": 321
+          },
+          "language": "JavaScript",
+          "file": "javascript.js"
+        },
+        {
+          "name": "unmarkedProperty",
+          "kind": "Field",
+          "range": {
+            "start_line": 17,
+            "start_column": 3,
+            "end_line": 17,
+            "end_column": 19,
+            "start_byte": 360,
+            "end_byte": 376
+          },
+          "language": "JavaScript",
+          "file": "javascript.js",
+          "container_name": "ExportedWidget"
+        },
+        {
+          "name": "#hashPrivateProperty",
+          "kind": "Field",
+          "range": {
+            "start_line": 18,
+            "start_column": 3,
+            "end_line": 18,
+            "end_column": 23,
+            "start_byte": 384,
+            "end_byte": 404
+          },
+          "language": "JavaScript",
+          "file": "javascript.js",
+          "container_name": "ExportedWidget"
+        },
+        {
+          "name": "staticProperty",
+          "kind": "Field",
+          "range": {
+            "start_line": 19,
+            "start_column": 10,
+            "end_line": 19,
+            "end_column": 24,
+            "start_byte": 419,
+            "end_byte": 433
+          },
+          "language": "JavaScript",
+          "file": "javascript.js",
+          "container_name": "ExportedWidget"
+        },
+        {
+          "name": "#hashPrivateStaticProperty",
+          "kind": "Field",
+          "range": {
+            "start_line": 20,
+            "start_column": 10,
+            "end_line": 20,
+            "end_column": 36,
+            "start_byte": 448,
+            "end_byte": 474
+          },
+          "language": "JavaScript",
+          "file": "javascript.js",
+          "container_name": "ExportedWidget"
+        },
+        {
+          "name": "constructor",
+          "kind": "Unknown",
+          "range": {
+            "start_line": 22,
+            "start_column": 3,
+            "end_line": 24,
+            "end_column": 4,
+            "start_byte": 483,
+            "end_byte": 556
+          },
+          "language": "JavaScript",
+          "file": "javascript.js",
+          "container_name": "ExportedWidget",
+          "signature": {
+            "parameters": [
+              {
+                "name": "initialValue"
+              }
+            ]
+          }
+        },
+        {
+          "name": "initialValue",
+          "kind": "Parameter",
+          "range": {
+            "start_line": 22,
+            "start_column": 15,
+            "end_line": 22,
+            "end_column": 27,
+            "start_byte": 495,
+            "end_byte": 507
+          },
+          "language": "JavaScript",
+          "file": "javascript.js",
+          "container_name": "ExportedWidget"
+        },
+        {
+          "name": "unmarkedProperty",
+          "kind": "Variable",
+          "range": {
+            "start_line": 23,
+            "start_column": 10,
+            "end_line": 23,
+            "end_column": 26,
+            "start_byte": 520,
+            "end_byte": 536
+          },
+          "language": "JavaScript",
+          "file": "javascript.js",
+          "container_name": "ExportedWidget"
+        },
+        {
+          "name": "unmarkedMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 26,
+            "start_column": 3,
+            "end_line": 28,
+            "end_column": 4,
+            "start_byte": 560,
+            "end_byte": 620
+          },
+          "language": "JavaScript",
+          "file": "javascript.js",
+          "container_name": "ExportedWidget"
+        },
+        {
+          "name": "#hashPrivateMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 30,
+            "start_column": 3,
+            "end_line": 30,
+            "end_column": 26,
+            "start_byte": 624,
+            "end_byte": 647
+          },
+          "language": "JavaScript",
+          "file": "javascript.js",
+          "container_name": "ExportedWidget"
+        },
+        {
+          "name": "staticMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 32,
+            "start_column": 3,
+            "end_line": 34,
+            "end_column": 4,
+            "start_byte": 651,
+            "end_byte": 712
+          },
+          "language": "JavaScript",
+          "file": "javascript.js",
+          "container_name": "ExportedWidget"
+        },
+        {
+          "name": "#hashPrivateStaticMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 36,
+            "start_column": 3,
+            "end_line": 36,
+            "end_column": 39,
+            "start_byte": 716,
+            "end_byte": 752
+          },
+          "language": "JavaScript",
+          "file": "javascript.js",
+          "container_name": "ExportedWidget"
+        },
+        {
+          "name": "ModuleWidget",
+          "kind": "Class",
+          "range": {
+            "start_line": 39,
+            "start_column": 1,
+            "end_line": 43,
+            "end_column": 2,
+            "start_byte": 756,
+            "end_byte": 820
+          },
+          "language": "JavaScript",
+          "file": "javascript.js"
+        },
+        {
+          "name": "constructor",
+          "kind": "Unknown",
+          "range": {
+            "start_line": 40,
+            "start_column": 3,
+            "end_line": 40,
+            "end_column": 19,
+            "start_byte": 779,
+            "end_byte": 795
+          },
+          "language": "JavaScript",
+          "file": "javascript.js",
+          "container_name": "ModuleWidget"
+        },
+        {
+          "name": "instanceMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 42,
+            "start_column": 3,
+            "end_line": 42,
+            "end_column": 22,
+            "start_byte": 799,
+            "end_byte": 818
+          },
+          "language": "JavaScript",
+          "file": "javascript.js",
+          "container_name": "ModuleWidget"
+        }
+      ],
+      "lint": [
+        {
+          "message": "Imported symbol 'readFileSync' is never used",
+          "range": {
+            "start_line": 3,
+            "start_column": 10,
+            "end_line": 3,
+            "end_column": 22,
+            "start_byte": 90,
+            "end_byte": 102
+          },
+          "severity": "Warning",
+          "rule": "unused-import",
+          "context": {
+            "line_text": "import { readFileSync } from \"fs\";",
+            "underline_column": 9,
+            "underline_length": 12
+          },
+          "metadata": {
+            "category": "Style",
+            "confidence": "Low",
+            "source": "SemanticAnalysis",
+            "default_severity": "Warning",
+            "effective_severity": "Warning"
+          }
+        }
+      ],
+      "syntax": []
+    }
+  ],
+  "symbol_indexes": [
+    {
+      "schema_version": {
+        "major": 2,
+        "minor": 0
+      },
+      "file": "javascript.js",
+      "language": "JavaScript",
+      "file_hash": "495a45b33e2898a6",
+      "completed_passes": [
+        "Parse",
+        "Bind",
+        "Semantic",
+        "Docs"
+      ],
+      "symbols": [
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "2392924bada08ba0c3cd81d82ccc299e5887e667d4b3f83b842b14fb56b31f6f",
+          "language": "JavaScript",
+          "kind": "Function",
+          "identity": {
+            "name": "exportedFunction",
+            "display_name": "exportedFunction",
+            "stable_key": "javascript::javascript.js::Function::exportedFunction::0"
+          },
+          "source": {
+            "file_path": "javascript.js",
+            "declaration_span": {
+              "start": {
+                "line": 5,
+                "column": 8
+              },
+              "end": {
+                "line": 5,
+                "column": 38
+              },
+              "start_byte": 124,
+              "end_byte": 154
+            },
+            "body_span": {
+              "start": {
+                "line": 5,
+                "column": 36
+              },
+              "end": {
+                "line": 5,
+                "column": 38
+              },
+              "start_byte": 152,
+              "end_byte": 154
+            },
+            "name_span": {
+              "start": {
+                "line": 5,
+                "column": 17
+              },
+              "end": {
+                "line": 5,
+                "column": 33
+              },
+              "start_byte": 133,
+              "end_byte": 149
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": true,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069295539,
+            "updated_at_epoch_ms": 1791069295629
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "8055cb599948d3a538d426765f55ebfbd968f4a14f97ab2f25a71457556b5868",
+          "language": "JavaScript",
+          "kind": "Function",
+          "identity": {
+            "name": "moduleFunction",
+            "display_name": "moduleFunction",
+            "stable_key": "javascript::javascript.js::Function::moduleFunction::0"
+          },
+          "source": {
+            "file_path": "javascript.js",
+            "declaration_span": {
+              "start": {
+                "line": 7,
+                "column": 1
+              },
+              "end": {
+                "line": 10,
+                "column": 2
+              },
+              "start_byte": 156,
+              "end_byte": 261
+            },
+            "body_span": {
+              "start": {
+                "line": 7,
+                "column": 41
+              },
+              "end": {
+                "line": 10,
+                "column": 2
+              },
+              "start_byte": 196,
+              "end_byte": 261
+            },
+            "name_span": {
+              "start": {
+                "line": 7,
+                "column": 10
+              },
+              "end": {
+                "line": 7,
+                "column": 24
+              },
+              "start_byte": 165,
+              "end_byte": 179
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "references": [
+              {
+                "id": "36c79c23cdd80c411aeec04468cc64c4ab8a3df60dc73380591621f6165a553e",
+                "name": "parameterValue"
+              },
+              {
+                "id": "93f0c00aa9b35e6fbb3786055255a039f1f91c1354f9daf1bea63b1e17d4aa74",
+                "name": "localValue"
+              }
+            ]
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069295539,
+            "updated_at_epoch_ms": 1791069295629
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "parameters": [
+                {
+                  "name": "parameterValue",
+                  "position": 0,
+                  "is_optional": false,
+                  "is_variadic": false,
+                  "is_keyword_only": false,
+                  "is_positional_only": false
+                }
+              ],
+              "return_info": {
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 1
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "36c79c23cdd80c411aeec04468cc64c4ab8a3df60dc73380591621f6165a553e",
+          "language": "JavaScript",
+          "kind": "Parameter",
+          "identity": {
+            "name": "parameterValue",
+            "display_name": "parameterValue",
+            "stable_key": "javascript::javascript.js::Parameter::parameterValue::0"
+          },
+          "source": {
+            "file_path": "javascript.js",
+            "declaration_span": {
+              "start": {
+                "line": 7,
+                "column": 25
+              },
+              "end": {
+                "line": 7,
+                "column": 39
+              },
+              "start_byte": 180,
+              "end_byte": 194
+            },
+            "name_span": {
+              "start": {
+                "line": 7,
+                "column": 25
+              },
+              "end": {
+                "line": 7,
+                "column": 39
+              },
+              "start_byte": 180,
+              "end_byte": 194
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "referenced_by": [
+              {
+                "id": "8055cb599948d3a538d426765f55ebfbd968f4a14f97ab2f25a71457556b5868",
+                "name": "moduleFunction"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069295539,
+            "updated_at_epoch_ms": 1791069295629
+          },
+          "kind_data": {
+            "kind_data_type": "Parameter",
+            "data": {
+              "name": "parameterValue",
+              "position": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "93f0c00aa9b35e6fbb3786055255a039f1f91c1354f9daf1bea63b1e17d4aa74",
+          "language": "JavaScript",
+          "kind": "Variable",
+          "identity": {
+            "name": "localValue",
+            "display_name": "localValue",
+            "stable_key": "javascript::javascript.js::Variable::localValue::0"
+          },
+          "source": {
+            "file_path": "javascript.js",
+            "declaration_span": {
+              "start": {
+                "line": 8,
+                "column": 9
+              },
+              "end": {
+                "line": 8,
+                "column": 19
+              },
+              "start_byte": 206,
+              "end_byte": 216
+            },
+            "name_span": {
+              "start": {
+                "line": 8,
+                "column": 9
+              },
+              "end": {
+                "line": 8,
+                "column": 19
+              },
+              "start_byte": 206,
+              "end_byte": 216
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "referenced_by": [
+              {
+                "id": "8055cb599948d3a538d426765f55ebfbd968f4a14f97ab2f25a71457556b5868",
+                "name": "moduleFunction"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069295539,
+            "updated_at_epoch_ms": 1791069295629
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "e9421ad99cfb5fa68de99a38f7f1191a0d15162e4fae33301e0e8dc3de821281",
+          "language": "JavaScript",
+          "kind": "Variable",
+          "identity": {
+            "name": "EXPORTED_CONSTANT",
+            "display_name": "EXPORTED_CONSTANT",
+            "stable_key": "javascript::javascript.js::Variable::EXPORTED_CONSTANT::0"
+          },
+          "source": {
+            "file_path": "javascript.js",
+            "declaration_span": {
+              "start": {
+                "line": 12,
+                "column": 14
+              },
+              "end": {
+                "line": 12,
+                "column": 31
+              },
+              "start_byte": 276,
+              "end_byte": 293
+            },
+            "name_span": {
+              "start": {
+                "line": 12,
+                "column": 14
+              },
+              "end": {
+                "line": 12,
+                "column": 31
+              },
+              "start_byte": 276,
+              "end_byte": 293
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069295539,
+            "updated_at_epoch_ms": 1791069295629
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "11fc1956a0c7ed0dfb5c990c355f59a3fe3b6f769d8167bbdb13cf44c1595786",
+          "language": "JavaScript",
+          "kind": "Variable",
+          "identity": {
+            "name": "MODULE_CONSTANT",
+            "display_name": "MODULE_CONSTANT",
+            "stable_key": "javascript::javascript.js::Variable::MODULE_CONSTANT::0"
+          },
+          "source": {
+            "file_path": "javascript.js",
+            "declaration_span": {
+              "start": {
+                "line": 14,
+                "column": 7
+              },
+              "end": {
+                "line": 14,
+                "column": 22
+              },
+              "start_byte": 306,
+              "end_byte": 321
+            },
+            "name_span": {
+              "start": {
+                "line": 14,
+                "column": 7
+              },
+              "end": {
+                "line": 14,
+                "column": 22
+              },
+              "start_byte": 306,
+              "end_byte": 321
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069295539,
+            "updated_at_epoch_ms": 1791069295629
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "28fd449b5dbe049323ad4420fe20e2e0803707ebdf1dc5bf46f2ca9392fa46c0",
+          "language": "JavaScript",
+          "kind": "Class",
+          "identity": {
+            "name": "ExportedWidget",
+            "display_name": "ExportedWidget",
+            "stable_key": "javascript::javascript.js::Class::ExportedWidget::0"
+          },
+          "source": {
+            "file_path": "javascript.js",
+            "declaration_span": {
+              "start": {
+                "line": 16,
+                "column": 8
+              },
+              "end": {
+                "line": 37,
+                "column": 2
+              },
+              "start_byte": 335,
+              "end_byte": 754
+            },
+            "body_span": {
+              "start": {
+                "line": 16,
+                "column": 29
+              },
+              "end": {
+                "line": 37,
+                "column": 2
+              },
+              "start_byte": 356,
+              "end_byte": 754
+            },
+            "name_span": {
+              "start": {
+                "line": 16,
+                "column": 14
+              },
+              "end": {
+                "line": 16,
+                "column": 28
+              },
+              "start_byte": 341,
+              "end_byte": 355
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": true,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "members": [
+              {
+                "id": "d97f80ddd57e5b965f24f8ea0963fcf6e6133c6fba5b6c0980c60dbf0069bd92",
+                "name": "unmarkedProperty",
+                "qualified_name": "ExportedWidget::unmarkedProperty"
+              },
+              {
+                "id": "d96998475234ba0fa343f12e0c72cdbc15f0600304d526f8752b79c50dd29555",
+                "name": "#hashPrivateProperty",
+                "qualified_name": "ExportedWidget::#hashPrivateProperty"
+              },
+              {
+                "id": "3100c627dc72963e8357d882ac1cd05318d3d82e305d47200f9e5482b84f1c6d",
+                "name": "staticProperty",
+                "qualified_name": "ExportedWidget::staticProperty"
+              },
+              {
+                "id": "00bd009b2c381efeb84de9b1c21c80da7c3677d5d683133b4f32ef8dd1e4e0a4",
+                "name": "#hashPrivateStaticProperty",
+                "qualified_name": "ExportedWidget::#hashPrivateStaticProperty"
+              },
+              {
+                "id": "e421978368194ef05e615c8e88031c2c60dd15a26df95acfc48899a39b0bf0e4",
+                "name": "constructor",
+                "qualified_name": "ExportedWidget::constructor"
+              },
+              {
+                "id": "3076bba958fc6b07e664543b71d0a445c5d2f3ab94567cc23be6e46215aa4315",
+                "name": "initialValue",
+                "qualified_name": "ExportedWidget::initialValue"
+              },
+              {
+                "id": "664eec51b6dfa129385fb76f0f851531030ec72f22f987565ef6629b64c9bdce",
+                "name": "unmarkedProperty",
+                "qualified_name": "ExportedWidget::unmarkedProperty"
+              },
+              {
+                "id": "6dd0a27415399f1589ae35b33337aaedcb07794242a04aafad34c7fcaa727998",
+                "name": "unmarkedMethod",
+                "qualified_name": "ExportedWidget::unmarkedMethod"
+              },
+              {
+                "id": "ac69f4c0443b9fcd0c2b8762b20787fb671fd8336e0a6ee4e3d0d4c23c9b5241",
+                "name": "#hashPrivateMethod",
+                "qualified_name": "ExportedWidget::#hashPrivateMethod"
+              },
+              {
+                "id": "cfa109039487d797c95dd9bcd43f9e746eaefce00b0d7355ad37f21c7c1292f0",
+                "name": "staticMethod",
+                "qualified_name": "ExportedWidget::staticMethod"
+              },
+              {
+                "id": "20fde9b28769a518e875440a5747c33708033a1690feca86b9d4194f0461f28f",
+                "name": "#hashPrivateStaticMethod",
+                "qualified_name": "ExportedWidget::#hashPrivateStaticMethod"
+              }
+            ],
+            "referenced_by": [
+              {
+                "id": "cfa109039487d797c95dd9bcd43f9e746eaefce00b0d7355ad37f21c7c1292f0",
+                "name": "staticMethod",
+                "qualified_name": "ExportedWidget::staticMethod"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069295539,
+            "updated_at_epoch_ms": 1791069295629
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "d97f80ddd57e5b965f24f8ea0963fcf6e6133c6fba5b6c0980c60dbf0069bd92",
+          "language": "JavaScript",
+          "kind": "Field",
+          "identity": {
+            "name": "unmarkedProperty",
+            "display_name": "unmarkedProperty",
+            "qualified_name": "ExportedWidget::unmarkedProperty",
+            "module_path": "ExportedWidget",
+            "stable_key": "javascript::javascript.js::Field::ExportedWidget::unmarkedProperty::0"
+          },
+          "source": {
+            "file_path": "javascript.js",
+            "declaration_span": {
+              "start": {
+                "line": 17,
+                "column": 3
+              },
+              "end": {
+                "line": 17,
+                "column": 19
+              },
+              "start_byte": 360,
+              "end_byte": 376
+            },
+            "name_span": {
+              "start": {
+                "line": 17,
+                "column": 3
+              },
+              "end": {
+                "line": 17,
+                "column": 19
+              },
+              "start_byte": 360,
+              "end_byte": 376
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "28fd449b5dbe049323ad4420fe20e2e0803707ebdf1dc5bf46f2ca9392fa46c0",
+              "name": "ExportedWidget"
+            },
+            "container": {
+              "id": "28fd449b5dbe049323ad4420fe20e2e0803707ebdf1dc5bf46f2ca9392fa46c0",
+              "name": "ExportedWidget"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069295539,
+            "updated_at_epoch_ms": 1791069295629
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "unmarkedProperty",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "d96998475234ba0fa343f12e0c72cdbc15f0600304d526f8752b79c50dd29555",
+          "language": "JavaScript",
+          "kind": "Field",
+          "identity": {
+            "name": "#hashPrivateProperty",
+            "display_name": "#hashPrivateProperty",
+            "qualified_name": "ExportedWidget::#hashPrivateProperty",
+            "module_path": "ExportedWidget",
+            "stable_key": "javascript::javascript.js::Field::ExportedWidget::#hashPrivateProperty::0"
+          },
+          "source": {
+            "file_path": "javascript.js",
+            "declaration_span": {
+              "start": {
+                "line": 18,
+                "column": 3
+              },
+              "end": {
+                "line": 18,
+                "column": 23
+              },
+              "start_byte": 384,
+              "end_byte": 404
+            },
+            "name_span": {
+              "start": {
+                "line": 18,
+                "column": 3
+              },
+              "end": {
+                "line": 18,
+                "column": 23
+              },
+              "start_byte": 384,
+              "end_byte": 404
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "28fd449b5dbe049323ad4420fe20e2e0803707ebdf1dc5bf46f2ca9392fa46c0",
+              "name": "ExportedWidget"
+            },
+            "container": {
+              "id": "28fd449b5dbe049323ad4420fe20e2e0803707ebdf1dc5bf46f2ca9392fa46c0",
+              "name": "ExportedWidget"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069295539,
+            "updated_at_epoch_ms": 1791069295629
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "#hashPrivateProperty",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "3100c627dc72963e8357d882ac1cd05318d3d82e305d47200f9e5482b84f1c6d",
+          "language": "JavaScript",
+          "kind": "Field",
+          "identity": {
+            "name": "staticProperty",
+            "display_name": "staticProperty",
+            "qualified_name": "ExportedWidget::staticProperty",
+            "module_path": "ExportedWidget",
+            "stable_key": "javascript::javascript.js::Field::ExportedWidget::staticProperty::0"
+          },
+          "source": {
+            "file_path": "javascript.js",
+            "declaration_span": {
+              "start": {
+                "line": 19,
+                "column": 10
+              },
+              "end": {
+                "line": 19,
+                "column": 24
+              },
+              "start_byte": 419,
+              "end_byte": 433
+            },
+            "name_span": {
+              "start": {
+                "line": 19,
+                "column": 10
+              },
+              "end": {
+                "line": 19,
+                "column": 24
+              },
+              "start_byte": 419,
+              "end_byte": 433
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "28fd449b5dbe049323ad4420fe20e2e0803707ebdf1dc5bf46f2ca9392fa46c0",
+              "name": "ExportedWidget"
+            },
+            "container": {
+              "id": "28fd449b5dbe049323ad4420fe20e2e0803707ebdf1dc5bf46f2ca9392fa46c0",
+              "name": "ExportedWidget"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069295539,
+            "updated_at_epoch_ms": 1791069295629
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "staticProperty",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "00bd009b2c381efeb84de9b1c21c80da7c3677d5d683133b4f32ef8dd1e4e0a4",
+          "language": "JavaScript",
+          "kind": "Field",
+          "identity": {
+            "name": "#hashPrivateStaticProperty",
+            "display_name": "#hashPrivateStaticProperty",
+            "qualified_name": "ExportedWidget::#hashPrivateStaticProperty",
+            "module_path": "ExportedWidget",
+            "stable_key": "javascript::javascript.js::Field::ExportedWidget::#hashPrivateStaticProperty::0"
+          },
+          "source": {
+            "file_path": "javascript.js",
+            "declaration_span": {
+              "start": {
+                "line": 20,
+                "column": 10
+              },
+              "end": {
+                "line": 20,
+                "column": 36
+              },
+              "start_byte": 448,
+              "end_byte": 474
+            },
+            "name_span": {
+              "start": {
+                "line": 20,
+                "column": 10
+              },
+              "end": {
+                "line": 20,
+                "column": 36
+              },
+              "start_byte": 448,
+              "end_byte": 474
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "28fd449b5dbe049323ad4420fe20e2e0803707ebdf1dc5bf46f2ca9392fa46c0",
+              "name": "ExportedWidget"
+            },
+            "container": {
+              "id": "28fd449b5dbe049323ad4420fe20e2e0803707ebdf1dc5bf46f2ca9392fa46c0",
+              "name": "ExportedWidget"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069295539,
+            "updated_at_epoch_ms": 1791069295629
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "#hashPrivateStaticProperty",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "e421978368194ef05e615c8e88031c2c60dd15a26df95acfc48899a39b0bf0e4",
+          "language": "JavaScript",
+          "kind": "Constructor",
+          "identity": {
+            "name": "constructor",
+            "display_name": "constructor",
+            "qualified_name": "ExportedWidget::constructor",
+            "module_path": "ExportedWidget",
+            "stable_key": "javascript::javascript.js::Constructor::ExportedWidget::constructor::0"
+          },
+          "source": {
+            "file_path": "javascript.js",
+            "declaration_span": {
+              "start": {
+                "line": 22,
+                "column": 3
+              },
+              "end": {
+                "line": 24,
+                "column": 4
+              },
+              "start_byte": 483,
+              "end_byte": 556
+            },
+            "body_span": {
+              "start": {
+                "line": 22,
+                "column": 29
+              },
+              "end": {
+                "line": 24,
+                "column": 4
+              },
+              "start_byte": 509,
+              "end_byte": 556
+            },
+            "name_span": {
+              "start": {
+                "line": 22,
+                "column": 3
+              },
+              "end": {
+                "line": 22,
+                "column": 14
+              },
+              "start_byte": 483,
+              "end_byte": 494
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "28fd449b5dbe049323ad4420fe20e2e0803707ebdf1dc5bf46f2ca9392fa46c0",
+              "name": "ExportedWidget"
+            },
+            "container": {
+              "id": "28fd449b5dbe049323ad4420fe20e2e0803707ebdf1dc5bf46f2ca9392fa46c0",
+              "name": "ExportedWidget"
+            },
+            "references": [
+              {
+                "id": "3076bba958fc6b07e664543b71d0a445c5d2f3ab94567cc23be6e46215aa4315",
+                "name": "initialValue",
+                "qualified_name": "ExportedWidget::initialValue"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069295539,
+            "updated_at_epoch_ms": 1791069295629
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "parameters": [
+                {
+                  "name": "initialValue",
+                  "position": 0,
+                  "is_optional": false,
+                  "is_variadic": false,
+                  "is_keyword_only": false,
+                  "is_positional_only": false
+                }
+              ],
+              "return_info": {
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 1
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "3076bba958fc6b07e664543b71d0a445c5d2f3ab94567cc23be6e46215aa4315",
+          "language": "JavaScript",
+          "kind": "Parameter",
+          "identity": {
+            "name": "initialValue",
+            "display_name": "initialValue",
+            "qualified_name": "ExportedWidget::initialValue",
+            "module_path": "ExportedWidget",
+            "stable_key": "javascript::javascript.js::Parameter::ExportedWidget::initialValue::0"
+          },
+          "source": {
+            "file_path": "javascript.js",
+            "declaration_span": {
+              "start": {
+                "line": 22,
+                "column": 15
+              },
+              "end": {
+                "line": 22,
+                "column": 27
+              },
+              "start_byte": 495,
+              "end_byte": 507
+            },
+            "name_span": {
+              "start": {
+                "line": 22,
+                "column": 15
+              },
+              "end": {
+                "line": 22,
+                "column": 27
+              },
+              "start_byte": 495,
+              "end_byte": 507
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "28fd449b5dbe049323ad4420fe20e2e0803707ebdf1dc5bf46f2ca9392fa46c0",
+              "name": "ExportedWidget"
+            },
+            "container": {
+              "id": "28fd449b5dbe049323ad4420fe20e2e0803707ebdf1dc5bf46f2ca9392fa46c0",
+              "name": "ExportedWidget"
+            },
+            "referenced_by": [
+              {
+                "id": "e421978368194ef05e615c8e88031c2c60dd15a26df95acfc48899a39b0bf0e4",
+                "name": "constructor",
+                "qualified_name": "ExportedWidget::constructor"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069295539,
+            "updated_at_epoch_ms": 1791069295629
+          },
+          "kind_data": {
+            "kind_data_type": "Parameter",
+            "data": {
+              "name": "initialValue",
+              "position": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "664eec51b6dfa129385fb76f0f851531030ec72f22f987565ef6629b64c9bdce",
+          "language": "JavaScript",
+          "kind": "Variable",
+          "identity": {
+            "name": "unmarkedProperty",
+            "display_name": "unmarkedProperty",
+            "qualified_name": "ExportedWidget::unmarkedProperty",
+            "module_path": "ExportedWidget",
+            "stable_key": "javascript::javascript.js::Variable::ExportedWidget::unmarkedProperty::0"
+          },
+          "source": {
+            "file_path": "javascript.js",
+            "declaration_span": {
+              "start": {
+                "line": 23,
+                "column": 10
+              },
+              "end": {
+                "line": 23,
+                "column": 26
+              },
+              "start_byte": 520,
+              "end_byte": 536
+            },
+            "name_span": {
+              "start": {
+                "line": 23,
+                "column": 10
+              },
+              "end": {
+                "line": 23,
+                "column": 26
+              },
+              "start_byte": 520,
+              "end_byte": 536
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "28fd449b5dbe049323ad4420fe20e2e0803707ebdf1dc5bf46f2ca9392fa46c0",
+              "name": "ExportedWidget"
+            },
+            "container": {
+              "id": "28fd449b5dbe049323ad4420fe20e2e0803707ebdf1dc5bf46f2ca9392fa46c0",
+              "name": "ExportedWidget"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069295539,
+            "updated_at_epoch_ms": 1791069295629
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "6dd0a27415399f1589ae35b33337aaedcb07794242a04aafad34c7fcaa727998",
+          "language": "JavaScript",
+          "kind": "Method",
+          "identity": {
+            "name": "unmarkedMethod",
+            "display_name": "unmarkedMethod",
+            "qualified_name": "ExportedWidget::unmarkedMethod",
+            "module_path": "ExportedWidget",
+            "stable_key": "javascript::javascript.js::Method::ExportedWidget::unmarkedMethod::0"
+          },
+          "source": {
+            "file_path": "javascript.js",
+            "declaration_span": {
+              "start": {
+                "line": 26,
+                "column": 3
+              },
+              "end": {
+                "line": 28,
+                "column": 4
+              },
+              "start_byte": 560,
+              "end_byte": 620
+            },
+            "body_span": {
+              "start": {
+                "line": 26,
+                "column": 20
+              },
+              "end": {
+                "line": 28,
+                "column": 4
+              },
+              "start_byte": 577,
+              "end_byte": 620
+            },
+            "name_span": {
+              "start": {
+                "line": 26,
+                "column": 3
+              },
+              "end": {
+                "line": 26,
+                "column": 17
+              },
+              "start_byte": 560,
+              "end_byte": 574
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "28fd449b5dbe049323ad4420fe20e2e0803707ebdf1dc5bf46f2ca9392fa46c0",
+              "name": "ExportedWidget"
+            },
+            "container": {
+              "id": "28fd449b5dbe049323ad4420fe20e2e0803707ebdf1dc5bf46f2ca9392fa46c0",
+              "name": "ExportedWidget"
+            }
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069295539,
+            "updated_at_epoch_ms": 1791069295629
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "ac69f4c0443b9fcd0c2b8762b20787fb671fd8336e0a6ee4e3d0d4c23c9b5241",
+          "language": "JavaScript",
+          "kind": "Method",
+          "identity": {
+            "name": "#hashPrivateMethod",
+            "display_name": "#hashPrivateMethod",
+            "qualified_name": "ExportedWidget::#hashPrivateMethod",
+            "module_path": "ExportedWidget",
+            "stable_key": "javascript::javascript.js::Method::ExportedWidget::#hashPrivateMethod::0"
+          },
+          "source": {
+            "file_path": "javascript.js",
+            "declaration_span": {
+              "start": {
+                "line": 30,
+                "column": 3
+              },
+              "end": {
+                "line": 30,
+                "column": 26
+              },
+              "start_byte": 624,
+              "end_byte": 647
+            },
+            "body_span": {
+              "start": {
+                "line": 30,
+                "column": 24
+              },
+              "end": {
+                "line": 30,
+                "column": 26
+              },
+              "start_byte": 645,
+              "end_byte": 647
+            },
+            "name_span": {
+              "start": {
+                "line": 30,
+                "column": 3
+              },
+              "end": {
+                "line": 30,
+                "column": 21
+              },
+              "start_byte": 624,
+              "end_byte": 642
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "28fd449b5dbe049323ad4420fe20e2e0803707ebdf1dc5bf46f2ca9392fa46c0",
+              "name": "ExportedWidget"
+            },
+            "container": {
+              "id": "28fd449b5dbe049323ad4420fe20e2e0803707ebdf1dc5bf46f2ca9392fa46c0",
+              "name": "ExportedWidget"
+            }
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069295539,
+            "updated_at_epoch_ms": 1791069295629
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "cfa109039487d797c95dd9bcd43f9e746eaefce00b0d7355ad37f21c7c1292f0",
+          "language": "JavaScript",
+          "kind": "Method",
+          "identity": {
+            "name": "staticMethod",
+            "display_name": "staticMethod",
+            "qualified_name": "ExportedWidget::staticMethod",
+            "module_path": "ExportedWidget",
+            "stable_key": "javascript::javascript.js::Method::ExportedWidget::staticMethod::0"
+          },
+          "source": {
+            "file_path": "javascript.js",
+            "declaration_span": {
+              "start": {
+                "line": 32,
+                "column": 3
+              },
+              "end": {
+                "line": 34,
+                "column": 4
+              },
+              "start_byte": 651,
+              "end_byte": 712
+            },
+            "body_span": {
+              "start": {
+                "line": 32,
+                "column": 25
+              },
+              "end": {
+                "line": 34,
+                "column": 4
+              },
+              "start_byte": 673,
+              "end_byte": 712
+            },
+            "name_span": {
+              "start": {
+                "line": 32,
+                "column": 10
+              },
+              "end": {
+                "line": 32,
+                "column": 22
+              },
+              "start_byte": 658,
+              "end_byte": 670
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "modifiers": [
+            {
+              "type": "Static"
+            }
+          ],
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "28fd449b5dbe049323ad4420fe20e2e0803707ebdf1dc5bf46f2ca9392fa46c0",
+              "name": "ExportedWidget"
+            },
+            "container": {
+              "id": "28fd449b5dbe049323ad4420fe20e2e0803707ebdf1dc5bf46f2ca9392fa46c0",
+              "name": "ExportedWidget"
+            },
+            "references": [
+              {
+                "id": "28fd449b5dbe049323ad4420fe20e2e0803707ebdf1dc5bf46f2ca9392fa46c0",
+                "name": "ExportedWidget"
+              }
+            ]
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069295539,
+            "updated_at_epoch_ms": 1791069295629
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "20fde9b28769a518e875440a5747c33708033a1690feca86b9d4194f0461f28f",
+          "language": "JavaScript",
+          "kind": "Method",
+          "identity": {
+            "name": "#hashPrivateStaticMethod",
+            "display_name": "#hashPrivateStaticMethod",
+            "qualified_name": "ExportedWidget::#hashPrivateStaticMethod",
+            "module_path": "ExportedWidget",
+            "stable_key": "javascript::javascript.js::Method::ExportedWidget::#hashPrivateStaticMethod::0"
+          },
+          "source": {
+            "file_path": "javascript.js",
+            "declaration_span": {
+              "start": {
+                "line": 36,
+                "column": 3
+              },
+              "end": {
+                "line": 36,
+                "column": 39
+              },
+              "start_byte": 716,
+              "end_byte": 752
+            },
+            "body_span": {
+              "start": {
+                "line": 36,
+                "column": 37
+              },
+              "end": {
+                "line": 36,
+                "column": 39
+              },
+              "start_byte": 750,
+              "end_byte": 752
+            },
+            "name_span": {
+              "start": {
+                "line": 36,
+                "column": 10
+              },
+              "end": {
+                "line": 36,
+                "column": 34
+              },
+              "start_byte": 723,
+              "end_byte": 747
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "modifiers": [
+            {
+              "type": "Static"
+            }
+          ],
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "28fd449b5dbe049323ad4420fe20e2e0803707ebdf1dc5bf46f2ca9392fa46c0",
+              "name": "ExportedWidget"
+            },
+            "container": {
+              "id": "28fd449b5dbe049323ad4420fe20e2e0803707ebdf1dc5bf46f2ca9392fa46c0",
+              "name": "ExportedWidget"
+            }
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069295539,
+            "updated_at_epoch_ms": 1791069295629
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "e093dd570f3cdea0196fd8fd01da5b6cdba089ab79dc53db97a7fb74ffaa28f8",
+          "language": "JavaScript",
+          "kind": "Class",
+          "identity": {
+            "name": "ModuleWidget",
+            "display_name": "ModuleWidget",
+            "stable_key": "javascript::javascript.js::Class::ModuleWidget::0"
+          },
+          "source": {
+            "file_path": "javascript.js",
+            "declaration_span": {
+              "start": {
+                "line": 39,
+                "column": 1
+              },
+              "end": {
+                "line": 43,
+                "column": 2
+              },
+              "start_byte": 756,
+              "end_byte": 820
+            },
+            "body_span": {
+              "start": {
+                "line": 39,
+                "column": 20
+              },
+              "end": {
+                "line": 43,
+                "column": 2
+              },
+              "start_byte": 775,
+              "end_byte": 820
+            },
+            "name_span": {
+              "start": {
+                "line": 39,
+                "column": 7
+              },
+              "end": {
+                "line": 39,
+                "column": 19
+              },
+              "start_byte": 762,
+              "end_byte": 774
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "members": [
+              {
+                "id": "f45897a43317486f8a89f34b663cbda8377ca1ca15342e61eefa2e309d46f0db",
+                "name": "constructor",
+                "qualified_name": "ModuleWidget::constructor"
+              },
+              {
+                "id": "76bbd8d7635597ff0ac77ea880d84e7255799de4c464f11befc5e01d80e0de98",
+                "name": "instanceMethod",
+                "qualified_name": "ModuleWidget::instanceMethod"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069295539,
+            "updated_at_epoch_ms": 1791069295629
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "f45897a43317486f8a89f34b663cbda8377ca1ca15342e61eefa2e309d46f0db",
+          "language": "JavaScript",
+          "kind": "Constructor",
+          "identity": {
+            "name": "constructor",
+            "display_name": "constructor",
+            "qualified_name": "ModuleWidget::constructor",
+            "module_path": "ModuleWidget",
+            "stable_key": "javascript::javascript.js::Constructor::ModuleWidget::constructor::0"
+          },
+          "source": {
+            "file_path": "javascript.js",
+            "declaration_span": {
+              "start": {
+                "line": 40,
+                "column": 3
+              },
+              "end": {
+                "line": 40,
+                "column": 19
+              },
+              "start_byte": 779,
+              "end_byte": 795
+            },
+            "body_span": {
+              "start": {
+                "line": 40,
+                "column": 17
+              },
+              "end": {
+                "line": 40,
+                "column": 19
+              },
+              "start_byte": 793,
+              "end_byte": 795
+            },
+            "name_span": {
+              "start": {
+                "line": 40,
+                "column": 3
+              },
+              "end": {
+                "line": 40,
+                "column": 14
+              },
+              "start_byte": 779,
+              "end_byte": 790
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "e093dd570f3cdea0196fd8fd01da5b6cdba089ab79dc53db97a7fb74ffaa28f8",
+              "name": "ModuleWidget"
+            },
+            "container": {
+              "id": "e093dd570f3cdea0196fd8fd01da5b6cdba089ab79dc53db97a7fb74ffaa28f8",
+              "name": "ModuleWidget"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069295539,
+            "updated_at_epoch_ms": 1791069295629
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "76bbd8d7635597ff0ac77ea880d84e7255799de4c464f11befc5e01d80e0de98",
+          "language": "JavaScript",
+          "kind": "Method",
+          "identity": {
+            "name": "instanceMethod",
+            "display_name": "instanceMethod",
+            "qualified_name": "ModuleWidget::instanceMethod",
+            "module_path": "ModuleWidget",
+            "stable_key": "javascript::javascript.js::Method::ModuleWidget::instanceMethod::0"
+          },
+          "source": {
+            "file_path": "javascript.js",
+            "declaration_span": {
+              "start": {
+                "line": 42,
+                "column": 3
+              },
+              "end": {
+                "line": 42,
+                "column": 22
+              },
+              "start_byte": 799,
+              "end_byte": 818
+            },
+            "body_span": {
+              "start": {
+                "line": 42,
+                "column": 20
+              },
+              "end": {
+                "line": 42,
+                "column": 22
+              },
+              "start_byte": 816,
+              "end_byte": 818
+            },
+            "name_span": {
+              "start": {
+                "line": 42,
+                "column": 3
+              },
+              "end": {
+                "line": 42,
+                "column": 17
+              },
+              "start_byte": 799,
+              "end_byte": 813
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "e093dd570f3cdea0196fd8fd01da5b6cdba089ab79dc53db97a7fb74ffaa28f8",
+              "name": "ModuleWidget"
+            },
+            "container": {
+              "id": "e093dd570f3cdea0196fd8fd01da5b6cdba089ab79dc53db97a7fb74ffaa28f8",
+              "name": "ModuleWidget"
+            }
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069295540,
+            "updated_at_epoch_ms": 1791069295629
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        }
+      ],
+      "imports": [
+        {
+          "name": "readFileSync",
+          "source": "fs",
+          "span": {
+            "start": {
+              "line": 3,
+              "column": 10
+            },
+            "end": {
+              "line": 3,
+              "column": 22
+            },
+            "start_byte": 90,
+            "end_byte": 102
+          },
+          "statement_span": {
+            "start": {
+              "line": 3,
+              "column": 1
+            },
+            "end": {
+              "line": 3,
+              "column": 35
+            },
+            "start_byte": 81,
+            "end_byte": 115
+          },
+          "symbol": {
+            "name": "readFileSync"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "name": "exportedFunction",
+          "span": {
+            "start": {
+              "line": 5,
+              "column": 17
+            },
+            "end": {
+              "line": 5,
+              "column": 33
+            },
+            "start_byte": 133,
+            "end_byte": 149
+          },
+          "symbol": {
+            "id": "2392924bada08ba0c3cd81d82ccc299e5887e667d4b3f83b842b14fb56b31f6f",
+            "name": "exportedFunction"
+          }
+        },
+        {
+          "name": "ExportedWidget",
+          "span": {
+            "start": {
+              "line": 16,
+              "column": 14
+            },
+            "end": {
+              "line": 16,
+              "column": 28
+            },
+            "start_byte": 341,
+            "end_byte": 355
+          },
+          "symbol": {
+            "id": "28fd449b5dbe049323ad4420fe20e2e0803707ebdf1dc5bf46f2ca9392fa46c0",
+            "name": "ExportedWidget"
+          }
+        }
+      ],
+      "diagnostics": [
+        {
+          "kind": "Semantic",
+          "message": "Imported symbol 'readFileSync' is never used",
+          "range": {
+            "start_line": 3,
+            "start_column": 10,
+            "end_line": 3,
+            "end_column": 22,
+            "start_byte": 90,
+            "end_byte": 102
+          },
+          "severity": "Warning",
+          "rule": "unused-import",
+          "context": {
+            "line_text": "import { readFileSync } from \"fs\";",
+            "underline_column": 9,
+            "underline_length": 12
+          },
+          "metadata": {
+            "category": "Style",
+            "confidence": "Low",
+            "source": "SemanticAnalysis",
+            "default_severity": "Warning",
+            "effective_severity": "Warning"
+          }
+        }
+      ]
+    }
+  ],
+  "adapter_metadata": []
+}

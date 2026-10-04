@@ -1,0 +1,6079 @@
+{
+  "schema_version": {
+    "major": 2,
+    "minor": 0
+  },
+  "root_dir": "/private/tmp/claude-501/-Volumes-coding-wt-rusty-biscuit-feat-symbols/d63e5266-3b40-40b9-970c-1a0bd24ad9bf/scratchpad/baseline",
+  "language": "CSharp",
+  "files": [
+    {
+      "file": "c_sharp.cs",
+      "language": "CSharp",
+      "hash": "e47b026d3d56ff4",
+      "symbols": [
+        {
+          "name": "PublicWidget",
+          "kind": "Class",
+          "range": {
+            "start_line": 6,
+            "start_column": 1,
+            "end_line": 48,
+            "end_column": 2,
+            "start_byte": 98,
+            "end_byte": 1131
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "type_metadata": {
+            "fields": [
+              {
+                "name": "PublicField",
+                "type_annotation": "int",
+                "visibility": "Public"
+              },
+              {
+                "name": "ProtectedField",
+                "type_annotation": "int",
+                "visibility": "Protected"
+              },
+              {
+                "name": "PrivateField",
+                "type_annotation": "int",
+                "visibility": "Private"
+              },
+              {
+                "name": "InternalField",
+                "type_annotation": "int",
+                "visibility": "Internal"
+              },
+              {
+                "name": "ProtectedInternalField",
+                "type_annotation": "int",
+                "visibility": "Protected"
+              },
+              {
+                "name": "PrivateProtectedField",
+                "type_annotation": "int",
+                "visibility": "Private"
+              },
+              {
+                "name": "UnmarkedField",
+                "type_annotation": "int"
+              },
+              {
+                "name": "PublicStaticField",
+                "type_annotation": "int",
+                "visibility": "Public",
+                "is_static": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "PublicField",
+          "kind": "Field",
+          "range": {
+            "start_line": 8,
+            "start_column": 16,
+            "end_line": 8,
+            "end_column": 27,
+            "start_byte": 141,
+            "end_byte": 152
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget"
+        },
+        {
+          "name": "ProtectedField",
+          "kind": "Field",
+          "range": {
+            "start_line": 9,
+            "start_column": 19,
+            "end_line": 9,
+            "end_column": 33,
+            "start_byte": 172,
+            "end_byte": 186
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget"
+        },
+        {
+          "name": "PrivateField",
+          "kind": "Field",
+          "range": {
+            "start_line": 10,
+            "start_column": 17,
+            "end_line": 10,
+            "end_column": 29,
+            "start_byte": 204,
+            "end_byte": 216
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget"
+        },
+        {
+          "name": "InternalField",
+          "kind": "Field",
+          "range": {
+            "start_line": 11,
+            "start_column": 18,
+            "end_line": 11,
+            "end_column": 31,
+            "start_byte": 235,
+            "end_byte": 248
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget"
+        },
+        {
+          "name": "ProtectedInternalField",
+          "kind": "Field",
+          "range": {
+            "start_line": 12,
+            "start_column": 28,
+            "end_line": 12,
+            "end_column": 50,
+            "start_byte": 277,
+            "end_byte": 299
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget"
+        },
+        {
+          "name": "PrivateProtectedField",
+          "kind": "Field",
+          "range": {
+            "start_line": 13,
+            "start_column": 27,
+            "end_line": 13,
+            "end_column": 48,
+            "start_byte": 327,
+            "end_byte": 348
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget"
+        },
+        {
+          "name": "UnmarkedField",
+          "kind": "Field",
+          "range": {
+            "start_line": 14,
+            "start_column": 9,
+            "end_line": 14,
+            "end_column": 22,
+            "start_byte": 358,
+            "end_byte": 371
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget"
+        },
+        {
+          "name": "PublicStaticField",
+          "kind": "Field",
+          "range": {
+            "start_line": 15,
+            "start_column": 23,
+            "end_line": 15,
+            "end_column": 40,
+            "start_byte": 395,
+            "end_byte": 412
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget"
+        },
+        {
+          "name": "initialValue",
+          "kind": "Parameter",
+          "range": {
+            "start_line": 17,
+            "start_column": 29,
+            "end_line": 17,
+            "end_column": 41,
+            "start_byte": 447,
+            "end_byte": 459
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget"
+        },
+        {
+          "name": "PublicMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 22,
+            "start_column": 5,
+            "end_line": 22,
+            "end_column": 47,
+            "start_byte": 515,
+            "end_byte": 557
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget",
+          "signature": {
+            "return_type": "int"
+          }
+        },
+        {
+          "name": "ProtectedMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 24,
+            "start_column": 5,
+            "end_line": 24,
+            "end_column": 41,
+            "start_byte": 563,
+            "end_byte": 599
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "PrivateMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 26,
+            "start_column": 5,
+            "end_line": 26,
+            "end_column": 37,
+            "start_byte": 605,
+            "end_byte": 637
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "InternalMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 28,
+            "start_column": 5,
+            "end_line": 28,
+            "end_column": 39,
+            "start_byte": 643,
+            "end_byte": 677
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "ProtectedInternalMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 30,
+            "start_column": 5,
+            "end_line": 30,
+            "end_column": 58,
+            "start_byte": 683,
+            "end_byte": 736
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "PrivateProtectedMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 32,
+            "start_column": 5,
+            "end_line": 32,
+            "end_column": 56,
+            "start_byte": 742,
+            "end_byte": 793
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "UnmarkedMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 34,
+            "start_column": 5,
+            "end_line": 34,
+            "end_column": 30,
+            "start_byte": 799,
+            "end_byte": 824
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "StaticFactory",
+          "kind": "Method",
+          "range": {
+            "start_line": 36,
+            "start_column": 5,
+            "end_line": 36,
+            "end_column": 71,
+            "start_byte": 830,
+            "end_byte": 896
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget"
+        },
+        {
+          "name": "MethodWithLocals",
+          "kind": "Method",
+          "range": {
+            "start_line": 38,
+            "start_column": 5,
+            "end_line": 42,
+            "end_column": 6,
+            "start_byte": 902,
+            "end_byte": 1026
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget",
+          "signature": {
+            "parameters": [
+              {
+                "name": "parameterValue",
+                "type_annotation": "int"
+              }
+            ],
+            "return_type": "int"
+          }
+        },
+        {
+          "name": "parameterValue",
+          "kind": "Parameter",
+          "range": {
+            "start_line": 38,
+            "start_column": 30,
+            "end_line": 38,
+            "end_column": 44,
+            "start_byte": 927,
+            "end_byte": 941
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget"
+        },
+        {
+          "name": "localValue",
+          "kind": "Variable",
+          "range": {
+            "start_line": 40,
+            "start_column": 13,
+            "end_line": 40,
+            "end_column": 23,
+            "start_byte": 961,
+            "end_byte": 971
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget"
+        },
+        {
+          "name": "PrivateNestedClass",
+          "kind": "Class",
+          "range": {
+            "start_line": 44,
+            "start_column": 5,
+            "end_line": 47,
+            "end_column": 6,
+            "start_byte": 1032,
+            "end_byte": 1129
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget"
+        },
+        {
+          "name": "PublicMethodInPrivateClass",
+          "kind": "Method",
+          "range": {
+            "start_line": 46,
+            "start_column": 9,
+            "end_line": 46,
+            "end_column": 53,
+            "start_byte": 1079,
+            "end_byte": 1123
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PrivateNestedClass",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "UnmarkedTopLevelClass",
+          "kind": "Class",
+          "range": {
+            "start_line": 50,
+            "start_column": 1,
+            "end_line": 53,
+            "end_column": 2,
+            "start_byte": 1133,
+            "end_byte": 1207
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs"
+        },
+        {
+          "name": "UnmarkedTopLevelClassMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 52,
+            "start_column": 5,
+            "end_line": 52,
+            "end_column": 43,
+            "start_byte": 1167,
+            "end_byte": 1205
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "UnmarkedTopLevelClass",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "InternalClass",
+          "kind": "Class",
+          "range": {
+            "start_line": 55,
+            "start_column": 1,
+            "end_line": 55,
+            "end_column": 33,
+            "start_byte": 1209,
+            "end_byte": 1241
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs"
+        },
+        {
+          "name": "FileLocalClass",
+          "kind": "Class",
+          "range": {
+            "start_line": 57,
+            "start_column": 1,
+            "end_line": 57,
+            "end_column": 30,
+            "start_byte": 1243,
+            "end_byte": 1272
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs"
+        },
+        {
+          "name": "PublicStruct",
+          "kind": "Type",
+          "range": {
+            "start_line": 59,
+            "start_column": 1,
+            "end_line": 63,
+            "end_column": 2,
+            "start_byte": 1274,
+            "end_byte": 1367
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "type_metadata": {
+            "fields": [
+              {
+                "name": "StructPublicField",
+                "type_annotation": "int",
+                "visibility": "Public"
+              },
+              {
+                "name": "StructUnmarkedField",
+                "type_annotation": "int"
+              }
+            ]
+          }
+        },
+        {
+          "name": "StructPublicField",
+          "kind": "Field",
+          "range": {
+            "start_line": 61,
+            "start_column": 16,
+            "end_line": 61,
+            "end_column": 33,
+            "start_byte": 1318,
+            "end_byte": 1335
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicStruct"
+        },
+        {
+          "name": "StructUnmarkedField",
+          "kind": "Field",
+          "range": {
+            "start_line": 62,
+            "start_column": 9,
+            "end_line": 62,
+            "end_column": 28,
+            "start_byte": 1345,
+            "end_byte": 1364
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicStruct"
+        },
+        {
+          "name": "IShape",
+          "kind": "Interface",
+          "range": {
+            "start_line": 65,
+            "start_column": 1,
+            "end_line": 76,
+            "end_column": 2,
+            "start_byte": 1369,
+            "end_byte": 1535
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "type_metadata": {
+            "fields": [
+              {
+                "name": "Area",
+                "type_annotation": "double Area();",
+                "visibility": "Public"
+              },
+              {
+                "name": "Draw",
+                "type_annotation": "void Draw() { }",
+                "visibility": "Public"
+              },
+              {
+                "name": "IShape",
+                "type_annotation": "static IShape Unit() => new Square();",
+                "visibility": "Public"
+              },
+              {
+                "name": "Log",
+                "type_annotation": "private void Log() { }",
+                "visibility": "Public"
+              }
+            ]
+          }
+        },
+        {
+          "name": "Area",
+          "kind": "Method",
+          "range": {
+            "start_line": 67,
+            "start_column": 5,
+            "end_line": 67,
+            "end_column": 19,
+            "start_byte": 1399,
+            "end_byte": 1413
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "IShape",
+          "signature": {
+            "return_type": "double"
+          }
+        },
+        {
+          "name": "Draw",
+          "kind": "Method",
+          "range": {
+            "start_line": 69,
+            "start_column": 5,
+            "end_line": 69,
+            "end_column": 20,
+            "start_byte": 1419,
+            "end_byte": 1434
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "IShape",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "Unit",
+          "kind": "Method",
+          "range": {
+            "start_line": 71,
+            "start_column": 5,
+            "end_line": 71,
+            "end_column": 42,
+            "start_byte": 1440,
+            "end_byte": 1477
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "IShape"
+        },
+        {
+          "name": "NestedHelper",
+          "kind": "Class",
+          "range": {
+            "start_line": 73,
+            "start_column": 5,
+            "end_line": 73,
+            "end_column": 27,
+            "start_byte": 1483,
+            "end_byte": 1505
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "IShape"
+        },
+        {
+          "name": "Log",
+          "kind": "Method",
+          "range": {
+            "start_line": 75,
+            "start_column": 5,
+            "end_line": 75,
+            "end_column": 27,
+            "start_byte": 1511,
+            "end_byte": 1533
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "IShape",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "Square",
+          "kind": "Class",
+          "range": {
+            "start_line": 78,
+            "start_column": 1,
+            "end_line": 83,
+            "end_column": 2,
+            "start_byte": 1537,
+            "end_byte": 1629
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs"
+        },
+        {
+          "name": "Area",
+          "kind": "Method",
+          "range": {
+            "start_line": 80,
+            "start_column": 5,
+            "end_line": 80,
+            "end_column": 31,
+            "start_byte": 1572,
+            "end_byte": 1598
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "Square",
+          "signature": {
+            "return_type": "double"
+          }
+        },
+        {
+          "name": "Paint",
+          "kind": "Method",
+          "range": {
+            "start_line": 82,
+            "start_column": 5,
+            "end_line": 82,
+            "end_column": 28,
+            "start_byte": 1604,
+            "end_byte": 1627
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "Square",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "PublicColor",
+          "kind": "Enum",
+          "range": {
+            "start_line": 85,
+            "start_column": 1,
+            "end_line": 89,
+            "end_column": 2,
+            "start_byte": 1631,
+            "end_byte": 1678
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "type_metadata": {
+            "variants": [
+              {
+                "name": "Red"
+              },
+              {
+                "name": "Green"
+              }
+            ]
+          }
+        },
+        {
+          "name": "UnmarkedEnum",
+          "kind": "Enum",
+          "range": {
+            "start_line": 91,
+            "start_column": 1,
+            "end_line": 94,
+            "end_column": 2,
+            "start_byte": 1680,
+            "end_byte": 1717
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "type_metadata": {
+            "variants": [
+              {
+                "name": "OnlyMember"
+              }
+            ]
+          }
+        }
+      ],
+      "imports": [
+        {
+          "name": "System",
+          "range": {
+            "start_line": 2,
+            "start_column": 7,
+            "end_line": 2,
+            "end_column": 13,
+            "start_byte": 61,
+            "end_byte": 67
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "source": "System"
+        }
+      ],
+      "exports": [],
+      "locals": [
+        {
+          "name": "PublicWidget",
+          "kind": "Class",
+          "range": {
+            "start_line": 6,
+            "start_column": 1,
+            "end_line": 48,
+            "end_column": 2,
+            "start_byte": 98,
+            "end_byte": 1131
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "type_metadata": {
+            "fields": [
+              {
+                "name": "PublicField",
+                "type_annotation": "int",
+                "visibility": "Public"
+              },
+              {
+                "name": "ProtectedField",
+                "type_annotation": "int",
+                "visibility": "Protected"
+              },
+              {
+                "name": "PrivateField",
+                "type_annotation": "int",
+                "visibility": "Private"
+              },
+              {
+                "name": "InternalField",
+                "type_annotation": "int",
+                "visibility": "Internal"
+              },
+              {
+                "name": "ProtectedInternalField",
+                "type_annotation": "int",
+                "visibility": "Protected"
+              },
+              {
+                "name": "PrivateProtectedField",
+                "type_annotation": "int",
+                "visibility": "Private"
+              },
+              {
+                "name": "UnmarkedField",
+                "type_annotation": "int"
+              },
+              {
+                "name": "PublicStaticField",
+                "type_annotation": "int",
+                "visibility": "Public",
+                "is_static": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "PublicField",
+          "kind": "Field",
+          "range": {
+            "start_line": 8,
+            "start_column": 16,
+            "end_line": 8,
+            "end_column": 27,
+            "start_byte": 141,
+            "end_byte": 152
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget"
+        },
+        {
+          "name": "ProtectedField",
+          "kind": "Field",
+          "range": {
+            "start_line": 9,
+            "start_column": 19,
+            "end_line": 9,
+            "end_column": 33,
+            "start_byte": 172,
+            "end_byte": 186
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget"
+        },
+        {
+          "name": "PrivateField",
+          "kind": "Field",
+          "range": {
+            "start_line": 10,
+            "start_column": 17,
+            "end_line": 10,
+            "end_column": 29,
+            "start_byte": 204,
+            "end_byte": 216
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget"
+        },
+        {
+          "name": "InternalField",
+          "kind": "Field",
+          "range": {
+            "start_line": 11,
+            "start_column": 18,
+            "end_line": 11,
+            "end_column": 31,
+            "start_byte": 235,
+            "end_byte": 248
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget"
+        },
+        {
+          "name": "ProtectedInternalField",
+          "kind": "Field",
+          "range": {
+            "start_line": 12,
+            "start_column": 28,
+            "end_line": 12,
+            "end_column": 50,
+            "start_byte": 277,
+            "end_byte": 299
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget"
+        },
+        {
+          "name": "PrivateProtectedField",
+          "kind": "Field",
+          "range": {
+            "start_line": 13,
+            "start_column": 27,
+            "end_line": 13,
+            "end_column": 48,
+            "start_byte": 327,
+            "end_byte": 348
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget"
+        },
+        {
+          "name": "UnmarkedField",
+          "kind": "Field",
+          "range": {
+            "start_line": 14,
+            "start_column": 9,
+            "end_line": 14,
+            "end_column": 22,
+            "start_byte": 358,
+            "end_byte": 371
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget"
+        },
+        {
+          "name": "PublicStaticField",
+          "kind": "Field",
+          "range": {
+            "start_line": 15,
+            "start_column": 23,
+            "end_line": 15,
+            "end_column": 40,
+            "start_byte": 395,
+            "end_byte": 412
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget"
+        },
+        {
+          "name": "initialValue",
+          "kind": "Parameter",
+          "range": {
+            "start_line": 17,
+            "start_column": 29,
+            "end_line": 17,
+            "end_column": 41,
+            "start_byte": 447,
+            "end_byte": 459
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget"
+        },
+        {
+          "name": "PublicMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 22,
+            "start_column": 5,
+            "end_line": 22,
+            "end_column": 47,
+            "start_byte": 515,
+            "end_byte": 557
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget",
+          "signature": {
+            "return_type": "int"
+          }
+        },
+        {
+          "name": "ProtectedMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 24,
+            "start_column": 5,
+            "end_line": 24,
+            "end_column": 41,
+            "start_byte": 563,
+            "end_byte": 599
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "PrivateMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 26,
+            "start_column": 5,
+            "end_line": 26,
+            "end_column": 37,
+            "start_byte": 605,
+            "end_byte": 637
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "InternalMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 28,
+            "start_column": 5,
+            "end_line": 28,
+            "end_column": 39,
+            "start_byte": 643,
+            "end_byte": 677
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "ProtectedInternalMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 30,
+            "start_column": 5,
+            "end_line": 30,
+            "end_column": 58,
+            "start_byte": 683,
+            "end_byte": 736
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "PrivateProtectedMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 32,
+            "start_column": 5,
+            "end_line": 32,
+            "end_column": 56,
+            "start_byte": 742,
+            "end_byte": 793
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "UnmarkedMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 34,
+            "start_column": 5,
+            "end_line": 34,
+            "end_column": 30,
+            "start_byte": 799,
+            "end_byte": 824
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "StaticFactory",
+          "kind": "Method",
+          "range": {
+            "start_line": 36,
+            "start_column": 5,
+            "end_line": 36,
+            "end_column": 71,
+            "start_byte": 830,
+            "end_byte": 896
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget"
+        },
+        {
+          "name": "MethodWithLocals",
+          "kind": "Method",
+          "range": {
+            "start_line": 38,
+            "start_column": 5,
+            "end_line": 42,
+            "end_column": 6,
+            "start_byte": 902,
+            "end_byte": 1026
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget",
+          "signature": {
+            "parameters": [
+              {
+                "name": "parameterValue",
+                "type_annotation": "int"
+              }
+            ],
+            "return_type": "int"
+          }
+        },
+        {
+          "name": "parameterValue",
+          "kind": "Parameter",
+          "range": {
+            "start_line": 38,
+            "start_column": 30,
+            "end_line": 38,
+            "end_column": 44,
+            "start_byte": 927,
+            "end_byte": 941
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget"
+        },
+        {
+          "name": "localValue",
+          "kind": "Variable",
+          "range": {
+            "start_line": 40,
+            "start_column": 13,
+            "end_line": 40,
+            "end_column": 23,
+            "start_byte": 961,
+            "end_byte": 971
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget"
+        },
+        {
+          "name": "PrivateNestedClass",
+          "kind": "Class",
+          "range": {
+            "start_line": 44,
+            "start_column": 5,
+            "end_line": 47,
+            "end_column": 6,
+            "start_byte": 1032,
+            "end_byte": 1129
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicWidget"
+        },
+        {
+          "name": "PublicMethodInPrivateClass",
+          "kind": "Method",
+          "range": {
+            "start_line": 46,
+            "start_column": 9,
+            "end_line": 46,
+            "end_column": 53,
+            "start_byte": 1079,
+            "end_byte": 1123
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PrivateNestedClass",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "UnmarkedTopLevelClass",
+          "kind": "Class",
+          "range": {
+            "start_line": 50,
+            "start_column": 1,
+            "end_line": 53,
+            "end_column": 2,
+            "start_byte": 1133,
+            "end_byte": 1207
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs"
+        },
+        {
+          "name": "UnmarkedTopLevelClassMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 52,
+            "start_column": 5,
+            "end_line": 52,
+            "end_column": 43,
+            "start_byte": 1167,
+            "end_byte": 1205
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "UnmarkedTopLevelClass",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "InternalClass",
+          "kind": "Class",
+          "range": {
+            "start_line": 55,
+            "start_column": 1,
+            "end_line": 55,
+            "end_column": 33,
+            "start_byte": 1209,
+            "end_byte": 1241
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs"
+        },
+        {
+          "name": "FileLocalClass",
+          "kind": "Class",
+          "range": {
+            "start_line": 57,
+            "start_column": 1,
+            "end_line": 57,
+            "end_column": 30,
+            "start_byte": 1243,
+            "end_byte": 1272
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs"
+        },
+        {
+          "name": "PublicStruct",
+          "kind": "Type",
+          "range": {
+            "start_line": 59,
+            "start_column": 1,
+            "end_line": 63,
+            "end_column": 2,
+            "start_byte": 1274,
+            "end_byte": 1367
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "type_metadata": {
+            "fields": [
+              {
+                "name": "StructPublicField",
+                "type_annotation": "int",
+                "visibility": "Public"
+              },
+              {
+                "name": "StructUnmarkedField",
+                "type_annotation": "int"
+              }
+            ]
+          }
+        },
+        {
+          "name": "StructPublicField",
+          "kind": "Field",
+          "range": {
+            "start_line": 61,
+            "start_column": 16,
+            "end_line": 61,
+            "end_column": 33,
+            "start_byte": 1318,
+            "end_byte": 1335
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicStruct"
+        },
+        {
+          "name": "StructUnmarkedField",
+          "kind": "Field",
+          "range": {
+            "start_line": 62,
+            "start_column": 9,
+            "end_line": 62,
+            "end_column": 28,
+            "start_byte": 1345,
+            "end_byte": 1364
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "PublicStruct"
+        },
+        {
+          "name": "IShape",
+          "kind": "Interface",
+          "range": {
+            "start_line": 65,
+            "start_column": 1,
+            "end_line": 76,
+            "end_column": 2,
+            "start_byte": 1369,
+            "end_byte": 1535
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "type_metadata": {
+            "fields": [
+              {
+                "name": "Area",
+                "type_annotation": "double Area();",
+                "visibility": "Public"
+              },
+              {
+                "name": "Draw",
+                "type_annotation": "void Draw() { }",
+                "visibility": "Public"
+              },
+              {
+                "name": "IShape",
+                "type_annotation": "static IShape Unit() => new Square();",
+                "visibility": "Public"
+              },
+              {
+                "name": "Log",
+                "type_annotation": "private void Log() { }",
+                "visibility": "Public"
+              }
+            ]
+          }
+        },
+        {
+          "name": "Area",
+          "kind": "Method",
+          "range": {
+            "start_line": 67,
+            "start_column": 5,
+            "end_line": 67,
+            "end_column": 19,
+            "start_byte": 1399,
+            "end_byte": 1413
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "IShape",
+          "signature": {
+            "return_type": "double"
+          }
+        },
+        {
+          "name": "Draw",
+          "kind": "Method",
+          "range": {
+            "start_line": 69,
+            "start_column": 5,
+            "end_line": 69,
+            "end_column": 20,
+            "start_byte": 1419,
+            "end_byte": 1434
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "IShape",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "Unit",
+          "kind": "Method",
+          "range": {
+            "start_line": 71,
+            "start_column": 5,
+            "end_line": 71,
+            "end_column": 42,
+            "start_byte": 1440,
+            "end_byte": 1477
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "IShape"
+        },
+        {
+          "name": "NestedHelper",
+          "kind": "Class",
+          "range": {
+            "start_line": 73,
+            "start_column": 5,
+            "end_line": 73,
+            "end_column": 27,
+            "start_byte": 1483,
+            "end_byte": 1505
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "IShape"
+        },
+        {
+          "name": "Log",
+          "kind": "Method",
+          "range": {
+            "start_line": 75,
+            "start_column": 5,
+            "end_line": 75,
+            "end_column": 27,
+            "start_byte": 1511,
+            "end_byte": 1533
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "IShape",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "Square",
+          "kind": "Class",
+          "range": {
+            "start_line": 78,
+            "start_column": 1,
+            "end_line": 83,
+            "end_column": 2,
+            "start_byte": 1537,
+            "end_byte": 1629
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs"
+        },
+        {
+          "name": "Area",
+          "kind": "Method",
+          "range": {
+            "start_line": 80,
+            "start_column": 5,
+            "end_line": 80,
+            "end_column": 31,
+            "start_byte": 1572,
+            "end_byte": 1598
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "Square",
+          "signature": {
+            "return_type": "double"
+          }
+        },
+        {
+          "name": "Paint",
+          "kind": "Method",
+          "range": {
+            "start_line": 82,
+            "start_column": 5,
+            "end_line": 82,
+            "end_column": 28,
+            "start_byte": 1604,
+            "end_byte": 1627
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "container_name": "Square",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "PublicColor",
+          "kind": "Enum",
+          "range": {
+            "start_line": 85,
+            "start_column": 1,
+            "end_line": 89,
+            "end_column": 2,
+            "start_byte": 1631,
+            "end_byte": 1678
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "type_metadata": {
+            "variants": [
+              {
+                "name": "Red"
+              },
+              {
+                "name": "Green"
+              }
+            ]
+          }
+        },
+        {
+          "name": "UnmarkedEnum",
+          "kind": "Enum",
+          "range": {
+            "start_line": 91,
+            "start_column": 1,
+            "end_line": 94,
+            "end_column": 2,
+            "start_byte": 1680,
+            "end_byte": 1717
+          },
+          "language": "CSharp",
+          "file": "c_sharp.cs",
+          "type_metadata": {
+            "variants": [
+              {
+                "name": "OnlyMember"
+              }
+            ]
+          }
+        }
+      ],
+      "lint": [
+        {
+          "message": "Imported symbol 'System' is never used",
+          "range": {
+            "start_line": 2,
+            "start_column": 7,
+            "end_line": 2,
+            "end_column": 13,
+            "start_byte": 61,
+            "end_byte": 67
+          },
+          "severity": "Warning",
+          "rule": "unused-import",
+          "context": {
+            "line_text": "using System;",
+            "underline_column": 6,
+            "underline_length": 6
+          },
+          "metadata": {
+            "category": "Style",
+            "confidence": "Low",
+            "source": "SemanticAnalysis",
+            "default_severity": "Warning",
+            "effective_severity": "Warning"
+          }
+        }
+      ],
+      "syntax": []
+    }
+  ],
+  "symbol_indexes": [
+    {
+      "schema_version": {
+        "major": 2,
+        "minor": 0
+      },
+      "file": "c_sharp.cs",
+      "language": "CSharp",
+      "file_hash": "e47b026d3d56ff4",
+      "completed_passes": [
+        "Parse",
+        "Bind",
+        "Semantic",
+        "Docs"
+      ],
+      "symbols": [
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+          "language": "CSharp",
+          "kind": "Class",
+          "identity": {
+            "name": "PublicWidget",
+            "display_name": "PublicWidget",
+            "stable_key": "c_sharp::c_sharp.cs::Class::PublicWidget::0"
+          },
+          "source": {
+            "file_path": "c_sharp.cs",
+            "declaration_span": {
+              "start": {
+                "line": 6,
+                "column": 1
+              },
+              "end": {
+                "line": 48,
+                "column": 2
+              },
+              "start_byte": 98,
+              "end_byte": 1131
+            },
+            "body_span": {
+              "start": {
+                "line": 7,
+                "column": 1
+              },
+              "end": {
+                "line": 48,
+                "column": 2
+              },
+              "start_byte": 124,
+              "end_byte": 1131
+            },
+            "name_span": {
+              "start": {
+                "line": 6,
+                "column": 14
+              },
+              "end": {
+                "line": 6,
+                "column": 26
+              },
+              "start_byte": 111,
+              "end_byte": 123
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "members": [
+              {
+                "id": "99fe3f3a87fe95067fe8f9c68c11ad895688e79c83c16bc9f38ea7b37e8774f7",
+                "name": "PublicField",
+                "qualified_name": "PublicWidget::PublicField"
+              },
+              {
+                "id": "c9d256c2176057d939ba97db288deb52102e097a457d46955810b6b5bdba90a2",
+                "name": "ProtectedField",
+                "qualified_name": "PublicWidget::ProtectedField"
+              },
+              {
+                "id": "fe9f5423bbd28a4675eae60f3145e8c1857a7c3097caed2288574fce49d9804e",
+                "name": "PrivateField",
+                "qualified_name": "PublicWidget::PrivateField"
+              },
+              {
+                "id": "41668b0082b2e4952c5aa21c765e8bd0374a371e010c6e3423f075449a232c96",
+                "name": "InternalField",
+                "qualified_name": "PublicWidget::InternalField"
+              },
+              {
+                "id": "9a6e156ac22720739bcebb96460d6e90c7200f1af8e66a1a4a077d945a06524b",
+                "name": "ProtectedInternalField",
+                "qualified_name": "PublicWidget::ProtectedInternalField"
+              },
+              {
+                "id": "122ac3d2af5e208f8ad0408adc83dccf24b342a298a45af7546f71c88164e4e2",
+                "name": "PrivateProtectedField",
+                "qualified_name": "PublicWidget::PrivateProtectedField"
+              },
+              {
+                "id": "907c7735d50b7d3c3e32072c9369de1e6a8500f0fc86b8dab654f7451f2b7703",
+                "name": "UnmarkedField",
+                "qualified_name": "PublicWidget::UnmarkedField"
+              },
+              {
+                "id": "057a30bde8960897dde056a6883c8e1b3255b1593ad35e6ca765321540bb6d83",
+                "name": "PublicStaticField",
+                "qualified_name": "PublicWidget::PublicStaticField"
+              },
+              {
+                "id": "1a46c18d0f82f28b97e266cd61772e8fb2e30db32f7d53f99a87849696e0f115",
+                "name": "initialValue",
+                "qualified_name": "PublicWidget::initialValue"
+              },
+              {
+                "id": "3797869c12442b24e56df17494751e21456284c71d3acad63c7407eea1387891",
+                "name": "PublicMethod",
+                "qualified_name": "PublicWidget::PublicMethod"
+              },
+              {
+                "id": "0b558b1a150b605e4fe484998659ae816c381c652a714e4a6a4a80cf3f1d8750",
+                "name": "ProtectedMethod",
+                "qualified_name": "PublicWidget::ProtectedMethod"
+              },
+              {
+                "id": "e0146f24bc0a235a632372d5b1798d7ce4935eeb501014468f952ee13ed3c388",
+                "name": "PrivateMethod",
+                "qualified_name": "PublicWidget::PrivateMethod"
+              },
+              {
+                "id": "7d0faef76b29c19ee89c28675524f2d6c30782068359e52f4e6e8a39a6d6eb37",
+                "name": "InternalMethod",
+                "qualified_name": "PublicWidget::InternalMethod"
+              },
+              {
+                "id": "4130412d4a9278b91eed375412d48a06aa71cf76e5807e054ce89c9fa715f02c",
+                "name": "ProtectedInternalMethod",
+                "qualified_name": "PublicWidget::ProtectedInternalMethod"
+              },
+              {
+                "id": "8c9a626861bf447e7460139e309ac4557c21d4177907bd9c93b4ba3b8cffd6b2",
+                "name": "PrivateProtectedMethod",
+                "qualified_name": "PublicWidget::PrivateProtectedMethod"
+              },
+              {
+                "id": "69c9949491746b2a3e9b5494a7106a23130a817c5f429977d666b3b9f8a0f17e",
+                "name": "UnmarkedMethod",
+                "qualified_name": "PublicWidget::UnmarkedMethod"
+              },
+              {
+                "id": "97dd7babbbabb47c835a6da4d1e8cc682eb53b21e59eaa9edec4b80ae2aae7c7",
+                "name": "StaticFactory",
+                "qualified_name": "PublicWidget::StaticFactory"
+              },
+              {
+                "id": "6cf98111408b718649c1dff8a90b24e67a209d545124e762fcd152bf7b0c91ed",
+                "name": "MethodWithLocals",
+                "qualified_name": "PublicWidget::MethodWithLocals"
+              },
+              {
+                "id": "92e63cffc9586ae99e5a897aa2f94915520eacdfa553884e432eec536e00ba72",
+                "name": "parameterValue",
+                "qualified_name": "PublicWidget::parameterValue"
+              },
+              {
+                "id": "a0eff5bc7c59169de246c2651b925a5530e24246ebd59006cedaa94bb0fd5536",
+                "name": "localValue",
+                "qualified_name": "PublicWidget::localValue"
+              },
+              {
+                "id": "0e053e2da30a2e4037234cf079128215c92784c1245df68ef7274c4bc348b367",
+                "name": "PrivateNestedClass",
+                "qualified_name": "PublicWidget::PrivateNestedClass"
+              }
+            ],
+            "references": [
+              {
+                "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+                "name": "PublicWidget"
+              },
+              {
+                "id": "fe9f5423bbd28a4675eae60f3145e8c1857a7c3097caed2288574fce49d9804e",
+                "name": "PrivateField",
+                "qualified_name": "PublicWidget::PrivateField"
+              },
+              {
+                "id": "1a46c18d0f82f28b97e266cd61772e8fb2e30db32f7d53f99a87849696e0f115",
+                "name": "initialValue",
+                "qualified_name": "PublicWidget::initialValue"
+              }
+            ],
+            "referenced_by": [
+              {
+                "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+                "name": "PublicWidget"
+              },
+              {
+                "id": "97dd7babbbabb47c835a6da4d1e8cc682eb53b21e59eaa9edec4b80ae2aae7c7",
+                "name": "StaticFactory",
+                "qualified_name": "PublicWidget::StaticFactory"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069282978,
+            "updated_at_epoch_ms": 1791069283281
+          },
+          "kind_data": {
+            "kind_data_type": "Type",
+            "data": {
+              "fields": [
+                {
+                  "name": "PublicField",
+                  "type_text": "int",
+                  "visibility": "Public",
+                  "is_static": false,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                },
+                {
+                  "name": "ProtectedField",
+                  "type_text": "int",
+                  "visibility": "Protected",
+                  "is_static": false,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                },
+                {
+                  "name": "PrivateField",
+                  "type_text": "int",
+                  "visibility": "Private",
+                  "is_static": false,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                },
+                {
+                  "name": "InternalField",
+                  "type_text": "int",
+                  "visibility": "Internal",
+                  "is_static": false,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                },
+                {
+                  "name": "ProtectedInternalField",
+                  "type_text": "int",
+                  "visibility": "Protected",
+                  "is_static": false,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                },
+                {
+                  "name": "PrivateProtectedField",
+                  "type_text": "int",
+                  "visibility": "Private",
+                  "is_static": false,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                },
+                {
+                  "name": "UnmarkedField",
+                  "type_text": "int",
+                  "is_static": false,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                },
+                {
+                  "name": "PublicStaticField",
+                  "type_text": "int",
+                  "visibility": "Public",
+                  "is_static": true,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                }
+              ],
+              "is_abstract": false,
+              "is_final": false,
+              "is_sealed": false,
+              "is_open": false,
+              "is_partial": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "99fe3f3a87fe95067fe8f9c68c11ad895688e79c83c16bc9f38ea7b37e8774f7",
+          "language": "CSharp",
+          "kind": "Field",
+          "identity": {
+            "name": "PublicField",
+            "display_name": "PublicField",
+            "qualified_name": "PublicWidget::PublicField",
+            "module_path": "PublicWidget",
+            "stable_key": "c_sharp::c_sharp.cs::Field::PublicWidget::PublicField::0"
+          },
+          "source": {
+            "file_path": "c_sharp.cs",
+            "declaration_span": {
+              "start": {
+                "line": 8,
+                "column": 16
+              },
+              "end": {
+                "line": 8,
+                "column": 27
+              },
+              "start_byte": 141,
+              "end_byte": 152
+            },
+            "name_span": {
+              "start": {
+                "line": 8,
+                "column": 16
+              },
+              "end": {
+                "line": 8,
+                "column": 27
+              },
+              "start_byte": 141,
+              "end_byte": 152
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            },
+            "container": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069282978,
+            "updated_at_epoch_ms": 1791069283281
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "PublicField",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "c9d256c2176057d939ba97db288deb52102e097a457d46955810b6b5bdba90a2",
+          "language": "CSharp",
+          "kind": "Field",
+          "identity": {
+            "name": "ProtectedField",
+            "display_name": "ProtectedField",
+            "qualified_name": "PublicWidget::ProtectedField",
+            "module_path": "PublicWidget",
+            "stable_key": "c_sharp::c_sharp.cs::Field::PublicWidget::ProtectedField::0"
+          },
+          "source": {
+            "file_path": "c_sharp.cs",
+            "declaration_span": {
+              "start": {
+                "line": 9,
+                "column": 19
+              },
+              "end": {
+                "line": 9,
+                "column": 33
+              },
+              "start_byte": 172,
+              "end_byte": 186
+            },
+            "name_span": {
+              "start": {
+                "line": 9,
+                "column": 19
+              },
+              "end": {
+                "line": 9,
+                "column": 33
+              },
+              "start_byte": 172,
+              "end_byte": 186
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            },
+            "container": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069282978,
+            "updated_at_epoch_ms": 1791069283281
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "ProtectedField",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "fe9f5423bbd28a4675eae60f3145e8c1857a7c3097caed2288574fce49d9804e",
+          "language": "CSharp",
+          "kind": "Field",
+          "identity": {
+            "name": "PrivateField",
+            "display_name": "PrivateField",
+            "qualified_name": "PublicWidget::PrivateField",
+            "module_path": "PublicWidget",
+            "stable_key": "c_sharp::c_sharp.cs::Field::PublicWidget::PrivateField::0"
+          },
+          "source": {
+            "file_path": "c_sharp.cs",
+            "declaration_span": {
+              "start": {
+                "line": 10,
+                "column": 17
+              },
+              "end": {
+                "line": 10,
+                "column": 29
+              },
+              "start_byte": 204,
+              "end_byte": 216
+            },
+            "name_span": {
+              "start": {
+                "line": 10,
+                "column": 17
+              },
+              "end": {
+                "line": 10,
+                "column": 29
+              },
+              "start_byte": 204,
+              "end_byte": 216
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            },
+            "container": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            },
+            "referenced_by": [
+              {
+                "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+                "name": "PublicWidget"
+              },
+              {
+                "id": "3797869c12442b24e56df17494751e21456284c71d3acad63c7407eea1387891",
+                "name": "PublicMethod",
+                "qualified_name": "PublicWidget::PublicMethod"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069282978,
+            "updated_at_epoch_ms": 1791069283281
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "PrivateField",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "41668b0082b2e4952c5aa21c765e8bd0374a371e010c6e3423f075449a232c96",
+          "language": "CSharp",
+          "kind": "Field",
+          "identity": {
+            "name": "InternalField",
+            "display_name": "InternalField",
+            "qualified_name": "PublicWidget::InternalField",
+            "module_path": "PublicWidget",
+            "stable_key": "c_sharp::c_sharp.cs::Field::PublicWidget::InternalField::0"
+          },
+          "source": {
+            "file_path": "c_sharp.cs",
+            "declaration_span": {
+              "start": {
+                "line": 11,
+                "column": 18
+              },
+              "end": {
+                "line": 11,
+                "column": 31
+              },
+              "start_byte": 235,
+              "end_byte": 248
+            },
+            "name_span": {
+              "start": {
+                "line": 11,
+                "column": 18
+              },
+              "end": {
+                "line": 11,
+                "column": 31
+              },
+              "start_byte": 235,
+              "end_byte": 248
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            },
+            "container": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069282978,
+            "updated_at_epoch_ms": 1791069283281
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "InternalField",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "9a6e156ac22720739bcebb96460d6e90c7200f1af8e66a1a4a077d945a06524b",
+          "language": "CSharp",
+          "kind": "Field",
+          "identity": {
+            "name": "ProtectedInternalField",
+            "display_name": "ProtectedInternalField",
+            "qualified_name": "PublicWidget::ProtectedInternalField",
+            "module_path": "PublicWidget",
+            "stable_key": "c_sharp::c_sharp.cs::Field::PublicWidget::ProtectedInternalField::0"
+          },
+          "source": {
+            "file_path": "c_sharp.cs",
+            "declaration_span": {
+              "start": {
+                "line": 12,
+                "column": 28
+              },
+              "end": {
+                "line": 12,
+                "column": 50
+              },
+              "start_byte": 277,
+              "end_byte": 299
+            },
+            "name_span": {
+              "start": {
+                "line": 12,
+                "column": 28
+              },
+              "end": {
+                "line": 12,
+                "column": 50
+              },
+              "start_byte": 277,
+              "end_byte": 299
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            },
+            "container": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069282978,
+            "updated_at_epoch_ms": 1791069283281
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "ProtectedInternalField",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "122ac3d2af5e208f8ad0408adc83dccf24b342a298a45af7546f71c88164e4e2",
+          "language": "CSharp",
+          "kind": "Field",
+          "identity": {
+            "name": "PrivateProtectedField",
+            "display_name": "PrivateProtectedField",
+            "qualified_name": "PublicWidget::PrivateProtectedField",
+            "module_path": "PublicWidget",
+            "stable_key": "c_sharp::c_sharp.cs::Field::PublicWidget::PrivateProtectedField::0"
+          },
+          "source": {
+            "file_path": "c_sharp.cs",
+            "declaration_span": {
+              "start": {
+                "line": 13,
+                "column": 27
+              },
+              "end": {
+                "line": 13,
+                "column": 48
+              },
+              "start_byte": 327,
+              "end_byte": 348
+            },
+            "name_span": {
+              "start": {
+                "line": 13,
+                "column": 27
+              },
+              "end": {
+                "line": 13,
+                "column": 48
+              },
+              "start_byte": 327,
+              "end_byte": 348
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            },
+            "container": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069282978,
+            "updated_at_epoch_ms": 1791069283281
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "PrivateProtectedField",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "907c7735d50b7d3c3e32072c9369de1e6a8500f0fc86b8dab654f7451f2b7703",
+          "language": "CSharp",
+          "kind": "Field",
+          "identity": {
+            "name": "UnmarkedField",
+            "display_name": "UnmarkedField",
+            "qualified_name": "PublicWidget::UnmarkedField",
+            "module_path": "PublicWidget",
+            "stable_key": "c_sharp::c_sharp.cs::Field::PublicWidget::UnmarkedField::0"
+          },
+          "source": {
+            "file_path": "c_sharp.cs",
+            "declaration_span": {
+              "start": {
+                "line": 14,
+                "column": 9
+              },
+              "end": {
+                "line": 14,
+                "column": 22
+              },
+              "start_byte": 358,
+              "end_byte": 371
+            },
+            "name_span": {
+              "start": {
+                "line": 14,
+                "column": 9
+              },
+              "end": {
+                "line": 14,
+                "column": 22
+              },
+              "start_byte": 358,
+              "end_byte": 371
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            },
+            "container": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069282978,
+            "updated_at_epoch_ms": 1791069283281
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "UnmarkedField",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "057a30bde8960897dde056a6883c8e1b3255b1593ad35e6ca765321540bb6d83",
+          "language": "CSharp",
+          "kind": "Field",
+          "identity": {
+            "name": "PublicStaticField",
+            "display_name": "PublicStaticField",
+            "qualified_name": "PublicWidget::PublicStaticField",
+            "module_path": "PublicWidget",
+            "stable_key": "c_sharp::c_sharp.cs::Field::PublicWidget::PublicStaticField::0"
+          },
+          "source": {
+            "file_path": "c_sharp.cs",
+            "declaration_span": {
+              "start": {
+                "line": 15,
+                "column": 23
+              },
+              "end": {
+                "line": 15,
+                "column": 40
+              },
+              "start_byte": 395,
+              "end_byte": 412
+            },
+            "name_span": {
+              "start": {
+                "line": 15,
+                "column": 23
+              },
+              "end": {
+                "line": 15,
+                "column": 40
+              },
+              "start_byte": 395,
+              "end_byte": 412
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            },
+            "container": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069282978,
+            "updated_at_epoch_ms": 1791069283281
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "PublicStaticField",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "1a46c18d0f82f28b97e266cd61772e8fb2e30db32f7d53f99a87849696e0f115",
+          "language": "CSharp",
+          "kind": "Parameter",
+          "identity": {
+            "name": "initialValue",
+            "display_name": "initialValue",
+            "qualified_name": "PublicWidget::initialValue",
+            "module_path": "PublicWidget",
+            "stable_key": "c_sharp::c_sharp.cs::Parameter::PublicWidget::initialValue::0"
+          },
+          "source": {
+            "file_path": "c_sharp.cs",
+            "declaration_span": {
+              "start": {
+                "line": 17,
+                "column": 29
+              },
+              "end": {
+                "line": 17,
+                "column": 41
+              },
+              "start_byte": 447,
+              "end_byte": 459
+            },
+            "name_span": {
+              "start": {
+                "line": 17,
+                "column": 29
+              },
+              "end": {
+                "line": 17,
+                "column": 41
+              },
+              "start_byte": 447,
+              "end_byte": 459
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            },
+            "container": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            },
+            "referenced_by": [
+              {
+                "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+                "name": "PublicWidget"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069282978,
+            "updated_at_epoch_ms": 1791069283281
+          },
+          "kind_data": {
+            "kind_data_type": "Parameter",
+            "data": {
+              "name": "initialValue",
+              "position": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "3797869c12442b24e56df17494751e21456284c71d3acad63c7407eea1387891",
+          "language": "CSharp",
+          "kind": "Method",
+          "identity": {
+            "name": "PublicMethod",
+            "display_name": "PublicMethod",
+            "qualified_name": "PublicWidget::PublicMethod",
+            "module_path": "PublicWidget",
+            "stable_key": "c_sharp::c_sharp.cs::Method::PublicWidget::PublicMethod::0"
+          },
+          "source": {
+            "file_path": "c_sharp.cs",
+            "declaration_span": {
+              "start": {
+                "line": 22,
+                "column": 5
+              },
+              "end": {
+                "line": 22,
+                "column": 47
+              },
+              "start_byte": 515,
+              "end_byte": 557
+            },
+            "body_span": {
+              "start": {
+                "line": 22,
+                "column": 31
+              },
+              "end": {
+                "line": 22,
+                "column": 46
+              },
+              "start_byte": 541,
+              "end_byte": 556
+            },
+            "name_span": {
+              "start": {
+                "line": 22,
+                "column": 16
+              },
+              "end": {
+                "line": 22,
+                "column": 28
+              },
+              "start_byte": 526,
+              "end_byte": 538
+            }
+          },
+          "visibility": {
+            "level": "Public",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "int",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "int"
+              },
+              {
+                "kind": "Canonical",
+                "text": "int"
+              }
+            ]
+          },
+          "relations": {
+            "parent": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            },
+            "container": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            },
+            "references": [
+              {
+                "id": "fe9f5423bbd28a4675eae60f3145e8c1857a7c3097caed2288574fce49d9804e",
+                "name": "PrivateField",
+                "qualified_name": "PublicWidget::PrivateField"
+              }
+            ]
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069282978,
+            "updated_at_epoch_ms": 1791069283281
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "int",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "0b558b1a150b605e4fe484998659ae816c381c652a714e4a6a4a80cf3f1d8750",
+          "language": "CSharp",
+          "kind": "Method",
+          "identity": {
+            "name": "ProtectedMethod",
+            "display_name": "ProtectedMethod",
+            "qualified_name": "PublicWidget::ProtectedMethod",
+            "module_path": "PublicWidget",
+            "stable_key": "c_sharp::c_sharp.cs::Method::PublicWidget::ProtectedMethod::0"
+          },
+          "source": {
+            "file_path": "c_sharp.cs",
+            "declaration_span": {
+              "start": {
+                "line": 24,
+                "column": 5
+              },
+              "end": {
+                "line": 24,
+                "column": 41
+              },
+              "start_byte": 563,
+              "end_byte": 599
+            },
+            "body_span": {
+              "start": {
+                "line": 24,
+                "column": 38
+              },
+              "end": {
+                "line": 24,
+                "column": 41
+              },
+              "start_byte": 596,
+              "end_byte": 599
+            },
+            "name_span": {
+              "start": {
+                "line": 24,
+                "column": 20
+              },
+              "end": {
+                "line": 24,
+                "column": 35
+              },
+              "start_byte": 578,
+              "end_byte": 593
+            }
+          },
+          "visibility": {
+            "level": "Protected",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "void",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "void"
+              },
+              {
+                "kind": "Canonical",
+                "text": "void"
+              }
+            ]
+          },
+          "relations": {
+            "parent": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            },
+            "container": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            }
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069282978,
+            "updated_at_epoch_ms": 1791069283281
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "void",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "e0146f24bc0a235a632372d5b1798d7ce4935eeb501014468f952ee13ed3c388",
+          "language": "CSharp",
+          "kind": "Method",
+          "identity": {
+            "name": "PrivateMethod",
+            "display_name": "PrivateMethod",
+            "qualified_name": "PublicWidget::PrivateMethod",
+            "module_path": "PublicWidget",
+            "stable_key": "c_sharp::c_sharp.cs::Method::PublicWidget::PrivateMethod::0"
+          },
+          "source": {
+            "file_path": "c_sharp.cs",
+            "declaration_span": {
+              "start": {
+                "line": 26,
+                "column": 5
+              },
+              "end": {
+                "line": 26,
+                "column": 37
+              },
+              "start_byte": 605,
+              "end_byte": 637
+            },
+            "body_span": {
+              "start": {
+                "line": 26,
+                "column": 34
+              },
+              "end": {
+                "line": 26,
+                "column": 37
+              },
+              "start_byte": 634,
+              "end_byte": 637
+            },
+            "name_span": {
+              "start": {
+                "line": 26,
+                "column": 18
+              },
+              "end": {
+                "line": 26,
+                "column": 31
+              },
+              "start_byte": 618,
+              "end_byte": 631
+            }
+          },
+          "visibility": {
+            "level": "Private",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "void",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "void"
+              },
+              {
+                "kind": "Canonical",
+                "text": "void"
+              }
+            ]
+          },
+          "relations": {
+            "parent": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            },
+            "container": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            }
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069282978,
+            "updated_at_epoch_ms": 1791069283281
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "void",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "7d0faef76b29c19ee89c28675524f2d6c30782068359e52f4e6e8a39a6d6eb37",
+          "language": "CSharp",
+          "kind": "Method",
+          "identity": {
+            "name": "InternalMethod",
+            "display_name": "InternalMethod",
+            "qualified_name": "PublicWidget::InternalMethod",
+            "module_path": "PublicWidget",
+            "stable_key": "c_sharp::c_sharp.cs::Method::PublicWidget::InternalMethod::0"
+          },
+          "source": {
+            "file_path": "c_sharp.cs",
+            "declaration_span": {
+              "start": {
+                "line": 28,
+                "column": 5
+              },
+              "end": {
+                "line": 28,
+                "column": 39
+              },
+              "start_byte": 643,
+              "end_byte": 677
+            },
+            "body_span": {
+              "start": {
+                "line": 28,
+                "column": 36
+              },
+              "end": {
+                "line": 28,
+                "column": 39
+              },
+              "start_byte": 674,
+              "end_byte": 677
+            },
+            "name_span": {
+              "start": {
+                "line": 28,
+                "column": 19
+              },
+              "end": {
+                "line": 28,
+                "column": 33
+              },
+              "start_byte": 657,
+              "end_byte": 671
+            }
+          },
+          "visibility": {
+            "level": "Internal",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "void",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "void"
+              },
+              {
+                "kind": "Canonical",
+                "text": "void"
+              }
+            ]
+          },
+          "relations": {
+            "parent": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            },
+            "container": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            }
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069282978,
+            "updated_at_epoch_ms": 1791069283281
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "void",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "4130412d4a9278b91eed375412d48a06aa71cf76e5807e054ce89c9fa715f02c",
+          "language": "CSharp",
+          "kind": "Method",
+          "identity": {
+            "name": "ProtectedInternalMethod",
+            "display_name": "ProtectedInternalMethod",
+            "qualified_name": "PublicWidget::ProtectedInternalMethod",
+            "module_path": "PublicWidget",
+            "stable_key": "c_sharp::c_sharp.cs::Method::PublicWidget::ProtectedInternalMethod::0"
+          },
+          "source": {
+            "file_path": "c_sharp.cs",
+            "declaration_span": {
+              "start": {
+                "line": 30,
+                "column": 5
+              },
+              "end": {
+                "line": 30,
+                "column": 58
+              },
+              "start_byte": 683,
+              "end_byte": 736
+            },
+            "body_span": {
+              "start": {
+                "line": 30,
+                "column": 55
+              },
+              "end": {
+                "line": 30,
+                "column": 58
+              },
+              "start_byte": 733,
+              "end_byte": 736
+            },
+            "name_span": {
+              "start": {
+                "line": 30,
+                "column": 29
+              },
+              "end": {
+                "line": 30,
+                "column": 52
+              },
+              "start_byte": 707,
+              "end_byte": 730
+            }
+          },
+          "visibility": {
+            "level": "Protected",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "void",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "void"
+              },
+              {
+                "kind": "Canonical",
+                "text": "void"
+              }
+            ]
+          },
+          "relations": {
+            "parent": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            },
+            "container": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            }
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069282978,
+            "updated_at_epoch_ms": 1791069283281
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "void",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "8c9a626861bf447e7460139e309ac4557c21d4177907bd9c93b4ba3b8cffd6b2",
+          "language": "CSharp",
+          "kind": "Method",
+          "identity": {
+            "name": "PrivateProtectedMethod",
+            "display_name": "PrivateProtectedMethod",
+            "qualified_name": "PublicWidget::PrivateProtectedMethod",
+            "module_path": "PublicWidget",
+            "stable_key": "c_sharp::c_sharp.cs::Method::PublicWidget::PrivateProtectedMethod::0"
+          },
+          "source": {
+            "file_path": "c_sharp.cs",
+            "declaration_span": {
+              "start": {
+                "line": 32,
+                "column": 5
+              },
+              "end": {
+                "line": 32,
+                "column": 56
+              },
+              "start_byte": 742,
+              "end_byte": 793
+            },
+            "body_span": {
+              "start": {
+                "line": 32,
+                "column": 53
+              },
+              "end": {
+                "line": 32,
+                "column": 56
+              },
+              "start_byte": 790,
+              "end_byte": 793
+            },
+            "name_span": {
+              "start": {
+                "line": 32,
+                "column": 28
+              },
+              "end": {
+                "line": 32,
+                "column": 50
+              },
+              "start_byte": 765,
+              "end_byte": 787
+            }
+          },
+          "visibility": {
+            "level": "Private",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "void",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "void"
+              },
+              {
+                "kind": "Canonical",
+                "text": "void"
+              }
+            ]
+          },
+          "relations": {
+            "parent": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            },
+            "container": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            }
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069282978,
+            "updated_at_epoch_ms": 1791069283281
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "void",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "69c9949491746b2a3e9b5494a7106a23130a817c5f429977d666b3b9f8a0f17e",
+          "language": "CSharp",
+          "kind": "Method",
+          "identity": {
+            "name": "UnmarkedMethod",
+            "display_name": "UnmarkedMethod",
+            "qualified_name": "PublicWidget::UnmarkedMethod",
+            "module_path": "PublicWidget",
+            "stable_key": "c_sharp::c_sharp.cs::Method::PublicWidget::UnmarkedMethod::0"
+          },
+          "source": {
+            "file_path": "c_sharp.cs",
+            "declaration_span": {
+              "start": {
+                "line": 34,
+                "column": 5
+              },
+              "end": {
+                "line": 34,
+                "column": 30
+              },
+              "start_byte": 799,
+              "end_byte": 824
+            },
+            "body_span": {
+              "start": {
+                "line": 34,
+                "column": 27
+              },
+              "end": {
+                "line": 34,
+                "column": 30
+              },
+              "start_byte": 821,
+              "end_byte": 824
+            },
+            "name_span": {
+              "start": {
+                "line": 34,
+                "column": 10
+              },
+              "end": {
+                "line": 34,
+                "column": 24
+              },
+              "start_byte": 804,
+              "end_byte": 818
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "void",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "void"
+              },
+              {
+                "kind": "Canonical",
+                "text": "void"
+              }
+            ]
+          },
+          "relations": {
+            "parent": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            },
+            "container": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            }
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069282978,
+            "updated_at_epoch_ms": 1791069283281
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "void",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "97dd7babbbabb47c835a6da4d1e8cc682eb53b21e59eaa9edec4b80ae2aae7c7",
+          "language": "CSharp",
+          "kind": "Method",
+          "identity": {
+            "name": "StaticFactory",
+            "display_name": "StaticFactory",
+            "qualified_name": "PublicWidget::StaticFactory",
+            "module_path": "PublicWidget",
+            "stable_key": "c_sharp::c_sharp.cs::Method::PublicWidget::StaticFactory::0"
+          },
+          "source": {
+            "file_path": "c_sharp.cs",
+            "declaration_span": {
+              "start": {
+                "line": 36,
+                "column": 5
+              },
+              "end": {
+                "line": 36,
+                "column": 71
+              },
+              "start_byte": 830,
+              "end_byte": 896
+            },
+            "body_span": {
+              "start": {
+                "line": 36,
+                "column": 48
+              },
+              "end": {
+                "line": 36,
+                "column": 70
+              },
+              "start_byte": 873,
+              "end_byte": 895
+            },
+            "name_span": {
+              "start": {
+                "line": 36,
+                "column": 32
+              },
+              "end": {
+                "line": 36,
+                "column": 45
+              },
+              "start_byte": 857,
+              "end_byte": 870
+            }
+          },
+          "visibility": {
+            "level": "Public",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "modifiers": [
+            {
+              "type": "Static"
+            }
+          ],
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            },
+            "container": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            },
+            "references": [
+              {
+                "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+                "name": "PublicWidget"
+              }
+            ]
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069282978,
+            "updated_at_epoch_ms": 1791069283281
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "6cf98111408b718649c1dff8a90b24e67a209d545124e762fcd152bf7b0c91ed",
+          "language": "CSharp",
+          "kind": "Method",
+          "identity": {
+            "name": "MethodWithLocals",
+            "display_name": "MethodWithLocals",
+            "qualified_name": "PublicWidget::MethodWithLocals",
+            "module_path": "PublicWidget",
+            "stable_key": "c_sharp::c_sharp.cs::Method::PublicWidget::MethodWithLocals::0"
+          },
+          "source": {
+            "file_path": "c_sharp.cs",
+            "declaration_span": {
+              "start": {
+                "line": 38,
+                "column": 5
+              },
+              "end": {
+                "line": 42,
+                "column": 6
+              },
+              "start_byte": 902,
+              "end_byte": 1026
+            },
+            "body_span": {
+              "start": {
+                "line": 39,
+                "column": 5
+              },
+              "end": {
+                "line": 42,
+                "column": 6
+              },
+              "start_byte": 947,
+              "end_byte": 1026
+            },
+            "name_span": {
+              "start": {
+                "line": 38,
+                "column": 9
+              },
+              "end": {
+                "line": 38,
+                "column": 25
+              },
+              "start_byte": 906,
+              "end_byte": 922
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "int",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "int"
+              },
+              {
+                "kind": "Canonical",
+                "text": "int"
+              }
+            ]
+          },
+          "relations": {
+            "parent": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            },
+            "container": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            },
+            "references": [
+              {
+                "id": "92e63cffc9586ae99e5a897aa2f94915520eacdfa553884e432eec536e00ba72",
+                "name": "parameterValue",
+                "qualified_name": "PublicWidget::parameterValue"
+              },
+              {
+                "id": "a0eff5bc7c59169de246c2651b925a5530e24246ebd59006cedaa94bb0fd5536",
+                "name": "localValue",
+                "qualified_name": "PublicWidget::localValue"
+              }
+            ]
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069282978,
+            "updated_at_epoch_ms": 1791069283281
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "parameters": [
+                {
+                  "name": "parameterValue",
+                  "position": 0,
+                  "type_text": "int",
+                  "is_optional": false,
+                  "is_variadic": false,
+                  "is_keyword_only": false,
+                  "is_positional_only": false
+                }
+              ],
+              "return_info": {
+                "type_text": "int",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 1
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "92e63cffc9586ae99e5a897aa2f94915520eacdfa553884e432eec536e00ba72",
+          "language": "CSharp",
+          "kind": "Parameter",
+          "identity": {
+            "name": "parameterValue",
+            "display_name": "parameterValue",
+            "qualified_name": "PublicWidget::parameterValue",
+            "module_path": "PublicWidget",
+            "stable_key": "c_sharp::c_sharp.cs::Parameter::PublicWidget::parameterValue::0"
+          },
+          "source": {
+            "file_path": "c_sharp.cs",
+            "declaration_span": {
+              "start": {
+                "line": 38,
+                "column": 30
+              },
+              "end": {
+                "line": 38,
+                "column": 44
+              },
+              "start_byte": 927,
+              "end_byte": 941
+            },
+            "name_span": {
+              "start": {
+                "line": 38,
+                "column": 30
+              },
+              "end": {
+                "line": 38,
+                "column": 44
+              },
+              "start_byte": 927,
+              "end_byte": 941
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            },
+            "container": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            },
+            "referenced_by": [
+              {
+                "id": "6cf98111408b718649c1dff8a90b24e67a209d545124e762fcd152bf7b0c91ed",
+                "name": "MethodWithLocals",
+                "qualified_name": "PublicWidget::MethodWithLocals"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069282978,
+            "updated_at_epoch_ms": 1791069283281
+          },
+          "kind_data": {
+            "kind_data_type": "Parameter",
+            "data": {
+              "name": "parameterValue",
+              "position": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "a0eff5bc7c59169de246c2651b925a5530e24246ebd59006cedaa94bb0fd5536",
+          "language": "CSharp",
+          "kind": "Variable",
+          "identity": {
+            "name": "localValue",
+            "display_name": "localValue",
+            "qualified_name": "PublicWidget::localValue",
+            "module_path": "PublicWidget",
+            "stable_key": "c_sharp::c_sharp.cs::Variable::PublicWidget::localValue::0"
+          },
+          "source": {
+            "file_path": "c_sharp.cs",
+            "declaration_span": {
+              "start": {
+                "line": 40,
+                "column": 13
+              },
+              "end": {
+                "line": 40,
+                "column": 23
+              },
+              "start_byte": 961,
+              "end_byte": 971
+            },
+            "name_span": {
+              "start": {
+                "line": 40,
+                "column": 13
+              },
+              "end": {
+                "line": 40,
+                "column": 23
+              },
+              "start_byte": 961,
+              "end_byte": 971
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            },
+            "container": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            },
+            "referenced_by": [
+              {
+                "id": "6cf98111408b718649c1dff8a90b24e67a209d545124e762fcd152bf7b0c91ed",
+                "name": "MethodWithLocals",
+                "qualified_name": "PublicWidget::MethodWithLocals"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069282978,
+            "updated_at_epoch_ms": 1791069283281
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "0e053e2da30a2e4037234cf079128215c92784c1245df68ef7274c4bc348b367",
+          "language": "CSharp",
+          "kind": "Class",
+          "identity": {
+            "name": "PrivateNestedClass",
+            "display_name": "PrivateNestedClass",
+            "qualified_name": "PublicWidget::PrivateNestedClass",
+            "module_path": "PublicWidget",
+            "stable_key": "c_sharp::c_sharp.cs::Class::PublicWidget::PrivateNestedClass::0"
+          },
+          "source": {
+            "file_path": "c_sharp.cs",
+            "declaration_span": {
+              "start": {
+                "line": 44,
+                "column": 5
+              },
+              "end": {
+                "line": 47,
+                "column": 6
+              },
+              "start_byte": 1032,
+              "end_byte": 1129
+            },
+            "body_span": {
+              "start": {
+                "line": 45,
+                "column": 5
+              },
+              "end": {
+                "line": 47,
+                "column": 6
+              },
+              "start_byte": 1069,
+              "end_byte": 1129
+            },
+            "name_span": {
+              "start": {
+                "line": 44,
+                "column": 19
+              },
+              "end": {
+                "line": 44,
+                "column": 37
+              },
+              "start_byte": 1046,
+              "end_byte": 1064
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            },
+            "container": {
+              "id": "cf138b9b93ba97be0cd82b61caeaff01540f00fb41b89e7942484285b1d3734c",
+              "name": "PublicWidget"
+            },
+            "members": [
+              {
+                "id": "39a2d143f69c9440001570b6f0ee1e2b5fd815e84d218c2a00bb1ee42607c7eb",
+                "name": "PublicMethodInPrivateClass",
+                "qualified_name": "PrivateNestedClass::PublicMethodInPrivateClass"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069282978,
+            "updated_at_epoch_ms": 1791069283281
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "39a2d143f69c9440001570b6f0ee1e2b5fd815e84d218c2a00bb1ee42607c7eb",
+          "language": "CSharp",
+          "kind": "Method",
+          "identity": {
+            "name": "PublicMethodInPrivateClass",
+            "display_name": "PublicMethodInPrivateClass",
+            "qualified_name": "PrivateNestedClass::PublicMethodInPrivateClass",
+            "module_path": "PrivateNestedClass",
+            "stable_key": "c_sharp::c_sharp.cs::Method::PrivateNestedClass::PublicMethodInPrivateClass::0"
+          },
+          "source": {
+            "file_path": "c_sharp.cs",
+            "declaration_span": {
+              "start": {
+                "line": 46,
+                "column": 9
+              },
+              "end": {
+                "line": 46,
+                "column": 53
+              },
+              "start_byte": 1079,
+              "end_byte": 1123
+            },
+            "body_span": {
+              "start": {
+                "line": 46,
+                "column": 50
+              },
+              "end": {
+                "line": 46,
+                "column": 53
+              },
+              "start_byte": 1120,
+              "end_byte": 1123
+            },
+            "name_span": {
+              "start": {
+                "line": 46,
+                "column": 21
+              },
+              "end": {
+                "line": 46,
+                "column": 47
+              },
+              "start_byte": 1091,
+              "end_byte": 1117
+            }
+          },
+          "visibility": {
+            "level": "Public",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "void",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "void"
+              },
+              {
+                "kind": "Canonical",
+                "text": "void"
+              }
+            ]
+          },
+          "relations": {
+            "parent": {
+              "id": "0e053e2da30a2e4037234cf079128215c92784c1245df68ef7274c4bc348b367",
+              "name": "PrivateNestedClass",
+              "qualified_name": "PublicWidget::PrivateNestedClass"
+            },
+            "container": {
+              "id": "0e053e2da30a2e4037234cf079128215c92784c1245df68ef7274c4bc348b367",
+              "name": "PrivateNestedClass",
+              "qualified_name": "PublicWidget::PrivateNestedClass"
+            }
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069282978,
+            "updated_at_epoch_ms": 1791069283281
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "void",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "3bdbd24f815a0a7e7ba9e8f2455c46cba2f355c875a43343717c487887023ee1",
+          "language": "CSharp",
+          "kind": "Class",
+          "identity": {
+            "name": "UnmarkedTopLevelClass",
+            "display_name": "UnmarkedTopLevelClass",
+            "stable_key": "c_sharp::c_sharp.cs::Class::UnmarkedTopLevelClass::0"
+          },
+          "source": {
+            "file_path": "c_sharp.cs",
+            "declaration_span": {
+              "start": {
+                "line": 50,
+                "column": 1
+              },
+              "end": {
+                "line": 53,
+                "column": 2
+              },
+              "start_byte": 1133,
+              "end_byte": 1207
+            },
+            "body_span": {
+              "start": {
+                "line": 51,
+                "column": 1
+              },
+              "end": {
+                "line": 53,
+                "column": 2
+              },
+              "start_byte": 1161,
+              "end_byte": 1207
+            },
+            "name_span": {
+              "start": {
+                "line": 50,
+                "column": 7
+              },
+              "end": {
+                "line": 50,
+                "column": 28
+              },
+              "start_byte": 1139,
+              "end_byte": 1160
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "members": [
+              {
+                "id": "63570e398ea22c7c59c443f6f0b6039a6be8d80b823e9c4ea1243aa4ed8eaa6a",
+                "name": "UnmarkedTopLevelClassMethod",
+                "qualified_name": "UnmarkedTopLevelClass::UnmarkedTopLevelClassMethod"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069282978,
+            "updated_at_epoch_ms": 1791069283281
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "63570e398ea22c7c59c443f6f0b6039a6be8d80b823e9c4ea1243aa4ed8eaa6a",
+          "language": "CSharp",
+          "kind": "Method",
+          "identity": {
+            "name": "UnmarkedTopLevelClassMethod",
+            "display_name": "UnmarkedTopLevelClassMethod",
+            "qualified_name": "UnmarkedTopLevelClass::UnmarkedTopLevelClassMethod",
+            "module_path": "UnmarkedTopLevelClass",
+            "stable_key": "c_sharp::c_sharp.cs::Method::UnmarkedTopLevelClass::UnmarkedTopLevelClassMethod::0"
+          },
+          "source": {
+            "file_path": "c_sharp.cs",
+            "declaration_span": {
+              "start": {
+                "line": 52,
+                "column": 5
+              },
+              "end": {
+                "line": 52,
+                "column": 43
+              },
+              "start_byte": 1167,
+              "end_byte": 1205
+            },
+            "body_span": {
+              "start": {
+                "line": 52,
+                "column": 40
+              },
+              "end": {
+                "line": 52,
+                "column": 43
+              },
+              "start_byte": 1202,
+              "end_byte": 1205
+            },
+            "name_span": {
+              "start": {
+                "line": 52,
+                "column": 10
+              },
+              "end": {
+                "line": 52,
+                "column": 37
+              },
+              "start_byte": 1172,
+              "end_byte": 1199
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "void",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "void"
+              },
+              {
+                "kind": "Canonical",
+                "text": "void"
+              }
+            ]
+          },
+          "relations": {
+            "parent": {
+              "id": "3bdbd24f815a0a7e7ba9e8f2455c46cba2f355c875a43343717c487887023ee1",
+              "name": "UnmarkedTopLevelClass"
+            },
+            "container": {
+              "id": "3bdbd24f815a0a7e7ba9e8f2455c46cba2f355c875a43343717c487887023ee1",
+              "name": "UnmarkedTopLevelClass"
+            }
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069282978,
+            "updated_at_epoch_ms": 1791069283281
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "void",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "00ee42459f0137824962af7a67f4f99dc5ae147b61f555a941c03f3ab1a7884a",
+          "language": "CSharp",
+          "kind": "Class",
+          "identity": {
+            "name": "InternalClass",
+            "display_name": "InternalClass",
+            "stable_key": "c_sharp::c_sharp.cs::Class::InternalClass::0"
+          },
+          "source": {
+            "file_path": "c_sharp.cs",
+            "declaration_span": {
+              "start": {
+                "line": 55,
+                "column": 1
+              },
+              "end": {
+                "line": 55,
+                "column": 33
+              },
+              "start_byte": 1209,
+              "end_byte": 1241
+            },
+            "body_span": {
+              "start": {
+                "line": 55,
+                "column": 30
+              },
+              "end": {
+                "line": 55,
+                "column": 33
+              },
+              "start_byte": 1238,
+              "end_byte": 1241
+            },
+            "name_span": {
+              "start": {
+                "line": 55,
+                "column": 16
+              },
+              "end": {
+                "line": 55,
+                "column": 29
+              },
+              "start_byte": 1224,
+              "end_byte": 1237
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069282978,
+            "updated_at_epoch_ms": 1791069283281
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "f4798cda4520d5b7488510d95d8878bea91ceb3fa44a1c9c3675c4ac4b28a6a5",
+          "language": "CSharp",
+          "kind": "Class",
+          "identity": {
+            "name": "FileLocalClass",
+            "display_name": "FileLocalClass",
+            "stable_key": "c_sharp::c_sharp.cs::Class::FileLocalClass::0"
+          },
+          "source": {
+            "file_path": "c_sharp.cs",
+            "declaration_span": {
+              "start": {
+                "line": 57,
+                "column": 1
+              },
+              "end": {
+                "line": 57,
+                "column": 30
+              },
+              "start_byte": 1243,
+              "end_byte": 1272
+            },
+            "body_span": {
+              "start": {
+                "line": 57,
+                "column": 27
+              },
+              "end": {
+                "line": 57,
+                "column": 30
+              },
+              "start_byte": 1269,
+              "end_byte": 1272
+            },
+            "name_span": {
+              "start": {
+                "line": 57,
+                "column": 12
+              },
+              "end": {
+                "line": 57,
+                "column": 26
+              },
+              "start_byte": 1254,
+              "end_byte": 1268
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069282978,
+            "updated_at_epoch_ms": 1791069283281
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "4673d5bb0a29184d3089199bfd5b9c44222e21a3445d7c3fcdd86bb1afb6ff63",
+          "language": "CSharp",
+          "kind": "Type",
+          "identity": {
+            "name": "PublicStruct",
+            "display_name": "PublicStruct",
+            "stable_key": "c_sharp::c_sharp.cs::Type::PublicStruct::0"
+          },
+          "source": {
+            "file_path": "c_sharp.cs",
+            "declaration_span": {
+              "start": {
+                "line": 59,
+                "column": 1
+              },
+              "end": {
+                "line": 63,
+                "column": 2
+              },
+              "start_byte": 1274,
+              "end_byte": 1367
+            },
+            "body_span": {
+              "start": {
+                "line": 60,
+                "column": 1
+              },
+              "end": {
+                "line": 63,
+                "column": 2
+              },
+              "start_byte": 1301,
+              "end_byte": 1367
+            },
+            "name_span": {
+              "start": {
+                "line": 59,
+                "column": 15
+              },
+              "end": {
+                "line": 59,
+                "column": 27
+              },
+              "start_byte": 1288,
+              "end_byte": 1300
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "members": [
+              {
+                "id": "ce3aa6088a219a2006bf604527c2993751758c0f8b1521e79cdd30d79a1e2377",
+                "name": "StructPublicField",
+                "qualified_name": "PublicStruct::StructPublicField"
+              },
+              {
+                "id": "b1fddfae90132dda10ea17b16b6cde25967185fac0dfa359b63a4ce446c19d91",
+                "name": "StructUnmarkedField",
+                "qualified_name": "PublicStruct::StructUnmarkedField"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069282978,
+            "updated_at_epoch_ms": 1791069283281
+          },
+          "kind_data": {
+            "kind_data_type": "Type",
+            "data": {
+              "fields": [
+                {
+                  "name": "StructPublicField",
+                  "type_text": "int",
+                  "visibility": "Public",
+                  "is_static": false,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                },
+                {
+                  "name": "StructUnmarkedField",
+                  "type_text": "int",
+                  "is_static": false,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                }
+              ],
+              "is_abstract": false,
+              "is_final": false,
+              "is_sealed": false,
+              "is_open": false,
+              "is_partial": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "ce3aa6088a219a2006bf604527c2993751758c0f8b1521e79cdd30d79a1e2377",
+          "language": "CSharp",
+          "kind": "Field",
+          "identity": {
+            "name": "StructPublicField",
+            "display_name": "StructPublicField",
+            "qualified_name": "PublicStruct::StructPublicField",
+            "module_path": "PublicStruct",
+            "stable_key": "c_sharp::c_sharp.cs::Field::PublicStruct::StructPublicField::0"
+          },
+          "source": {
+            "file_path": "c_sharp.cs",
+            "declaration_span": {
+              "start": {
+                "line": 61,
+                "column": 16
+              },
+              "end": {
+                "line": 61,
+                "column": 33
+              },
+              "start_byte": 1318,
+              "end_byte": 1335
+            },
+            "name_span": {
+              "start": {
+                "line": 61,
+                "column": 16
+              },
+              "end": {
+                "line": 61,
+                "column": 33
+              },
+              "start_byte": 1318,
+              "end_byte": 1335
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "4673d5bb0a29184d3089199bfd5b9c44222e21a3445d7c3fcdd86bb1afb6ff63",
+              "name": "PublicStruct"
+            },
+            "container": {
+              "id": "4673d5bb0a29184d3089199bfd5b9c44222e21a3445d7c3fcdd86bb1afb6ff63",
+              "name": "PublicStruct"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069282978,
+            "updated_at_epoch_ms": 1791069283281
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "StructPublicField",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "b1fddfae90132dda10ea17b16b6cde25967185fac0dfa359b63a4ce446c19d91",
+          "language": "CSharp",
+          "kind": "Field",
+          "identity": {
+            "name": "StructUnmarkedField",
+            "display_name": "StructUnmarkedField",
+            "qualified_name": "PublicStruct::StructUnmarkedField",
+            "module_path": "PublicStruct",
+            "stable_key": "c_sharp::c_sharp.cs::Field::PublicStruct::StructUnmarkedField::0"
+          },
+          "source": {
+            "file_path": "c_sharp.cs",
+            "declaration_span": {
+              "start": {
+                "line": 62,
+                "column": 9
+              },
+              "end": {
+                "line": 62,
+                "column": 28
+              },
+              "start_byte": 1345,
+              "end_byte": 1364
+            },
+            "name_span": {
+              "start": {
+                "line": 62,
+                "column": 9
+              },
+              "end": {
+                "line": 62,
+                "column": 28
+              },
+              "start_byte": 1345,
+              "end_byte": 1364
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "4673d5bb0a29184d3089199bfd5b9c44222e21a3445d7c3fcdd86bb1afb6ff63",
+              "name": "PublicStruct"
+            },
+            "container": {
+              "id": "4673d5bb0a29184d3089199bfd5b9c44222e21a3445d7c3fcdd86bb1afb6ff63",
+              "name": "PublicStruct"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069282978,
+            "updated_at_epoch_ms": 1791069283281
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "StructUnmarkedField",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "1cfefebc3477ce5bb866adcfdafbcb5d1bf377d0527a29ad642d85c156a2e879",
+          "language": "CSharp",
+          "kind": "Interface",
+          "identity": {
+            "name": "IShape",
+            "display_name": "IShape",
+            "stable_key": "c_sharp::c_sharp.cs::Interface::IShape::0"
+          },
+          "source": {
+            "file_path": "c_sharp.cs",
+            "declaration_span": {
+              "start": {
+                "line": 65,
+                "column": 1
+              },
+              "end": {
+                "line": 76,
+                "column": 2
+              },
+              "start_byte": 1369,
+              "end_byte": 1535
+            },
+            "body_span": {
+              "start": {
+                "line": 66,
+                "column": 1
+              },
+              "end": {
+                "line": 76,
+                "column": 2
+              },
+              "start_byte": 1393,
+              "end_byte": 1535
+            },
+            "name_span": {
+              "start": {
+                "line": 65,
+                "column": 18
+              },
+              "end": {
+                "line": 65,
+                "column": 24
+              },
+              "start_byte": 1386,
+              "end_byte": 1392
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "members": [
+              {
+                "id": "a5184e8bd72a6d898942a59c423af5112bf1bd2a7bf64f2ae8d1d5acc806bbd5",
+                "name": "Area",
+                "qualified_name": "IShape::Area"
+              },
+              {
+                "id": "30e9c5d6d023a654128d21735457cfd0e94decf4c7aebd4ae436800970c4722d",
+                "name": "Draw",
+                "qualified_name": "IShape::Draw"
+              },
+              {
+                "id": "588353cb1231aad0b95091fb2c420d4845f69bbd3f075c5527693ce0020f52ba",
+                "name": "Unit",
+                "qualified_name": "IShape::Unit"
+              },
+              {
+                "id": "ff2d1a8a0efb4efc938f5c174e2bba7507b2fe9356aebd8aa88bc2d9afc3de97",
+                "name": "NestedHelper",
+                "qualified_name": "IShape::NestedHelper"
+              },
+              {
+                "id": "45b33a935c3fde82587fe36b62501e1d31ff5b621be8e856561c3dbe92b6db8c",
+                "name": "Log",
+                "qualified_name": "IShape::Log"
+              }
+            ],
+            "referenced_by": [
+              {
+                "id": "588353cb1231aad0b95091fb2c420d4845f69bbd3f075c5527693ce0020f52ba",
+                "name": "Unit",
+                "qualified_name": "IShape::Unit"
+              },
+              {
+                "id": "cb0dfbaece6818ba06721fed7d16a27ff5126a93978f697260e7af06e798c13f",
+                "name": "Square"
+              },
+              {
+                "id": "425d6933ca42dcee98e45ea2ed551a89d94e7bde06d1352bd1ff474c34bfd736",
+                "name": "Area",
+                "qualified_name": "Square::Area"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069282978,
+            "updated_at_epoch_ms": 1791069283281
+          },
+          "kind_data": {
+            "kind_data_type": "Type",
+            "data": {
+              "fields": [
+                {
+                  "name": "Area",
+                  "type_text": "double Area();",
+                  "visibility": "Public",
+                  "is_static": false,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                },
+                {
+                  "name": "Draw",
+                  "type_text": "void Draw() { }",
+                  "visibility": "Public",
+                  "is_static": false,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                },
+                {
+                  "name": "IShape",
+                  "type_text": "static IShape Unit() => new Square();",
+                  "visibility": "Public",
+                  "is_static": false,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                },
+                {
+                  "name": "Log",
+                  "type_text": "private void Log() { }",
+                  "visibility": "Public",
+                  "is_static": false,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                }
+              ],
+              "is_abstract": false,
+              "is_final": false,
+              "is_sealed": false,
+              "is_open": false,
+              "is_partial": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "a5184e8bd72a6d898942a59c423af5112bf1bd2a7bf64f2ae8d1d5acc806bbd5",
+          "language": "CSharp",
+          "kind": "Method",
+          "identity": {
+            "name": "Area",
+            "display_name": "Area",
+            "qualified_name": "IShape::Area",
+            "module_path": "IShape",
+            "stable_key": "c_sharp::c_sharp.cs::Method::IShape::Area::0"
+          },
+          "source": {
+            "file_path": "c_sharp.cs",
+            "declaration_span": {
+              "start": {
+                "line": 67,
+                "column": 5
+              },
+              "end": {
+                "line": 67,
+                "column": 19
+              },
+              "start_byte": 1399,
+              "end_byte": 1413
+            },
+            "name_span": {
+              "start": {
+                "line": 67,
+                "column": 12
+              },
+              "end": {
+                "line": 67,
+                "column": 16
+              },
+              "start_byte": 1406,
+              "end_byte": 1410
+            }
+          },
+          "visibility": {
+            "level": "Public",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "double",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "double"
+              },
+              {
+                "kind": "Canonical",
+                "text": "double"
+              }
+            ]
+          },
+          "relations": {
+            "parent": {
+              "id": "1cfefebc3477ce5bb866adcfdafbcb5d1bf377d0527a29ad642d85c156a2e879",
+              "name": "IShape"
+            },
+            "container": {
+              "id": "1cfefebc3477ce5bb866adcfdafbcb5d1bf377d0527a29ad642d85c156a2e879",
+              "name": "IShape"
+            }
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069282978,
+            "updated_at_epoch_ms": 1791069283281
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "double",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "30e9c5d6d023a654128d21735457cfd0e94decf4c7aebd4ae436800970c4722d",
+          "language": "CSharp",
+          "kind": "Method",
+          "identity": {
+            "name": "Draw",
+            "display_name": "Draw",
+            "qualified_name": "IShape::Draw",
+            "module_path": "IShape",
+            "stable_key": "c_sharp::c_sharp.cs::Method::IShape::Draw::0"
+          },
+          "source": {
+            "file_path": "c_sharp.cs",
+            "declaration_span": {
+              "start": {
+                "line": 69,
+                "column": 5
+              },
+              "end": {
+                "line": 69,
+                "column": 20
+              },
+              "start_byte": 1419,
+              "end_byte": 1434
+            },
+            "body_span": {
+              "start": {
+                "line": 69,
+                "column": 17
+              },
+              "end": {
+                "line": 69,
+                "column": 20
+              },
+              "start_byte": 1431,
+              "end_byte": 1434
+            },
+            "name_span": {
+              "start": {
+                "line": 69,
+                "column": 10
+              },
+              "end": {
+                "line": 69,
+                "column": 14
+              },
+              "start_byte": 1424,
+              "end_byte": 1428
+            }
+          },
+          "visibility": {
+            "level": "Public",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "void",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "void"
+              },
+              {
+                "kind": "Canonical",
+                "text": "void"
+              }
+            ]
+          },
+          "relations": {
+            "parent": {
+              "id": "1cfefebc3477ce5bb866adcfdafbcb5d1bf377d0527a29ad642d85c156a2e879",
+              "name": "IShape"
+            },
+            "container": {
+              "id": "1cfefebc3477ce5bb866adcfdafbcb5d1bf377d0527a29ad642d85c156a2e879",
+              "name": "IShape"
+            }
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069282978,
+            "updated_at_epoch_ms": 1791069283281
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "void",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "588353cb1231aad0b95091fb2c420d4845f69bbd3f075c5527693ce0020f52ba",
+          "language": "CSharp",
+          "kind": "Method",
+          "identity": {
+            "name": "Unit",
+            "display_name": "Unit",
+            "qualified_name": "IShape::Unit",
+            "module_path": "IShape",
+            "stable_key": "c_sharp::c_sharp.cs::Method::IShape::Unit::0"
+          },
+          "source": {
+            "file_path": "c_sharp.cs",
+            "declaration_span": {
+              "start": {
+                "line": 71,
+                "column": 5
+              },
+              "end": {
+                "line": 71,
+                "column": 42
+              },
+              "start_byte": 1440,
+              "end_byte": 1477
+            },
+            "body_span": {
+              "start": {
+                "line": 71,
+                "column": 26
+              },
+              "end": {
+                "line": 71,
+                "column": 41
+              },
+              "start_byte": 1461,
+              "end_byte": 1476
+            },
+            "name_span": {
+              "start": {
+                "line": 71,
+                "column": 19
+              },
+              "end": {
+                "line": 71,
+                "column": 23
+              },
+              "start_byte": 1454,
+              "end_byte": 1458
+            }
+          },
+          "visibility": {
+            "level": "Public",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "modifiers": [
+            {
+              "type": "Static"
+            }
+          ],
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "1cfefebc3477ce5bb866adcfdafbcb5d1bf377d0527a29ad642d85c156a2e879",
+              "name": "IShape"
+            },
+            "container": {
+              "id": "1cfefebc3477ce5bb866adcfdafbcb5d1bf377d0527a29ad642d85c156a2e879",
+              "name": "IShape"
+            },
+            "references": [
+              {
+                "id": "1cfefebc3477ce5bb866adcfdafbcb5d1bf377d0527a29ad642d85c156a2e879",
+                "name": "IShape"
+              },
+              {
+                "id": "cb0dfbaece6818ba06721fed7d16a27ff5126a93978f697260e7af06e798c13f",
+                "name": "Square"
+              }
+            ]
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069282978,
+            "updated_at_epoch_ms": 1791069283281
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "ff2d1a8a0efb4efc938f5c174e2bba7507b2fe9356aebd8aa88bc2d9afc3de97",
+          "language": "CSharp",
+          "kind": "Class",
+          "identity": {
+            "name": "NestedHelper",
+            "display_name": "NestedHelper",
+            "qualified_name": "IShape::NestedHelper",
+            "module_path": "IShape",
+            "stable_key": "c_sharp::c_sharp.cs::Class::IShape::NestedHelper::0"
+          },
+          "source": {
+            "file_path": "c_sharp.cs",
+            "declaration_span": {
+              "start": {
+                "line": 73,
+                "column": 5
+              },
+              "end": {
+                "line": 73,
+                "column": 27
+              },
+              "start_byte": 1483,
+              "end_byte": 1505
+            },
+            "body_span": {
+              "start": {
+                "line": 73,
+                "column": 24
+              },
+              "end": {
+                "line": 73,
+                "column": 27
+              },
+              "start_byte": 1502,
+              "end_byte": 1505
+            },
+            "name_span": {
+              "start": {
+                "line": 73,
+                "column": 11
+              },
+              "end": {
+                "line": 73,
+                "column": 23
+              },
+              "start_byte": 1489,
+              "end_byte": 1501
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "1cfefebc3477ce5bb866adcfdafbcb5d1bf377d0527a29ad642d85c156a2e879",
+              "name": "IShape"
+            },
+            "container": {
+              "id": "1cfefebc3477ce5bb866adcfdafbcb5d1bf377d0527a29ad642d85c156a2e879",
+              "name": "IShape"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069282979,
+            "updated_at_epoch_ms": 1791069283281
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "45b33a935c3fde82587fe36b62501e1d31ff5b621be8e856561c3dbe92b6db8c",
+          "language": "CSharp",
+          "kind": "Method",
+          "identity": {
+            "name": "Log",
+            "display_name": "Log",
+            "qualified_name": "IShape::Log",
+            "module_path": "IShape",
+            "stable_key": "c_sharp::c_sharp.cs::Method::IShape::Log::0"
+          },
+          "source": {
+            "file_path": "c_sharp.cs",
+            "declaration_span": {
+              "start": {
+                "line": 75,
+                "column": 5
+              },
+              "end": {
+                "line": 75,
+                "column": 27
+              },
+              "start_byte": 1511,
+              "end_byte": 1533
+            },
+            "body_span": {
+              "start": {
+                "line": 75,
+                "column": 24
+              },
+              "end": {
+                "line": 75,
+                "column": 27
+              },
+              "start_byte": 1530,
+              "end_byte": 1533
+            },
+            "name_span": {
+              "start": {
+                "line": 75,
+                "column": 18
+              },
+              "end": {
+                "line": 75,
+                "column": 21
+              },
+              "start_byte": 1524,
+              "end_byte": 1527
+            }
+          },
+          "visibility": {
+            "level": "Private",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "void",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "void"
+              },
+              {
+                "kind": "Canonical",
+                "text": "void"
+              }
+            ]
+          },
+          "relations": {
+            "parent": {
+              "id": "1cfefebc3477ce5bb866adcfdafbcb5d1bf377d0527a29ad642d85c156a2e879",
+              "name": "IShape"
+            },
+            "container": {
+              "id": "1cfefebc3477ce5bb866adcfdafbcb5d1bf377d0527a29ad642d85c156a2e879",
+              "name": "IShape"
+            }
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069282979,
+            "updated_at_epoch_ms": 1791069283281
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "void",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "cb0dfbaece6818ba06721fed7d16a27ff5126a93978f697260e7af06e798c13f",
+          "language": "CSharp",
+          "kind": "Class",
+          "identity": {
+            "name": "Square",
+            "display_name": "Square",
+            "stable_key": "c_sharp::c_sharp.cs::Class::Square::0"
+          },
+          "source": {
+            "file_path": "c_sharp.cs",
+            "declaration_span": {
+              "start": {
+                "line": 78,
+                "column": 1
+              },
+              "end": {
+                "line": 83,
+                "column": 2
+              },
+              "start_byte": 1537,
+              "end_byte": 1629
+            },
+            "body_span": {
+              "start": {
+                "line": 79,
+                "column": 1
+              },
+              "end": {
+                "line": 83,
+                "column": 2
+              },
+              "start_byte": 1566,
+              "end_byte": 1629
+            },
+            "name_span": {
+              "start": {
+                "line": 78,
+                "column": 14
+              },
+              "end": {
+                "line": 78,
+                "column": 20
+              },
+              "start_byte": 1550,
+              "end_byte": 1556
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "members": [
+              {
+                "id": "425d6933ca42dcee98e45ea2ed551a89d94e7bde06d1352bd1ff474c34bfd736",
+                "name": "Area",
+                "qualified_name": "Square::Area"
+              },
+              {
+                "id": "6f575c8182596675a7b258a0d93a7f336c014912954cde7c088cec6b47fe6f5c",
+                "name": "Paint",
+                "qualified_name": "Square::Paint"
+              }
+            ],
+            "references": [
+              {
+                "id": "1cfefebc3477ce5bb866adcfdafbcb5d1bf377d0527a29ad642d85c156a2e879",
+                "name": "IShape"
+              }
+            ],
+            "referenced_by": [
+              {
+                "id": "588353cb1231aad0b95091fb2c420d4845f69bbd3f075c5527693ce0020f52ba",
+                "name": "Unit",
+                "qualified_name": "IShape::Unit"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069282979,
+            "updated_at_epoch_ms": 1791069283281
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "425d6933ca42dcee98e45ea2ed551a89d94e7bde06d1352bd1ff474c34bfd736",
+          "language": "CSharp",
+          "kind": "Method",
+          "identity": {
+            "name": "Area",
+            "display_name": "Area",
+            "qualified_name": "Square::Area",
+            "module_path": "Square",
+            "stable_key": "c_sharp::c_sharp.cs::Method::Square::Area::0"
+          },
+          "source": {
+            "file_path": "c_sharp.cs",
+            "declaration_span": {
+              "start": {
+                "line": 80,
+                "column": 5
+              },
+              "end": {
+                "line": 80,
+                "column": 31
+              },
+              "start_byte": 1572,
+              "end_byte": 1598
+            },
+            "body_span": {
+              "start": {
+                "line": 80,
+                "column": 26
+              },
+              "end": {
+                "line": 80,
+                "column": 30
+              },
+              "start_byte": 1593,
+              "end_byte": 1597
+            },
+            "name_span": {
+              "start": {
+                "line": 80,
+                "column": 19
+              },
+              "end": {
+                "line": 80,
+                "column": 23
+              },
+              "start_byte": 1586,
+              "end_byte": 1590
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "double",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "double"
+              },
+              {
+                "kind": "Canonical",
+                "text": "double"
+              }
+            ]
+          },
+          "relations": {
+            "parent": {
+              "id": "cb0dfbaece6818ba06721fed7d16a27ff5126a93978f697260e7af06e798c13f",
+              "name": "Square"
+            },
+            "container": {
+              "id": "cb0dfbaece6818ba06721fed7d16a27ff5126a93978f697260e7af06e798c13f",
+              "name": "Square"
+            },
+            "references": [
+              {
+                "id": "1cfefebc3477ce5bb866adcfdafbcb5d1bf377d0527a29ad642d85c156a2e879",
+                "name": "IShape"
+              }
+            ]
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069282979,
+            "updated_at_epoch_ms": 1791069283281
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "double",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "6f575c8182596675a7b258a0d93a7f336c014912954cde7c088cec6b47fe6f5c",
+          "language": "CSharp",
+          "kind": "Method",
+          "identity": {
+            "name": "Paint",
+            "display_name": "Paint",
+            "qualified_name": "Square::Paint",
+            "module_path": "Square",
+            "stable_key": "c_sharp::c_sharp.cs::Method::Square::Paint::0"
+          },
+          "source": {
+            "file_path": "c_sharp.cs",
+            "declaration_span": {
+              "start": {
+                "line": 82,
+                "column": 5
+              },
+              "end": {
+                "line": 82,
+                "column": 28
+              },
+              "start_byte": 1604,
+              "end_byte": 1627
+            },
+            "body_span": {
+              "start": {
+                "line": 82,
+                "column": 25
+              },
+              "end": {
+                "line": 82,
+                "column": 28
+              },
+              "start_byte": 1624,
+              "end_byte": 1627
+            },
+            "name_span": {
+              "start": {
+                "line": 82,
+                "column": 17
+              },
+              "end": {
+                "line": 82,
+                "column": 22
+              },
+              "start_byte": 1616,
+              "end_byte": 1621
+            }
+          },
+          "visibility": {
+            "level": "Public",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "void",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "void"
+              },
+              {
+                "kind": "Canonical",
+                "text": "void"
+              }
+            ]
+          },
+          "relations": {
+            "parent": {
+              "id": "cb0dfbaece6818ba06721fed7d16a27ff5126a93978f697260e7af06e798c13f",
+              "name": "Square"
+            },
+            "container": {
+              "id": "cb0dfbaece6818ba06721fed7d16a27ff5126a93978f697260e7af06e798c13f",
+              "name": "Square"
+            }
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069282979,
+            "updated_at_epoch_ms": 1791069283281
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "void",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "b50bfd7c32fa3874e09f3fcbe6eb1c02ad5b7ff2e8732de2a0119da13f4b96d4",
+          "language": "CSharp",
+          "kind": "Enum",
+          "identity": {
+            "name": "PublicColor",
+            "display_name": "PublicColor",
+            "stable_key": "c_sharp::c_sharp.cs::Enum::PublicColor::0"
+          },
+          "source": {
+            "file_path": "c_sharp.cs",
+            "declaration_span": {
+              "start": {
+                "line": 85,
+                "column": 1
+              },
+              "end": {
+                "line": 89,
+                "column": 2
+              },
+              "start_byte": 1631,
+              "end_byte": 1678
+            },
+            "body_span": {
+              "start": {
+                "line": 86,
+                "column": 1
+              },
+              "end": {
+                "line": 89,
+                "column": 2
+              },
+              "start_byte": 1655,
+              "end_byte": 1678
+            },
+            "name_span": {
+              "start": {
+                "line": 85,
+                "column": 13
+              },
+              "end": {
+                "line": 85,
+                "column": 24
+              },
+              "start_byte": 1643,
+              "end_byte": 1654
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069282979,
+            "updated_at_epoch_ms": 1791069283281
+          },
+          "kind_data": {
+            "kind_data_type": "Enum",
+            "data": {
+              "variants": [
+                {
+                  "name": "Red"
+                },
+                {
+                  "name": "Green"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "5c274a2e5828628163eec715477321ad27da80fbc0a91320843da2fcd91e2835",
+          "language": "CSharp",
+          "kind": "Enum",
+          "identity": {
+            "name": "UnmarkedEnum",
+            "display_name": "UnmarkedEnum",
+            "stable_key": "c_sharp::c_sharp.cs::Enum::UnmarkedEnum::0"
+          },
+          "source": {
+            "file_path": "c_sharp.cs",
+            "declaration_span": {
+              "start": {
+                "line": 91,
+                "column": 1
+              },
+              "end": {
+                "line": 94,
+                "column": 2
+              },
+              "start_byte": 1680,
+              "end_byte": 1717
+            },
+            "body_span": {
+              "start": {
+                "line": 92,
+                "column": 1
+              },
+              "end": {
+                "line": 94,
+                "column": 2
+              },
+              "start_byte": 1698,
+              "end_byte": 1717
+            },
+            "name_span": {
+              "start": {
+                "line": 91,
+                "column": 6
+              },
+              "end": {
+                "line": 91,
+                "column": 18
+              },
+              "start_byte": 1685,
+              "end_byte": 1697
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069282979,
+            "updated_at_epoch_ms": 1791069283281
+          },
+          "kind_data": {
+            "kind_data_type": "Enum",
+            "data": {
+              "variants": [
+                {
+                  "name": "OnlyMember"
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "imports": [
+        {
+          "name": "System",
+          "source": "System",
+          "span": {
+            "start": {
+              "line": 2,
+              "column": 7
+            },
+            "end": {
+              "line": 2,
+              "column": 13
+            },
+            "start_byte": 61,
+            "end_byte": 67
+          },
+          "statement_span": {
+            "start": {
+              "line": 2,
+              "column": 1
+            },
+            "end": {
+              "line": 2,
+              "column": 14
+            },
+            "start_byte": 55,
+            "end_byte": 68
+          },
+          "symbol": {
+            "name": "System"
+          }
+        }
+      ],
+      "exports": [],
+      "diagnostics": [
+        {
+          "kind": "Semantic",
+          "message": "Imported symbol 'System' is never used",
+          "range": {
+            "start_line": 2,
+            "start_column": 7,
+            "end_line": 2,
+            "end_column": 13,
+            "start_byte": 61,
+            "end_byte": 67
+          },
+          "severity": "Warning",
+          "rule": "unused-import",
+          "context": {
+            "line_text": "using System;",
+            "underline_column": 6,
+            "underline_length": 6
+          },
+          "metadata": {
+            "category": "Style",
+            "confidence": "Low",
+            "source": "SemanticAnalysis",
+            "default_severity": "Warning",
+            "effective_severity": "Warning"
+          }
+        }
+      ]
+    }
+  ],
+  "adapter_metadata": []
+}

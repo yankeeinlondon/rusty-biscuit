@@ -1,0 +1,757 @@
+{
+  "schema_version": {
+    "major": 2,
+    "minor": 0
+  },
+  "root_dir": "/private/tmp/claude-501/-Volumes-coding-wt-rusty-biscuit-feat-symbols/d63e5266-3b40-40b9-970c-1a0bd24ad9bf/scratchpad/baseline",
+  "language": "Zsh",
+  "files": [
+    {
+      "file": "zsh.zsh",
+      "language": "Zsh",
+      "hash": "74f0b9e4cead359f",
+      "symbols": [
+        {
+          "name": "paren_function",
+          "kind": "Function",
+          "range": {
+            "start_line": 4,
+            "start_column": 1,
+            "end_line": 7,
+            "end_column": 2,
+            "start_byte": 90,
+            "end_byte": 161
+          },
+          "language": "Zsh",
+          "file": "zsh.zsh",
+          "doc_comment": "#!/usr/bin/env zsh\n# Symbol-kind fixture for Zsh. Shell functions have no access levels."
+        },
+        {
+          "name": "local_value",
+          "kind": "Variable",
+          "range": {
+            "start_line": 5,
+            "start_column": 9,
+            "end_line": 5,
+            "end_column": 20,
+            "start_byte": 117,
+            "end_byte": 128
+          },
+          "language": "Zsh",
+          "file": "zsh.zsh"
+        },
+        {
+          "name": "keyword_function",
+          "kind": "Function",
+          "range": {
+            "start_line": 9,
+            "start_column": 1,
+            "end_line": 11,
+            "end_column": 2,
+            "start_byte": 163,
+            "end_byte": 213
+          },
+          "language": "Zsh",
+          "file": "zsh.zsh"
+        },
+        {
+          "name": "keyword_with_parens",
+          "kind": "Function",
+          "range": {
+            "start_line": 13,
+            "start_column": 1,
+            "end_line": 15,
+            "end_column": 2,
+            "start_byte": 215,
+            "end_byte": 267
+          },
+          "language": "Zsh",
+          "file": "zsh.zsh"
+        },
+        {
+          "name": "_conventionally_private_function",
+          "kind": "Function",
+          "range": {
+            "start_line": 17,
+            "start_column": 1,
+            "end_line": 19,
+            "end_column": 2,
+            "start_byte": 269,
+            "end_byte": 311
+          },
+          "language": "Zsh",
+          "file": "zsh.zsh"
+        },
+        {
+          "name": "GLOBAL_VARIABLE",
+          "kind": "Variable",
+          "range": {
+            "start_line": 21,
+            "start_column": 1,
+            "end_line": 21,
+            "end_column": 16,
+            "start_byte": 313,
+            "end_byte": 328
+          },
+          "language": "Zsh",
+          "file": "zsh.zsh"
+        }
+      ],
+      "imports": [],
+      "exports": [],
+      "locals": [
+        {
+          "name": "paren_function",
+          "kind": "Function",
+          "range": {
+            "start_line": 4,
+            "start_column": 1,
+            "end_line": 7,
+            "end_column": 2,
+            "start_byte": 90,
+            "end_byte": 161
+          },
+          "language": "Zsh",
+          "file": "zsh.zsh",
+          "doc_comment": "#!/usr/bin/env zsh\n# Symbol-kind fixture for Zsh. Shell functions have no access levels."
+        },
+        {
+          "name": "local_value",
+          "kind": "Variable",
+          "range": {
+            "start_line": 5,
+            "start_column": 9,
+            "end_line": 5,
+            "end_column": 20,
+            "start_byte": 117,
+            "end_byte": 128
+          },
+          "language": "Zsh",
+          "file": "zsh.zsh"
+        },
+        {
+          "name": "keyword_function",
+          "kind": "Function",
+          "range": {
+            "start_line": 9,
+            "start_column": 1,
+            "end_line": 11,
+            "end_column": 2,
+            "start_byte": 163,
+            "end_byte": 213
+          },
+          "language": "Zsh",
+          "file": "zsh.zsh"
+        },
+        {
+          "name": "keyword_with_parens",
+          "kind": "Function",
+          "range": {
+            "start_line": 13,
+            "start_column": 1,
+            "end_line": 15,
+            "end_column": 2,
+            "start_byte": 215,
+            "end_byte": 267
+          },
+          "language": "Zsh",
+          "file": "zsh.zsh"
+        },
+        {
+          "name": "_conventionally_private_function",
+          "kind": "Function",
+          "range": {
+            "start_line": 17,
+            "start_column": 1,
+            "end_line": 19,
+            "end_column": 2,
+            "start_byte": 269,
+            "end_byte": 311
+          },
+          "language": "Zsh",
+          "file": "zsh.zsh"
+        },
+        {
+          "name": "GLOBAL_VARIABLE",
+          "kind": "Variable",
+          "range": {
+            "start_line": 21,
+            "start_column": 1,
+            "end_line": 21,
+            "end_column": 16,
+            "start_byte": 313,
+            "end_byte": 328
+          },
+          "language": "Zsh",
+          "file": "zsh.zsh"
+        }
+      ],
+      "lint": [],
+      "syntax": []
+    }
+  ],
+  "symbol_indexes": [
+    {
+      "schema_version": {
+        "major": 2,
+        "minor": 0
+      },
+      "file": "zsh.zsh",
+      "language": "Zsh",
+      "file_hash": "74f0b9e4cead359f",
+      "completed_passes": [
+        "Parse",
+        "Bind",
+        "Semantic",
+        "Docs"
+      ],
+      "symbols": [
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "ac6dc9ad5195eb81c6c16a60a3e241e9a0843eadbce7a8ea4b22e67e1eb292ef",
+          "language": "Zsh",
+          "kind": "Function",
+          "identity": {
+            "name": "paren_function",
+            "display_name": "paren_function",
+            "stable_key": "zsh::zsh.zsh::Function::paren_function::0"
+          },
+          "source": {
+            "file_path": "zsh.zsh",
+            "declaration_span": {
+              "start": {
+                "line": 4,
+                "column": 1
+              },
+              "end": {
+                "line": 7,
+                "column": 2
+              },
+              "start_byte": 90,
+              "end_byte": 161
+            },
+            "body_span": {
+              "start": {
+                "line": 4,
+                "column": 18
+              },
+              "end": {
+                "line": 7,
+                "column": 2
+              },
+              "start_byte": 107,
+              "end_byte": 161
+            },
+            "name_span": {
+              "start": {
+                "line": 4,
+                "column": 1
+              },
+              "end": {
+                "line": 4,
+                "column": 15
+              },
+              "start_byte": 90,
+              "end_byte": 104
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {
+            "raw_doc": "#!/usr/bin/env zsh\n# Symbol-kind fixture for Zsh. Shell functions have no access levels.",
+            "comments": [
+              {
+                "kind": "Doc",
+                "attachment": "Leading",
+                "span": {
+                  "start": {
+                    "line": 4,
+                    "column": 1
+                  },
+                  "end": {
+                    "line": 4,
+                    "column": 15
+                  },
+                  "start_byte": 90,
+                  "end_byte": 104
+                },
+                "raw_text": "#!/usr/bin/env zsh\n# Symbol-kind fixture for Zsh. Shell functions have no access levels.",
+                "cleaned_text": "#!/usr/bin/env zsh\n# Symbol-kind fixture for Zsh. Shell functions have no access levels."
+              }
+            ],
+            "parsed": {
+              "summary": "#!/usr/bin/env zsh # Symbol-kind fixture for Zsh. Shell functions have no access levels."
+            }
+          },
+          "type_info": {},
+          "relations": {
+            "references": [
+              {
+                "id": "db83e5ef082953b1e418d1845189674165bfbd3a70ab9792b612cb173251b505",
+                "name": "local_value"
+              }
+            ]
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069305919,
+            "updated_at_epoch_ms": 1791069306145
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "db83e5ef082953b1e418d1845189674165bfbd3a70ab9792b612cb173251b505",
+          "language": "Zsh",
+          "kind": "Variable",
+          "identity": {
+            "name": "local_value",
+            "display_name": "local_value",
+            "stable_key": "zsh::zsh.zsh::Variable::local_value::0"
+          },
+          "source": {
+            "file_path": "zsh.zsh",
+            "declaration_span": {
+              "start": {
+                "line": 5,
+                "column": 9
+              },
+              "end": {
+                "line": 5,
+                "column": 20
+              },
+              "start_byte": 117,
+              "end_byte": 128
+            },
+            "name_span": {
+              "start": {
+                "line": 5,
+                "column": 9
+              },
+              "end": {
+                "line": 5,
+                "column": 20
+              },
+              "start_byte": 117,
+              "end_byte": 128
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "referenced_by": [
+              {
+                "id": "ac6dc9ad5195eb81c6c16a60a3e241e9a0843eadbce7a8ea4b22e67e1eb292ef",
+                "name": "paren_function"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069305919,
+            "updated_at_epoch_ms": 1791069306145
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "b9880112ed5cff95e7732ffbb397a86d914245805eaf263cda5101a1c4474d7d",
+          "language": "Zsh",
+          "kind": "Function",
+          "identity": {
+            "name": "keyword_function",
+            "display_name": "keyword_function",
+            "stable_key": "zsh::zsh.zsh::Function::keyword_function::0"
+          },
+          "source": {
+            "file_path": "zsh.zsh",
+            "declaration_span": {
+              "start": {
+                "line": 9,
+                "column": 1
+              },
+              "end": {
+                "line": 11,
+                "column": 2
+              },
+              "start_byte": 163,
+              "end_byte": 213
+            },
+            "body_span": {
+              "start": {
+                "line": 9,
+                "column": 27
+              },
+              "end": {
+                "line": 11,
+                "column": 2
+              },
+              "start_byte": 189,
+              "end_byte": 213
+            },
+            "name_span": {
+              "start": {
+                "line": 9,
+                "column": 10
+              },
+              "end": {
+                "line": 9,
+                "column": 26
+              },
+              "start_byte": 172,
+              "end_byte": 188
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069305919,
+            "updated_at_epoch_ms": 1791069306145
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "08277acd58e84ab62118f293ab14f160c6bffc71e2f8dbe8d9098e857bd23689",
+          "language": "Zsh",
+          "kind": "Function",
+          "identity": {
+            "name": "keyword_with_parens",
+            "display_name": "keyword_with_parens",
+            "stable_key": "zsh::zsh.zsh::Function::keyword_with_parens::0"
+          },
+          "source": {
+            "file_path": "zsh.zsh",
+            "declaration_span": {
+              "start": {
+                "line": 13,
+                "column": 1
+              },
+              "end": {
+                "line": 15,
+                "column": 2
+              },
+              "start_byte": 215,
+              "end_byte": 267
+            },
+            "body_span": {
+              "start": {
+                "line": 13,
+                "column": 32
+              },
+              "end": {
+                "line": 15,
+                "column": 2
+              },
+              "start_byte": 246,
+              "end_byte": 267
+            },
+            "name_span": {
+              "start": {
+                "line": 13,
+                "column": 10
+              },
+              "end": {
+                "line": 13,
+                "column": 29
+              },
+              "start_byte": 224,
+              "end_byte": 243
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069305919,
+            "updated_at_epoch_ms": 1791069306145
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "22f558fe3007f096331a664e44a955cde2fcdffae6c26153ddb606f2bfb923a6",
+          "language": "Zsh",
+          "kind": "Function",
+          "identity": {
+            "name": "_conventionally_private_function",
+            "display_name": "_conventionally_private_function",
+            "stable_key": "zsh::zsh.zsh::Function::_conventionally_private_function::0"
+          },
+          "source": {
+            "file_path": "zsh.zsh",
+            "declaration_span": {
+              "start": {
+                "line": 17,
+                "column": 1
+              },
+              "end": {
+                "line": 19,
+                "column": 2
+              },
+              "start_byte": 269,
+              "end_byte": 311
+            },
+            "body_span": {
+              "start": {
+                "line": 17,
+                "column": 36
+              },
+              "end": {
+                "line": 19,
+                "column": 2
+              },
+              "start_byte": 304,
+              "end_byte": 311
+            },
+            "name_span": {
+              "start": {
+                "line": 17,
+                "column": 1
+              },
+              "end": {
+                "line": 17,
+                "column": 33
+              },
+              "start_byte": 269,
+              "end_byte": 301
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069305919,
+            "updated_at_epoch_ms": 1791069306145
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "355bb10c6ae99f9b044996c50f8e144250ac3666fc063d48d58efb525d51eb82",
+          "language": "Zsh",
+          "kind": "Variable",
+          "identity": {
+            "name": "GLOBAL_VARIABLE",
+            "display_name": "GLOBAL_VARIABLE",
+            "stable_key": "zsh::zsh.zsh::Variable::GLOBAL_VARIABLE::0"
+          },
+          "source": {
+            "file_path": "zsh.zsh",
+            "declaration_span": {
+              "start": {
+                "line": 21,
+                "column": 1
+              },
+              "end": {
+                "line": 21,
+                "column": 16
+              },
+              "start_byte": 313,
+              "end_byte": 328
+            },
+            "name_span": {
+              "start": {
+                "line": 21,
+                "column": 1
+              },
+              "end": {
+                "line": 21,
+                "column": 16
+              },
+              "start_byte": 313,
+              "end_byte": 328
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069305919,
+            "updated_at_epoch_ms": 1791069306145
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        }
+      ],
+      "imports": [],
+      "exports": [],
+      "diagnostics": []
+    }
+  ],
+  "adapter_metadata": []
+}

@@ -1,0 +1,536 @@
+{
+  "schema_version": {
+    "major": 2,
+    "minor": 0
+  },
+  "root_dir": "/private/tmp/claude-501/-Volumes-coding-wt-rusty-biscuit-feat-symbols/d63e5266-3b40-40b9-970c-1a0bd24ad9bf/scratchpad/baseline",
+  "language": "JavaScript",
+  "files": [
+    {
+      "file": "javascript_script.js",
+      "language": "JavaScript",
+      "hash": "21a1b4e37254814d",
+      "symbols": [
+        {
+          "name": "scriptFunction",
+          "kind": "Function",
+          "range": {
+            "start_line": 4,
+            "start_column": 1,
+            "end_line": 4,
+            "end_column": 29,
+            "start_byte": 122,
+            "end_byte": 150
+          },
+          "language": "JavaScript",
+          "file": "javascript_script.js",
+          "doc_comment": "Classic script: no import, export, require, or module.exports.\nUnexported top-level declarations are Unknown here."
+        },
+        {
+          "name": "scriptVariable",
+          "kind": "Variable",
+          "range": {
+            "start_line": 6,
+            "start_column": 5,
+            "end_line": 6,
+            "end_column": 19,
+            "start_byte": 156,
+            "end_byte": 170
+          },
+          "language": "JavaScript",
+          "file": "javascript_script.js"
+        },
+        {
+          "name": "ScriptClass",
+          "kind": "Class",
+          "range": {
+            "start_line": 8,
+            "start_column": 1,
+            "end_line": 10,
+            "end_column": 2,
+            "start_byte": 177,
+            "end_byte": 218
+          },
+          "language": "JavaScript",
+          "file": "javascript_script.js"
+        },
+        {
+          "name": "scriptMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 9,
+            "start_column": 3,
+            "end_line": 9,
+            "end_column": 20,
+            "start_byte": 199,
+            "end_byte": 216
+          },
+          "language": "JavaScript",
+          "file": "javascript_script.js",
+          "container_name": "ScriptClass"
+        }
+      ],
+      "imports": [],
+      "exports": [],
+      "locals": [
+        {
+          "name": "scriptFunction",
+          "kind": "Function",
+          "range": {
+            "start_line": 4,
+            "start_column": 1,
+            "end_line": 4,
+            "end_column": 29,
+            "start_byte": 122,
+            "end_byte": 150
+          },
+          "language": "JavaScript",
+          "file": "javascript_script.js",
+          "doc_comment": "Classic script: no import, export, require, or module.exports.\nUnexported top-level declarations are Unknown here."
+        },
+        {
+          "name": "scriptVariable",
+          "kind": "Variable",
+          "range": {
+            "start_line": 6,
+            "start_column": 5,
+            "end_line": 6,
+            "end_column": 19,
+            "start_byte": 156,
+            "end_byte": 170
+          },
+          "language": "JavaScript",
+          "file": "javascript_script.js"
+        },
+        {
+          "name": "ScriptClass",
+          "kind": "Class",
+          "range": {
+            "start_line": 8,
+            "start_column": 1,
+            "end_line": 10,
+            "end_column": 2,
+            "start_byte": 177,
+            "end_byte": 218
+          },
+          "language": "JavaScript",
+          "file": "javascript_script.js"
+        },
+        {
+          "name": "scriptMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 9,
+            "start_column": 3,
+            "end_line": 9,
+            "end_column": 20,
+            "start_byte": 199,
+            "end_byte": 216
+          },
+          "language": "JavaScript",
+          "file": "javascript_script.js",
+          "container_name": "ScriptClass"
+        }
+      ],
+      "lint": [],
+      "syntax": []
+    }
+  ],
+  "symbol_indexes": [
+    {
+      "schema_version": {
+        "major": 2,
+        "minor": 0
+      },
+      "file": "javascript_script.js",
+      "language": "JavaScript",
+      "file_hash": "21a1b4e37254814d",
+      "completed_passes": [
+        "Parse",
+        "Bind",
+        "Semantic",
+        "Docs"
+      ],
+      "symbols": [
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "243e3f9130c0fdf3add882c696a71739d312fcbd60f714af1c8707b8a7f7a1f8",
+          "language": "JavaScript",
+          "kind": "Function",
+          "identity": {
+            "name": "scriptFunction",
+            "display_name": "scriptFunction",
+            "stable_key": "javascript::javascript_script.js::Function::scriptFunction::0"
+          },
+          "source": {
+            "file_path": "javascript_script.js",
+            "declaration_span": {
+              "start": {
+                "line": 4,
+                "column": 1
+              },
+              "end": {
+                "line": 4,
+                "column": 29
+              },
+              "start_byte": 122,
+              "end_byte": 150
+            },
+            "body_span": {
+              "start": {
+                "line": 4,
+                "column": 27
+              },
+              "end": {
+                "line": 4,
+                "column": 29
+              },
+              "start_byte": 148,
+              "end_byte": 150
+            },
+            "name_span": {
+              "start": {
+                "line": 4,
+                "column": 10
+              },
+              "end": {
+                "line": 4,
+                "column": 24
+              },
+              "start_byte": 131,
+              "end_byte": 145
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {
+            "raw_doc": "Classic script: no import, export, require, or module.exports.\nUnexported top-level declarations are Unknown here.",
+            "comments": [
+              {
+                "kind": "Doc",
+                "attachment": "Leading",
+                "span": {
+                  "start": {
+                    "line": 4,
+                    "column": 10
+                  },
+                  "end": {
+                    "line": 4,
+                    "column": 24
+                  },
+                  "start_byte": 131,
+                  "end_byte": 145
+                },
+                "raw_text": "Classic script: no import, export, require, or module.exports.\nUnexported top-level declarations are Unknown here.",
+                "cleaned_text": "Classic script: no import, export, require, or module.exports.\nUnexported top-level declarations are Unknown here."
+              }
+            ],
+            "parsed": {
+              "summary": "Classic script: no import, export, require, or module.exports. Unexported top-level declarations are Unknown here."
+            }
+          },
+          "type_info": {},
+          "relations": {},
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069294587,
+            "updated_at_epoch_ms": 1791069294671
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "22d6ce245fd3222245143c9cd439b634e15be7489eb07b5cfdd816f4aa301fd8",
+          "language": "JavaScript",
+          "kind": "Variable",
+          "identity": {
+            "name": "scriptVariable",
+            "display_name": "scriptVariable",
+            "stable_key": "javascript::javascript_script.js::Variable::scriptVariable::0"
+          },
+          "source": {
+            "file_path": "javascript_script.js",
+            "declaration_span": {
+              "start": {
+                "line": 6,
+                "column": 5
+              },
+              "end": {
+                "line": 6,
+                "column": 19
+              },
+              "start_byte": 156,
+              "end_byte": 170
+            },
+            "name_span": {
+              "start": {
+                "line": 6,
+                "column": 5
+              },
+              "end": {
+                "line": 6,
+                "column": 19
+              },
+              "start_byte": 156,
+              "end_byte": 170
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069294587,
+            "updated_at_epoch_ms": 1791069294671
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "2e7726f52c138a09eeae14a5a7ceceae99a1429237abe7076026dd61899b0f82",
+          "language": "JavaScript",
+          "kind": "Class",
+          "identity": {
+            "name": "ScriptClass",
+            "display_name": "ScriptClass",
+            "stable_key": "javascript::javascript_script.js::Class::ScriptClass::0"
+          },
+          "source": {
+            "file_path": "javascript_script.js",
+            "declaration_span": {
+              "start": {
+                "line": 8,
+                "column": 1
+              },
+              "end": {
+                "line": 10,
+                "column": 2
+              },
+              "start_byte": 177,
+              "end_byte": 218
+            },
+            "body_span": {
+              "start": {
+                "line": 8,
+                "column": 19
+              },
+              "end": {
+                "line": 10,
+                "column": 2
+              },
+              "start_byte": 195,
+              "end_byte": 218
+            },
+            "name_span": {
+              "start": {
+                "line": 8,
+                "column": 7
+              },
+              "end": {
+                "line": 8,
+                "column": 18
+              },
+              "start_byte": 183,
+              "end_byte": 194
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "members": [
+              {
+                "id": "e5b07536a7ce38fdf38c086e2ba4bf4c73655844610aa9509c6577ab7986dd95",
+                "name": "scriptMethod",
+                "qualified_name": "ScriptClass::scriptMethod"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069294587,
+            "updated_at_epoch_ms": 1791069294671
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "e5b07536a7ce38fdf38c086e2ba4bf4c73655844610aa9509c6577ab7986dd95",
+          "language": "JavaScript",
+          "kind": "Method",
+          "identity": {
+            "name": "scriptMethod",
+            "display_name": "scriptMethod",
+            "qualified_name": "ScriptClass::scriptMethod",
+            "module_path": "ScriptClass",
+            "stable_key": "javascript::javascript_script.js::Method::ScriptClass::scriptMethod::0"
+          },
+          "source": {
+            "file_path": "javascript_script.js",
+            "declaration_span": {
+              "start": {
+                "line": 9,
+                "column": 3
+              },
+              "end": {
+                "line": 9,
+                "column": 20
+              },
+              "start_byte": 199,
+              "end_byte": 216
+            },
+            "body_span": {
+              "start": {
+                "line": 9,
+                "column": 18
+              },
+              "end": {
+                "line": 9,
+                "column": 20
+              },
+              "start_byte": 214,
+              "end_byte": 216
+            },
+            "name_span": {
+              "start": {
+                "line": 9,
+                "column": 3
+              },
+              "end": {
+                "line": 9,
+                "column": 15
+              },
+              "start_byte": 199,
+              "end_byte": 211
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "2e7726f52c138a09eeae14a5a7ceceae99a1429237abe7076026dd61899b0f82",
+              "name": "ScriptClass"
+            },
+            "container": {
+              "id": "2e7726f52c138a09eeae14a5a7ceceae99a1429237abe7076026dd61899b0f82",
+              "name": "ScriptClass"
+            }
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069294587,
+            "updated_at_epoch_ms": 1791069294671
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        }
+      ],
+      "imports": [],
+      "exports": [],
+      "diagnostics": []
+    }
+  ],
+  "adapter_metadata": []
+}

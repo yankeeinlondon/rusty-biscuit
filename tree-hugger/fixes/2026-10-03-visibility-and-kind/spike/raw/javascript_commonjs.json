@@ -1,0 +1,656 @@
+{
+  "schema_version": {
+    "major": 2,
+    "minor": 0
+  },
+  "root_dir": "/private/tmp/claude-501/-Volumes-coding-wt-rusty-biscuit-feat-symbols/d63e5266-3b40-40b9-970c-1a0bd24ad9bf/scratchpad/baseline",
+  "language": "JavaScript",
+  "files": [
+    {
+      "file": "javascript_commonjs.js",
+      "language": "JavaScript",
+      "hash": "f751654958a4732c",
+      "symbols": [
+        {
+          "name": "path",
+          "kind": "Variable",
+          "range": {
+            "start_line": 4,
+            "start_column": 7,
+            "end_line": 4,
+            "end_column": 11,
+            "start_byte": 145,
+            "end_byte": 149
+          },
+          "language": "JavaScript",
+          "file": "javascript_commonjs.js"
+        },
+        {
+          "name": "commonjsHelper",
+          "kind": "Function",
+          "range": {
+            "start_line": 6,
+            "start_column": 1,
+            "end_line": 8,
+            "end_column": 2,
+            "start_byte": 170,
+            "end_byte": 218
+          },
+          "language": "JavaScript",
+          "file": "javascript_commonjs.js"
+        },
+        {
+          "name": "commonjsExported",
+          "kind": "Function",
+          "range": {
+            "start_line": 10,
+            "start_column": 1,
+            "end_line": 12,
+            "end_column": 2,
+            "start_byte": 220,
+            "end_byte": 278
+          },
+          "language": "JavaScript",
+          "file": "javascript_commonjs.js"
+        },
+        {
+          "name": "CommonjsClass",
+          "kind": "Class",
+          "range": {
+            "start_line": 14,
+            "start_column": 1,
+            "end_line": 16,
+            "end_column": 2,
+            "start_byte": 280,
+            "end_byte": 325
+          },
+          "language": "JavaScript",
+          "file": "javascript_commonjs.js"
+        },
+        {
+          "name": "commonjsMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 15,
+            "start_column": 3,
+            "end_line": 15,
+            "end_column": 22,
+            "start_byte": 304,
+            "end_byte": 323
+          },
+          "language": "JavaScript",
+          "file": "javascript_commonjs.js",
+          "container_name": "CommonjsClass"
+        }
+      ],
+      "imports": [],
+      "exports": [],
+      "locals": [
+        {
+          "name": "path",
+          "kind": "Variable",
+          "range": {
+            "start_line": 4,
+            "start_column": 7,
+            "end_line": 4,
+            "end_column": 11,
+            "start_byte": 145,
+            "end_byte": 149
+          },
+          "language": "JavaScript",
+          "file": "javascript_commonjs.js"
+        },
+        {
+          "name": "commonjsHelper",
+          "kind": "Function",
+          "range": {
+            "start_line": 6,
+            "start_column": 1,
+            "end_line": 8,
+            "end_column": 2,
+            "start_byte": 170,
+            "end_byte": 218
+          },
+          "language": "JavaScript",
+          "file": "javascript_commonjs.js"
+        },
+        {
+          "name": "commonjsExported",
+          "kind": "Function",
+          "range": {
+            "start_line": 10,
+            "start_column": 1,
+            "end_line": 12,
+            "end_column": 2,
+            "start_byte": 220,
+            "end_byte": 278
+          },
+          "language": "JavaScript",
+          "file": "javascript_commonjs.js"
+        },
+        {
+          "name": "CommonjsClass",
+          "kind": "Class",
+          "range": {
+            "start_line": 14,
+            "start_column": 1,
+            "end_line": 16,
+            "end_column": 2,
+            "start_byte": 280,
+            "end_byte": 325
+          },
+          "language": "JavaScript",
+          "file": "javascript_commonjs.js"
+        },
+        {
+          "name": "commonjsMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 15,
+            "start_column": 3,
+            "end_line": 15,
+            "end_column": 22,
+            "start_byte": 304,
+            "end_byte": 323
+          },
+          "language": "JavaScript",
+          "file": "javascript_commonjs.js",
+          "container_name": "CommonjsClass"
+        }
+      ],
+      "lint": [],
+      "syntax": []
+    }
+  ],
+  "symbol_indexes": [
+    {
+      "schema_version": {
+        "major": 2,
+        "minor": 0
+      },
+      "file": "javascript_commonjs.js",
+      "language": "JavaScript",
+      "file_hash": "f751654958a4732c",
+      "completed_passes": [
+        "Parse",
+        "Bind",
+        "Semantic",
+        "Docs"
+      ],
+      "symbols": [
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "a63553a8b9f2f2c58d873098228e4e93da0ca2162038ba8fc37b7077a3fca159",
+          "language": "JavaScript",
+          "kind": "Variable",
+          "identity": {
+            "name": "path",
+            "display_name": "path",
+            "stable_key": "javascript::javascript_commonjs.js::Variable::path::0"
+          },
+          "source": {
+            "file_path": "javascript_commonjs.js",
+            "declaration_span": {
+              "start": {
+                "line": 4,
+                "column": 7
+              },
+              "end": {
+                "line": 4,
+                "column": 11
+              },
+              "start_byte": 145,
+              "end_byte": 149
+            },
+            "name_span": {
+              "start": {
+                "line": 4,
+                "column": 7
+              },
+              "end": {
+                "line": 4,
+                "column": 11
+              },
+              "start_byte": 145,
+              "end_byte": 149
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "referenced_by": [
+              {
+                "id": "4a498f677b97779740031ad15dbb1611c3f5aab99ea7d5b07e85a2fb3ef2aed9",
+                "name": "commonjsHelper"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069293793,
+            "updated_at_epoch_ms": 1791069293897
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "4a498f677b97779740031ad15dbb1611c3f5aab99ea7d5b07e85a2fb3ef2aed9",
+          "language": "JavaScript",
+          "kind": "Function",
+          "identity": {
+            "name": "commonjsHelper",
+            "display_name": "commonjsHelper",
+            "stable_key": "javascript::javascript_commonjs.js::Function::commonjsHelper::0"
+          },
+          "source": {
+            "file_path": "javascript_commonjs.js",
+            "declaration_span": {
+              "start": {
+                "line": 6,
+                "column": 1
+              },
+              "end": {
+                "line": 8,
+                "column": 2
+              },
+              "start_byte": 170,
+              "end_byte": 218
+            },
+            "body_span": {
+              "start": {
+                "line": 6,
+                "column": 27
+              },
+              "end": {
+                "line": 8,
+                "column": 2
+              },
+              "start_byte": 196,
+              "end_byte": 218
+            },
+            "name_span": {
+              "start": {
+                "line": 6,
+                "column": 10
+              },
+              "end": {
+                "line": 6,
+                "column": 24
+              },
+              "start_byte": 179,
+              "end_byte": 193
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "references": [
+              {
+                "id": "a63553a8b9f2f2c58d873098228e4e93da0ca2162038ba8fc37b7077a3fca159",
+                "name": "path"
+              }
+            ],
+            "referenced_by": [
+              {
+                "id": "182ae9bd0ded255ab869095fae4b74ca020f8a9bb59139ec7e8c693dd4a3c4cc",
+                "name": "commonjsExported"
+              }
+            ]
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069293793,
+            "updated_at_epoch_ms": 1791069293897
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "182ae9bd0ded255ab869095fae4b74ca020f8a9bb59139ec7e8c693dd4a3c4cc",
+          "language": "JavaScript",
+          "kind": "Function",
+          "identity": {
+            "name": "commonjsExported",
+            "display_name": "commonjsExported",
+            "stable_key": "javascript::javascript_commonjs.js::Function::commonjsExported::0"
+          },
+          "source": {
+            "file_path": "javascript_commonjs.js",
+            "declaration_span": {
+              "start": {
+                "line": 10,
+                "column": 1
+              },
+              "end": {
+                "line": 12,
+                "column": 2
+              },
+              "start_byte": 220,
+              "end_byte": 278
+            },
+            "body_span": {
+              "start": {
+                "line": 10,
+                "column": 29
+              },
+              "end": {
+                "line": 12,
+                "column": 2
+              },
+              "start_byte": 248,
+              "end_byte": 278
+            },
+            "name_span": {
+              "start": {
+                "line": 10,
+                "column": 10
+              },
+              "end": {
+                "line": 10,
+                "column": 26
+              },
+              "start_byte": 229,
+              "end_byte": 245
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "references": [
+              {
+                "id": "4a498f677b97779740031ad15dbb1611c3f5aab99ea7d5b07e85a2fb3ef2aed9",
+                "name": "commonjsHelper"
+              }
+            ]
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069293793,
+            "updated_at_epoch_ms": 1791069293897
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "f06b035a3bae2684b97767ce1bec10cb65dbc4148ee3fd95604fa4ed41b48bea",
+          "language": "JavaScript",
+          "kind": "Class",
+          "identity": {
+            "name": "CommonjsClass",
+            "display_name": "CommonjsClass",
+            "stable_key": "javascript::javascript_commonjs.js::Class::CommonjsClass::0"
+          },
+          "source": {
+            "file_path": "javascript_commonjs.js",
+            "declaration_span": {
+              "start": {
+                "line": 14,
+                "column": 1
+              },
+              "end": {
+                "line": 16,
+                "column": 2
+              },
+              "start_byte": 280,
+              "end_byte": 325
+            },
+            "body_span": {
+              "start": {
+                "line": 14,
+                "column": 21
+              },
+              "end": {
+                "line": 16,
+                "column": 2
+              },
+              "start_byte": 300,
+              "end_byte": 325
+            },
+            "name_span": {
+              "start": {
+                "line": 14,
+                "column": 7
+              },
+              "end": {
+                "line": 14,
+                "column": 20
+              },
+              "start_byte": 286,
+              "end_byte": 299
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "members": [
+              {
+                "id": "3b0a4d85971ad8d9ba46b4fa93e7f9ec9a08b3b62fc2f3206b6ec51f436a0f79",
+                "name": "commonjsMethod",
+                "qualified_name": "CommonjsClass::commonjsMethod"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069293793,
+            "updated_at_epoch_ms": 1791069293897
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "3b0a4d85971ad8d9ba46b4fa93e7f9ec9a08b3b62fc2f3206b6ec51f436a0f79",
+          "language": "JavaScript",
+          "kind": "Method",
+          "identity": {
+            "name": "commonjsMethod",
+            "display_name": "commonjsMethod",
+            "qualified_name": "CommonjsClass::commonjsMethod",
+            "module_path": "CommonjsClass",
+            "stable_key": "javascript::javascript_commonjs.js::Method::CommonjsClass::commonjsMethod::0"
+          },
+          "source": {
+            "file_path": "javascript_commonjs.js",
+            "declaration_span": {
+              "start": {
+                "line": 15,
+                "column": 3
+              },
+              "end": {
+                "line": 15,
+                "column": 22
+              },
+              "start_byte": 304,
+              "end_byte": 323
+            },
+            "body_span": {
+              "start": {
+                "line": 15,
+                "column": 20
+              },
+              "end": {
+                "line": 15,
+                "column": 22
+              },
+              "start_byte": 321,
+              "end_byte": 323
+            },
+            "name_span": {
+              "start": {
+                "line": 15,
+                "column": 3
+              },
+              "end": {
+                "line": 15,
+                "column": 17
+              },
+              "start_byte": 304,
+              "end_byte": 318
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "f06b035a3bae2684b97767ce1bec10cb65dbc4148ee3fd95604fa4ed41b48bea",
+              "name": "CommonjsClass"
+            },
+            "container": {
+              "id": "f06b035a3bae2684b97767ce1bec10cb65dbc4148ee3fd95604fa4ed41b48bea",
+              "name": "CommonjsClass"
+            }
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069293793,
+            "updated_at_epoch_ms": 1791069293897
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        }
+      ],
+      "imports": [],
+      "exports": [],
+      "diagnostics": []
+    }
+  ],
+  "adapter_metadata": []
+}

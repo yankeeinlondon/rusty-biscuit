@@ -1,0 +1,14 @@
+  - function _conventionally_private_function bash.sh:17:1
+  - function function_keyword_function bash.sh:9:1
+  - function function_keyword_with_parens bash.sh:13:1
+  - variable GLOBAL_VARIABLE bash.sh:21:1
+  - function keyword_function bash.sh:4:1
+  - local local_value bash.sh:5:9
+=== classes
+=== functions
+  - function _conventionally_private_function bash.sh:17:1
+  - function function_keyword_function bash.sh:9:1
+  - function function_keyword_with_parens bash.sh:13:1
+  - function keyword_function bash.sh:4:1
+=== types
+(no symbols)

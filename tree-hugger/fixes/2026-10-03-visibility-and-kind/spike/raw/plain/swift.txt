@@ -1,0 +1,103 @@
+  - function classMethod [in OpenWidget] swift.swift:21:5
+  - var classProperty [in OpenWidget] swift.swift:18:15
+  - var drawableName swift.swift:80:9
+  - field east [in PlainDirection] swift.swift:75:10
+  - function fileprivateFunction swift.swift:34:1
+  - type FileprivateHidden swift.swift:52:1
+  - function fileprivateMethod [in OpenWidget] swift.swift:9:5
+  - type InnerPrivate swift.swift:42:5
+  - function instanceMethod [in OpenWidget] swift.swift:22:5
+  - function internalMethod [in OpenWidget] swift.swift:8:5
+  - let localValue swift.swift:30:9
+  - field north [in PublicDirection] swift.swift:70:10
+  - function openMethod [in OpenWidget] swift.swift:5:5
+  - type OpenWidget { publicProperty: Int, unmarkedProperty: Int, privateProperty: Int, staticProperty: Int, classProperty: Int } swift.swift:4:1
+  - function packageMethod [in OpenWidget] swift.swift:7:5
+  - parameter parameterValue swift.swift:29:23
+  - type PlainDirection swift.swift:74:1
+  - interface PlainDrawable { plainDraw: func plainDraw() } swift.swift:83:1
+  - var plainField [in PlainStruct] swift.swift:57:9
+  - type PlainStruct { plainField: Int } swift.swift:56:1
+  - function privateFunction swift.swift:36:1
+  - type PrivateHidden { privateHiddenField: Int } swift.swift:47:1
+  - var privateHiddenField [in PrivateHidden] swift.swift:48:9
+  - function privateMethod [in OpenWidget] swift.swift:10:5
+  - var privateProperty [in OpenWidget] swift.swift:15:17
+  - type PublicApi { publicApiField: Int } swift.swift:38:1
+  - var publicApiField [in PublicApi] swift.swift:39:9
+  - type PublicDirection swift.swift:69:1
+  - interface PublicDrawable { draw: func draw() } swift.swift:78:1
+  - function publicFunction swift.swift:27:1
+  - function publicMethod [in OpenWidget] swift.swift:6:5
+  - var publicProperty [in OpenWidget] swift.swift:13:16
+  - field south [in PublicDirection] swift.swift:71:10
+  - function staticMethod() -> OpenWidget [in OpenWidget] swift.swift:20:5
+  - var staticProperty [in OpenWidget] swift.swift:17:16
+  - function unmarkedFunction(parameterValue: Int) -> Int swift.swift:29:1
+  - function unmarkedMethodInFileprivateStruct [in FileprivateHidden] swift.swift:53:5
+  - function unmarkedMethodInInnerPrivate [in InnerPrivate] swift.swift:43:9
+  - function unmarkedMethodInOpenClass [in OpenWidget] swift.swift:11:5
+  - function unmarkedMethodInPlainStruct [in PlainStruct] swift.swift:58:5
+  - function unmarkedMethodInPrivateExtension [in OpenWidget] swift.swift:62:5
+  - function unmarkedMethodInPrivateStruct [in PrivateHidden] swift.swift:49:5
+  - function unmarkedMethodInPublicExtension [in OpenWidget] swift.swift:66:5
+  - function unmarkedMethodInPublicStruct [in PublicApi] swift.swift:40:5
+  - var unmarkedProperty [in OpenWidget] swift.swift:14:9
+  - field west [in PlainDirection] swift.swift:75:16
+=== classes
+swift.swift (Swift)
+  type OpenWidget [4:1]
+    Static Fields (2)
+      - staticProperty: Int
+      - classProperty: Int
+    Instance Fields (3)
+      - public publicProperty: Int
+      - unmarkedProperty: Int
+      - private privateProperty: Int
+  type PublicApi [38:1]
+    Instance Fields (1)
+      - publicApiField: Int
+  type InnerPrivate [42:5]
+  type PrivateHidden [47:1]
+    Instance Fields (1)
+      - privateHiddenField: Int
+  type FileprivateHidden [52:1]
+  type PlainStruct [56:1]
+    Instance Fields (1)
+      - plainField: Int
+  type PublicDirection [69:1]
+  type PlainDirection [74:1]
+
+=== functions
+  - function classMethod [in OpenWidget] swift.swift:21:5
+  - function fileprivateFunction swift.swift:34:1
+  - function fileprivateMethod [in OpenWidget] swift.swift:9:5
+  - function instanceMethod [in OpenWidget] swift.swift:22:5
+  - function internalMethod [in OpenWidget] swift.swift:8:5
+  - function openMethod [in OpenWidget] swift.swift:5:5
+  - function packageMethod [in OpenWidget] swift.swift:7:5
+  - function privateFunction swift.swift:36:1
+  - function privateMethod [in OpenWidget] swift.swift:10:5
+  - function publicFunction swift.swift:27:1
+  - function publicMethod [in OpenWidget] swift.swift:6:5
+  - function staticMethod() -> OpenWidget [in OpenWidget] swift.swift:20:5
+  - function unmarkedFunction(parameterValue: Int) -> Int swift.swift:29:1
+  - function unmarkedMethodInFileprivateStruct [in FileprivateHidden] swift.swift:53:5
+  - function unmarkedMethodInInnerPrivate [in InnerPrivate] swift.swift:43:9
+  - function unmarkedMethodInOpenClass [in OpenWidget] swift.swift:11:5
+  - function unmarkedMethodInPlainStruct [in PlainStruct] swift.swift:58:5
+  - function unmarkedMethodInPrivateExtension [in OpenWidget] swift.swift:62:5
+  - function unmarkedMethodInPrivateStruct [in PrivateHidden] swift.swift:49:5
+  - function unmarkedMethodInPublicExtension [in OpenWidget] swift.swift:66:5
+  - function unmarkedMethodInPublicStruct [in PublicApi] swift.swift:40:5
+=== types
+  - type FileprivateHidden swift.swift:52:1
+  - type InnerPrivate swift.swift:42:5
+  - type OpenWidget { publicProperty: Int, unmarkedProperty: Int, privateProperty: Int, staticProperty: Int, classProperty: Int } swift.swift:4:1
+  - type PlainDirection swift.swift:74:1
+  - interface PlainDrawable { plainDraw: func plainDraw() } swift.swift:83:1
+  - type PlainStruct { plainField: Int } swift.swift:56:1
+  - type PrivateHidden { privateHiddenField: Int } swift.swift:47:1
+  - type PublicApi { publicApiField: Int } swift.swift:38:1
+  - type PublicDirection swift.swift:69:1
+  - interface PublicDrawable { draw: func draw() } swift.swift:78:1

@@ -1,0 +1,46 @@
+  - method #hashPrivateMethod [in ExportedWidget] javascript.js:30:3
+  - field #hashPrivateProperty [in ExportedWidget] javascript.js:18:3
+  - method #hashPrivateStaticMethod [in ExportedWidget] javascript.js:36:3
+  - field #hashPrivateStaticProperty [in ExportedWidget] javascript.js:20:10
+  - unknown constructor javascript.js:22:3
+  - unknown constructor javascript.js:40:3
+  - const EXPORTED_CONSTANT javascript.js:12:14
+  - function exportedFunction javascript.js:5:8
+  - class ExportedWidget javascript.js:16:8
+  - parameter initialValue [in ExportedWidget] javascript.js:22:15
+  - method instanceMethod [in ModuleWidget] javascript.js:42:3
+  - const localValue javascript.js:8:9
+  - const MODULE_CONSTANT javascript.js:14:7
+  - function moduleFunction(parameterValue) javascript.js:7:1
+  - class ModuleWidget javascript.js:39:1
+  - parameter parameterValue javascript.js:7:25
+  - method staticMethod [in ExportedWidget] javascript.js:32:3
+  - field staticProperty [in ExportedWidget] javascript.js:19:10
+  - method unmarkedMethod [in ExportedWidget] javascript.js:26:3
+  - field unmarkedProperty [in ExportedWidget] javascript.js:17:3
+  - variable unmarkedProperty javascript.js:23:10
+=== classes
+javascript.js (JavaScript)
+  class ExportedWidget [16:8]
+    Instance Methods (5)
+      - constructor [22:3]
+      - unmarkedMethod [in ExportedWidget] [26:3]
+      - #hashPrivateMethod [in ExportedWidget] [30:3]
+      - staticMethod [in ExportedWidget] [32:3]
+      - #hashPrivateStaticMethod [in ExportedWidget] [36:3]
+  class ModuleWidget [39:1]
+    Instance Methods (2)
+      - constructor [40:3]
+      - instanceMethod [in ModuleWidget] [42:3]
+
+=== functions
+  - method #hashPrivateMethod [in ExportedWidget] javascript.js:30:3
+  - method #hashPrivateStaticMethod [in ExportedWidget] javascript.js:36:3
+  - function exportedFunction javascript.js:5:8
+  - method instanceMethod [in ModuleWidget] javascript.js:42:3
+  - function moduleFunction(parameterValue) javascript.js:7:1
+  - method staticMethod [in ExportedWidget] javascript.js:32:3
+  - method unmarkedMethod [in ExportedWidget] javascript.js:26:3
+=== types
+  - class ExportedWidget javascript.js:16:8
+  - class ModuleWidget javascript.js:39:1

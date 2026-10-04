@@ -1,0 +1,3871 @@
+{
+  "schema_version": {
+    "major": 2,
+    "minor": 0
+  },
+  "root_dir": "/private/tmp/claude-501/-Volumes-coding-wt-rusty-biscuit-feat-symbols/d63e5266-3b40-40b9-970c-1a0bd24ad9bf/scratchpad/baseline",
+  "language": "Python",
+  "files": [
+    {
+      "file": "python.py",
+      "language": "Python",
+      "hash": "f464853dd11ee795",
+      "symbols": [
+        {
+          "name": "module_function",
+          "kind": "Function",
+          "range": {
+            "start_line": 9,
+            "start_column": 1,
+            "end_line": 11,
+            "end_column": 23,
+            "start_byte": 164,
+            "end_byte": 274
+          },
+          "language": "Python",
+          "file": "python.py",
+          "signature": {
+            "parameters": [
+              {
+                "name": "parameter_value",
+                "type_annotation": "int"
+              }
+            ],
+            "return_type": "int"
+          }
+        },
+        {
+          "name": "parameter_value",
+          "kind": "Parameter",
+          "range": {
+            "start_line": 9,
+            "start_column": 21,
+            "end_line": 9,
+            "end_column": 36,
+            "start_byte": 184,
+            "end_byte": 199
+          },
+          "language": "Python",
+          "file": "python.py"
+        },
+        {
+          "name": "local_value",
+          "kind": "Variable",
+          "range": {
+            "start_line": 10,
+            "start_column": 5,
+            "end_line": 10,
+            "end_column": 16,
+            "start_byte": 218,
+            "end_byte": 229
+          },
+          "language": "Python",
+          "file": "python.py"
+        },
+        {
+          "name": "_conventionally_private_function",
+          "kind": "Function",
+          "range": {
+            "start_line": 14,
+            "start_column": 1,
+            "end_line": 15,
+            "end_column": 9,
+            "start_byte": 277,
+            "end_byte": 333
+          },
+          "language": "Python",
+          "file": "python.py",
+          "signature": {
+            "return_type": "None"
+          }
+        },
+        {
+          "name": "MODULE_CONSTANT",
+          "kind": "Variable",
+          "range": {
+            "start_line": 18,
+            "start_column": 1,
+            "end_line": 18,
+            "end_column": 16,
+            "start_byte": 336,
+            "end_byte": 351
+          },
+          "language": "Python",
+          "file": "python.py"
+        },
+        {
+          "name": "PlainWidget",
+          "kind": "Type",
+          "range": {
+            "start_line": 21,
+            "start_column": 1,
+            "end_line": 45,
+            "end_column": 22,
+            "start_byte": 358,
+            "end_byte": 1121
+          },
+          "language": "Python",
+          "file": "python.py",
+          "doc_comment": "MODULE_CONSTANT = 1",
+          "type_metadata": {
+            "fields": [
+              {
+                "name": "annotated_instance_field",
+                "type_annotation": "int"
+              },
+              {
+                "name": "annotated_instance_field_with_value",
+                "type_annotation": "str"
+              },
+              {
+                "name": "class_var_static_field",
+                "type_annotation": "ClassVar[int]"
+              },
+              {
+                "name": "class_var_static_field_with_value",
+                "type_annotation": "ClassVar[int]"
+              }
+            ]
+          }
+        },
+        {
+          "name": "annotated_instance_field",
+          "kind": "Field",
+          "range": {
+            "start_line": 22,
+            "start_column": 5,
+            "end_line": 22,
+            "end_column": 29,
+            "start_byte": 381,
+            "end_byte": 405
+          },
+          "language": "Python",
+          "file": "python.py",
+          "container_name": "PlainWidget"
+        },
+        {
+          "name": "annotated_instance_field_with_value",
+          "kind": "Field",
+          "range": {
+            "start_line": 23,
+            "start_column": 5,
+            "end_line": 23,
+            "end_column": 40,
+            "start_byte": 415,
+            "end_byte": 450
+          },
+          "language": "Python",
+          "file": "python.py",
+          "container_name": "PlainWidget"
+        },
+        {
+          "name": "class_var_static_field",
+          "kind": "Field",
+          "range": {
+            "start_line": 24,
+            "start_column": 5,
+            "end_line": 24,
+            "end_column": 27,
+            "start_byte": 470,
+            "end_byte": 492
+          },
+          "language": "Python",
+          "file": "python.py",
+          "container_name": "PlainWidget"
+        },
+        {
+          "name": "class_var_static_field_with_value",
+          "kind": "Field",
+          "range": {
+            "start_line": 25,
+            "start_column": 5,
+            "end_line": 25,
+            "end_column": 38,
+            "start_byte": 512,
+            "end_byte": 545
+          },
+          "language": "Python",
+          "file": "python.py",
+          "container_name": "PlainWidget"
+        },
+        {
+          "name": "unannotated_static_field",
+          "kind": "Field",
+          "range": {
+            "start_line": 26,
+            "start_column": 5,
+            "end_line": 26,
+            "end_column": 29,
+            "start_byte": 569,
+            "end_byte": 593
+          },
+          "language": "Python",
+          "file": "python.py",
+          "container_name": "PlainWidget"
+        },
+        {
+          "name": "__init__",
+          "kind": "Method",
+          "range": {
+            "start_line": 28,
+            "start_column": 5,
+            "end_line": 30,
+            "end_column": 54,
+            "start_byte": 603,
+            "end_byte": 755
+          },
+          "language": "Python",
+          "file": "python.py",
+          "container_name": "PlainWidget",
+          "doc_comment": "annotated_instance_field: int\nannotated_instance_field_with_value: str = \"value\"\nclass_var_static_field: ClassVar[int]\nclass_var_static_field_with_value: ClassVar[int] = 3\nunannotated_static_field = 4",
+          "signature": {
+            "parameters": [
+              {
+                "name": "self"
+              },
+              {
+                "name": "initial_value",
+                "type_annotation": "int"
+              }
+            ],
+            "return_type": "None"
+          }
+        },
+        {
+          "name": "self",
+          "kind": "Parameter",
+          "range": {
+            "start_line": 28,
+            "start_column": 18,
+            "end_line": 28,
+            "end_column": 22,
+            "start_byte": 616,
+            "end_byte": 620
+          },
+          "language": "Python",
+          "file": "python.py",
+          "container_name": "PlainWidget"
+        },
+        {
+          "name": "initial_value",
+          "kind": "Parameter",
+          "range": {
+            "start_line": 28,
+            "start_column": 24,
+            "end_line": 28,
+            "end_column": 37,
+            "start_byte": 622,
+            "end_byte": 635
+          },
+          "language": "Python",
+          "file": "python.py",
+          "container_name": "PlainWidget"
+        },
+        {
+          "name": "assigned_through_self",
+          "kind": "Field",
+          "range": {
+            "start_line": 29,
+            "start_column": 14,
+            "end_line": 29,
+            "end_column": 35,
+            "start_byte": 664,
+            "end_byte": 685
+          },
+          "language": "Python",
+          "file": "python.py",
+          "container_name": "PlainWidget"
+        },
+        {
+          "name": "unannotated_static_field",
+          "kind": "Field",
+          "range": {
+            "start_line": 30,
+            "start_column": 14,
+            "end_line": 30,
+            "end_column": 38,
+            "start_byte": 715,
+            "end_byte": 739
+          },
+          "language": "Python",
+          "file": "python.py",
+          "container_name": "PlainWidget"
+        },
+        {
+          "name": "instance_method",
+          "kind": "Method",
+          "range": {
+            "start_line": 32,
+            "start_column": 5,
+            "end_line": 34,
+            "end_column": 45,
+            "start_byte": 761,
+            "end_byte": 878
+          },
+          "language": "Python",
+          "file": "python.py",
+          "container_name": "PlainWidget",
+          "signature": {
+            "parameters": [
+              {
+                "name": "self"
+              }
+            ],
+            "return_type": "int"
+          }
+        },
+        {
+          "name": "self",
+          "kind": "Parameter",
+          "range": {
+            "start_line": 32,
+            "start_column": 25,
+            "end_line": 32,
+            "end_column": 29,
+            "start_byte": 781,
+            "end_byte": 785
+          },
+          "language": "Python",
+          "file": "python.py",
+          "container_name": "PlainWidget"
+        },
+        {
+          "name": "assigned_through_self",
+          "kind": "Field",
+          "range": {
+            "start_line": 33,
+            "start_column": 14,
+            "end_line": 33,
+            "end_column": 35,
+            "start_byte": 808,
+            "end_byte": 829
+          },
+          "language": "Python",
+          "file": "python.py",
+          "container_name": "PlainWidget"
+        },
+        {
+          "name": "_conventionally_private_method",
+          "kind": "Method",
+          "range": {
+            "start_line": 36,
+            "start_column": 5,
+            "end_line": 37,
+            "end_column": 13,
+            "start_byte": 884,
+            "end_byte": 946
+          },
+          "language": "Python",
+          "file": "python.py",
+          "container_name": "PlainWidget",
+          "signature": {
+            "parameters": [
+              {
+                "name": "self"
+              }
+            ],
+            "return_type": "None"
+          }
+        },
+        {
+          "name": "self",
+          "kind": "Parameter",
+          "range": {
+            "start_line": 36,
+            "start_column": 40,
+            "end_line": 36,
+            "end_column": 44,
+            "start_byte": 919,
+            "end_byte": 923
+          },
+          "language": "Python",
+          "file": "python.py",
+          "container_name": "PlainWidget"
+        },
+        {
+          "name": "static_method",
+          "kind": "Function",
+          "range": {
+            "start_line": 40,
+            "start_column": 5,
+            "end_line": 41,
+            "end_column": 30,
+            "start_byte": 970,
+            "end_byte": 1037
+          },
+          "language": "Python",
+          "file": "python.py",
+          "container_name": "PlainWidget",
+          "signature": {
+            "return_type": "\"PlainWidget\""
+          }
+        },
+        {
+          "name": "class_method",
+          "kind": "Function",
+          "range": {
+            "start_line": 44,
+            "start_column": 5,
+            "end_line": 45,
+            "end_column": 22,
+            "start_byte": 1060,
+            "end_byte": 1121
+          },
+          "language": "Python",
+          "file": "python.py",
+          "container_name": "PlainWidget",
+          "signature": {
+            "parameters": [
+              {
+                "name": "cls"
+              }
+            ],
+            "return_type": "\"PlainWidget\""
+          }
+        },
+        {
+          "name": "cls",
+          "kind": "Parameter",
+          "range": {
+            "start_line": 44,
+            "start_column": 22,
+            "end_line": 44,
+            "end_column": 25,
+            "start_byte": 1077,
+            "end_byte": 1080
+          },
+          "language": "Python",
+          "file": "python.py",
+          "container_name": "PlainWidget"
+        },
+        {
+          "name": "free_function_assigning_attribute",
+          "kind": "Function",
+          "range": {
+            "start_line": 48,
+            "start_column": 1,
+            "end_line": 49,
+            "end_column": 44,
+            "start_byte": 1124,
+            "end_byte": 1242
+          },
+          "language": "Python",
+          "file": "python.py",
+          "signature": {
+            "parameters": [
+              {
+                "name": "target_object",
+                "type_annotation": "PlainWidget"
+              }
+            ],
+            "return_type": "None"
+          }
+        },
+        {
+          "name": "target_object",
+          "kind": "Parameter",
+          "range": {
+            "start_line": 48,
+            "start_column": 39,
+            "end_line": 48,
+            "end_column": 52,
+            "start_byte": 1162,
+            "end_byte": 1175
+          },
+          "language": "Python",
+          "file": "python.py"
+        },
+        {
+          "name": "assigned_from_outside",
+          "kind": "Field",
+          "range": {
+            "start_line": 49,
+            "start_column": 19,
+            "end_line": 49,
+            "end_column": 40,
+            "start_byte": 1217,
+            "end_byte": 1238
+          },
+          "language": "Python",
+          "file": "python.py"
+        }
+      ],
+      "imports": [
+        {
+          "name": "ClassVar",
+          "range": {
+            "start_line": 6,
+            "start_column": 20,
+            "end_line": 6,
+            "end_column": 28,
+            "start_byte": 153,
+            "end_byte": 161
+          },
+          "language": "Python",
+          "file": "python.py",
+          "source": "typing"
+        }
+      ],
+      "exports": [],
+      "locals": [
+        {
+          "name": "module_function",
+          "kind": "Function",
+          "range": {
+            "start_line": 9,
+            "start_column": 1,
+            "end_line": 11,
+            "end_column": 23,
+            "start_byte": 164,
+            "end_byte": 274
+          },
+          "language": "Python",
+          "file": "python.py",
+          "signature": {
+            "parameters": [
+              {
+                "name": "parameter_value",
+                "type_annotation": "int"
+              }
+            ],
+            "return_type": "int"
+          }
+        },
+        {
+          "name": "parameter_value",
+          "kind": "Parameter",
+          "range": {
+            "start_line": 9,
+            "start_column": 21,
+            "end_line": 9,
+            "end_column": 36,
+            "start_byte": 184,
+            "end_byte": 199
+          },
+          "language": "Python",
+          "file": "python.py"
+        },
+        {
+          "name": "local_value",
+          "kind": "Variable",
+          "range": {
+            "start_line": 10,
+            "start_column": 5,
+            "end_line": 10,
+            "end_column": 16,
+            "start_byte": 218,
+            "end_byte": 229
+          },
+          "language": "Python",
+          "file": "python.py"
+        },
+        {
+          "name": "_conventionally_private_function",
+          "kind": "Function",
+          "range": {
+            "start_line": 14,
+            "start_column": 1,
+            "end_line": 15,
+            "end_column": 9,
+            "start_byte": 277,
+            "end_byte": 333
+          },
+          "language": "Python",
+          "file": "python.py",
+          "signature": {
+            "return_type": "None"
+          }
+        },
+        {
+          "name": "MODULE_CONSTANT",
+          "kind": "Variable",
+          "range": {
+            "start_line": 18,
+            "start_column": 1,
+            "end_line": 18,
+            "end_column": 16,
+            "start_byte": 336,
+            "end_byte": 351
+          },
+          "language": "Python",
+          "file": "python.py"
+        },
+        {
+          "name": "PlainWidget",
+          "kind": "Type",
+          "range": {
+            "start_line": 21,
+            "start_column": 1,
+            "end_line": 45,
+            "end_column": 22,
+            "start_byte": 358,
+            "end_byte": 1121
+          },
+          "language": "Python",
+          "file": "python.py",
+          "doc_comment": "MODULE_CONSTANT = 1",
+          "type_metadata": {
+            "fields": [
+              {
+                "name": "annotated_instance_field",
+                "type_annotation": "int"
+              },
+              {
+                "name": "annotated_instance_field_with_value",
+                "type_annotation": "str"
+              },
+              {
+                "name": "class_var_static_field",
+                "type_annotation": "ClassVar[int]"
+              },
+              {
+                "name": "class_var_static_field_with_value",
+                "type_annotation": "ClassVar[int]"
+              }
+            ]
+          }
+        },
+        {
+          "name": "annotated_instance_field",
+          "kind": "Field",
+          "range": {
+            "start_line": 22,
+            "start_column": 5,
+            "end_line": 22,
+            "end_column": 29,
+            "start_byte": 381,
+            "end_byte": 405
+          },
+          "language": "Python",
+          "file": "python.py",
+          "container_name": "PlainWidget"
+        },
+        {
+          "name": "annotated_instance_field_with_value",
+          "kind": "Field",
+          "range": {
+            "start_line": 23,
+            "start_column": 5,
+            "end_line": 23,
+            "end_column": 40,
+            "start_byte": 415,
+            "end_byte": 450
+          },
+          "language": "Python",
+          "file": "python.py",
+          "container_name": "PlainWidget"
+        },
+        {
+          "name": "class_var_static_field",
+          "kind": "Field",
+          "range": {
+            "start_line": 24,
+            "start_column": 5,
+            "end_line": 24,
+            "end_column": 27,
+            "start_byte": 470,
+            "end_byte": 492
+          },
+          "language": "Python",
+          "file": "python.py",
+          "container_name": "PlainWidget"
+        },
+        {
+          "name": "class_var_static_field_with_value",
+          "kind": "Field",
+          "range": {
+            "start_line": 25,
+            "start_column": 5,
+            "end_line": 25,
+            "end_column": 38,
+            "start_byte": 512,
+            "end_byte": 545
+          },
+          "language": "Python",
+          "file": "python.py",
+          "container_name": "PlainWidget"
+        },
+        {
+          "name": "unannotated_static_field",
+          "kind": "Field",
+          "range": {
+            "start_line": 26,
+            "start_column": 5,
+            "end_line": 26,
+            "end_column": 29,
+            "start_byte": 569,
+            "end_byte": 593
+          },
+          "language": "Python",
+          "file": "python.py",
+          "container_name": "PlainWidget"
+        },
+        {
+          "name": "__init__",
+          "kind": "Method",
+          "range": {
+            "start_line": 28,
+            "start_column": 5,
+            "end_line": 30,
+            "end_column": 54,
+            "start_byte": 603,
+            "end_byte": 755
+          },
+          "language": "Python",
+          "file": "python.py",
+          "container_name": "PlainWidget",
+          "doc_comment": "annotated_instance_field: int\nannotated_instance_field_with_value: str = \"value\"\nclass_var_static_field: ClassVar[int]\nclass_var_static_field_with_value: ClassVar[int] = 3\nunannotated_static_field = 4",
+          "signature": {
+            "parameters": [
+              {
+                "name": "self"
+              },
+              {
+                "name": "initial_value",
+                "type_annotation": "int"
+              }
+            ],
+            "return_type": "None"
+          }
+        },
+        {
+          "name": "self",
+          "kind": "Parameter",
+          "range": {
+            "start_line": 28,
+            "start_column": 18,
+            "end_line": 28,
+            "end_column": 22,
+            "start_byte": 616,
+            "end_byte": 620
+          },
+          "language": "Python",
+          "file": "python.py",
+          "container_name": "PlainWidget"
+        },
+        {
+          "name": "initial_value",
+          "kind": "Parameter",
+          "range": {
+            "start_line": 28,
+            "start_column": 24,
+            "end_line": 28,
+            "end_column": 37,
+            "start_byte": 622,
+            "end_byte": 635
+          },
+          "language": "Python",
+          "file": "python.py",
+          "container_name": "PlainWidget"
+        },
+        {
+          "name": "assigned_through_self",
+          "kind": "Field",
+          "range": {
+            "start_line": 29,
+            "start_column": 14,
+            "end_line": 29,
+            "end_column": 35,
+            "start_byte": 664,
+            "end_byte": 685
+          },
+          "language": "Python",
+          "file": "python.py",
+          "container_name": "PlainWidget"
+        },
+        {
+          "name": "unannotated_static_field",
+          "kind": "Field",
+          "range": {
+            "start_line": 30,
+            "start_column": 14,
+            "end_line": 30,
+            "end_column": 38,
+            "start_byte": 715,
+            "end_byte": 739
+          },
+          "language": "Python",
+          "file": "python.py",
+          "container_name": "PlainWidget"
+        },
+        {
+          "name": "instance_method",
+          "kind": "Method",
+          "range": {
+            "start_line": 32,
+            "start_column": 5,
+            "end_line": 34,
+            "end_column": 45,
+            "start_byte": 761,
+            "end_byte": 878
+          },
+          "language": "Python",
+          "file": "python.py",
+          "container_name": "PlainWidget",
+          "signature": {
+            "parameters": [
+              {
+                "name": "self"
+              }
+            ],
+            "return_type": "int"
+          }
+        },
+        {
+          "name": "self",
+          "kind": "Parameter",
+          "range": {
+            "start_line": 32,
+            "start_column": 25,
+            "end_line": 32,
+            "end_column": 29,
+            "start_byte": 781,
+            "end_byte": 785
+          },
+          "language": "Python",
+          "file": "python.py",
+          "container_name": "PlainWidget"
+        },
+        {
+          "name": "assigned_through_self",
+          "kind": "Field",
+          "range": {
+            "start_line": 33,
+            "start_column": 14,
+            "end_line": 33,
+            "end_column": 35,
+            "start_byte": 808,
+            "end_byte": 829
+          },
+          "language": "Python",
+          "file": "python.py",
+          "container_name": "PlainWidget"
+        },
+        {
+          "name": "_conventionally_private_method",
+          "kind": "Method",
+          "range": {
+            "start_line": 36,
+            "start_column": 5,
+            "end_line": 37,
+            "end_column": 13,
+            "start_byte": 884,
+            "end_byte": 946
+          },
+          "language": "Python",
+          "file": "python.py",
+          "container_name": "PlainWidget",
+          "signature": {
+            "parameters": [
+              {
+                "name": "self"
+              }
+            ],
+            "return_type": "None"
+          }
+        },
+        {
+          "name": "self",
+          "kind": "Parameter",
+          "range": {
+            "start_line": 36,
+            "start_column": 40,
+            "end_line": 36,
+            "end_column": 44,
+            "start_byte": 919,
+            "end_byte": 923
+          },
+          "language": "Python",
+          "file": "python.py",
+          "container_name": "PlainWidget"
+        },
+        {
+          "name": "static_method",
+          "kind": "Function",
+          "range": {
+            "start_line": 40,
+            "start_column": 5,
+            "end_line": 41,
+            "end_column": 30,
+            "start_byte": 970,
+            "end_byte": 1037
+          },
+          "language": "Python",
+          "file": "python.py",
+          "container_name": "PlainWidget",
+          "signature": {
+            "return_type": "\"PlainWidget\""
+          }
+        },
+        {
+          "name": "class_method",
+          "kind": "Function",
+          "range": {
+            "start_line": 44,
+            "start_column": 5,
+            "end_line": 45,
+            "end_column": 22,
+            "start_byte": 1060,
+            "end_byte": 1121
+          },
+          "language": "Python",
+          "file": "python.py",
+          "container_name": "PlainWidget",
+          "signature": {
+            "parameters": [
+              {
+                "name": "cls"
+              }
+            ],
+            "return_type": "\"PlainWidget\""
+          }
+        },
+        {
+          "name": "cls",
+          "kind": "Parameter",
+          "range": {
+            "start_line": 44,
+            "start_column": 22,
+            "end_line": 44,
+            "end_column": 25,
+            "start_byte": 1077,
+            "end_byte": 1080
+          },
+          "language": "Python",
+          "file": "python.py",
+          "container_name": "PlainWidget"
+        },
+        {
+          "name": "free_function_assigning_attribute",
+          "kind": "Function",
+          "range": {
+            "start_line": 48,
+            "start_column": 1,
+            "end_line": 49,
+            "end_column": 44,
+            "start_byte": 1124,
+            "end_byte": 1242
+          },
+          "language": "Python",
+          "file": "python.py",
+          "signature": {
+            "parameters": [
+              {
+                "name": "target_object",
+                "type_annotation": "PlainWidget"
+              }
+            ],
+            "return_type": "None"
+          }
+        },
+        {
+          "name": "target_object",
+          "kind": "Parameter",
+          "range": {
+            "start_line": 48,
+            "start_column": 39,
+            "end_line": 48,
+            "end_column": 52,
+            "start_byte": 1162,
+            "end_byte": 1175
+          },
+          "language": "Python",
+          "file": "python.py"
+        },
+        {
+          "name": "assigned_from_outside",
+          "kind": "Field",
+          "range": {
+            "start_line": 49,
+            "start_column": 19,
+            "end_line": 49,
+            "end_column": 40,
+            "start_byte": 1217,
+            "end_byte": 1238
+          },
+          "language": "Python",
+          "file": "python.py"
+        }
+      ],
+      "lint": [],
+      "syntax": []
+    }
+  ],
+  "symbol_indexes": [
+    {
+      "schema_version": {
+        "major": 2,
+        "minor": 0
+      },
+      "file": "python.py",
+      "language": "Python",
+      "file_hash": "f464853dd11ee795",
+      "completed_passes": [
+        "Parse",
+        "Bind",
+        "Semantic",
+        "Docs"
+      ],
+      "symbols": [
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "e66ebc3fd0054ad286a1b6ba521d485317cba9f551906036c50ed8ed3d722ad7",
+          "language": "Python",
+          "kind": "Function",
+          "identity": {
+            "name": "module_function",
+            "display_name": "module_function",
+            "stable_key": "python::python.py::Function::module_function::0"
+          },
+          "source": {
+            "file_path": "python.py",
+            "declaration_span": {
+              "start": {
+                "line": 9,
+                "column": 1
+              },
+              "end": {
+                "line": 11,
+                "column": 23
+              },
+              "start_byte": 164,
+              "end_byte": 274
+            },
+            "body_span": {
+              "start": {
+                "line": 10,
+                "column": 5
+              },
+              "end": {
+                "line": 11,
+                "column": 23
+              },
+              "start_byte": 218,
+              "end_byte": 274
+            },
+            "name_span": {
+              "start": {
+                "line": 9,
+                "column": 5
+              },
+              "end": {
+                "line": 9,
+                "column": 20
+              },
+              "start_byte": 168,
+              "end_byte": 183
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "int",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "int"
+              },
+              {
+                "kind": "Canonical",
+                "text": "int"
+              }
+            ]
+          },
+          "relations": {
+            "references": [
+              {
+                "id": "7a01b68ddc49d2b477865457efb476b3e41a562ecb4da7675e01e1d718e09ffb",
+                "name": "parameter_value"
+              },
+              {
+                "id": "e264baeb48b251f00b8e49edcf750b310f5deb84e0c025f60f57370b019b18a4",
+                "name": "local_value"
+              }
+            ]
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069298868,
+            "updated_at_epoch_ms": 1791069298994
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "parameters": [
+                {
+                  "name": "parameter_value",
+                  "position": 0,
+                  "type_text": "int",
+                  "is_optional": false,
+                  "is_variadic": false,
+                  "is_keyword_only": false,
+                  "is_positional_only": false
+                }
+              ],
+              "return_info": {
+                "type_text": "int",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 1
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "7a01b68ddc49d2b477865457efb476b3e41a562ecb4da7675e01e1d718e09ffb",
+          "language": "Python",
+          "kind": "Parameter",
+          "identity": {
+            "name": "parameter_value",
+            "display_name": "parameter_value",
+            "stable_key": "python::python.py::Parameter::parameter_value::0"
+          },
+          "source": {
+            "file_path": "python.py",
+            "declaration_span": {
+              "start": {
+                "line": 9,
+                "column": 21
+              },
+              "end": {
+                "line": 9,
+                "column": 36
+              },
+              "start_byte": 184,
+              "end_byte": 199
+            },
+            "name_span": {
+              "start": {
+                "line": 9,
+                "column": 21
+              },
+              "end": {
+                "line": 9,
+                "column": 36
+              },
+              "start_byte": 184,
+              "end_byte": 199
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "referenced_by": [
+              {
+                "id": "e66ebc3fd0054ad286a1b6ba521d485317cba9f551906036c50ed8ed3d722ad7",
+                "name": "module_function"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069298868,
+            "updated_at_epoch_ms": 1791069298994
+          },
+          "kind_data": {
+            "kind_data_type": "Parameter",
+            "data": {
+              "name": "parameter_value",
+              "position": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "e264baeb48b251f00b8e49edcf750b310f5deb84e0c025f60f57370b019b18a4",
+          "language": "Python",
+          "kind": "Variable",
+          "identity": {
+            "name": "local_value",
+            "display_name": "local_value",
+            "stable_key": "python::python.py::Variable::local_value::0"
+          },
+          "source": {
+            "file_path": "python.py",
+            "declaration_span": {
+              "start": {
+                "line": 10,
+                "column": 5
+              },
+              "end": {
+                "line": 10,
+                "column": 16
+              },
+              "start_byte": 218,
+              "end_byte": 229
+            },
+            "name_span": {
+              "start": {
+                "line": 10,
+                "column": 5
+              },
+              "end": {
+                "line": 10,
+                "column": 16
+              },
+              "start_byte": 218,
+              "end_byte": 229
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "referenced_by": [
+              {
+                "id": "e66ebc3fd0054ad286a1b6ba521d485317cba9f551906036c50ed8ed3d722ad7",
+                "name": "module_function"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069298868,
+            "updated_at_epoch_ms": 1791069298994
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "4a5c7743a68b023e54abbeb8f977d15b3ce11b3e07b678d419bd6946d44b3911",
+          "language": "Python",
+          "kind": "Function",
+          "identity": {
+            "name": "_conventionally_private_function",
+            "display_name": "_conventionally_private_function",
+            "stable_key": "python::python.py::Function::_conventionally_private_function::0"
+          },
+          "source": {
+            "file_path": "python.py",
+            "declaration_span": {
+              "start": {
+                "line": 14,
+                "column": 1
+              },
+              "end": {
+                "line": 15,
+                "column": 9
+              },
+              "start_byte": 277,
+              "end_byte": 333
+            },
+            "body_span": {
+              "start": {
+                "line": 15,
+                "column": 5
+              },
+              "end": {
+                "line": 15,
+                "column": 9
+              },
+              "start_byte": 329,
+              "end_byte": 333
+            },
+            "name_span": {
+              "start": {
+                "line": 14,
+                "column": 5
+              },
+              "end": {
+                "line": 14,
+                "column": 37
+              },
+              "start_byte": 281,
+              "end_byte": 313
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "None",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "None"
+              },
+              {
+                "kind": "Canonical",
+                "text": "None"
+              }
+            ]
+          },
+          "relations": {},
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069298868,
+            "updated_at_epoch_ms": 1791069298994
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "None",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "6d294982deaa44d13994ad40afe336feda81a3a8b6d8d28f960274fd4ab5ec0f",
+          "language": "Python",
+          "kind": "Variable",
+          "identity": {
+            "name": "MODULE_CONSTANT",
+            "display_name": "MODULE_CONSTANT",
+            "stable_key": "python::python.py::Variable::MODULE_CONSTANT::0"
+          },
+          "source": {
+            "file_path": "python.py",
+            "declaration_span": {
+              "start": {
+                "line": 18,
+                "column": 1
+              },
+              "end": {
+                "line": 18,
+                "column": 16
+              },
+              "start_byte": 336,
+              "end_byte": 351
+            },
+            "name_span": {
+              "start": {
+                "line": 18,
+                "column": 1
+              },
+              "end": {
+                "line": 18,
+                "column": 16
+              },
+              "start_byte": 336,
+              "end_byte": 351
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069298868,
+            "updated_at_epoch_ms": 1791069298994
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "fe26a3624ffd25a4d7ca572b007b7c1de73f013d9b2e641b367129374c6e406d",
+          "language": "Python",
+          "kind": "Type",
+          "identity": {
+            "name": "PlainWidget",
+            "display_name": "PlainWidget",
+            "stable_key": "python::python.py::Type::PlainWidget::0"
+          },
+          "source": {
+            "file_path": "python.py",
+            "declaration_span": {
+              "start": {
+                "line": 21,
+                "column": 1
+              },
+              "end": {
+                "line": 45,
+                "column": 22
+              },
+              "start_byte": 358,
+              "end_byte": 1121
+            },
+            "body_span": {
+              "start": {
+                "line": 22,
+                "column": 5
+              },
+              "end": {
+                "line": 45,
+                "column": 22
+              },
+              "start_byte": 381,
+              "end_byte": 1121
+            },
+            "name_span": {
+              "start": {
+                "line": 21,
+                "column": 7
+              },
+              "end": {
+                "line": 21,
+                "column": 18
+              },
+              "start_byte": 364,
+              "end_byte": 375
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {
+            "raw_doc": "MODULE_CONSTANT = 1",
+            "comments": [
+              {
+                "kind": "Doc",
+                "attachment": "Leading",
+                "span": {
+                  "start": {
+                    "line": 21,
+                    "column": 7
+                  },
+                  "end": {
+                    "line": 21,
+                    "column": 18
+                  },
+                  "start_byte": 364,
+                  "end_byte": 375
+                },
+                "raw_text": "MODULE_CONSTANT = 1",
+                "cleaned_text": "MODULE_CONSTANT = 1"
+              }
+            ],
+            "parsed": {
+              "summary": "MODULE_CONSTANT = 1"
+            }
+          },
+          "type_info": {},
+          "relations": {
+            "members": [
+              {
+                "id": "c5d158dc226c70dfc442a38f96d4710075ac752ae3e5d4a29e964cad638d857d",
+                "name": "annotated_instance_field",
+                "qualified_name": "PlainWidget::annotated_instance_field"
+              },
+              {
+                "id": "6fb304fbd088b1a652ebd9be5e6dce9bf693e5fa0c41d471f7026977feeb5ad2",
+                "name": "annotated_instance_field_with_value",
+                "qualified_name": "PlainWidget::annotated_instance_field_with_value"
+              },
+              {
+                "id": "0c9afaa420ecc5f1993ff286cc87869a4554bdb397f34cddec2990ef5c150449",
+                "name": "class_var_static_field",
+                "qualified_name": "PlainWidget::class_var_static_field"
+              },
+              {
+                "id": "e74698a7f99f9f4dcd4130c5a86e2f50707365220c94c4458b5cc881a7a31605",
+                "name": "class_var_static_field_with_value",
+                "qualified_name": "PlainWidget::class_var_static_field_with_value"
+              },
+              {
+                "id": "54da14ba1fa0d5f65503f117b5bc42bece73bff08776cbd443992f82f1d19df2",
+                "name": "unannotated_static_field",
+                "qualified_name": "PlainWidget::unannotated_static_field"
+              },
+              {
+                "id": "ba9c1a791b6b60d4235dcf43f82d5c492b9c66a26d5d2e1d50f96142a7f74244",
+                "name": "__init__",
+                "qualified_name": "PlainWidget::__init__"
+              },
+              {
+                "id": "51aebd41bd7fdaf471c2818f08b4e62c881605f394419fb2c8575e811a8ef636",
+                "name": "self",
+                "qualified_name": "PlainWidget::self"
+              },
+              {
+                "id": "4839a27d9f90c4daaace81481f0036710e017fdc1d0b7ba1e9866a9db512db0d",
+                "name": "initial_value",
+                "qualified_name": "PlainWidget::initial_value"
+              },
+              {
+                "id": "133139459cc4baa9e2d92c60a6bd91e85dcde79e249869694ac05ef4cdfc3546",
+                "name": "assigned_through_self",
+                "qualified_name": "PlainWidget::assigned_through_self"
+              },
+              {
+                "id": "c7c5c5dfe06ab77ef8d2a2ceb6977f019dca0566bf89676c2195a79c1bd3da46",
+                "name": "unannotated_static_field",
+                "qualified_name": "PlainWidget::unannotated_static_field"
+              },
+              {
+                "id": "975c9fa86cbf6a498be830d39ffbcf2b9e1795fba981e37f1f129aca200c9580",
+                "name": "instance_method",
+                "qualified_name": "PlainWidget::instance_method"
+              },
+              {
+                "id": "6e979d40c7a921afa56e42a35b39c60918c0440e320bf8f7b2a6f142cfeb4e08",
+                "name": "self",
+                "qualified_name": "PlainWidget::self"
+              },
+              {
+                "id": "d2110d043d159535473afe34a3fbdb34ec813d0bfea951ce134ce567b7396d0b",
+                "name": "assigned_through_self",
+                "qualified_name": "PlainWidget::assigned_through_self"
+              },
+              {
+                "id": "45123a135e37235959cef70af346606c3b7a89b9686c30118296db81358cd344",
+                "name": "_conventionally_private_method",
+                "qualified_name": "PlainWidget::_conventionally_private_method"
+              },
+              {
+                "id": "b44808ea55c56999327bfd20e9faf41c82a7004244cdd50c217c10a2f0c62c38",
+                "name": "self",
+                "qualified_name": "PlainWidget::self"
+              },
+              {
+                "id": "3fb701b16430032ba81055e4bcb011c155f7ccf17c2b396abcddea52b14d5471",
+                "name": "static_method",
+                "qualified_name": "PlainWidget::static_method"
+              },
+              {
+                "id": "e81ebc50a342ea5b4bf91ba39e2a24010afcb6fa26e316f676394abb98f7fe27",
+                "name": "class_method",
+                "qualified_name": "PlainWidget::class_method"
+              },
+              {
+                "id": "82f8427668b9eb3526b0b7e29cd02436f9a0653f260ce20d71d8bb2366a302d6",
+                "name": "cls",
+                "qualified_name": "PlainWidget::cls"
+              }
+            ],
+            "references": [
+              {
+                "name": "ClassVar"
+              }
+            ],
+            "referenced_by": [
+              {
+                "id": "3fb701b16430032ba81055e4bcb011c155f7ccf17c2b396abcddea52b14d5471",
+                "name": "static_method",
+                "qualified_name": "PlainWidget::static_method"
+              },
+              {
+                "id": "fd0c2ead522f96a968544c926de383492b135b522f53e9cb47b9a393b76dc645",
+                "name": "free_function_assigning_attribute"
+              }
+            ],
+            "dependencies": [
+              {
+                "name": "ClassVar"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069298868,
+            "updated_at_epoch_ms": 1791069298994
+          },
+          "kind_data": {
+            "kind_data_type": "Type",
+            "data": {
+              "fields": [
+                {
+                  "name": "annotated_instance_field",
+                  "type_text": "int",
+                  "is_static": false,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                },
+                {
+                  "name": "annotated_instance_field_with_value",
+                  "type_text": "str",
+                  "is_static": false,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                },
+                {
+                  "name": "class_var_static_field",
+                  "type_text": "ClassVar[int]",
+                  "is_static": false,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                },
+                {
+                  "name": "class_var_static_field_with_value",
+                  "type_text": "ClassVar[int]",
+                  "is_static": false,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                }
+              ],
+              "is_abstract": false,
+              "is_final": false,
+              "is_sealed": false,
+              "is_open": false,
+              "is_partial": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "c5d158dc226c70dfc442a38f96d4710075ac752ae3e5d4a29e964cad638d857d",
+          "language": "Python",
+          "kind": "Field",
+          "identity": {
+            "name": "annotated_instance_field",
+            "display_name": "annotated_instance_field",
+            "qualified_name": "PlainWidget::annotated_instance_field",
+            "module_path": "PlainWidget",
+            "stable_key": "python::python.py::Field::PlainWidget::annotated_instance_field::0"
+          },
+          "source": {
+            "file_path": "python.py",
+            "declaration_span": {
+              "start": {
+                "line": 22,
+                "column": 5
+              },
+              "end": {
+                "line": 22,
+                "column": 29
+              },
+              "start_byte": 381,
+              "end_byte": 405
+            },
+            "name_span": {
+              "start": {
+                "line": 22,
+                "column": 5
+              },
+              "end": {
+                "line": 22,
+                "column": 29
+              },
+              "start_byte": 381,
+              "end_byte": 405
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "fe26a3624ffd25a4d7ca572b007b7c1de73f013d9b2e641b367129374c6e406d",
+              "name": "PlainWidget"
+            },
+            "container": {
+              "id": "fe26a3624ffd25a4d7ca572b007b7c1de73f013d9b2e641b367129374c6e406d",
+              "name": "PlainWidget"
+            },
+            "referenced_by": [
+              {
+                "id": "975c9fa86cbf6a498be830d39ffbcf2b9e1795fba981e37f1f129aca200c9580",
+                "name": "instance_method",
+                "qualified_name": "PlainWidget::instance_method"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069298868,
+            "updated_at_epoch_ms": 1791069298994
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "annotated_instance_field",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "6fb304fbd088b1a652ebd9be5e6dce9bf693e5fa0c41d471f7026977feeb5ad2",
+          "language": "Python",
+          "kind": "Field",
+          "identity": {
+            "name": "annotated_instance_field_with_value",
+            "display_name": "annotated_instance_field_with_value",
+            "qualified_name": "PlainWidget::annotated_instance_field_with_value",
+            "module_path": "PlainWidget",
+            "stable_key": "python::python.py::Field::PlainWidget::annotated_instance_field_with_value::0"
+          },
+          "source": {
+            "file_path": "python.py",
+            "declaration_span": {
+              "start": {
+                "line": 23,
+                "column": 5
+              },
+              "end": {
+                "line": 23,
+                "column": 40
+              },
+              "start_byte": 415,
+              "end_byte": 450
+            },
+            "name_span": {
+              "start": {
+                "line": 23,
+                "column": 5
+              },
+              "end": {
+                "line": 23,
+                "column": 40
+              },
+              "start_byte": 415,
+              "end_byte": 450
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "fe26a3624ffd25a4d7ca572b007b7c1de73f013d9b2e641b367129374c6e406d",
+              "name": "PlainWidget"
+            },
+            "container": {
+              "id": "fe26a3624ffd25a4d7ca572b007b7c1de73f013d9b2e641b367129374c6e406d",
+              "name": "PlainWidget"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069298868,
+            "updated_at_epoch_ms": 1791069298994
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "annotated_instance_field_with_value",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "0c9afaa420ecc5f1993ff286cc87869a4554bdb397f34cddec2990ef5c150449",
+          "language": "Python",
+          "kind": "Field",
+          "identity": {
+            "name": "class_var_static_field",
+            "display_name": "class_var_static_field",
+            "qualified_name": "PlainWidget::class_var_static_field",
+            "module_path": "PlainWidget",
+            "stable_key": "python::python.py::Field::PlainWidget::class_var_static_field::0"
+          },
+          "source": {
+            "file_path": "python.py",
+            "declaration_span": {
+              "start": {
+                "line": 24,
+                "column": 5
+              },
+              "end": {
+                "line": 24,
+                "column": 27
+              },
+              "start_byte": 470,
+              "end_byte": 492
+            },
+            "name_span": {
+              "start": {
+                "line": 24,
+                "column": 5
+              },
+              "end": {
+                "line": 24,
+                "column": 27
+              },
+              "start_byte": 470,
+              "end_byte": 492
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "fe26a3624ffd25a4d7ca572b007b7c1de73f013d9b2e641b367129374c6e406d",
+              "name": "PlainWidget"
+            },
+            "container": {
+              "id": "fe26a3624ffd25a4d7ca572b007b7c1de73f013d9b2e641b367129374c6e406d",
+              "name": "PlainWidget"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069298868,
+            "updated_at_epoch_ms": 1791069298994
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "class_var_static_field",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "e74698a7f99f9f4dcd4130c5a86e2f50707365220c94c4458b5cc881a7a31605",
+          "language": "Python",
+          "kind": "Field",
+          "identity": {
+            "name": "class_var_static_field_with_value",
+            "display_name": "class_var_static_field_with_value",
+            "qualified_name": "PlainWidget::class_var_static_field_with_value",
+            "module_path": "PlainWidget",
+            "stable_key": "python::python.py::Field::PlainWidget::class_var_static_field_with_value::0"
+          },
+          "source": {
+            "file_path": "python.py",
+            "declaration_span": {
+              "start": {
+                "line": 25,
+                "column": 5
+              },
+              "end": {
+                "line": 25,
+                "column": 38
+              },
+              "start_byte": 512,
+              "end_byte": 545
+            },
+            "name_span": {
+              "start": {
+                "line": 25,
+                "column": 5
+              },
+              "end": {
+                "line": 25,
+                "column": 38
+              },
+              "start_byte": 512,
+              "end_byte": 545
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "fe26a3624ffd25a4d7ca572b007b7c1de73f013d9b2e641b367129374c6e406d",
+              "name": "PlainWidget"
+            },
+            "container": {
+              "id": "fe26a3624ffd25a4d7ca572b007b7c1de73f013d9b2e641b367129374c6e406d",
+              "name": "PlainWidget"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069298868,
+            "updated_at_epoch_ms": 1791069298994
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "class_var_static_field_with_value",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "54da14ba1fa0d5f65503f117b5bc42bece73bff08776cbd443992f82f1d19df2",
+          "language": "Python",
+          "kind": "Field",
+          "identity": {
+            "name": "unannotated_static_field",
+            "display_name": "unannotated_static_field",
+            "qualified_name": "PlainWidget::unannotated_static_field",
+            "module_path": "PlainWidget",
+            "stable_key": "python::python.py::Field::PlainWidget::unannotated_static_field::0"
+          },
+          "source": {
+            "file_path": "python.py",
+            "declaration_span": {
+              "start": {
+                "line": 26,
+                "column": 5
+              },
+              "end": {
+                "line": 26,
+                "column": 29
+              },
+              "start_byte": 569,
+              "end_byte": 593
+            },
+            "name_span": {
+              "start": {
+                "line": 26,
+                "column": 5
+              },
+              "end": {
+                "line": 26,
+                "column": 29
+              },
+              "start_byte": 569,
+              "end_byte": 593
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "fe26a3624ffd25a4d7ca572b007b7c1de73f013d9b2e641b367129374c6e406d",
+              "name": "PlainWidget"
+            },
+            "container": {
+              "id": "fe26a3624ffd25a4d7ca572b007b7c1de73f013d9b2e641b367129374c6e406d",
+              "name": "PlainWidget"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069298868,
+            "updated_at_epoch_ms": 1791069298994
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "unannotated_static_field",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "ba9c1a791b6b60d4235dcf43f82d5c492b9c66a26d5d2e1d50f96142a7f74244",
+          "language": "Python",
+          "kind": "Method",
+          "identity": {
+            "name": "__init__",
+            "display_name": "__init__",
+            "qualified_name": "PlainWidget::__init__",
+            "module_path": "PlainWidget",
+            "stable_key": "python::python.py::Method::PlainWidget::__init__::0"
+          },
+          "source": {
+            "file_path": "python.py",
+            "declaration_span": {
+              "start": {
+                "line": 28,
+                "column": 5
+              },
+              "end": {
+                "line": 30,
+                "column": 54
+              },
+              "start_byte": 603,
+              "end_byte": 755
+            },
+            "body_span": {
+              "start": {
+                "line": 29,
+                "column": 9
+              },
+              "end": {
+                "line": 30,
+                "column": 54
+              },
+              "start_byte": 659,
+              "end_byte": 755
+            },
+            "name_span": {
+              "start": {
+                "line": 28,
+                "column": 9
+              },
+              "end": {
+                "line": 28,
+                "column": 17
+              },
+              "start_byte": 607,
+              "end_byte": 615
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {
+            "raw_doc": "annotated_instance_field: int\nannotated_instance_field_with_value: str = \"value\"\nclass_var_static_field: ClassVar[int]\nclass_var_static_field_with_value: ClassVar[int] = 3\nunannotated_static_field = 4",
+            "comments": [
+              {
+                "kind": "Doc",
+                "attachment": "Leading",
+                "span": {
+                  "start": {
+                    "line": 28,
+                    "column": 9
+                  },
+                  "end": {
+                    "line": 28,
+                    "column": 17
+                  },
+                  "start_byte": 607,
+                  "end_byte": 615
+                },
+                "raw_text": "annotated_instance_field: int\nannotated_instance_field_with_value: str = \"value\"\nclass_var_static_field: ClassVar[int]\nclass_var_static_field_with_value: ClassVar[int] = 3\nunannotated_static_field = 4",
+                "cleaned_text": "annotated_instance_field: int\nannotated_instance_field_with_value: str = \"value\"\nclass_var_static_field: ClassVar[int]\nclass_var_static_field_with_value: ClassVar[int] = 3\nunannotated_static_field = 4"
+              }
+            ],
+            "parsed": {
+              "summary": "annotated_instance_field: int annotated_instance_field_with_value: str = \"value\" class_var_static_field: ClassVar[int] class_var_static_field_with_value: ClassVar[int] = 3 unannotated_static_field = 4"
+            }
+          },
+          "type_info": {
+            "primary_type": "None",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "None"
+              },
+              {
+                "kind": "Canonical",
+                "text": "None"
+              }
+            ]
+          },
+          "relations": {
+            "parent": {
+              "id": "fe26a3624ffd25a4d7ca572b007b7c1de73f013d9b2e641b367129374c6e406d",
+              "name": "PlainWidget"
+            },
+            "container": {
+              "id": "fe26a3624ffd25a4d7ca572b007b7c1de73f013d9b2e641b367129374c6e406d",
+              "name": "PlainWidget"
+            },
+            "references": [
+              {
+                "id": "51aebd41bd7fdaf471c2818f08b4e62c881605f394419fb2c8575e811a8ef636",
+                "name": "self",
+                "qualified_name": "PlainWidget::self"
+              },
+              {
+                "id": "4839a27d9f90c4daaace81481f0036710e017fdc1d0b7ba1e9866a9db512db0d",
+                "name": "initial_value",
+                "qualified_name": "PlainWidget::initial_value"
+              }
+            ]
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069298868,
+            "updated_at_epoch_ms": 1791069298994
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "parameters": [
+                {
+                  "name": "self",
+                  "position": 0,
+                  "is_optional": false,
+                  "is_variadic": false,
+                  "is_keyword_only": false,
+                  "is_positional_only": false
+                },
+                {
+                  "name": "initial_value",
+                  "position": 1,
+                  "type_text": "int",
+                  "is_optional": false,
+                  "is_variadic": false,
+                  "is_keyword_only": false,
+                  "is_positional_only": false
+                }
+              ],
+              "return_info": {
+                "type_text": "None",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 2
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "51aebd41bd7fdaf471c2818f08b4e62c881605f394419fb2c8575e811a8ef636",
+          "language": "Python",
+          "kind": "Parameter",
+          "identity": {
+            "name": "self",
+            "display_name": "self",
+            "qualified_name": "PlainWidget::self",
+            "module_path": "PlainWidget",
+            "stable_key": "python::python.py::Parameter::PlainWidget::self::0"
+          },
+          "source": {
+            "file_path": "python.py",
+            "declaration_span": {
+              "start": {
+                "line": 28,
+                "column": 18
+              },
+              "end": {
+                "line": 28,
+                "column": 22
+              },
+              "start_byte": 616,
+              "end_byte": 620
+            },
+            "name_span": {
+              "start": {
+                "line": 28,
+                "column": 18
+              },
+              "end": {
+                "line": 28,
+                "column": 22
+              },
+              "start_byte": 616,
+              "end_byte": 620
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "fe26a3624ffd25a4d7ca572b007b7c1de73f013d9b2e641b367129374c6e406d",
+              "name": "PlainWidget"
+            },
+            "container": {
+              "id": "fe26a3624ffd25a4d7ca572b007b7c1de73f013d9b2e641b367129374c6e406d",
+              "name": "PlainWidget"
+            },
+            "referenced_by": [
+              {
+                "id": "ba9c1a791b6b60d4235dcf43f82d5c492b9c66a26d5d2e1d50f96142a7f74244",
+                "name": "__init__",
+                "qualified_name": "PlainWidget::__init__"
+              },
+              {
+                "id": "975c9fa86cbf6a498be830d39ffbcf2b9e1795fba981e37f1f129aca200c9580",
+                "name": "instance_method",
+                "qualified_name": "PlainWidget::instance_method"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069298868,
+            "updated_at_epoch_ms": 1791069298994
+          },
+          "kind_data": {
+            "kind_data_type": "Parameter",
+            "data": {
+              "name": "self",
+              "position": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "4839a27d9f90c4daaace81481f0036710e017fdc1d0b7ba1e9866a9db512db0d",
+          "language": "Python",
+          "kind": "Parameter",
+          "identity": {
+            "name": "initial_value",
+            "display_name": "initial_value",
+            "qualified_name": "PlainWidget::initial_value",
+            "module_path": "PlainWidget",
+            "stable_key": "python::python.py::Parameter::PlainWidget::initial_value::0"
+          },
+          "source": {
+            "file_path": "python.py",
+            "declaration_span": {
+              "start": {
+                "line": 28,
+                "column": 24
+              },
+              "end": {
+                "line": 28,
+                "column": 37
+              },
+              "start_byte": 622,
+              "end_byte": 635
+            },
+            "name_span": {
+              "start": {
+                "line": 28,
+                "column": 24
+              },
+              "end": {
+                "line": 28,
+                "column": 37
+              },
+              "start_byte": 622,
+              "end_byte": 635
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "fe26a3624ffd25a4d7ca572b007b7c1de73f013d9b2e641b367129374c6e406d",
+              "name": "PlainWidget"
+            },
+            "container": {
+              "id": "fe26a3624ffd25a4d7ca572b007b7c1de73f013d9b2e641b367129374c6e406d",
+              "name": "PlainWidget"
+            },
+            "referenced_by": [
+              {
+                "id": "ba9c1a791b6b60d4235dcf43f82d5c492b9c66a26d5d2e1d50f96142a7f74244",
+                "name": "__init__",
+                "qualified_name": "PlainWidget::__init__"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069298868,
+            "updated_at_epoch_ms": 1791069298994
+          },
+          "kind_data": {
+            "kind_data_type": "Parameter",
+            "data": {
+              "name": "initial_value",
+              "position": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "133139459cc4baa9e2d92c60a6bd91e85dcde79e249869694ac05ef4cdfc3546",
+          "language": "Python",
+          "kind": "Field",
+          "identity": {
+            "name": "assigned_through_self",
+            "display_name": "assigned_through_self",
+            "qualified_name": "PlainWidget::assigned_through_self",
+            "module_path": "PlainWidget",
+            "stable_key": "python::python.py::Field::PlainWidget::assigned_through_self::0"
+          },
+          "source": {
+            "file_path": "python.py",
+            "declaration_span": {
+              "start": {
+                "line": 29,
+                "column": 14
+              },
+              "end": {
+                "line": 29,
+                "column": 35
+              },
+              "start_byte": 664,
+              "end_byte": 685
+            },
+            "name_span": {
+              "start": {
+                "line": 29,
+                "column": 14
+              },
+              "end": {
+                "line": 29,
+                "column": 35
+              },
+              "start_byte": 664,
+              "end_byte": 685
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "fe26a3624ffd25a4d7ca572b007b7c1de73f013d9b2e641b367129374c6e406d",
+              "name": "PlainWidget"
+            },
+            "container": {
+              "id": "fe26a3624ffd25a4d7ca572b007b7c1de73f013d9b2e641b367129374c6e406d",
+              "name": "PlainWidget"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069298868,
+            "updated_at_epoch_ms": 1791069298994
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "assigned_through_self",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "c7c5c5dfe06ab77ef8d2a2ceb6977f019dca0566bf89676c2195a79c1bd3da46",
+          "language": "Python",
+          "kind": "Field",
+          "identity": {
+            "name": "unannotated_static_field",
+            "display_name": "unannotated_static_field",
+            "qualified_name": "PlainWidget::unannotated_static_field",
+            "module_path": "PlainWidget",
+            "stable_key": "python::python.py::Field::PlainWidget::unannotated_static_field::1"
+          },
+          "source": {
+            "file_path": "python.py",
+            "declaration_span": {
+              "start": {
+                "line": 30,
+                "column": 14
+              },
+              "end": {
+                "line": 30,
+                "column": 38
+              },
+              "start_byte": 715,
+              "end_byte": 739
+            },
+            "name_span": {
+              "start": {
+                "line": 30,
+                "column": 14
+              },
+              "end": {
+                "line": 30,
+                "column": 38
+              },
+              "start_byte": 715,
+              "end_byte": 739
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "fe26a3624ffd25a4d7ca572b007b7c1de73f013d9b2e641b367129374c6e406d",
+              "name": "PlainWidget"
+            },
+            "container": {
+              "id": "fe26a3624ffd25a4d7ca572b007b7c1de73f013d9b2e641b367129374c6e406d",
+              "name": "PlainWidget"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069298868,
+            "updated_at_epoch_ms": 1791069298994
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "unannotated_static_field",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "975c9fa86cbf6a498be830d39ffbcf2b9e1795fba981e37f1f129aca200c9580",
+          "language": "Python",
+          "kind": "Method",
+          "identity": {
+            "name": "instance_method",
+            "display_name": "instance_method",
+            "qualified_name": "PlainWidget::instance_method",
+            "module_path": "PlainWidget",
+            "stable_key": "python::python.py::Method::PlainWidget::instance_method::0"
+          },
+          "source": {
+            "file_path": "python.py",
+            "declaration_span": {
+              "start": {
+                "line": 32,
+                "column": 5
+              },
+              "end": {
+                "line": 34,
+                "column": 45
+              },
+              "start_byte": 761,
+              "end_byte": 878
+            },
+            "body_span": {
+              "start": {
+                "line": 33,
+                "column": 9
+              },
+              "end": {
+                "line": 34,
+                "column": 45
+              },
+              "start_byte": 803,
+              "end_byte": 878
+            },
+            "name_span": {
+              "start": {
+                "line": 32,
+                "column": 9
+              },
+              "end": {
+                "line": 32,
+                "column": 24
+              },
+              "start_byte": 765,
+              "end_byte": 780
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "int",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "int"
+              },
+              {
+                "kind": "Canonical",
+                "text": "int"
+              }
+            ]
+          },
+          "relations": {
+            "parent": {
+              "id": "fe26a3624ffd25a4d7ca572b007b7c1de73f013d9b2e641b367129374c6e406d",
+              "name": "PlainWidget"
+            },
+            "container": {
+              "id": "fe26a3624ffd25a4d7ca572b007b7c1de73f013d9b2e641b367129374c6e406d",
+              "name": "PlainWidget"
+            },
+            "references": [
+              {
+                "id": "51aebd41bd7fdaf471c2818f08b4e62c881605f394419fb2c8575e811a8ef636",
+                "name": "self",
+                "qualified_name": "PlainWidget::self"
+              },
+              {
+                "id": "c5d158dc226c70dfc442a38f96d4710075ac752ae3e5d4a29e964cad638d857d",
+                "name": "annotated_instance_field",
+                "qualified_name": "PlainWidget::annotated_instance_field"
+              }
+            ]
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069298868,
+            "updated_at_epoch_ms": 1791069298994
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "parameters": [
+                {
+                  "name": "self",
+                  "position": 0,
+                  "is_optional": false,
+                  "is_variadic": false,
+                  "is_keyword_only": false,
+                  "is_positional_only": false
+                }
+              ],
+              "return_info": {
+                "type_text": "int",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 1
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "6e979d40c7a921afa56e42a35b39c60918c0440e320bf8f7b2a6f142cfeb4e08",
+          "language": "Python",
+          "kind": "Parameter",
+          "identity": {
+            "name": "self",
+            "display_name": "self",
+            "qualified_name": "PlainWidget::self",
+            "module_path": "PlainWidget",
+            "stable_key": "python::python.py::Parameter::PlainWidget::self::1"
+          },
+          "source": {
+            "file_path": "python.py",
+            "declaration_span": {
+              "start": {
+                "line": 32,
+                "column": 25
+              },
+              "end": {
+                "line": 32,
+                "column": 29
+              },
+              "start_byte": 781,
+              "end_byte": 785
+            },
+            "name_span": {
+              "start": {
+                "line": 32,
+                "column": 25
+              },
+              "end": {
+                "line": 32,
+                "column": 29
+              },
+              "start_byte": 781,
+              "end_byte": 785
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "fe26a3624ffd25a4d7ca572b007b7c1de73f013d9b2e641b367129374c6e406d",
+              "name": "PlainWidget"
+            },
+            "container": {
+              "id": "fe26a3624ffd25a4d7ca572b007b7c1de73f013d9b2e641b367129374c6e406d",
+              "name": "PlainWidget"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069298868,
+            "updated_at_epoch_ms": 1791069298994
+          },
+          "kind_data": {
+            "kind_data_type": "Parameter",
+            "data": {
+              "name": "self",
+              "position": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "d2110d043d159535473afe34a3fbdb34ec813d0bfea951ce134ce567b7396d0b",
+          "language": "Python",
+          "kind": "Field",
+          "identity": {
+            "name": "assigned_through_self",
+            "display_name": "assigned_through_self",
+            "qualified_name": "PlainWidget::assigned_through_self",
+            "module_path": "PlainWidget",
+            "stable_key": "python::python.py::Field::PlainWidget::assigned_through_self::1"
+          },
+          "source": {
+            "file_path": "python.py",
+            "declaration_span": {
+              "start": {
+                "line": 33,
+                "column": 14
+              },
+              "end": {
+                "line": 33,
+                "column": 35
+              },
+              "start_byte": 808,
+              "end_byte": 829
+            },
+            "name_span": {
+              "start": {
+                "line": 33,
+                "column": 14
+              },
+              "end": {
+                "line": 33,
+                "column": 35
+              },
+              "start_byte": 808,
+              "end_byte": 829
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "fe26a3624ffd25a4d7ca572b007b7c1de73f013d9b2e641b367129374c6e406d",
+              "name": "PlainWidget"
+            },
+            "container": {
+              "id": "fe26a3624ffd25a4d7ca572b007b7c1de73f013d9b2e641b367129374c6e406d",
+              "name": "PlainWidget"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069298868,
+            "updated_at_epoch_ms": 1791069298994
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "assigned_through_self",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "45123a135e37235959cef70af346606c3b7a89b9686c30118296db81358cd344",
+          "language": "Python",
+          "kind": "Method",
+          "identity": {
+            "name": "_conventionally_private_method",
+            "display_name": "_conventionally_private_method",
+            "qualified_name": "PlainWidget::_conventionally_private_method",
+            "module_path": "PlainWidget",
+            "stable_key": "python::python.py::Method::PlainWidget::_conventionally_private_method::0"
+          },
+          "source": {
+            "file_path": "python.py",
+            "declaration_span": {
+              "start": {
+                "line": 36,
+                "column": 5
+              },
+              "end": {
+                "line": 37,
+                "column": 13
+              },
+              "start_byte": 884,
+              "end_byte": 946
+            },
+            "body_span": {
+              "start": {
+                "line": 37,
+                "column": 9
+              },
+              "end": {
+                "line": 37,
+                "column": 13
+              },
+              "start_byte": 942,
+              "end_byte": 946
+            },
+            "name_span": {
+              "start": {
+                "line": 36,
+                "column": 9
+              },
+              "end": {
+                "line": 36,
+                "column": 39
+              },
+              "start_byte": 888,
+              "end_byte": 918
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "None",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "None"
+              },
+              {
+                "kind": "Canonical",
+                "text": "None"
+              }
+            ]
+          },
+          "relations": {
+            "parent": {
+              "id": "fe26a3624ffd25a4d7ca572b007b7c1de73f013d9b2e641b367129374c6e406d",
+              "name": "PlainWidget"
+            },
+            "container": {
+              "id": "fe26a3624ffd25a4d7ca572b007b7c1de73f013d9b2e641b367129374c6e406d",
+              "name": "PlainWidget"
+            }
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069298868,
+            "updated_at_epoch_ms": 1791069298994
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "parameters": [
+                {
+                  "name": "self",
+                  "position": 0,
+                  "is_optional": false,
+                  "is_variadic": false,
+                  "is_keyword_only": false,
+                  "is_positional_only": false
+                }
+              ],
+              "return_info": {
+                "type_text": "None",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 1
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "b44808ea55c56999327bfd20e9faf41c82a7004244cdd50c217c10a2f0c62c38",
+          "language": "Python",
+          "kind": "Parameter",
+          "identity": {
+            "name": "self",
+            "display_name": "self",
+            "qualified_name": "PlainWidget::self",
+            "module_path": "PlainWidget",
+            "stable_key": "python::python.py::Parameter::PlainWidget::self::2"
+          },
+          "source": {
+            "file_path": "python.py",
+            "declaration_span": {
+              "start": {
+                "line": 36,
+                "column": 40
+              },
+              "end": {
+                "line": 36,
+                "column": 44
+              },
+              "start_byte": 919,
+              "end_byte": 923
+            },
+            "name_span": {
+              "start": {
+                "line": 36,
+                "column": 40
+              },
+              "end": {
+                "line": 36,
+                "column": 44
+              },
+              "start_byte": 919,
+              "end_byte": 923
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "fe26a3624ffd25a4d7ca572b007b7c1de73f013d9b2e641b367129374c6e406d",
+              "name": "PlainWidget"
+            },
+            "container": {
+              "id": "fe26a3624ffd25a4d7ca572b007b7c1de73f013d9b2e641b367129374c6e406d",
+              "name": "PlainWidget"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069298868,
+            "updated_at_epoch_ms": 1791069298994
+          },
+          "kind_data": {
+            "kind_data_type": "Parameter",
+            "data": {
+              "name": "self",
+              "position": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "3fb701b16430032ba81055e4bcb011c155f7ccf17c2b396abcddea52b14d5471",
+          "language": "Python",
+          "kind": "Function",
+          "identity": {
+            "name": "static_method",
+            "display_name": "static_method",
+            "qualified_name": "PlainWidget::static_method",
+            "module_path": "PlainWidget",
+            "stable_key": "python::python.py::Function::PlainWidget::static_method::0"
+          },
+          "source": {
+            "file_path": "python.py",
+            "declaration_span": {
+              "start": {
+                "line": 40,
+                "column": 5
+              },
+              "end": {
+                "line": 41,
+                "column": 30
+              },
+              "start_byte": 970,
+              "end_byte": 1037
+            },
+            "body_span": {
+              "start": {
+                "line": 41,
+                "column": 9
+              },
+              "end": {
+                "line": 41,
+                "column": 30
+              },
+              "start_byte": 1016,
+              "end_byte": 1037
+            },
+            "name_span": {
+              "start": {
+                "line": 40,
+                "column": 9
+              },
+              "end": {
+                "line": 40,
+                "column": 22
+              },
+              "start_byte": 974,
+              "end_byte": 987
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "modifiers": [
+            {
+              "type": "Static"
+            }
+          ],
+          "type_info": {
+            "primary_type": "\"PlainWidget\"",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "\"PlainWidget\""
+              },
+              {
+                "kind": "Canonical",
+                "text": "\"PlainWidget\""
+              }
+            ]
+          },
+          "relations": {
+            "parent": {
+              "id": "fe26a3624ffd25a4d7ca572b007b7c1de73f013d9b2e641b367129374c6e406d",
+              "name": "PlainWidget"
+            },
+            "container": {
+              "id": "fe26a3624ffd25a4d7ca572b007b7c1de73f013d9b2e641b367129374c6e406d",
+              "name": "PlainWidget"
+            },
+            "references": [
+              {
+                "id": "fe26a3624ffd25a4d7ca572b007b7c1de73f013d9b2e641b367129374c6e406d",
+                "name": "PlainWidget"
+              }
+            ]
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069298868,
+            "updated_at_epoch_ms": 1791069298994
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "\"PlainWidget\"",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "e81ebc50a342ea5b4bf91ba39e2a24010afcb6fa26e316f676394abb98f7fe27",
+          "language": "Python",
+          "kind": "Function",
+          "identity": {
+            "name": "class_method",
+            "display_name": "class_method",
+            "qualified_name": "PlainWidget::class_method",
+            "module_path": "PlainWidget",
+            "stable_key": "python::python.py::Function::PlainWidget::class_method::0"
+          },
+          "source": {
+            "file_path": "python.py",
+            "declaration_span": {
+              "start": {
+                "line": 44,
+                "column": 5
+              },
+              "end": {
+                "line": 45,
+                "column": 22
+              },
+              "start_byte": 1060,
+              "end_byte": 1121
+            },
+            "body_span": {
+              "start": {
+                "line": 45,
+                "column": 9
+              },
+              "end": {
+                "line": 45,
+                "column": 22
+              },
+              "start_byte": 1108,
+              "end_byte": 1121
+            },
+            "name_span": {
+              "start": {
+                "line": 44,
+                "column": 9
+              },
+              "end": {
+                "line": 44,
+                "column": 21
+              },
+              "start_byte": 1064,
+              "end_byte": 1076
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "modifiers": [
+            {
+              "type": "Static"
+            }
+          ],
+          "type_info": {
+            "primary_type": "\"PlainWidget\"",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "\"PlainWidget\""
+              },
+              {
+                "kind": "Canonical",
+                "text": "\"PlainWidget\""
+              }
+            ]
+          },
+          "relations": {
+            "parent": {
+              "id": "fe26a3624ffd25a4d7ca572b007b7c1de73f013d9b2e641b367129374c6e406d",
+              "name": "PlainWidget"
+            },
+            "container": {
+              "id": "fe26a3624ffd25a4d7ca572b007b7c1de73f013d9b2e641b367129374c6e406d",
+              "name": "PlainWidget"
+            },
+            "references": [
+              {
+                "id": "82f8427668b9eb3526b0b7e29cd02436f9a0653f260ce20d71d8bb2366a302d6",
+                "name": "cls",
+                "qualified_name": "PlainWidget::cls"
+              }
+            ]
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069298868,
+            "updated_at_epoch_ms": 1791069298994
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "parameters": [
+                {
+                  "name": "cls",
+                  "position": 0,
+                  "is_optional": false,
+                  "is_variadic": false,
+                  "is_keyword_only": false,
+                  "is_positional_only": false
+                }
+              ],
+              "return_info": {
+                "type_text": "\"PlainWidget\"",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 1
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "82f8427668b9eb3526b0b7e29cd02436f9a0653f260ce20d71d8bb2366a302d6",
+          "language": "Python",
+          "kind": "Parameter",
+          "identity": {
+            "name": "cls",
+            "display_name": "cls",
+            "qualified_name": "PlainWidget::cls",
+            "module_path": "PlainWidget",
+            "stable_key": "python::python.py::Parameter::PlainWidget::cls::0"
+          },
+          "source": {
+            "file_path": "python.py",
+            "declaration_span": {
+              "start": {
+                "line": 44,
+                "column": 22
+              },
+              "end": {
+                "line": 44,
+                "column": 25
+              },
+              "start_byte": 1077,
+              "end_byte": 1080
+            },
+            "name_span": {
+              "start": {
+                "line": 44,
+                "column": 22
+              },
+              "end": {
+                "line": 44,
+                "column": 25
+              },
+              "start_byte": 1077,
+              "end_byte": 1080
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "fe26a3624ffd25a4d7ca572b007b7c1de73f013d9b2e641b367129374c6e406d",
+              "name": "PlainWidget"
+            },
+            "container": {
+              "id": "fe26a3624ffd25a4d7ca572b007b7c1de73f013d9b2e641b367129374c6e406d",
+              "name": "PlainWidget"
+            },
+            "referenced_by": [
+              {
+                "id": "e81ebc50a342ea5b4bf91ba39e2a24010afcb6fa26e316f676394abb98f7fe27",
+                "name": "class_method",
+                "qualified_name": "PlainWidget::class_method"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069298868,
+            "updated_at_epoch_ms": 1791069298994
+          },
+          "kind_data": {
+            "kind_data_type": "Parameter",
+            "data": {
+              "name": "cls",
+              "position": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "fd0c2ead522f96a968544c926de383492b135b522f53e9cb47b9a393b76dc645",
+          "language": "Python",
+          "kind": "Function",
+          "identity": {
+            "name": "free_function_assigning_attribute",
+            "display_name": "free_function_assigning_attribute",
+            "stable_key": "python::python.py::Function::free_function_assigning_attribute::0"
+          },
+          "source": {
+            "file_path": "python.py",
+            "declaration_span": {
+              "start": {
+                "line": 48,
+                "column": 1
+              },
+              "end": {
+                "line": 49,
+                "column": 44
+              },
+              "start_byte": 1124,
+              "end_byte": 1242
+            },
+            "body_span": {
+              "start": {
+                "line": 49,
+                "column": 5
+              },
+              "end": {
+                "line": 49,
+                "column": 44
+              },
+              "start_byte": 1203,
+              "end_byte": 1242
+            },
+            "name_span": {
+              "start": {
+                "line": 48,
+                "column": 5
+              },
+              "end": {
+                "line": 48,
+                "column": 38
+              },
+              "start_byte": 1128,
+              "end_byte": 1161
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "None",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "None"
+              },
+              {
+                "kind": "Canonical",
+                "text": "None"
+              }
+            ]
+          },
+          "relations": {
+            "references": [
+              {
+                "id": "fe26a3624ffd25a4d7ca572b007b7c1de73f013d9b2e641b367129374c6e406d",
+                "name": "PlainWidget"
+              },
+              {
+                "id": "0bcc474044880628551aaf9bddf4c29dd0d3a51cea2ea684bfa6e346da833e8e",
+                "name": "target_object"
+              }
+            ]
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069298868,
+            "updated_at_epoch_ms": 1791069298994
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "parameters": [
+                {
+                  "name": "target_object",
+                  "position": 0,
+                  "type_text": "PlainWidget",
+                  "is_optional": false,
+                  "is_variadic": false,
+                  "is_keyword_only": false,
+                  "is_positional_only": false
+                }
+              ],
+              "return_info": {
+                "type_text": "None",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 1
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "0bcc474044880628551aaf9bddf4c29dd0d3a51cea2ea684bfa6e346da833e8e",
+          "language": "Python",
+          "kind": "Parameter",
+          "identity": {
+            "name": "target_object",
+            "display_name": "target_object",
+            "stable_key": "python::python.py::Parameter::target_object::0"
+          },
+          "source": {
+            "file_path": "python.py",
+            "declaration_span": {
+              "start": {
+                "line": 48,
+                "column": 39
+              },
+              "end": {
+                "line": 48,
+                "column": 52
+              },
+              "start_byte": 1162,
+              "end_byte": 1175
+            },
+            "name_span": {
+              "start": {
+                "line": 48,
+                "column": 39
+              },
+              "end": {
+                "line": 48,
+                "column": 52
+              },
+              "start_byte": 1162,
+              "end_byte": 1175
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "referenced_by": [
+              {
+                "id": "fd0c2ead522f96a968544c926de383492b135b522f53e9cb47b9a393b76dc645",
+                "name": "free_function_assigning_attribute"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069298868,
+            "updated_at_epoch_ms": 1791069298994
+          },
+          "kind_data": {
+            "kind_data_type": "Parameter",
+            "data": {
+              "name": "target_object",
+              "position": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "9a6f260063646bb4db361844dda99c95125e7741ca776e6332423fc7817467c3",
+          "language": "Python",
+          "kind": "Field",
+          "identity": {
+            "name": "assigned_from_outside",
+            "display_name": "assigned_from_outside",
+            "stable_key": "python::python.py::Field::assigned_from_outside::0"
+          },
+          "source": {
+            "file_path": "python.py",
+            "declaration_span": {
+              "start": {
+                "line": 49,
+                "column": 19
+              },
+              "end": {
+                "line": 49,
+                "column": 40
+              },
+              "start_byte": 1217,
+              "end_byte": 1238
+            },
+            "name_span": {
+              "start": {
+                "line": 49,
+                "column": 19
+              },
+              "end": {
+                "line": 49,
+                "column": 40
+              },
+              "start_byte": 1217,
+              "end_byte": 1238
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069298868,
+            "updated_at_epoch_ms": 1791069298994
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "assigned_from_outside",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        }
+      ],
+      "imports": [
+        {
+          "name": "ClassVar",
+          "source": "typing",
+          "span": {
+            "start": {
+              "line": 6,
+              "column": 20
+            },
+            "end": {
+              "line": 6,
+              "column": 28
+            },
+            "start_byte": 153,
+            "end_byte": 161
+          },
+          "statement_span": {
+            "start": {
+              "line": 6,
+              "column": 1
+            },
+            "end": {
+              "line": 6,
+              "column": 28
+            },
+            "start_byte": 134,
+            "end_byte": 161
+          },
+          "symbol": {
+            "name": "ClassVar"
+          }
+        }
+      ],
+      "exports": [],
+      "diagnostics": []
+    }
+  ],
+  "adapter_metadata": []
+}
