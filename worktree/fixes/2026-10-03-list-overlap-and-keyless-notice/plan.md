@@ -8,8 +8,19 @@ source_files_during_phase_2: []
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - worktree/lib/src/pull_requests.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - worktree/lib/src/listing.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
 packages:
   - sniff
+  - worktree
 created: 2026-10-03
 phase: 1
 agent: claude/sonnet
@@ -158,11 +169,11 @@ Smells to grep before closing: `#[serde(default)]` on the new fields; `Option<T>
 
 ### Tasks
 
-- [ ] **Serialized evidence.** Strict (duplicate/missing/type/trailing) serde for the P2 type through the existing `strict_json` reader; persist state and validated names only.
-- [ ] **PR store format 6.** Bump 5→6 in `pull_requests.rs`; write evidence atomically with `publication`; read v5 as `unknown`, older/newer = miss. `refresh` passes the P2 evidence from the request outcome; an empty PR list stores evidence too.
-- [ ] **Head store format 3.** Bump 2→3 in `remote_head.rs`; record evidence on the attempt when the API check succeeds (`remote_update::run_attempt`), retain it through `set_phase`/`finish_attempt` and across the fetch, including fetch failure and timeout; `publish_answer` (`source: fetch`) must not erase it. v1 migration unchanged; v2 drops `attempt`.
-- [ ] **Wait capture.** In `list/wait.rs`, return evidence from the **same new publication** the wait accepted (including a lock-holder's publication); never from an older cached answer or a later unrelated publication; no budget reset, no wait for the receipt. For adopted head work use the followed attempt's evidence. PR failure stays the listing's own receipt.
-- [ ] **Tests (L1).** Matrix tests above per store; publication-before-receipt; lock contention publication; adoption with a different worker environment; superseded later publication ignored; token values absent from files.
+- [x] **Serialized evidence.** Strict (duplicate/missing/type/trailing) serde for the P2 type through the existing `strict_json` reader; persist state and validated names only.
+- [x] **PR store format 6.** Bump 5→6 in `pull_requests.rs`; write evidence atomically with `publication`; read v5 as `unknown`, older/newer = miss. `refresh` passes the P2 evidence from the request outcome; an empty PR list stores evidence too.
+- [x] **Head store format 3.** Bump 2→3 in `remote_head.rs`; record evidence on the attempt when the API check succeeds (`remote_update::run_attempt`), retain it through `set_phase`/`finish_attempt` and across the fetch, including fetch failure and timeout; `publish_answer` (`source: fetch`) must not erase it. v1 migration unchanged; v2 drops `attempt`.
+- [x] **Wait capture.** In `list/wait.rs`, return evidence from the **same new publication** the wait accepted (including a lock-holder's publication); never from an older cached answer or a later unrelated publication; no budget reset, no wait for the receipt. For adopted head work use the followed attempt's evidence. PR failure stays the listing's own receipt.
+- [x] **Tests (L1).** Matrix tests above per store; publication-before-receipt; lock contention publication; adoption with a different worker environment; superseded later publication ignored; token values absent from files.
 
 **Checkpoint 3:** `just test` in `worktree/` for lib and wait tests; `rg 'serde\(default\)'` smell check clean for the new fields.
 
@@ -170,14 +181,14 @@ Smells to grep before closing: `#[serde(default)]` on the new fields; `Option<T>
 
 Wave 2 (independent of P2/P3; may run concurrently with them). Package: `worktree` lib.
 
-- [ ] **Split `fill_worktree_statuses`** (`lib/src/worktree.rs`) into: (a) dirtiness gather, (b) ref-dependent gather (caption, target, tree, comparisons) over a given `RefTips`, returning results plus the SHA-pair cache entries, and (c) a commit step (save cache once, fork prune, copy-record prune). No persistent write in (a)/(b).
-- [ ] **Compose in `list_worktrees`.** Same observable behavior and subprocess counts for library callers (existing tests `list_worktrees_*` stay green).
-- [ ] **In-memory cache.** Valid SHA-pair entries from a discarded gather are kept and saved once; failed comparisons stay uncached; the cache is seedable into the final gather.
-- [ ] **Targeted dirtiness.** Expose a function that refreshes one entry's dirtiness (for the `--ff` moved checkout) and replaces that result only.
-- [ ] **Snapshot comparison.** Add `RefTips` equality over the full local and remote maps (additions/deletions count) and a type that records whether each read succeeded; an unsuccessful read never equals anything.
-- [ ] **Prune guard.** Fork pruning requires a successful final read; reload the store before pruning; keep the `refs_read_at` protection; copy-record pruning keeps live-worktree checks.
-- [ ] **Docs on touched symbols** updated in the same change (comment drift rule).
-- [ ] **Tests (L1).** Persistence happens only in the commit step; speculative cache entries survive; concurrent `wt create` record survives; failed read never prunes; read-failure never equal.
+- [x] **Split `fill_worktree_statuses`** (`lib/src/worktree.rs`) into: (a) dirtiness gather, (b) ref-dependent gather (caption, target, tree, comparisons) over a given `RefTips`, returning results plus the SHA-pair cache entries, and (c) a commit step (save cache once, fork prune, copy-record prune). No persistent write in (a)/(b).
+- [x] **Compose in `list_worktrees`.** Same observable behavior and subprocess counts for library callers (existing tests `list_worktrees_*` stay green).
+- [x] **In-memory cache.** Valid SHA-pair entries from a discarded gather are kept and saved once; failed comparisons stay uncached; the cache is seedable into the final gather.
+- [x] **Targeted dirtiness.** Expose a function that refreshes one entry's dirtiness (for the `--ff` moved checkout) and replaces that result only.
+- [x] **Snapshot comparison.** Add `RefTips` equality over the full local and remote maps (additions/deletions count) and a type that records whether each read succeeded; an unsuccessful read never equals anything.
+- [x] **Prune guard.** Fork pruning requires a successful final read; reload the store before pruning; keep the `refs_read_at` protection; copy-record pruning keeps live-worktree checks.
+- [x] **Docs on touched symbols** updated in the same change (comment drift rule).
+- [x] **Tests (L1).** Persistence happens only in the commit step; speculative cache entries survive; concurrent `wt create` record survives; failed read never prunes; read-failure never equal.
 
 **Checkpoint 4:** `just test` in `worktree/` (lib) with unchanged warm/cold subprocess-count tests.
 

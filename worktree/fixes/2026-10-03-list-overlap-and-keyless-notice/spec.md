@@ -34,12 +34,26 @@ message_to_agent: |-
     (including departures: upper-case-only stored variable names, `regather` children
     `list regather` / `graph regather` / `verbose regather`, `pr reread` always a
     group child). Treat each later phase as verify-and-tick against the existing code,
-    filling only real gaps; do not re-implement. Baseline on 2026-10-03: worktree
-    `just test` 945 passed, `just lint` clean; sniff `just test` 3127 passed, `just lint`
-    clean. Builds on this macOS host need `LIBGIT2_NO_PKG_CONFIG=1` (Homebrew libgit2
-    upgrade; see the `os` skill macOS page). Phase 2 (sniff credential metadata) was
-    verified and ticked with no code change; the worktree `packages` list already
-    includes `sniff`, so later phases only add `worktree` / `worktree-cli`.
+    filling only real gaps; do not re-implement. Builds on this macOS host need
+    `LIBGIT2_NO_PKG_CONFIG=1` (Homebrew libgit2 upgrade; see the `os` skill macOS page).
+    Phase 2 (sniff) was verified with no code change. Phase 3 (stores, worker, wait
+    capture) was verified; its only change was one added assertion in
+    `pull_requests::tests::a_format_5_answer_is_served_with_unknown_credentials_and_a_future_format_is_a_miss`
+    (a format-5 file carrying a stray `credentials: anonymous` still reads as `unknown`).
+    After phase 3: worktree `just test` 945 passed, `just lint` clean. `packages` now
+    lists `sniff` and `worktree`; add `worktree-cli` when a phase touches `worktree/cli`.
+    Phase 4 (library gather separation) was verified; its only change was one added
+    test, `listing::repo_tests::the_shared_cache_seeds_the_final_gather_and_never_holds_a_failure`.
+    Watch for Phase 6: `cli/tests/list_prs.rs`
+    `a_held_pr_request_with_nothing_stored_ends_at_the_budget_with_only_the_hint`
+    asserts the whole `wt list` command takes under 5 s. It failed once under full-suite
+    load (11.8 s) and passed in isolation (5 of 5, about 3.7 s) and on the next two full
+    runs. That bound covers local gathering as well as the wait. Since the overlap, a
+    timeout limits waiting, not local computation, so decide in Phase 6 whether the
+    bound should measure only the wait. A second `list_prs` test,
+    `a_detached_workers_answer_replaces_the_stale_one_on_the_next_list`, failed the
+    same way once (11.2 s under load; 3.9 s isolated, 3 of 3 passing), so review the
+    timing bounds across `cli/tests/list_prs.rs`, not just the first test.
 related:
     - 2026-09-27-list-freshness-ux
     - 2026-10-02-fresh-prs

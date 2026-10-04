@@ -8,8 +8,19 @@ source_files_during_phase_2: []
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - worktree/lib/src/pull_requests.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - worktree/lib/src/listing.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
 packages:
   - sniff
+  - worktree
 implementation_1: "2026-10-03T14:50:53-07:00"
 ---
 
@@ -141,3 +152,62 @@ The files changed in this cycle:
 - gates (with `LIBGIT2_NO_PKG_CONFIG=1`): `sniff/` `just test` 3127 passed, 32 skipped; `sniff/` `just lint` exit 0; `just check-tier-coverage sniff` 0 stranded; `worktree/` `just test` 945 passed, 32 skipped; `worktree/` `just lint` exit 0. No failures, pre-existing or new
 - frontmatter: the phase 2 file lists are empty because this phase edited no source, docs, or skill files. `packages` now lists `sniff`, the package this phase's scope covers, whose changes landed in review cycle 1
 - skills: no `worktree` skill change needed
+
+## Phase 3
+
+> **phase:** stores, worker, and wait capture (plan Phase 3), 2026-10-03
+
+- state found: review cycle 1 had already built this phase, and the working tree had no source changes. I checked each task against the code and found one test gap, which is now closed (below). No behavior changed
+- task verification:
+        - serialized evidence: `remote_head::CredentialEvidence` (`#[serde(tag = "state", rename_all = "kebab-case")]`) is read through the strict readers. `is_valid` requires a `keyed` state to have at least one name, and every name must match `[A-Z_][A-Z0-9_]*`. Both writers refuse anything else (`set_credentials` errors; PR `refresh` returns `PublishFailed`), so nothing shaped like a token reaches disk
+        - PR store format 6: `PR_STORE_FORMAT_VERSION = 6`. `credentials` is written in the same atomic write as the answer and `publication`, including for an empty list. Format 5 is read through `UncredentialedStoreFile`, whose conversion sets `Unknown` unconditionally. Formats 4 and older, and 7 and newer, are misses. `PrSource::fetch` maps sniff's `RequestCredentials` with `CredentialEvidence::from_sniff`, and an unknown future sniff state maps to `Unknown`
+        - head store format 3: `Attempt::credentials` is required and starts `Unknown`. `remote_update::Recorder::credentials` (`set_credentials`) writes it as soon as the API check succeeds, before the answer is published. `set_phase`, `finish_attempt`, and `publish_answer` (`source: fetch`) keep it. Format 2 keeps its answer and drops its attempt, and format 1 migrates as before
+        - wait capture: `WaitEnd.pr_credentials` comes from the first new publication the wait sees, in the same read as its id. That includes a lock holder's publication. A later publication never replaces it. A success known only from a receipt, and the answer cached before launch, give `Unknown`. Head evidence is the followed attempt's own field. No budget changed
+- matrix (plan Phase 3 table) → tests, all L1 in `worktree` (lib):
+        - PR `credentials` (v6), every row (absent, null, wrong whole type, one bad element, every element bad, empty `[]`/`{}`, unknown tag, an invalid name or one shaped like a token, a duplicate key inside the object and in the envelope, trailing content, valid `unknown`/`keyed`) plus a control row → `pull_requests::tests::the_store_reader_walks_the_input_robustness_matrix`, asserted through `select_cached` and `stored_publication`
+        - head `attempt.credentials` (v3), the same rows; a bad shape drops the attempt and keeps the answer. Also a duplicate key, trailing content (both halves lost), valid `unknown`/`keyed`, and a control row → `remote_head::tests::the_store_reader_walks_the_input_robustness_matrix`, asserted through `select_cached_head` and `select_attempt`
+        - cross-version: PR v5 is read as `Unknown` and v7 is a miss → `a_format_5_answer_is_served_with_unknown_credentials_and_a_future_format_is_a_miss`; PR v1–v4 are misses → `earlier_formats_exactly_as_they_were_written_are_misses`; head v1 → `a_format_1_file_reads_as_a_git_answer_and_a_write_keeps_it`; head v2 → `a_format_2_file_keeps_its_answer_and_drops_its_attempt`
+        - the notice side of the matrix (`unknown` and cached evidence never give the notice) → `commands::list::tests::…::unknown_cached_or_receipt_only_evidence_never_gives_the_notice` (CLI); the full notice is plan Phase 8
+- other plan tests → existing tests:
+        - publication before the receipt → `list::wait::tests::a_publication_before_the_receipt_carries_its_own_credentials`
+        - lock contention, a real holder's anonymous `refresh` → `a_contending_holders_real_refresh_is_followed_by_its_publication_id` (ordinary and forced)
+        - adoption under another worker's environment → `an_adopted_attempt_carries_the_credentials_its_own_worker_recorded`
+        - a later publication is ignored → `a_later_publication_never_replaces_the_accepted_ones_credentials`; the older cached answer is never borrowed → `an_older_cached_answers_credentials_are_never_borrowed`; the publication seen at the timeout does not extend the budget → `a_publication_seen_at_the_timeout_keeps_its_credentials_without_extending_the_budget`
+        - worker writes → `remote_update::tests::an_api_answer_records_its_credentials_before_the_answer_and_through_the_fetch` and `a_check_the_api_did_not_answer_has_unknown_credentials`
+        - no token values in files → `remote_head::tests::credentials_survive_every_later_write_of_the_attempt_and_never_hold_a_value` and `pull_requests::tests::a_publication_records_what_its_request_was_sent_with_and_only_names`
+- gap closed: no test pinned that a format-5 PR file with a stray `credentials: {"state": "anonymous"}` still reads as `unknown`. The format-5 reader ignores unknown fields, so this held only because the conversion hardcodes `Unknown`. I added that case to `a_format_5_answer_is_served_with_unknown_credentials_and_a_future_format_is_a_miss` (`worktree/lib/src/pull_requests.rs`). It passes, and a future change that read the field would fail it
+- note: the wait tests' `stored_prs::store_json` helper still writes format 5. That is intentional and correct: format 5 is readable, and its evidence is `unknown`. The contention test that needs real evidence uses the real `refresh` writer
+- smell grep (`serde(default)`, `Option` where absent and null must differ, `filter_map`/`unwrap_or_default`/`.ok()` on the credentials parse): clean. The only hits are the pre-existing whole-file `.ok()?` reads, which turn a malformed file into a miss and never into anonymous, plus unrelated `unix_now` and PR-summary code
+- OS: no OS-specific code in this phase (JSON stores under a temp directory), so no cross-check was run
+- gates (with `LIBGIT2_NO_PKG_CONFIG=1`): `worktree/` `just test` 945 passed, 32 skipped (the count is unchanged because the addition is an assertion in an existing test); `just lint` exit 0. No failures, pre-existing or new
+- skills: no `worktree` skill change needed; `list-remote.md` already describes the format-6 and format-3 evidence
+
+## Phase 4
+
+> **phase:** library gather separation (plan Phase 4), 2026-10-03
+
+- state found: review cycle 1 had already built this phase, and the working tree had no Phase 4 source changes. I checked each task against the code and found one test gap, which is now closed (below). No behavior changed
+- task verification:
+        - split: `fill_worktree_statuses` (`worktree/lib/src/worktree.rs`) is now `load_comparison_cache` + `WorktreeList::gather_local` (dirtiness via `gather_dirtiness`, run concurrently with `gather_ref_facts`) + `WorktreeList::commit`. The two gathers write nothing persistent. `commit` saves the cache, prunes fork records, and prunes copy records, each once
+        - compose: `list_worktrees` still calls `parse_worktree_state` and `fill_worktree_statuses`, whose composition is gather then commit on the parse step's read. The `list_worktrees_*` warm/cold subprocess-count tests pass unchanged
+        - in-memory cache: one `Mutex<Cache>` from `load_comparison_cache` serves every gather of a listing. `compare_cached` adds only successful comparisons (`compare_live` returns `None` before `put`), and `commit` saves the whole cache once, so a discarded gather's entries are kept
+        - targeted dirtiness: `WorktreeList::refresh_dirty_status(checkout)` measures one entry again and replaces only that result. It returns `false` when no entry has that path
+        - snapshot comparison: `listing::RefSnapshot { tips, succeeded, read_at }`. `matches` compares the complete `local`, `remote`, and `remote_heads` maps, and it is false when either read failed, even two failed reads compared with each other
+        - prune guard: fork pruning runs only when `refs.succeeded()`. It reloads the store from disk and protects a record no older than `read_at` with a `rev-parse --verify`. Copy-record pruning still checks for live worktrees (canonicalized entry paths)
+        - docs on touched symbols: the `///` docs on `fill_worktree_statuses`, `gather_local`, `gather_ref_facts`, `commit`, `refresh_dirty_status`, `RefSnapshot::matches`, and `compare_cached` match the code; no drift found. `rg` finds no stale `reread_refs` / `refs_read` / `refs_read_at` in code or in docs outside the fix directories
+- requirement-to-test mapping (all L1, `worktree` lib, in `listing::tests` / `listing::repo_tests`):
+        - persistence only in the commit step; a discarded gather's cache entries survive → `gathers_persist_nothing_until_one_commit_that_keeps_every_comparison` (cache file, fork store, and copy record all checked before and after `commit`; the initial and final comparisons are both cached)
+        - **added:** the shared cache seeds the final gather, and failures stay uncached → `the_shared_cache_seeds_the_final_gather_and_never_holds_a_failure`. A gather over tips naming a missing object leaves no entry in memory or on disk, and a second gather over unchanged tips issues no `rev-list`/`merge-tree`. Mutation check: bypassing the cache lookup in `compare_cached` makes the test fail
+        - a `wt create` record written during the wait survives the prune → `a_fork_record_written_while_the_listing_waits_survives_its_prune`
+        - a failed read never prunes → `a_commit_after_a_failed_ref_read_never_prunes_fork_records`
+        - a failed read never matches; additions, deletions, and advances do not match; an empty repository read twice matches → `only_two_successful_reads_of_equal_maps_match`
+        - a targeted refresh measures only the named checkout (one `git status`), and a path matching no entry returns false → `a_dirtiness_refresh_measures_only_the_named_checkout_again`
+        - library-caller behavior unchanged → the existing `worktree::tests::list_worktrees_*` subprocess-count tests
+- input robustness matrix: not applicable. This phase reads no file format
+- OS: no OS-specific code (scoped threads and git subprocesses already used before this phase), so no cross-check was run
+- gates (with `LIBGIT2_NO_PKG_CONFIG=1`): `worktree/` `just lint` exit 0; `just check-tier-coverage worktree` 0 stranded; `worktree/` `just test` was run four times:
+        - two full runs passed, 946 tests (945 plus the new one), 32 skipped
+        - one run stopped early on a failure; the reruns showed no failure
+        - one run failed `worktree-cli::list_prs a_held_pr_request_with_nothing_stored_ends_at_the_budget_with_only_the_hint` (11.8 s; it asserts the whole command takes under 5 s). Five isolated runs of that test passed (about 3.7 s each). It is a load-sensitive wall-clock bound in Phase 6's territory and is unrelated to this phase's test-only change, so it is flagged in `spec.md` `message_to_agent` and was not changed here
+- skills: no `worktree` skill change needed; `list.md` already describes the gather/commit split
+- re-verification run (2026-10-03, same phase): `just lint` exit 0; `just check-tier-coverage worktree` 0 stranded; `just test` run three times. The first stopped on `worktree-cli::list_prs a_detached_workers_answer_replaces_the_stale_one_on_the_next_list` (11.2 s under full-suite load). It passed three of three isolated runs (about 3.9 s each), and the next two full runs passed, 946 tests, 32 skipped. This is a second `list_prs` test with the same load-sensitive timing as the one above, so the Phase 6 note in `spec.md` now names both
