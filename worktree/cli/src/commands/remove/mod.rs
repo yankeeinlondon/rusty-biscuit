@@ -6,8 +6,13 @@
 //! branch on origin is deleted only with `--force-remote`. Removing the
 //! worktree the caller stands in is handed to the shell wrapper: the first run
 //! asks everything and prints `cd:` plus `remove-handoff:<token>`, and the
-//! wrapper's `wt remove --handoff <token>` finishes from outside. The rules are
-//! item 3 of `2026-09-24-ux-improvements`.
+//! wrapper's `wt remove --handoff <token>` finishes from outside.
+//!
+//! A worktree Git can no longer read is prepared first ([`prepare`]): a
+//! missing directory has only its record removed, after its surviving index
+//! is checked; a directory whose `.git` file is gone has its link repaired and
+//! verified, then takes the ordinary path; anything else refuses. The rules
+//! are item 3 of `2026-09-24-ux-improvements`.
 
 mod policy;
 mod report;
@@ -20,11 +25,12 @@ use biscuit_terminal::components::renderable::TerminalRenderable as _;
 use biscuit_terminal::terminal::Terminal;
 use inquire::{Confirm, InquireError, Select};
 use worktree::WorktreeError;
+use worktree::availability;
 use worktree::fork_origin::{ForkOriginStore, fork_origin_path};
 use worktree::git::git_command;
 use worktree::remove::handoff::{
     self, Approvals, BranchAction, HandoffError, HandoffRecord, HandoffRefusal, HandoffState,
-    RemoteApproval, canonical, is_within,
+    RemoteApproval, canonical, checkout_git_dir, is_within,
 };
 use worktree::live_remote::{LIVE_CHECK_DEADLINE, LsRemote};
 use worktree::remove::remote::{
@@ -35,9 +41,16 @@ use worktree::remove::safety::{
     BranchSafety, NoPrSource, PrSource, Reconfirmation, SafetyInput, SniffPrSource, Tier, assess,
     reconfirm,
 };
-use worktree::remove::{Inventory, collect_inventory, remove_local_branch, remove_worktree};
+use worktree::remove::missing::{MissingCheckout, MissingRefusal, remove_missing_record};
+use worktree::remove::repair::{self, RepairRefusal};
+use worktree::remove::{
+    CheckoutState, Inventory, PrepareRefusal, collect_inventory, prepare, remove_local_branch,
+    remove_worktree,
+};
 use worktree::remove::included::classify_included;
 use worktree::worktree::{WorktreeEntry, default_branch, find_worktree, parse_worktree_list};
+
+use super::list_table::{observed_condition, shell_word};
 
 pub use policy::Flags;
 use policy::{Actions, BranchStep, Decision, Question, Refusal, Situation};
@@ -50,6 +63,37 @@ fn print(terminal: &Terminal, markup: impl Into<String>) {
     eprintln!("{}", Prose::new(markup.into()).render(terminal));
 }
 
+/// The name a worktree is reported by: its directory's basename.
+fn display_name(entry: &WorktreeEntry) -> String {
+    entry
+        .path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| entry.path.display().to_string())
+}
+
+/// `error` with `context` (the target and the operation) before its message.
+/// The variant, and so the exit code, is kept; variants that carry their own
+/// context or Prose markup are returned unchanged.
+fn in_context(error: WorktreeError, context: &str) -> WorktreeError {
+    match error {
+        WorktreeError::GitCommand(message) => WorktreeError::GitCommand(format!("{context}: {message}")),
+        WorktreeError::GitParse(message) => WorktreeError::GitParse(format!("{context}: {message}")),
+        WorktreeError::IncludeSetDiscovery(message) => {
+            WorktreeError::IncludeSetDiscovery(format!("{context}: {message}"))
+        }
+        WorktreeError::Io(error) => WorktreeError::Io(std::io::Error::new(error.kind(), format!("{context}: {error}"))),
+        other => other,
+    }
+}
+
+/// Prose markup for `command` followed by `argument`, a command the user can
+/// type, or `None` when `argument` can't be spelled the same way in every
+/// shell.
+fn typed_command(command: &str, argument: &str) -> Option<String> {
+    Some(format!("<i>{} {}</i>", esc(command), esc(&shell_word(argument)?)))
+}
+
 /// Everything known about the worktree before anything is asked.
 struct Facts {
     base: PathBuf,
@@ -57,6 +101,10 @@ struct Facts {
     display_name: String,
     /// The branch's full tip SHA (detached: HEAD).
     head: String,
+    /// What [`prepare`] found and did before any check.
+    checkout: CheckoutState,
+    /// The checkout's files. Empty for [`CheckoutState::Missing`], which had
+    /// no directory to inspect; that never means "checked clean".
     inventory: Inventory,
     /// `None` for a detached worktree, and in a handoff's second run, which
     /// never assesses the tiers (see [`run_handoff`]).
@@ -68,29 +116,42 @@ struct Facts {
 }
 
 impl Facts {
-    /// The local facts both runs read: the target's files, its tip, and its
-    /// include rules. No network.
-    fn local(base: &Path, entry: WorktreeEntry) -> Result<Self, WorktreeError> {
-        let mut inventory = collect_inventory(base, &entry.path)?;
-        inventory.included = classify_included(base, &entry.path, entry.branch.as_deref())?;
-        inventory.expand_mixed_ignored(base, &entry.path)?;
-        let head = match &entry.branch {
-            Some(branch) => git_command(&["rev-parse", &format!("refs/heads/{branch}")])?,
-            None => entry
-                .head_sha
-                .clone()
-                .ok_or_else(|| WorktreeError::GitParse("worktree has no HEAD".into()))?,
+    /// The local facts both runs read: the target's files and include rules
+    /// (for a missing directory, what [`prepare`] read from its record
+    /// instead), and its tip. No network.
+    fn local(base: &Path, entry: WorktreeEntry, checkout: CheckoutState) -> Result<Self, WorktreeError> {
+        let display_name = display_name(&entry);
+        let (inventory, head) = match &checkout {
+            CheckoutState::Missing(missing) => (Inventory::default(), missing.head.clone()),
+            CheckoutState::Healthy | CheckoutState::Repaired(_) => {
+                let kept = if matches!(checkout, CheckoutState::Repaired(_)) {
+                    " (the .git link restored for this check was left in place)"
+                } else {
+                    ""
+                };
+                let operation =
+                    format!("could not check the files of worktree {display_name} at {}{kept}", entry.path.display());
+                let context = |error| in_context(error, &operation);
+                let mut inventory = collect_inventory(base, &entry.path).map_err(context)?;
+                inventory.included =
+                    classify_included(base, &entry.path, entry.branch.as_deref()).map_err(context)?;
+                inventory.expand_mixed_ignored(base, &entry.path).map_err(context)?;
+                let head = match &entry.branch {
+                    Some(branch) => git_command(&["rev-parse", &format!("refs/heads/{branch}")]).map_err(context)?,
+                    None => entry
+                        .head_sha
+                        .clone()
+                        .ok_or_else(|| context(WorktreeError::GitParse("worktree has no HEAD".into())))?,
+                };
+                (inventory, head)
+            }
         };
-        let display_name = entry
-            .path
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| entry.path.display().to_string());
         Ok(Self {
             base: base.to_path_buf(),
             entry,
             display_name,
             head,
+            checkout,
             inventory,
             safety: None,
             has_origin: false,
@@ -121,9 +182,31 @@ impl Facts {
         self.entry.branch.as_deref()
     }
 
+    fn missing(&self) -> Option<&MissingCheckout> {
+        match &self.checkout {
+            CheckoutState::Missing(missing) => Some(missing),
+            CheckoutState::Healthy | CheckoutState::Repaired(_) => None,
+        }
+    }
+
+    /// What a refusal or cancellation adds after a repair: the restored link
+    /// is never rolled back.
+    fn kept_link_note(&self) -> String {
+        match self.checkout {
+            CheckoutState::Repaired(_) => format!(
+                "\n  <dim>The .git link restored for <blue>{}</blue> was left in place.</dim>",
+                esc(&self.display_name)
+            ),
+            CheckoutState::Healthy | CheckoutState::Missing(_) => String::new(),
+        }
+    }
+
     fn situation(&self, interactive: bool) -> Situation {
         Situation {
-            needs_consent: self.inventory.needs_consent(),
+            needs_consent: match self.missing() {
+                Some(missing) => missing.needs_consent(),
+                None => self.inventory.needs_consent(),
+            },
             branch_safe: self.safety.as_ref().map(|s| s.tier.allows_deletion()),
             interactive,
         }
@@ -137,6 +220,7 @@ impl Facts {
                 path: &self.entry.path,
                 branch: self.branch(),
                 inventory: &self.inventory,
+                missing: self.missing(),
                 safety: self.safety.as_ref(),
                 has_origin: self.has_origin,
                 remote: self.remote.as_ref(),
@@ -205,11 +289,7 @@ pub fn run(name: &str, flags: Flags) -> Result<(), WorktreeError> {
     std::env::set_current_dir(&base)?;
 
     let inside = is_within(&cwd, &entry.path);
-    let display = entry
-        .path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
+    let display = display_name(&entry);
     if inside && !crate::env::shell_wrapper_active() {
         return Err(WorktreeError::BlockedByEnvironment(format!(
             "\n<red><b>Nothing was removed.</b></red> You are inside worktree <blue>{}</blue>, and \
@@ -220,11 +300,26 @@ pub fn run(name: &str, flags: Flags) -> Result<(), WorktreeError> {
         )));
     }
 
-    let mut facts = Facts::local(&base, entry)?;
+    // After the guards above, so nothing is repaired for a removal that
+    // could not go ahead anyway.
+    let checkout = prepare(&base, &entry, &repair::Git)
+        .map_err(|refusal| WorktreeError::RefusedToLoseWork(prepare_refusal_markup(&refusal, name, &entry)))?;
+    if let CheckoutState::Repaired(_) = checkout {
+        print(
+            &terminal,
+            format!(
+                "\n<green>Restored the link</green> for <blue>{}</blue> so its files could be checked.\n  \
+                <dim>git worktree repair may also have restored other worktrees' links.</dim>",
+                esc(&display)
+            ),
+        );
+    }
+
+    let mut facts = Facts::local(&base, entry, checkout)?;
     facts.assess(flags.force_remote);
     eprintln!("{}", facts.render_report(&terminal));
     if let Some(refusal) = unprovable_remote(facts.remote.as_ref()) {
-        return Err(WorktreeError::RefusedToLoseWork(refusal));
+        return Err(WorktreeError::RefusedToLoseWork(refusal + &facts.kept_link_note()));
     }
 
     let interactive = crate::env::is_interactive();
@@ -237,21 +332,24 @@ pub fn run(name: &str, flags: Flags) -> Result<(), WorktreeError> {
     };
 
     match decision {
-        Decision::Refuse(refusal) => Err(WorktreeError::RefusedToLoseWork(refusal_markup(
-            refusal,
-            &facts.display_name,
-        ))),
+        Decision::Refuse(refusal) => Err(WorktreeError::RefusedToLoseWork(
+            refusal_markup(refusal, &facts) + &facts.kept_link_note(),
+        )),
         Decision::Cancelled => {
             print(
                 &terminal,
                 format!(
-                    "\n<dim>Cancelled. Worktree <blue>{}</blue> was not removed.</dim>",
-                    esc(&facts.display_name)
+                    "\n<dim>Cancelled. Worktree <blue>{}</blue> was not removed.</dim>{}",
+                    esc(&facts.display_name),
+                    facts.kept_link_note()
                 ),
             );
             Ok(())
         }
-        Decision::Proceed(actions) if inside => hand_off(&terminal, &facts, &cwd, actions),
+        // A missing directory has nowhere to stand in, so needs no move.
+        Decision::Proceed(actions) if inside && facts.missing().is_none() => {
+            hand_off(&terminal, &facts, &cwd, actions)
+        }
         Decision::Proceed(actions) => execute(&terminal, &facts, actions),
     }
 }
@@ -295,18 +393,82 @@ fn unprovable_remote(state: Option<&RemoteState>) -> Option<String> {
     }
 }
 
-fn refusal_markup(refusal: Refusal, display: &str) -> String {
+fn refusal_markup(refusal: Refusal, facts: &Facts) -> String {
     match refusal {
+        Refusal::FilesNeedForce if facts.missing().is_some() => format!(
+            "\n<red><b>Nothing was removed.</b></red> The record of worktree <blue>{}</blue> holds \
+            staged changes (listed above), and there is no terminal to confirm discarding them.\n  \
+            <dim>Add <i>--force-worktree</i> to discard them.</dim>",
+            esc(&facts.display_name)
+        ),
         Refusal::FilesNeedForce => format!(
             "\n<red><b>Nothing was removed.</b></red> Worktree <blue>{}</blue> has uncommitted or \
             protected included files (listed above), and there is no terminal to confirm discarding them.\n  \
             <dim>Add <i>--force-worktree</i> to discard them.</dim>",
-            esc(display)
+            esc(&facts.display_name)
         ),
         Refusal::ForceBranchNeedsWorktree => "\n<red><b>Nothing was removed.</b></red> \
             <i>--force-branch</i> needs the worktree removed first, and it has uncommitted files; \
             add <i>--force-worktree</i> to discard them."
             .to_string(),
+    }
+}
+
+/// Why `wt remove name` stopped before checking anything: Git can't read the
+/// worktree and [`prepare`] could not make it checkable. Every case is a
+/// refusal (exit 3) that removed nothing; only a repair attempt may have
+/// changed Git metadata, and then the message says so.
+fn prepare_refusal_markup(refusal: &PrepareRefusal, name: &str, entry: &WorktreeEntry) -> String {
+    let label = esc(&display_name(entry));
+    let path = entry.path.to_string_lossy();
+    let nothing = "<b>No working files, branches, or worktree records were removed.</b>";
+    let list = "<i>git worktree list --porcelain</i>";
+    let retry = typed_command("wt remove", name).unwrap_or_else(|| "<i>wt remove</i>".to_string());
+    match refusal {
+        PrepareRefusal::Repair(RepairRefusal::Unverified { failures, attempt }) => {
+            let repair = typed_command("git worktree repair", &path)
+                .unwrap_or_else(|| format!("<i>git worktree repair</i> naming {}", esc(&path)));
+            let mut markup = format!(
+                "\n<red><b>Can't remove {label}:</b></red> its .git file was missing and Git couldn't \
+                restore a verified link.\n{nothing} The repair attempt may have changed Git metadata \
+                for this or other worktrees.\nFrom the base checkout, inspect the repair result with \
+                {list} and try {repair}, then retry {retry}."
+            );
+            // Several checks fail with the same message when Git can't
+            // resolve the checkout at all; say it once.
+            let mut reasons: Vec<String> = Vec::new();
+            for failure in failures.iter().map(ToString::to_string) {
+                if !reasons.contains(&failure) {
+                    reasons.push(failure);
+                }
+            }
+            for reason in reasons {
+                markup.push_str(&format!("\n  <dim>Not verified: {}</dim>", esc(&reason)));
+            }
+            for line in attempt.diagnostics() {
+                markup.push_str(&format!("\n  <dim>Repair output: {}</dim>", esc(&line)));
+            }
+            markup
+        }
+        PrepareRefusal::Repair(refusal) => format!(
+            "\n<red><b>Can't remove {label}:</b></red> Git can't read this worktree, and no repair was \
+            attempted: {}.\n{nothing}\n  <dim>Inspect it from the base checkout with {list}, then retry \
+            {retry}.</dim>",
+            esc(&refusal.to_string())
+        ),
+        PrepareRefusal::Missing(refusal) => format!(
+            "\n<red><b>Can't remove {label}:</b></red> its directory is gone, and its remaining Git record \
+            couldn't be checked: {}.\n{nothing}\n  <dim>Inspect it from the base checkout with {list}, \
+            then retry {retry}.</dim>",
+            esc(&refusal.to_string())
+        ),
+        PrepareRefusal::Unavailable(condition) => format!(
+            "\n<red><b>Can't remove {label}:</b></red> Git can't read this worktree: {}.\n{nothing} \
+            <i>wt remove</i> deletes a directory only after checking its files, and no <i>--force</i> \
+            flag changes that.\n  <dim>Restore or move what is at {}, then retry {retry}.</dim>",
+            observed_condition(entry, condition),
+            esc(&path)
+        ),
     }
 }
 
@@ -317,12 +479,15 @@ fn ask(terminal: &Terminal, facts: &Facts, question: Question) -> Result<bool, W
             eprintln!();
             let included = facts.inventory.included.needs_consent.iter()
                 .map(|(path, _)| report::visible_include_path(path)).collect::<Vec<_>>();
-            let names = if included.is_empty() { "the files listed above".to_string() }
-                else { format!("the files listed above, including {}", included.join(", ")) };
-            let label = Prose::new(format!(
-                "Discard {names} and remove worktree <blue>{}</blue>?", esc(&facts.display_name)
-            ))
-            .render(terminal);
+            let question = if facts.missing().is_some() {
+                format!("Discard the staged changes listed above and remove the record of worktree <blue>{}</blue>?",
+                    esc(&facts.display_name))
+            } else {
+                let names = if included.is_empty() { "the files listed above".to_string() }
+                    else { format!("the files listed above, including {}", included.join(", ")) };
+                format!("Discard {names} and remove worktree <blue>{}</blue>?", esc(&facts.display_name))
+            };
+            let label = Prose::new(question).render(terminal);
             Confirm::new(&label)
                 .with_default(false)
                 .prompt()
@@ -367,27 +532,42 @@ fn map_inquire_err(e: InquireError) -> WorktreeError {
     }
 }
 
-/// Removes the worktree, then the branch, then (with `--force-remote`) the
-/// branch on origin.
+/// Removes the worktree (for a missing directory, only its record), then the
+/// branch, then (with `--force-remote`) the branch on origin. Nothing after a
+/// failed step runs.
 fn execute(terminal: &Terminal, facts: &Facts, actions: Actions) -> Result<(), WorktreeError> {
-    remove_worktree(&facts.base, &facts.entry.path, actions.discard_files)?;
-    if let Some(warning) = worktree::copy_record::delete_for(&facts.base, &facts.entry.path) {
+    let target = format!("worktree {} at {}", facts.display_name, facts.entry.path.display());
+    let copy_record_warning = if facts.missing().is_some() {
+        remove_missing_record(&facts.base, &facts.entry).map_err(|refusal| missing_record_error(refusal, facts))?
+    } else {
+        remove_worktree(&facts.base, &facts.entry.path, actions.discard_files)
+            .map_err(|error| in_context(error, &format!("could not remove {target}")))?;
+        worktree::copy_record::delete_for(&facts.base, &facts.entry.path)
+    };
+    if let Some(warning) = copy_record_warning {
         print(terminal, format!("<yellow>Warning:</yellow> could not delete copy record: {}", esc(&warning)));
     }
     let mut removed = vec![format!("worktree {}", facts.display_name)];
+    let path = esc(&facts.entry.path.display().to_string());
     print(
         terminal,
-        format!(
-            "\n<green>Removed worktree</green> <b>{}</b> <dim>at {}</dim>",
-            esc(&facts.display_name),
-            esc(&facts.entry.path.display().to_string())
-        ),
+        if facts.missing().is_some() {
+            format!(
+                "\n<green>Removed the record of worktree</green> <b>{}</b> <dim>(its directory at {path} was \
+                already gone)</dim>",
+                esc(&facts.display_name)
+            )
+        } else {
+            format!("\n<green>Removed worktree</green> <b>{}</b> <dim>at {path}</dim>", esc(&facts.display_name))
+        },
     );
 
     if let (Some(branch), Some(step)) = (facts.branch(), actions.branch) {
         match step {
             BranchStep::Delete { .. } => {
-                remove_local_branch(&facts.base, branch)?;
+                remove_local_branch(&facts.base, branch).map_err(|error| {
+                    in_context(error, &format!("removed {}, but could not delete branch {branch}", removed.join(" and ")))
+                })?;
                 removed.push(format!("branch {branch}"));
                 // Without assessed safety (a handoff's second run) there is
                 // no count to claim; the first run's report named the commits.
@@ -425,6 +605,31 @@ fn execute(terminal: &Terminal, facts: &Facts, actions: Actions) -> Result<(), W
         delete_on_origin(terminal, facts, &removed)?;
     }
     Ok(())
+}
+
+/// The error for a missing directory's record that was not removed. No branch
+/// step has run.
+fn missing_record_error(refusal: MissingRefusal, facts: &Facts) -> WorktreeError {
+    let name = esc(&facts.display_name);
+    match refusal {
+        MissingRefusal::RecordRemoval(error) => in_context(
+            error,
+            &format!(
+                "could not remove the record of worktree {} at {}; no branch was deleted",
+                facts.display_name,
+                facts.entry.path.display()
+            ),
+        ),
+        MissingRefusal::Reappeared(_) => WorktreeError::RefusedToLoseWork(start_again(&format!(
+            "Something now exists at <b>{}</b>, where the directory of worktree <blue>{name}</blue> was \
+            gone, and its contents have not been checked.",
+            esc(&facts.entry.path.display().to_string())
+        ))),
+        other => WorktreeError::RefusedToLoseWork(start_again(&format!(
+            "The record of worktree <blue>{name}</blue> was not removed: {}.",
+            esc(&other.to_string())
+        ))),
+    }
 }
 
 fn delete_on_origin(terminal: &Terminal, facts: &Facts, removed: &[String]) -> Result<(), WorktreeError> {
@@ -530,11 +735,15 @@ fn hand_off(terminal: &Terminal, facts: &Facts, cwd: &Path, actions: Actions) ->
         }),
         remote: actions.delete_remote.then(|| remote_approval(facts.remote.as_ref())),
     };
+    let git_dir = checkout_git_dir(&facts.base, &facts.entry.path).map_err(|error| {
+        in_context(error, &format!("could not read the .git link of worktree {}", facts.display_name))
+    })?;
     let state = HandoffState {
         repo: canonical(&facts.base),
         target: canonical(&facts.entry.path),
         head: facts.head.clone(),
         branch: facts.entry.branch.clone(),
+        git_dir,
         fingerprint: fingerprint(facts)?,
         rules: facts.inventory.included.rules.clone(),
         baseline: facts.inventory.included.baseline.clone(),
@@ -735,13 +944,29 @@ pub fn run_handoff(token: &str) -> Result<(), WorktreeError> {
         })?;
     std::env::set_current_dir(&base)?;
 
+    // The second run never repairs: a link that broke since the first run
+    // refuses, and one redirected elsewhere fails the `git_dir` comparison.
+    if availability::classify(&entry).is_unavailable() {
+        return Err(WorktreeError::RefusedToLoseWork(start_again(
+            "Git can no longer read the worktree: its .git link broke since you confirmed. \
+            Nothing was repaired.",
+        )));
+    }
+    let git_dir = checkout_git_dir(&base, &entry.path).map_err(|error| {
+        WorktreeError::RefusedToLoseWork(start_again(&format!(
+            "The worktree's .git link can no longer be read: {}.",
+            esc(&error.to_string())
+        )))
+    })?;
+
     let remote_approval = record.approvals.remote.clone();
-    let mut facts = Facts::local(&base, entry)?;
+    let mut facts = Facts::local(&base, entry, CheckoutState::Healthy)?;
     let fresh = HandoffState {
         repo: canonical(&base),
         target: canonical(&facts.entry.path),
         head: facts.head.clone(),
         branch: facts.entry.branch.clone(),
+        git_dir,
         fingerprint: fingerprint(&facts)?,
         rules: facts.inventory.included.rules.clone(),
         baseline: facts.inventory.included.baseline.clone(),
@@ -796,4 +1021,41 @@ pub fn run_handoff(token: &str) -> Result<(), WorktreeError> {
         format!("<dim>You are now in {}.</dim>", esc(&cwd.display().to_string())),
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::exit::exit_code;
+
+    #[test]
+    fn context_never_changes_an_exit_code() {
+        let errors = [
+            WorktreeError::GitCommand("fatal: not a git repository".into()),
+            WorktreeError::GitParse("worktree has no HEAD".into()),
+            WorktreeError::IncludeSetDiscovery("git failed".into()),
+            WorktreeError::Io(std::io::Error::from(std::io::ErrorKind::PermissionDenied)),
+            WorktreeError::RefusedToLoseWork("markup".into()),
+            WorktreeError::BlockedByEnvironment("markup".into()),
+            WorktreeError::DirectoryInUse("/wt/feat-x".into()),
+            WorktreeError::Cancelled,
+        ];
+        for error in errors {
+            let before = (exit_code(&error), error.to_string());
+            let wrapped = in_context(error, "could not check the files of worktree feat-x at /wt/feat-x");
+            assert_eq!(exit_code(&wrapped), before.0, "{wrapped:?}");
+            let message = wrapped.to_string();
+            match &wrapped {
+                WorktreeError::GitCommand(_) | WorktreeError::GitParse(_) | WorktreeError::IncludeSetDiscovery(_) => {
+                    assert!(message.contains("worktree feat-x at /wt/feat-x: "), "{message}");
+                }
+                WorktreeError::Io(io) => {
+                    assert!(message.contains("worktree feat-x"), "{message}");
+                    assert_eq!(io.kind(), std::io::ErrorKind::PermissionDenied);
+                }
+                // Markup and self-describing errors are left alone.
+                _ => assert_eq!(message, before.1),
+            }
+        }
+    }
 }

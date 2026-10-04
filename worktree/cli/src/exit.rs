@@ -1,8 +1,10 @@
 //! Process exit codes shared by every `wt` command.
 //!
 //! 0, 1, and 2 mean the same everywhere (2 is clap's invalid-arguments code).
-//! 3 and 4 are refusals that changed nothing, split because the remedy
-//! differs: 3 needs a `--force-*` flag, 4 needs a different environment.
+//! 3 and 4 are refusals that removed nothing, split because the remedy
+//! differs: 3 needs a `--force-*` flag, a fix to the worktree, or a fresh run;
+//! 4 needs a different environment. Exit 3 does not promise that nothing
+//! changed: `wt remove` may have repaired a worktree's link before refusing.
 
 use worktree::WorktreeError;
 

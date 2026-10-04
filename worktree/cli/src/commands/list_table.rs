@@ -859,25 +859,32 @@ fn unavailable_note(status: &WorktreeStatus, statuses: &[WorktreeStatus]) -> Opt
             )
         }
         Availability::Other(condition) => {
-            let observed = match condition {
-                OtherCondition::NotADirectory => format!("{path} is not a directory"),
-                OtherCondition::Link => format!("{path} is a link, which may have replaced the original checkout"),
-                OtherCondition::PathUninspectable(error) => {
-                    format!("{path} couldn't be inspected ({})", Prose::escape_text(error))
-                }
-                OtherCondition::GitEntryUninspectable(error) => {
-                    format!("its .git couldn't be inspected ({})", Prose::escape_text(error))
-                }
-                OtherCondition::GitEntryPresent => "its .git exists, but Git can't use it".to_string(),
-            };
-            let reason = match entry.prunable.as_deref() {
-                Some(reason) if !reason.is_empty() => format!("; Git reports: {}", Prose::escape_text(reason)),
-                _ => String::new(),
-            };
-            format!("{label}: Git can't read this worktree: {observed}{reason}.")
+            format!("{label}: Git can't read this worktree: {}.", observed_condition(entry, condition))
         }
     };
     Some(format!("<dim>{text}</dim>"))
+}
+
+/// Prose markup for what was observed at `entry`, a worktree Git can't read
+/// that is neither missing nor unlinked, followed by Git's `prunable` reason
+/// when it gave one. Paths, errors, and the reason are escaped.
+pub(crate) fn observed_condition(entry: &WorktreeEntry, condition: &OtherCondition) -> String {
+    let path = Prose::escape_text(&entry.path.to_string_lossy());
+    let observed = match condition {
+        OtherCondition::NotADirectory => format!("{path} is not a directory"),
+        OtherCondition::Link => format!("{path} is a link, which may have replaced the original checkout"),
+        OtherCondition::PathUninspectable(error) => {
+            format!("{path} couldn't be inspected ({})", Prose::escape_text(error))
+        }
+        OtherCondition::GitEntryUninspectable(error) => {
+            format!("its .git couldn't be inspected ({})", Prose::escape_text(error))
+        }
+        OtherCondition::GitEntryPresent => "its .git exists, but Git can't use it".to_string(),
+    };
+    match entry.prunable.as_deref() {
+        Some(reason) if !reason.is_empty() => format!("{observed}; Git reports: {}", Prose::escape_text(reason)),
+        _ => observed,
+    }
 }
 
 /// The name a row shows: its directory's basename, or `base repo`.
@@ -925,7 +932,7 @@ fn remove_argument(entry: &WorktreeEntry, statuses: &[WorktreeStatus]) -> Result
 /// a quote character (PowerShell also treats `‘’‚‛` as quotes), a control
 /// character, or a backslash that fish would read as an escape inside single
 /// quotes (`\\`, or one before the closing quote).
-fn shell_word(value: &str) -> Option<String> {
+pub(crate) fn shell_word(value: &str) -> Option<String> {
     if value.is_empty() || value.starts_with(['-', '~']) {
         return None;
     }
