@@ -64,7 +64,13 @@ Both list types automatically configure hanging indent on child components so th
 
 ### Prose Items
 
-A list item holds blocks, as a Markdown list item does, so a list item takes the block [`Prose`](./prose.md). Its first paragraph sits on the marker line and wraps with the hanging indent; each further paragraph or fenced code block follows as its own block, indented under the item.
+A list item holds blocks, as a Markdown list item does, so a list item takes the block [`Prose`](./prose.md). Its first paragraph sits on the marker line and wraps with the hanging indent; each further paragraph or fenced code block follows as its own block, indented under the item. A hard break in that first paragraph (a `Prose` in `LineBreaks::Hard` mode, or `\` before a newline) starts a new row under the marker line:
+
+```rust
+// The `- Details:` row renders on its own line, under the marker line.
+list.add(Prose::new("Object shape. One mapping per document.\n  - Details: keys are property names")
+    .with_line_breaks(LineBreaks::Hard));
+```
 
 ```rust
 let mut list = UnorderedList::empty();

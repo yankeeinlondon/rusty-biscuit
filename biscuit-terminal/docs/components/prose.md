@@ -50,9 +50,9 @@ carries a component-local rendering format.
 
 ```mermaid
 flowchart LR
-    A[raw input] --> B[normalize CRLF and CR to LF;<br/>lift fenced code blocks]
+    A[raw input] --> B[normalize CRLF and CR to LF;<br/>set aside opaque regions]
     B --> C[split into paragraphs<br/>on blank lines]
-    C --> D[inline parse per paragraph:<br/>code spans, links, bold, italics, tags]
+    C --> D[inline parse per paragraph:<br/>links, bold, italics, tags]
     D --> E[render tree]
     E --> T[terminal: ANSI and OSC 8]
     E --> H[browser: HTML fragment]
@@ -122,6 +122,11 @@ Newlines follow Markdown. One rule per row:
 
 - **Soft break.** A single newline reflows as a space. Spaces and tabs
   around it are dropped, so `"first  \nsecond"` renders `first second`.
+  This holds when a style or link starts or ends beside the break, and the
+  style keeps its extent: `"a <b> \nb</b>"` and `"<b>a \n</b> b"` both
+  render one space between `a` and `b`. Inline code beside a break keeps its
+  own spaces. Whitespace away from a break, and around a hard break, is kept
+  (`"a <b> b</b>"` keeps both spaces).
 - **Paragraph boundary.** Two or more newlines in a row, with only spaces or
   tabs between them, start a new paragraph. `\n\n` and `\n\n\n\n` are the
   same boundary. Leading and trailing blank lines produce nothing, and empty
@@ -158,7 +163,16 @@ InlineProse::new("line one\nline two").with_line_breaks(LineBreaks::Hard);
 
 The default is the same in both components, so a string means the same thing
 in either. Markdown output keeps the meaning but may normalize the spelling;
-it is not a byte-for-byte copy of the input.
+it is not a byte-for-byte copy of the input. A break with no text after it,
+or none before it on its line, has no newline spelling a Markdown reader
+keeps, so it is written as `<br>` or a space instead:
+
+| Input | Mode | HTML | Markdown |
+|---|---|---|---|
+| `InlineProse` `a` newline | `Hard` | `a<br>` | `a<br>` |
+| `<b>a` newline `</b>` | `Hard` | `<strong>a<br></strong>` | `**a**<br>` |
+| `InlineProse` newline `a` | `Soft` | ` a` | `&#32;a` |
+| `<red>` newline `**a**</red>` | `Soft` | a red span holding a space and bold `a` | MarkdownPlus `<span style="…"> **a**</span>` |
 
 ### Styles across paragraphs
 
@@ -232,12 +246,36 @@ are inline code on every target.
 stay literal text. Each emphasis style has exactly one spelling, so authored
 intent is unambiguous.
 
-**File link targets.** A link target that is a path rather than a URL
-becomes a `file://` URL on every target, which keeps it clickable as an OSC 8
-link in the terminal. An absolute path is used as is; `./path` resolves from
-the working directory; any other relative path (`plan.md`) resolves from the
-nearest package root or the Git repository root, falling back to the working
-directory. `http(s)://`, `file://`, and `mailto:` targets are unchanged.
+**File link targets.** The render tree, Markdown, and HTML keep a link
+target exactly as written, so the output is portable:
+
+```rust
+let label = InlineProse::new("Run `md hash` on [the plan](plan.md)");
+// Markdown: Run `md hash` on [the plan](plan.md)
+// HTML:     Run <code>md hash</code> on <a href="plan.md">the plan</a>
+```
+
+Only the terminal turns a path into a `file://` URL, because an OSC 8 link
+needs one to be clickable. It reads the target as a file reference, the same
+grammar every repository tool uses: `./path` resolves from the working
+directory; a bare path (`plan.md`) resolves from the working directory, then
+the Git repository root; an absolute path is used as is; `~/`, `@`, `&`, `^`,
+and `vault:` references resolve by their own rules. A path that names no
+existing file still links to where it would be under the working directory.
+A target with a URL scheme (`https:`, `mailto:`, `file:`) or a `#fragment` is
+unchanged. The working directory is the one at render time.
+
+```mermaid
+flowchart LR
+    A["[the plan](plan.md)"] --> T[render tree: href = plan.md]
+    T --> M["Markdown / HTML: plan.md"]
+    T --> O["terminal OSC 8: file:///…/plan.md"]
+```
+
+This applies to links Prose builds, wherever the Prose is embedded (a table
+cell, `InlineContent`, a `StatusBlock` body). A link node built by other code,
+such as a darkmatter document, reaches the terminal with its destination
+unchanged, because its producer owns the base directory.
 
 ### Code spans
 
@@ -272,6 +310,56 @@ starts or ends with a backtick. ``a`b`` is written ```` ``a`b`` ````.
 is code. `` `[desc](ref)` `` is a code span that shows the literal text
 `[desc](ref)`. In a darkmatter template, `{{code_link(path)}}` produces the
 link-with-code-text form (see darkmatter's expression reference).
+
+### Opaque regions
+
+Some input is never read as markup. Before anything else runs, a single
+left-to-right pass sets these regions aside, taking whichever starts first:
+
+| Region | Example | What survives |
+|---|---|---|
+| Fenced code block | ```` ```\n**x**\n``` ```` | the body lines exactly |
+| Code span | `` `**x**` `` | the span value (see [Code spans](#code-spans)) |
+| `<code-block>` body | `<code-block>**x**</code-block>` | everything up to the first `</code-block>`, exactly |
+| Quoted tag attribute | `<a href="https://e.io/a>**b**">t</a>` | the attribute value, with only the [`quoted_attr`](#escape-mechanism) escapes resolved |
+| HTML comment | `a<!-- **x** -->b` | nothing: the comment adds no node, so this is the text `ab` |
+
+Nothing inside a region is interpreted as Prose: no emphasis, link, tag,
+backslash escape, or backtick, and no blank line or fence line inside it splits a paragraph or
+opens a code block. So `<code-block>[x](https://e.io)</code-block>` shows the
+literal `[x](https://e.io)`, and an attribute value that spans lines,
+including lines that look like a fence, reaches the link destination
+unchanged. A `<code-block>` with no closing tag takes the rest of the input.
+`InlineProse` turns each line ending of a code body into a space, as it does
+for a fenced block. An escaped `\<code-block>` is literal text, and its body is
+ordinary prose.
+
+An HTML comment is `<!-->`, `<!--->`, or `<!--` up to the first `-->`, as in
+CommonMark. It has no visible content, which is what lets `Prose` and
+`InlineProse` read back their own Markdown: two code spans that would touch
+are written `` `a`<!-- -->`b` ``, and reading that gives the code values `a`
+and `b` with nothing between them. A paragraph holding only comments is no
+paragraph. Like a code span, a comment never crosses a blank line or a fence
+line, and an unclosed `<!--` is literal text. Comment-shaped text stays
+content where the grammar does not read a comment: inside a code span, a
+fenced block, a `<code-block>` body, a recognized tag's quoted attribute, or
+after an escape. `Prose::escape_text("<!-- x -->")` is `\<!-- x --\>`, which
+shows `<!-- x -->`.
+
+This also holds for the tag that encloses a region. Tag text inside a quoted
+attribute, a code span, or a code body never opens or closes the surrounding
+wrapper. Neither does escaped tag text in ordinary content, and a `]` inside
+an attribute never ends a Markdown link label:
+
+| Input | Result |
+|---|---|
+| `<b>x <a href="https://e.io/</b>">l</a> y</b> z` | `x`, `l`, and `y` are bold, and the link destination is `https://e.io/</b>`; `z` is not bold |
+| `<b>x <green note="<b>">l</green> y</b> z` | the `<b>` in the attribute does not nest, so `z` is not bold |
+| `<b>x \</b> y</b> z` | shows `x </b> y` in bold; `z` is not bold |
+| `[x <green note="]">l</green>](https://e.io)` | one link labeled `x l` |
+
+A `<` that does not open a recognized tag is a literal `<`; the input after
+it is parsed as usual, so `` a <b `c` `` still shows `c` as code.
 
 ### Flanking Rules
 
@@ -334,7 +422,11 @@ let path = InlineProse::new(format!("written to `{}`", path.display()));
 
 **Colors** (foreground): `red`, `green`, `blue`, `yellow`, `cyan`, `magenta`, `white`, `black`, plus bright variants (`bright-red`, etc.), Tailwind colors (`gray-800`, `blue-400`), and web colors (`coral`, `salmon`)
 
-**Background Colors**: Prefix with `bg-` (e.g., `<bg-blue>`, `<bg-coral>`)
+**Background Colors**: prefix a web color or a Tailwind color with `bg-`
+(`<bg-coral>`, `<bg-red-800>`), or give an RGB value with `bg-rgb`
+(`<bg-rgb 255,128,0>`). The basic and bright color names do not take the
+prefix: tags spelled `bg-blue` or `bg-bright-red` stay literal text. `<bg-black>` and
+`<bg-white>` work because they are Tailwind names.
 
 **Special**: `<a href="url">text</a>` for hyperlinks and `<rgb #hex>text</rgb>`
 for arbitrary colors. Styles end when their tag closes; there is no
@@ -342,11 +434,30 @@ standalone reset token.
 
 **Fenced code blocks** are block content. In `Prose` a fenced block is a code
 block (`<pre><code class="language-rust">` in HTML) that sits between
-paragraphs; a fenced block inside a style tag stays a sibling block, and the
-style resumes after it. In `InlineProse` the same fence becomes one inline
+paragraphs. In `InlineProse` the same fence becomes one inline
 code value: the language hint is dropped and each line ending becomes a
 space, so a table cell holding a fence shows `fn main() {} let x = 1;` as
-inline code.
+inline code. `<code-block lang="rust">…</code-block>` is the explicit form of
+the same block. In Markdown output the fence grows past any backtick run that
+starts a body line, so a body holding a ```` ``` ```` line still reads back
+whole.
+
+A code block inside a style or link never sits inside it. In `Prose` the
+paragraph is split around the block: the code becomes a sibling block, and
+every enclosing style and link resumes on each side, nested ones included.
+A paragraph edge that meets a code block drops its line break, spaces, and
+tabs (`"a \n<code-block>x</code-block>\n b"` renders `<p>a</p>…<p>b</p>`),
+and an edge with nothing else in it leaves no paragraph.
+
+```text
+<a href="https://e.io">a<code-block>x</code-block>b</a>
+  → <p><a href="https://e.io">a</a></p><pre><code>x</code></pre><p><a href="https://e.io">b</a></p>
+```
+
+A Markdown delimiter (`**`, `[…](…)`) cannot span a fence line: as in
+CommonMark, the fence ends the paragraph, so `**a` and `b**` stay literal
+around it. In `InlineProse` the code is inline code, so it stays inside the
+style or link (`<a href="https://e.io">a<code>x</code>b</a>`).
 
 > **Removed:** the `<hidden>` tag (SGR 8) is no longer recognized;
 > `<hidden>text</hidden>` renders as inert literal text like any unknown tag.
@@ -359,7 +470,7 @@ inline code.
 |--------|-------|-------|
 | Terminal | `TerminalRenderable` | ANSI and OSC 8, degraded to what the terminal supports (see [Graceful Degradation](#graceful-degradation)). `Prose` applies its `Layout`. |
 | Browser | `BrowserRenderable` | `Prose`: one element per paragraph (the [block tag](#block-tag), default `<p>`), `<pre><code>` for code blocks, and the `Layout` as CSS on a wrapping `<div>` when it is not the default. `InlineProse`: phrasing HTML with no outer element. Both use `<strong>`, `<em>`, `<s>`, `<a>`, `<code>`, and `<span style="…">` for presentational styles. No class is added. User text and attribute values are escaped. |
-| Markdown | `MarkdownRenderable` | Portable Markdown keeps semantic styles and degrades color and underline variants to readable text; MarkdownPlus keeps more presentation as inline HTML. A hard break is `\` plus a newline (`<br>` inside a table cell). `InlineProse` output has no trailing paragraph break. |
+| Markdown | `MarkdownRenderable` | Portable Markdown keeps semantic styles and degrades color and underline variants to readable text; MarkdownPlus keeps more presentation as inline HTML. A hard break is `\` plus a newline where text follows it, and `<br>` where nothing follows it in its block or inside a table cell; a soft break with nothing before or after it on its line is a space (`&#32;` at a line edge), so `InlineProse::new("\na")` is `&#32;a`. Literal text stays literal: escaped source such as `\**not bold\**`, a `Prose::escape_text` value, or an unknown tag is written with Markdown escapes (`\*\*not bold\*\*`, `\<unknown>`), so a Markdown reader sees the same text the terminal and browser show. That includes text that only looks like Markdown once pieces join or whitespace is counted: `<3@example.com>` stays text rather than an email link, `1<clipboard>. x</clipboard>` stays a paragraph rather than a numbered list, and leading or trailing spaces and tabs are written as `&#32;`/`&#9;` so `"    x"` is not read as a code block. `InlineProse` output has no trailing paragraph break. |
 
 Both components implement `TreeRenderable`. `Prose::render_tree()` returns
 the `Root` of paragraph and code blocks; `InlineProse::render_tree()`

@@ -54,7 +54,14 @@ renderers, with no component-local IR.
 - **`Prose`** is **block** content: paragraphs (split on blank lines) and
   fenced code blocks under a `Root`, with a `Layout` applied on every target
   (CSS in HTML) and a `ProseTag` choosing each paragraph's HTML element
-  (default `<p>`). Use it for anything printed as its own message.
+  (default `<p>`). Use it for anything printed as its own message. A code
+  block (fenced or `<code-block>`) inside a style or link splits the
+  paragraph: the code is a sibling block and every enclosing wrapper resumes
+  on both sides (`tree::split_around_blocks`, the one split used for styles,
+  links, and paragraphs). A paragraph edge meeting a code block drops its
+  breaks and spaces (`blocks::trim_edges_at_code`). Soft-break whitespace is
+  trimmed once over the whole inline sequence
+  (`tree::trim_soft_break_whitespace`), so it crosses wrapper boundaries.
 - **`InlineProse`** is **inline**: one neutral `Span` of phrasing nodes, no
   layout builders, no outer HTML element. Use it for table cells, labels,
   badges, and values inside a line. A fenced block in it becomes one
@@ -85,14 +92,22 @@ Markdown rules, the same in both components:
 
 | Input | Meaning |
 |---|---|
-| single `\n` | soft break (a space on terminal/HTML), spaces around it dropped |
+| single `\n` | soft break (a space on terminal/HTML), spaces and tabs around it dropped, also across a style or link boundary |
 | two or more `\n` (only spaces/tabs between) | paragraph boundary in `Prose`; one soft break in `InlineProse` |
 | `\` before `\n` (Rust: `"a\\\nb"`) | hard break (`<br>`; Markdown `\` + newline) |
 | trailing spaces before `\n` | **not** a hard break |
 
 CRLF and lone CR are read as LF. Text that uses single `\n` as line breaks
 needs `.with_line_breaks(LineBreaks::Hard)` (on either component); without it
-the lines join.
+the lines join. The implicit conversions are soft too: a `String` passed to
+`StatusBlock::body`, a hint, a `Status::from_prose` description, and an
+`InlineProse` table cell. Callers that build rows (`"Heading:\n- a\n- b"`,
+`.join("\n")`, an error `Display` with a `hint:` line, pre-rendered component
+output) pass `Prose::new(s).with_line_breaks(LineBreaks::Hard)` instead. A
+leading or trailing `\n` meant as a blank spacing row is trimmed in both
+modes, so put that newline outside the component. `Status::from_prose` takes
+`.with_line_breaks(LineBreaks::Hard)` too: each newline starts a new row as
+written.
 
 ### Block Tags
 
@@ -112,7 +127,6 @@ now render as literal text.
 | `<dashed-underline>` | | Dashed underline |
 | `<blink>` | | Blinking |
 | `<inverse>` | `<reverse>` | Inverse video |
-| `<hidden>` | | Hidden |
 | `<strikethrough>` | `<~>` | Strikethrough |
 | `<a href="...">` | | OSC8 link |
 | `<rgb 255,128,0>` | | RGB foreground |
@@ -132,11 +146,11 @@ Foreground colors:
 <rgb 255,0,0>RGB color</rgb>
 ```
 
-Background colors (prefix with `bg-`):
+Background colors (prefix a web/CSS or Tailwind name with `bg-`, or use
+`bg-rgb`; basic and bright names such as `bg-blue` stay literal text):
 ```
-<bg-red>red background</bg-red>
-<bg-blue>blue background</bg-blue>
 <bg-coral>web/CSS background</bg-coral>
+<bg-navy>web/CSS background</bg-navy>
 <bg-red-800>Tailwind background</bg-red-800>
 <bg-rgb 255,128,0>RGB background</bg-rgb>
 ```
@@ -148,13 +162,15 @@ OSC8 links with relative path support:
 <a href="https://example.com">URL</a>
 <a href="/absolute/path">absolute file</a>
 <a href="./relative/path">relative to CWD</a>
-<a href="src/main.rs">relative to git/package root</a>
+<a href="src/main.rs">relative to CWD, then git root</a>
 ```
 
-Relative paths (without `./`) resolve from:
-1. Package root (for monorepos: nearest Cargo.toml)
-2. Git repository root
-3. CWD (fallback)
+The tree, Markdown, and HTML keep the authored `href`. Only the terminal
+renderer resolves it (`render_tree::link`), with `biscuit_file::FileReference`
+grammar, against the CWD at render time; a missing file still links to its
+CWD-joined path, and a URL with a scheme or a `#fragment` is unchanged. Prose
+marks its links with the `biscuit_terminal.link` hint; unmarked links (e.g.
+darkmatter's) are emitted as authored.
 
 Example:
 ```
@@ -172,7 +188,7 @@ A strict CommonMark subset is recognised in addition to block tags. Markdown for
 | `**text**`      | `<b>text</b>`                  |
 | `_text_`        | `<i>text</i>`                  |
 
-Strict subset — `__bold__` and `*italics*` are **not** recognised; both pass through as literal text. The pre-processor runs in a fixed order: fenced code blocks → code spans → links → bold → italics → block-tag parser. Link URLs are placeholdered before the bold/italics phases so a URL like `https://example.com/path_with_underscores` is never re-interpreted. A code span (`` `x_y` ``) is opaque and becomes `NodeKind::InlineCode`: terminal dim (or theme colors) without backticks, HTML `<code>`, Markdown a safe backtick fence. Its value follows CommonMark: backslashes literal (`` `a\_b` `` shows `a\_b`), line endings → spaces, one edge space stripped when both edges have one. A span never crosses a paragraph boundary. On a terminal that emits no styling, inline code keeps a backtick fence. `` [`desc`](ref) `` is a link with code text; `` `[desc](ref)` `` is literal code (darkmatter's `code_link()` emits the former).
+Strict subset — `__bold__` and `*italics*` are **not** recognised; both pass through as literal text. The pre-processor runs in a fixed order: one pass over the whole input sets opaque regions aside (fenced code blocks, code spans, HTML comments, `<code-block>` bodies, and recognized tag declarations with their quoted attributes, whichever starts first; a comment `<!-- … -->` contributes no node, so Prose reads its own `` `a`<!-- -->`b` `` Markdown back as two code values) → paragraph split → links → bold → italics → block-tag parser. No later phase ever sees code contents or attribute values, so a new phase never needs its own code/attribute protection; a `<` that opens no recognized tag is a literal `<` and parsing continues after it. Link URLs are placeholdered before the bold/italics phases so a URL like `https://example.com/path_with_underscores` is never re-interpreted. A code span (`` `x_y` ``) is opaque and becomes `NodeKind::InlineCode`: terminal dim (or theme colors) without backticks, HTML `<code>`, Markdown a safe backtick fence. Its value follows CommonMark: backslashes literal (`` `a\_b` `` shows `a\_b`), line endings → spaces, one edge space stripped when both edges have one. A span never crosses a paragraph boundary. On a terminal that emits no styling, inline code keeps a backtick fence. `` [`desc`](ref) `` is a link with code text; `` `[desc](ref)` `` is literal code (darkmatter's `code_link()` emits the former).
 
 #### Flanking rules
 
@@ -328,6 +344,12 @@ fn colored_output(msg: &str) {
     }
 }
 ```
+
+For components, do not strip SGR from a styled render: render through a
+colorless terminal (`Terminal { color_depth: ColorDepth::None, ..term }`) so
+the renderer picks the unstyled forms itself. A stripped styled render leaves
+inline code unmarked, where a colorless render keeps its backtick fence. The
+`bt` CLI does this with `colorless_when_no_color`.
 
 ## Related
 
