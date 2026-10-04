@@ -1222,6 +1222,27 @@ fn a_focused_view_is_never_cut_by_the_height_cap() {
     assert_eq!(planned.mermaid, SPEC_EXAMPLE);
 }
 
+/// `dest` is emitted before `src` but merges `src` mid-lane: `dest` waits
+/// before the merge commit until `src` has drawn its source, so the merge is
+/// drawn instead of dropped.
+#[test]
+fn a_lane_waits_before_a_merge_whose_source_is_not_drawn_yet() {
+    let graph = GitGraph::new("main", commits(&["1111111"]))
+        .with_line(GraphLine::new("dest").forked_at(sha("1111111")).with_entries(commits(&["d100000", "3333333", "d200000"])))
+        .with_line(
+            GraphLine::new("src")
+                .forked_at(sha("1111111"))
+                .with_entries(commits(&["5555555"]))
+                .with_merge(sha("5555555"), sha("3333333")),
+        );
+    let planned = plan(&graph, viewport(400, 200));
+    assert!(planned.omissions.is_empty(), "{:?}\n{}", planned.omissions, planned.mermaid);
+    assert!(planned.mermaid.contains("merge src id: \"3333333\""), "{}", planned.mermaid);
+    let source = planned.mermaid.find("\"5555555\"").expect("the source");
+    let destination = planned.mermaid.find("\"3333333\"").expect("the destination");
+    assert!(source < destination, "the source is emitted first: {}", planned.mermaid);
+}
+
 /// A focused view keeps the current branch's parent chain and any lane that
 /// holds the fork of a lane in view; an unrelated lane stays out.
 #[test]

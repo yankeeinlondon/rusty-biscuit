@@ -375,6 +375,9 @@ struct EmitState {
     /// Lanes stopped after a merge source whose destination is not emitted
     /// yet; the destination's merge resumes them.
     paused: HashSet<usize>,
+    /// Lanes stopped before a merge destination (the value) whose source is
+    /// not emitted yet; emitting the source resumes them.
+    awaiting: HashMap<usize, String>,
     /// Lanes in the order they were declared, which orders stranded pauses.
     declared: Vec<usize>,
     /// Destinations whose merge will not be drawn.
@@ -878,7 +881,26 @@ impl GitGraph {
         // after some paused lane resumes: a cycle. Each round drops one lane's
         // blocking merges and resumes it past its source, so every round
         // advances a cursor and the loop terminates.
-        while let Some(lane) = state.declared.iter().copied().find(|lane| state.paused.contains(lane)) {
+        loop {
+            // A lane still waiting before a destination waits on a source
+            // that is emitted only after it: its merge is dropped and the
+            // lane resumes at the destination, now a plain commit.
+            let Some(lane) = state.declared.iter().copied().find(|lane| state.paused.contains(lane)) else {
+                let Some((lane, destination)) = state
+                    .declared
+                    .iter()
+                    .find_map(|lane| state.awaiting.get(lane).map(|destination| (*lane, destination.clone())))
+                else {
+                    break;
+                };
+                state.awaiting.remove(&lane);
+                let source = arranged.merges[&destination].source.0;
+                state.dropped.insert(destination.clone());
+                state.omissions.push(GraphOmission::Merge { branch: self.lines[source].branch.clone(), destination });
+                lines.push(format!("    checkout {}", arranged.lane_names[&Some(lane)]));
+                self.emit_lane(draft, Some(lane), true, &arranged, &ids, &mut state, &mut lines);
+                continue;
+            };
             state.paused.remove(&lane);
             let source = (lane, state.cursors[&Some(lane)] - 1);
             for destination in arranged.sources.get(&source).into_iter().flatten() {
@@ -917,6 +939,18 @@ impl GitGraph {
         let entries = draft.entries(key);
         let start = state.cursors.get(&key).copied().unwrap_or(0);
         for (position, entry) in entries.iter().enumerate().skip(start) {
+            // A destination whose source is not drawn yet: wait before it, so
+            // the merge is drawn when the source's lane reaches the source.
+            if let (Some(lane), LaneEntry::Commit(sha)) = (key, entry)
+                && has_head
+                && let Some(edge) = arranged.merges.get(sha)
+                && !state.dropped.contains(sha)
+                && !state.emitted((Some(edge.source.0), edge.source.1))
+            {
+                state.cursors.insert(key, position);
+                state.awaiting.insert(lane, sha.clone());
+                return;
+            }
             // Advanced before the entry's merge and children, so a merge drawn
             // from inside them already sees this lane past `position`.
             state.cursors.insert(key, position + 1);
@@ -931,6 +965,16 @@ impl GitGraph {
                         line.push_str(&format!(" tag: \"{}\"", tag.replace('"', "'")));
                     }
                     out.push(line);
+                    // A source resumes the lane waiting before its destination.
+                    for destination in key.and_then(|lane| arranged.sources.get(&(lane, position))).into_iter().flatten() {
+                        let waiting = state.awaiting.iter().find(|(_, awaited)| *awaited == destination).map(|(lane, _)| *lane);
+                        if let Some(waiting) = waiting {
+                            state.awaiting.remove(&waiting);
+                            out.push(format!("    checkout {}", arranged.lane_names[&Some(waiting)]));
+                            self.emit_lane(draft, Some(waiting), true, arranged, ids, state, out);
+                            out.push(format!("    checkout {}", arranged.lane_names[&key]));
+                        }
+                    }
                     if let Some(edge) = arranged.merges.get(sha) {
                         let source = edge.source.0;
                         if state.paused.contains(&source) && !self.blocked(source, arranged, state) {
