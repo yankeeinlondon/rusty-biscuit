@@ -2,11 +2,15 @@
 kind: feature
 name: symbol-improvements
 date: 2026-10-03
-status: draft-spec
+status: finalized-spec
+clarified: true
+clarified_by: claude/opus
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-03
+review_note: "the clarification process served as a review"
 review_iterations: 0
+needs_rulings: false
 $schema:
   status: |-
     enum(
@@ -35,6 +39,40 @@ depends-on:
   - 2026-10-03-visibility-and-kind
 related:
   - 2026-10-03-symbol-filters-and-reports
+human_review: false
+message_to_agent: |-
+  Phase 1 (baseline, rulings, fixtures) is done; read the "## Phase 1" section of
+  implementation-log.md first. Points that affect Phase 2 and later:
+
+  - A new L1 golden test, `golden::plain_symbols_over_multi_match_the_golden`
+    (tree-hugger-cli `symbols` test binary), pins today's `hug --plain symbols`
+    output over `lib/tests/fixtures/symbols/multi/`. Phase 2 should not change
+    plain output; if a record change does alter it, regenerate with
+    `HUG_UPDATE_GOLDEN=1`, review the diff, and log each difference.
+  - Every primary per-language fixture now ends with a "Declaration boundaries"
+    section (names `boundary*`/`Boundary*`, Java/C# class `DeclarationBoundaries`)
+    for the keyword and signature_text matrices. Two cells are not applicable,
+    and the matrices should say so explicitly: C# cannot put an attribute between
+    modifiers (syntax error in tree-sitter-c-sharp), and tree-sitter-zsh rejects
+    a function body brace on the line after the header, so Zsh has no multi-line
+    header case. Perl has no in-node annotation case.
+  - Rulings 1-7 are accepted (log has the details). Ruling 2's concrete
+    selector list is in the log. Ruling 4: no synthetic marker exists, so add
+    `provenance.synthetic: bool` (serialized only when true) inside the 4.0 bump.
+    Ruling 5: `TriState::Unknown` already exists; no new type is needed.
+  - Recon: the CLI parses every file and reruns diagnostics even on a warm cache
+    hit (`analyze_tree_file` -> `hydrate_diagnostics`), and `parse_pass` always
+    calls `try_diagnostics()`. `identity.module_path` readers are listed in the
+    log; confirm which are the record field before renaming.
+  - The baseline timings were taken on a heavily loaded host (load average
+    about 40 on 16 cores) and are noisy. Peak RSS (3.48 GB, whole repo) is
+    reliable. For Phase 6, rebuild the pre-change binary from commit 60e3b841e
+    and time it back-to-back with the new one.
+  - Shell gotcha: `cd` is a zoxide alias in this environment and can jump to a
+    different checkout (/Volumes/coding/personal/rusty-biscuit). Use absolute
+    paths.
+  - The Windows cross-check rig (build-win-native) was unreachable during
+    Phase 1. The Linux cross-check passed.
 ---
 
 # Fast, deterministic symbol reports on v2 records
@@ -68,11 +106,13 @@ signature-shape filters, hiding locals in `hug symbols`, and the outline,
 table, JSON Lines, count and stats outputs arrive with
 `2026-10-03-symbol-filters-and-reports`.
 
-**Depends on `2026-10-03-visibility-and-kind`.** That fix corrects kind,
-visibility, `static` and container data for its accepted extraction set across
-all 16 languages, and introduces `source.declaration_text`. It retains some
-grammar limits and defers some constructs; this feature operates on that
-accepted extraction set and does not widen it.
+**Depends on `2026-10-03-visibility-and-kind`; that dependency is met.** The
+fix is implemented: it corrects kind, visibility, `static` and container data
+for its accepted extraction set across all 16 languages, and the code already
+has `SchemaVersion::V3_0`, `identity.container_kind`,
+`source.declaration_text` and `EXTRACTOR_REVISION`. It retains some grammar
+limits and defers some constructs; this feature operates on that accepted
+extraction set and does not widen it.
 
 ## Baseline
 
@@ -121,8 +161,9 @@ The implementation contracts used in this review are:
 - In the tree-hugger package, [IdentityFacet, SymbolRef and ProvenanceFacet](../../lib/src/shared/schema_v2/facets.rs)
   hold names, relation targets and extraction metadata.
 - In the tree-hugger package, [PassFingerprint](../../lib/src/cache/mod.rs)
-  describes analysis inputs but does not currently include the source hash or
-  requested passes. The file cache key must include those separately.
+  describes analysis inputs but does not currently include the source hash.
+  The file cache key must include it separately; requested kinds and passes
+  are recorded as the entry's coverage, not as key inputs.
 - In the tree-hugger-cli package, [PreludeFilter and prelude resolution](../../cli/src/prelude.rs)
   include public re-export aliases and environment-provided names. Moving to
   records must preserve that behavior.
@@ -138,7 +179,7 @@ and removal of timestamps are intentional changes. Update the schema
 documentation and release notes with before/after examples. Keep the existing
 `SymbolRecord` model and Rust type names, but advance the serialized
 record/index schema from 3.0 to 4.0 when the breaking field changes land; 3.0
-is taken by `2026-10-03-visibility-and-kind`. The CLI report envelope carries
+is the version `2026-10-03-visibility-and-kind` shipped (`SchemaVersion::V3_0`). The CLI report envelope carries
 its own `report_schema_version: 1` and `schema_version: {major: 4, minor: 0}`
 for its embedded records. Later additive record changes, including those in
 `2026-10-03-symbol-filters-and-reports`, follow the existing minor-version rule.
@@ -207,11 +248,15 @@ captures with native semantic diagnostics rather than re-extracting them.
 
 `symbol_nodes` runs `extract_signature`, `extract_type_metadata` and
 `extract_doc_comment` for every capture, then throws duplicates away. The
-change removes duplicates on the captured name span and declaration identity
-first, choosing the same refined kind regardless of capture order, then
-extracts metadata once per surviving symbol. Distinct declarations sharing a
-span or name, such as a C typedef and its struct tag, must remain distinct;
-regression fixtures establish which captures describe one declaration.
+change keeps today's duplicate-removal rule (the same winning capture, chosen
+the same way) but extracts metadata lazily: each field is read from the
+winning capture, and only when the winner lacks a field does extraction fall
+back to the later duplicate captures, in their existing order. Output is
+therefore identical to today's by construction, so no census of duplicate
+captures is needed first. Distinct declarations sharing a span or name, such
+as a C typedef and its struct tag, remain distinct because the
+duplicate-removal rule is unchanged; the per-language library matrices catch
+any regression.
 
 ### A5. Command kind sets are pushed into extraction
 
@@ -273,9 +318,10 @@ single-visit scan, keeping their public library APIs. Prelude analysis can
 reuse a request-local map of results because it actually revisits files.
 
 Use the tree-hugger package's [PassFingerprint](../../lib/src/cache/mod.rs)
-for pass inputs, alongside normalized file identity, source hash, forced
-language, canonical requested passes and extraction selection. The
-fingerprint includes schema, grammar version/identity, actual effective query
+for pass inputs, alongside normalized file identity, source hash and forced
+language. The key excludes kind selection and requested passes, so each file
+has one persistent entry; the entry records the kinds and capabilities it
+covers. The fingerprint includes schema, grammar version/identity, actual effective query
 text (including inherited queries and overlays), relevant configuration, and
 extractor implementation revision. Rules and external-tool versions affect
 only passes that use them. Any later input that changes records, such as the
@@ -287,20 +333,27 @@ code. Keep `EXTRACTOR_REVISION` as one fingerprint input until a reproducible
 build identity replaces it; a computed query digest alone cannot replace it.
 Use `biscuit-hash` for all digests and an unambiguous canonical encoding.
 
-Cache analysis before presentation filtering. A kind-restricted extraction
-has its own cache selection key and never satisfies a broader request unless
-its recorded coverage proves completeness. Name, export and output-format
-filters do not invalidate complete extraction data. A full-index request
+Cache analysis before presentation filtering. An entry satisfies a request
+only when its recorded coverage includes every requested kind and capability;
+a narrower entry never masquerades as a complete hit. Name, export and
+output-format filters do not invalidate complete extraction data. A full-index request
 cannot reuse an entry missing relations, docs or diagnostics. Corrupt or
 incompatible entries are misses, not empty results; `--no-cache` bypasses reads
 and writes. Cache failures remain recoverable and print nothing unless
 `--verbose` is given (see “Quiet by default”).
 
-**A partial hit is written back as one wider entry.** When a cached entry
-covers some of the requested capabilities, the CLI runs only the missing
-passes. It then writes one merged entry whose recorded coverage includes both
-the old and the new passes, replacing the narrower entry. The write is atomic:
-write a temporary file, then rename it over the entry. If two processes write
+**A partial hit is written back as one wider entry.** A lookup has three
+outcomes:
+
+| Cached coverage | Action |
+|---|---|
+| covers the requested kinds and capabilities | complete hit; no parsing or analysis |
+| covers the requested kinds, missing some capabilities | run only the missing passes, then write back the merged entry |
+| missing some requested kinds | re-extract the file fully for the union of cached and requested kinds and capabilities, then write back the wider entry |
+
+Either write-back replaces the narrower entry with one whose recorded coverage
+includes both the old and the new work. The write is atomic: write a
+temporary file, then rename it over the entry. If two processes write
 the same entry at once, the last rename wins. That is acceptable only because
 each entry is internally valid and its recorded coverage matches its contents;
 a reader can never see a half-written or mislabeled entry.
@@ -528,7 +581,7 @@ declarations forced into `SymbolQuery`.
 - Remove the old v1 symbols payload and unconditional `symbol_indexes` block.
   Empty selections use `files: []`; omit file entries with no matches.
 - `--json-full` emits the same versioned envelope, including the trailing
-  `errors` array, with complete per-file `indexes` instead of selected
+  `errors` array and its nonzero-exit rule, with complete per-file `indexes` instead of selected
   `files`. File selectors still apply; symbol selectors are rejected rather
   than implying a complete index is filtered. Request every index capability,
   including diagnostics.
@@ -549,29 +602,40 @@ the new declaration envelope is not a global change to `--json`.
 
 ### D7. A useful default order
 
-`--sort file|name|kind|container` replaces `--sort-by-kind` and
-`--sort-by-module`. Both old flags are removed outright, with no aliases, so
-passing either is an argument error. Like them, `--sort` is one of the shared
-scan options (`ScanOptions` in `cli/src/main.rs`).
+`--sort file|name|kind` replaces `--sort-by-kind` and `--sort-by-module`.
+Both old flags are removed outright, with no aliases, so passing either is an
+argument error. Unlike them, `--sort` is not one of the shared scan options
+(`ScanOptions` in `cli/src/main.rs`): only the four declaration commands
+(`functions`, `types`, `symbols` and `classes`) accept it, and `lint` and
+`imports` reject it as an unknown argument. `imports` shares `CommonArgs` with
+`functions`, `types` and `symbols` today, so the flag moves to arguments that
+only the declaration commands carry.
 
 | Order | Today | After |
 |---|---|---|
 | default (`--sort file`) | by case-insensitive name across all files | by file, then source position |
 | `--sort name` | (the default) | by the written, case-sensitive name |
 | `--sort kind` | alphabetical by the kind's name (`--sort-by-kind`) | Module, Namespace, Type, Class, Interface, Trait, Enum, TypeAlias, Function, Method, Constructor, Macro, Constant, Field, Property, EnumVariant, Variable, Parameter, Unknown |
-| `--sort container` | by the file's directory (`--sort-by-module`) | by `identity.container_name`, written and case-sensitive; declarations with no container come first |
 
 Every order ends with the same tie-breakers: portable file path, start byte,
 end byte, kind (in the `--sort kind` order) and ID. `--sort file` is exactly
-these tie-breakers. For example, `--sort container` puts every member of two
-same-named `Point` types in different files together, the first file's
-members first, each file's in source order. Sort relation targets
-deterministically too. `--sort` takes one value; repeating it is an argument
-error.
+these tie-breakers. For example, `--sort name` puts two same-named `Point`
+types in different files together, the first file's declaration first. Sort
+relation targets deterministically too. `--sort` takes one value; repeating it
+is an argument error.
 
-`--sort container` is not a rename of `--sort-by-module`: the old flag sorted
-by directory, and the new order sorts by the declaring container. Directory
-grouping remains available through `--group-by-module`.
+There is no container order. The old `--sort-by-module` sorted by the file's
+directory, not by a declaring container, and `--sort file` covers it: the
+portable path orders files directory by directory, then source position
+orders each file. Directory grouping remains available through
+`--group-by-module`.
+
+**JSON keeps file order.** With `--json` or `--json-full`, file entries are
+always in portable path order, whatever `--sort` says. A non-default `--sort`
+orders the records within each file's `symbols` array, using the same keys
+and tie-breakers. JSON output therefore never needs a global sort across
+files, and bounded buffering in file order (see “Files are analyzed in
+parallel”) suffices for every `--sort` value.
 
 `--group-by-file` and `--group-by-module` are unchanged and independent of
 `--sort`. They group terminal output by the file's scan-root-relative path or
@@ -603,12 +667,40 @@ printed with or without `--verbose`.
 
 In the tree-hugger-cli package, [render_symbols and render_symbol_line](../../cli/src/main.rs)
 format the same declarations through separate code paths. Replace them with
-one `biscuit-terminal` component, fed from records (keyword, signature,
+one renderer type local to tree-hugger-cli, built on `biscuit-terminal`'s
+existing components (`Prose`, `UnorderedList`; `Table` arrives with
+`2026-10-03-symbol-filters-and-reports`) and fed from records (keyword, signature,
 visibility, container), so visibility and signatures agree in grouped and flat
 output. This feature keeps today's visible layout, compact signatures, OSC 8
-hyperlinks and `--plain` behavior. Width wrapping, `--format table`,
-signature modes and the outline view build on this component in
+hyperlinks and `--plain` behavior; the biscuit-terminal package itself does
+not change. Width wrapping, `--format table`, signature modes and the outline
+view build on this renderer in
 `2026-10-03-symbol-filters-and-reports`.
+
+---
+
+## Risks and implementation notes
+
+- `PersistentCache::put` (`lib/src/cache/mod.rs`) writes with plain
+  `std::fs::write`; the atomic temp-file-and-rename write is new work.
+- Queries are compiled in through `include_str!`. The fingerprint function must
+  accept query text as an injectable input so the "edited query text
+  invalidates the entry" test can run.
+- Work counters must propagate from rayon workers, as atomics or as counts
+  returned with each result, not through thread-locals.
+- Prelude scheduling is two-phase: analyze the prelude files first to discover
+  their targets, then run the scan.
+- Peak-RSS target risk: each parallel worker holds a parse tree, and terminal
+  `--sort name`/`--sort kind` buffers every selected record. Bound concurrency
+  by processing files in chunks.
+- `signature_text` boundaries need per-grammar work across 16 languages,
+  starting from the fix's `declaration_text` extraction.
+- Before the renderer refactor, capture the current plain and JSON output of
+  `hug symbols` over `multi/` as goldens, so "keeps today's visible layout" is
+  checkable.
+- Diagnostics separation is mechanical: `parse_pass` calls `try_diagnostics`
+  in one place. Semantic lint currently re-extracts through `symbols()` and
+  `exported_symbols()`; it should receive the shared definition captures.
 
 ---
 
@@ -627,13 +719,13 @@ Each phase leaves `hug` working, and updates relevant docs/tests with its code.
 Before Phase 1 changes any code, measure the peak-RSS baseline (see
 “Performance targets”). Phase 1 consumes records directly and removes diagnostics from listing work.
 Preserve v1 library adapters until the separate author decision on removing
-them. Introduce the shared query planner before kind-restricted cache entries
+them. Introduce the shared query planner before cache coverage records
 or parallel prelude reuse, so those optimizations have one completeness
 contract. `2026-10-03-symbol-filters-and-reports` starts after this feature
 lands; it extends `SymbolQuery`, the record facets and the renderer defined
-here. Final acceptance includes all resolved requirements; open author
-decisions must be settled or explicitly deferred in the implementation log
-before their features ship.
+here. Final acceptance includes all resolved requirements. The only open
+question, removing v1 from the library, is a follow-up that does not block
+this feature.
 
 ## Decisions
 
@@ -685,16 +777,15 @@ Decided by the author on 2026-10-03:
 - **`signature_text` strips only leading in-node annotations.** An annotation
   between modifiers stays in the header, so `signature_text` remains one
   contiguous sub-range of `declaration_text`.
-- **`--sort file|name|kind|container` replaces `--sort-by-kind` and
-  `--sort-by-module`, with no aliases.** One value-taking flag cannot express
-  conflicting orders; grouping flags stay separate because grouping and order
-  are independent.
+- **`--sort` replaces `--sort-by-kind` and `--sort-by-module`, with no
+  aliases.** One value-taking flag cannot express conflicting orders; grouping
+  flags stay separate because grouping and order are independent.
 - **The v1 adapter maps `is_recursive` `Unknown` and `None` to `false`.** v1
   has only a `bool`; `false` is documented as "not known to be recursive".
 - **The peak-RSS target stays, and its baseline is measured first.** A
   target with no recorded baseline cannot be checked afterward.
 - **A partial cache hit writes back one merged entry.** Replacing the narrower
-  entry keeps one entry per key; atomic last-rename-wins is safe because every
+  entry keeps one entry per file; atomic last-rename-wins is safe because every
   entry is internally valid.
 - **The `module_path` → `container_name` rename stays in this feature.** Every
   breaking record change then shares schema 4.0, and
@@ -703,11 +794,43 @@ Decided by the author on 2026-10-03:
   `2026-10-03-symbol-filters-and-reports`.** That feature introduces the
   input, so it extends the key.
 
+Decided by the author on 2026-10-04:
+
+- **`--sort` takes `file|name|kind` only; there is no `container` value.**
+  The old `--sort-by-module` sorted by directory, which the default `file`
+  order (portable path, then source position) already covers, so a container
+  order would be a new feature rather than a replacement.
+- **JSON file entries always stay in portable path order.** A non-default
+  `--sort` orders records only within each file's `symbols` array, so the
+  envelope keeps one entry per file and parallel output never needs a global
+  sort.
+- **`--json-full` shares the trailing `errors` array and nonzero exit with
+  `--json`.** Both reports stream file entries first, so both need the same
+  guarantee that a failed file can never look like success.
+- **Only `functions`, `types`, `symbols` and `classes` accept `--sort`.** It
+  moves out of the shared scan options; `lint` and `imports` reject it because
+  their reports are not declaration lists and the declaration order keys do
+  not apply to them.
+- **The cache key excludes kind selection.** One persistent entry per file
+  (file identity, content hash, fingerprint inputs) records its covered kinds
+  and capabilities; covered requests hit, missing capabilities run only the
+  missing passes, and uncovered kinds re-extract the file for the union, so
+  narrow and broad commands never multiply entries.
+- **The renderer is CLI-local.** D10's single renderer is a tree-hugger-cli
+  type built on biscuit-terminal's existing `Prose` and `UnorderedList`
+  (`Table` with `2026-10-03-symbol-filters-and-reports`); keeping it local
+  avoids changing a shared package for one consumer.
+- **No spikes.** The duplicate-capture census was considered and skipped:
+  lazy metadata extraction from the winning capture, with order-preserving
+  fallback to later captures, is identical to today's output by construction,
+  and the per-language library matrices catch regressions.
+
 ### Open Questions
 
 #### Removing v1 from the library
 
-This is a separate follow-up decision, not work authorized by this feature.
+**Follow-up; does not block planning or implementation of this feature.**
+This is a separate decision, not work authorized by this feature.
 Moving the CLI does not prove that other packages have no v1 callers.
 
 - **Remove after an audit:** one public model and less adapter maintenance;
@@ -724,9 +847,6 @@ Moving the CLI does not prove that other packages have no v1 callers.
 The author has authorized the implementer to take these actions without
 pausing for approval:
 
-- **Prerequisite fix text.** Edit the text of `2026-10-03-visibility-and-kind`
-  where it refers to this feature for content now owned by
-  `2026-10-03-symbol-filters-and-reports`.
 - **Fixtures and tests asserting superseded behavior.**
   - Create the 16-language `lib/tests/fixtures/symbols/multi/` tree and extend
     the per-language fixtures as described under “Shared fixtures”.
@@ -842,11 +962,14 @@ members in `members`.
 - **Two runs are identical.** Back-to-back runs, cold and then warm, produce
   byte-identical `--json`.
 - **Cache correctness.** Editing a language's query text in a test-local copy
-  invalidates the entry. Also vary extractor revision, language override,
-  query kinds, schema and requested capabilities. Warm narrow then broad
-  queries (and the reverse) must match uncached results. After a narrow-then-
-  broad run, the key holds one entry whose recorded coverage includes both
-  requests, and a third, narrow run is a complete hit. Simulate corrupt and
+  invalidates the entry (query text is an injectable fingerprint input). Also
+  vary extractor revision, language override and schema; each is a miss.
+  Varying kinds and capabilities changes coverage, not the key: warm narrow
+  then broad queries (and the reverse) must match uncached results. After a
+  capability-widening run the file holds one entry covering both requests and
+  only the missing passes ran; after a kind-widening run the file was
+  re-extracted once for the union. Either way a third, narrow run is a
+  complete hit. Simulate corrupt and
   concurrent writes without treating either as empty success; every entry left
   after concurrent writes is readable and its coverage matches its contents.
 - **Binding.** The candidate index selects the same targets as the previous
@@ -856,11 +979,13 @@ members in `members`.
 - **Prelude behavior survives.** Cover aliases, unresolved re-exports,
   environment names and targets outside the selected scan, with no duplicate
   parse.
-- **Order.** Default (`--sort file`) file/source order, `--sort name`,
-  `--sort kind` and `--sort container`, each with the shared tie-breakers;
-  `--sort` within `--group-by-file` and `--group-by-module` groups; the removed
-  `--sort-by-kind` and `--sort-by-module` flags and a repeated `--sort` are
-  argument errors.
+- **Order.** Default (`--sort file`) file/source order, `--sort name` and
+  `--sort kind`, each with the shared tie-breakers; `--sort` within
+  `--group-by-file` and `--group-by-module` groups; under `--json` and
+  `--json-full`, a non-default `--sort` leaves file entries in portable path
+  order and orders only each file's `symbols` array. `--sort container`, the
+  removed `--sort-by-kind` and `--sort-by-module` flags, a repeated `--sort`,
+  and `--sort` passed to `lint` or `imports` are argument errors.
 - **Classes.** Interface and Trait containers are summarized; `--static-only`
   and `--instance-only` keep their current sections; a field's visibility and
   `static` flag are unchanged when Field, Property and Constant are outside the
@@ -906,8 +1031,9 @@ focus changes.
     displays
   - the JSON envelope, with a short sample, the trailing `errors` array and
     exit status, and what `--json-full` adds
-  - default and `--sort` ordering, its tie-breakers, and how grouping combines
-    with it
+  - default and `--sort` ordering, its tie-breakers, how grouping combines
+    with it, that JSON keeps file entries in path order and sorts within each
+    file, and that only the four declaration commands accept `--sort`
   - `--verbose` and what it gates
   - a Mermaid diagram of the query → passes → render flow
 - **`tree-hugger/docs/cache-design.md`:** the single cache layer, the
@@ -930,7 +1056,7 @@ focus changes.
 ## Out of scope
 
 - Correct kinds, visibility, `static` and containers. That is
-  `2026-10-03-visibility-and-kind`.
+  `2026-10-03-visibility-and-kind`, already implemented.
 - Scope classification, modifiers and attributes, generics and inheritance,
   qualified names, metrics, every new filter (`--kind`, `--scope`,
   visibility, `--in`, smart case, tests/docs/deprecation, signature shape,
