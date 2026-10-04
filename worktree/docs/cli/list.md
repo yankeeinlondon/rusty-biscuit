@@ -2,7 +2,7 @@
 
 Lists all git worktrees along with their status. This is the default command -- running `wt` with no subcommand is equivalent to `wt list`.
 
-Before it lists anything, `wt list` checks whether `origin/<default>` is current (fetching it when it is not) and asks for the open pull requests, both in one short wait; see [Checking origin](#checking-origin). The output is then, in order: a caption, an optional credentials warning, the worktree table, a two-line legend, the git graph (image-capable terminals only), a status list holding this run's PR item and the refresh hint, the verbose section (`-v` only), and, after a blank line, any closing notes. Everything is written to stderr.
+Before it lists anything, `wt list` checks whether `origin/<default>` is current (fetching it when it is not) and asks for the open pull requests, both in one short wait; see [Checking origin](#checking-origin). The output is then, in order: a caption, an optional credentials line (a warning, or the keyless notice), the worktree table, a two-line legend, the git graph (image-capable terminals only), a status list holding this run's PR item and the refresh hint, the verbose section (`-v` only), and, after a blank line, any closing notes. Everything is written to stderr.
 
 ## Output
 
@@ -43,11 +43,43 @@ Merge metrics are only as good as `origin/<default>`, and PR badges only as good
 
     Only `refs/remotes/origin/<default>` changes: no tags, no other branches, no `FETCH_HEAD`, and no submodules, whatever your Git configuration says. The leading `+` lets a remote rewind through. Your local default branch is never moved; see `--ff` below. Git runs without credential prompts, with SSH in batch mode, and is killed with its whole process tree at the deadline.
 3. **Wait.** `wt list` waits up to **3 s** for both halves, so an ordinary listing costs the slower of the two, never their sum. While it waits, a spinner on stderr says `updating`, `no API key, using fallback method`, `rate limited, using fallback method`, or `pulling remote updates`, and goes back to `updating` whenever only the PR half is left, including after a retried or adopted head operation finishes. It appears only after 150 ms, only when stderr is a terminal, and its line is cleared before anything else is printed, so captured output and the shell wrapper never see it. Work still running at 3 s carries on in the background, the listing adds the refresh hint, and the next listing shows the result.
-4. **Gather.** Only then are the local refs, comparison counts, and graph read, so a fetch that finished during the wait is reflected everywhere at once.
+4. **Local work, at the same time.** The listing does not sit idle while it waits; see [Local work during the wait](#local-work-during-the-wait).
 
 The check's result is stored for later listings (the last successful answer is never erased by a failed check), and at most one check or fetch runs per repository at a time: a listing that finds one already running follows it rather than asking `origin` again. `-r` and `--ff` wait for both halves the same way, only longer: up to 75 s.
 
 Without an `origin` nothing is asked, nothing is waited for, and no PR item or refresh hint is shown.
+
+#### Local work during the wait
+
+The expensive local work (`git status` in every worktree, the branch comparisons behind the caption and the columns, and the graph and `-v` history) starts as soon as the branch tips are read, and runs while the listing waits. An ordinary listing therefore costs roughly the slower of the wait and the local work, not their sum. A wait that runs out limits only the waiting: local work that takes longer is still finished before anything prints.
+
+That first pass describes the branch tips as they were before the wait, so when the wait ends (and after `--ff`, which runs only once the local work is done), the listing reads every local and `origin/*` tip again and compares the two reads:
+
+```mermaid
+flowchart TD
+  A[read branch tips] --> B[wait for origin]
+  A --> C[local work from those tips]
+  B --> J[both done]
+  C --> J
+  J --> F{--ff?}
+  F -- yes --> M[fast-forward]
+  F -- no --> R
+  M --> R[read branch tips again]
+  R --> E{both reads worked<br/>and every tip is the same?}
+  E -- yes --> K[keep the first pass]
+  E -- no --> G[redo comparisons, caption,<br/>graph and history from the new tips]
+  K --> D{--ff moved a<br/>checked-out branch?}
+  G --> D
+  D -- yes --> S[run git status again<br/>in that checkout only]
+  D -- no --> P
+  S --> P[save the comparison cache,<br/>prune stale records, print once]
+```
+
+- **Unchanged tips** (the usual case): the first pass is used as is, and nothing is measured twice.
+- **A tip moved** (a fetch brought a new commit, `origin` rewound, a branch appeared or disappeared, or `--ff` moved the default branch): the comparisons, caption, default-branch target, branch tree, graph, and `-v` history are worked out once more from the second read, so everything printed describes one set of tips. The listing does not retry if tips keep moving; a change after the second read shows in the next listing.
+- **A read failed**: a failed read proves nothing, so the first pass is never kept on its strength. If the second read is the one that failed, the listing shows what it can (no caption, as before) and keeps every fork record, since an empty read would make every branch look deleted.
+- **Uncommitted files** do not depend on any tip, so `git status` is never repeated for a fetch. It is repeated only in the one checkout whose files `--ff` just moved; a fast-forward of a branch nobody has checked out, an up-to-date branch, or a refused fast-forward measures nothing again.
+- **Saved state** (the stored comparisons, and pruning of fork records and include-copy records of deleted branches and removed worktrees) is written once, after the choice, so a discarded first pass leaves nothing behind except its comparisons, which are kept because they describe fixed commits.
 
 #### How the wait knows both halves are done
 
@@ -74,7 +106,7 @@ The two halves are reported separately, so one never hides the other:
 - **PRs published, the head did not.** The new badges show with no PR item; the caption says "still checking" (or "still pulling") and the hint follows.
 - **The process exited without a receipt.** What it stored is still shown; the PR refresh counts as failed, with no guessed reason. A receipt with any field missing, of the wrong type, or repeated counts as no receipt.
 
-The PR half publishes its answer before the receipt exists, so a new answer is recognized the moment it is stored: every stored answer carries a fresh random publication id, and a listing that sees an id other than the one stored when it started knows the answer is new, even when it arrived in the same second or lists no PRs.
+The PR half publishes its answer before the receipt exists, so a new answer is recognized the moment it is stored: every stored answer carries a fresh random publication id, and a listing that sees an id other than the one stored when it started knows the answer is new, even when it arrived in the same second or lists no PRs. The same write records whether that request was sent with an API key (by variable name only) or without one, so the listing learns it with the answer, without waiting for the receipt; the keyless notice reads it from the first new answer the listing sees and from the `origin` check it followed, never from an older stored answer.
 
 Two listings that overlap (say `wt list` in two checkouts of one repository) never ask for PRs twice at once. The second one's PR half finds the first one asking and makes no request; its listing then waits, within its own 3 s, for the first one to finish, and shows the first one's answer if a new one was published. When nothing new appears the PR refresh counts as failed; `-r` and `--ff` instead try once more, still within their 75 s. Waiting on someone else never extends a listing's budget.
 
@@ -106,9 +138,28 @@ The comparison is `is N commits behind`, `is N commits ahead of`, `is in sync wi
 
 Ages use the PR age units: `less than 1 min`, then minutes, hours below two days, then days.
 
-### Credentials warning
+### Credentials line
 
-When `origin` is a supported provider and this run's API request failed for a confirmed credentials or rate-limit reason, one dim line follows the caption. `{key}` is the variable that was used, or, when none was set, every variable the provider accepts (for example `GITHUB_TOKEN or GH_TOKEN`). Only variable names are printed, never their values.
+At most one dim credentials line follows the caption. It is either a **warning** about a request that failed for a confirmed credentials or rate-limit reason, or the **keyless notice** about a request that succeeded without an API key. A warning always wins:
+
+1. a warning from the `origin` check;
+2. a warning from the PR request;
+3. the keyless notice, from either request.
+
+```mermaid
+flowchart TD
+    A[This listing's results] --> B{origin check failed for a<br/>confirmed credentials reason?}
+    B -- yes --> W1[origin check warning]
+    B -- no --> C{PR request failed for a<br/>confirmed credentials reason?}
+    C -- yes --> W2[PR warning]
+    C -- no --> D{either request succeeded,<br/>and was sent without a key?}
+    D -- yes --> N[keyless notice]
+    D -- no --> E[no line]
+```
+
+#### Credentials warning
+
+When `origin` is a supported provider and this run's API request failed for a confirmed credentials or rate-limit reason, the line is a warning. `{key}` is the variable that was used, or, when none was set, every variable the provider accepts (for example `GITHUB_TOKEN or GH_TOKEN`). Only variable names are printed, never their values.
 
 | Condition | Line |
 |---|---|
@@ -120,7 +171,26 @@ When `origin` is a supported provider and this run's API request failed for a co
 
 The PR request counts too, in every listing, not only under `-r`: a rejected key or a rate limit on it prints the same line. When both requests failed for a confirmed reason, the `origin` check's line wins, and the PR item's `(couldn't refresh)` does not repeat the reason.
 
-Nothing is printed when the request succeeded, with or without a key, or when no key was set and `ls-remote` answered (the closing notice below covers that). A 404 on its own is ambiguous and produces no line. Only failures this listing observed count; a background refresh that fails after the listing rendered never adds a line to it.
+No warning is printed when no key was set and `ls-remote` answered (the closing notice below covers that). A 404 on its own is ambiguous and produces no line. Only failures this listing observed count; a background refresh that fails after the listing rendered never adds a line to it.
+
+#### Keyless notice
+
+When this listing saw the provider answer the `origin` check or the PR request, and that request was sent without an API key, the line says so, so a key you believed was set (but was lost from your shell, or set to an empty value) does not go unnoticed until the provider starts rate limiting:
+
+```text
+GitHub answered without an API key; set GH_TOKEN or GITHUB_TOKEN for higher rate limits.
+```
+
+The provider name and the variables come from the provider `sniff` identifies, in the order it reads them; only names are printed, never values. "For higher rate limits" is promised only where the provider documents a higher limit for a key: GitHub (github.com), GitLab (gitlab.com), and Bitbucket (bitbucket.org). Gitea and Forgejo hosts (Codeberg included) get `Gitea answered without an API key; set GITEA_TOKEN or FORGEJO_TOKEN or CODEBERG_TOKEN to authenticate API requests.` instead.
+
+What counts is what the refresh worker recorded for the exact answer this listing accepted, never a look at your current environment: the worker that sent the request may have been started by another listing with a different environment. So:
+
+- A key-bearing answer in one request does not hide an anonymous answer in the other, and neither does a generic failure (a timeout, an HTTP 500).
+- An anonymous `origin` check still counts when the listing renders while the fetch it led to is running, or after that fetch failed or timed out.
+- A PR answer counts as soon as it is published, even when the listing ends before the worker's completion receipt.
+- Nothing is shown for a stored answer from an earlier run, an answer whose credentials are unknown (one written by an older `wt`), an answer that arrives after the listing chose what to show, a repository in `~/.wt.json`, an unsupported provider, a local-path `origin`, or an `origin` that changed during the wait. A request that failed without a key adds no notice either; the warnings above cover the failures that matter.
+
+The closing fallback notice below is about a different request and may appear in the same listing.
 
 The table is never narrower than the legend beneath it; a table with short content widens its last column to match. In the legend the `conflicts` sample sits in the same column as the source-files dot above it.
 
@@ -248,7 +318,7 @@ After a blank line, the output can end with up to three kinds of note, in this o
 | `--refresh` | `-r` | Wait for the full check, fetch, and PR refresh, up to 75 s instead of 3 s |
 | `--ignore-api` | | Check `origin` with Git only, never the provider API, for this repository from now on |
 | `--fast-forward` | `--ff` | Wait like `--refresh`, then fast-forward the local default branch to `origin/<default>` |
-| `--perf` | | Print a per-stage timing report to stderr |
+| `--perf` | | Print a per-stage timing report to stderr; work that overlaps the remote wait is one measured group ([details](../performance-testing.md#runtime---perf-flag)) |
 
 `-r`, `--ignore-api`, and `--ff` are global, so `wt -r` and `wt list -r` are the same. They apply only to listing: `wt create`, `wt go`, and `wt remove` reject them with exit code 2. They can be combined; `wt --ff -r` makes one check, at most one fetch, and one fast-forward.
 
@@ -258,7 +328,7 @@ Waits for both the `origin` check (with any fetch) and the PR refresh to finish,
 
 ### `--ignore-api`
 
-Records the current repository in `~/.wt.json` before the check starts, so this run and every later one checks `origin` with `git ls-remote` only. Neither the check nor the PR refresh makes a provider request for that repository, so it shows no PR badges, no credentials warning, and no fallback notice. It fails (exit code 1, nothing listed) when there is no `origin`, when `origin` is a local path, or when the home directory is unknown.
+Records the current repository in `~/.wt.json` before the check starts, so this run and every later one checks `origin` with `git ls-remote` only. Neither the check nor the PR refresh makes a provider request for that repository, so it shows no PR badges, no credentials line, and no fallback notice. It fails (exit code 1, nothing listed) when there is no `origin`, when `origin` is a local path, or when the home directory is unknown.
 
 The file lives in the home directory (`%USERPROFILE%` on native Windows), separate from `~/.worktree.json`:
 
@@ -281,7 +351,7 @@ Waits for the check like `--refresh`, then moves the local default branch to `or
 - when a worktree has it checked out, it runs `git merge --ff-only` there, which refuses rather than overwrite local changes to files the update touches
 - a diverged branch, or a missing local branch or tracking ref, is refused with a note and nothing is created or changed; in sync or ahead does nothing and prints nothing
 
-Both refs and their ancestry are read again immediately before the move. When the check or fetch failed, `--ff` still fast-forwards to the local `origin/<default>` if that is ahead, and the caption keeps the failure reason, so you know the target may itself be out of date. A refusal does not fail the listing.
+Both refs and their ancestry are read again immediately before the move. The move happens after the listing's local work is done, and a checkout whose files it moved gets its uncommitted-file status measured again; see [Local work during the wait](#local-work-during-the-wait). When the check or fetch failed, `--ff` still fast-forwards to the local `origin/<default>` if that is ahead, and the caption keeps the failure reason, so you know the target may itself be out of date. A refusal does not fail the listing.
 
 ## Examples
 

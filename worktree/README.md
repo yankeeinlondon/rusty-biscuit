@@ -26,6 +26,7 @@ The **worktree** package area, like many in this monorepo, is composed of both a
     Lists the worktrees (along with the base repo checkout) which currently exist. See [`docs/cli/list.md`](./docs/cli/list.md) for the full output.
 
     - first, two questions for `origin`, asked side by side by a background process: the default branch's current commit (through the provider API, falling back to `git ls-remote`; when it differs from `origin/<default>`, that one tracking ref is fetched), and the open pull requests. An ordinary listing waits up to 3 s for both, with a spinner on terminals; anything still running carries on in the background and the listing says so. `-r` and `--ff` wait for both to finish, up to 75 s. The local default branch is never moved unless you ask with `--ff`
+    - meanwhile the local work runs: `git status` in every worktree, the branch comparisons, and the graph. Afterwards the branch tips are read again; if a fetch or `--ff` moved any of them, the comparisons and graph are worked out again from the new tips, so everything shown describes one state. Uncommitted-file status is not measured again, except in a checkout whose files `--ff` just moved
     - a one-sentence caption comparing the local default branch with `origin/<default>` (in sync, ahead, behind, or diverged), followed in dim italics by what this run learned (`updated from origin just now`, `still checking in the background`, `couldn't check origin`, …; nothing when a fresh check found the tracking ref current). Without an `origin` there is no caption
     - a table with one row per worktree; the current row is highlighted
         - **Worktree**: a dot for uncommitted files (none, other files, or source files) and the directory name (`base repo` for the main checkout)
@@ -34,7 +35,7 @@ The **worktree** package area, like many in this monorepo, is composed of both a
         - **`-> parent`**: the same against the branch's fork parent (its local branch)
         - open PRs from this repository as badges, placed by the PR's target. Every listing asks again and shows the answer that arrives within its wait; otherwise it shows the last stored answer for the current `origin`, with a dim item saying how old it is (`PRs as of N min ago`) or that this run `couldn't refresh` it (`couldn't get open PRs` when nothing is stored)
     - a legend, then, on image-capable terminals, a branch graph (see [`docs/git-graph.md`](./docs/git-graph.md))
-    - notes when they apply: a credentials warning under the caption when a missing or rejected API key (or a rate limit) stopped the check or the PR request, a hint to run again when the wait ran out, and closing notes suggesting `wt --ff` when the default branch is behind or explaining the `ls-remote` fallback
+    - notes when they apply: one credentials line under the caption, either a warning when a missing or rejected API key (or a rate limit) stopped the check or the PR request, or, failing that, a notice that the provider answered without an API key (with the variables to set), a hint to run again when the wait ran out, and closing notes suggesting `wt --ff` when the default branch is behind or explaining the `ls-remote` fallback
     - flags (listing only): `-r`/`--refresh` waits for a full update from `origin`; `--ignore-api` makes this repository use `git ls-remote` only, recorded in `~/.wt.json`; `--ff`/`--fast-forward` fast-forwards the local default branch to `origin/<default>`
 
     > The **list** command is the default command so it will be run if a user types only `wt`
@@ -189,7 +190,7 @@ cmd.exe has no wrapper.
 
 ### Runtime diagnostic
 
-Run `wt list --perf` to emit a per-stage timing report to stderr after the command completes. The report is rendered as a reconciling tree: recorded stages plus an `unattributed` node sum to the total wall-clock time. Only stages that actually ran are shown, so on a non-image terminal the graph-related stages are omitted.
+Run `wt list --perf` to emit a per-stage timing report to stderr after the command completes. The report is rendered as a reconciling tree: the top-level rows plus an `unattributed` row sum to the total wall-clock time. Work that runs at the same time is one measured group (`remote wait ‖ local gather`, or `local gather` without an `origin`; `regather` when the tips moved), whose children show their own durations with no share and are not added to the total. Only stages that actually ran are shown, so on a non-image terminal the graph-related stages are omitted.
 
 ### Dev-time benchmarks
 
