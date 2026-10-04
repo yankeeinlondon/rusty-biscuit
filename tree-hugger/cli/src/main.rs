@@ -2380,15 +2380,17 @@ fn format_symbol_name(symbol: &SymbolInfo, language: ProgrammingLanguage) -> Str
     if let Some(container_name) = symbol.container_name.as_deref()
         && matches!(
             symbol.kind,
-            SymbolKind::Method | SymbolKind::Function | SymbolKind::Field | SymbolKind::Parameter
+            SymbolKind::Method
+                | SymbolKind::Constructor
+                | SymbolKind::Function
+                | SymbolKind::Field
+                | SymbolKind::Property
+                | SymbolKind::Constant
+                | SymbolKind::EnumVariant
+                | SymbolKind::Parameter
         )
     {
         let container_label = match symbol.container_kind {
-            Some(kind)
-                if kind == SymbolKind::Type && container_name.trim_start().starts_with("impl ") =>
-            {
-                container_name.to_string()
-            }
             Some(kind) => format!("{kind} {container_name}"),
             None => container_name.to_string(),
         };
@@ -2858,10 +2860,15 @@ fn extract_class_summaries(
 
     let mut result = Vec::new();
 
+    // Interfaces and traits own static members too: a Java interface constant
+    // is implicitly `static`, and a Rust trait declares associated functions.
     for class_record in index.symbols.iter().filter(|symbol| {
         matches!(
             symbol.kind,
-            tree_hugger::SymbolKindV2::Class | tree_hugger::SymbolKindV2::Type
+            tree_hugger::SymbolKindV2::Class
+                | tree_hugger::SymbolKindV2::Type
+                | tree_hugger::SymbolKindV2::Interface
+                | tree_hugger::SymbolKindV2::Trait
         )
     }) {
         let Ok(class) = SymbolInfo::try_from(class_record.clone()) else {
@@ -2893,12 +2900,7 @@ fn extract_class_summaries(
             let Ok(method) = SymbolInfo::try_from((*member_record).clone()) else {
                 continue;
             };
-            let is_static = method
-                .signature
-                .as_ref()
-                .map(|s| s.is_static)
-                .unwrap_or(false);
-            if is_static {
+            if method.is_static {
                 static_methods.push(method);
             } else {
                 instance_methods.push(method);

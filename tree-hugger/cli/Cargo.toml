@@ -25,6 +25,7 @@ biscuit-test-harness = { path = "../../biscuit-test-harness", optional = true }
 test-toolkit = { path = "../../tools/test-toolkit", optional = true }
 
 [dev-dependencies]
+biscuit-hash = { path = "../../biscuit-hash/lib", features = ["blake3"] }
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
 assert_cmd = "2.0"
 predicates = "3.1"

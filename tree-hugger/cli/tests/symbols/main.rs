@@ -4,3 +4,129 @@
 
 mod cache_upgrade;
 mod wiring;
+
+use std::path::{Path, PathBuf};
+use std::process::Output;
+
+use assert_cmd::Command;
+use serde_json::Value;
+use tempfile::TempDir;
+
+pub const TYPESCRIPT_FIXTURE: &str =
+    include_str!("../../../lib/tests/fixtures/symbols/typescript.ts");
+pub const RUST_FIXTURE: &str = include_str!("../../../lib/tests/fixtures/symbols/rust.rs");
+pub const CPP_FIXTURE: &str = include_str!("../../../lib/tests/fixtures/symbols/cpp.cpp");
+pub const JAVA_FIXTURE: &str = include_str!("../../../lib/tests/fixtures/symbols/java.java");
+pub const CSHARP_FIXTURE: &str = include_str!("../../../lib/tests/fixtures/symbols/c_sharp.cs");
+pub const BASH_FIXTURE: &str = include_str!("../../../lib/tests/fixtures/symbols/bash.sh");
+
+/// A scratch Git repository plus test-owned home, config and temp
+/// directories. The temp directory holds `hug`'s persistent cache, so no run
+/// sees the caller's cache, checkout or configuration.
+pub struct Scratch {
+    pub repo: TempDir,
+    pub home: TempDir,
+    pub temp: TempDir,
+}
+
+impl Scratch {
+    /// Creates the repository and writes each `(file name, contents)` into it.
+    pub fn new(files: &[(&str, &str)]) -> Self {
+        let scratch = Self {
+            repo: TempDir::new().expect("scratch repo"),
+            home: TempDir::new().expect("scratch home"),
+            temp: TempDir::new().expect("scratch temp"),
+        };
+        let status = std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(scratch.repo.path())
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env("HOME", scratch.home.path())
+            .env("USERPROFILE", scratch.home.path())
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .status()
+            .expect("git must be on PATH to create the scratch repository");
+        assert!(status.success(), "git init failed in the scratch repository");
+        for (name, contents) in files {
+            std::fs::write(scratch.repo.path().join(name), contents).expect("write fixture");
+        }
+        scratch
+    }
+
+    /// Runs `hug` in the repository with the cache under `temp`.
+    pub fn hug(&self, args: &[&str]) -> Output {
+        self.run(self.temp.path(), args, &[])
+    }
+
+    /// Runs `hug` with the persistent cache under `temp`.
+    pub fn hug_with_temp(&self, temp: &Path, args: &[&str]) -> Output {
+        self.run(temp, args, &[])
+    }
+
+    /// Runs `hug` with extra environment variables set after the isolation ones.
+    pub fn hug_with_env(&self, args: &[&str], env: &[(&str, &str)]) -> Output {
+        self.run(self.temp.path(), args, env)
+    }
+
+    #[allow(deprecated)] // `cargo_bin` is the area's binary-launch helper
+    fn run(&self, temp: &Path, args: &[&str], env: &[(&str, &str)]) -> Output {
+        let config = self.home.path().join(".config");
+        let mut command = Command::cargo_bin("hug").expect("hug binary");
+        command
+            .args(args)
+            .current_dir(self.repo.path())
+            .env("HOME", self.home.path())
+            .env("USERPROFILE", self.home.path())
+            .env("XDG_CONFIG_HOME", &config)
+            .env("APPDATA", &config)
+            .env("LOCALAPPDATA", &config)
+            .env("TMPDIR", temp)
+            .env("TMP", temp)
+            .env("TEMP", temp)
+            .env("NO_COLOR", "1")
+            .env_remove("CLICOLOR_FORCE")
+            .envs(env.iter().copied());
+        command.output().expect("run hug")
+    }
+
+    /// Runs `hug` and returns stdout, failing with stderr when it exits non-zero.
+    pub fn stdout(&self, args: &[&str]) -> String {
+        stdout_of(self.hug(args), args)
+    }
+}
+
+/// Returns stdout of a successful run, failing with stderr otherwise.
+pub fn stdout_of(output: Output, args: &[&str]) -> String {
+    assert!(
+        output.status.success(),
+        "hug {args:?} failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).expect("utf-8 stdout")
+}
+
+/// Parses `hug --json` output.
+pub fn json_of(stdout: &str) -> Value {
+    serde_json::from_str(stdout).unwrap_or_else(|error| panic!("invalid JSON ({error}):\n{stdout}"))
+}
+
+/// Every `.json` entry file under `root`, sorted.
+pub fn cache_entries(root: &Path) -> Vec<PathBuf> {
+    fn walk(dir: &Path, found: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, found);
+            } else if path.extension().is_some_and(|ext| ext == "json") {
+                found.push(path);
+            }
+        }
+    }
+    let mut found = Vec::new();
+    walk(root, &mut found);
+    found.sort();
+    found
+}
