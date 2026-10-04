@@ -157,11 +157,7 @@ impl Comparison {
 /// when one side contains the other, since such a merge cannot conflict.
 /// `None` when `rev-list` fails; a failure is never cached.
 pub fn compare_cached(cache: &Mutex<Cache>, target_sha: &str, branch_sha: &str) -> Option<Comparison> {
-    let key = CacheKey {
-        target_tip_sha: target_sha.to_string(),
-        branch_tip_sha: branch_sha.to_string(),
-        version: CACHE_FORMAT_VERSION,
-    };
+    let key = cache_key(target_sha, branch_sha);
     if let Some(value) = cache.lock().expect("cache mutex poisoned").get(&key).copied() {
         return Some(Comparison {
             ahead: value.ahead,
@@ -177,9 +173,34 @@ pub fn compare_cached(cache: &Mutex<Cache>, target_sha: &str, branch_sha: &str) 
             ahead: comparison.ahead,
             behind: comparison.behind,
             is_clean: comparison.is_clean,
+            line: None,
         },
     );
     Some(comparison)
+}
+
+fn cache_key(target_sha: &str, branch_sha: &str) -> CacheKey {
+    CacheKey {
+        target_tip_sha: target_sha.to_string(),
+        branch_tip_sha: branch_sha.to_string(),
+        version: CACHE_FORMAT_VERSION,
+    }
+}
+
+/// [`line_steps`] from `branch_sha` to `target_sha`, kept in `cache` with the
+/// [`compare_cached`] entry for the same pair (which must exist), so a warm
+/// listing asks Git nothing for it either.
+pub fn line_steps_cached(cache: &Mutex<Cache>, target_sha: &str, branch_sha: &str) -> Option<LineSteps> {
+    let key = cache_key(target_sha, branch_sha);
+    let cached = cache.lock().expect("cache mutex poisoned").get(&key).copied();
+    if let Some(steps) = cached.and_then(|value| value.line) {
+        return Some(steps);
+    }
+    let steps = line_steps(branch_sha, target_sha)?;
+    if let Some(value) = cached {
+        cache.lock().expect("cache mutex poisoned").put(key, CacheValue { line: Some(steps), ..value });
+    }
+    Some(steps)
 }
 
 fn compare_live(target_sha: &str, branch_sha: &str) -> Option<Comparison> {
@@ -224,6 +245,27 @@ pub struct Caption {
     pub ahead: usize,
     /// Tracking-ref commits the local branch lacks.
     pub behind: usize,
+    /// When behind: the tracking ref's own line (first-parent chain) from
+    /// the local tip, which is shorter than `behind` when merges brought the
+    /// rest in. `None` when not behind or Git couldn't say.
+    pub behind_on_line: Option<LineSteps>,
+}
+
+pub use crate::cache::LineSteps;
+
+/// The first-parent steps from `from` to `to` (`to` must descend from
+/// `from`): one `rev-list --first-parent --parents`, counting each line and
+/// each line with more than one parent.
+pub(crate) fn line_steps(from: &str, to: &str) -> Option<LineSteps> {
+    let output = git_command(&["rev-list", "--first-parent", "--parents", &format!("{from}..{to}"), "--"]).ok()?;
+    let mut steps = LineSteps { commits: 0, merges: 0 };
+    for line in output.lines().filter(|line| !line.trim().is_empty()) {
+        steps.commits += 1;
+        if line.split_whitespace().count() > 2 {
+            steps.merges += 1;
+        }
+    }
+    Some(steps)
 }
 
 /// How [`Caption`] reads.
@@ -822,6 +864,7 @@ malformed
             tracking_sha: "f".repeat(40),
             ahead,
             behind,
+            behind_on_line: None,
         }
         .state();
         assert_eq!(caption(0, 0), CaptionState::InSync);
@@ -903,6 +946,26 @@ mod repo_tests {
 
     fn caption_state(list: &WorktreeList) -> Option<CaptionState> {
         list.caption.as_ref().map(Caption::state)
+    }
+
+    /// One merge on `main`'s own line brings in two side commits: the line
+    /// is one step, a merge, though `main` gained three commits.
+    #[test]
+    #[serial_test::serial]
+    fn line_steps_count_only_the_first_parent_line_and_its_merges() {
+        let repo = TestRepo::new();
+        let _guard = DirGuard::enter(&repo.path());
+        let base = repo.sha("HEAD");
+        repo.git(&["checkout", "-q", "-b", "side"]);
+        repo.commit("s1.txt");
+        repo.commit("s2.txt");
+        repo.git(&["checkout", "-q", "main"]);
+        repo.git(&["merge", "-q", "--no-ff", "-m", "merge side", "side"]);
+        let merged = repo.sha("HEAD");
+        assert_eq!(line_steps(&base, &merged), Some(LineSteps { commits: 1, merges: 1 }));
+        let after = repo.commit("d1.txt");
+        assert_eq!(line_steps(&base, &after), Some(LineSteps { commits: 2, merges: 1 }));
+        assert_eq!(line_steps(&after, &after), Some(LineSteps { commits: 0, merges: 0 }));
     }
 
     #[test]
@@ -1320,8 +1383,9 @@ mod repo_tests {
         let rev_lists = |calls: &[Vec<String>]| {
             recorder::count_matching(calls, |args| args.first().map(String::as_str) == Some("rev-list"))
         };
-        // Caption, two target comparisons, and one parent comparison.
-        assert_eq!(rev_lists(&cold_calls), 4, "got {cold_calls:?}");
+        // Caption, its own-line steps (main is behind), two target
+        // comparisons, and one parent comparison.
+        assert_eq!(rev_lists(&cold_calls), 5, "got {cold_calls:?}");
 
         recorder::start_recording();
         let warm = list_worktrees().unwrap();
