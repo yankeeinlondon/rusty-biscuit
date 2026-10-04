@@ -4,7 +4,12 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+source_files_during_phase_2: []
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+packages:
+  - sniff
 created: 2026-10-03
 phase: 1
 agent: claude/sonnet
@@ -118,11 +123,11 @@ to "implementation"; the author can overturn any in review):
 
 Wave 2. Package: `sniff`.
 
-- [ ] **Evidence type.** Add the Rule 1 type to `sniff/lib/src/remote` (public, `serde` where the worker needs it is decided in P3, so keep it plain data here). Variable names only.
-- [ ] **Selection from the client.** Make `FocusedProviderClient` report the selection it made for each request (provider variable, host-bound `SNIFF_*_TOKEN`, empty variable treated as absent, none) without a second lookup and without extra requests. Pre-reqs: S2.
-- [ ] **Blocking entry points.** Return the evidence beside the existing result for `branch_head*` and `open_pull_requests*` (fold per Rule 1 across pages). Preserve deadlines, error classification, pagination, request counts. Failures stay distinct and carry no success evidence.
-- [ ] **Callers compile.** Update every `sniff` and workspace caller of changed signatures (grep `branch_head(`, `open_pull_requests(`); prefer additive entry points if the churn is wide.
-- [ ] **Tests (L1, sniff).** Provider token, host-bound token, empty variable, no token; paginated PR (all anonymous / mixed / all keyed); token values absent from `Debug`/serialization of the evidence; request count unchanged.
+- [x] **Evidence type.** Add the Rule 1 type to `sniff/lib/src/remote` (public, `serde` where the worker needs it is decided in P3, so keep it plain data here). Variable names only.
+- [x] **Selection from the client.** Make `FocusedProviderClient` report the selection it made for each request (provider variable, host-bound `SNIFF_*_TOKEN`, empty variable treated as absent, none) without a second lookup and without extra requests. Pre-reqs: S2.
+- [x] **Blocking entry points.** Return the evidence beside the existing result for `branch_head*` and `open_pull_requests*` (fold per Rule 1 across pages). Preserve deadlines, error classification, pagination, request counts. Failures stay distinct and carry no success evidence.
+- [x] **Callers compile.** Update every `sniff` and workspace caller of changed signatures (grep `branch_head(`, `open_pull_requests(`); prefer additive entry points if the churn is wide.
+- [x] **Tests (L1, sniff).** Provider token, host-bound token, empty variable, no token; paginated PR (all anonymous / mixed / all keyed); token values absent from `Debug`/serialization of the evidence; request count unchanged.
 
 **Checkpoint 2:** `sniff` area tests and lint pass.
 

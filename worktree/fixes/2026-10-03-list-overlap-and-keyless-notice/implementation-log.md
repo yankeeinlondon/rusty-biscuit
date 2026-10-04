@@ -4,7 +4,12 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+source_files_during_phase_2: []
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+packages:
+  - sniff
 implementation_1: "2026-10-03T14:50:53-07:00"
 ---
 
@@ -112,3 +117,27 @@ The files changed in this cycle:
 - tests: none added; Phase 1 changes no behavior, so there is no requirement-to-test mapping. The earlier cycle's targeted tests are listed in the review-cycle section above
 - frontmatter: the Phase 1 file lists are empty, because only plan, log, and spec files under the fix directory were edited. `spec.md` has `human_review: false` and a `message_to_agent` telling later phases to verify and tick the existing work, not re-implement it
 - skills: no change to the `worktree` skill was needed; review cycle 1 had already updated it
+
+## Phase 2
+
+> **phase:** `sniff` credential metadata (plan Phase 2), 2026-10-03
+
+- state found: review cycle 1 had already built this phase (the work is committed). The working tree had no source changes. Each task was checked against the code, no gap was found, and no code changed
+- task verification:
+        - evidence type: `sniff::remote::blocking::RequestCredentials { Anonymous, Keyed { variables }, Unknown }` (`sniff/lib/src/remote/blocking.rs`). It is plain data, `#[non_exhaustive]`, has no `Serialize`, and holds only variable names
+        - selection from the client: `FocusedProviderClient::fetch_json` (`sniff/lib/src/remote/focused.rs`) logs `SentWith` from the same `credential()` call that builds the request's auth header. It does no second lookup and adds no request. An empty variable is unset in `credentials::token_in`, so it is neither sent nor reported
+        - blocking entry points: `BranchHead.credentials` and `OpenPullRequests { pull_requests, credentials }` are folded in `run_with_deadline`. A failure is still a `PrUnavailable`, which carries no success evidence; its `key` comes from the last request sent. Deadline handling, classification, and pagination are unchanged
+        - callers: `rg` for `branch_head(_with)?(` / `open_pull_requests(_with)?(` finds only `sniff` itself and `worktree/lib/src/{pull_requests,remote_update}.rs`, all compiling (`cargo check --all-targets -p worktree -p worktree-cli` clean)
+- requirement-to-test mapping (all L1, `sniff-lib`, existing; none added because none was missing):
+        - provider token → `l1::branch_head::a_success_reports_the_provider_token_variable_its_request_sent` (every flavor; token absent from `Debug`; exactly one request)
+        - no token → `a_success_without_a_token_reports_an_anonymous_request` (one request)
+        - empty variable, and an empty first candidate not hiding the next → `an_empty_variable_is_unset_for_both_the_request_and_its_credentials`
+        - host-bound token (success and 404 key; global token ignored) → `a_host_bound_token_is_the_selection_reported_for_success_and_404`; empty host-bound → `an_empty_host_bound_token_leaves_a_discovered_request_anonymous`
+        - pagination all anonymous / all keyed / key appears between pages / key disappears between pages, with request counts and token kept out of `Debug` → `l1::open_pull_requests::a_paginated_answer_is_anonymous_only_when_every_page_was`; an empty list still reports credentials → `an_empty_list_reports_its_requests_credentials`
+        - fold rules (zero requests → unknown, repeats removed, first-use order) → unit test `remote::blocking::tests::request_credentials_are_anonymous_only_when_every_request_was`
+        - token values in serialization: not applicable at this layer, because `RequestCredentials` has no serializer. The stored form is phase 3's `CredentialEvidence`
+- input robustness matrix: not applicable. This phase reads no file format; the stored evidence and its matrix belong to phase 3
+- OS: no OS-specific code (environment variables plus HTTP to a local wiremock), so no cross-check was run; CI's Linux leg covers the rest
+- gates (with `LIBGIT2_NO_PKG_CONFIG=1`): `sniff/` `just test` 3127 passed, 32 skipped; `sniff/` `just lint` exit 0; `just check-tier-coverage sniff` 0 stranded; `worktree/` `just test` 945 passed, 32 skipped; `worktree/` `just lint` exit 0. No failures, pre-existing or new
+- frontmatter: the phase 2 file lists are empty because this phase edited no source, docs, or skill files. `packages` now lists `sniff`, the package this phase's scope covers, whose changes landed in review cycle 1
+- skills: no `worktree` skill change needed

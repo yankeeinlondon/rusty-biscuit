@@ -37,7 +37,9 @@ message_to_agent: |-
     filling only real gaps; do not re-implement. Baseline on 2026-10-03: worktree
     `just test` 945 passed, `just lint` clean; sniff `just test` 3127 passed, `just lint`
     clean. Builds on this macOS host need `LIBGIT2_NO_PKG_CONFIG=1` (Homebrew libgit2
-    upgrade; see the `os` skill macOS page).
+    upgrade; see the `os` skill macOS page). Phase 2 (sniff credential metadata) was
+    verified and ticked with no code change; the worktree `packages` list already
+    includes `sniff`, so later phases only add `worktree` / `worktree-cli`.
 related:
     - 2026-09-27-list-freshness-ux
     - 2026-10-02-fresh-prs
