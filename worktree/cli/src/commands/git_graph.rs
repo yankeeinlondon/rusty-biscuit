@@ -59,7 +59,10 @@ pub struct GatherInput {
 }
 
 impl GatherInput {
-    pub fn from_list(list: &WorktreeList) -> Self {
+    /// The listing's entries, default branch, and fork records, with `refs`
+    /// as the tips: the initial snapshot for a speculative gather, or the
+    /// final one for a regather.
+    pub fn from_list(list: &WorktreeList, refs: &RefTips) -> Self {
         let entries = list.entries();
         Self {
             default_branch: list.default_branch.clone(),
@@ -68,7 +71,7 @@ impl GatherInput {
                 .find(|entry| entry.is_current)
                 .and_then(|entry| entry.branch.clone()),
             branch_names: entries.iter().filter_map(|entry| entry.branch.clone()).collect(),
-            refs: list.refs().clone(),
+            refs: refs.clone(),
             forks: list.fork_origins().clone(),
         }
     }
@@ -270,8 +273,8 @@ pub fn gather(input: &GatherInput, needs_graph: bool, needs_verbose: bool) -> (O
         (Ok(Some(fork)), true) => Some(VerboseData {
             default_branch: input.default_branch.clone(),
             branch: current.to_string(),
-            merge_base: commit_details(fork, 1).into_iter().next(),
-            branch_commits: commit_details_since(current_tip, &tips.exclusions()),
+            merge_base: commit_details(input, fork, 1).into_iter().next(),
+            branch_commits: commit_details_since(input, current_tip, &tips.exclusions()),
         }),
         _ => None,
     };
@@ -861,30 +864,34 @@ fn parallel<T: Sync, R: Send>(items: &[T], work: impl Fn(&T) -> R + Sync) -> Vec
 
 /// Git format string using %x1f (Unit Separator) as field delimiter.
 /// Using git's own escape avoids embedding raw control chars in args.
-const DETAIL_FMT: &str = "%h%x1f%s%x1f%at%x1f%D";
+const DETAIL_FMT: &str = "%H%x1f%h%x1f%s%x1f%at%x1f%D";
+
+/// Leaves `%D` only the decorations [`GatherInput::refs`] does not capture
+/// (tags, and any other non-branch refs Git decorates): branch, remote-tracking,
+/// and `HEAD` labels are rebuilt from the snapshot by [`snapshot_labels`],
+/// because Git's live refs may have moved since it was read.
+const LIVE_DECORATION_EXCLUDES: [&str; 3] =
+    ["--decorate-refs-exclude=HEAD", "--decorate-refs-exclude=refs/heads/", "--decorate-refs-exclude=refs/remotes/"];
 
 /// Query git log for detailed commit info, returning oldest first.
-fn commit_details(rev: &str, max: usize) -> Vec<CommitDetail> {
+fn commit_details(input: &GatherInput, rev: &str, max: usize) -> Vec<CommitDetail> {
     let max_str = max.to_string();
     let fmt_arg = format!("--format={DETAIL_FMT}");
-    let Ok(output) = git_command(&[
-        "log",
-        &fmt_arg,
-        "--max-count",
-        &max_str,
-        "--reverse",
-        rev,
-        "--",
-    ]) else {
+    let mut args = vec!["log", fmt_arg.as_str()];
+    args.extend(LIVE_DECORATION_EXCLUDES);
+    args.extend(["--max-count", &max_str, "--reverse", rev, "--"]);
+    let Ok(output) = git_command(&args) else {
         return vec![];
     };
-    parse_commit_lines(&output)
+    parse_commit_lines(input, &output)
 }
 
 /// Query git log for commits reachable from `target` but not `excludes`, oldest first.
-fn commit_details_since(target: &str, excludes: &[String]) -> Vec<CommitDetail> {
+fn commit_details_since(input: &GatherInput, target: &str, excludes: &[String]) -> Vec<CommitDetail> {
     let fmt_arg = format!("--format={DETAIL_FMT}");
-    let mut args = vec!["log", fmt_arg.as_str(), "--reverse", target];
+    let mut args = vec!["log", fmt_arg.as_str()];
+    args.extend(LIVE_DECORATION_EXCLUDES);
+    args.extend(["--reverse", target]);
     if !excludes.is_empty() {
         args.push("--not");
         args.extend(excludes.iter().map(String::as_str));
@@ -893,28 +900,62 @@ fn commit_details_since(target: &str, excludes: &[String]) -> Vec<CommitDetail> 
     let Ok(output) = git_command(&args) else {
         return vec![];
     };
-    parse_commit_lines(&output)
+    parse_commit_lines(input, &output)
 }
 
-fn parse_commit_lines(output: &str) -> Vec<CommitDetail> {
+fn parse_commit_lines(input: &GatherInput, output: &str) -> Vec<CommitDetail> {
     output
         .lines()
         .filter(|l| !l.is_empty())
         .filter_map(|line| {
-            let parts: Vec<&str> = line.splitn(4, '\x1f').collect();
-            if parts.len() < 3 {
+            let parts: Vec<&str> = line.splitn(5, '\x1f').collect();
+            if parts.len() < 4 {
                 return None;
             }
-            let ts: i64 = parts[2].parse().ok()?;
+            let ts: i64 = parts[3].parse().ok()?;
             let timestamp = Local.timestamp_opt(ts, 0).single()?;
             Some(CommitDetail {
-                short_sha: parts[0].to_string(),
-                message: parts[1].to_string(),
+                short_sha: parts[1].to_string(),
+                message: parts[2].to_string(),
                 timestamp,
-                refs: parts.get(3).unwrap_or(&"").to_string(),
+                refs: snapshot_labels(input, parts[0], parts.get(4).copied().unwrap_or("")),
             })
         })
         .collect()
+}
+
+/// `sha`'s decorations in Git's `%D` spelling, as of the snapshot: `HEAD ->
+/// <current>` at the current branch's tip, then `live` (the decorations the
+/// snapshot does not capture, such as tags), then the remote-tracking names
+/// and the other local branches at `sha`, each group in Git's reverse refname
+/// order.
+fn snapshot_labels(input: &GatherInput, sha: &str, live: &str) -> String {
+    let refs = &input.refs;
+    let current = input.current_branch.as_deref().filter(|current| refs.local(current) == Some(sha));
+    let mut labels: Vec<String> = current.map(|current| format!("HEAD -> {current}")).into_iter().collect();
+    labels.extend(live.split(", ").filter(|label| !label.is_empty()).map(str::to_string));
+    let mut remotes: Vec<&str> = refs
+        .remote
+        .iter()
+        .filter(|(_, tip)| tip.as_str() == sha)
+        .map(|(name, _)| name.as_str())
+        .chain(
+            refs.remote_heads
+                .iter()
+                .filter(|(_, target)| refs.remote(target) == Some(sha))
+                .map(|(name, _)| name.as_str()),
+        )
+        .collect();
+    remotes.sort_unstable_by(|a, b| b.cmp(a));
+    labels.extend(remotes.into_iter().map(str::to_string));
+    labels.extend(
+        refs.local
+            .iter()
+            .rev()
+            .filter(|(name, tip)| tip.as_str() == sha && Some(name.as_str()) != current)
+            .map(|(name, _)| name.clone()),
+    );
+    labels.join(", ")
 }
 
 /// Format a commit in the same style as `sniff repo git-status`.

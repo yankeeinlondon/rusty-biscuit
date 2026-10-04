@@ -130,8 +130,9 @@ pub enum LastKnown {
     Never,
 }
 
-/// A §5 condition, with the provider's display name and the variable
-/// wording (the one used, or the accepted ones joined by "or").
+/// A §5 condition, or the keyless notice, with the provider's display name
+/// and the variable wording (the one used, or the accepted ones joined by
+/// "or").
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CredentialLine {
     pub provider: String,
@@ -146,6 +147,10 @@ pub enum CredentialCondition {
     Rejected,
     Insufficient,
     RateLimited { authenticated: bool },
+    /// This listing saw the provider answer an API request sent without a
+    /// key. `higher_limits`: the provider is known to give a key a higher
+    /// rate limit than an anonymous request.
+    AnsweredWithoutKey { higher_limits: bool },
 }
 
 /// §9: the local default branch is strictly behind its tracking ref.
@@ -446,6 +451,12 @@ pub fn credential_markup(line: &CredentialLine) -> String {
         ),
         CredentialCondition::RateLimited { authenticated: true } => {
             format!("{provider} rate limited the request for updated information. Try again in a few minutes.")
+        }
+        CredentialCondition::AnsweredWithoutKey { higher_limits: true } => {
+            format!("{provider} answered without an API key; set {key} for higher rate limits.")
+        }
+        CredentialCondition::AnsweredWithoutKey { higher_limits: false } => {
+            format!("{provider} answered without an API key; set {key} to authenticate API requests.")
         }
     };
     format!("<dim>{}</dim>", Prose::escape_text(&text))

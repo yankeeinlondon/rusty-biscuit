@@ -434,6 +434,43 @@ fn graph_and_verbose_share_one_merge_base() {
     assert_eq!(verbose.branch_commits.len(), 1);
 }
 
+/// Verbose labels describe the snapshot the listing accepted, not Git's live
+/// branch refs; tags, which the snapshot does not capture, stay live.
+#[test]
+#[serial_test::serial]
+fn verbose_labels_follow_the_snapshot_and_keep_live_tags() {
+    let repo = branches();
+    let _guard = DirGuard::enter(&repo.path);
+    run_git(&repo.path, &["config", "tag.gpgsign", "false"]);
+    run_git(&repo.path, &["update-ref", "refs/remotes/origin/main", &repo.c2]);
+    run_git(&repo.path, &["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"]);
+    run_git(&repo.path, &["tag", "v1", &repo.c2]);
+    let snapshot = input("feature-a", &["main", "feature-a"], ForkOriginStore::default());
+    let labels = |verbose: &VerboseData| {
+        (
+            verbose.merge_base.as_ref().map(|commit| commit.refs.clone()),
+            verbose.branch_commits.iter().map(|commit| commit.refs.clone()).collect::<Vec<_>>(),
+        )
+    };
+
+    let (_, unmoved) = gather(&snapshot, false, true);
+    let live = git_output(&repo.path, &["log", "-1", "--format=%D", &repo.c2]);
+    assert_eq!(live, "tag: v1, origin/main, origin/HEAD", "Git's own spelling, in its order");
+    assert_eq!(labels(&unmoved.expect("verbose")), (Some(live), vec!["HEAD -> feature-a".to_string()]));
+
+    // A fetch and a new branch after the snapshot; a new tag is live.
+    run_git(&repo.path, &["update-ref", "refs/remotes/origin/main", &repo.c3]);
+    run_git(&repo.path, &["branch", "late", &repo.a1]);
+    run_git(&repo.path, &["tag", "v2", &repo.a1]);
+    let (_, moved) = gather(&snapshot, false, true);
+
+    assert_eq!(
+        labels(&moved.expect("verbose")),
+        (Some("tag: v1, origin/main, origin/HEAD".to_string()), vec!["HEAD -> feature-a, tag: v2".to_string()]),
+        "origin/main and origin/HEAD stay at the snapshot's tip; `late` is not in it"
+    );
+}
+
 #[test]
 #[serial_test::serial]
 fn nothing_is_gathered_when_detached_or_not_needed() {
