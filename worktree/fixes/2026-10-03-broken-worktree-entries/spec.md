@@ -20,17 +20,19 @@ $schema:
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
 status: draft-spec
-reviewed: false
+reviewed: true
+reviewed_by: codex/gpt-6.1-sol
+reviewed_on: 2026-10-03
 review_iterations: 0
 clarified: true
 implemented: false
 ---
 
-# Worktrees git can no longer read: `wt list` calls them clean, `wt remove` fails
+# Worktrees Git can no longer read: honest listing and safe removal
 
 ## Problem
 
-A linked worktree can lose its connection to the repository while git still
+A linked worktree can lose its connection to the repository while Git still
 records it. Git reports such an entry as `prunable`:
 
 ```text
@@ -40,169 +42,380 @@ detached
 prunable gitdir file points to non-existent location
 ```
 
-Git uses that one reason for two different states:
+The same reason can describe two different states:
 
 | State | On disk | Example |
 | --- | --- | --- |
-| **Missing** | the worktree directory is gone | someone ran `rm -rf` on it |
-| **Unlinked** | the directory and its files remain; its `.git` file is gone | `/private/tmp/lhg-before`, observed 2026-10-03, cause unknown |
+| **Missing** | The worktree directory is gone. | Someone deleted the directory. |
+| **Unlinked** | The directory remains, but its `.git` file is absent. | `/private/tmp/lhg-before`, observed 2026-10-03; cause unknown. |
 
-`wt` handles neither:
+Other damage or an unreadable path is also possible; `prunable` alone does
+not prove that `.git` is missing.
 
-1. **`wt list` says an unlinked worktree is clean.** `dirty_status`
-   (`lib/src/worktree.rs`) maps *any* `git status` failure to
-   `DirtyStatus::Clean`, so the row shows `○` although nothing was checked.
-   The same fallback hides every other `git status` failure.
-2. **`wt remove` fails with a raw git error.** `collect_inventory` runs
-   `git status` in the worktree and returns `WorktreeError::GitCommand`:
+`wt` currently hides the problem or fails without useful context:
+
+1. In the `worktree` library, [dirty_status](../../lib/src/worktree.rs)
+   classifies working files for listing. It maps every `git status` failure
+   to `DirtyStatus::Clean`, so an unlinked row shows `○` without checking
+   anything. The same fallback hides unrelated status failures.
+2. In the `worktree` library, [collect_inventory](../../lib/src/remove/inventory.rs)
+   gathers files that removal might discard. It runs `git status` in the
+   damaged worktree and returns a bare Git error:
 
    ```text
-   💻❯ wt remove lhg-before
    Error: failed to execute git command: fatal: not a git repository (or any of the parent directories): .git
    ```
 
-   It names neither the worktree nor the problem, nor what to do.
-3. **`wt list` parses `prunable` and throws it away** (the porcelain
-   parser in `lib/src/worktree.rs` skips that line).
+   The message identifies neither the target nor a recovery step.
+3. In the `worktree` library, [parse_worktree_list](../../lib/src/worktree.rs)
+   discards the `prunable` line, losing information needed to explain the row.
 
-### What git does (git 2.55.0, macOS, 2026-10-03)
+### Observed Git behavior
 
-Checked in a scratch repository with one missing and one unlinked worktree:
+The author checked Git 2.55.0 on macOS on 2026-10-03 in a scratch repository
+with one missing and one unlinked worktree:
 
 | Command | Missing | Unlinked |
 | --- | --- | --- |
-| `git worktree remove <path>` | succeeds; drops the record | `fatal: validation failed, cannot remove working tree: '<path>/.git' does not exist` |
-| `git worktree remove --force <path>` | — | the same fatal error |
-| `git worktree repair <path>` | — | **recreates `<path>/.git` and the link, but prints `error: unable to locate repository; .git file broken` and exits 1**; afterward `git -C <path> status` works and the entry is no longer `prunable` |
+| `git worktree remove <path>` | Succeeds; drops the record. | Fails because `<path>/.git` does not exist. |
+| `git worktree remove --force <path>` | Not checked. | Fails for the same reason. |
+| `git worktree repair <path>` | Not checked. | Recreates `.git` and the link, but prints an error and exits 1. Afterward status works and the entry is no longer prunable. |
 
-So git cannot remove an unlinked worktree at all, `repair` can bring it back,
-and `repair`'s exit status cannot be trusted.
+These are observations, not a Git version requirement. Tests must check the
+result of repair rather than require real Git to return this exact exit code.
 
-## Fix
+## Scope and design
 
-### 1. The listing knows the state
+This fix makes listing distinguish unavailable checkouts from checked-clean
+ones, and lets removal recover the specific missing-`.git` case before applying
+its existing protections. It introduces no new force flag and never removes
+an unchecked existing directory.
 
-- The porcelain parser records `prunable` on `WorktreeEntry`.
-- A prunable entry is classified once, from the filesystem: **missing** when
-  its path does not exist, **unlinked** when it does.
-- Classify with the entry's path as git printed it; never canonicalize a
-  missing path.
+**Reader's note:** The original draft called every existing prunable path
+“unlinked” and suggested repository-wide pruning after repair failed. This
+review narrows automatic repair to a confirmed absent `.git` file and removes
+that advice. A prunable directory may have different damage, and pruning can
+drop other worktree records; neither justifies deleting the named directory.
 
-### 2. `wt list` shows it
+### 1. Preserve Git's report and classify filesystem state separately
 
-- No `git status` runs for a missing or unlinked worktree.
-- The worktree marker is `✕` for both, with one legend entry,
-  `✕ git can't read this worktree`, shown only when such a row exists.
-- After the legend, one dim note per such worktree saying what is wrong and
-  what to do:
+In the `worktree` library, extend [WorktreeEntry](../../lib/src/worktree.rs),
+the parsed entry shared by commands, with `prunable: Option<String>`: `None`
+means no marker, `Some("")` means a marker without a reason, and otherwise the
+string preserves Git's reason. Reset it for every entry, including the last
+entry. Do not interpret localized reason text to make safety decisions.
 
-  ```text
-  lhg-before: its .git file is missing; `wt remove lhg-before` restores and removes it, or `git worktree repair /private/tmp/lhg-before` restores it.
-  feat-gone: its directory is gone; `wt remove feat-gone` drops the record.
-  ```
+Keep filesystem classification separate from porcelain parsing. For each
+prunable entry, inspect the recorded path and its `.git` entry:
 
-- Branch comparisons for such a row still come from refs and are shown as
-  usual; only the dirtiness claim changes.
-- **`git status` failing for any other reason is not clean.** Add
-  `DirtyStatus::Unknown`, rendered `?` with the legend entry `? couldn't
-  check`, shown only when such a row exists. `Unknown` never counts as clean
-  anywhere a decision depends on it.
-- `wt list` stays read-only: it never repairs.
+| Classification | Required evidence | Listing marker | Removal preparation |
+| --- | --- | --- | --- |
+| Missing | The path is confirmed absent. | `✕` | Use the missing-directory path below. |
+| Unlinked | The path is a directory and `.git` is confirmed absent. | `✕` | Attempt targeted repair. |
+| Other unavailable state | The path is a file, a dangling link, cannot be inspected, or `.git` exists but Git reports damage. | `✕` | Refuse automatic recovery and explain the observed condition. |
 
-### 3. `wt remove` handles both states
+A permission or I/O failure is not absence: do not use `Path::exists()` to
+make that decision. Do not follow a dangling link into the missing-directory
+path. Refuse automatic repair/removal of a target that is itself a symlink
+or Windows reparse point; this avoids treating a replacement link as the
+original checkout. Existing healthy worktree behavior is otherwise unchanged.
+
+Keep Git's recorded spelling for display and subprocess arguments. Never
+canonicalize a missing path. When comparing existing repository metadata
+paths, use the repository's established path helpers, accounting for macOS
+symlink aliases and Windows short names and verbatim prefixes.
+
+Classification is a snapshot, not authorization to delete. Listing uses one
+classification per entry for this run; removal refreshes the listing and
+filesystem evidence before preparation and rechecks before execution.
+
+### 2. Make `wt list` honest
+
+- Do not run `git status` for a prunable entry. Represent its dirtiness as
+  unknown and use its separate availability state to render `✕`.
+- Add `DirtyStatus::Unknown` to the `worktree` library's
+  [DirtyStatus](../../lib/src/worktree.rs), which describes working-file
+  changes. Spawn failures and nonzero status exits return `Unknown`, never
+  `Clean`. A non-prunable entry with unknown dirtiness renders `?`.
+- Add `✕ git can't read this worktree` and `? couldn't check` to the Worktree
+  legend only when their respective markers occur. Keep the existing Branch
+  legend and size the table using the actual rendered legends.
+- Add one dim note for each unavailable entry, in table row order, without
+  disrupting the existing PR status and closing-note order. Render through
+  `biscuit-terminal` components and escape names, paths, and Git reasons as
+  text so they cannot become markup.
+
+Example notes, with commands shown for simple names and paths:
+
+```text
+lhg-before: its .git file is missing; wt remove lhg-before attempts to restore the link before checking its files. To restore it without removing it, run git -C /path/to/base worktree repair /private/tmp/lhg-before.
+feat-gone: its directory is gone; wt remove feat-gone checks whether its remaining Git record can be removed safely.
+```
+
+For other unavailable states, explain the observed condition and include
+Git's reason when present. Do not claim `.git` is absent unless it was checked.
+Use an unambiguous command argument accepted by existing name resolution;
+when no unique short name exists, explain the conflicting names rather than
+suggesting a command that cannot select the row. Quote suggested commands for
+the caller's shell when names or paths need it; never execute displayed text.
+
+Branch comparisons still use refs and retain their existing meaning. A
+comparison cell saying `clean` means “merges without conflicts,” not “working
+files were checked.” Unknown dirtiness never counts as checked-clean, nor as
+known uncommitted source files. Audit every match and default over dirtiness,
+including graph annotations and status refresh after `--ff`.
+
+Listing performs no repair or worktree-record removal. Its existing cache
+writes, worker behavior, and explicit `--ff` behavior remain supported. With
+`--ff`, a prunable holder of the default branch still counts as a holder:
+refuse the move rather than treat it as absent and update the ref underneath
+it. Never repair as part of fast-forwarding.
+
+### 3. Prepare `wt remove` before inventory
 
 ```mermaid
 flowchart TD
-  A[wt remove name] --> B{entry prunable?}
-  B -- no --> N[unchanged flow]
-  B -- missing --> M[git worktree remove: drops the record] --> BR[branch step as today]
-  B -- unlinked --> R[git worktree repair path]
-  R --> V{git -C path rev-parse --git-dir<br/>names this repository?}
-  V -- yes --> N
-  V -- no --> X[refuse, exit 3, with the manual steps]
+  A[Resolve target and move process to base] --> B[Refresh entry and inspect path]
+  B --> C{Checkout state}
+  C -- Healthy --> N[Existing inventory, consent, and handoff flow]
+  C -- Missing --> M[Check surviving Git state and branch safety]
+  M --> E[Recheck absence, remove only this record, then approved branch steps]
+  C -- Missing .git file --> R[Targeted git worktree repair]
+  R --> V{Exact link and checkout identity verified?}
+  V -- Yes --> N
+  V -- No --> X[Refuse deletion and report repair side effects]
+  C -- Other damage --> X
 ```
 
-- **Missing:** nothing on disk can be lost. Drop the record and continue with
-  the branch step exactly as for an ordinary removal (consent and
-  `--force-branch` rules unchanged). Report that the directory was already
-  gone.
-- **Unlinked:** run `git worktree repair <path>` and decide by **verifying**,
-  never by its exit status: the worktree's `git rev-parse --git-dir` must name
-  this repository's `worktrees/<id>` directory. On success, report
-  `restored the link for <name> so its files could be checked` and continue
-  with the ordinary flow, so the inventory, consent, `--force-worktree`, and
-  handoff rules apply unchanged.
-- **Repair did not take:** refuse with exit 3 and no change beyond what
-  `repair` wrote:
+#### Missing directory
 
-  ```text
-  Can't remove lhg-before: its .git file is missing and git couldn't restore it,
-  so wt can't tell what in /private/tmp/lhg-before is uncommitted work.
-  To drop the record and keep the files: git worktree prune
-  ```
+Do not run checkout status, include-file discovery, or a checkout-content
+fingerprint against a directory that is gone. Carry an explicit missing state;
+an empty file inventory means “no directory to inspect,” not “checked clean.”
+Resolve the branch and tip from this repository's refs, or the recorded HEAD
+for a detached entry. Branch safety assessment, consent, `--force-branch`,
+remote preflight, and `--force-remote` remain unchanged. A missing directory
+does not prove that its commits or surviving index are disposable; the index
+policy is the open question below.
 
-  No flag makes `wt` delete a directory whose contents it could not check.
-- **Every other git failure** in the remove flow names the worktree it was
-  about, instead of a bare `failed to execute git command`.
+Immediately before record removal, confirm that the target still identifies
+the same listed entry and remains absent. If a directory or link has appeared,
+refuse with exit 3 and ask the caller to rerun so its contents can be checked.
+Use only `git -C <base> worktree remove <path>`, not `prune` or hand-deletion of
+administrative directories. On Windows, skip the rename-based directory-lock
+probe only for confirmed absence; keep it for existing directories. Preserve
+Git's worktree-lock protections and do not add a second `--force` to bypass them.
+
+After successful record removal, perform the existing copy-record cleanup and
+approved local and remote branch steps. Report that the directory was already
+gone and the record was removed. If Git removal fails, do not delete branches
+or claim completion. No move-first handoff is needed for an absent directory.
+
+#### Directory remains and `.git` is absent
+
+Run targeted `git -C <base> worktree repair <path>` only after the existing
+main-checkout and shell-wrapper guards have passed. Run every repair and
+verification subprocess from the base checkout through the existing Git
+helpers, so it does not hold the target directory open on Windows. It must
+remain noninteractive and must not launch a network operation.
+
+Before repair, identify the exact administrative entry associated with the
+recorded target through this repository's common Git directory and the
+administrative `gitdir` back-reference. Do not guess its ID from the worktree
+basename, assume that base `.git` is a directory, or accept an arbitrary entry
+under `worktrees/`. If the association is ambiguous or unreadable, refuse.
+
+Judge repair by all of these postconditions, even if its exit status is nonzero:
+
+- The target's `.git` resolves to the exact administrative directory identified
+  before repair, and its common Git directory is this repository's.
+- That entry's `gitdir` back-reference resolves to the target's `.git`.
+- Git's top-level checkout is the target itself. Discovering a parent
+  repository is not success.
+- A fresh worktree listing still identifies the same target, branch or
+  detached HEAD, and no longer marks it prunable. If identity changed during
+  preparation, refuse and require a fresh invocation.
+
+Only then report `restored the link for <name> so its files could be checked`
+and enter the ordinary inventory, consent, protected-include-file,
+`--force-worktree`, and move-first handoff flow. Inventory must succeed before
+any deletion, even when all force flags are present.
+
+Repair intentionally occurs before consent to discard files. It may recreate
+`.git` and alter administrative links even when the user declines or later
+checks refuse removal. Do not roll back those changes: removing a repaired
+link could undo concurrent recovery work. Report the outcome and leave files,
+branches, and records in place when removal is refused.
+
+In the handoff's second run, never automatically repair a newly broken link.
+Verify the repaired checkout's identity again and apply the existing content,
+index, rules, baseline, branch, and remote checks. A link that changed or broke
+between the two runs invalidates approval and refuses deletion with exit 3.
+
+#### Repair failed or other damage prevents checking
+
+Refuse deletion with exit 3 using the existing refusal error. No force flag
+allows deletion of an existing directory whose inventory could not be checked.
+For the confirmed missing-`.git` case, the message explains:
+
+```text
+Can't remove lhg-before: its .git file was missing and Git couldn't restore a verified link.
+No working files, branches, or worktree records were removed. The repair attempt may have changed Git metadata.
+From the base checkout, inspect the repair result with git worktree list --porcelain and try git worktree repair /private/tmp/lhg-before, then retry wt remove lhg-before.
+```
+
+Include useful captured repair diagnostics on failure. A spawn failure still
+requires verification before claiming a repaired result, and must be named in
+the failure message. Do not suggest `git worktree prune` as a targeted way to
+keep the files: it can affect other entries and normally honors an expiration
+period. Removing only a damaged record while keeping its directory is outside
+this fix.
+
+In `worktree-cli`, [exit_code](../../cli/src/exit.rs) maps refusal errors to
+exit 3. In the `worktree` library, [WorktreeError](../../lib/src/error.rs)
+currently documents these errors as changing nothing. **This is an intended
+contract adjustment:** exit 3 continues to mean refusal to risk losing work,
+but a repair attempt may have changed link metadata. Update those comments and
+user documentation to distinguish “nothing removed” from “nothing changed”;
+do not print the latter after repair. Cancellation remains exit 0, and existing
+environment/directory-in-use failures remain exit 4.
+
+Add target name, path, and operation to otherwise bare Git failures in the
+remove flow while preserving the underlying error category and exit code.
+Retain existing partial-success reporting when a later branch operation fails.
+Do not convert an environment error into exit 1 merely to add context.
 
 ## Decisions
 
-1. **`wt remove` repairs an unlinked worktree before checking it.** Repair
-   only restores the link git expects; it writes the `.git` file into the
-   worktree even if the user then declines. The alternative, refusing
-   outright, leaves the user with no `wt` path at all, since git cannot remove
-   such a worktree either.
-2. **`repair` is judged by its result, not its exit status** (git 2.55.0 exits
-   1 after a successful repair).
-3. **A failed `git status` is `Unknown`, never `Clean`.**
-4. **`wt list` never repairs.**
+1. Automatic repair is limited to a confirmed absent `.git` in an existing
+   directory, with a uniquely associated administrative entry. This addresses
+   the observed defect without guessing what other damage means.
+2. Repair is verified by exact repository and checkout identity, not by exit
+   status or a path merely somewhere under the repository's `worktrees/`.
+3. Repair may leave metadata changes after cancellation or refusal; the report
+   and documented error contract must say so.
+4. Failed status is unknown. Availability and dirtiness are separate facts;
+   branch comparisons remain independent of both.
+5. Listing never repairs, and removal never prunes unrelated records.
+6. Keep filesystem paths as paths in Git arguments, not interpolated shell
+   commands. Existing name ambiguity rules and cross-platform path helpers
+   apply unchanged.
+
+## Open Questions
+
+### May removing a missing directory discard staged work in its surviving index?
+
+Deleting a checkout directory does not necessarily delete its administrative
+index. That index can still reference staged changes absent from HEAD; removing
+the record loses the index that identifies them, even though object contents
+may remain temporarily recoverable. The original “nothing on disk can be
+lost” assumption is therefore too strong. Decide this policy before finalizing
+the missing-directory removal path.
+
+- **Inspect the surviving index and require ordinary discard consent when it
+  differs from recorded HEAD; refuse if inspection fails (recommended).**
+  Pros: preserves the existing distinction between losing working changes and
+  deleting commits; clean missing entries still remove conveniently. Cons:
+  needs a metadata-only check and a report of staged paths, because checkout
+  status cannot run. Recommend this because the existing removal contract
+  already protects staged work; directory deletion should not bypass it.
+- **Require `--force-worktree` for every missing entry.** Pros: simple and
+  explicit authorization to discard remaining checkout state. Cons: asks for
+  force even when the index is unchanged, and provides little guidance about
+  what may be lost.
+- **Refuse every missing entry and require manual Git removal.** Pros: smallest
+  implementation and no automatic loss of surviving state. Cons: leaves the
+  observed missing-entry problem without a usable `wt` removal path.
+
+Until resolved, implementation must refuse missing-entry removal when staged
+state cannot be proved disposable; tests and acceptance below do not authorize
+silently discarding it. This review does not change the spec's draft status.
 
 ## Out of scope
 
-- Finding what removed `/private/tmp/lhg-before/.git`. That worktree is kept
-  in place as a live example.
-- `wt go` into a missing or unlinked worktree.
-- Other `prunable` reasons git may add later; they are treated as unlinked when
-  the path exists and missing when it does not.
+- Finding what removed `/private/tmp/lhg-before/.git`, or mutating that live
+  example during implementation or testing.
+- Changing `wt go` or `wt create` behavior for damaged entries.
+- Automatic recovery of corrupt, present, or foreign `.git` entries; future
+  prunable reasons receive honest listing and safe refusal.
+- A command that removes a broken record while preserving an existing directory.
+- New performance benchmarks or CI environments. Skipping failed status calls
+  and adding bounded local metadata checks does not warrant a performance spike.
 
 ## Tests
 
-All fixtures build both states with plain filesystem operations: delete the
-directory (missing), delete only `<path>/.git` (unlinked).
+Use disposable, network-isolated repositories and the existing test toolkit.
+Create missing and unlinked fixtures by deleting the directory or only its
+`.git` file. Never use the live `lhg-before` worktree. Tests must run on macOS,
+Linux, native Windows, and WSL2 without making terminal/browser windows gain
+focus.
 
-- **Parser (L1).** `prunable` is recorded; missing and unlinked are told apart.
-- **`wt list` (L1).** `✕` rows, the legend entry and notes appear only when
-  such a row exists; no `git status` runs for them (`count-git` recorder); a
-  `git status` failure for another reason renders `?`, never `○`.
-- **`wt remove`, missing (L1).** The record is dropped, the branch step behaves
-  as today, nothing else is touched.
-- **`wt remove`, unlinked (L1).** After the remove, the link is restored and the
-  ordinary flow ran: a dirty file still requires consent, and declining leaves
-  the files in place with the restored `.git`.
-- **`wt remove`, repair fails (L1).** Inject the repair step behind a seam and
-  stub it to change nothing; exit 3, the message, and no files removed. Real
-  git cannot produce this case for a listed entry: deleting
-  `.git/worktrees/<id>` makes `repair` fail, but git then stops listing the
-  worktree at all (checked with git 2.55.0).
-- **Repair exit status (L1).** A test pins the observed behavior: the result is
-  verified even when `repair` exits nonzero.
-- **Error naming (L1).** A forced git failure in the remove flow names the
-  worktree.
+- **Porcelain parsing (L1):** preserve marker presence with/without a reason;
+  reset between entries and flush the last entry. Filesystem classification
+  tests are separate and cover absence, missing `.git`, a present broken
+  `.git`, and inspection errors. Inject permission errors when the host cannot
+  reproduce them reliably.
+- **Listing (L1):** `✕` and `?` markers, conditional legends, dim notes, stable
+  row order, safe markup escaping, and ordinary ref comparisons. Record Git
+  calls to prove no status or repair runs for prunable entries. Inject status
+  spawn/nonzero failures through the runner actually used by status: the
+  existing recorder's failure injection does not affect `git_command_in`.
+  Put rendering snapshots in `cli/tests/list_table.rs`, not shared CLI unit
+  modules, which compile under both library and binary targets.
+- **Fast-forward (L1):** a prunable default-branch holder is refused without
+  repair or a ref move; healthy-holder behavior remains unchanged.
+- **Missing removal (L1):** a disposable record is removed without checkout
+  inventory or the Windows rename probe; an unsafe branch is retained unless
+  deletion is approved. Cover detached HEAD, other entries left intact, target
+  reappearance before execution, record-removal failure, and cleanup only
+  after success. Add staged-index cases for the policy chosen above.
+- **Unlinked removal (L1):** successful repair enters ordinary inventory;
+  dirty and protected ignored files still require consent. Noninteractive
+  refusal leaves the repaired link and all files intact; forced removal works
+  only after successful inventory. Verify cancellation through the existing
+  pure policy tests and scripted answers.
+- **Failed or incorrect repair (L1):** inject no change, a wrong administrative
+  entry in the same repository, a foreign repository, parent-repository
+  discovery, and changed identity. Refuse with exit 3 and delete no files,
+  records, or branches, including with every force flag. Do not assume real
+  Git can never fail for a listed entry.
+- **Repair exit status (L1):** an injected nonzero result with valid repaired
+  postconditions succeeds; a zero result without them refuses. Real-Git tests
+  assert postconditions without pinning the observed Git 2.55.0 exit code.
+- **Handoff (L1/L2):** preserve normal approval checks after repair; breaking
+  or redirecting the link between runs refuses without another repair. Use
+  existing windowless terminal helpers for the consent/cancellation and
+  wrapper behavior that needs a real terminal.
+- **Error context (L1):** failures identify target and operation, preserve exit
+  codes, and accurately describe any completed metadata or removal steps.
 
-## Docs
+## Documentation updates required by implementation
 
-- `worktree/docs/cli/list.md`: the `✕` and `?` markers and the notes.
-- `worktree/README.md` / the `wt remove` page: missing and unlinked
-  worktrees.
-- `.claude/skills/worktree/remove.md`: the prunable branch of the flow and the
-  `repair` exit-status trap. `list.md`: `Unknown` dirtiness.
+- `worktree/docs/cli/list.md`: markers, conditional legends, notes, and the
+  distinction between working-file status and branch merge comparisons.
+- `worktree/README.md`: missing/unlinked removal, repair before consent,
+  metadata changes on refusal, and force limits.
+- Create `worktree/docs/cli/remove.md`: recovery and refusal examples plus the
+  existing removal safety and handoff rules, so removal has a current topic
+  page rather than an unspecified “wt remove page.”
+- `.claude/skills/worktree/remove.md`: preparation, exact repair verification,
+  missing-directory handling, and the exit-status trap. Update `list.md` for
+  unavailable/unknown states and `cli-contracts.md` for refusal side effects.
+- Update affected symbol comments alongside behavior, especially the status
+  fallback and error/exit-code promises. Current documentation must state the
+  behavior directly, without referring readers back to this fix.
 
 ## Acceptance
 
-- `wt list` in the `rusty-biscuit` checkout shows `lhg-before` as `✕` with its
-  note, not `○`.
-- `wt remove` on an unlinked worktree restores it and then follows the
-  ordinary removal rules; on a missing one it drops the record; when repair
-  does not take, it refuses with the message above and removes nothing.
-- No `wt list` row claims clean without a successful `git status`.
-- `just test`, `just test-l2`, and `just lint` pass in `worktree/`.
+- A fixture matching `lhg-before` renders `✕` with an accurate recovery note,
+  rather than `○`; no live checkout is modified to demonstrate this.
+- Unlinked removal verifies repair and then follows ordinary protections.
+  Failed verification refuses without deletion and reports possible metadata
+  changes. An unknown inventory never permits deleting an existing directory.
+- Missing removal targets only that entry, follows the finalized staged-index
+  policy and existing branch rules, and refuses if the target reappears.
+- No row claims checked-clean after a status failure. Merge-comparison `clean`
+  remains a separate, unchanged concept.
+- `just test`, `just test-l2`, and `just lint` pass from `worktree/` using
+  nextest and existing focus-free terminal test helpers. Implementation
+  evidence states which environments were actually exercised.
