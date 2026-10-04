@@ -17,6 +17,7 @@ mod dasherized_identifier_corpus;
 mod directive_target_analysis;
 mod empty_package_area;
 mod feature_review_incident;
+mod file_tree_roots;
 mod find_files_and_try_frontmatter;
 // Helpers shared by more than one module are declared once, here.
 #[path = "../image_test_support/mod.rs"]
@@ -24,10 +25,12 @@ mod image_test_support;
 #[path = "../layout_matrix_support/mod.rs"]
 mod layout_matrix_support;
 
+mod absent_property_contract;
 mod ambient_ctx_capture;
 mod array_rendering_json;
 mod as_block_error_registry;
 mod backslash_escape_spans;
+mod binding_contract;
 mod base_schema_end_to_end;
 mod benchmark_fixtures;
 mod blockquote_list_spacing;

@@ -274,13 +274,15 @@ fn status_block_is_plain_and_informative_when_piped() {
 /// block the walker has become too eager.
 ///
 /// Argument-shape rejection is the honest unstructured case — it is authored
-/// prose with no typed error behind it. (`--timeout not-a-duration` looks
+/// prose with no typed error behind it. An `argv=` setter is one: `argv`
+/// holds positional arguments and cannot be set by name. (`--timeout not-a-duration` looks
 /// unstructured but is **not**: it carries a typed
 /// `HarnessError::InvalidTimeout`, and since Phase 5 it correctly renders a
 /// block. See `characterization_error_routes.rs` route 5.)
 #[test]
 fn unstructured_failure_still_uses_the_generic_fallback() {
-    let stderr = compose_stderr("---\ntitle: t\n---\nBody\n", &["also-a-file.md"]);
+    let stderr = compose_stderr("---\ntitle: t\n---\nBody\n", &["argv=x"]);
+    assert!(stderr.contains("reserved for positional arguments"), "stderr:\n{stderr}");
 
     assert!(
         has_generic_error_line(&stderr),

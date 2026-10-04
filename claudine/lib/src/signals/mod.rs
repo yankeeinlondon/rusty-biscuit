@@ -27,6 +27,7 @@ pub use claudine_catalog_types::{
 };
 pub use bespoke::{
     EXIT_STDERR_TAIL_LINES, EXIT_STDOUT_TAIL_LINES, bespoke_replayer, exit_source_payload,
+    tail_lines,
 };
 pub use engine::{ReplayObservation, SignalEngine};
 pub use hub::SignalHub;

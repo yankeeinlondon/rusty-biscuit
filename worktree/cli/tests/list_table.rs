@@ -1,6 +1,6 @@
 //! The `wt list` output rendered from listing facts: caption variants, the
 //! credentials line, every cell kind, badge placement, the legend, row
-//! emphasis, the PR age line, the refresh hint, the closing notes, and the
+//! emphasis, the status list (PR age line and refresh hint), the closing notes, and the
 //! order of every section.
 //!
 //! The tree comes from the library's real `build_tree`; only the git answers
@@ -20,8 +20,8 @@ use worktree::pull_requests::{OpenPullRequest, PrListing};
 use worktree::remote_head::{CheckFailure, FetchFailure};
 use worktree::worktree::{DirtyStatus, WorktreeEntry, WorktreeStatus};
 use worktree_cli::commands::list_table::{
-    self, CredentialCondition, CredentialLine, FfNotice, FfSuggestion, LastKnown, RemoteFacts, RemoteStatus,
-    Sections, TableFacts,
+    self, CredentialCondition, CredentialLine, FfNotice, FfSuggestion, LastKnown, PrOutcome, RemoteFacts,
+    RemoteStatus, Sections, TableFacts,
 };
 
 const NOW: u64 = 1_790_000_000;
@@ -193,7 +193,8 @@ impl Example {
                 status: RemoteStatus::CheckedNow,
             }),
             credential_line: None,
-            unfinished: false,
+            pr_outcome: Some(PrOutcome::Published),
+            timed_out: false,
             ff_suggestion: None,
             ff_notice: None,
             fallback_notice: None,
@@ -415,26 +416,78 @@ fn the_legend_explains_both_columns() {
         lines[legend].trim_end(),
         " Worktree   ○ clean    ● uncommitted files    ● uncommitted source files"
     );
+    let column = |line: &str, glyph: char, nth: usize| line.chars().enumerate().filter(|(_, c)| *c == glyph).nth(nth).map(|(i, _)| i);
+    assert_eq!(
+        column(lines[legend + 1], '└', 1),
+        column(lines[legend], '●', 1),
+        "the conflicts elbow sits under the source-files dot"
+    );
     assert_eq!(
         lines[legend + 1].trim_end(),
-        " Branch     └─ merges cleanly into parent    └─ conflicts with parent    └┄ parent deleted"
+        " Branch     └─ merges cleanly into parent     └─ conflicts with parent    └┄ parent deleted"
     );
 }
 
 #[test]
-fn the_pr_age_line_appears_once_the_badges_are_60_seconds_old() {
+fn a_narrow_table_is_as_wide_as_the_legend() {
+    let example = Example::new();
+    let facts = TableFacts { tree: &example.tree[..1], ..example.facts() };
+    let rendered = list_table::render(&facts, &plain_terminal(), NOW);
+    let width = |line: &str| line.trim_end().chars().count();
+    let branch_legend = rendered.lines().find(|line| line.starts_with(" Branch ")).expect("legend");
+    let table_lines: Vec<&str> = rendered.lines().filter(|line| line.starts_with(['┌', '│', '├', '└'])).collect();
+    assert_eq!(table_lines.len(), 5, "{rendered}");
+    for line in table_lines {
+        assert_eq!(width(line), width(branch_legend), "{line:?} in:\n{rendered}");
+    }
+}
+
+/// The status list alone for `example` with this run's PR half `outcome`.
+fn pr_status(example: &Example, outcome: PrOutcome) -> Option<String> {
+    let facts = TableFacts { pr_outcome: Some(outcome), ..example.facts() };
+    list_table::render_status(&facts, &plain_terminal(), NOW).map(|status| status.trim().to_string())
+}
+
+#[test]
+fn the_pr_age_line_appears_once_a_pending_refreshs_badges_are_60_seconds_old() {
     let with = |fetched_at: Option<u64>| {
         let mut example = Example::new();
         example.prs.fetched_at = fetched_at;
-        plain(&example).lines().last().unwrap().trim().to_string()
+        assert!(!plain(&example).contains("PRs as of"), "the age line is not beneath the legend");
+        pr_status(&example, PrOutcome::Pending)
     };
-    assert_eq!(with(Some(NOW - (12 * 60 + 30))), "PRs as of 12 min ago");
-    assert_eq!(with(Some(NOW - 60)), "PRs as of 1 min ago");
-    assert_eq!(with(Some(NOW - 3 * 3600)), "PRs as of 3 h ago");
-    assert_eq!(with(Some(NOW - 5 * 86_400)), "PRs as of 5 days ago");
-    assert!(with(Some(NOW - 59)).starts_with("Branch"), "fresh badges need no age line");
-    assert!(with(Some(NOW + 60)).starts_with("Branch"), "a future fetch time has no age");
-    assert!(with(None).starts_with("Branch"), "no answer has no age");
+    assert_eq!(with(Some(NOW - (12 * 60 + 30))).as_deref(), Some("- PRs as of 12 min ago"));
+    assert_eq!(with(Some(NOW - 60)).as_deref(), Some("- PRs as of 1 min ago"));
+    assert_eq!(with(Some(NOW - 3 * 3600)).as_deref(), Some("- PRs as of 3 h ago"));
+    assert_eq!(with(Some(NOW - 5 * 86_400)).as_deref(), Some("- PRs as of 5 days ago"));
+    assert_eq!(with(Some(NOW - 59)), None, "fresh badges need no age line");
+    assert_eq!(with(Some(NOW + 60)), None, "a future fetch time has no age");
+    assert_eq!(with(None), None, "no answer has no age");
+}
+
+#[test]
+fn a_published_answer_has_no_status_item_at_any_age() {
+    for fetched_at in [Some(NOW), Some(NOW - 5 * 86_400), None] {
+        let mut example = Example::new();
+        example.prs.fetched_at = fetched_at;
+        assert_eq!(pr_status(&example, PrOutcome::Published), None, "{fetched_at:?}");
+    }
+}
+
+#[test]
+fn a_failed_refresh_dates_the_stored_answer_at_any_age() {
+    let with = |fetched_at: Option<u64>| {
+        let mut example = Example::new();
+        example.prs.fetched_at = fetched_at;
+        pr_status(&example, PrOutcome::Failed)
+    };
+    assert_eq!(with(Some(NOW - 10)).as_deref(), Some("- PRs as of less than 1 min ago (couldn't refresh)"));
+    assert_eq!(with(Some(NOW)).as_deref(), Some("- PRs as of less than 1 min ago (couldn't refresh)"));
+    assert_eq!(with(Some(NOW - 59)).as_deref(), Some("- PRs as of less than 1 min ago (couldn't refresh)"));
+    assert_eq!(with(Some(NOW - 60)).as_deref(), Some("- PRs as of 1 min ago (couldn't refresh)"));
+    assert_eq!(with(Some(NOW - 3 * 3600)).as_deref(), Some("- PRs as of 3 h ago (couldn't refresh)"));
+    assert_eq!(with(Some(NOW - 5 * 86_400)).as_deref(), Some("- PRs as of 5 days ago (couldn't refresh)"));
+    assert_eq!(with(None).as_deref(), Some("- couldn't get open PRs"), "nothing stored");
 }
 
 #[test]
@@ -444,13 +497,93 @@ fn a_stored_empty_answer_shows_no_badges_but_keeps_its_age() {
     example.prs.fetched_at = Some(NOW - 5 * 60);
     let rendered = plain(&example);
     assert!(!rendered.contains("PR #"), "{rendered}");
-    assert_eq!(rendered.lines().last().unwrap().trim(), "PRs as of 5 min ago");
+    assert_eq!(pr_status(&example, PrOutcome::Pending).as_deref(), Some("- PRs as of 5 min ago"));
+    assert_eq!(pr_status(&example, PrOutcome::Failed).as_deref(), Some("- PRs as of 5 min ago (couldn't refresh)"));
 
-    // An unavailable first answer (nothing stored, the request failed) is
-    // not an empty answer: no badges and no age.
+    // Nothing stored is not an empty answer: no badges, no age, and a
+    // failure says there are no PRs to show.
     example.prs = Default::default();
     let rendered = plain(&example);
-    assert!(!rendered.contains("PR #") && !rendered.contains("PRs as of"), "{rendered}");
+    assert!(!rendered.contains("PR #"), "{rendered}");
+    assert_eq!(pr_status(&example, PrOutcome::Pending), None);
+    assert_eq!(pr_status(&example, PrOutcome::Failed).as_deref(), Some("- couldn't get open PRs"));
+}
+
+#[test]
+fn an_ignored_or_unsupported_repository_shows_no_badges_even_when_an_answer_is_stored() {
+    let example = Example::new();
+    assert!(plain(&example).contains("PR #99"), "control: the stored answer has badges");
+    for outcome in [PrOutcome::Ignored, PrOutcome::Unsupported] {
+        let facts = TableFacts { pr_outcome: Some(outcome), ..example.facts() };
+        let rendered = list_table::render(&facts, &plain_terminal(), NOW);
+        assert!(!rendered.contains("PR #"), "{outcome:?}: {rendered}");
+        assert_eq!(facts.badges().pull_requests.len(), 0, "{outcome:?}: the graph's tags too");
+        assert_eq!(list_table::render_status(&facts, &plain_terminal(), NOW), None, "{outcome:?}");
+    }
+}
+
+/// Every row of the PR presentation table: the badges the table shows and
+/// the status list, for each PR outcome and stored answer.
+#[test]
+fn pr_presentation_snapshot_every_row() {
+    let example = Example::new();
+    let answer = |fetched_at: Option<u64>| PrListing { fetched_at, ..example.prs.clone() };
+    let empty = |fetched_at: u64| PrListing { pull_requests: Vec::new(), fetched_at: Some(fetched_at), ..example.prs.clone() };
+    let fresh = answer(Some(NOW - 2));
+    let young = answer(Some(NOW - 10));
+    let old = answer(Some(NOW - (12 * 60 + 30)));
+    let empty_old = empty(NOW - 5 * 60);
+    let empty_fresh = empty(NOW - 2);
+    let nothing = PrListing::default();
+    let rows: Vec<(&str, Option<PrOutcome>, &PrListing, bool)> = vec![
+        ("published within the wait", Some(PrOutcome::Published), &fresh, false),
+        ("published within the wait, head still running", Some(PrOutcome::Published), &fresh, true),
+        ("published an empty answer", Some(PrOutcome::Published), &empty_fresh, false),
+        ("ignored, an old answer stored", Some(PrOutcome::Ignored), &old, false),
+        ("unsupported origin", Some(PrOutcome::Unsupported), &nothing, false),
+        ("still running at 3 s, answer 12 min old", Some(PrOutcome::Pending), &old, true),
+        ("still running at 3 s, answer 10 s old", Some(PrOutcome::Pending), &young, true),
+        ("still running at 3 s, empty answer 5 min old", Some(PrOutcome::Pending), &empty_old, true),
+        ("still running at 3 s, nothing stored", Some(PrOutcome::Pending), &nothing, true),
+        ("failed, answer 10 s old", Some(PrOutcome::Failed), &young, false),
+        ("failed, answer 12 min old", Some(PrOutcome::Failed), &old, false),
+        ("failed, empty answer 5 min old", Some(PrOutcome::Failed), &empty_old, false),
+        ("failed, nothing stored", Some(PrOutcome::Failed), &nothing, false),
+        ("failed, head still running at 3 s", Some(PrOutcome::Failed), &young, true),
+        ("no origin", None, &nothing, false),
+    ];
+    let cases = rows
+        .into_iter()
+        .map(|(label, pr_outcome, prs, timed_out)| {
+            let facts = TableFacts { prs, pr_outcome, timed_out, ..example.facts() };
+            let table = list_table::render(&facts, &terminal_at(400, false), NOW);
+            let mut badges: Vec<&str> = table.match_indices("PR #").map(|(at, _)| {
+                let rest = &table[at..];
+                &rest[..rest.find(|c: char| !(c.is_ascii_alphanumeric() || c == ' ' || c == '#')).unwrap_or(rest.len())]
+            })
+            .map(str::trim)
+            .collect();
+            badges.sort_unstable();
+            let status = list_table::render_status(&facts, &terminal_at(400, false), NOW).unwrap_or_else(|| "(none)\n".into());
+            let badges = if badges.is_empty() { "(none)".to_string() } else { badges.join(", ") };
+            (label.to_string(), format!("badges: {badges}\n{status}"))
+        })
+        .collect();
+    insta::assert_snapshot!("pr_presentation_every_row", labeled(cases));
+}
+
+#[test]
+fn the_pr_status_item_is_dim_and_precedes_the_hint() {
+    let mut example = Example::new();
+    example.prs.fetched_at = None;
+    let facts = TableFacts { pr_outcome: Some(PrOutcome::Failed), timed_out: true, ..example.facts() };
+    let colored = list_table::render_status(&facts, &color_terminal(), NOW).expect("status");
+    let item = colored.find("couldn't get open PRs").expect("the item");
+    let hint = colored.find("running this command again").expect("the hint");
+    assert!(item < hint, "the PR item comes first: {colored:?}");
+    for text in ["couldn't get open PRs", "running this command again"] {
+        assert!(colored.contains(&format!("\u{1b}[2m{text}")), "{text:?} is dim: {colored:?}");
+    }
 }
 
 fn plain_at(width: u32, example: &Example) -> String {
@@ -928,14 +1061,14 @@ fn the_credentials_line_is_dim_and_directly_follows_the_caption() {
 // sections.
 
 #[test]
-fn the_hint_appears_only_with_unfinished_work() {
+fn the_hint_appears_only_when_the_wait_timed_out() {
     let example = Example::new();
-    assert_eq!(list_table::render_hint(&example.facts(), &plain_terminal()), None);
-    let facts = TableFacts { unfinished: true, ..example.facts() };
-    let hint = list_table::render_hint(&facts, &plain_terminal()).expect("hint");
+    assert_eq!(list_table::render_status(&example.facts(), &plain_terminal(), NOW), None);
+    let facts = TableFacts { timed_out: true, ..example.facts() };
+    let hint = list_table::render_status(&facts, &plain_terminal(), NOW).expect("hint");
     let words = hint.split_whitespace().collect::<Vec<_>>().join(" ");
     assert_eq!(words, format!("- {}", list_table::REFRESH_HINT), "wrapped, never split: {hint:?}");
-    let colored = list_table::render_hint(&facts, &color_terminal()).expect("hint");
+    let colored = list_table::render_status(&facts, &color_terminal(), NOW).expect("hint");
     assert!(colored.contains("\u{1b}[2m"), "dim: {colored:?}");
 }
 
@@ -998,7 +1131,8 @@ fn output_order_snapshot() {
     let example = Example::new();
     let terminal = terminal_at(400, false);
     let facts = TableFacts {
-        unfinished: true,
+        pr_outcome: Some(PrOutcome::Pending),
+        timed_out: true,
         ff_suggestion: Some(FfSuggestion { behind: 7 }),
         fallback_notice: Some(vec!["GH_TOKEN".to_string(), "GITHUB_TOKEN".to_string()]),
         credential_line: Some(CredentialLine {
@@ -1010,7 +1144,7 @@ fn output_order_snapshot() {
         ..example.facts()
     };
     let table = list_table::render(&facts, &terminal, NOW);
-    let hint = list_table::render_hint(&facts, &terminal);
+    let status = list_table::render_status(&facts, &terminal, NOW);
     let notes = list_table::render_notes(&facts, &terminal);
     let graph = "<the git graph>\n";
     let verbose = "<the verbose section>\n";
@@ -1018,7 +1152,7 @@ fn output_order_snapshot() {
         list_table::assemble(Sections {
             table: &table,
             graph,
-            hint: hint.as_deref(),
+            status: status.as_deref(),
             verbose,
             notes: notes.as_deref(),
         })

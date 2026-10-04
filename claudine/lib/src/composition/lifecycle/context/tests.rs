@@ -1,4 +1,6 @@
 use super::*;
+use crate::composition::LifecycleSignal;
+use darkmatter::markdown::compose::expression::RuntimeBinding;
 use serde_json::json;
 
 /// Hand-build a [`DiagnosticSnapshot`] for a projection test where no typed
@@ -65,6 +67,7 @@ fn error_info_to_value_has_kind_variant_msg() {
         snapshot: None,
         property: None,
         reason: crate::composition::LifecycleEvaluationReason::Expression,
+        cause: None,
     };
     let value = info.to_value();
     assert_eq!(value.get("kind"), Some(&json!("ClaudineError")));
@@ -346,6 +349,7 @@ fn cap_detail_promotes_reset_at_and_retry_after_ms_to_top_level() {
         ))),
         property: None,
         reason: crate::composition::LifecycleEvaluationReason::Expression,
+        cause: None,
     };
     let value = info.to_value();
     // Promoted to the top level …
@@ -375,6 +379,7 @@ fn null_detail_field_promotes_to_null() {
         ))),
         property: None,
         reason: crate::composition::LifecycleEvaluationReason::Expression,
+        cause: None,
     };
     let value = info.to_value();
     assert_eq!(value.get("reset_at"), Some(&Value::Null));
@@ -467,8 +472,28 @@ fn scripted_authority(
     darkmatter::markdown::compose::CurrentAuthority::default().with_provider(provider.clone())
 }
 
+/// The catalog's view and entries for a lifecycle event outside any group.
+fn catalog(
+    signal: LifecycleSignal,
+    err: Option<&LifecycleErrorInfo>,
+    timing: Option<&LifecycleTiming>,
+) -> (
+    std::sync::Arc<darkmatter::markdown::compose::expression::BindingView>,
+    std::collections::HashMap<String, RuntimeBinding<'static>>,
+) {
+    use crate::composition::lifecycle::bindings::{LifecycleScope, LifecycleValues, runtime_bindings};
+    runtime_bindings(
+        LifecycleScope::Event(signal),
+        LifecycleValues {
+            err,
+            timing,
+            group: None,
+        },
+    )
+}
+
 #[test]
-fn injected_globals_attaches_err_and_timing() {
+fn the_catalog_supplies_err_and_timing_values() {
     let info = LifecycleErrorInfo {
         kind: "ClaudineError",
         variant: "Io".to_string(),
@@ -476,15 +501,16 @@ fn injected_globals_attaches_err_and_timing() {
         snapshot: None,
         property: None,
         reason: crate::composition::LifecycleEvaluationReason::Expression,
+        cause: None,
     };
     let timing = LifecycleTiming {
         document_ms: Some(100),
         total_ms: None,
         step_ms: None,
     };
-    let globals = lifecycle_injected_globals(Some(&info), Some(&timing));
-    assert!(globals.contains_key("err"));
-    assert!(globals.contains_key("timing"));
+    let (_, globals) = catalog(LifecycleSignal::Failure, Some(&info), Some(&timing));
+    assert!(matches!(globals["err"], RuntimeBinding::Eager(ref err) if err["msg"] == "disk full"));
+    assert!(matches!(globals["timing"], RuntimeBinding::Eager(ref t) if t["document_ms"] == 100));
     assert!(
         !globals.contains_key("current"),
         "`current` is a Darkmatter reserved root, never a Claudine global"
@@ -492,9 +518,11 @@ fn injected_globals_attaches_err_and_timing() {
 }
 
 #[test]
-fn injected_globals_omits_unattached() {
-    let globals = lifecycle_injected_globals(None, None);
-    assert!(globals.is_empty());
+fn an_unattached_global_is_an_explicit_null_entry_not_an_omission() {
+    let (view, globals) = catalog(LifecycleSignal::Finalize, None, None);
+    assert_eq!(globals.len(), view.globals().count(), "every declared global has an entry");
+    assert!(matches!(globals["err"], RuntimeBinding::Eager(Value::Null)));
+    assert!(matches!(globals["timing"], RuntimeBinding::Eager(Value::Null)));
 }
 
 #[test]
@@ -507,11 +535,13 @@ fn err_global_resolves_through_dm2_subtree() {
         snapshot: None,
         property: None,
         reason: crate::composition::LifecycleEvaluationReason::Expression,
+        cause: None,
     };
-    let globals = lifecycle_injected_globals(Some(&info), None);
+    let (view, globals) = catalog(LifecycleSignal::Failure, Some(&info), None);
     let state = state(json!({}));
     let resolved = SubtreeCompose::new(&json!("{{err.msg}}"), &state)
         .with_globals(globals)
+        .with_binding_view(view)
         .compose()
         .unwrap();
     assert_eq!(resolved, json!("disk full"));
@@ -525,10 +555,11 @@ fn timing_global_resolves_through_dm2_subtree() {
         total_ms: None,
         step_ms: None,
     };
-    let globals = lifecycle_injected_globals(None, Some(&timing));
+    let (view, globals) = catalog(LifecycleSignal::Start, None, Some(&timing));
     let state = state(json!({}));
     let resolved = SubtreeCompose::new(&json!("took {{timing.document_ms}}ms"), &state)
         .with_globals(globals)
+        .with_binding_view(view)
         .compose()
         .unwrap();
     assert_eq!(resolved, json!("took 100ms"));
@@ -546,11 +577,13 @@ fn doc_namespace_reaches_literal_err_property_through_dm2() {
         snapshot: None,
         property: None,
         reason: crate::composition::LifecycleEvaluationReason::Expression,
+        cause: None,
     };
-    let globals = lifecycle_injected_globals(Some(&info), None);
+    let (view, globals) = catalog(LifecycleSignal::Failure, Some(&info), None);
     let state = state(json!({"err": "literal-value"}));
     let resolved = SubtreeCompose::new(&json!("{{doc.err}} / {{err.msg}}"), &state)
         .with_globals(globals)
+        .with_binding_view(view)
         .compose()
         .unwrap();
     assert_eq!(resolved, json!("literal-value / disk full"));
@@ -568,7 +601,7 @@ fn current_reads_the_supplied_refresh_capability_per_event() {
     let resolve = |authority: &darkmatter::markdown::compose::CurrentAuthority| {
         let state = state_with_current(json!({}), authority.clone());
         SubtreeCompose::new(&json!("on {{current.branch}}"), &state)
-            .with_globals(lifecycle_injected_globals(None, None))
+            .with_globals(catalog(LifecycleSignal::Start, None, None).1)
             .compose()
             .unwrap()
     };
@@ -591,7 +624,7 @@ fn an_unsupplied_current_capability_renders_empty_rather_than_probing() {
     let provider = ScriptedRefresh::new([("branch", json!("main"))]);
     let state = state_with_current(json!({}), scripted_authority(&provider));
     let resolved = SubtreeCompose::new(&json!("host=[{{current.hostname}}]"), &state)
-        .with_globals(lifecycle_injected_globals(None, None))
+        .with_globals(catalog(LifecycleSignal::Start, None, None).1)
         .compose()
         .unwrap();
     assert_eq!(
@@ -609,8 +642,7 @@ fn the_removed_current_ctx_nesting_is_rejected() {
     let provider = ScriptedRefresh::new([("branch", json!("main"))]);
     let state = state_with_current(json!({}), scripted_authority(&provider));
     let error = SubtreeCompose::new(&json!("{{current.ctx.branch}}"), &state)
-        .with_globals(lifecycle_injected_globals(None, None))
-        .strict()
+        .with_globals(catalog(LifecycleSignal::Start, None, None).1)
         .compose()
         .expect_err("`current.ctx.*` was removed by the clean break (R33)");
     let rendered = error.to_string();
@@ -652,14 +684,13 @@ fn timing_from_instants_omits_total_ms_without_run_start() {
 ///
 /// Since the clean break (spec R31–R33) that surface is Darkmatter's reserved
 /// `current_env` root, which rereads the live process environment at reference
-/// time. Resolved here through DM2's layered lookup with the lifecycle globals
-/// attached, which also proves the injected `current` global no longer shadows
-/// a reserved root.
+/// time. Resolved here through a DM2 layered session with the lifecycle
+/// globals attached; a global can never be registered under a reserved root.
 #[test]
 #[serial_test::serial(env_lifecycle_current)]
 fn when_clause_reacts_to_env_changed_after_prepare() {
     use darkmatter::markdown::compose::expression::{evaluate, is_truthy, parse};
-    use darkmatter::markdown::compose::subtree::LayeredLookup;
+    use darkmatter::markdown::compose::subtree::layered_session;
 
     let key = "CLAUDINE_TEST_LATE_BINDING_MYVAR";
     // SAFETY: serialized via #[serial]; no other thread reads this var.
@@ -667,8 +698,8 @@ fn when_clause_reacts_to_env_changed_after_prepare() {
     // "Prepare time": the variable holds an old value.
     unsafe { std::env::set_var(key, "old") };
     let base = state(json!({}));
-    let globals = lifecycle_injected_globals(None, None);
-    let lookup = LayeredLookup::new(&base, &globals, None);
+    let (view, globals) = catalog(LifecycleSignal::Start, None, None);
+    let lookup = layered_session(&base, globals, Some(view), None).expect("the globals associate");
     let expr = parse(&format!("current_env.{key} == 'x'")).expect("parses");
 
     assert!(

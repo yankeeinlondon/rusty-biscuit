@@ -980,11 +980,11 @@ fn nested_span_in_a_lifecycle_literal_is_still_refused() {
     );
 }
 
-/// Strict whole-value evaluation still fails closed: an authored lifecycle
-/// span with an unknown root is an error, not an empty message.
+/// An authored lifecycle span reading an absent document property is not an
+/// error: the property is `null`, so the run completes (R1).
 #[test]
-fn an_unknown_root_in_an_authored_lifecycle_span_still_fails() {
-    let fixture = CliProcessFixture::named("agent-text-strict-guard");
+fn an_absent_property_in_an_authored_lifecycle_span_is_not_an_error() {
+    let fixture = CliProcessFixture::named("agent-text-absent-property");
     counting_goose(&fixture, "", "ok");
     let md = fixture.cwd().join("doc.md");
     fs::write(
@@ -995,7 +995,6 @@ fn an_unknown_root_in_an_authored_lifecycle_span_still_fails() {
 
     let (code, stderr) = run(&fixture, &["compose", "--goose", md.to_str().unwrap()]);
 
-    assert_ne!(code, 0, "stderr:\n{stderr}");
-    assert!(stderr.contains("lifecycle evaluation error"), "{stderr}");
-    assert!(stderr.contains("success.info"), "{stderr}");
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert!(!stderr.contains("lifecycle evaluation error"), "{stderr}");
 }

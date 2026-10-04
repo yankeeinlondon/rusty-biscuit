@@ -68,8 +68,9 @@ pub struct PreflightGraphEdge {
 /// Resolved target for a preflight graph edge.
 #[derive(Debug, Clone)]
 pub enum PreflightResolvedTarget {
-    /// Local file with canonicalized path.
-    File(PathBuf),
+    /// Local file: the canonical `path` and the `resolved` path the parent's
+    /// context produced (see [`transclusion::ResolvedTarget::File`]).
+    File { path: PathBuf, resolved: PathBuf },
     /// Remote URL.
     Url(url::Url),
 }
@@ -769,7 +770,7 @@ flag: a
         );
         let edge = &preflight.preflight_graph.edges[0];
         let resolved_path = match &edge.resolved_target {
-            super::PreflightResolvedTarget::File(p) => p.clone(),
+            super::PreflightResolvedTarget::File { path, .. } => path.clone(),
             super::PreflightResolvedTarget::Url(_) => {
                 panic!("local child edge should resolve to a File target")
             }
@@ -978,7 +979,7 @@ flag: a
             "child node should carry one grandchild edge: {child_node:?}"
         );
         let grandchild_target = match &child_node.edges[0].resolved_target {
-            super::PreflightResolvedTarget::File(p) => p.clone(),
+            super::PreflightResolvedTarget::File { path, .. } => path.clone(),
             super::PreflightResolvedTarget::Url(_) => panic!("grandchild should resolve to a File"),
         };
         assert_eq!(

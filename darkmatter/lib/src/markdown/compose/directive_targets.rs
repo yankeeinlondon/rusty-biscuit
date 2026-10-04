@@ -12,6 +12,7 @@ use crate::markdown::compose::directives_api::{
 use crate::markdown::compose::expression::{
     ComparisonOp, EvaluationLookup, Expr, parse, parse_condition, scalar_string,
 };
+use crate::markdown::compose::expression::absence;
 use crate::markdown::compose::expression::lint::whole_value_span;
 use crate::markdown::compose::interpolation::rewrite::interpolate_value;
 use crate::markdown::compose::interpolation::{
@@ -240,7 +241,7 @@ fn expression_path(expression: &Expr) -> Option<ExpressionPath> {
         }
         return Some(ExpressionPath(document_path.to_string()));
     }
-    if path.is_empty() || matches!(path, "null" | "doc" | "ctx" | "env") {
+    if path.is_empty() || absence::is_reserved_root(path) {
         return None;
     }
     Some(ExpressionPath(path.to_string()))

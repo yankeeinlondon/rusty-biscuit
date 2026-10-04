@@ -32,10 +32,6 @@ initialize:
           action:
               - message: "review #{{iteration}} skipped: {{basename(previous_review)}} already marked `{{parent_dir(spec)}}` production ready"
               - skip
-        - when: "in_loop && previous_review && frontmatter(previous_review, 'recurrence') == true"
-          action:
-              - message: "review #{{iteration}} skipped: {{basename(previous_review)}} reported a recurring finding class; a human should read it before another cycle runs"
-              - skip
 start:
     message: "🏃‍♂️ starting review #{{iteration}} of `{{parent_dir(spec)}}` (_{{feature_or_fix}} in the **{{ctx.area || ctx.repo}}**_)"
 success:
@@ -155,9 +151,9 @@ in this directory. If a finding belongs to the same class as an earlier one:
 - say so under a `## Recurrence` heading, naming the earlier review and finding
 - state which sibling sites that fix should have swept and did not
 - sweep them all now, so this review carries the complete list
-- set the frontmatter property `recurrence` to `true`; the review loop stops on
-  it, because a recurring class means the sweep is missing and a human should
-  look before another cycle runs
+- set the frontmatter property `recurrence` to `true`; the review loop does not
+  stop on it, so the next repair cycle implements exactly the list this review
+  carries, and a missed sibling here costs another cycle
 ::end-block
 
 ::file "../_input-robustness.md"

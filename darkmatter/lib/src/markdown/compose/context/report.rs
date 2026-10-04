@@ -107,7 +107,7 @@ pub struct ComposeReport {
     pub(crate) unknown_root_candidates: UnknownRootCandidates,
 }
 
-/// First-read unknown-root candidates in read order, one per root.
+/// First-read undeclared-property candidates in read order, one per root.
 ///
 /// The root set is private to this type so it cannot drift from the list.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -235,7 +235,7 @@ pub(crate) struct UnknownRootCandidate {
     pub(crate) locus: CandidateLocus,
 }
 
-/// Where an unknown-root candidate was read, as precisely as the reading
+/// Where an undeclared-property candidate was read, as precisely as the reading
 /// surface can prove.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CandidateLocus {
@@ -516,7 +516,7 @@ impl ComposeReport {
         }
     }
 
-    /// Records the unknown-root `roots` one stage read, each at `locus(root)`.
+    /// Records the undeclared-property `roots` one stage read, each at `locus(root)`.
     ///
     /// Only a root's first read is kept (and located): the document warns
     /// once per root, at its first authored location.
@@ -640,9 +640,9 @@ impl WarningSubject {
 impl ComposeWarning {
     /// Code of the `unknown context variable` warning.
     pub const UNKNOWN_CONTEXT_VARIABLE_CODE: &'static str = "dm.expression.unknown_context_variable";
-    /// Code of the unknown-identifier warning, shared with DMLS.
-    pub const UNKNOWN_IDENTIFIER_CODE: &'static str = "dm.expression.unknown_identifier";
-    /// Producer of the unknown-identifier warning.
+    /// Code of the undeclared-property advisory, shared with DMLS.
+    pub const UNDECLARED_PROPERTY_CODE: &'static str = "dm.expression.undeclared_property";
+    /// Producer of the undeclared-property advisory.
     pub const EXPRESSION_SOURCE: &'static str = "darkmatter.expression";
     /// Code of a lenient expression parse failure.
     pub const EXPRESSION_PARSE_FAILURE_CODE: &'static str = "dm.expression.parse_failure";
@@ -706,10 +706,10 @@ impl ComposeWarning {
         }
     }
 
-    /// An unknown-identifier warning for the root `name`, read in `document`
-    /// (at `line` when provable). One per source document per root: every
-    /// read of `name` there is one issue.
-    pub(crate) fn unknown_identifier(
+    /// An undeclared-property advisory for the root `name`, read in
+    /// `document` (at `line` when provable). One per source document per root:
+    /// every read of `name` there is one issue.
+    pub(crate) fn undeclared_property(
         stage: impl Into<String>,
         message: impl Into<String>,
         name: &str,
@@ -718,7 +718,7 @@ impl ComposeWarning {
     ) -> Self {
         Self {
             source: Some(Self::EXPRESSION_SOURCE.to_string()),
-            code: Some(Self::UNKNOWN_IDENTIFIER_CODE.to_string()),
+            code: Some(Self::UNDECLARED_PROPERTY_CODE.to_string()),
             identity: Some(WarningIdentity {
                 subject: WarningSubject::Root {
                     document: None,

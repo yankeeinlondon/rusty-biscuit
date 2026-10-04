@@ -34,6 +34,7 @@ use crate::provider_values::provider_value_parser;
 // that owns no part of the compose run.
 pub(crate) mod interrupt;
 mod loop_run;
+pub(crate) mod ownership;
 pub(crate) mod prep;
 mod setters;
 
@@ -216,17 +217,25 @@ pub struct SharedComposeArgs {
     #[arg(long = "on-rate-limit", value_name = "POLICY", value_enum)]
     pub on_rate_limit: Option<OnRateLimitArg>,
 
-    /// Provider-argument tail forwarded to the underlying agent, captured by
-    /// the pre-clap ownership partition ([`crate::argv::partition_composition_tail`]).
-    /// Not parsed by clap — populated in `main` after the parse from the
-    /// partitioned argv, so it is deliberately excluded from the CLI surface.
+    /// The arguments after the composition file, as the pre-clap partition
+    /// left them ([`crate::argv::partition_composition_tail`]). Populated in
+    /// `main` after the parse; type-aware ownership
+    /// ([`ownership::own_caller_arguments`]) classifies them once the file is
+    /// read.
     #[arg(skip)]
-    pub provider_args: Vec<String>,
+    pub caller_arguments: claudine::composition::ArgumentsAfterFile,
 
-    /// `true` when [`Self::provider_args`] came from an explicit `--` boundary
-    /// (opaque, unclassified) rather than an implicit non-Claudine switch.
+    /// Provider-argument tail forwarded to the underlying agent, set by
+    /// type-aware ownership from [`Self::caller_arguments`]. Not parsed by
+    /// clap.
     #[arg(skip)]
-    pub provider_args_explicit: bool,
+    pub provider_tail: claudine::composition::ProviderTail,
+
+    /// Forwarding notices already shown by this command. Created with the
+    /// parse, so it lives exactly as long as the top-level command; every
+    /// request built from these args shares it.
+    #[arg(skip)]
+    pub provider_tail_notices: claudine::composition::ProviderTailNotices,
 }
 
 /// CLI-facing wrapper for [`claudine::composition::OnRateLimit`], exposed

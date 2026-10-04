@@ -252,15 +252,18 @@ fn section_at_line(
         .map(|(_, text, level)| (text.as_str(), *level))
 }
 
+/// `opening` is the reference that resolved to `path`, when the caller has it
+/// (see [`SourceOpening`](crate::markdown::compose::context::options::SourceOpening)).
 fn accepted_child_options(
     options: &ReferenceGraphOptions,
     path: &std::path::Path,
+    opening: Option<crate::markdown::compose::context::options::SourceOpening>,
 ) -> ReferenceGraphOptions {
     ReferenceGraphOptions::with_compose(
         options
             .compose
             .clone()
-            .with_accepted_source_file(path),
+            .with_accepted_source_file(path, opening),
     )
 }
 
@@ -431,7 +434,11 @@ fn build_node(
                             let (child_node, mut descendants) = build_node(
                                 &child_md,
                                 &child_source,
-                                &accepted_child_options(options, &child_path),
+                                &accepted_child_options(
+                                    options,
+                                    &child_path,
+                                    crate::markdown::compose::transclusion::source_opening(&directive.raw_target, &child_path),
+                                ),
                                 runtime,
                                 extract_references,
                                 dependencies,
@@ -532,7 +539,7 @@ fn build_node(
                         let (child_node, mut descendants) = build_node(
                             &child_md,
                             &child_source,
-                            &accepted_child_options(options, &path),
+                            &accepted_child_options(options, &path, None),
                             runtime,
                             extract_references,
                             dependencies,
@@ -698,7 +705,11 @@ fn build_node(
                         let (child_node, mut descendants) = build_node(
                             &child_md,
                             &child_source,
-                            &accepted_child_options(options, &child_path),
+                            &accepted_child_options(
+                                options,
+                                &child_path,
+                                crate::markdown::compose::transclusion::source_opening(prologue, &child_path),
+                            ),
                             runtime,
                             extract_references,
                             dependencies,
@@ -779,7 +790,11 @@ fn build_node(
                         let (child_node, mut descendants) = build_node(
                             &child_md,
                             &child_source,
-                            &accepted_child_options(options, &child_path),
+                            &accepted_child_options(
+                                options,
+                                &child_path,
+                                crate::markdown::compose::transclusion::source_opening(epilogue, &child_path),
+                            ),
                             runtime,
                             extract_references,
                             dependencies,
@@ -885,7 +900,7 @@ pub(super) fn prepare_content_for_validation(
 ) -> MarkdownResult<String> {
     let node_options = match source {
         ComposeSource::File(path) if options.compose.source != *source => {
-            accepted_child_options(options, path)
+            accepted_child_options(options, path, None)
         }
         ComposeSource::Url(url) if options.compose.source != *source => {
             ReferenceGraphOptions::with_compose(

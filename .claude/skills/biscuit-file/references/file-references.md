@@ -10,8 +10,8 @@ contract, see [the topic doc](../../../../biscuit-file/docs/topics/file-referenc
 
 | Prefix | `FileReferenceKind` | Resolution roots |
 |--------|---------------------|------------------|
-| `./`, `../` | `ExplicitRelative` | Authoring base only; no fallback |
-| _(none)_ | `ImplicitRelative` | Authoring base, then repository root |
+| `./`, `../` | `ExplicitRelative` | Authoring `cwd` only; no fallback |
+| _(none)_ | `ImplicitRelative` | Authoring `cwd`, then repository root |
 | POSIX root, Windows drive/UNC | `Absolute` | Authored absolute path only |
 | `~`, `~/` (`~\` on Windows) | `Home` | Captured home only; `~user` is rejected |
 | `@`, `@/` | `Magic` | Local tier (local prepends → package → package area → local root → local appends), then user tier (user prepends → home → user appends) |
@@ -46,8 +46,8 @@ user tier, which a caller needs for home conventions when the local root *is*
 `$HOME`. `PathPosition` orders a root only within its tier (`Start` before
 that tier's intrinsic roots, `End` after). Roots are deduplicated after
 ordering, keeping first-seen provenance. A relative configured root joins onto
-the captured request directory — for ambient `resolve_from(base)`, onto
-`base` rather than the process CWD.
+the captured request directory — for ambient `resolve_from(cwd)`, onto
+`cwd` rather than the process CWD.
 
 ### Authoritative explicit context
 
@@ -79,30 +79,65 @@ let target = FileReference::new("prompts/next.md")?
 # Ok::<(), biscuit_file::FileReferenceError>(())
 ```
 
-`FileResolutionContext::new(base_dir)` snapshots the process environment and
+`FileResolutionContext::new(cwd)` snapshots the process environment and
 cross-platform home once. Supply a validated repository scope catalog,
 and override the snapshot with `with_env()`, `with_home_dir()`, or
-`without_home_dir()` when the caller has authoritative values. Context-owned
+`without_home_dir()` when the caller has authoritative values. `with_env()`
+replaces the whole environment (it does not merge); non-Unicode variables are
+never captured. Context-owned
 `add_magic_path()` and `add_vault()` configure the roots used by explicit APIs.
 
+Every context directory and tree anchor (request and authoring `cwd`,
+`with_base_dir`, repository/package/package-area roots, captured home, and every
+launch `@` scope directory including a replaced scope's request directory) must
+be absolute. Builders and derivations never fail; `validate()` (run first by every
+resolver entry point and `PortablePath`) returns
+`RelativeContextDirectory { anchor: ContextAnchor, path }`, trusted
+derivations included. Relative env values, magic roots, and vault roots keep
+their own rules and stay supported. `home_dir()` reports a relative `$HOME` as
+`None`.
+
 Use `for_source(source)` for each in-repository nested file-backed document. It
-sets the source and changes the authoring base to `source.parent()`, while
+sets the source and changes the authoring `cwd` to `source.parent()`, while
 preserving process-state inputs while selecting repository/package scopes for
-the new base. Use `for_base(base)` for an in-repository in-memory child document.
-Both methods validate the request boundary and their new authoring base.
+the new `cwd`. Use `for_cwd(cwd)` for an in-repository in-memory child document.
+Both methods validate the request boundary and their new authoring `cwd`.
 
 Use `for_trusted_external_source(source)` or
-`for_trusted_external_base(base)` only after a configured home, magic, or vault
-root has deliberately accepted a document outside the repository. These named
-derivations exempt the current external authoring base but still validate the
-original request boundary. No derivation reads ambient state or performs
-discovery. `with_source_path()` records provenance only and does not derive the
-base.
+`for_trusted_external_cwd(cwd)` only after a configured home, magic, or vault
+root has deliberately accepted a document outside the tree. Outside the
+current tree they select a **new** tree for the document (catalog repository >
+containing vault > opening anchor > fallback) and drop the source repository,
+package, and package-area anchors unless a catalog assigns them; the original
+request is still validated against its own tree. Every derivation also keeps
+the `validate()` failure of the context it came from (captured before a
+trusted derivation drops the explicit root or a catalog replaces package
+anchors), and a builder on the derived context cannot clear it; correct
+settings before deriving. No derivation reads ambient state or performs
+discovery. `with_source_path()` records provenance only and
+does not derive the `cwd`.
+
+**Tree root and boundary.** `base_dir()` is the tree root and
+`base_dir_origin()` says where it came from (`BaseDirOrigin::{Repository,
+Explicit, Vault, Home, Environment { name }, Fallback}`): the repository root,
+then `with_base_dir(dir)` (must equal the repository root inside one, else
+`validate()` gives `BaseDirNotRepositoryRoot`), then the deepest containing
+vault, then the `~`/`{{VAR}}` anchor kept by `for_source_reference(&reference,
+resolved)` / `for_trusted_external_source_reference`, then `cwd` (fallback, not
+a boundary). Explicit and bare relative references must stay inside a boundary
+tree as written and where they land (shared canonical check with `&`/`^`), or
+fail with `RelativeTreeEscape`; this applies to `candidate_plan`,
+`resolve_detailed`/`resolve_in_context`, and implicit-relative completion.
+`allow_external_relative()` lifts it (copied to children). A normal
+derivation leaving a non-repository tree fails `validate()` with
+`CwdOutsideBaseDir`. Ambient `resolve()`/`resolve_from()` carry no tree. Do not
+compare `base_dir()` with `cwd()` to infer the boundary; use
+`base_dir_is_boundary()`.
 
 `@` does not follow those re-anchored scopes. The context carries an immutable
 `LaunchMagicScope` (request directory plus its repository, package, and
 package-area roots), captured by `new` and the anchor builders and copied
-unchanged by `for_source`, `for_base`, and the trusted-external derivations.
+unchanged by `for_source`, `for_cwd`, and the trusted-external derivations.
 A nested `@x.md` in a prompt from `~/.claudine` or another repository searches
 the launch tree first; `./`, bare, `&`, and `^` keep source anchors. A caller
 that rebuilds a context around an external source (rather than deriving it)
@@ -119,11 +154,11 @@ itself apply only to ambient resolution; add request-scoped roots to the context
 ### Ambient compatibility APIs
 
 - `resolve()` reads ambient CWD, environment/home, and repository state when called.
-- `resolve_from(base)` fixes the authoring base but still reads the other live
-  state. `base` is a directory; pass a source file's parent.
+- `resolve_from(cwd)` fixes the authoring `cwd` but still reads the other live
+  state. `cwd` is a directory; pass a source file's parent.
 - `resolve_relative(base)` resolves ambiently and then computes a lexical
   relative path.
-- `complete_partial(token, base)` performs live repository/home discovery and
+- `complete_partial(token, cwd)` performs live repository/home discovery and
   cannot see request-configured magic roots.
 
 Use these for compatibility and simple top-level calls. Do not use them inside
@@ -139,7 +174,7 @@ failures are `Err`.
 
 - authored `raw()` and `class()`;
 - post-interpolation `effective_kind()`;
-- `base_dir()`, `source_path()`, and `repository_root()`;
+- `cwd()`, `source_path()`, and `repository_root()`;
 - attempted `candidates()` as ordered `ProbedCandidate` values;
 - `outcome()`, `error()`, and `matched_path()`.
 
@@ -204,7 +239,7 @@ magic, repository-root, repository-scoped, and implicit-relative tokens. Its
 `PartialCompletion` provides `entry_form()`, ordered `roots()`,
 `active_segment()`, and `rendered_prefix()`.
 
-The completion roots mirror execution: implicit is base then repository; magic
+The completion roots mirror execution: implicit is `cwd` then repository; magic
 is the same tier-ordered chain (built once, from the launch `@` scope) with the
 typed segment appended after root selection, with stable deduplication. Enumerate roots in order and execute the emitted string unchanged
 through `FileReference::new()` plus `resolve_in_context()` so the displayed and
@@ -216,6 +251,7 @@ not otherwise support.
 
 ```text
 InvalidSyntax(String)
+ForeignAbsolutePath { path }
 MissingEnvironmentVariable { name }
 CurrentDirectory(io::Error)
 Git(Box<gix::discover::Error>)
@@ -227,6 +263,7 @@ OutsideRepository { sigil, reference_cwd }
 RepositoryEscape { sigil, reference, repository_root, escaped_candidate }
 BoundaryEscape { reference, boundary, escaped_candidate }
 RepositoryRootNotContainingSource { repository_root, source_path }
+RelativeContextDirectory { anchor, path }
 RelativePath { from, to }
 Io { path, source }
 RemoteNotLocal(String)
@@ -235,8 +272,11 @@ InvalidUrl(String)                    # with `url`
 
 `InvalidSyntax` also covers rooted magic payloads and interpolation-injected
 sigils.
+`ForeignAbsolutePath` rejects an absolute path (authored or interpolated) that
+is not absolute on the resolving host (`C:\x` on POSIX, `/x` on Windows);
+nothing is translated between operating systems.
 `RepositoryRootNotContainingSource` is the lexical containment check on the
-request base and normal derived authoring bases. `BoundaryEscape` comes only from
+request `cwd` and normal derived authoring `cwd`s. `BoundaryEscape` comes only from
 `FileReference::validate_contained_candidate(candidate, boundary)`, the
 public containment check for *any* reference kind against a caller-chosen
 directory (lexical, then through symlinks from the deepest ancestor whose

@@ -272,76 +272,77 @@ fn test_compose_link_transcluded_child() {
     );
 }
 
+/// A variable declared portable through `PORTABLE_ENV_VARIABLES` anchors a
+/// link nothing nearer reaches, and the composed output composes again to
+/// the same text.
+///
+/// The document sits two levels below the shared temporary root, outside any
+/// repository, so no default relative shape and no repository root applies;
+/// `{{VAR}}` precedes `~` in the default strategy, so Windows (whose temporary
+/// directory is under the profile) gives the same answer.
 #[test]
-fn test_compose_env_var_substitution_one_warning() {
-    let fixture = CliProcessFixture::named("test_compose_env_var_substitution_one_warning");
+fn test_compose_portable_env_variable_round_trips() {
+    let fixture = CliProcessFixture::named("test_compose_portable_env_variable_round_trips");
     let dir = tempfile::tempdir().unwrap();
     let project_root = dir.path().join("project");
+    let docs = dir.path().join("a").join("b");
     std::fs::create_dir_all(&project_root).unwrap();
+    std::fs::create_dir_all(&docs).unwrap();
     let target_file = project_root.join("config.json");
     std::fs::write(&target_file, "{}").unwrap();
 
-    let abs_target = std::fs::canonicalize(&target_file).unwrap();
     let abs_root = std::fs::canonicalize(&project_root).unwrap();
-    let abs_target_markdown = abs_target.to_string_lossy();
-    #[cfg(windows)]
-    let abs_target_markdown = abs_target_markdown
-        .strip_prefix(r"\\?\")
-        .unwrap_or(&abs_target_markdown)
-        .replace('\\', "/");
-    #[cfg(not(windows))]
-    let abs_target_markdown = abs_target_markdown.into_owned();
-
-    let md_file = dir.path().join("test.md");
+    let abs_target_markdown =
+        biscuit_file::to_portable_string(&std::fs::canonicalize(&target_file).unwrap());
+    let md_file = docs.join("test.md");
     std::fs::write(&md_file, format!("[config]({abs_target_markdown})\n")).unwrap();
 
-    let output = fixture
-        .command()
-        .env("PROJECT_ROOT", &abs_root)
-        .arg("compose")
-        .arg(&md_file)
-        .output()
-        .unwrap();
+    let compose = |path: &std::path::Path, declared: bool| {
+        let mut command = fixture.command();
+        // Exported spelling: a verbatim `\\?\` value cannot anchor `{{VAR}}/…`.
+        command.env("PROJECT_ROOT", biscuit_file::to_portable_string(&abs_root));
+        if declared {
+            command.env("PORTABLE_ENV_VARIABLES", "PROJECT_ROOT");
+        } else {
+            command.env_remove("PORTABLE_ENV_VARIABLES");
+        }
+        let output = command.arg("compose").arg(path).output().unwrap();
+        assert!(
+            output.status.success(),
+            "command should succeed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        (
+            String::from_utf8_lossy(&output.stdout).into_owned(),
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        )
+    };
 
-    assert!(output.status.success(), "command should succeed");
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-
-    eprintln!("DEBUG stdout:\n{stdout}");
-    eprintln!("DEBUG stderr:\n{stderr}");
-
-    #[cfg(not(windows))]
+    let (stdout, stderr) = compose(&md_file, true);
     assert!(
-        stdout.contains("${PROJECT_ROOT}/config.json"),
-        "stdout should contain env-var abstraction, got:\n{stdout}"
+        stdout.contains("[config]({{{PROJECT_ROOT}}}/config.json)"),
+        "stdout should contain the escaped env anchor, got:\n{stdout}"
     );
-    // Windows places its temp directory beneath the user profile. The
-    // normalization contract prefers the home abstraction over environment
-    // variables, so this fixture is represented with `~/` on Windows.
-    #[cfg(windows)]
     assert!(
-        stdout.contains("~/") && stdout.contains("/project/config.json"),
-        "stdout should contain the higher-priority home abstraction, got:\n{stdout}"
-    );
-    // Warning text should NOT be in stdout
-    assert!(
-        !stdout.contains("environment variable"),
-        "stdout should not contain warning text, got:\n{stdout}"
+        !stderr.contains("left exactly as authored"),
+        "no preservation warning expected, got:\n{stderr}"
     );
 
-    // Unix temp directories are outside the home directory, so the env-var
-    // abstraction is selected and emits one warning. On Windows the
-    // higher-priority home abstraction emits no warning.
-    let warning_count = stderr.matches("environment variable").count();
-    #[cfg(not(windows))]
-    assert_eq!(
-        warning_count, 1,
-        "stderr should contain exactly one env-var warning, got {warning_count} occurrences:\n{stderr}"
+    // Compose the output again from the same directory: the literal composes
+    // to the `{{PROJECT_ROOT}}` anchor, which resolves and normalizes back.
+    let recomposed_file = docs.join("recomposed.md");
+    std::fs::write(&recomposed_file, &stdout).unwrap();
+    let (recomposed, _) = compose(&recomposed_file, true);
+    assert!(
+        recomposed.contains("[config]({{{PROJECT_ROOT}}}/config.json)"),
+        "recompose should reproduce the anchor, got:\n{recomposed}"
     );
-    #[cfg(windows)]
-    assert_eq!(
-        warning_count, 0,
-        "home abstraction should not emit an env-var warning, got:\n{stderr}"
+
+    // Undeclared, the variable is never an anchor: there is no built-in set.
+    let (undeclared, _) = compose(&md_file, false);
+    assert!(
+        !undeclared.contains("PROJECT_ROOT"),
+        "an undeclared variable must not be written, got:\n{undeclared}"
     );
 }
 
@@ -373,21 +374,71 @@ fn test_compose_html_spaced_attributes() {
     assert!(output.status.success(), "command should succeed");
     let stdout = String::from_utf8_lossy(&output.stdout);
 
+    // Resolved to absolute and normalized back: a same-directory target is
+    // `./name`, so the authored destinations come back unchanged.
     assert!(
-        stdout.contains("other.md"),
-        "stdout should contain normalized other.md path, got:\n{stdout}"
+        stdout.contains("<a href = \"./other.md\">"),
+        "stdout should contain the normalized spaced href, got:\n{stdout}"
     );
     assert!(
-        stdout.contains("img.png"),
-        "stdout should contain normalized img.png path, got:\n{stdout}"
+        stdout.contains("<img src = \"./img.png\">"),
+        "stdout should contain the normalized spaced src, got:\n{stdout}"
     );
-    // Should not contain the spaced attribute syntax unprocessed
+    let abs_repo = std::fs::canonicalize(&repo).unwrap();
     assert!(
-        !stdout.contains("href = \"./other.md\""),
-        "stdout should not contain unprocessed spaced href, got:\n{stdout}"
+        !stdout.contains(&biscuit_file::to_portable_string(&abs_repo)),
+        "stdout should not contain an absolute path, got:\n{stdout}"
     );
+}
+
+/// Through the normal `md compose` path, a document opened as
+/// `{{{NOTES}}}/inbox/…` (which composes to the literal `{{NOTES}}`
+/// file-reference anchor) takes `$NOTES` as its tree root: an in-tree
+/// `../b.md` composes, and a link that leaves `$NOTES` stops the run with the
+/// boundary error instead of reading the file outside it.
+#[test]
+fn compose_env_anchored_child_is_bounded_by_the_variable() {
+    let fixture = CliProcessFixture::named("compose_env_anchored_child_is_bounded_by_the_variable");
+    let root = fixture.workspace_path().join("anchor");
+    let work = root.join("work");
+    let notes = root.join("notes");
+    std::fs::create_dir_all(&work).unwrap();
+    std::fs::create_dir_all(notes.join("inbox")).unwrap();
+    std::fs::write(notes.join("b.md"), "in-tree-content\n").unwrap();
+    std::fs::write(notes.join("inbox/a.md"), "::file ../b.md\n").unwrap();
+    std::fs::write(notes.join("inbox/escape.md"), "::file ../../outside.md\n").unwrap();
+    std::fs::write(root.join("outside.md"), "outside-content\n").unwrap();
+    std::fs::write(work.join("inside.md"), "::file \"{{{NOTES}}}/inbox/a.md\"\n").unwrap();
+    std::fs::write(work.join("escape.md"), "::file \"{{{NOTES}}}/inbox/escape.md\"\n").unwrap();
+    let compose = |document: &str| {
+        fixture
+            .command_builder()
+            .plain_terminal(400, 50)
+            .build()
+            .env("NOTES", &notes)
+            .arg("compose")
+            .arg(work.join(document))
+            .output()
+            .unwrap()
+    };
+
+    let inside = compose("inside.md");
+    let stdout = String::from_utf8_lossy(&inside.stdout);
     assert!(
-        !stdout.contains("src = \"./img.png\""),
-        "stdout should not contain unprocessed spaced src, got:\n{stdout}"
+        inside.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&inside.stderr)
+    );
+    assert!(stdout.contains("in-tree-content"), "{stdout}");
+
+    let escape = compose("escape.md");
+    let stdout = String::from_utf8_lossy(&escape.stdout);
+    let stderr = String::from_utf8_lossy(&escape.stderr);
+    let collapsed = stderr.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(!escape.status.success(), "stdout: {stdout}");
+    assert!(!stdout.contains("outside-content"), "{stdout}");
+    assert!(
+        collapsed.contains("relative reference `../../outside.md` leaves file tree"),
+        "{collapsed}"
     );
 }

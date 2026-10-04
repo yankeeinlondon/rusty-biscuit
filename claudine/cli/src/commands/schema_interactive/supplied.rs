@@ -26,7 +26,7 @@ pub(crate) fn resolve_supplied_file_inputs(
         interactive,
         |property, provided, patterns, origin| {
             let scope = ScopeContext {
-                cwd: origin.base_dir().to_path_buf(),
+                cwd: origin.cwd().to_path_buf(),
                 home: origin.home_dir().map(std::path::Path::to_path_buf),
                 repo_info: None,
                 git_root: origin.repository_root().map(std::path::Path::to_path_buf),

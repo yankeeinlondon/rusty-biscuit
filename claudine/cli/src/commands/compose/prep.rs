@@ -168,7 +168,7 @@ fn caller_data_keys(step_scope: Option<&StepScope>) -> std::collections::BTreeSe
 /// shell preflight, loop detection, and single execution) is shared.
 #[allow(clippy::too_many_lines)]
 pub(crate) fn run_composition_inner(
-    shared: SharedComposeArgs,
+    mut shared: SharedComposeArgs,
     args: Vec<String>,
     verbose: u8,
     startup_timings: Option<crate::perf::StartupTimings>,
@@ -177,8 +177,9 @@ pub(crate) fn run_composition_inner(
     let compose_entry = std::time::Instant::now();
     let perf_enabled = shared.perf;
     let mut prep_substages: Vec<crate::perf::SubstageTiming> = Vec::new();
-    let parsed = parse_composition_positionals(&args)?;
-    let file = parsed.file_ref.ok_or_else(|| {
+    // The clap positionals hold the file and any setters before it; the
+    // arguments after the file are owned once the file is read, below.
+    let file = parse_composition_positionals(&args)?.file_ref.ok_or_else(|| {
         eyre!("missing file reference: expected exactly one file reference plus optional key=value setters")
     })?;
 
@@ -192,25 +193,40 @@ pub(crate) fn run_composition_inner(
     validate_timeout_flags(&shared)?;
     shared.step_timeout_secs()?;
     shared.stall_timeout_secs()?;
-    let mut set_overrides = merge_set_overrides(shared.set.as_deref(), parsed.shorthand_setters)?;
     let system_prompt_args = shared.system_prompt_args();
 
     let frontmatter_load_t = std::time::Instant::now();
     let invocation = InvocationContext::capture()?;
     let provisional_context = invocation.launch_file_resolution_context().clone();
-    let mut caller_input_records = claudine::composition::CallerInputLayers::from_caller_overrides(
-        set_overrides.clone(),
-        provisional_context.clone(),
-    )
-    .caller_input_records;
     let source = resolve_composition_source(&file, kind, &shared, &provisional_context)?;
     // Derive the definitive source bundle from the same owner so a
     // top-level document selected from a different repository keeps that
     // repository's nested references (D2/D10, AC12). The launch projection is
     // used only for resolving the top-level argument; downstream surfaces
-    // receive this source bundle.
-    let mut source_context = invocation.derive_source(&source.resolved_path)?;
+    // receive this source bundle. A `~`/`{{VAR}}` argument can supply its tree
+    // root.
+    let mut source_context = invocation.derive_composition_source(&source)?;
     let mut file_resolution_context = source_context.file_resolution_context().clone();
+    // Ownership reads the document as authored, before any caller override,
+    // and is fixed for the whole invocation: retries, proxy targets, and
+    // steps recheck the tail but never reassign a setter or positional.
+    let owned_tokens = super::ownership::own_caller_arguments(
+        &mut shared,
+        &source,
+        &file_resolution_context,
+        Some(invocation.launch_cwd()),
+    )?;
+    let parsed = parse_composition_positionals(&[args, owned_tokens].concat())?;
+    let mut set_overrides = merge_set_overrides(
+        shared.set.as_deref(),
+        parsed.shorthand_setters,
+        parsed.positionals,
+    )?;
+    let mut caller_input_records = claudine::composition::CallerInputLayers::from_caller_overrides(
+        set_overrides.clone(),
+        provisional_context.clone(),
+    )
+    .caller_input_records;
     record_prep_substage(
         &mut prep_substages,
         perf_enabled,
@@ -1375,8 +1391,8 @@ fn build_execution_request(
         prep_env_context: Some(prep_context.env_context.clone()),
         prep_launch_detection_error: prep_context.launch_detection_error.clone(),
         header_emitted,
-        provider_args: shared.provider_args.clone(),
-        provider_args_explicit: shared.provider_args_explicit,
+        provider_tail: shared.provider_tail.clone(),
+        provider_tail_notices: shared.provider_tail_notices.clone(),
         runtime_state: Some(runtime_state),
         suppress_output_commit: step_scope.is_some_and(|scope| scope.suppress_output_commit),
         task_frame_writer: step_scope.and_then(|scope| scope.task_frame_writer.clone()),

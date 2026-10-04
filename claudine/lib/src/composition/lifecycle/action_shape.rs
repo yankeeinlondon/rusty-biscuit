@@ -345,7 +345,7 @@ pub(super) fn did_you_mean_verb(verb: &str) -> Option<&'static str> {
 ///
 /// The `when`/`until`/`while` keys are **not** action parameters — they remain
 /// boolean expressions parsed by [`parse_condition`].
-pub(super) fn action_value_to_expr(value: &serde_json::Value) -> Result<Expr, ActionExprError> {
+pub(crate) fn action_value_to_expr(value: &serde_json::Value) -> Result<Expr, ActionExprError> {
     match value {
         serde_json::Value::String(s) => {
             let trimmed = s.trim();

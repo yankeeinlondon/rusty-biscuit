@@ -24,8 +24,8 @@
 //!   Markdown must escape it.
 //!
 //! Resolution ladder (first match wins):
-//! 1. git-root-relative when `base_dir` is inside a repo;
-//! 2. `base_dir`-relative;
+//! 1. git-root-relative when `cwd` is inside a repo;
+//! 2. `cwd`-relative;
 //! 3. `~/`-aliased home path;
 //! 4. the absolute path verbatim.
 
@@ -42,8 +42,8 @@ use std::path::{Path, PathBuf};
 /// This raw form remains available for diagnostics and tests that explicitly
 /// need native path text.
 #[cfg(test)]
-pub(crate) fn make_relative(abs: &Path, base_dir: &Path) -> String {
-    make_relative_in_context(abs, base_dir, None)
+pub(crate) fn make_relative(abs: &Path, cwd: &Path) -> String {
+    make_relative_in_context(abs, cwd, None)
 }
 
 /// The projection's chosen value, still a path.
@@ -52,7 +52,7 @@ pub(crate) fn make_relative(abs: &Path, base_dir: &Path) -> String {
 /// policy to the same decision; a `String`-valued ladder would force the
 /// portable wrapper to re-parse already-rendered text as a path.
 enum Projection {
-    /// Repo-relative, `base_dir`-relative, or the absolute path verbatim.
+    /// Repo-relative, `cwd`-relative, or the absolute path verbatim.
     Bare(PathBuf),
     /// The remainder below the user's home directory, rendered behind `~/`.
     HomeRelative(PathBuf),
@@ -60,7 +60,7 @@ enum Projection {
 
 fn project_in_context(
     abs: &Path,
-    base_dir: &Path,
+    cwd: &Path,
     request_context: Option<&biscuit_file::FileResolutionContext>,
 ) -> Projection {
     let repository_root = match request_context {
@@ -72,7 +72,7 @@ fn project_in_context(
     {
         return Projection::Bare(stripped);
     }
-    if let Some(stripped) = strip_prefix_any_spelling(abs, base_dir) {
+    if let Some(stripped) = strip_prefix_any_spelling(abs, cwd) {
         return Projection::Bare(stripped);
     }
     let home_dir = match request_context {
@@ -118,10 +118,10 @@ fn strip_prefix_any_spelling(abs: &Path, root: &Path) -> Option<PathBuf> {
 #[cfg(test)]
 pub(crate) fn make_relative_in_context(
     abs: &Path,
-    base_dir: &Path,
+    cwd: &Path,
     request_context: Option<&biscuit_file::FileResolutionContext>,
 ) -> String {
-    match project_in_context(abs, base_dir, request_context) {
+    match project_in_context(abs, cwd, request_context) {
         Projection::Bare(path) => path.to_string_lossy().to_string(),
         Projection::HomeRelative(rest) => format!("~/{}", rest.to_string_lossy()),
     }
@@ -135,8 +135,8 @@ pub(crate) fn make_relative_in_context(
 /// [`make_relative`]'s output, so the tests exercise the same prefix policy
 /// production does instead of a parallel separator swap.
 #[cfg(test)]
-pub(crate) fn make_portable_relative(abs: &Path, base_dir: &Path) -> String {
-    make_portable_relative_in_context(abs, base_dir, None)
+pub(crate) fn make_portable_relative(abs: &Path, cwd: &Path) -> String {
+    make_portable_relative_in_context(abs, cwd, None)
 }
 
 /// Renders the projection through [`biscuit_file::to_portable_string`],
@@ -149,10 +149,10 @@ pub(crate) fn make_portable_relative(abs: &Path, base_dir: &Path) -> String {
 /// native form carries literal backslashes, which a Markdown caller must escape.
 pub(crate) fn make_portable_relative_in_context(
     abs: &Path,
-    base_dir: &Path,
+    cwd: &Path,
     request_context: Option<&biscuit_file::FileResolutionContext>,
 ) -> String {
-    match project_in_context(abs, base_dir, request_context) {
+    match project_in_context(abs, cwd, request_context) {
         Projection::Bare(path) => biscuit_file::to_portable_string(&path),
         Projection::HomeRelative(rest) => {
             format!("~/{}", biscuit_file::to_portable_string(&rest))
@@ -184,7 +184,7 @@ mod tests {
     #[test]
     fn base_dir_relative_outside_repo() {
         // A plain temp dir: no `.git` ancestor on the host, so the projection
-        // falls through to the base_dir-relative arm.
+        // falls through to the cwd-relative arm.
         let base = TempDir::new().unwrap();
         std::fs::create_dir_all(base.path().join("deep")).unwrap();
         let abs = base.path().join("deep/file.md");
@@ -194,7 +194,7 @@ mod tests {
 
     #[test]
     fn home_aliased_when_under_home() {
-        // base_dir is a temp dir (outside any repo, outside $HOME), so the
+        // cwd is a temp dir (outside any repo, outside $HOME), so the
         // projection reaches the home-alias arm for a path under $HOME.
         let base = TempDir::new().unwrap();
         let home = dirs::home_dir().expect("home dir available");
@@ -217,7 +217,7 @@ mod tests {
             std::collections::HashMap::new(),
         );
         let rendered = make_relative_in_context(&abs, base.path(), Some(&context));
-        // No repo, not under base_dir, not under $HOME → absolute verbatim.
+        // No repo, not under cwd, not under $HOME → absolute verbatim.
         assert_eq!(rendered, abs.to_string_lossy());
     }
 

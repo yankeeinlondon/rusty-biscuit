@@ -2446,9 +2446,9 @@ mod schema_validation_integration {
             .expect("schema-projected lazy value must retain caller evidence");
         let expected = launch.join(raw);
         assert_eq!(diagnostic.reference, raw);
-        assert_eq!(diagnostic.base_dir, launch);
+        assert_eq!(diagnostic.cwd, launch);
         assert_eq!(caller.property, "spec");
-        assert_eq!(caller.origin.base_dir(), origin.base_dir());
+        assert_eq!(caller.origin.cwd(), origin.cwd());
         assert_eq!(caller.candidate, expected);
         assert_eq!(
             caller.candidate_provenance,
@@ -2526,12 +2526,12 @@ mod schema_validation_integration {
         let second_caller = second.caller.as_ref().unwrap();
         assert_eq!(first.reference, first_raw);
         assert_eq!(first_caller.property, "first");
-        assert_eq!(first.base_dir, launch);
+        assert_eq!(first.cwd, launch);
         assert_eq!(first_caller.origin.source_path(), Some(first_source.as_path()));
         assert_eq!(first_caller.candidate, launch.join(first_raw));
         assert_eq!(second.reference, second_raw);
         assert_eq!(second_caller.property, "second");
-        assert_eq!(second.base_dir, launch);
+        assert_eq!(second.cwd, launch);
         assert_eq!(second_caller.origin.source_path(), Some(second_source.as_path()));
         assert_eq!(second_caller.candidate, launch.join("missing.md"));
         assert_eq!(first_caller.candidate, second_caller.candidate);
@@ -2590,12 +2590,12 @@ mod schema_validation_integration {
         let second = failure_for(1);
         assert_eq!(first.reference, "missing.md");
         assert_eq!(second.reference, "./missing.md");
-        assert_eq!(first.base_dir, launch);
-        assert_eq!(second.base_dir, launch);
+        assert_eq!(first.cwd, launch);
+        assert_eq!(second.cwd, launch);
         assert_eq!(first.caller.as_ref().unwrap().property, "files");
         assert_eq!(second.caller.as_ref().unwrap().property, "files");
-        assert_eq!(first.caller.as_ref().unwrap().origin.base_dir(), launch);
-        assert_eq!(second.caller.as_ref().unwrap().origin.base_dir(), launch);
+        assert_eq!(first.caller.as_ref().unwrap().origin.cwd(), launch);
+        assert_eq!(second.caller.as_ref().unwrap().origin.cwd(), launch);
         assert_eq!(first.caller.as_ref().unwrap().candidate, launch.join("missing.md"));
         assert_eq!(first.caller.as_ref().unwrap().candidate, second.caller.as_ref().unwrap().candidate);
     }
@@ -2657,9 +2657,9 @@ mod schema_validation_integration {
         for (diagnostic, expected_raw) in [(&first, "missing.md"), (&second, "./missing.md")] {
             let caller = diagnostic.caller.as_ref().unwrap();
             assert_eq!(diagnostic.reference, expected_raw);
-            assert_eq!(diagnostic.base_dir, launch);
+            assert_eq!(diagnostic.cwd, launch);
             assert_eq!(caller.property, "files");
-            assert_eq!(caller.origin.base_dir(), origin.base_dir());
+            assert_eq!(caller.origin.cwd(), origin.cwd());
             assert_eq!(caller.origin.repository_root(), origin.repository_root());
             assert_eq!(caller.origin.source_path(), Some(source.as_path()));
             assert_eq!(caller.candidate, launch.join("missing.md"));

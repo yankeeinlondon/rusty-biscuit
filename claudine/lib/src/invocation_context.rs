@@ -1157,6 +1157,28 @@ impl InvocationContext {
         })
     }
 
+    /// [`derive_source`](Self::derive_source) for a top-level source, keeping
+    /// the anchor of the reference that opened it.
+    ///
+    /// A prompt opened as `~/.claudine/prompts/x.md` (or through a leading
+    /// `{{VAR}}`) outside any repository or vault takes that anchor as its
+    /// tree root, so its relative references may move around the anchor but
+    /// not leave it. A source a repository contains keeps the repository as
+    /// its tree. A reference with no such anchor (`@x.md`, an absolute path)
+    /// derives exactly as [`derive_source`](Self::derive_source) does.
+    pub fn derive_composition_source(
+        &self,
+        source: &crate::composition::ResolvedCompositionSource,
+    ) -> Result<SourceContext, InvocationContextError> {
+        let mut context = self.derive_source(&source.resolved_path)?;
+        if let Ok(reference) = biscuit_file::FileReference::new(&source.original_ref) {
+            context.file_resolution = context
+                .file_resolution
+                .for_source_reference(&reference, &context.source_path);
+        }
+        Ok(context)
+    }
+
     /// Capture the runtime groups requested by a document from retained facts.
     ///
     /// The returned evidence is complete for every requested group. Repository

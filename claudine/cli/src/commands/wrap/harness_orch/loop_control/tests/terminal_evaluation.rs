@@ -36,7 +36,7 @@ fn emit_blocked_finalize_pre_launch_blocked_raise_surfaces_failure_and_finalize(
     let fx = fixture(serde_json::json!({
         "blocked": {
             "stack": [
-                {"when": "missing_root == true", "action": {"stderr": "never"}}
+                {"when": "missing_root() == true", "action": {"stderr": "never"}}
             ]
         },
         "failure": {
@@ -110,7 +110,7 @@ fn emit_blocked_finalize_post_launch_failure_raise_surfaces_finalize() {
     let fx = fixture(serde_json::json!({
         "failure": {
             "stack": [
-                {"when": "missing_root == true", "action": {"stderr": "never"}}
+                {"when": "missing_root() == true", "action": {"stderr": "never"}}
             ]
         },
         "finalize": {
@@ -173,7 +173,7 @@ fn emit_blocked_finalize_finalize_raise_surfaces_without_reentry() {
         },
         "finalize": {
             "stack": [
-                {"when": "missing_root == true", "action": {"stderr": "never"}}
+                {"when": "missing_root() == true", "action": {"stderr": "never"}}
             ]
         }
     }));
@@ -227,7 +227,7 @@ fn missing_source_branch_blocked_raise_surfaces_not_swallowed() {
     let fx = fixture(serde_json::json!({
         "blocked": {
             "stack": [
-                {"when": "missing_root == true", "action": {"stderr": "never"}}
+                {"when": "missing_root() == true", "action": {"stderr": "never"}}
             ]
         }
     }));
@@ -290,7 +290,7 @@ fn shell_audit_branch_finalize_raise_surfaces_not_swallowed() {
         },
         "finalize": {
             "stack": [
-                {"when": "missing_root == true", "action": {"stderr": "never"}}
+                {"when": "missing_root() == true", "action": {"stderr": "never"}}
             ]
         }
     }));
@@ -353,7 +353,7 @@ fn emit_failure_finalize_failure_raise_surfaces_finalize() {
     let fx = fixture(serde_json::json!({
         "failure": {
             "stack": [
-                {"when": "missing_root == true", "action": {"stderr": "never"}}
+                {"when": "missing_root() == true", "action": {"stderr": "never"}}
             ]
         },
         "finalize": {
@@ -412,7 +412,7 @@ fn emit_failure_finalize_finalize_raise_surfaces_without_reentry() {
         },
         "finalize": {
             "stack": [
-                {"when": "missing_root == true", "action": {"stderr": "never"}}
+                {"when": "missing_root() == true", "action": {"stderr": "never"}}
             ]
         }
     }));
@@ -462,10 +462,10 @@ fn emit_failure_finalize_finalize_raise_surfaces_without_reentry() {
 fn emit_failure_finalize_both_raise_surfaces_finalize() {
     let fx = fixture(serde_json::json!({
         "failure": {
-            "stack": [{"when": "missing_root == true", "action": {"stderr": "never"}}]
+            "stack": [{"when": "missing_root() == true", "action": {"stderr": "never"}}]
         },
         "finalize": {
-            "stack": [{"when": "also_missing == true", "action": {"stderr": "never"}}]
+            "stack": [{"when": "also_missing() == true", "action": {"stderr": "never"}}]
         }
     }));
     let emitter = RecordingEmitter::default();
@@ -507,10 +507,10 @@ fn emit_failure_finalize_both_raise_surfaces_finalize() {
 fn success_raise_then_finalize_raise_surfaces_finalize() {
     let fx = fixture(serde_json::json!({
         "success": {
-            "stack": [{"when": "missing_root == true", "action": {"stderr": "never"}}]
+            "stack": [{"when": "missing_root() == true", "action": {"stderr": "never"}}]
         },
         "finalize": {
-            "stack": [{"when": "also_missing == true", "action": {"stderr": "never"}}]
+            "stack": [{"when": "also_missing() == true", "action": {"stderr": "never"}}]
         }
     }));
     let emitter = RecordingEmitter::default();
@@ -576,7 +576,7 @@ fn success_raise_then_finalize_raise_surfaces_finalize() {
 fn setup_raise_then_failure_raise_surfaces_failure_and_threads_into_finalize() {
     let fx = fixture(serde_json::json!({
         "failure": {
-            "stack": [{"when": "failure_typo == true", "action": {"stderr": "never"}}]
+            "stack": [{"when": "failure_typo() == true", "action": {"stderr": "never"}}]
         },
         "finalize": {
             "stack": [{
@@ -602,7 +602,7 @@ fn setup_raise_then_failure_raise_surfaces_failure_and_threads_into_finalize() {
     let outcome = LifecycleEventOutcome {
         evaluation_error: Some(LifecycleErrorInfo::from_action_failure(
             "when",
-            "`when:` references undefined variable `missing_root`",
+            "Unknown function: missing_root",
         )),
         ..Default::default()
     };
@@ -661,13 +661,13 @@ fn setup_raise_then_failure_raise_surfaces_failure_and_threads_into_finalize() {
 fn emit_blocked_finalize_blocked_raise_then_finalize_raise_surfaces_finalize() {
     let fx = fixture(serde_json::json!({
         "blocked": {
-            "stack": [{"when": "missing_root == true", "action": {"stderr": "never"}}]
+            "stack": [{"when": "missing_root() == true", "action": {"stderr": "never"}}]
         },
         "failure": {
             "stack": [{"when": "err", "action": {"append_line": ["events.log", "failure-ran"]}}]
         },
         "finalize": {
-            "stack": [{"when": "also_missing == true", "action": {"stderr": "never"}}]
+            "stack": [{"when": "also_missing() == true", "action": {"stderr": "never"}}]
         }
     }));
     let emitter = RecordingEmitter::default();
@@ -771,7 +771,7 @@ fn target_initialize_error_with_failure_raise_surfaces_failure_evaluation_error(
         },
         "failure": {
             "stderr": "fail",
-            "stack": [{"when": "missing_root == true", "action": {"stderr": "never"}}]
+            "stack": [{"when": "missing_root() == true", "action": {"stderr": "never"}}]
         },
         "finalize": { "stderr": "final" }
     }));
@@ -833,7 +833,7 @@ fn target_initialize_routes_to_failure_with_raise_surfaces_failure_evaluation_er
         },
         "failure": {
             "stderr": "fail",
-            "stack": [{"when": "missing_root == true", "action": {"stderr": "never"}}]
+            "stack": [{"when": "missing_root() == true", "action": {"stderr": "never"}}]
         },
         "finalize": { "stderr": "final" }
     }));
@@ -896,7 +896,7 @@ fn start_routes_to_failure_with_raise_surfaces_failure_and_threads_into_finalize
         "failure": {
             "stderr": "fail",
             "stack": [{
-                "when": "missing_root == true",
+                "when": "missing_root() == true",
                 "action": {"stderr": "never"}
             }]
         },
@@ -979,7 +979,7 @@ fn terminal_control_abort_with_finalize_raise_surfaces_finalize_evaluation_error
     let fx = fixture(serde_json::json!({
         "finalize": {
             "stderr": "final",
-            "stack": [{"when": "missing_root == true", "action": {"stderr": "never"}}]
+            "stack": [{"when": "missing_root() == true", "action": {"stderr": "never"}}]
         }
     }));
     let emitter = RecordingEmitter::default();
@@ -1048,7 +1048,7 @@ fn interrupt_failure_when_raise_surfaces_failure_and_runs_finalize_once() {
     let fx = fixture(serde_json::json!({
         "failure": {
             "stderr": "fail",
-            "stack": [{"when": "missing_root == true", "action": {"stderr": "never"}}]
+            "stack": [{"when": "missing_root() == true", "action": {"stderr": "never"}}]
         },
         "finalize": {
             "stderr": "final",
@@ -1128,7 +1128,7 @@ fn interrupt_finalize_when_raise_surfaces_finalize_evaluation_error() {
         "failure": { "stderr": "fail" },
         "finalize": {
             "stderr": "final",
-            "stack": [{"when": "missing_root == true", "action": {"stderr": "never"}}]
+            "stack": [{"when": "missing_root() == true", "action": {"stderr": "never"}}]
         }
     }));
     let emitter = RecordingEmitter::default();
@@ -1218,7 +1218,7 @@ fn start_control_abort_with_finalize_raise_surfaces_finalize_evaluation_error() 
     let fx = fixture(serde_json::json!({
         "finalize": {
             "stderr": "final",
-            "stack": [{"when": "missing_root == true", "action": {"stderr": "never"}}]
+            "stack": [{"when": "missing_root() == true", "action": {"stderr": "never"}}]
         }
     }));
     let emitter = RecordingEmitter::default();

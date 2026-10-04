@@ -4,8 +4,8 @@
 //! than by occurrence or rescan pass.
 //!
 //! The unresolved-root family is exercised through the `ctx.*` typo warning,
-//! the root warning that exists today; Phase 5's
-//! `dm.expression.unknown_identifier` warning shares its identity shape.
+//! the root warning that exists today; the
+//! `dm.expression.undeclared_property` advisory shares its identity shape.
 
 use std::path::{Path, PathBuf};
 

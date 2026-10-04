@@ -82,6 +82,49 @@ The example showed a relative path used to the foreign file and this is the reco
     - and by the time the _transclusion_ stage was reached this reference to an ENV variable would have been replaced with the value of that ENV variable.
     - this strategy of file referencing will typically result in an absolute path but with an abstraction layer that makes it potentially more portable then a static absolute path.
 
+### File Trees
+
+Every document has a **tree root** (`base_dir`): the directory its relative references (`./x.md`, `../x.md`, `x.md`) may move around in but not leave. A relative reference whose target lands outside the tree root is an error, not a missing file:
+
+```text
+repo/                    ← tree root of every document inside the repository
+├── shared.md
+└── docs/
+    └── guide.md         ::file ../shared.md       → repo/shared.md        (inside: fine)
+                         ::file ../../outside.md   → error: leaves repo/   (outside)
+```
+
+The tree root is chosen by the first rule that applies:
+
+1. the **repository** the document is in;
+2. a root the host supplied explicitly;
+3. the deepest configured **vault** that contains the document;
+4. the **anchor of the reference that opened the document**, when it is `~` (or a leading `{{VAR}}` file-reference anchor) and the anchor contains the document;
+5. otherwise the document's own directory. This last one is only a fallback: nothing said where the tree is, so it rejects nothing.
+
+Rule 4 is what gives a document outside any repository a boundary:
+
+```md
+<!-- work/parent.md (not in a repository) -->
+::file ~/Downloads/a.md
+```
+
+```md
+<!-- ~/Downloads/a.md: its tree root is ~ -->
+::file ../b.md            → ~/b.md (inside the home tree)
+::file ../../outside.md   → error: leaves ~
+```
+
+Opened as `::file /Users/me/Downloads/a.md` instead, the same `a.md` has no anchor, falls back to its own directory, and `../../outside.md` resolves. An anchor never replaces a tree that already contains the document: `~/repo/docs/a.md` inside the repository is still bounded by the repository.
+
+For an environment anchor, remember that the interpolation stage evaluates `{{ … }}` before transclusion runs (see "ENV based paths" above): in `::file {{NOTES}}/inbox/a.md`, `{{NOTES}}` is evaluated as a Darkmatter expression (an unknown name, so the target becomes `/inbox/a.md`) and no anchor is left. Write the anchor with triple braces so the composed directive keeps a literal `{{NOTES}}` for the file reference to resolve:
+
+```md
+::file "{{{NOTES}}}/inbox/a.md"   → a.md's tree root is $NOTES
+```
+
+A tree-root error follows the rules in [When an Included File Fails](#when-an-included-file-fails): inside a nested document it becomes a `_Could not transclude …_` notice and a warning in lenient mode, and stops the composition with `fail_fast`. `&` and `^` keep their own repository-only rule.
+
 ### Options and Conditionals
 
 The syntax we've covered so far for block file transclusion is just `::file <filename>` and that is how a block file transclusion MUST start but beyond that we offer a way to assign key/value pairs to modify the behavior of the transclusion. The full syntax looks something like: `::file <filename> <key>=<value> <key>=<value>` and the `keys` represent the various aspects you're allowed to modify. These include:

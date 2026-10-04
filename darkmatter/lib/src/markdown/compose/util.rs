@@ -63,27 +63,44 @@ pub fn find_git_root_from(start: &Path) -> Option<PathBuf> {
 /// Build an explicit, request-scoped [`FileResolutionContext`] for a
 /// document-backed reference.
 ///
-/// `base_dir` is the authoring document's directory (the base for the
+/// `cwd` is the authoring document's directory (the base for the
 /// references it contains); `source_path`, when known, is the document file
 /// itself. Repository, package, and package-area scopes come only from the
 /// request snapshot and are recomputed for the authoring document.
 ///
 /// [`ComposeOptions::expression_resolution_context`]: super::context::options::ComposeOptions::expression_resolution_context
 pub(crate) fn document_resolution_context(
-    base_dir: &Path,
+    cwd: &Path,
     source_path: Option<&Path>,
     magic_paths: &[(PathBuf, PathPosition)],
     request_context: Option<&FileResolutionContext>,
 ) -> FileResolutionContext {
     let mut ctx = match (request_context, source_path) {
         (Some(snapshot), Some(source)) => snapshot.for_source(source),
-        (Some(snapshot), None) => snapshot.for_base(base_dir),
-        (None, _) => FileResolutionContext::new(base_dir),
+        (Some(snapshot), None) => snapshot.for_cwd(cwd),
+        (None, _) => FileResolutionContext::new(cwd),
     };
     for (path, position) in magic_paths {
         ctx = ctx.add_magic_path(path.clone(), *position);
     }
     ctx
+}
+
+/// The context a document's own links resolve and normalize in.
+///
+/// The request snapshot's derivation for the source when there is a snapshot;
+/// otherwise, for a file source, a context captured from the source's
+/// directory. `None` for a source with neither a snapshot nor a path.
+pub(crate) fn source_link_context(options: &ComposeOptions) -> Option<FileResolutionContext> {
+    if let Some(context) = options.source_file_resolution_context() {
+        return Some(context);
+    }
+    let super::ComposeSource::File(path) = &options.source else {
+        return None;
+    };
+    let dir = path.parent()?;
+    let snapshot = super::capture_file_resolution_context(dir);
+    Some(document_resolution_context(dir, None, &options.magic_paths, Some(&snapshot)))
 }
 
 /// Helper to find target range within content.

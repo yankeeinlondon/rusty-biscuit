@@ -338,6 +338,7 @@ pub(crate) fn run_kimi_wire_session(
         agent_pid: Some(captured_pid),
         guard_context,
         signals: Vec::new(),
+        stream_tails: None,
     })
 }
 /// Grace period after the `prompt-2` response arrives before tree termination.

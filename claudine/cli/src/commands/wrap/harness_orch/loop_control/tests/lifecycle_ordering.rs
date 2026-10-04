@@ -65,7 +65,7 @@ fn success_when_evaluation_error_is_not_swallowed_as_action_error() {
     let fx = fixture(serde_json::json!({
         "success": {
             "stack": [
-                {"when": "missing_root == true", "action": {"stderr": "ready"}}
+                {"when": "missing_root() == true", "action": {"stderr": "ready"}}
             ]
         }
     }));
@@ -122,7 +122,7 @@ fn success_when_evaluation_error_is_not_swallowed_as_action_error() {
 fn success_evaluation_error_runs_finalize_with_err_and_returns_failure() {
     let fx = fixture(serde_json::json!({
         "success": {
-            "stack": [{"when": "missing_root == true", "action": {"stderr": "ready"}}]
+            "stack": [{"when": "missing_root() == true", "action": {"stderr": "ready"}}]
         },
         "finalize": {
             "stack": [{"when": "err", "action": {"append_line": ["events.log", "finalized-with-err"]}}]
@@ -202,7 +202,7 @@ fn downgraded_success_failure_raise_reports_failure_event() {
             "stack": [{"action": {"error": "downgraded"}}]
         },
         "failure": {
-            "stack": [{"when": "missing_root == true", "action": {"stderr": "unreachable"}}]
+            "stack": [{"when": "missing_root() == true", "action": {"stderr": "unreachable"}}]
         }
     }));
     let emitter = RecordingEmitter::default();
@@ -273,7 +273,7 @@ fn downgraded_success_failure_raise_reports_failure_event() {
 fn success_evaluation_error_non_downgrading_reports_success_event() {
     let fx = fixture(serde_json::json!({
         "success": {
-            "stack": [{"when": "missing_root == true", "action": {"stderr": "unreachable"}}]
+            "stack": [{"when": "missing_root() == true", "action": {"stderr": "unreachable"}}]
         }
     }));
     let emitter = RecordingEmitter::default();
@@ -450,7 +450,7 @@ fn setup_evaluation_error_routes_through_failure_and_finalize() {
     let outcome = LifecycleEventOutcome {
         evaluation_error: Some(LifecycleErrorInfo::from_action_failure(
             "when",
-            "`when:` references undefined variable `missing_root`",
+            "Unknown function: missing_root",
         )),
         ..Default::default()
     };
@@ -498,7 +498,7 @@ fn setup_evaluation_error_routes_through_failure_and_finalize() {
 fn finalize_evaluation_error_aborts_without_reentry() {
     let fx = fixture(serde_json::json!({
         "finalize": {
-            "stack": [{"when": "missing_root == true", "action": {"stderr": "x"}}]
+            "stack": [{"when": "missing_root() == true", "action": {"stderr": "x"}}]
         }
     }));
     let emitter = RecordingEmitter::default();

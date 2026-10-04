@@ -163,6 +163,9 @@ pub(crate) struct ExtractedWrapperFlags {
     pub(crate) verbose: bool,
     pub(crate) operation: Option<String>,
     pub(crate) perf: bool,
+    /// Where the arguments after the user's consumed `--` start in the
+    /// extracted passthrough; `None` when no `--` was written.
+    pub(crate) dash_boundary: Option<usize>,
 }
 
 fn has_flag(args: &[String], flag: &str) -> bool {
@@ -431,6 +434,9 @@ fn extract_wrapper_flags_from_passthrough_with_boundary(
         }
     }
 
+    // Every removed flag sits before the boundary, so the protected tail
+    // starts that many places earlier once they are gone.
+    extracted.dash_boundary = dash_boundary.map(|_| boundary - remove_indices.len());
     // The separator sits past every removed index, so dropping it first
     // leaves those indices valid.
     if let Some(DashBoundary::Literal(index)) = dash_boundary {
@@ -442,6 +448,26 @@ fn extract_wrapper_flags_from_passthrough_with_boundary(
     }
 
     Ok(extracted)
+}
+
+/// Describe the direct wrapper's forwarded passthrough for reporting.
+///
+/// `args` is the passthrough after wrapper-flag and prompt extraction;
+/// `dash_boundary` is [`ExtractedWrapperFlags::dash_boundary`] already
+/// shifted for any token the prompt extraction removed before it. No
+/// composition ownership rule runs here, and the child argv is not built
+/// from the result.
+pub(crate) fn passthrough_provider_tail(
+    args: &[String],
+    dash_boundary: Option<usize>,
+) -> claudine::composition::ProviderTail {
+    match dash_boundary {
+        Some(at) => {
+            let at = at.min(args.len());
+            claudine::composition::ProviderTail::new(args[..at].to_vec(), Some(args[at..].to_vec()))
+        }
+        None => claudine::composition::ProviderTail::new(args.to_vec(), None),
+    }
 }
 
 #[cfg(test)]

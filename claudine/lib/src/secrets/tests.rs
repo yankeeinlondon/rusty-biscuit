@@ -151,6 +151,15 @@ fn redactor_masks_repeated_values_and_provider_echoes() {
 }
 
 #[test]
+fn caller_known_values_are_masked_like_learned_ones() {
+    let redactor = Redactor::for_message("--password")
+        .with_known_values(["hunter22".to_string(), "abc".to_string(), MASK.to_string()]);
+    assert_eq!(redactor.redact("bad credential hunter22").as_str(), "bad credential ****");
+    assert_eq!(redactor.redact("abc stays").as_str(), "abc stays");
+    assert_eq!(format!("{redactor:?}"), "Redactor(1 known values)");
+}
+
+#[test]
 fn short_known_values_are_not_masked_elsewhere() {
     let redactor = Redactor::for_message("password=abc");
     assert_eq!(redactor.redact("abc is the alphabet").as_str(), "abc is the alphabet");
@@ -223,4 +232,28 @@ fn sensitive_key_names_cover_payload_and_environment_spellings() {
     for key in ["PUBLIC_KEY", "SSH_AUTH_SOCK", "OLDPWD", "CWD", "PATH", "HOME", "name", "model"] {
         assert!(!is_sensitive_key_name(key), "{key}");
     }
+}
+
+#[test]
+fn argument_tokens_mask_embedded_and_attached_credentials() {
+    let cases = [
+        ("api_key=sk-proj-reviewsecret0123456789", "api_key=****"),
+        ("--config=sk-proj-reviewsecret0123456789", "--config=****"),
+        ("--config=sk-short", "--config=****"),
+        ("model=gh_ordinary", "model=gh_ordinary"),
+        ("ghp_bare", "****"),
+        ("model_reasoning_effort=high", "model_reasoning_effort=high"),
+        ("--model", "--model"),
+    ];
+    for (token, masked) in cases {
+        assert_eq!(mask_argument_token(token), masked, "token {token:?}");
+    }
+}
+
+#[test]
+fn argument_secret_spans_locate_the_original_value() {
+    let token = "--config=sk-proj-reviewsecret0123456789";
+    let spans = find_argument_secret_spans(token);
+    assert_eq!(spans, vec![9..token.len()]);
+    assert_eq!(&token[spans[0].clone()], "sk-proj-reviewsecret0123456789");
 }

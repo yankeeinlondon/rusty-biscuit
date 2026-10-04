@@ -617,7 +617,10 @@ out in arm declaration order.
 If `$schema` cannot be loaded (missing file, unparseable schema, raw
 JSON Schema without typed metadata) the schema completer returns no
 candidates and the slot falls through to the existing `@`-gated setter
-completer described above. Completion is strictly side-effect free: no
+completer described above. The exception is a line with a provider switch
+after the file: ownership then needs the schema's parameter names, and an
+unreadable schema offers nothing (see
+[Provider arguments after the composition file](#provider-arguments-after-the-composition-file)). Completion is strictly side-effect free: no
 shell directives are executed, no provider sessions are launched, no
 on-disk caches are written.
 
@@ -625,6 +628,97 @@ on-disk caches are written.
 malformed schema or a transient filesystem failure must not break
 `<TAB>` for the entire command. Returning nothing keeps the shell's
 own completion alive in those edge cases.
+
+## Provider arguments after the composition file
+
+A composition command can carry arguments for the agent after its file
+(`claudine compose plan.md --codex -c model_reasoning_effort=low`). Which
+words are Claudine's setters and positionals and which belong to the
+agent is decided by type-aware ownership (see
+[Type-aware ownership](../argv-normalization.md#type-aware-ownership)).
+Completion asks the same code the same question, with the word under the
+cursor as the last argument, so it never offers a setter for a word the
+agent would receive.
+
+What you can expect, with a `plan.md` whose `$schema` declares `phase`
+(a number) and `mode` (`enum(fast, slow)`):
+
+| You type | Offered | Why |
+| --- | --- | --- |
+| `compose plan.md --codex -c low ph<TAB>` | `phase=` | `-c` took `low`; `ph` is Claudine's |
+| `compose plan.md --codex -c low mode=<TAB>` | `mode='fast'`, `mode='slow'` | the setter value slot completes as usual |
+| `compose plan.md --codex -c <TAB>` | nothing | the word is `-c`'s value: it belongs to Codex |
+| `compose plan.md --codex -c ph<TAB>` | nothing | an unfinished value of `-c`, not a setter name |
+| `compose plan.md --codex -c phase=2 ph<TAB>` | nothing | `phase=2` is a declared parameter, so `-c` has no value and the command would fail |
+| `compose plan.md -c low ph<TAB>` | nothing | no agent named: Claude's `-c` takes nothing and Codex's takes a value, so `low` is ambiguous |
+| `compose plan.md --codex -c low --mod<TAB>` | `--model` | the words before the flag read cleanly |
+| `compose plan.md --codex -c phase=2 --mod<TAB>` | nothing | `-c` still has no value; a new flag cannot repair it |
+| `compose plan.md -c low --mod<TAB>` | nothing | `low` is ambiguous, whatever the cursor shape |
+| `compose plan.md --codex -c low --exclude co<TAB>` | `codex` | a Claudine option's value; the words before the option read cleanly |
+| `compose plan.md --codex -c phase=2 --exclude co<TAB>` | nothing | `-c` still has no value; an option's value cannot repair it |
+| `compose plan.md -c low --on-rate-limit <TAB>` | nothing | `low` is ambiguous |
+| `compose plan.md -c low --codex --on-rate-limit <TAB>` | `pause`, `abort`, `continue` | the later `--codex` names the agent, so `low` is `-c`'s value |
+| `compose plan.md -- ph<TAB>` | nothing | everything after `--` is forwarded to the agent untouched |
+
+The rules:
+
+- **Same candidates as execution.** The provider named on the command line
+  (`--codex`, `--provider codex`), else the file's literal `agent`, else
+  every provider. A caller setter such as `agent=codex` does not narrow
+  them. Add `agent: codex` to the file, or name the provider, and
+  `compose plan.md -c low ph<TAB>` offers `phase=` again.
+- **A word an open switch takes is the agent's.** Nothing is offered for
+  it, empty or partial. Once the switch's value is complete, the next word
+  is Claudine's again.
+- **A line execution would reject offers nothing.** An ambiguous word, a
+  missing value the provider requires, a `$schema` that cannot be read
+  when a provider switch makes it matter, or an `argv=` setter. Completion
+  never prompts (an interactive run asks which agent the arguments are for;
+  completion does not) and never reports an error. This holds for every
+  cursor shape: a setter, a bare word, a flag, or a Claudine option's value
+  (`--provider`, `--exclude`, `--on-rate-limit`, `--debug`,
+  `sequence --budget-ledger`, and every other value-taking option or alias).
+- **A flag is judged by the words before it.** A partial flag such as
+  `--mod` may become a Claudine option, so it is not itself read as a
+  forwarded switch; the words before it must read cleanly for any flag to
+  be offered.
+- **Nothing after an authored `--`.** No setter, file, or flag candidates,
+  and no clap fallback either, for composition and wrapper commands alike.
+- **No provider switch, no file read.** Without a forwarded switch every
+  word after the file is Claudine's, so `compose new.md spec=@<TAB>` keeps
+  working for a file that does not exist yet.
+- **Claudine options keep their own slots.** A Claudine option's value
+  (`--model <TAB>`, `--step-timeout <TAB>`) goes to clap's completion,
+  never to the setter or file completers, once the words before the option
+  read cleanly. The option and its unfinished value are left out of that
+  check, so `--on-rate-limit a<TAB>` still offers `abort`. Which options
+  take a value comes from the same clap definitions the argument partition
+  reads, so the two cannot disagree.
+- **Provider switches are not completed.** `--codex -c` is never offered
+  as a candidate; the flag completer offers Claudine's own options and the
+  `--<provider>` selection switches.
+
+```mermaid
+flowchart TD
+    A["word under the cursor"] --> B{"after an authored --?"}
+    B -->|yes| N["offer nothing"]
+    B -->|no| C{"after the composition file?"}
+    C -->|no| S["slot completer (file, setter, flag)"]
+    C -->|yes| D{"a flag, or a Claudine option's value?"}
+    D -->|"yes: judge only the words before it"| E
+    D -->|"no: judge the word as well"| E{"any provider switch after the file?"}
+    E -->|no| F["ownership without reading the file"]
+    E -->|yes| G["read the file's agent and literal $schema"]
+    G -->|unreadable| N
+    G --> F
+    F -->|error: ambiguous, missing value, ...| N
+    F -->|the agent's word| N
+    F -->|Claudine's word| S
+```
+
+Ownership needs the composition file and its literal `$schema` only;
+it runs no templates, shell, lifecycle actions, or provider, and writes
+nothing.
 
 ## ENTER-path autocomplete
 
@@ -964,6 +1058,20 @@ $ claudine compose file.md spec=@<TAB>
 ```text
 $ claudine claude --<TAB>
 # → shell native completion (filenames, clap-exported flags)
+
+$ claudine claude -- --<TAB>
+# → nothing: everything after `--` belongs to the agent
+```
+
+### Provider arguments after the file
+
+```text
+# plan.md declares `phase` in its $schema
+$ claudine compose plan.md --codex -c low ph<TAB>
+→ phase=
+
+$ claudine compose plan.md --codex -c ph<TAB>
+# → nothing: the word is the value of Codex's `-c`
 ```
 
 ## Architecture
@@ -975,8 +1083,15 @@ flowchart TD
     C --> D["engine::classify_completion_target"]
     D -->|Root| E["root_menu::render"]
     D -->|CompositionPositional| F["composition::run"]
-    D -->|SetterValue| G["setter_value::run"]
-    D -->|Other| H["emit nothing → shell fallback"]
+    D -->|SetterValue / SetterName / Other| O{"engine/ownership.rs: Claudine's word?"}
+    D -->|CompositionProviderFlag| P{"engine/ownership.rs: words before the flag read cleanly?"}
+    P -->|no| H2
+    P -->|yes| H3["--provider switches + clap flags"]
+    H3 --> M
+    O -->|no| H2["emit nothing"]
+    O -->|yes, SetterValue| G["setter_value::run"]
+    O -->|yes, Other| H["clap fallback or nothing → shell fallback"]
+    D -->|Declined: after --| H2
     F --> I["scopes::resolve_compose_scopes"]
     G --> I
     I --> J["walker::walk (.gitignore-aware)"]
@@ -989,6 +1104,7 @@ flowchart TD
 | Module | Role |
 |---|---|
 | [`engine/mod.rs`](../../../cli/src/completion/engine/mod.rs) | Entry point; classifies the cursor slot and dispatches. |
+| [`engine/ownership.rs`](../../../cli/src/completion/engine/ownership.rs) | Asks type-aware ownership whether the word after the composition file is Claudine's, and, for a flag or a Claudine option's value at the cursor, whether the words before it read cleanly. |
 | [`root_menu.rs`](../../../cli/src/completion/root_menu.rs) | Curated subcommand menu + `init` visibility. |
 | [`composition/mod.rs`](../../../cli/src/completion/composition/mod.rs) | Shared compose/inline-compose/sequence pipeline. |
 | [`setter_value.rs`](../../../cli/src/completion/setter_value.rs) | `@`-gated file completion inside `name=value` setters. |

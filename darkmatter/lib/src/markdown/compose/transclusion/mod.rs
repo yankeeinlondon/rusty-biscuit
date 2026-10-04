@@ -23,7 +23,7 @@ pub use parser::{parse_directives, parse_frontmatter_refs};
 pub(crate) use parser::parse_directives_in;
 pub(crate) use resolver::{
     FrontmatterReference, classify_frontmatter_reference, resolve_parsed_target, resolve_path,
-    resolve_target,
+    resolve_target, source_opening,
 };
 pub use types::{
     BlockDirective, BlockOptions, DeferredSetError, DependencyNode, DirectiveKind, FrontmatterRefs,

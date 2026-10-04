@@ -48,7 +48,7 @@ Rust but nothing about this library.
      configured search roots. Every later resolution reads *only* that
      snapshot — nothing ambient, ever. Deterministic and immune to
      `set_current_dir` surprises.
-   - **Ambient convenience** (`resolve()`, `resolve_from(base)`): the library
+   - **Ambient convenience** (`resolve()`, `resolve_from(cwd)`): the library
      reads live process state (CWD, `$HOME`, git discovery) at call time.
      Fine for simple CLI tools and one-off lookups.
 
@@ -76,8 +76,8 @@ Rust but nothing about this library.
 
 | Prefix                | Kind                  | Resolves against                                                | Example                            |
 |-----------------------|-----------------------|-----------------------------------------------------------------|------------------------------------|
-| `./` or `../`         | **Explicit relative** | The base directory only; no fallback                            | `./src/main.rs`, `../a.md`         |
-| _(none)_              | **Implicit relative** | The base directory, then the git repository root                | `README.md`, `docs/spec.md`        |
+| `./` or `../`         | **Explicit relative** | The working directory (`cwd`) only; no fallback; stays in the [file tree](#the-file-tree-base_dir-and-the-relative-boundary) | `./src/main.rs`, `../a.md`         |
+| _(none)_              | **Implicit relative** | The working directory (`cwd`), then the git repository root; stays in the file tree | `README.md`, `docs/spec.md`        |
 | `/`, drive, or UNC    | **Absolute**          | Used verbatim                                                   | `/etc/config.toml`, `C:\\cfg.toml` |
 | `~` or `~/`           | **Home**              | The user's home directory only (`~user` unsupported)            | `~/.config/app.toml`               |
 | `@` or `@/`           | **Magic**             | Local-tier roots (package, package area, local root), then HOME | `@docs/spec.md`                    |
@@ -91,8 +91,8 @@ Two modifiers compose with the kinds above:
 - a leading `%` switches to [recursive directory search](#recursive-search-);
 - any segment may contain [`{{VAR}}` environment interpolation](#environment-variable-interpolation).
 
-**"Base directory"** above means: the process CWD in ambient mode, or the
-context's `base_dir` in explicit-context mode (typically the directory of the
+**"Working directory"** (`cwd`) above means: the process CWD in ambient mode, or the
+context's `cwd` in explicit-context mode (typically the directory of the
 document that authored the reference).
 
 The grammar reserves recognized introducers. A value beginning with `@`, `&`,
@@ -115,7 +115,7 @@ implicit reference.
 | "lives in my notes/knowledge-base vault"             | `vault:`     |
 | "is exactly this path"                               | absolute     |
 
-Bare paths are base-first, so a document-local copy shadows the repository
+Bare paths are `cwd`-first, so a document-local copy shadows the repository
 copy. Use `&README.md` when the repository-root identity is required, or
 `^README.md` for package → package-area → repository fallback.
 
@@ -124,29 +124,33 @@ copy. Use `&README.md` when the repository-root identity is required, or
 ### Explicit Relative (`./`, `../`)
 
 A leading `./` or `../` (or the `.\`/`..\` Windows spellings) pins the lookup
-to the base directory. There is exactly one candidate and no fallback.
+to the working directory. There is exactly one candidate and no fallback.
 
 ```text
-./README.md         → <base>/README.md
-../sibling/foo.md   → <base>/../sibling/foo.md   (normalized)
+./README.md         → <cwd>/README.md
+../sibling/foo.md   → <cwd>/../sibling/foo.md   (normalized)
 ```
 
 **Use it when** the file belongs to the authoring document and should move
 with it — an image next to a markdown file, a fragment included by a template.
 
+With an explicit context, a relative reference may not leave the
+[file tree](#the-file-tree-base_dir-and-the-relative-boundary): `../` that
+climbs above the tree root is a `RelativeTreeEscape` error, not a lookup.
+
 ### Implicit Relative (bare path)
 
 A bare path with no recognized prefix gets two candidates, in this order:
 
-1. the **base directory**, then
+1. the **working directory** (`cwd`), then
 2. the **root of the enclosing git repository** (when one is known).
 
 ```text
-docs/spec.md        → <base>/docs/spec.md, then <git_root>/docs/spec.md
+docs/spec.md        → <cwd>/docs/spec.md, then <git_root>/docs/spec.md
 ```
 
 If no repository is known, the
-base directory is the only candidate. When the base *is* the repository root,
+working directory is the only candidate. When `cwd` *is* the repository root,
 the two candidates collapse into one. A miss returns `Ok(None)`.
 
 ```rust,no_run
@@ -164,7 +168,12 @@ let path = FileReference::new("README.md")?.resolve()?;
 
 The path is used exactly as written — one candidate, no search. POSIX
 (`/etc/hosts`), Windows drive (`C:\cfg.toml`), and UNC paths are all
-recognized.
+recognized on every host, but only resolve on a host where they are absolute.
+Nothing is translated between operating systems: resolving `C:\cfg.toml` on
+macOS or Linux, or `/etc/hosts` on Windows (where it names no drive), fails
+with `ForeignAbsolutePath` rather than being probed against the process's
+working directory or current drive. The same check applies when interpolation
+produces the absolute path.
 
 ```rust,no_run
 use biscuit_file::FileReference;
@@ -246,8 +255,8 @@ configured root equal to an intrinsic root is searched once, as `Magic`.
 
 A relative configured root is joined onto the captured request directory, not
 the process working directory, and the tier test uses that same absolute path.
-For the ambient `resolve_from(base)` form the request directory is `base`, so
-a relative root follows `base`; earlier releases interpreted it against the
+For the ambient `resolve_from(cwd)` form the request directory is `cwd`, so
+a relative root follows `cwd`; earlier releases interpreted it against the
 process working directory.
 
 The first candidate confirmed to be a regular file wins. Missing and
@@ -291,7 +300,7 @@ from.
 ### Repository Root (`&`) and Repository Scoped (`^`)
 
 `&path` has exactly one candidate: `<repository_root>/path`. `^path` searches
-the package root containing the reference base, then its package-area root,
+the package root containing the reference `cwd`, then its package-area root,
 then the repository root. Missing levels and duplicate roots are skipped.
 Both forms require a repository and reject lexical `..` escapes plus existing
 symlink, junction, or reparse targets that resolve outside it.
@@ -361,7 +370,7 @@ against become traversal *starting points*:
 
 ```text
 %@README.md         → search every magic root in order, recursively, for "README.md"
-%./config.toml      → search under the base directory for "config.toml"
+%./config.toml      → search under the working directory for "config.toml"
 %@docs/spec.md      → find any "spec.md" whose parent path ends with "docs"
 %vault:notes.md     → search all vault roots for "notes.md"
 ```
@@ -443,42 +452,190 @@ let request = FileResolutionContext::new(&launch_dir)
     .add_vault(repo_root.join("notes"));
 
 // A file-backed document becomes the authoring source: its references
-// resolve with base_dir = the document's parent directory, while every
+// resolve with cwd = the document's parent directory, while every
 // process-state inputs carry over while repository scopes are selected again
-// from the catalog for the document's base.
+// from the catalog for the document's directory.
 let document = request.for_source(repo_root.join("docs/guide.md"));
 let resolved = FileReference::new("./images/diagram.png")?
     .resolve_in_context(&document)?;
 
 // Nested documents derive again — still no rediscovery.
 let nested = document.for_source(repo_root.join("includes/chapter.md"));
-assert_eq!(nested.base_dir(), repo_root.join("includes"));
+assert_eq!(nested.cwd(), repo_root.join("includes"));
 # let _ = resolved;
 # Ok::<(), biscuit_file::FileReferenceError>(())
 ```
 
-`FileResolutionContext::new(base_dir)` captures the process environment and
-the cross-platform home directory once. Everything trusted — the repository
+`FileResolutionContext::new(cwd)` captures the process environment and
+the cross-platform home directory once. Variables whose name or value is not
+valid Unicode are left out of the snapshot, so a reference naming one fails
+with `MissingEnvironmentVariable`. `with_env(map)` **replaces** that snapshot
+rather than adding to it — after
+`.with_env(HashMap::from([("APP".into(), "x".into())]))`, `{{HOME}}` is
+missing. To add variables while keeping the captured ones, extend a copy of
+`ctx.env()` and pass that. Everything trusted — the repository
 scope catalog plus magic and vault roots — is *supplied by you*; `biscuit-file`
 deliberately leaves that discovery to the caller so the context is a pure
-data snapshot. The base should be an absolute directory.
+data snapshot.
+
+Every directory the context treats as a location must be absolute: the
+request and document `cwd`, `with_base_dir`, the repository, package, and
+package-area roots, a captured home, and every directory of the
+[launch `@` scope](#the-launch--scope), including its request directory when
+the scope was replaced with `with_launch_magic_scope`. Building or deriving a context never
+fails, but `validate()` (which every resolver entry point and `PortablePath`
+run first) rejects a relative one with `RelativeContextDirectory`, naming
+which `ContextAnchor` it was:
+
+```rust
+let ctx = FileResolutionContext::new("docs"); // relative
+assert!(matches!(
+    ctx.validate(),
+    Err(FileReferenceError::RelativeContextDirectory { anchor: ContextAnchor::RequestDirectory, .. })
+));
+```
+
+A relative directory would make every probe depend on the process working
+directory at resolution time, so a captured context could resolve
+differently after a `chdir`. Three inputs keep their own, different rules and
+may be relative: environment values (a relative `{{VAR}}` expansion resolves
+like any relative reference), configured magic roots (anchored on the
+captured request directory), and vault roots. The ambient `home_dir()`
+provider reports a relative `$HOME` as no home directory, so `new()` never
+captures one.
 
 ### Deriving contexts for documents
 
 When a document inside the request becomes the author of further references,
 derive a child context instead of building a new one:
 
-- `for_source(source_path)` — records the source and sets `base_dir` to the
+- `for_source(source_path)` — records the source and sets `cwd` to the
   source's parent. Use it for file-backed documents.
-- `for_base(base_dir)` — new base, no source path. Use it for in-memory
+- `for_cwd(cwd)` — new `cwd`, no source path. Use it for in-memory
   documents.
-- `with_source_path(path)` records provenance *without* moving `base_dir`;
+- `with_source_path(path)` records provenance *without* moving `cwd`;
   use a derivation method when both must move together.
 
 Derivations clone the captured snapshot and recompute repository, package-area,
-and package anchors from the catalog for the new base. A trusted external base
-outside the catalog clears those anchors. No derivation re-reads process state
-or performs discovery.
+and package anchors from the catalog for the new `cwd`. They keep the
+[file tree](#the-file-tree-base_dir-and-the-relative-boundary) and the reader
+opt-in. No derivation re-reads process state or performs discovery.
+
+A derived context also keeps the `validate()` failure of the context it was
+derived from, captured before the catalog replaced any anchor or a trusted
+derivation dropped the explicit root. Correct a setting with a builder *before*
+deriving; a builder applied to the derived context cannot clear the retained
+failure, because it describes the originating request:
+
+```rust,no_run
+# use biscuit_file::{FileResolutionContext, FileReferenceError};
+let request = FileResolutionContext::new("/work/repo/docs")
+    .with_repository_root("/work/repo")
+    .with_base_dir("relative"); // invalid: relative explicit root
+let document = request.for_trusted_external_cwd("/prompts"); // root dropped here
+assert!(matches!(
+    document.validate(),
+    Err(FileReferenceError::RelativeContextDirectory { .. })
+));
+```
+
+- `for_source_reference(&reference, resolved_source)` — like `for_source`,
+  but also keeps the `~` or leading `{{VAR}}` anchor of the reference that
+  opened the document, so that anchor can become the new document's tree root
+  (see below). The caller must already have resolved and accepted
+  `resolved_source`; this neither re-resolves the reference nor grants
+  permission to open the file.
+
+### The file tree: `base_dir` and the relative boundary
+
+A context describes a file tree with two directories:
+
+| Term | Meaning |
+|------|---------|
+| `cwd()` | Where `./`, `../`, and bare references start — usually the authoring document's directory |
+| `base_dir()` | The root of the whole tree, and the boundary relative references must stay inside |
+
+```rust,no_run
+use biscuit_file::{BaseDirOrigin, FileResolutionContext};
+
+// In a repository, the tree root is the repository root.
+let ctx = FileResolutionContext::new("/work/repo/biscuit-file/docs")
+    .with_repository_root("/work/repo");
+assert_eq!(ctx.base_dir(), std::path::Path::new("/work/repo"));
+assert_eq!(ctx.base_dir_origin(), &BaseDirOrigin::Repository);
+
+// Outside one, name the tree yourself.
+let ctx = FileResolutionContext::new("/Users/me/docs/notes")
+    .with_base_dir("/Users/me/docs");
+assert_eq!(ctx.repository_root(), None);
+assert!(ctx.base_dir_is_boundary());
+```
+
+**How the tree root is chosen.** The first rule that applies wins, and
+`base_dir_origin()` reports which one did:
+
+```mermaid
+flowchart TD
+    A{Repository root supplied<br/>or selected by the catalog?} -- yes --> R[Repository]
+    A -- no --> B{with_base_dir?}
+    B -- yes --> E[Explicit]
+    B -- no --> C{A vault contains cwd?}
+    C -- yes --> V["Vault (deepest; configured roots,<br/>then captured VAULT, win ties)"]
+    C -- no --> D{"Opened through ~ or {{VAR}}<br/>that contains the document?"}
+    D -- yes --> H["Home / Environment { name }"]
+    D -- no --> F["Fallback: base_dir = cwd<br/>(no boundary)"]
+```
+
+- Inside a repository the tree root is always the repository root. A
+  `with_base_dir` equal to it is accepted; any other directory makes
+  `validate()` fail with `BaseDirNotRepositoryRoot`.
+- An explicit root outranks a containing vault, and stays a boundary even
+  when it equals `cwd`. Read `base_dir_origin()` or `base_dir_is_boundary()`;
+  never infer the boundary by comparing `base_dir()` with `cwd()`.
+- Only a captured, absolute home directory or environment value that
+  lexically contains the opened document qualifies as an anchor. An unset,
+  relative, or other-OS value (`C:\notes` on macOS) supplies nothing. A shell
+  expands an unquoted `~` before the program sees it, so only a reference that
+  reaches the library still spelled with `~` carries the anchor.
+- An explicit context never discovers a repository. The ambient
+  `resolve()` / `resolve_from()` / `complete_partial()` methods carry no tree
+  at all, so they behave like a fallback root.
+
+**The boundary.** When the tree root is a boundary, an explicit or bare
+relative reference must stay inside it, both as written and where it really
+lands:
+
+```text
+tree: /work/repo          cwd: /work/repo/docs
+
+../README.md                 → /work/repo/README.md        allowed
+./../../outside.md           → RelativeTreeEscape
+a/../../../outside.md        → RelativeTreeEscape
+docs/current → docs/v2       (in-tree symlink)   ./current/x.md  allowed
+docs/shared → /opt/team-docs (out-of-tree link)  ./shared/x.md   RelativeTreeEscape
+```
+
+- Every candidate is checked before any is probed. A bare reference whose
+  repository-root fallback candidate would leave the tree is rejected even if
+  the `cwd` candidate exists; resolution never silently skips to another root.
+- The "where it lands" check canonicalizes the existing target, or its
+  deepest existing ancestor for a file not yet created, so a symlink,
+  junction, or reparse point leading out of the tree is an escape. It shares
+  the check `&` and `^` use for the repository. Like that check it is a rule
+  about references, not a sandbox: the filesystem can change between the
+  check and a later open.
+- An absolute reference, including a `{{VAR}}` that expands to an absolute
+  path, is not relative and is never checked.
+- `&` and `^` stay repository-only: outside a repository they fail with
+  `OutsideRepository` even when `with_base_dir` is set.
+- A **fallback** tree root is not a boundary; `../x.md` resolves as it always
+  did.
+
+**The reader opt-in.** `allow_external_relative()` lets relative references
+reach targets outside the tree, as written or through a symlink. It is off by
+default and copied to every derived context. It does not excuse an invalid
+`cwd`, authorize opening a file, or relax `&`/`^`.
+`external_relative_allowed()` reports it.
 
 ### The launch `@` scope
 
@@ -488,7 +645,7 @@ request," so it reads a separate, immutable `LaunchMagicScope`: the request
 directory plus the repository, package, and package-area roots selected for
 it. `new` captures it, and the anchor builders (`with_repository_root`,
 `with_repository_scope_catalog`, `with_package_root`, `with_package_area`)
-keep it in sync. `for_source`, `for_base`, and both trusted-external
+keep it in sync. `for_source`, `for_cwd`, and both trusted-external
 derivations copy it unchanged. A prompt loaded from `~/.myapp/prompts` or
 another repository that writes `@x.md` therefore searches the launch tree
 first, while its `./x.md`, `x.md`, `&x.md`, and `^x.md` keep their
@@ -511,20 +668,50 @@ diagnostics that list where an `@` reference looked.
 
 ### Trust boundaries and containment
 
-When a repository root is supplied, `validate()` enforces that the original
-request base and every normally-derived base lie **lexically inside** that
-root (component-aware, after `.`/`..` normalization and Windows
-verbatim-prefix reduction; symlinks are not canonicalized, so worktree
-identity is preserved). Violation is the typed
-`RepositoryRootNotContainingSource`. This is a trust check on the
-caller-provided root, not a filesystem sandbox.
+After the absolute-directory check above (which trusted derivations do not
+skip: trust lets a document change trees, not use a relative directory),
+`validate()` enforces that the original request `cwd` and every
+normally-derived `cwd` lie **lexically inside** their tree root
+(component-aware, after `.`/`..` normalization and Windows verbatim-prefix
+reduction; symlinks are not canonicalized, so worktree identity is preserved).
+A repository tree reports a violation as `RepositoryRootNotContainingSource`;
+any other boundary tree as `CwdOutsideBaseDir`. A fallback tree contains
+every `cwd`. This is a trust check on the caller-provided roots, not a
+filesystem sandbox. A normal derivation that leaves the tree keeps the tree,
+so `validate()` reports the escape rather than a new tree absorbing it.
 
-Some documents legitimately live *outside* the repository — one found through
-a configured home, magic, or vault root (say, `~/.myapp/prompts/example.md`).
-Derive those with `for_trusted_external_source()` / `for_trusted_external_base()`:
-the new authoring base is exempt from containment, but the original request
-boundary is still checked, so derivation can never launder an invalid request
-snapshot into a valid one.
+Some documents legitimately live *outside* the tree — one found through a
+configured home, magic, or vault root (say, `~/.myapp/prompts/example.md`).
+Derive those with `for_trusted_external_source()` /
+`for_trusted_external_cwd()` / `for_trusted_external_source_reference()`. When
+the document is still inside the current tree they behave like the normal
+derivations. Otherwise the document gets a tree of its own:
+
+```mermaid
+flowchart LR
+    T[Trusted external document] --> Q{Catalog assigns<br/>it a repository?}
+    Q -- yes --> R[That repository]
+    Q -- no --> V{In a vault?}
+    V -- yes --> VR[The vault]
+    V -- no --> O{"Opening ~ / {{VAR}}<br/>anchor contains it?"}
+    O -- yes --> H[Home / Environment]
+    O -- no --> F[Fallback: its cwd]
+```
+
+- The source repository, package, and package-area anchors are dropped unless
+  a catalog assigns the document a repository, and the originating tree's
+  `with_base_dir` does not carry over. No repository is discovered. A caller
+  that knows the destination's topology supplies it with the builders after
+  deriving.
+- The launch `@` scope is unchanged, so `@x.md` still searches the launch
+  tree.
+- The original request is still validated against the tree it was captured
+  with, and the originating context's own failure (a relative or conflicting
+  explicit root, a relative package anchor) is retained, so derivation can
+  never launder an invalid request snapshot into a valid one.
+
+Trusting an external document and letting relative references leave a tree
+(`allow_external_relative()`) are separate decisions.
 
 Resolution checks containment itself only for `&` and `^`. A caller that
 confines *other* kinds to a directory, such as a tool that lets a document
@@ -553,13 +740,17 @@ does not exist is `Io`.
 
 | Method | Purpose |
 |--------|---------|
-| `new(base_dir)` | Capture environment/home once; establish the request's initial base |
-| `for_source(source_path)` | Derive a child whose base is `source_path.parent()` |
-| `for_base(base_dir)` | Derive a child base with no source path |
+| `new(cwd)` | Capture environment/home once; establish the request's initial `cwd` |
+| `for_source(source_path)` | Derive a child whose `cwd` is `source_path.parent()` |
+| `for_cwd(cwd)` | Derive a child `cwd` with no source path |
 | `for_trusted_external_source(source_path)` | File-backed child across an accepted external trust root |
-| `for_trusted_external_base(base_dir)` | In-memory child across an accepted external trust root |
+| `for_trusted_external_cwd(cwd)` | In-memory child across an accepted external trust root |
+| `for_source_reference(&reference, resolved_source)` | `for_source` that keeps the opening `~`/`{{VAR}}` anchor as a candidate tree root |
+| `for_trusted_external_source_reference(&reference, resolved_source)` | Trusted-external counterpart of `for_source_reference` |
 | `with_repository_root(root)` | Supply the trusted worktree root |
-| `with_repository_scope_catalog(catalog)` | Supply topology and select repository/package scopes for this base |
+| `with_base_dir(dir)` | Name the tree root outside a repository (must equal the repository root inside one) |
+| `allow_external_relative()` | Let relative references leave the tree (copied to children) |
+| `with_repository_scope_catalog(catalog)` | Supply topology and select repository/package scopes for this `cwd` |
 | `with_package_root(package)` | Supply a package root for compatibility callers without a catalog |
 | `with_package_area(area)` | Supply the authoritative package-area root |
 | `with_home_dir(home)` / `without_home_dir()` | Override or explicitly clear captured home |
@@ -568,10 +759,11 @@ does not exist is `Io`.
 | `add_magic_path_with_tier(path, position, tier)` | Add a magic root with an explicit `MagicPathTier` (`User` forces the user tier) |
 | `add_vault(path)` | Add an authoritative vault root |
 | `with_launch_magic_scope(scope)` | Seed the launch `@` scope on a context rebuilt around an external source |
-| `source_path()`, `base_dir()`, `repository_root()`, `package_root()`, `package_area()`, `home_dir()`, `env()` | Inspect captured inputs |
+| `source_path()`, `cwd()`, `repository_root()`, `package_root()`, `package_area()`, `home_dir()`, `env()` | Inspect captured inputs |
+| `base_dir()`, `base_dir_origin()`, `base_dir_is_boundary()`, `external_relative_allowed()` | Inspect the file tree and the reader opt-in |
 | `launch_magic_scope()`, `magic_path_registrations()` | Inspect the launch `@` scope and configured magic roots with their tiers |
 | `magic_search_roots()` | The ordered, deduplicated `@` roots with provenance |
-| `validate()` | Check repository containment of request and derived bases |
+| `validate()` | Report a failure retained from the originating context, then check that every context and launch-scope directory is absolute, tree containment of request and derived `cwd`s, and an explicit root against the repository |
 
 ## Choosing an Entry Point
 
@@ -582,8 +774,8 @@ does not exist is `Io`.
 | `candidate_plan(&ctx)` | Explicit, authoritative context | `Result<Vec<ResolutionCandidate>, _>` | Inspect the full ordered plan without probing |
 | `complete_partial_in_context(token, &ctx)` | Explicit, authoritative context | `Result<Option<PartialCompletion>, _>` | Completion that must agree with execution |
 | `resolve()` | Live ambient state | `Result<Option<PathBuf>, FileReferenceError>` | Simple top-level calls; compatibility |
-| `resolve_from(base)` | Explicit base + live ambient state | `Result<Option<PathBuf>, FileReferenceError>` | Document-relative callers not yet carrying a context |
-| `complete_partial(token, base)` | Explicit base + live discovery | `Result<Option<PartialCompletion>, _>` | Compatibility completion |
+| `resolve_from(cwd)` | Explicit `cwd` + live ambient state | `Result<Option<PathBuf>, FileReferenceError>` | Document-relative callers not yet carrying a context |
+| `complete_partial(token, cwd)` | Explicit `cwd` + live discovery | `Result<Option<PartialCompletion>, _>` | Compatibility completion |
 
 `resolve_relative()` and the `url`-gated `resolve_target()` are also ambient
 compatibility operations.
@@ -592,8 +784,8 @@ compatibility operations.
 stored on the *context*. Roots added directly to a `FileReference` via its
 own `add_magic_path()` / `add_vault()` builders apply **only** to the ambient
 `resolve()` / `resolve_from()` path, where the request directory — the local
-root without a repository, and the base for relative magic roots — is the
-process CWD or `base` respectively.
+root without a repository, and the anchor for relative magic roots — is the
+process CWD or `cwd` respectively.
 
 ### `FileReference` method summary
 
@@ -605,14 +797,14 @@ process CWD or `base` respectively.
 | `payload()` | Authored text after `%`, the sigil, and its optional `/` (`@/@x.md` → `@x.md`); name a reference in diagnostics with this, not prefix trimming |
 | `add_magic_path(path, position)` | Add an ambient-path magic root |
 | `add_vault(path)` | Add an ambient-path vault root |
-| `resolve()` / `resolve_from(base)` | Resolve through the ambient compatibility APIs |
+| `resolve()` / `resolve_from(cwd)` | Resolve through the ambient compatibility APIs |
 | `resolve_in_context(ctx)` | Resolve through the explicit API; no-match maps to `Ok(None)` |
 | `resolve_detailed(ctx)` | Keep the detailed success/failure record |
 | `candidate_plan(ctx)` | Build the complete ordered plan, no filesystem probes |
 | `candidate_plan_with_order(ctx, order)` | Build the unprobed plan using an explicit `CandidatePlanOrder` |
 | `validate_repository_candidate(candidate, repository_root)` | Apply the shared `&`/`^` containment check |
 | `validate_contained_candidate(candidate, boundary)` | Check any kind's candidate against a caller-chosen boundary, lexically and through symlinks |
-| `complete_partial(token, base)` | Expand an ambient completion token |
+| `complete_partial(token, cwd)` | Expand an ambient completion token |
 | `complete_partial_in_context(token, ctx)` | Expand a completion token from the same roots as execution |
 | `resolve_relative(base)` | Resolve ambiently, return a lexical relative path |
 | `resolve_target()` | With `url`: distinguish `Resolved::Local` from `Resolved::Remote` |
@@ -639,7 +831,7 @@ retains:
 
 - `raw()` and `class()` — authored intent;
 - `effective_kind()` — post-interpolation anchoring;
-- `base_dir()`, optional `source_path()`, optional `repository_root()`;
+- `cwd()`, optional `source_path()`, optional `repository_root()`;
 - `candidates()` — the ordered candidates actually probed before the search
   stopped, each a `ProbedCandidate`;
 - `error()` — the underlying `FileReferenceError` (present for failures other
@@ -657,8 +849,8 @@ data — never re-derive it from the reference kind:
 
 | Variant | Meaning |
 |---------|---------|
-| `InvalidReference` | Syntax or an effective-anchoring invariant is invalid |
-| `MissingContext` | A required environment, home, vault, or repository input is unavailable |
+| `InvalidReference` | Syntax or an effective-anchoring invariant is invalid, or a candidate escapes its repository or file tree |
+| `MissingContext` | A required environment, home, vault, or repository input is unavailable, or the context fails `validate()` |
 | `NoMatch` | The complete applicable search found no regular file |
 | `Io` | CWD access or a candidate metadata probe failed |
 | `UnsupportedRemote` | A remote reference was sent through local-path resolution |
@@ -668,7 +860,7 @@ Every `ResolutionCandidate` exposes `path()` and `provenance()`; the
 `PackageArea`, `Home`, `Magic`, `Vault`, `Absolute`, and `LocalRoot`.
 `LocalRoot` marks the request directory serving as an `@` chain's local root
 when there is no repository; it is deliberately distinct from `Source` (the
-authoring base of bare and explicit-relative references), so
+authoring `cwd` of bare and explicit-relative references), so
 `CandidatePlanOrder::AuthoringBaseFirst` never promotes it. Every attempted
 `ProbedCandidate` adds a
 `ProbeDisposition`:
@@ -694,11 +886,15 @@ unsupported token recursive.
 
 The parity guarantee: with one shared `FileResolutionContext`, completion and
 execution consume the same captured roots in the same precedence (implicit:
-base, then repository; magic: the one tier-ordered chain from
+`cwd`, then repository; magic: the one tier-ordered chain from
 [Magic](#magic-), read from the launch `@` scope, with the typed path segment
 appended only after the roots are selected; duplicates removed in first-seen
 order).
-A consumer that
+Implicit-relative completion is held to the same
+[file-tree boundary](#the-file-tree-base_dir-and-the-relative-boundary) as
+resolution: a token whose roots would leave the tree returns
+`RelativeTreeEscape` unless the context opted in with
+`allow_external_relative()`. A consumer that
 enumerates those roots in order can pass its emitted value unchanged to
 `FileReference::new()` + `resolve_in_context()` and get the file it
 displayed. The ambient `complete_partial()` cannot see request-configured
@@ -712,6 +908,7 @@ The complete `FileReferenceError` vocabulary:
 | Variant | Trigger |
 |---------|---------|
 | `InvalidSyntax(message)` | Empty/malformed syntax, a rooted magic payload, invalid interpolation, or an injected grammar sigil |
+| `ForeignAbsolutePath { path }` | An absolute path (authored or interpolated) is not absolute on this host — a drive or UNC path on macOS/Linux, a `/` path on Windows |
 | `MissingEnvironmentVariable { name }` | `{{NAME}}` is absent from the selected environment snapshot |
 | `CurrentDirectory(source)` | An ambient operation could not read the CWD |
 | `Git(source)` | Ambient repository discovery failed for a reason other than "not a repository" |
@@ -719,10 +916,14 @@ The complete `FileReferenceError` vocabulary:
 | `VaultNotConfigured` | A vault reference has no explicit or captured `$VAULT` roots |
 | `UnsupportedUserHome(raw)` | A non-portable `~user` reference was authored |
 | `MissingHomeContext` | A home reference has no home directory in the explicit context |
-| `OutsideRepository { sigil, reference_cwd }` | `&` or `^` was used without a repository containing the reference base |
+| `OutsideRepository { sigil, reference_cwd }` | `&` or `^` was used without a repository containing the reference `cwd` |
 | `RepositoryEscape { .. }` | A repository sigil's lexical or resolved target escapes the repository |
 | `BoundaryEscape { reference, boundary, escaped_candidate }` | `validate_contained_candidate()` found the candidate outside the caller's boundary |
-| `RepositoryRootNotContainingSource { repository_root, source_path }` | The request base or a normal derived base fails lexical root containment |
+| `RepositoryRootNotContainingSource { repository_root, source_path }` | The request `cwd` or a normal derived `cwd` is outside the repository tree |
+| `CwdOutsideBaseDir { base_dir, cwd }` | The request `cwd` or a normal derived `cwd` is outside a non-repository boundary tree |
+| `RelativeContextDirectory { anchor, path }` | A context directory or tree anchor (`ContextAnchor`: request directory, working directory, base directory, repository/package/package-area root, home) is relative |
+| `BaseDirNotRepositoryRoot { base_dir, repository_root }` | `with_base_dir` names a directory other than the supplied repository root |
+| `RelativeTreeEscape { base_dir, candidate, reference }` | An explicit or bare relative reference leaves the file tree, as written or through a link |
 | `RelativePath { from, to }` | `resolve_relative()` cannot produce the requested lexical relative path |
 | `Io { path, source }` | A direct candidate metadata probe failed; records the candidate path |
 | `RemoteNotLocal(raw)` | A remote URL was passed to local-path resolution |
@@ -755,8 +956,8 @@ which belongs to the optional fetching API rather than local resolution.
 
    | Effective/authored kind | Direct candidate or recursive-root order |
    |-------------------------|------------------------------------------|
-   | Explicit relative | Base only |
-   | Implicit relative | Base, then repository root |
+   | Explicit relative | `cwd` only |
+   | Implicit relative | `cwd`, then repository root |
    | Absolute | The authored path only |
    | Home | Home directory only |
    | Magic | Local prepends, package, package area, local root, local appends, user prepends, home, user appends |
@@ -766,9 +967,15 @@ which belongs to the optional fetching API rather than local resolution.
    | Remote URL | No local candidates |
 
    Plans are lexically deduplicated preserving first-seen order, and every
-   entry retains its root provenance.
+   entry retains its root provenance. With an explicit context, every
+   relative candidate must lie lexically inside a boundary
+   [tree root](#the-file-tree-base_dir-and-the-relative-boundary), and every
+   `&`/`^` candidate inside the repository, or the plan fails before
+   anything is probed.
 
-5. **Probe (or traverse).** Direct candidates are checked with fallible
+5. **Probe (or traverse).** Before each probe, a relative or `&`/`^`
+   candidate's real landing (the canonical target, or its deepest existing
+   ancestor) is checked against the same root. Direct candidates are checked with fallible
    `std::fs::metadata`, not `Path::is_file()` — so permission problems are
    distinguishable from absence. `NotFound` records `Missing` and advances;
    an existing non-regular path records `NonFile` and advances; any other
@@ -780,14 +987,300 @@ which belongs to the optional fetching API rather than local resolution.
    matches lexically across roots, and takes the first.
 
 6. **Normalize.** Resolved local paths are made absolute with `.`/`..`
-   normalized lexically — symlinks are not canonicalized.
+   normalized lexically by the [path identity](#path-identity) rules (a `..`
+   at a root is dropped, so `/../a` stays absolute as `/a`) — symlinks are
+   not canonicalized.
 
 ## Relative Path Computation
 
-`resolve_relative()` resolves ambiently, then lexically normalizes the target
-and the selected base, strips their common prefix, adds `..` for the base's
-remaining components, and appends the target's remaining components. When no
-lexical relative path can be produced, it reports `RelativePath`.
+`resolve_relative()` resolves ambiently, lexically normalizes the target and
+the selected base directory, and returns the route between them by the
+[path identity](#path-identity) rules below. When no lexical relative path
+exists, for example because the target is on another Windows drive or share,
+it reports `RelativePath` rather than returning an absolute path.
+
+## Path Identity
+
+`PathIdentity` answers two questions without touching the filesystem: "is this
+path inside that directory?" (`starts_with`, `strip_prefix`) and "what is the
+relative route from this directory to that path?" (`relative_from`). It is the
+one implementation of both in this crate, and Darkmatter's link normalization
+uses it too.
+
+```rust
+use std::path::Path;
+use biscuit_file::PathIdentity;
+
+let target = PathIdentity::new(Path::new("/repo/assets/logo.png"));
+let docs = PathIdentity::new(Path::new("/repo/docs/guide"));
+
+let route = target.relative_from(&docs).unwrap();
+assert_eq!(route.parent_hops(), 2);                 // ../..
+assert_eq!(route.forward().len(), 2);               // assets/logo.png
+assert_eq!(route.to_path_buf(), Path::new("../../assets/logo.png"));
+```
+
+The rules, each with an example:
+
+| Rule | Example |
+| ---- | ------- |
+| Whole names are compared, never text prefixes | `/opt/config-old` is **not** inside `/opt/config` |
+| `.` is dropped and `..` removes the name before it | `/a/b/../c/./d` equals `/a/c/d` |
+| `..` never climbs above a root | `/../a` equals `/a` |
+| A relative path keeps the `..` it cannot cancel | `a/../../b` equals `../b`, not `b` |
+| The "from" side of a route is always a directory | from `/repo/README` to `/repo/x.md` is `../x.md` |
+| A Windows drive letter is case-insensitive; names are not | `c:\x` equals `C:\x`; `C:\Repo` differs from `C:\repo` |
+| A verbatim drive or share equals its legacy spelling | `\\?\C:\x` equals `C:\x`; `\\?\UNC\srv\share\x` equals `\\srv\share\x` |
+| Under `\\?\`, `.` and `..` are ordinary names | `\\?\C:\a\..\b` keeps three names and differs from `C:\b` |
+| Different drives and shares are separate roots | no route exists from `C:\repo` to `D:\x` |
+| Names are compared as raw platform data | two names differing only in invalid Unicode stay distinct |
+
+What it deliberately does **not** do: it does not resolve symlinks (so
+`/private/tmp/x` and `/tmp/x` on macOS differ), does not case-fold names, and
+does not check that anything exists. Failing to recognize two spellings of one
+file is acceptable; treating two different files as one is not.
+
+A route keeps its generated `..` hops apart from the names copied from the
+target, because a Windows verbatim path can contain a literal directory named
+`..`. `to_path_buf()` joins the two and so loses that distinction; it is meant
+for paths where no such name can occur.
+
+Resolution and context selection normalize native paths by the same rules
+before they compare them, so every surface agrees with `PathIdentity` about
+what a path names. That covers resolved targets, candidate deduplication,
+recursive filters, containment checks (the `&`/`^` repository boundary and
+the file-tree boundary), tree-root, vault, and magic-root selection,
+repository-catalog scope selection, and `resolve_relative()`:
+
+```text
+/../repo/docs/x.md  → /repo/docs/x.md  (a `..` at the root is dropped)
+C:\..\..\repo       → C:\repo          (and at a drive root)
+\\?\C:\a\..\b       → \\?\C:\a\..\b    (literal names under `\\?\`)
+```
+
+A verbatim path without dot segments is then reduced to its legacy spelling,
+so `\\?\C:\repo` and `C:\repo` select the same tree. Containment additionally
+checks where a candidate really lands; see
+[Trust boundaries and containment](#trust-boundaries-and-containment).
+
+## Portable References: `PortablePath`
+
+`PortablePath` answers "how should I write a link to this file so it keeps
+working when the document, the repository, or the host changes?" Give it an
+absolute path or an authored `FileReference`; it returns the most portable
+reference that verifiably resolves back to the same file.
+
+```rust,no_run
+use biscuit_file::{FileReference, FileResolutionContext, PortabilityPreference, PortablePath};
+
+// The document being written lives in <repo>/apps/web/docs.
+let ctx = FileResolutionContext::new("/work/repo/apps/web/docs")
+    .with_repository_root("/work/repo");
+
+// A path input: the strategy picks the form.
+let found = PortablePath::from_path("/work/repo/foo.md").with_ctx(&ctx).file_reference()?;
+assert_eq!(found.reference().raw(), "&foo.md");
+assert_eq!(found.strategy(), &PortabilityPreference::RepoRoot(None));
+
+// A reference input: anchors the author chose are kept, positions are cleaned.
+let kept = PortablePath::from_reference(FileReference::new("^/foo.md")?).with_ctx(&ctx).file_reference()?;
+assert_eq!(kept.reference().raw(), "^/foo.md");
+let cleaned = PortablePath::from_reference(FileReference::new("../../../foo.md")?)
+    .with_ctx(&ctx)
+    .file_reference()?;
+assert_eq!(cleaned.reference().raw(), "&foo.md");
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+### How a reference is chosen
+
+```mermaid
+flowchart TD
+    S[file_reference] --> C{"Settings valid?<br/>(builders, filters, absolute path input)"}
+    C -- no --> IC[Err: InvalidConfiguration / InvalidTarget]
+    C -- yes --> X["Context: with_ctx clone, or capture cwd,<br/>home, env and discover the repository"]
+    X --> P{Next preference?}
+    P -- none left --> N[Err: NoStrategyMatched]
+    P -- AuthoredIntent --> I{"Reference input in<br/>an intent form?"}
+    I -- yes --> K["Ok: the input, unchanged<br/>(findings for problems)"]
+    I -- no --> P
+    P -- a target preference --> T{"Target known?<br/>(resolved once, on first use)"}
+    T -- "no single target" --> U[Err: UnresolvableInput]
+    T -- yes --> G{"Can this preference<br/>spell the target?"}
+    G -- "no: NotApplicable" --> P
+    G -- yes --> V{"Resolve the spelling in the same context:<br/>same file, inside the tree?"}
+    V -- "no: Shadowed / Rejected" --> P
+    V -- "lookup failed (I/O)" --> F["Err: ProbeFailed<br/>(this preference's attempt recorded last)"]
+    V -- yes --> M["Ok: PortableReference<br/>(reference, strategy, attempts, findings)"]
+```
+
+Every preference that runs leaves an `Attempt`, so the result (or the error)
+explains why earlier preferences did not win.
+
+### The strategy
+
+A strategy is an ordered list of `PortabilityPreference`s. Each is tried in
+turn; the first whose reference verifies wins. The default:
+
+| # | Preference | Writes | Applies when |
+| - | ---------- | ------ | ------------ |
+| 1 | `AuthoredIntent(IntentForms::ALL)` | the input, unchanged | a reference input is `~`, `@`, `^`, `&`, `vault:`, a URL, a `%` search, or starts with a portable `{{VAR}}` |
+| 2 | `SameDirRelative` | `./x.md` (`./` for `cwd` itself) | the target's parent is `cwd` |
+| 3 | `ChildDir` | `./a/b/x.md` | the target is below a subdirectory of `cwd` |
+| 4 | `PeerDir` | `../sibling/x.md` | one hop up, then down |
+| 5 | `ImmediateParentDir` | `../x.md` | the target's parent is `cwd`'s parent |
+| 6 | `RepoRoot(None)` | `&path/x.md` | the context has a repository containing the target |
+| 7 | `EnvRootedPath` | `{{NAME}}/x.md` | a [portable variable](#portable-environment-variables) is an absolute prefix |
+| 8 | `HomeDir` | `~/x.md` | the target is under the home directory |
+| 9 | `AbsolutePath` | the absolute path | always; the caller's cue to warn |
+
+The relative preferences only write a route that stays inside the file tree
+(`base_dir`). Under a [fallback tree](#the-file-tree-base_dir-and-the-relative-boundary),
+which is just `cwd`, any upward route counts as leaving the tree.
+
+Not in the default, available with `with_strategy`:
+
+- `ParentDir`: any in-tree route that goes up (`../../x.md`). Without it, a
+  deep-parent target outside a repository falls through to the anchored forms:
+  from `notes/a/b`, `notes/x.md` becomes `~/notes/x.md` or an absolute path,
+  not `../../x.md`.
+- `ExternalRelativePath`: a route that leaves the tree. Readers of such links
+  must opt in with `allow_external_relative()`; `PortablePath` verifies the
+  link that way.
+- `RepoMultiPath(filter)` (`^`) and `MagicPath(filter)` (`@`): searched forms.
+  They are used only when the target exists and the lookup finds that very
+  file; a spelling that finds another file first is recorded as `Shadowed`
+  and the next root is tried.
+
+The optional string on `RepoRoot`, `RepoMultiPath`, and `MagicPath` is an
+eligibility filter, never a new root: `RepoRoot(Some("docs"))` only considers
+targets below `<repo>/docs` and still writes `&docs/x.md`. A `MagicPath`
+filter is a reference such as `~/.claudine/prompts` that must name one of the
+context's `@` search roots; results are spelled from that root (`@x.md`).
+
+Where `AuthoredIntent` sits matters: first means "never touch an author's
+sigil"; after `SameDirRelative` means "keep sigils unless `./x` reaches the
+same file"; absent means "normalize everything" (URLs and `%` searches are
+then refused with `NormalizationUnsupported`, never rewritten).
+
+### Reference inputs
+
+| Input | Treatment |
+| ----- | --------- |
+| intent forms (above) | kept exactly as written, with findings for problems |
+| `./`, `../`, bare, absolute, a non-portable `{{VAR}}` | resolved to one target, then run through the strategy |
+
+- A link already in the chosen form is returned as written: `foo.md` and
+  `./foo.md` both stay when the lookup finds `foo.md` next to the document. A
+  bare link that only resolves through the repository-root fallback is not a
+  same-directory link and is rewritten.
+- Running the result back through `PortablePath` returns it unchanged.
+- A single-location input that names a missing file still has a target
+  (`../../new.md` can become `&new.md`). A search with no match (`missing.md`
+  with two candidate roots, `@missing.md` when not kept), a boundary escape, a
+  missing anchor, or an I/O failure gives `UnresolvableInput`; keep the link
+  as authored and report the finding.
+- `PortablePath` takes a path only. A link layer splits `#fragment`, `?query`,
+  or `:line` off first and puts it back on the result.
+
+### Verification
+
+Every candidate is parsed back with `FileReference` and resolved in the same
+context, including the boundary and its symlink check:
+
+- single-location forms (`./`, `../`, `&`, `~`, absolute, an absolute
+  `{{VAR}}`) may name a file that does not exist yet;
+- searched forms (`@`, `^`) need the file to exist and be the lookup's first
+  match;
+- a target reached through a symlink that leads out of the tree cannot be
+  written relative; it falls through to a later preference.
+
+A generated spelling is refused when its text would not read back as the same
+names: a Unix name containing `\`, `{{…}}` inside a name, a non-Unicode name
+(`UnrenderableTarget`, even with `AbsolutePath`). A name starting with a sigil
+is protected by `./` (`./@notes.md`).
+
+### Portable environment variables
+
+A variable is portable when it is declared, either in
+`PORTABLE_ENV_VARIABLES` (comma-separated, read from the context's captured
+environment) or with `.with_portable_env(["CONFIG_DIR"])`. Invalid names are
+skipped and reported as `InvalidPortableVariableName`. Only a value that is an
+absolute path on this host and a whole-component prefix of the target can
+anchor it; the deepest anchor wins, then name order.
+
+```text
+CONFIG_DIR=/opt/config, target /opt/config/x.json  →  {{CONFIG_DIR}}/x.json
+CONFIG_DIR=../shared                                →  not eligible (NotAbsolute)
+CONFIG_DIR=/opt/conf                                →  not eligible (NotAPrefix)
+```
+
+### Builders and captured state
+
+- `with_ctx(&ctx)` evaluates against a clone of the context: no discovery and
+  no live reads. Reuse one context for a batch of links.
+- Without a context, `PortablePath` captures the working directory (or
+  `with_cwd`), home, and environment once, and discovers the repository from
+  `cwd`. `with_base_dir` names a non-repository tree; inside a repository it
+  must equal the repository root.
+- `with_ctx` together with `with_cwd` or `with_base_dir` is an
+  `InvalidConfiguration`: derive the context instead.
+- A relative directory is `InvalidConfiguration(RelativeDirectory)` before any
+  preference runs, whether it came from `with_cwd`/`with_base_dir` or from a
+  `with_ctx` context that fails `validate()`. Even an `AbsolutePath`-only
+  strategy does not run.
+
+### Diagnostics
+
+`file_reference()` returns `Result<PortableReference, PortablePathError>`.
+Both sides carry the attempts:
+
+- `attempts()`: one `Attempt` per preference tried, with its `outcome`
+  (`Matched`, `NotApplicable(reason)`, `Shadowed`, or `ProbeFailed(error)`)
+  and any earlier `rejected` candidates, such as each ineligible environment
+  variable or a shadowed `@` spelling;
+- `findings()`: problems with the returned reference (`TargetMissing`,
+  `TargetNotFile`, `NonPortableVariable`, `ResolutionFailed(..)`, …);
+- `PortablePathError` variants: `NoStrategyMatched`, `InvalidTarget`,
+  `UnresolvableInput`, `NormalizationUnsupported`, `InvalidConfiguration`,
+  `UnrenderableTarget`, `ProbeFailed`, `CwdUnavailable`,
+  `RepositoryDiscoveryFailed`. Errors are `Clone`; a filesystem failure is kept
+  as path, `ErrorKind`, and OS code, and is never reported as a missing file.
+- `ProbeFailed` has two sources, told apart by the attempts. When looking up a
+  preference's candidate fails (for example `@docs/x.md` probes
+  `blocker/docs/x.md` and `blocker` is a regular file), that preference is the
+  last attempt, its outcome is `AttemptOutcome::ProbeFailed` with the same
+  error, and its `rejected` list keeps the candidates tried before the failure.
+  When the target itself cannot be probed, no attempt has that outcome; the
+  attempts are only the `AuthoredIntent` ones that ran without a target.
+
+```text
+from_path("/repo/docs/x.md") from cwd /repo/other, strategy [SameDirRelative, MagicPath(None)],
+`@` roots: /repo/blocker (a regular file), /repo
+1. SameDirRelative   → NotApplicable(RouteShape { .. })
+2. MagicPath(None)   → ProbeFailed(/repo/blocker/docs/x.md, NotADirectory)
+Err(ProbeFailed { error: /repo/blocker/docs/x.md, attempts: [1, 2] })
+```
+
+```rust,no_run
+use biscuit_file::{AttemptOutcome, FileResolutionContext, PortablePath};
+
+let ctx = FileResolutionContext::new("/Users/me/notes/a/b").with_base_dir("/Users/me/notes");
+match PortablePath::from_path("/Users/me/notes/x.md").with_ctx(&ctx).file_reference() {
+    Ok(found) => {
+        // e.g. `~/notes/x.md` from HomeDir: no relative preference in the
+        // default strategy writes `../../x.md`.
+        println!("{} via {}", found.reference().raw(), found.strategy());
+        for attempt in found.attempts() {
+            if let AttemptOutcome::NotApplicable(reason) = &attempt.outcome {
+                println!("  {} skipped: {reason:?}", attempt.strategy);
+            }
+        }
+    }
+    // `Display` is a headline, then one line per attempt.
+    Err(error) => eprintln!("{error}"),
+}
+```
 
 ## Feature Flag
 

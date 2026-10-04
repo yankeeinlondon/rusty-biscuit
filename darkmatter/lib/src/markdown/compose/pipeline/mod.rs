@@ -54,7 +54,11 @@ impl Markdown {
             remote_fetch,
         );
         runtime.context_epoch.seed(options.context());
-        runtime.root_source = Some((options.source.clone(), options.source_derivation));
+        runtime.root_source = Some((
+            options.source.clone(),
+            options.source_derivation,
+            options.source_opening.clone(),
+        ));
 
         // Eagerly register discovered remote URLs and start fetching. The two
         // discovery paths gate independently: directive (`::file`/`::code`)
@@ -620,7 +624,7 @@ fn attribute_frontmatter_failure(
     failure.into_anchored(authored).with_on_disk_source(on_disk)
 }
 
-/// Records frontmatter unknown-root reads, each located at its top-level key.
+/// Records frontmatter undeclared-property reads, each located at its top-level key.
 fn add_frontmatter_candidates(
     report: &mut ComposeReport,
     stage: &'static str,

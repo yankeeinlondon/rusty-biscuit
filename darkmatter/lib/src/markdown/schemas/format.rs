@@ -607,27 +607,41 @@ mod tests {
         tempfile::tempdir().expect("create temp dir")
     }
 
+    /// An external document (a `cwd` in another repository) has no
+    /// repository of its own unless a catalog supplies one: a bare reference
+    /// neither borrows the request repository nor rediscovers the child's.
+    /// The request repository stays reachable through the launch `@` scope.
     #[test]
-    fn eager_file_validation_reuses_request_repository() {
+    fn eager_file_validation_of_an_external_document_keeps_only_the_launch_scope() {
         let request_repo = temp_dir();
         let nested_repo = temp_dir();
         std::fs::create_dir_all(request_repo.path().join(".git")).unwrap();
-        std::fs::create_dir_all(nested_repo.path().join(".git/docs")).unwrap();
+        std::fs::create_dir_all(nested_repo.path().join(".git")).unwrap();
+        std::fs::create_dir_all(nested_repo.path().join("docs")).unwrap();
         let request_target = request_repo.path().join("spec.md");
         std::fs::write(&request_target, "request").unwrap();
+        std::fs::write(nested_repo.path().join("spec.md"), "child decoy").unwrap();
         let context = biscuit_file::FileResolutionContext::new(request_repo.path())
             .with_repository_root(request_repo.path())
-            .for_trusted_external_base(nested_repo.path().join("docs"));
+            .for_trusted_external_cwd(nested_repo.path().join("docs"));
+        assert_eq!(context.repository_root(), None);
 
-        let resolved = resolve_file_reference_in_context(
+        let bare = resolve_file_reference_in_context(
             "spec.md",
+            Some(&nested_repo.path().join("docs")),
+            None,
+            Some(&context),
+        );
+        assert!(matches!(bare, Err(FileReferenceFailure::NoMatch { .. })), "{bare:?}");
+
+        let magic = resolve_file_reference_in_context(
+            "@spec.md",
             Some(&nested_repo.path().join("docs")),
             None,
             Some(&context),
         )
         .unwrap();
-
-        assert_eq!(resolved, request_target);
+        assert_eq!(magic, request_target);
     }
 
     #[test]

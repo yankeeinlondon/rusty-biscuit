@@ -538,7 +538,7 @@ pub(crate) fn run_execution_stage(
     wrapper_span: &tracing::Span,
     mut perf_collector: Option<&mut crate::perf::CommandPerfCollector>,
     invocation: &claudine::invocation_context::InvocationContext,
-) -> Result<(i32, Option<String>)> {
+) -> Result<crate::output::native_exit::NativeExit> {
     if let Some(WrapperHarness {
         source_path,
         source_context,
@@ -667,7 +667,12 @@ pub(crate) fn run_execution_stage(
         if let (Some(collector), Some(perf)) = (perf_collector.as_mut(), harness_perf) {
             collector.set_agent_perf(perf);
         }
-        Ok((harness_code, None))
+        // The harness loop reported its own attempts; the exit code is all
+        // that reaches this report.
+        Ok(crate::output::native_exit::NativeExit::new(
+            harness_code,
+            claudine::harness::ProcessTermination::Completed,
+        ))
     } else if use_structured {
         // Presence bracket for the direct structured-stream path (the
         // harness path above reports per attempt inside
@@ -741,7 +746,8 @@ pub(crate) fn run_execution_stage(
         if let Some(collector) = perf_collector.as_mut() {
             collector.set_agent_perf(result.telemetry.into_agent_perf(None));
         }
-        Ok((result.data, None))
+        // Both streams were forwarded live, so nothing was captured.
+        Ok(crate::output::native_exit::NativeExit::new(result.data, result.termination))
     }
 }
 

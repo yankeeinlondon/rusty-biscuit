@@ -45,6 +45,7 @@ pub(crate) fn execute_harness_attempt(
     claudine::harness::AttemptOutcome,
     Option<crate::perf::AgentExecutionPerf>,
     Option<IterationSummarySignals>,
+    crate::output::native_exit::NativeExit,
 )> {
     let _attempt_span = info_span!(
         "harness_attempt",
@@ -92,6 +93,14 @@ pub(crate) fn execute_harness_attempt(
         launch.clone()
     };
     let launch = &launch;
+    // Provider text Claudine relays (the captured stderr echo, the failure
+    // message built from it) masks echoes of the forwarded tail's values.
+    let tail_redactor = (!launch.provider_tail.is_empty())
+        .then(|| crate::commands::wrap::provider_tail_report::tail_redactor(&launch.provider_tail));
+    let mask = |text: String| match &tail_redactor {
+        Some(redactor) => redactor.redact(&text).to_string(),
+        None => text,
+    };
 
     // Resolve the runaway-output guards once for this attempt (Phase 6).
     // The model is taken from the `MODEL` env override or the frontmatter
@@ -160,6 +169,7 @@ pub(crate) fn execute_harness_attempt(
         guard_context,
         error_message,
         timeout_secs,
+        native_exit,
     ) = if use_structured
     {
         let summary_details = Arc::new(Mutex::new(
@@ -349,6 +359,12 @@ pub(crate) fn execute_harness_attempt(
         })
         .flatten();
 
+        let native_exit = crate::commands::wrap::exec::structured_native_exit(
+            summary.exit_code,
+            termination,
+            stream_result.stream_tails.as_ref(),
+        );
+
         (
             summary.exit_code,
             // The stream parser's semantic verdict rides alongside the native
@@ -357,13 +373,14 @@ pub(crate) fn execute_harness_attempt(
             termination,
             summary.session_id.clone(),
             effective_response,
-            summary.stderr_text.clone(),
+            summary.stderr_text.clone().map(mask),
             perf,
             iteration_signals,
             error_kind,
             stream_guard_context,
             summary.error_message.clone(),
             timeout_secs,
+            native_exit,
         )
     } else if effective_non_interactive {
         let capture = super::super::exec::run_child_capture(
@@ -397,13 +414,23 @@ pub(crate) fn execute_harness_attempt(
         let stderr = capture.data.stderr;
         let response = profile.parse_captured_output(&stdout);
 
-        if !response.trim().is_empty() {
+        let response_shown = !response.trim().is_empty();
+        if response_shown {
             crate::output::emit_final_message(&response, term, None)?;
         }
 
-        if !stderr.trim().is_empty() {
+        let unshown = crate::output::native_exit::NativeExit::new(capture.data.exit_code, termination)
+            .with_stdout(&stdout, response_shown)
+            .with_stderr(&stderr, false);
+        // A failure the report will attribute to the forwarded tail carries
+        // its own masked excerpt, so the raw stderr is not echoed as well.
+        let correlated =
+            crate::output::error_report::attributes_to_tail(&unshown, &launch.provider_tail);
+        let stderr = mask(stderr);
+        if !correlated && !stderr.trim().is_empty() {
             eprintln!("{stderr}");
         }
+        let native_exit = unshown.with_stderr(&stderr, !correlated);
 
         // No stream parser on this path, so no synthesized error message;
         // only the wall-clock `timeout` rule applies here.
@@ -429,6 +456,7 @@ pub(crate) fn execute_harness_attempt(
             capture_guard_context,
             None,
             capture_timeout_secs,
+            native_exit,
         )
     } else {
         // Interactive TUI path: inherit stdout/stderr directly so the
@@ -479,6 +507,8 @@ pub(crate) fn execute_harness_attempt(
             None,
             None,
             interactive_timeout_secs,
+            // The child owned the terminal; nothing was captured.
+            crate::output::native_exit::NativeExit::new(result.data, termination),
         )
     };
 
@@ -511,5 +541,6 @@ pub(crate) fn execute_harness_attempt(
         },
         perf,
         iteration_signals,
+        native_exit,
     ))
 }

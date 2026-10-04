@@ -16,12 +16,35 @@ cyan := '\033[36m'
 
 # Stand-in for the coming sequence support: alternate implement → review on an
 # implemented spec until a review marks it production ready (at most 5 cycles).
-fix spec:
+# Pass `--use-defaults` to skip the agent/model prompts and use the defaults.
+[positional-arguments]
+fix +args:
     #!/usr/bin/env bash
     set -euo pipefail
 
     max_cycles=5
-    spec="{{ spec }}"
+    use_defaults=false
+    spec=""
+    for arg in "$@"; do
+        case "${arg}" in
+            --use-defaults) use_defaults=true ;;
+            -*)
+                echo -e "{{ red }}ERROR:{{ reset }} unknown option '${arg}' (supported: --use-defaults)" >&2
+                exit 1
+                ;;
+            *)
+                if [[ -n "${spec}" ]]; then
+                    echo -e "{{ red }}ERROR:{{ reset }} expected one spec, got '${spec}' and '${arg}'" >&2
+                    exit 1
+                fi
+                spec="${arg}"
+                ;;
+        esac
+    done
+    if [[ -z "${spec}" ]]; then
+        echo -e "{{ red }}ERROR:{{ reset }} no spec given; usage: just fix <spec> [--use-defaults]" >&2
+        exit 1
+    fi
 
     if [[ ! -f "${spec}" ]]; then
         dirs=()
@@ -64,17 +87,19 @@ fix spec:
 
     choose_agent() {
         local label="$1" default="$2"
+        if [[ "${use_defaults}" == "true" ]]; then echo "${default}"; return; fi
         { echo "${default}"; echo -e "{{ agents }}" | rg -vx -- "${default}" | rg -v '^$'; } \
             | fzf --height=12 --border --border-label "${label} agent (default: ${default})"
     }
     choose_model() {
         local label="$1" default="$2" answer
+        if [[ "${use_defaults}" == "true" ]]; then echo "${default}"; return; fi
         read -r -p "$(echo -e "${label} model [{{ bold }}${default}{{ reset }}]: ")" answer
         echo "${answer:-${default}}"
     }
 
     review_agent="$(choose_agent "Review" codex)"
-    review_model="$(choose_model "Review" gpt-6-sol)"
+    review_model="$(choose_model "Review" gpt-6.1-sol)"
     implement_agent="$(choose_agent "Implementation" claude)"
     implement_model="$(choose_model "Implementation" opus)"
 
@@ -85,6 +110,7 @@ fix spec:
     echo
 
     cycle=0
+    recurring=()
     while (( cycle < max_cycles )); do
         (( ++cycle ))
         review="$(latest_review)"
@@ -109,15 +135,19 @@ fix spec:
             echo -e "{{ red }}ERROR:{{ reset }} ${review} did not set a boolean 'ready' frontmatter property" >&2
             exit 1
         fi
-        # The review prompt's contract: a recurring finding class stops the
-        # loop so a human reads the review before another cycle runs.
+        # A recurring finding class does not stop the loop: the review already
+        # swept every sibling site, so the next cycle implements the full list.
         if [[ "$(md get --raw "${review}" recurrence 2>/dev/null || true)" == "true" ]]; then
-            echo -e "{{ yellow }}STOP:{{ reset }} $(just _link "${review}") reports a finding class an earlier review already raised; read it before running another cycle." >&2
-            exit 2
+            recurring+=("${review}")
+            echo -e "{{ yellow }}NOTE:{{ reset }} $(just _link "${review}") repeats a finding class an earlier review raised; its sweep list is implemented next."
         fi
     done
 
     echo -e "{{ red }}ERROR:{{ reset }} ${max_cycles} cycles ran without a production-ready review; latest is $(just _link "$(latest_review)")" >&2
+    if (( ${#recurring[@]} > 0 )); then
+        echo -e "    reviews reporting a recurring finding class (read their {{ italic }}Recurrence{{ reset }} section first):" >&2
+        for r in "${recurring[@]}"; do echo -e "    - $(just _link "${r}")" >&2; done
+    fi
     exit 1
 
 # No-op recipe: reference color vars so linters won't report them as unused.

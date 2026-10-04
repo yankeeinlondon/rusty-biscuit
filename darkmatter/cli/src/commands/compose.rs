@@ -238,10 +238,18 @@ pub fn run_compose(
         load_markdown(None)?
     };
     let load_input_dur = load_start.map(|s| s.elapsed()).unwrap_or_default();
+    // The input as authored, so a quoted `~/…` or `{{VAR}}/…` argument can
+    // supply the document's tree root (an unquoted `~` was already expanded by
+    // the shell and carries no anchor).
+    let input_reference =
+        input.and_then(|path| biscuit_file::FileReference::new(&path.to_string_lossy()).ok());
     let file_resolution_context = resolved_input.as_ref().map_or_else(
         || launch_file_resolution_context.clone(),
         |resolved| {
-            let document_context = launch_file_resolution_context.for_source(resolved);
+            let document_context = match &input_reference {
+                Some(reference) => launch_file_resolution_context.for_source_reference(reference, resolved),
+                None => launch_file_resolution_context.for_source(resolved),
+            };
             if document_context.validate().is_ok() {
                 document_context
             } else {
@@ -286,7 +294,12 @@ pub fn run_compose(
                 if let Some(package_area) = source_package_area {
                     external_context = external_context.with_package_area(package_area);
                 }
-                external_context.for_trusted_external_source(resolved)
+                match &input_reference {
+                    Some(reference) => {
+                        external_context.for_trusted_external_source_reference(reference, resolved)
+                    }
+                    None => external_context.for_trusted_external_source(resolved),
+                }
             }
         },
     );

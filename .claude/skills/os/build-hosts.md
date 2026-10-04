@@ -117,7 +117,9 @@ within seconds (2026-09-26). The linux leg's archive build also hit the stale
 read-only kache links described below in a *different* standing clone
 (`<host>--fix-sniff`, 372 files); clearing only the read-only multiply-linked
 files (`find target/release -type f ! -perm -u+w -links +1 -delete`) fixed it
-without a cold rebuild.
+without a cold rebuild. Same failure and fix in `<host>--feat-reusable-path` on
+2026-09-30 (373 files, first seen as `libav_scenechange-*.rmeta is not
+writeable`), so clear them in any standing clone before reading the leg as red.
 
 The `just` recipe re-splits its arguments, so a filterset containing spaces
 or parentheses (`-E 'binary(a) | binary(b)'`) dies with a shell syntax error

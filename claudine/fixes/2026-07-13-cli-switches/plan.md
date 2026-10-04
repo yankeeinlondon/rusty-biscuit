@@ -1,229 +1,690 @@
 ---
-total_phases: 10
-created: 2026-07-16
+total_phases: 7
+created: 2026-10-01
 phase: 1
-agent: codex/default
+agent: claude/sonnet
 yolo: "true"
+packages:
+    - claudine
+    - claudine-cli
+    - claudine-gen
+    - claudine-catalog-types
+    - darkmatter
+source_files_during_phase_1: []
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+    - claudine/lib/src/composition/provider_tail.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/types.rs
+    - claudine/lib/src/composition/coordinator/invocation.rs
+    - claudine/cli/src/main.rs
+    - claudine/cli/src/argv/mod.rs
+    - claudine/cli/src/argv/partition.rs
+    - claudine/cli/src/commands/compose/mod.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/compose/prep/tests.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/mod.rs
+    - claudine/cli/src/commands/wrap/flags.rs
+    - claudine/cli/src/commands/wrap/flags/tests.rs
+    - claudine/cli/src/commands/wrap/profile/resolve.rs
+    - claudine/cli/src/commands/wrap/profile/tests/positional.rs
+    - claudine/cli/src/commands/wrap/provider_tail_report.rs
+    - claudine/cli/src/commands/wrap/provider_tail_report/tests.rs
+    - claudine/cli/src/commands/wrap/composition/mod.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/composition/dry_run.rs
+    - claudine/cli/src/commands/wrap/composition/provider_args.rs
+    - claudine/cli/src/commands/wrap/sequence/iterate.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/src/output/mod.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/provider_tail_notice.rs
+    - claudine/cli/tests/l1/snapshots/l1__wrap_basics__wrapper_reports_removed_sensitive_env_names.snap
+docs_updated_during_phase_2:
+    - claudine/docs/topics/argv-normalization.md
+    - claudine/docs/topics/cli-pre-parsing.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/providers/dispatch-inventory.json
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/cli-reference.md
+source_files_during_phase_3:
+    - claudine/lib/src/secrets/mod.rs
+    - claudine/lib/src/secrets/tests.rs
+    - claudine/lib/src/signals/bespoke.rs
+    - claudine/lib/src/signals/mod.rs
+    - claudine/cli/src/commands/wrap/resume.rs
+    - claudine/cli/src/commands/wrap/mod.rs
+    - claudine/cli/src/commands/wrap/profile/pi.rs
+    - claudine/cli/src/commands/wrap/launch_plan.rs
+    - claudine/cli/src/commands/wrap/launch_plan/tests.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/provider_tail_report.rs
+    - claudine/cli/src/commands/wrap/env/mod.rs
+    - claudine/cli/src/commands/wrap/env/sanitize.rs
+    - claudine/cli/src/commands/wrap/env/tests.rs
+    - claudine/cli/src/commands/wrap/exec/mod.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/semantic.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/captured.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/inherited.rs
+    - claudine/cli/src/commands/wrap/exec/wiring/session.rs
+    - claudine/cli/src/commands/wrap/wrapper_exec.rs
+    - claudine/cli/src/commands/wrap/wrapper_stages.rs
+    - claudine/cli/src/commands/wrap/harness_orch/attempt.rs
+    - claudine/cli/src/commands/wrap/harness_orch/launch.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/target_launch.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/target_launch/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/active_state_wiring.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs
+    - claudine/cli/src/commands/wrap/harness_orch/session_key.rs
+    - claudine/cli/src/commands/wrap/harness_orch/session_key/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/types.rs
+    - claudine/cli/src/output/mod.rs
+    - claudine/cli/src/output/native_exit.rs
+    - claudine/cli/src/output/error_report.rs
+    - claudine/cli/src/output/error_report/tests.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/provider_tail_launch.rs
+docs_updated_during_phase_3:
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/argv-normalization.md
+    - claudine/docs/topics/cli-pre-parsing.md
+    - claudine/docs/providers/dispatch-inventory.json
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/cli-reference.md
+source_files_during_phase_4:
+    - claudine/catalog-types/src/cli_switch.rs
+    - claudine/catalog-types/src/lib.rs
+    - claudine/lib/src/provider/cli_switch.rs
+    - claudine/lib/src/provider/mod.rs
+    - claudine/lib/src/provider/tests.rs
+    - claudine/lib/src/provider/antigravity/data.rs
+    - claudine/lib/src/provider/claude/data.rs
+    - claudine/lib/src/provider/codex/data.rs
+    - claudine/lib/src/provider/gemini/data.rs
+    - claudine/lib/src/provider/goose/data.rs
+    - claudine/lib/src/provider/kilo/data.rs
+    - claudine/lib/src/provider/kimi/data.rs
+    - claudine/lib/src/provider/opencode/data.rs
+    - claudine/lib/src/provider/pi/data.rs
+    - claudine/lib/src/provider/qwen/data.rs
+    - claudine/gen/src/emit/cli_switches.rs
+    - claudine/gen/src/emit/mod.rs
+    - claudine/gen/src/errors.rs
+    - claudine/gen/src/generate.rs
+    - claudine/gen/src/generate/coerce/cli_switches.rs
+    - claudine/gen/src/generate/coerce/mod.rs
+    - claudine/gen/src/inputs.rs
+    - claudine/gen/src/registry.rs
+    - claudine/gen/src/registry/tests.rs
+    - claudine/gen/src/schema_compat.rs
+    - claudine/gen/src/vocabulary/tests.rs
+    - claudine/gen/tests/l1/cli_switches.rs
+    - claudine/gen/tests/l1/main.rs
+    - claudine/gen/tests/l1/pipeline.rs
+    - claudine/gen/tests/l1/registry_coverage.rs
+    - claudine/gen/tests/fixtures/agent-cli-r2/codex.md
+    - claudine/gen/tests/fixtures/generated-artifact-baseline.json
+docs_updated_during_phase_4:
+    - claudine/docs/topics/provider-metadata.md
+    - claudine/docs/research/agent-cli/_schema.yaml
+    - claudine/docs/providers/catalog.json
+docs_created_during_phase_4:
+    - claudine/docs/research/agent-cli/_types.yaml
+    - claudine/docs/research/agent-cli/_schema.r1.yaml
+skills_files_updated_during_phase_4:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/research-contracts.md
+source_files_during_phase_5:
+    - claudine/catalog-types/src/cli_switch.rs
+    - claudine/lib/src/provider/cli_switch.rs
+    - claudine/lib/src/provider/cli_switch/tests.rs
+    - claudine/lib/src/provider/mod.rs
+    - claudine/lib/src/provider/antigravity/data.rs
+    - claudine/lib/src/provider/claude/data.rs
+    - claudine/lib/src/provider/codex/data.rs
+    - claudine/lib/src/provider/gemini/data.rs
+    - claudine/lib/src/provider/goose/data.rs
+    - claudine/lib/src/provider/kilo/data.rs
+    - claudine/lib/src/provider/kimi/data.rs
+    - claudine/lib/src/provider/opencode/data.rs
+    - claudine/lib/src/provider/pi/data.rs
+    - claudine/lib/src/provider/qwen/data.rs
+    - claudine/gen/src/main.rs
+    - claudine/gen/src/report.rs
+    - claudine/gen/tests/l1/cli_switches.rs
+    - claudine/gen/tests/l1/generate_ux.rs
+    - claudine/gen/tests/l1/pipeline.rs
+    - claudine/gen/tests/fixtures/agent-cli-r1/codex.md
+    - claudine/gen/tests/fixtures/agent-cli-r1/_schema.r1.yaml
+    - claudine/gen/tests/fixtures/agent-cli-r2/codex.md
+    - claudine/gen/tests/fixtures/generated-artifact-baseline.json
+    - claudine/cli/src/commands/wrap/provider_tail_report.rs
+    - claudine/cli/src/commands/wrap/provider_tail_report/tests.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/mod.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/provider_tail_notice.rs
+    - claudine/cli/tests/l1/switch_catalog_guard.rs
+    - claudine/docs/research/agent-cli/_relations.py
+    - claudine/justfile
+docs_updated_during_phase_5:
+    - claudine/docs/research/agent-cli/_schema.yaml
+    - claudine/docs/research/agent-cli/_types.yaml
+    - claudine/docs/research/agent-cli/_fleet.md
+    - claudine/docs/research/agent-cli/antigravity.md
+    - claudine/docs/research/agent-cli/claude.md
+    - claudine/docs/research/agent-cli/codex.md
+    - claudine/docs/research/agent-cli/gemini.md
+    - claudine/docs/research/agent-cli/goose.md
+    - claudine/docs/research/agent-cli/kilo.md
+    - claudine/docs/research/agent-cli/kimi.md
+    - claudine/docs/research/agent-cli/opencode.md
+    - claudine/docs/research/agent-cli/pi.md
+    - claudine/docs/research/agent-cli/qwen.md
+    - claudine/docs/providers/catalog.json
+    - claudine/docs/providers/dispatch-inventory.json
+    - claudine/docs/topics/provider-metadata.md
+    - claudine/docs/topics/argv-normalization.md
+    - claudine/docs/topics/composition.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/research-contracts.md
+    - .claude/skills/claudine/cli-reference.md
+source_files_during_phase_6:
+    - claudine/lib/src/composition/ownership.rs
+    - claudine/lib/src/composition/ownership/tests.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/provider_tail.rs
+    - claudine/lib/src/composition/schema/mod.rs
+    - claudine/lib/src/composition/types.rs
+    - claudine/lib/src/provider/cli_switch.rs
+    - claudine/lib/src/provider/mod.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - claudine/cli/src/main.rs
+    - claudine/cli/src/argv/mod.rs
+    - claudine/cli/src/argv/partition.rs
+    - claudine/cli/src/argv/partition/tests.rs
+    - claudine/cli/src/argv/rule4_help_hoist.rs
+    - claudine/cli/src/commands/compose/mod.rs
+    - claudine/cli/src/commands/compose/ownership.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/compose/prep/tests.rs
+    - claudine/cli/src/commands/compose/setters.rs
+    - claudine/cli/src/commands/compose/tests.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/provider_tail_report.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/harness_orch/launch.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/provider_tail_ownership.rs
+    - claudine/cli/tests/l1/level1_ownership_prompt_pty.rs
+    - claudine/cli/tests/l1/provider_tail_launch.rs
+    - claudine/cli/tests/l1/provider_tail_notice.rs
+    - claudine/cli/tests/l1/wrap_compose_validation.rs
+    - claudine/cli/tests/l1/effective_diagnostic_render.rs
+    - claudine/cli/tests/level2/level2_typed_error_render_capture.rs
+docs_updated_during_phase_6:
+    - claudine/docs/topics/argv-normalization.md
+    - claudine/docs/topics/cli-pre-parsing.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/frontmatter-properties.md
+    - claudine/docs/providers/dispatch-inventory.json
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/cli-reference.md
+    - .claude/skills/claudine/timeline.md
+source_files_during_phase_7:
+    - claudine/lib/src/composition/ownership.rs
+    - claudine/lib/src/composition/ownership/tests.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/provider/cli_switch.rs
+    - claudine/lib/src/provider/cli_switch/tests.rs
+    - claudine/lib/src/provider/mod.rs
+    - claudine/cli/src/argv/mod.rs
+    - claudine/cli/src/argv/partition.rs
+    - claudine/cli/src/commands/compose/ownership.rs
+    - claudine/cli/src/completion/engine/mod.rs
+    - claudine/cli/src/completion/engine/ownership.rs
+    - claudine/cli/src/completion/engine/tests.rs
+    - claudine/cli/src/completion/engine/tokens.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/completion_ownership.rs
+docs_updated_during_phase_7:
+    - claudine/docs/topics/completions/shell-completions.md
+    - claudine/docs/topics/argv-normalization.md
+    - claudine/docs/topics/provider-metadata.md
+    - claudine/docs/providers/dispatch-inventory.json
+    - claudine/fixes/2026-07-13-cli-switches/spec.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/cli-reference.md
+    - .claude/skills/claudine/timeline.md
+source_code:
+    - claudine/lib/src/composition/provider_tail.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/types.rs
+    - claudine/lib/src/composition/coordinator/invocation.rs
+    - claudine/cli/src/main.rs
+    - claudine/cli/src/argv/mod.rs
+    - claudine/cli/src/argv/partition.rs
+    - claudine/cli/src/commands/compose/mod.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/compose/prep/tests.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/mod.rs
+    - claudine/cli/src/commands/wrap/flags.rs
+    - claudine/cli/src/commands/wrap/flags/tests.rs
+    - claudine/cli/src/commands/wrap/profile/resolve.rs
+    - claudine/cli/src/commands/wrap/profile/tests/positional.rs
+    - claudine/cli/src/commands/wrap/provider_tail_report.rs
+    - claudine/cli/src/commands/wrap/provider_tail_report/tests.rs
+    - claudine/cli/src/commands/wrap/composition/mod.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/composition/dry_run.rs
+    - claudine/cli/src/commands/wrap/composition/provider_args.rs
+    - claudine/cli/src/commands/wrap/sequence/iterate.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/src/output/mod.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/provider_tail_notice.rs
+    - claudine/cli/tests/l1/snapshots/l1__wrap_basics__wrapper_reports_removed_sensitive_env_names.snap
+    - claudine/lib/src/secrets/mod.rs
+    - claudine/lib/src/secrets/tests.rs
+    - claudine/lib/src/signals/bespoke.rs
+    - claudine/lib/src/signals/mod.rs
+    - claudine/cli/src/commands/wrap/resume.rs
+    - claudine/cli/src/commands/wrap/profile/pi.rs
+    - claudine/cli/src/commands/wrap/launch_plan.rs
+    - claudine/cli/src/commands/wrap/launch_plan/tests.rs
+    - claudine/cli/src/commands/wrap/env/mod.rs
+    - claudine/cli/src/commands/wrap/env/sanitize.rs
+    - claudine/cli/src/commands/wrap/env/tests.rs
+    - claudine/cli/src/commands/wrap/exec/mod.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/semantic.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/captured.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/inherited.rs
+    - claudine/cli/src/commands/wrap/exec/wiring/session.rs
+    - claudine/cli/src/commands/wrap/wrapper_exec.rs
+    - claudine/cli/src/commands/wrap/wrapper_stages.rs
+    - claudine/cli/src/commands/wrap/harness_orch/attempt.rs
+    - claudine/cli/src/commands/wrap/harness_orch/launch.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/target_launch.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/target_launch/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/active_state_wiring.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs
+    - claudine/cli/src/commands/wrap/harness_orch/session_key.rs
+    - claudine/cli/src/commands/wrap/harness_orch/session_key/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/types.rs
+    - claudine/cli/src/output/native_exit.rs
+    - claudine/cli/src/output/error_report.rs
+    - claudine/cli/src/output/error_report/tests.rs
+    - claudine/cli/tests/l1/provider_tail_launch.rs
+    - claudine/catalog-types/src/cli_switch.rs
+    - claudine/catalog-types/src/lib.rs
+    - claudine/lib/src/provider/cli_switch.rs
+    - claudine/lib/src/provider/mod.rs
+    - claudine/lib/src/provider/tests.rs
+    - claudine/lib/src/provider/antigravity/data.rs
+    - claudine/lib/src/provider/claude/data.rs
+    - claudine/lib/src/provider/codex/data.rs
+    - claudine/lib/src/provider/gemini/data.rs
+    - claudine/lib/src/provider/goose/data.rs
+    - claudine/lib/src/provider/kilo/data.rs
+    - claudine/lib/src/provider/kimi/data.rs
+    - claudine/lib/src/provider/opencode/data.rs
+    - claudine/lib/src/provider/pi/data.rs
+    - claudine/lib/src/provider/qwen/data.rs
+    - claudine/gen/src/emit/cli_switches.rs
+    - claudine/gen/src/emit/mod.rs
+    - claudine/gen/src/errors.rs
+    - claudine/gen/src/generate.rs
+    - claudine/gen/src/generate/coerce/cli_switches.rs
+    - claudine/gen/src/generate/coerce/mod.rs
+    - claudine/gen/src/inputs.rs
+    - claudine/gen/src/registry.rs
+    - claudine/gen/src/registry/tests.rs
+    - claudine/gen/src/schema_compat.rs
+    - claudine/gen/src/vocabulary/tests.rs
+    - claudine/gen/tests/l1/cli_switches.rs
+    - claudine/gen/tests/l1/main.rs
+    - claudine/gen/tests/l1/pipeline.rs
+    - claudine/gen/tests/l1/registry_coverage.rs
+    - claudine/gen/tests/fixtures/agent-cli-r2/codex.md
+    - claudine/gen/tests/fixtures/generated-artifact-baseline.json
+    - claudine/lib/src/provider/cli_switch/tests.rs
+    - claudine/gen/src/main.rs
+    - claudine/gen/src/report.rs
+    - claudine/gen/tests/l1/generate_ux.rs
+    - claudine/gen/tests/fixtures/agent-cli-r1/codex.md
+    - claudine/gen/tests/fixtures/agent-cli-r1/_schema.r1.yaml
+    - claudine/cli/tests/l1/switch_catalog_guard.rs
+    - claudine/docs/research/agent-cli/_relations.py
+    - claudine/justfile
+    - claudine/lib/src/composition/ownership.rs
+    - claudine/lib/src/composition/ownership/tests.rs
+    - claudine/lib/src/composition/schema/mod.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - claudine/cli/src/argv/partition/tests.rs
+    - claudine/cli/src/argv/rule4_help_hoist.rs
+    - claudine/cli/src/commands/compose/ownership.rs
+    - claudine/cli/src/commands/compose/setters.rs
+    - claudine/cli/src/commands/compose/tests.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/tests/l1/provider_tail_ownership.rs
+    - claudine/cli/tests/l1/level1_ownership_prompt_pty.rs
+    - claudine/cli/tests/l1/wrap_compose_validation.rs
+    - claudine/cli/tests/l1/effective_diagnostic_render.rs
+    - claudine/cli/tests/level2/level2_typed_error_render_capture.rs
+    - claudine/cli/src/completion/engine/mod.rs
+    - claudine/cli/src/completion/engine/ownership.rs
+    - claudine/cli/src/completion/engine/tests.rs
+    - claudine/cli/src/completion/engine/tokens.rs
+    - claudine/cli/tests/l1/completion_ownership.rs
+documentation:
+    - claudine/docs/topics/argv-normalization.md
+    - claudine/docs/topics/cli-pre-parsing.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/providers/dispatch-inventory.json
+    - claudine/docs/topics/provider-metadata.md
+    - claudine/docs/research/agent-cli/_schema.yaml
+    - claudine/docs/providers/catalog.json
+    - claudine/docs/research/agent-cli/_types.yaml
+    - claudine/docs/research/agent-cli/_schema.r1.yaml
+    - claudine/docs/research/agent-cli/_fleet.md
+    - claudine/docs/research/agent-cli/antigravity.md
+    - claudine/docs/research/agent-cli/claude.md
+    - claudine/docs/research/agent-cli/codex.md
+    - claudine/docs/research/agent-cli/gemini.md
+    - claudine/docs/research/agent-cli/goose.md
+    - claudine/docs/research/agent-cli/kilo.md
+    - claudine/docs/research/agent-cli/kimi.md
+    - claudine/docs/research/agent-cli/opencode.md
+    - claudine/docs/research/agent-cli/pi.md
+    - claudine/docs/research/agent-cli/qwen.md
+    - claudine/docs/topics/frontmatter-properties.md
+    - claudine/docs/topics/completions/shell-completions.md
+    - claudine/fixes/2026-07-13-cli-switches/spec.md
+completed_phase: 7
+implemented: true
 ---
 
-# CLI Switch Forwarding Execution Plan
+# Plan: Composition forwards provider CLI switches to the agent
 
-This plan implements the functional specification while accounting for the partial Phase 1 implementation already present in the working tree. Existing behavior must be characterized before it is changed so the implementation team can distinguish retained work from gaps and avoid regressing direct wrapper behavior.
+Source: `spec.md` in this directory (reviewed 2026-10-01). Terminal state for an
+agent is "implementation complete, ready for review": never move the fix to
+`_completed` and never run `just complete`.
 
-## Dependency and parallelism map
+## Summary and Definition of Done
 
-| Phase | Depends on | Parallelization |
-|---|---|---|
-| 1 | None | Sequential baseline |
-| 2 | Phase 1 | Sequential contract foundation |
-| 3 | Phase 2 | Can run alongside Phases 4 and 6 |
-| 4 | Phase 2 | Can run alongside Phases 3 and 6 |
-| 5 | Phases 3 and 4 | Sequential integration |
-| 6 | Phase 2 | Can run alongside Phases 3–5 |
-| 7 | Phases 2–6 | Sequential Phase 1 gate |
-| 8 | Phase 2 contract terminology | Can run alongside Phases 3–7 |
-| 9 | Phase 8 | Sequential generation work |
-| 10 | Phases 7 and 9 | Sequential final integration |
+The headline bug (forwarding `--codex -c ...` through `compose`,
+`inline-compose`, `sequence`) already landed in `2c7f98dcf`. What remains falls
+into three independent bodies of work plus one dependent core:
 
-## Phase 1 — Baseline audit and characterization
+| Stream | Spec items | Nature |
+| --- | --- | --- |
+| Reporting hardening | R2, R3, R5, R6 | Typed tail descriptor, correlated native-error report, per-command INFO notice, redaction, direct-wrapper parity |
+| Launch threading | R1, R7 | Resume carries tail exactly once; compiled-binary coverage |
+| Switch metadata | R8 | Research schema, fleet re-research, `claudine-gen` projection, lookup |
+| Type-aware ownership | R9, R4 | One shared ownership function used by partition and completion; `argv` positionals; ambiguity; resolved-provider check |
 
-### Tasks
+Dependency shape:
 
-- [ ] Record the current partial implementation in the phase notes, including the argv partitioner, request-level provider arguments, generic announcement, dry-run redaction, and dormant native-argument classifier; identify each specification requirement that remains incomplete rather than rebuilding completed work.
-- [ ] Inventory every construction and consumption site for composition execution requests, child argv, retry/proxy/resume launches, sequence steps, status output, dry-run output, debug traces, metadata, correlated reports, and completion parsing; record the owning module and expected data flow for each site.
-- [ ] Run GitNexus upstream impact analysis immediately before editing each affected symbol and capture the direct callers, affected execution flows, and risk level in the implementation notes. Treat `partition_composition_tail` and `build_harness_launch` as known HIGH-risk gates and warn before changing either; rerun analysis if symbol names or boundaries change.
-- [ ] Add or confirm characterization tests for direct wrapper argv, composition lifecycle event ordering, terminal exit-code propagation, and exactly-once reporting so later refactors have an observable compatibility baseline.
-- [ ] Confirm the existing compiled-binary test helpers can create deterministic fake provider executables on macOS, Windows, and Linux; extend only the helper capabilities required by this feature.
+```mermaid
+flowchart LR
+    P1[Phase 1: rulings + spikes] --> P2[Phase 2: typed tail + reporting]
+    P1 --> P4[Phase 4: metadata schema + generator]
+    P2 --> P3[Phase 3: resume + correlated errors + binary tests]
+    P4 --> P5[Phase 5: fleet research + lookup]
+    P3 --> P6[Phase 6: type-aware ownership]
+    P5 --> P6
+    P6 --> P7[Phase 7: completion, docs, acceptance]
+```
 
-### Validation checkpoint
+**Done when** all 29 acceptance criteria in the spec are Done, `just test`,
+`just test-l2`, `just lint` pass from `claudine/`,
+`cargo run -p claudine-gen -- check` is clean, docs and the claudine skill are
+updated with no link back to this fix, and `spec.md` status/acceptance table is
+refreshed to match.
 
-- [ ] Run `cd claudine && just test` and record the baseline result, including any unrelated pre-existing failures, before production code changes begin.
-- [ ] Review the audit against all fourteen acceptance requirements in the specification and confirm every requirement has at least one planned implementation task and one planned validation path.
+Cross-cutting constraints (apply to every phase):
 
-## Phase 2 — Canonical provider-tail contract and ownership partition
+- No `cargo fmt`; no commits unless explicitly told; nextest only.
+- Every behavior change includes a pass over the `///`/`//!` docs and comments of the touched symbols.
+- Terminal output goes through `biscuit-terminal` components (`TerminalRenderable`).
+- Must compile and work on macOS, Linux, native Windows, WSL2 (load the `os` skill before touching path or `#[cfg(windows)]` code).
+- L1 binary tests use `CliProcessFixture`; any L2 session stays in the background and never takes focus.
+- Load skills as needed: `claudine`, `clap`, `rust-testing`, `biscuit-terminal`, `darkmatter`, `schemars`/`serde` for the generator.
 
-### Tasks
+## Phase 1: Rulings, spikes, and baseline
 
-- [ ] Introduce one typed provider-tail descriptor shared across composition paths, containing the exact ordered arguments and whether the tail began implicitly or at an authored `--`; replace parallel `Vec<String>` and boolean fields so source semantics cannot drift.
-- [ ] Preserve exact argument order and token boundaries from normalization through launch assembly, documenting and testing the intentional handling of non-UTF-8 `OsString` input at the normalization/partition boundary on supported platforms.
-- [ ] Derive the Claudine-owned switch surface from clap metadata for the active composition subcommand instead of maintaining a handwritten list or taking a union across compose and sequence commands.
-- [ ] Partition argv before clap parsing so the file operand must appear before the first implicit unowned provider switch, an authored `--` after the file begins an opaque tail, and an authored `--` before the file returns the targeted structural error.
-- [ ] Keep Claudine-owned switches owned before an authored boundary even after an implicit provider tail has begun; ensure setter-shaped values following the implicit tail remain provider arguments rather than mutating Claudine state.
-- [ ] Preserve clap-compatible handling for long switches, `--name=value`, short switches, clustered/attached short values where supported, help/version behavior, and missing owned-switch values.
-- [ ] Require an authored `--` for bare provider operands while preserving the existing multiple-composition-file error for two ordinary positional operands.
-- [ ] Add a drift test proving the partitioner’s owned switch surface matches clap’s active command definition and cannot silently diverge when a CLI switch is added or removed.
+Purpose: settle ambiguities in the spec before code, and capture a safety net.
 
-### Validation checkpoint
+### Necessary Rules
 
-- [ ] Run focused unit tests for implicit forwarding, authored opaque tails, pre-file errors, setter ownership, collisions, bare operands, multiple files, help/version, missing values, and non-UTF-8 boundaries.
-- [ ] Verify byte-for-byte-equivalent provider argv for representative short, long, equals-form, repeated, and value-shaped tail tokens.
-- [ ] Re-run upstream impact analysis after the partition refactor and confirm affected callers and flows match the Phase 1 inventory before proceeding.
+These are gaps or tensions found while reading the spec. Each needs an author
+ruling (or the default noted is used and recorded in the implementation log).
 
-## Phase 3 — Launch assembly, sequencing, and recovery paths
+1. **Phasing of R9 versus R8 (default: R9 lands only after R8 data exists).**
+   R9 depends on generated metadata, but R1/R2/R3/R5/R6/R7 do not. Default: ship
+   the reporting stream first against the current partition, as the spec's
+   "until type-aware ownership lands" language anticipates.
+2. **Behavior when metadata is entirely `unknown` for a provider at launch of R9.**
+   Spec says unknown is treated as unrecognized (rule 5). Default: that holds
+   even for the whole fleet, so R9 is functionally safe to land before every
+   provider is fully researched, provided each compiled provider has an entry or
+   explicit unknown gap (generator must enforce).
+3. **Where the shared ownership function lives.** The spec says one function
+   used by `argv/partition.rs` and completion, with the typed tail in the
+   library. Default: types and pure ownership logic in the `claudine` lib
+   (`composition`), CLI wraps with clap's `OwnedFlags::for_composition`. Needs
+   confirmation because the lib currently has no clap surface; the owned-flag
+   set must be passed in as data.
+4. **Shape of the `argv` reserved-key error versus `--set`.** Spec says the error
+   applies "whether or not positionals are given". Confirm the `--set` JSON
+   object check happens at the same point as the setter check (default: yes,
+   one validator).
+5. **Numeric ownership grammar.** "Finite decimal with optional fraction and
+   exponent". Confirm a leading `+` is accepted and a bare `.5` / `5.` are
+   (default: accept `+`, accept `.5` and `5.`; reject `0x..`, `NaN`, `inf`, `1_000`).
+6. **Variadic minimum count source.** Default: `variadic_min` in the catalog; a
+   missing value is `unknown` min and is treated as 1 for ownership but never
+   fails the resolved-provider check.
+7. **Wider measurement.** The spec says no performance spike. Do not add
+   benchmarks; if the early frontmatter read shows concrete new cost, the author
+   decides whether to widen measurement.
+8. **Prompt answer persistence.** Ambiguity prompt answer is per invocation and
+   not cached on disk (default; spec is silent).
+9. **Windows/WSL2.** Argv is `String`-based; the non-UTF-8 refusal test must
+   use `OsString` construction that is valid on Windows (WTF-8/unpaired
+   surrogate) as well as Unix bytes. Default: platform-gated fixtures.
 
-### Tasks
+### Spikes
 
-- [ ] Thread the typed provider-tail descriptor through every composition request constructor, inline composition path, sequence iterator, and provider-specific execution request without reconstructing or reparsing it.
-- [ ] Seed each child launch from the provider tail before applying Claudine’s resolved entrypoint, model, transport, system-prompt, MCP, and prompt requirements; keep MCP argument injection independently observable.
-- [ ] Apply provider capability and conflict validation to the resolved provider while leaving forwarded tokens untouched.
-- [ ] Ensure retry and proxy attempts reuse the same immutable launch basis so every attempt receives the exact provider tail once and in the same position.
-- [ ] Replace resume’s hardcoded passthrough whitelist with profile-aware, resume-aware argv assembly that carries the typed provider tail and required Claudine safety/transport arguments without duplicating either.
-- [ ] Ensure sequence and multi-provider execution apply the same tail to each resolved provider step, while provider-specific entrypoints and required arguments remain step-local.
-- [ ] Preserve exit codes, interruption semantics, retry policy, and lifecycle event ordering across the launch-assembly refactor.
+Run once, before the work they inform. One host, quick sample.
 
-### Validation checkpoint
-
-- [ ] Add focused tests for exact child argv ordering and single insertion across direct composition, sequence, retry, proxy, resume, and multi-provider execution.
-- [ ] Confirm resume retains arbitrary forwarded switches and values that were previously outside the hardcoded whitelist.
-- [ ] Re-run impact analysis for `build_harness_launch` and its replacement boundaries; do not advance if unexpected HIGH/CRITICAL callers or execution flows appear.
-
-## Phase 4 — Shared reporting and redaction
-
-> Parallelizable with Phase 3 after Phase 2 is complete.
-
-### Tasks
-
-- [ ] Define shared provider-tail presentation helpers used by direct wrappers and composition so switch-name extraction, source labeling, status rendering, and redaction have one behavior path without changing direct wrapper argv.
-- [ ] Render the implicit-tail INFO message with `TerminalRenderable` components and neutral wording that does not claim the provider switch is unknown; render an authored-boundary tail as opaque.
-- [ ] Replace process-global announcement deduplication with execution-scoped state so each distinct provider/tail pair is announced once per command across sequences, loops, retries, and proxies, without leaking state between invocations or tests.
-- [ ] Suppress the generic INFO announcement under quiet and silent modes while preserving normal status/event behavior.
-- [ ] Apply the existing shared argument redactor to every fuller-value surface, including debug traces, dry-run tables, `AGENT_PARAMS` or equivalent metadata, correlated diagnostic excerpts, and any structured execution diagnostics.
-- [ ] Verify redaction affects presentation and metadata only; the actual child process must receive the original unredacted tokens.
-
-### Validation checkpoint
-
-- [ ] Test once-only INFO behavior for repeated attempts and repeated provider/tail pairs, distinct messages for distinct pairs, and quiet/silent suppression.
-- [ ] Test that INFO contains switch names but no values and that secrets are absent from debug, dry-run, metadata, and diagnostic output while still reaching the fake provider unchanged.
-- [ ] Run direct-wrapper characterization tests and confirm both argv and existing output semantics remain compatible except for intentionally shared classification/reporting behavior.
-
-## Phase 5 — Typed native exit correlation
-
-### Tasks
-
-- [ ] Introduce a typed native-exit result that carries exit status, termination context, and bounded stdout/stderr tails from the terminal attempt without altering the child process lifecycle.
-- [ ] Define classifier precedence so stronger causes—missing executable, authentication, timeout/interruption, API failure, and model failure—win over argument rejection.
-- [ ] Narrow `ArgumentRejected` recognition to provider-backed signatures and known collision fixtures, considering both stdout and stderr and avoiding generic false positives.
-- [ ] Correlate an argument-rejected exit with a non-empty forwarded tail even when the opaque tail contains no switch-shaped token; keep the diagnostic explicitly probabilistic rather than asserting causality.
-- [ ] Redact all quoted or excerpted arguments while retaining enough provider-native output to make the report actionable.
-- [ ] Wire the shared correlation path exactly once into composition and direct wrapper reporting, replacing the dormant helper path without emitting duplicate reports.
-- [ ] Preserve the provider’s exit code, signal/interruption handling, retry decisions, and lifecycle event order after the typed result is introduced.
-
-### Validation checkpoint
-
-- [ ] Add positive provider-specific rejection and collision fixtures, negative near-miss fixtures, stronger-cause precedence fixtures, stdout-only and stderr-only fixtures, and opaque bare-tail fixtures.
-- [ ] Assert exactly one correlated report, no secret leakage, unchanged exit semantics, and no correlation when the forwarded tail is empty.
-- [ ] Run focused direct-wrapper and composition tests to prove both call the same classifier/reporting path without changing child argv.
-
-## Phase 6 — Completion, help, and Phase 1 documentation
-
-> Parallelizable with Phases 3–5 after Phase 2 is complete.
+- [x] **Spike A: early frontmatter read seam.** Read `lib/src/composition/hints.rs` (`parse_selection_hints_from_frontmatter`) and composition's file-reference/schema resolver. Confirm an existing entry point can read frontmatter and `$schema` property names with no template, shell, lifecycle, provider discovery, or network. Record the function to call, or the minimal extraction needed. Informs Phase 6.
+- [x] **Spike B: structured-stream capture bounds.** Identify how the direct wrapper and `harness_orch/attempt.rs` capture stdout/stderr tails today and which bounds exist. Confirm bounded tails of both streams are obtainable without retaining full streams. Informs Phase 3.
+- [x] **Spike C: schema-validation of a `string[]` named `argv`.** Confirm `SimplifiedSchema` can validate the effective `argv` array and that an overlay is not persisted by `inline-compose`. Informs Phase 6.
+- [x] **Spike D: generator extension point.** Read `claudine/gen` and `catalog-types` to identify where `cli_switches` flows into `data.rs`, and whether `cli_switches` is read today. Informs Phase 4.
 
 ### Tasks
 
-- [ ] Make completion’s tolerant cursor scan consume the same clap-derived owned switch metadata as the partitioner, removing the handwritten value-bearing switch list.
-- [ ] Stop Claudine completion after an authored `--` and remain non-failing after an implicit provider tail begins; do not attempt provider-native completion during Phase 1.
-- [ ] Preserve composition-file and Claudine setter completion before the provider tail, including incomplete owned switch values and cursor-local partial tokens.
-- [ ] Verify help collisions remain Claudine-owned before the authored boundary and are forwarded after `--`, with deterministic behavior for `--help`, `-h`, and their provider-tail equivalents.
-- [ ] Generate or test any collision reference from the same clap metadata source so documentation and completion do not establish a second ownership registry.
-- [ ] Update CLI pre-parsing, argv normalization, composition, wrapper, and output documentation to describe ownership partitioning, opaque authored tails, setter semantics, redaction, and correlation.
-- [ ] Remove stale Rule 3 and synthetic-separator wording from code comments, READMEs, and the Claudine skill documentation, assuming current code behavior is authoritative where comments have drifted.
+- [x] **Record rulings.** Write the rulings above (author answers or accepted defaults) into a new `implementation-log.md` in this directory.
+- [x] **Run the spikes.** Record each spike's finding (a few lines each) in `implementation-log.md`; if a spike answers "this spec assumption is wrong", record it as a ruling for the author instead of silently diverging.
+- [x] **Baseline.** From `claudine/`, run `just test`, `just lint`, and `cargo run -p claudine-gen -- check`; record any pre-existing failures so they are not attributed to this work.
+- [x] **Locate guards.** Confirm `tests/l1/wrap_direct_argv.rs`, `tests/l1/argv_normalization.rs`, `tests/l1/test_placement.rs`, and `dispatch_inventory.rs` exist and note what each protects.
 
-### Validation checkpoint
+Checkpoint 1: rulings recorded, spikes answered, baseline known.
 
-- [ ] Add completion tests for pre-tail file/setter suggestions, implicit-tail tolerance, authored-boundary stop behavior, collisions, partial values, and malformed provider tails.
-- [ ] Run documentation examples or doctests affected by the terminology changes and confirm no documentation promises Phase 2 metadata enrichment during Phase 1.
+## Phase 2: Typed tail descriptor, redaction, and notice (R6, R3, R5-descriptor)
 
-## Phase 7 — Phase 1 compiled-binary and quality gate
+Purpose: replace the two parallel fields with one typed descriptor and fix the notice, with no change to child argv. Waves run in order; tasks within a wave are parallel.
 
-### Tasks
+### Wave 1: descriptor (single owner; others depend on it)
 
-- [ ] Add compiled-binary integration cases using deterministic fake providers for compose, inline-compose, and sequence headline forwarding, asserting exact argv and setter-shaped tail non-application.
-- [ ] Cover authored boundaries, pre-file errors, owned collisions, bare operands, multiple composition files, short/equal forms, and help behavior at the binary boundary.
-- [ ] Cover sequence, retry, proxy, resume, and multi-provider propagation, including once-only insertion and provider-specific entrypoint ordering.
-- [ ] Cover INFO deduplication and suppression, redaction across every fuller-value surface, typed argument-rejection correlation, stronger-cause precedence, exact-one reporting, and exit-code preservation.
-- [ ] Re-run the direct wrapper exact-argv suite to establish the specification’s no-argv-change guarantee.
-- [ ] Review production/test placement against the Claudine architecture thresholds, keeping tokenizer tests colocated and moving larger classifier or integration suites to sibling test modules or `claudine/cli/tests` as prescribed.
+- [x] **ProviderTail type.** In `lib/src/composition/types.rs` add one descriptor holding ordered args and `Option<usize>` boundary index (None = no boundary, 0 = fully explicit, len = authored empty suffix). Implicit prefix keeps switch/value assignment slots (initially empty/unassigned; filled by Phase 6). Implement `Default`.
+    - Redacted `Debug`: never print raw tokens, ownership records, or notice keys. Provide an accessor that returns the unredacted tokens for launching only.
+    - Replace `CompositionExecutionRequest.provider_args` + `provider_args_explicit`.
+- [x] **CLI conversion.** Make `argv::ProviderArgs` become the type or convert at exactly one place; replace both fields in `SharedComposeArgs` (`commands/compose/mod.rs`). Update the `commands/sequence.rs` test helper to use `Default`.
+- [x] **Launch plan seeding.** Keep `LaunchPlanInputs::provider_args_tail` seeding order unchanged; feed it from the descriptor.
 
-### Validation checkpoint
+Checkpoint 2a: `just test` green; `wrap_direct_argv.rs` and `argv_normalization.rs` unchanged and green.
 
-- [ ] Run `cd claudine && just test`.
-- [ ] Run `cd claudine && just test-l2`.
-- [ ] Run `cd claudine && just lint`.
-- [ ] Record a Phase 1 acceptance matrix proving requirements 1–13 pass before enabling Phase 2 runtime enrichment.
+### Wave 2: parallel
 
-## Phase 8 — Phase 2 research schema and provider-fleet backfill
+- [x] **Non-UTF-8 refusal.** Replace `to_string_lossy` in the partitioner with a targeted partition error naming the position, not the bytes. Tests: Unix invalid bytes and Windows unpaired surrogate (platform-gated); proves criterion 15 and that direct wrappers behave consistently.
+- [x] **Redaction and display.** Single function to render a value-free switch-name list from a descriptor (strip `=value`; for implicit short tokens, with no metadata yet, describe an unrecognized short token such as `-csecret` without echoing it; explicit tail never listed as names). Route dry-run "Provider args" row, debug traces, and `AGENT_PARAMS` through `redact_sensitive_args`.
+- [x] **Command-scoped notice state.** Delete `static ANNOUNCED` in `wrap/composition/provider_args.rs`. Add a notice registry owned by the top-level command, keyed `(provider, tail, boundary)`, claimed atomically (no lock held across render or launch), thread it to composition, sequence tasks, and direct wrappers.
+- [x] **Notice module move and wording.** Move the notice out of `wrap/composition/` to a module both launch paths use (for example `wrap/provider_tail_report.rs`). Implicit: `Forwarding provider arguments to Codex: -c`. Explicit: `Forwarding an opaque argument tail to Codex (passed after --).`. Mixed tails: one notice with prefix names plus opaque summary. Render with `TerminalRenderable`; stderr; suppressed by `--quiet` and `--silent`. Remove "not recognized by Claudine".
+- [x] **Direct wrapper population (R5).** Populate the same descriptor from the existing passthrough parsing with no composition ownership checks; emit the same notice and redaction. Child argv must not change.
 
-> Parallelizable with Phases 3–7 once Phase 2 has fixed the runtime terminology; this work must not affect argv routing.
+### Wave 3: tests
 
-### Tasks
+- [x] **L1 unit/binary tests.** Distinct-pair dedup, two invocations in one process do not leak, parallel sequence tasks claim once, quiet/silent suppression, mixed-boundary key, redacted `Debug` (a test that formats `{:?}` of a descriptor holding `sk-secret` and asserts absence), notice wording for implicit and explicit.
 
-- [ ] Extend the researched `cli_switches` schema with a canonical flag, explicit `aliases`, a `value_arity` enum of `none`, `one`, `optional`, or `variadic`, and normalized invocation applicability while retaining the human-oriented `value`, `scope`, description, examples, and notes fields.
-- [ ] Represent invocation applicability as normalized exact native command paths plus an explicit global scope, allowing a lookup to match the resolved effective entrypoint without interpreting prose.
-- [ ] Update the research prompt/instructions to prohibit inferring arity from `value` or notes and to require authoritative provider help or documentation for every canonical flag, alias, arity, and invocation claim.
-- [ ] Backfill all ten provider research documents, splitting combined flag spellings into canonical flags and aliases and recording ambiguous or unsupported applicability as unknown rather than guessing.
-- [ ] Add schema validation for valid arity values, canonical/alias shapes, normalized invocation paths, and required descriptions while allowing human-oriented fields to remain descriptive.
+Checkpoint 2b: `just test` and `just lint` green; `wrap_direct_argv.rs` untouched and green. Docs: update `docs/topics/argv-normalization.md`, `cli-pre-parsing.md`, and the Provider Argument Forwarding section of `composition.md` for notice wording, scope, redaction.
 
-### Validation checkpoint
+## Phase 3: Resume, correlated errors, binary coverage (R1, R2, R7)
 
-- [ ] Validate all ten provider research documents with `md schema validate` using the updated sidecar schema.
-- [ ] Add and run positive and negative schema fixtures for aliases, each arity, global and command-scoped applicability, malformed invocations, and prohibited inferred metadata.
-- [ ] Review the Codex research entry against authoritative help and confirm `-c` is represented as an alias of `--config` with researched arity and invocation applicability.
+Depends on Phase 2 (descriptor). Waves in order.
 
-## Phase 9 — Catalog types and generator projection
+### Wave 1: parallel
 
-### Tasks
+- [x] **Resume carries tail (R1).** In `wrap/resume.rs::append_resume_passthrough_args` and `harness_orch/launch.rs`: append the request's descriptor tokens exactly once at the position the resume entrypoint expects; feed the allowlist carry-over from arguments identified as Claudine injections, not from a base argv that already contains the tail. Preserve authored repetitions and order; no dedup by spelling. A user-supplied `--json`/`--format` must be neither dropped nor doubled.
+    - Update the comment in `harness_orch/session_key.rs` (canonical argv comparison; the tail is invocation-fixed and must not make a resume look incompatible).
+- [x] **Typed native-exit input (R2).** Define a type holding exit code, `ProcessTermination`, and bounded stdout/stderr tails (reuse existing capture bounds, per Spike B). Produce it from both the direct wrapper (`commands/wrap/mod.rs`) and `harness_orch/attempt.rs`.
+- [x] **Classifier fixes (R2).** In `output/error_report.rs`: read both streams; precedence interruption → timeout → missing binary → auth/permission → API failure → model not found → argument rejected → missing argument → none; tighten signatures (`invalid argument` must not match `invalid argument: api key`); each kept signature has a positive and a near-miss fixture; uncertain returns `None`.
 
-- [ ] Add leaf catalog vocabulary for CLI switch value arity and serializable switch metadata, keeping shared enums in `claudine-catalog-types` and provider lookup structures in the Claudine library.
-- [ ] Extend `ProviderInfo` with generated CLI switch metadata and update registry parsing, provider-source coercion, and Rust/catalog emitters end to end.
-- [ ] Validate canonical flags and aliases, non-empty descriptions, explicit arity, normalized invocations, and canonical/alias uniqueness within an invocation scope; permit the same spelling only when applicability is provably disjoint.
-- [ ] Sort emitted switch and alias metadata deterministically so regeneration is stable across operating systems and source ordering.
-- [ ] Add generator and library lookup tests for global, exact-command, disjoint-scope, duplicate, ambiguous, and unknown cases, including Codex `-c` resolving to canonical `--config`.
-- [ ] Regenerate every committed provider `data.rs` file and catalog artifact with the repository generator rather than editing generated files by hand.
+### Wave 2
 
-### Validation checkpoint
+- [x] **One report builder.** `AgentErrorReport::correlated_with_forwarded_tail` becomes the one builder called exactly once per terminal failure by both paths, producing the correlated report only when tail non-empty, exit non-zero, and classifier returned `ArgumentRejected`; if a rejection names a switch, correlate only if it belongs to the forwarded tail (a rejection naming an injected Claudine switch stays generic). Wording: redacted switch names or "opaque", redacted diagnostic excerpt, "likely caused by the forwarded arguments"; no "not recognized by Claudine".
+    - Excerpt redaction: shared claudine secret recognizer, masks echoes of values recognized in the original tail even without their flag, escapes terminal control characters and markup.
+    - No duplicate stderr echo plus report. A handled retry must not emit a terminal report before recovery is exhausted. Never suppressed by quiet/silent; stderr only; exit code, termination, lifecycle `failure`/`finalize`, and retry policy unchanged.
+    - Remove stale `#[allow(dead_code)]`.
 
-- [ ] Run `cargo run -p claudine-gen -- generate --yes` from the repository root and inspect the generated diff for only expected provider metadata changes.
-- [ ] Run `cargo run -p claudine-gen -- check` and require a clean drift report.
-- [ ] Run the catalog-types, Claudine library, generator, and registry-coverage tests, including all negative validation fixtures.
+### Wave 3: compiled-binary coverage (R7)
 
-## Phase 10 — Phase 2 runtime enrichment and final acceptance
+All with `CliProcessFixture` and a deterministic fake provider; no real provider or network; silent audio defaults kept.
 
-### Tasks
+- [x] **Exact child argv** for the headline command under `compose`, `inline-compose`, `sequence`, setter-shaped value not applied to frontmatter (criteria 1, 2).
+- [x] **Exactly-once** on retry, proxy target, resume (with repeated authored switches and a user `--json`), and each step of a multi-provider sequence (criteria 7, 25).
+- [x] **Secrets**: `--api-key sk-…`, `--token=…`, `-csecret` reach the fake provider unchanged and appear in none of INFO, dry-run, debug, `AGENT_PARAMS`, correlated output (criterion 9, 28).
+- [x] **Notice counts** per distinct pair; none under `--quiet`/`--silent`.
+- [x] **Correlation matrix**: fixture-backed rejection on stderr and on stdout; injected-switch rejection not attributed; explicit operand-only rejection reported once; no correlation for auth, timeout, interruption, API, ambiguous; exit code preserved (criteria 10, 28).
 
-- [ ] Add a read-only metadata lookup keyed by resolved provider and normalized effective native invocation, returning known canonical, unknown, or ambiguous results without participating in argv ownership or routing.
-- [ ] Enrich implicit-tail INFO and argument-rejection diagnostics with researched canonical spelling and description when the lookup is unambiguous; use neutral unknown wording otherwise and keep authored-boundary tails opaque.
-- [ ] Route direct wrappers and composition through the same lookup and presentation path while preserving each provider step’s effective entrypoint in multi-provider sequences.
-- [ ] Add invariant tests proving metadata additions, removals, aliases, arity changes, ambiguity, and invocation-scope changes cannot alter the forwarded child argv.
-- [ ] Update provider metadata, CLI behavior, and troubleshooting documentation to distinguish structural Phase 1 routing from advisory Phase 2 enrichment.
-- [ ] Complete a cross-platform review of argv token preservation, executable fixtures, path handling, output capture, and deterministic generation for macOS, Windows, and Linux; rely on CI for unavailable hosts.
-- [ ] Run GitNexus change detection against `main` before any commit and verify only expected symbols and execution flows changed; investigate any unexpected process impact before handoff.
+Checkpoint 3: `just test`, `just test-l2`, `just lint` green. Docs: resume carry-over, correlated errors, redaction in `argv-normalization.md`/`composition.md`; CLI reference for direct-wrapper reporting. Criteria 7 (resume part), 8 (once scope/wording), 9, 10, 11, 15, 25 (resume part), 28 flip to Done in the spec table.
 
-### Validation checkpoint
+## Phase 4: Switch-metadata contract and generator (R8, part 1)
 
-- [ ] Run `cargo run -p claudine-gen -- check`.
-- [ ] Run `cd claudine && just check`.
-- [ ] Run `cd claudine && just test`.
-- [ ] Run `cd claudine && just test-l2`.
-- [ ] Run `cd claudine && just lint`.
-- [ ] Run `cd claudine && just doctest`.
-- [ ] Run `cargo fmt --check` as a read-only diagnostic; do not run formatting in write mode.
-- [ ] Complete the final acceptance matrix for all fourteen specification requirements, including direct-wrapper compatibility and the invariant that Phase 2 metadata never changes argv.
+Independent of Phases 2–3; can start after Phase 1 in parallel with them (touches research docs and `claudine/gen`, `claudine/catalog-types`, not the argv/wrap code).
 
-## Acceptance traceability
+### Wave 1: contract
 
-| Specification requirement | Implementation phases | Primary validation |
-|---|---|---|
-| 1–6: routing, boundaries, ownership, and operands | 2 | Unit and compiled-binary cases in Phases 2 and 7 |
-| 7: sequence/retry/proxy/resume/multi-provider | 3 | Launch assembly tests and Phase 7 L2 cases |
-| 8–9: INFO behavior and redaction | 4 | Presentation, secret-leak, and Phase 7 L2 cases |
-| 10: typed correlated native error | 5 | Classifier precedence and exact-one report cases |
-| 11: shared direct-wrapper path without argv change | 4–5 | Baseline and Phase 7 direct-wrapper exact-argv suite |
-| 12: completion behavior | 6 | Cursor and compiled completion cases |
-| 13: documentation and Rule 3 revision | 6 | Documentation review and doctests |
-| 14: researched metadata and Codex alias | 8–10 | Schema, generator, lookup, and argv-invariance tests |
+- [x] **Types in `_types.yaml`.** Per the research-contracts standard (read `.claude/skills/claudine/research-contracts.md`): named types for switch and invocation-scope records; closed enums for `value_type` (`none|string|number|variadic|unknown`) and for attachment forms (space, equals, short-attached); `aliases`; `value_optional`; variadic minimum count; normalized scope (global marker or exact native command path, empty path = root); evidence and observed-version fields; explicit `unknown` with a described evidence gap. Every property has a description. `value` stays a human placeholder.
+- [x] **Update `agent-cli/_schema.yaml`** `cli_switches[]`; increment `schema_revision`; do not reinterpret `config`/`model_selection` labels as command paths.
 
-## Completion criteria
+### Wave 2: generator (parallel with Wave 1 once types are agreed)
 
-- [ ] All phase checkpoints pass, all fourteen acceptance rows have recorded evidence, and no unresolved HIGH or CRITICAL impact warning remains.
-- [ ] The implementation changes only the intended Claudine symbols, generated provider metadata, tests, and documentation; unrelated working-tree changes remain untouched.
-- [ ] No production routing decision depends on researched alias or arity metadata, and direct wrapper child argv remains identical to its Phase 1 baseline.
+- [x] **Shared vocabulary** in `claudine-catalog-types`: switch metadata record, `ValueType`, scope, attachment forms; static-friendly types.
+- [x] **`claudine-gen` projection** into each `lib/src/provider/<slug>/data.rs` as typed static metadata, deterministic order. Validation: alias/canonical uniqueness per effective scope (global plus exact-path set; conflicts fail generation rather than depend on insertion order), legal types, non-empty descriptions, every compiled provider has entries or an explicit unknown gap.
+- [x] **Generator tests** (L1, in the gen/catalog-types area): conflict, illegal type, empty description, ordering determinism, unknown-gap acceptance. Drift check covers output.
+
+### Input Robustness Matrix
+
+This work adds a reader of the `cli_switches` research format and a token reader for provider switches. Load-bearing fields: `value_type`, `value_optional`, variadic minimum, `aliases`, scope. One test per format (the research YAML sidecar through generation) walks one edit per cell from a real fixture of the codex entry, asserting through the generated public lookup result, plus a control row proving the unedited fixture gives `-c` = `string` for Codex.
+
+| Shape | `value_type` | `value_optional` | variadic min | `aliases` | scope |
+| --- | --- | --- | --- | --- | --- |
+| absent | generation error (required) | defaults only where schema declares; else error | error when `variadic`; ignored otherwise | empty by definition (documented) | error (required) |
+| explicit null | error, not conflated with absent | error | error | error | error |
+| wrong type, whole field | error | error | error | error (e.g. string) | error |
+| wrong type, one element | n/a | n/a | n/a | error, no silent filtering | error (one path segment) |
+| wrong type, every element | n/a | n/a | n/a | error | error |
+| empty | error (empty string) | n/a | error (0 for variadic) | `[]` = no aliases (valid) | `[]` = root path, valid; empty scope list = error |
+| duplicate key | YAML duplicate key rejected | rejected | rejected | duplicate alias error | rejected |
+| trailing/invalid content | invalid document rejected | | | | |
+
+- [x] **Matrix test** per the table, with the grep smells checked before closure: `#[serde(default)]` on these fields, `Option<T>` where absent and null must differ, `filter_map(.. as_str())`, `unwrap_or_default()`, `.ok()` on a parse.
+
+Checkpoint 4: `cargo run -p claudine-gen -- check` clean; generator and catalog-types L1 green via the area recipes; `just lint`.
+
+## Phase 5: Fleet research, lookup, message enrichment (R8, part 2)
+
+Depends on Phase 4.
+
+- [x] **Update the fleet prompt** (`docs/research/agent-cli/_fleet.md`) to request the new fields, with evidence for value consumption and attachment forms; validate in the fleet's success lifecycle with both shape and relation checks, and revision-aware refresh so a recently dated doc cannot skip the changed contract.
+- [x] **Pilot one provider** (Codex, because `-c` is the headline case) and inspect before the fleet. Record observed version and evidence.
+- [x] **Re-research all roster providers**; respect `skip_research` roster entries, but every compiled provider still gets metadata or an explicit unknown gap. Repeatable scalar switches stay scalar. Anything not established is `unknown` with the gap described, never guessed.
+- [x] **Regenerate** (`claudine providers generate` / `claudine-gen`), commit nothing; run the drift check.
+- [x] **Lookup API** in the lib: keyed by provider and effective entrypoint (global + exact-path entries), returns a switch record or the union type for a candidate set, and keeps each arm so Phase 6 can name which candidate disagrees. Remove no handwritten list because none exists; guard with a test that no handwritten switch-type table exists in the CLI.
+- [x] **Message enrichment.** Known switch: `-c is Codex's --config switch (override a configuration value); forwarding to Codex.`; unrecognized: states the compiled catalog has no established type at this entrypoint and Claudine forwards anyway, without claiming the provider rejects it; explicit tail stays opaque. Use the lookup to strip attached values in notices (`-csecret` → `-c`) when `-c` is researched as short-attachable.
+- [x] **Tests**: criterion 14 (Codex `-c` = `--config`, `string`, enriched message, drift rejected); lookup precedence (exact name/alias); command-scoped resume metadata.
+
+Checkpoint 5: fleet outputs validated; generated data compiled; `just test`, `just lint`, gen check green. Docs: research topic description, `research-contracts.md` if the process changed; update the claudine skill if the workflow changed.
+
+## Phase 6: Type-aware ownership (R9)
+
+Depends on Phases 2, 3, and 5.
+
+### Wave 1: pure core (parallel tasks)
+
+- [x] **Ownership function** (one, shared; in the lib per ruling 3). Inputs: tokens after the file, Claudine owned-flag surface, authored snapshot (schema parameter names, `agent` hints), CLI-named provider, candidate-set types. Output: classified tokens, typed tail descriptor with per-switch value assignments, positionals, setters. Implement rules 1–9 exactly as specified, including: left-to-right application; `key=value` rule 3; none/string/number/variadic/union; ambiguity result type; contiguous value runs that are not reconnected after a Claudine token is removed; exact spellings and researched attached forms only; `-` prefixed values need attachment; empty-string values; number grammar per ruling 5; unknown ≠ none; first `--` consumed, later `--` forwarded; explicit tail never checked.
+- [x] **Candidate resolution**: CLI provider → frontmatter `agent` (via `parse_selection_hints_from_frontmatter`; unresolved expression retains all) → all providers. Per-step sequence providers do not narrow.
+- [x] **Authored snapshot reader**: using the Spike A seam; literal `$schema` (source-relative), literal `agent`; SimplifiedSchema property names from every union arm; raw JSON Schema top-level names including union branches via the existing loader; unestablished names make a contested setter-shaped token an error telling the user to use `--` or `--set`. Schema read failure is an execution error; completion gets no suggestions. No templates, shell, lifecycle, provider discovery, network. Help/version must not open a file.
+- [x] **`argv` positionals**: `parse_composition_positionals` (`commands/compose/setters.rs`) collects leftover bare words into `argv` and drops the multiple-file error (and fix its misattributing comment in the partition); `argv=` setter or `--set` containing `argv` is an error before `--` with bare-word guidance; reserved key directly after a provider switch; opaque after `--`; strings not JSON5-parsed; overrides authored `argv` only when at least one positional; sequence applies it via the existing caller-overlay path; participates in ordinary schema validation; `inline-compose` must not persist it (Spike C).
+
+### Wave 2: checks and prompt (depends on Wave 1)
+
+- [x] **Ambiguity handling**: when candidates disagree on consumption (including scalar vs variadic and unknown vs known), prompt when eligible (`prompt_for_missing` true, stdin and stderr TTYs, no `--silent`); the answer decides ownership only. Otherwise fail with `ambiguous provider argument` naming the switch and each provider's interpretation and suggesting a provider flag or `--`. Completion never prompts. Prompt text states it is resolving how arguments are read. Use `biscuit-tui`/`inquire` consistent with the existing prompt loop.
+- [x] **Resolved-provider check**: implemented once with the per-candidate assignments preserved; missing value, extra value, min-count, attachment; error names switch, token, resolved provider. Run at ownership (mismatch holds for every candidate), at preflight for the command and each statically resolvable `sequence` step (fails before step 1), and before each spawn for runtime-resolved providers (retry, proxy target, resume, runtime-decided step). Use the actual entrypoint including resume. Unknown types defer to the provider. Explicit tails bypass it.
+- [x] **Wire into the partition**: replace `partition_composition_tail`'s first-unowned-switch rule; file identification still the first bare non-setter token before any provider switch; switch/`--` before file stays an error with ordering guidance. Ownership is fixed once per invocation; retries and steps recheck, never reassign. Update the `looks_like_setter` doc comment in `argv/mod.rs`.
+
+### Wave 3: tests
+
+- [x] **Ownership fixture suite** (partition tests stay beside `argv/partition.rs`): optional and variadic counts, attached and empty values, aliases, mixed implicit/explicit tails, unknown catalog entries, numeric boundaries, a Claudine token interrupting a value run (`--codex -c phase=2 x=y` fails rather than attaching `x=y`), snapshot semantics (`agent=codex` does not narrow), source-relative schema, union schema, templated `agent`, command-scoped resume metadata, unresolved file/schema read, help with no valid file, prompt vs non-prompt ambiguity. Assert both ownership and exact forwarded tokens.
+- [x] **Binary tests** for the spec's three example commands and for `argv` frontmatter propagation through sequence steps and proxy runs.
+- [x] Verify criteria 4, 16–24, 26, 27, 29.
+
+#### Input robustness (token reader)
+
+The provider-token reader is a parser, so each load-bearing input has a defined outcome asserted through the public result (the forwarded tail/errors), walked in one table-driven test with a control row (`--codex -c model_reasoning_effort=low phase=2`).
+
+| Shape | Switch value | Type metadata | Schema parameter names | `argv` key |
+| --- | --- | --- | --- | --- |
+| absent | missing value error when type requires one | unknown, rule 5 (never none) | unestablished: contested setter errors | not set: authored left alone |
+| explicit null | n/a (no null token) | unknown with described gap | schema `null` property type ignored, name still counts | `argv=null` is an error |
+| wrong type, whole | `--n abc` for number: not taken, becomes positional or error per rule | n/a | non-object schema → read error, no guessing | `argv=[1]`-shaped setter rejected |
+| wrong type, one element | variadic run ends at first switch/setter | n/a | one non-string key: error | n/a |
+| wrong type, every element | n/a | n/a | n/a | n/a |
+| empty | empty string is a valid string value; `[]` schema props = none declared, setters go to Claudine | n/a | no params ≠ unestablished (distinct outcomes asserted) | no positionals ≠ absent only when authored `argv` exists |
+| duplicate | repeated scalar switch stays two assignments (no variadic merge) | duplicate alias rejected at generation | duplicate key across arms is one name | duplicate bare words preserved in order |
+| trailing/invalid | non-UTF-8 refused (Phase 2); `--` boundary only first consumed | n/a | invalid schema is a read error | n/a |
+
+Checkpoint 6: `just test`, `just test-l2`, `just lint` green; acceptance table criteria 1–29 all verifiable.
+
+## Phase 7: Completion, documentation, and close-out (R4, docs)
+
+Depends on Phase 6. Tasks parallel unless noted.
+
+- [x] **Completion (R4).** Delete `is_value_bearing_flag` and its stale comment in `completion/engine/tokens.rs`; cursor scan uses `OwnedFlags::for_composition` and the shared ownership function with the file's `$schema`/`agent`. Never fails or prompts: ambiguity, unreadable file, missing/extra-value errors yield no suggestions. No Claudine suggestions after authored `--`; file and setter completion keep working; no provider switch completion. Distinguish an unfinished value slot from a terminal missing-value error; no Claudine suggestions while the cursor belongs to a provider. Completion read-only, no side effects. Tests under `tests/` for each case. (Criteria 12, 27.)
+- [x] **Documentation.** Update `docs/topics/argv-normalization.md`, `cli-pre-parsing.md`, `composition.md` (provider forwarding; `argv` array; reserved setter name; propagation through sequence and proxy), `frontmatter-properties.md` (`argv`), `docs/topics/completions/`, the CLI reference; document authored snapshot, schema precedence, ambiguity, entrypoint checks, `--` escape. Audience: a developer with no repo experience: lead with what they can do, give a compact example per rule, add a Mermaid diagram for the ownership flow. Pages must not link to this fix by name or path. No page promises switch recognition beyond what the catalog establishes.
+- [x] **Skill.** Update `.claude/skills/claudine/` where the shared descriptor or parsing workflow changed (and `docs/dependencies.md` only if crates were added; none expected).
+- [x] **Drift pass.** Review all touched `///`/`//!` and inline comments; resolve drift in favor of the code and report it in the implementation log.
+- [x] **Spec upkeep.** Update status/acceptance table in `spec.md` to reflect landed work (a snapshot edit allowed because the status section is the lifecycle record); record departures in `implementation-log.md`.
+- [x] **Final verification.** From `claudine/`: `just test`, `just test-l2`, `just lint`; `cargo run -p claudine-gen -- check`; generator and catalog-types L1 via area recipes. Confirm the three guards (`wrap_direct_argv.rs`, `spawn_site_guard.rs`, `dispatch_inventory.rs`) are green and no L2 window took focus.
+- [x] **Hand off.** State "implementation complete, ready for review". Do not move the fix to `_completed` and do not run `just complete`. Do not commit unless asked.
+
+Checkpoint 7: all 29 criteria Done with evidence cited in `implementation-log.md`.

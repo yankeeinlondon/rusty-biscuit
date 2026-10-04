@@ -182,7 +182,7 @@ pub(crate) fn collect_effects(
     // compose pass that follows fetches each remote URL once (single-flight),
     // not twice. Absent a shared runtime, build a private one.
     let remote_fetch = options.remote_fetch_runtime();
-    let root = (options.source.clone(), options.source_derivation);
+    let root = (options.source.clone(), options.source_derivation, options.source_opening.clone());
     let graph = collect_recursive(
         markdown,
         options,
@@ -551,7 +551,7 @@ fn collect_recursive(
         };
 
         match resolved {
-            transclusion::ResolvedTarget::File { path, .. } => {
+            transclusion::ResolvedTarget::File { path, resolved, .. } => {
                 let mut child = Markdown::try_from(path.as_path())?;
                 transclusion::apply_directive_set_overlay(&mut child, &directive.options);
                 let child_options = transclusion::markdown_child_options(
@@ -559,6 +559,7 @@ fn collect_recursive(
                     &child_state_data,
                     &directive.options,
                     &path,
+                    transclusion::source_opening(&directive.raw_target, &resolved),
                 );
                 let child = collect_recursive(
                     &child,
@@ -575,7 +576,7 @@ fn collect_recursive(
                 )?;
                 edges.push(super::PreflightGraphEdge {
                     directive: directive.clone(),
-                    resolved_target: super::PreflightResolvedTarget::File(path),
+                    resolved_target: super::PreflightResolvedTarget::File { path, resolved },
                     child: std::sync::Arc::new(child),
                 });
             }
@@ -639,13 +640,17 @@ fn collect_recursive(
         };
 
         let child = match resolved {
-            transclusion::ResolvedTarget::File { path, .. } => {
+            transclusion::ResolvedTarget::File { path, resolved, .. } => {
                 let child = Markdown::try_from(path.as_path())?;
                 let child_options = transclusion::markdown_child_options(
                     options,
                     &child_state_data,
                     &transclusion::BlockOptions::default(),
                     &path,
+                    Some(crate::markdown::compose::context::options::SourceOpening {
+                        reference: file_ref.clone(),
+                        resolved,
+                    }),
                 );
                 collect_recursive(
                     &child,
@@ -701,6 +706,7 @@ fn collect_recursive(
         let mut nested_options = options.clone();
         nested_options.source = root.0.clone();
         nested_options.source_derivation = root.1;
+        nested_options.source_opening = root.2.clone();
         nested_options.clear_root_overrides();
         let child = Markdown::from(content);
         let mut node = collect_recursive(

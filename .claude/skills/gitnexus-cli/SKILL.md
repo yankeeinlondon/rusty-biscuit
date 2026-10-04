@@ -20,12 +20,28 @@ just gitnexus
 ```
 
 In an interactive terminal, the recipe starts `gitnexus analyze --watch` in the
-foreground. Re-running it for the same worktree detects the recipe-managed
-watcher through `.gitnexus/just-watch.pid` and returns `gitnexus status` instead.
+background and returns, printing the watcher's pid and its log file. Re-running
+it for the same worktree reports the running watcher's pid and log file, then
+`gitnexus status`. Watchers are tracked outside every worktree, in
+`/tmp/gitnexus-watch-<user>/`: `<worktree-slug>.pid` (pid, then worktree root)
+and `<worktree-slug>.log`. The path is fixed rather than `$TMPDIR` so sandboxed
+agents see the same registry.
+
+Every run, interactive or not, first sweeps that registry: entries whose process
+has exited are dropped, and a live watcher whose worktree no longer exists (no
+`<root>/.git`) is stopped, with a message naming the worktree and the log it
+left behind. Only recipe-started watchers are tracked; a watcher started by hand
+with `gitnexus analyze --watch` is invisible to the recipe.
+
 Each linked worktree needs its own watcher: GitNexus resolves and watches the
 current worktree root, and every worktree has independent `.gitnexus/` storage.
 The inferred registry name is shared because GitNexus derives it from the
 canonical checkout, but that name does not widen the watcher's filesystem scope.
+When the worktree has no index yet (no `.gitnexus/gitnexus.json` or `meta.json`),
+the background job first runs a one-shot `gitnexus analyze --skip-agents-md
+--force`, whose progress goes to the log. Without it, GitNexus 1.6.12+ classifies
+a `.gitnexus/` holding only the Claude Code hook's `.hook-locks/` as "unowned"
+storage and refuses to analyze, and `--watch` does not accept `--force`.
 
 When stdin or stdout is not a terminal, the recipe remains finite for hooks and
 agents: it short-circuits when `gitnexus status` reports up-to-date, otherwise it

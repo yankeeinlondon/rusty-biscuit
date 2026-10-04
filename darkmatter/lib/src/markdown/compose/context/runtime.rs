@@ -120,6 +120,16 @@ impl ComposeContext {
     pub fn env(&self) -> &HashMap<String, String> {
         &self.inner.env
     }
+    /// The environment snapshot as the value of the bare `env` root.
+    pub(crate) fn env_value(&self) -> serde_json::Value {
+        serde_json::Value::Object(
+            self.inner
+                .env
+                .iter()
+                .map(|(key, value)| (key.clone(), serde_json::Value::String(value.clone())))
+                .collect(),
+        )
+    }
     /// Access the values map.
     pub fn values(&self) -> &serde_json::Map<String, serde_json::Value> {
         &self.inner.values

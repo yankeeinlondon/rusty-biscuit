@@ -139,6 +139,81 @@ fn redact_sensitive_args_is_case_insensitive_and_alias_aware() {
 /// Bare-argument recognition uses the shared credential-token prefixes, so
 /// every GitHub and Slack token kind is masked, not only `ghp_`/`xox[bp]-`.
 #[test]
+fn redact_sensitive_args_masks_a_credential_attached_to_a_short_switch() {
+    let args: Vec<String> = ["-csk-proj-abc123", "-csecret", "-c", "--", "-"]
+        .iter()
+        .map(|arg| arg.to_string())
+        .collect();
+    assert_eq!(
+        redact_sensitive_args(&args),
+        vec!["-c****", "-csecret", "-c", "--", "-"]
+    );
+}
+
+#[test]
+fn sensitive_arg_values_returns_each_masked_original_value() {
+    let args: Vec<String> = [
+        "--token",
+        "hunter22",
+        "--api-key=sk-ant-x1",
+        "-csk-proj-abc123",
+        "ghp_bare",
+        "-c",
+        "x=y",
+    ]
+    .iter()
+    .map(|arg| arg.to_string())
+    .collect();
+    assert_eq!(
+        sensitive_arg_values(&args),
+        vec!["hunter22", "sk-ant-x1", "sk-proj-abc123", "ghp_bare"]
+    );
+}
+
+/// Credentials inside an otherwise ordinary token: a configuration
+/// assignment value, a long attached value, and a short attached value,
+/// beside the sensitive-flag forms.
+#[test]
+fn redact_sensitive_args_masks_embedded_and_attached_credentials() {
+    let secret = "sk-proj-reviewsecret0123456789";
+    let args = vec![
+        "-c".to_string(),
+        format!("api_key={secret}"),
+        format!("--config={secret}"),
+        "--config=sk-short".to_string(),
+        format!("-c{secret}"),
+        format!("--token={secret}"),
+        "--api-key".to_string(),
+        secret.to_string(),
+        "-c".to_string(),
+        "model_reasoning_effort=high".to_string(),
+    ];
+
+    let redacted = redact_sensitive_args(&args);
+
+    assert_eq!(
+        redacted,
+        vec![
+            "-c",
+            "api_key=****",
+            "--config=****",
+            "--config=****",
+            "-c****",
+            "--token=****",
+            "--api-key",
+            "****",
+            "-c",
+            "model_reasoning_effort=high",
+        ]
+    );
+    assert!(redacted.iter().all(|arg| !arg.contains(secret)));
+    assert_eq!(
+        sensitive_arg_values(&args),
+        vec![secret, secret, "sk-short", secret, secret, secret]
+    );
+}
+
+#[test]
 fn redact_sensitive_args_masks_every_shared_credential_prefix() {
     let args: Vec<String> = ["ghs_abc", "github_pat_abc", "xoxa-abc", "gho_abc", "skip-this", "ghost"]
         .iter()

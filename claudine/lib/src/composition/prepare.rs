@@ -818,16 +818,11 @@ fn effective_surface(
         options.file_ref_fallback_dir.as_deref(),
     )?;
     // Lifecycle communication/action strings are deferred by design (C1): they
-    // keep their `{{ }}` spans through prepare and resolve at event-time via
-    // DM2 (C2), where strict mode fails closed on undefined roots and malformed
-    // expressions; what a span inserts is data and is sent as is. The
-    // undefined-variable scan therefore does not run over these deferred
-    // strings — it would flag the authored spans as bugs. Two static scans stay
-    // because their defects hold regardless of binding time: a nested span
-    // inside a single-pass literal (above) and a bare `err` in a no-error
-    // event. The `err` scan skips the shell text C3 just stamped: that is
-    // resolved data, and C3 already refused an authored late-binding `err`.
-    validate_no_err_in_no_error_events(&lifecycle, &source.resolved_path)?;
+    // keep their `{{ }}` spans through prepare and resolve at event time, where
+    // an absent document property is `null`. A read of a global the event
+    // declares unavailable is a definite scope violation, so Darkmatter's
+    // passive validation rejects it here, in every branch, before any event.
+    validate_no_err_in_no_error_events(effective_frontmatter, &lifecycle, &source.resolved_path)?;
     Ok((selection_hints, lifecycle))
 }
 

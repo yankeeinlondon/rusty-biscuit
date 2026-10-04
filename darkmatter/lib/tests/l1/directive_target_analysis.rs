@@ -37,6 +37,36 @@ fn assert_nullable(actual: TargetNullability, expected_root: &str) {
     }
 }
 
+/// A bare reserved namespace is never a document target, even when the schema
+/// declares (or the frontmatter holds) a property of the same name; that
+/// property stays reachable as `doc.<name>`.
+#[test]
+fn a_reserved_namespace_root_is_never_a_document_target() {
+    let roots = ["doc", "ctx", "env", "current", "current_env"];
+    let properties: String = roots.iter().map(|root| format!("  {root}: file\n")).collect();
+    let (_, effective, unset) = document_with_schema(&properties, "");
+
+    for root in roots {
+        assert_eq!(
+            classify_target_nullability(&parse(root).unwrap(), Some(&effective), &unset),
+            TargetNullability::Unknown,
+            "bare `{root}` is a namespace, not the schema property",
+        );
+        assert_nullable(
+            classify_target_nullability(
+                &parse(&format!("doc.{root}")).unwrap(),
+                Some(&effective),
+                &unset,
+            ),
+            root,
+        );
+    }
+    assert_eq!(
+        classify_target_nullability(&parse("null").unwrap(), Some(&effective), &unset),
+        TargetNullability::Unknown,
+    );
+}
+
 #[test]
 fn classifies_schema_frontmatter_and_context_nullability_without_guessing() {
     let (_, effective, missing) = document_with_schema(

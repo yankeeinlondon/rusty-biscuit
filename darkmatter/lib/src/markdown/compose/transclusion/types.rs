@@ -301,7 +301,12 @@ impl TransclusionRuntime {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResolvedTarget {
     /// Local filesystem path.
-    File { path: PathBuf, id: String },
+    ///
+    /// `path` is canonical and is the target's identity. `resolved` is the
+    /// path the opening document's context resolved the reference to, before
+    /// canonicalization; the target's own references resolve from it, so it
+    /// keeps the spelling of the tree it was found in.
+    File { path: PathBuf, id: String, resolved: PathBuf },
     /// Remote URL target.
     Url { url: url::Url, id: String },
 }

@@ -113,6 +113,36 @@ Compare against that, never against `to_string_lossy()`.
    passed the whole time — the zero-candidate path and the interaction-denied
    path produce the same diagnostic — which is why only a real-terminal run
    on Windows could see it.
+10. **A fixture joined as `root.join("a/b/x.md")` keeps the `/` in the native
+    text.** Ordinary Win32 calls accept it, so most tests pass, but it breaks
+    the two places where `/` is not a separator: a `\\?\` path built from it
+    fails every probe with os error 123 ("filename, directory name, or volume
+    label syntax is incorrect"), and `cmd /C mklink /J` refuses the link.
+    Join name by name (`rel.split('/').fold(root, |p, n| p.join(n))`) in any
+    fixture that feeds a verbatim spelling or `mklink`. Found 2026-10-01 by the
+    `biscuit-file` `portable_path::platform` tests on `build-win-native`.
+11. **A `{{VAR}}` reference whose value is a verbatim path does not resolve.**
+    `FileReference` interpolation concatenates text, so `{{ROOT}}/x.md` with
+    `ROOT=\\?\C:\r` becomes `\\?\C:\r/x.md`, one component under the
+    verbatim prefix. `PortablePath` therefore never writes `{{ROOT}}/…` for
+    such a value (verification rejects it) and falls through to `~` or the
+    absolute path. A test that sets a variable from `fs::canonicalize` must
+    store `to_portable_string(&path)`, the spelling a user would export.
+    Found 2026-10-01 by the Darkmatter `link_normalization` tests.
+12. **A suffix splitter that cuts at `?` cuts a verbatim path at its prefix.**
+    `\\?\C:\…` contains `?`, so treating the first `?` as a URL query turns
+    every verbatim destination into `\\` (not absolute) and silently skips
+    it. Skip the `\\?\` / `//?/` prefix before looking for `#`, `?`, or `:`.
+    Darkmatter's `link_normalization::split_suffix` does; the macOS and Linux
+    legs cannot see it. Found 2026-10-01 on `build-win-native`.
+13. **`PathBuf::push` drops `.` and `..` pushed onto a verbatim buffer**, and
+    `collect::<PathBuf>()` pushes, so rebuilding `\\?\C:\a\..\b` from its
+    components yields `\\?\C:\b`, a different directory (under `\\?\` the
+    dots are literal names). A lexical normalizer that must keep them, such
+    as `biscuit-file`'s `normalize_native`, assembles the result as text.
+    Likewise, never write a `..` loop that calls `Vec::pop` on components:
+    it pops the `RootDir` or drive prefix and makes `/../a` relative.
+    Confirmed 2026-10-01 on `build-win-native`.
 
 ## WezTerm on `build-win`
 

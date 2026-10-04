@@ -8,6 +8,11 @@ pub enum FileReferenceError {
     #[error("unsupported file reference scheme `{scheme}` in `{reference}`")]
     UnsupportedScheme { scheme: String, reference: String },
 
+    #[error(
+        "`{path}` is absolute only on another operating system and cannot be located on this host"
+    )]
+    ForeignAbsolutePath { path: String },
+
     #[error("environment variable `{name}` is not set")]
     MissingEnvironmentVariable { name: String },
 
@@ -60,6 +65,45 @@ pub enum FileReferenceError {
     RepositoryRootNotContainingSource {
         repository_root: PathBuf,
         source_path: PathBuf,
+    },
+
+    /// A non-repository file tree does not contain a required working
+    /// directory. The repository counterpart is
+    /// [`RepositoryRootNotContainingSource`](Self::RepositoryRootNotContainingSource).
+    #[error("file tree `{base_dir}` does not contain the working directory `{cwd}`")]
+    CwdOutsideBaseDir { base_dir: PathBuf, cwd: PathBuf },
+
+    /// A context directory or tree anchor is not an absolute host path.
+    ///
+    /// Probing a relative candidate would read the live process directory, so
+    /// a captured context could resolve differently after that directory
+    /// changes. Environment values and configured magic and vault roots are
+    /// not anchors in this sense and may stay relative.
+    #[error("context {anchor} `{path}` is not an absolute path")]
+    RelativeContextDirectory {
+        anchor: super::ContextAnchor,
+        path: PathBuf,
+    },
+
+    /// An explicit tree root disagrees with the supplied repository root.
+    /// Inside a repository the tree root is always the repository root.
+    #[error(
+        "explicit base directory `{base_dir}` conflicts with repository root `{repository_root}`; inside a repository the base directory must be the repository root"
+    )]
+    BaseDirNotRepositoryRoot {
+        base_dir: PathBuf,
+        repository_root: PathBuf,
+    },
+
+    /// A relative reference leaves the file tree, as written or where it
+    /// really lands through a symlink, junction, or reparse point.
+    #[error(
+        "relative reference `{reference}` leaves file tree `{base_dir}` through candidate `{candidate}`"
+    )]
+    RelativeTreeEscape {
+        base_dir: PathBuf,
+        candidate: PathBuf,
+        reference: String,
     },
 
     #[error("could not produce a relative path from `{from}` to `{to}`")]

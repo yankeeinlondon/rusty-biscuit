@@ -242,7 +242,7 @@ Update alongside code changes:
 
 This project is indexed by GitNexus as **rusty-biscuit** (158905 symbols, 335372 relationships, 815 execution flows).
 
-> Index stale? Run **`just gitnexus`** from anywhere in the repo — always this recipe, never a bare `gitnexus analyze`. In an interactive terminal it starts a foreground watcher for the current worktree, or returns `gitnexus status` when that worktree already has a recipe-managed watcher. Linked worktrees have independent watcher scope and `.gitnexus/` storage. Non-interactive callers retain the finite status check and forced one-shot refresh without rewriting agent instruction files.
+> Index stale? Run **`just gitnexus`** from anywhere in the repo — always this recipe, never a bare `gitnexus analyze`. In an interactive terminal it starts a background watcher for the current worktree and prints its log file under `/tmp/gitnexus-watch-<user>/`, or reports the running watcher's log and `gitnexus status` when one already exists. Every run also stops watchers whose worktree has been removed. Linked worktrees have independent watcher scope and `.gitnexus/` storage. Non-interactive callers retain the finite status check and forced one-shot refresh without rewriting agent instruction files.
 
 ## Using it
 

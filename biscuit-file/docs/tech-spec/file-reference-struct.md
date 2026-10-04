@@ -59,15 +59,15 @@ Direct resolution probes candidates in order and returns the first existing
 regular file. Implicit relative paths are therefore composition-CWD first; a
 document-local file shadows a repository-root file.
 
-The base is the launch directory for top-level caller-authored references and
+The working directory (`cwd`) is the launch directory for top-level caller-authored references and
 the authoring document's directory for document-authored references. Package
 and package-area scopes are selected from a caller-supplied
-`RepositoryScopeCatalog` for that same base; they are never inherited from an
+`RepositoryScopeCatalog` for that same `cwd`; they are never inherited from an
 unrelated launch document.
 
 ## Repository Containment
 
-`&` and `^` require a repository containing the reference base. Their
+`&` and `^` require a repository containing the reference `cwd`. Their
 candidates must remain inside it after lexical normalization. If the target or
 its deepest existing ancestor can be canonicalized, that canonical path must
 also remain inside the canonical repository root, preventing a final symlink,
@@ -79,15 +79,24 @@ symlink behavior.
 
 ## Resolution Context
 
-`FileResolutionContext` captures the request's base directory, source path,
+`FileResolutionContext` captures the request's working directory (`cwd`), source path,
 home directory, environment, repository scope catalog, magic roots, and vault
-roots. Explicit operations read only this snapshot. `for_source` and `for_base`
-derive a new authoring base and reselect package/package-area anchors from the
+roots. Explicit operations read only this snapshot. `for_source` and `for_cwd`
+derive a new authoring `cwd` and reselect package/package-area anchors from the
 same catalog without ambient discovery.
 
-`resolve()` and `resolve_from(base)` are compatibility entry points. They build
+The context also selects a tree root, `base_dir`, with an origin: the
+repository root, an explicit `with_base_dir`, the deepest containing vault, the
+`~`/`{{VAR}}` anchor of the opening reference (`for_source_reference`), or a
+fallback to `cwd`. Every origin except the fallback is a boundary: explicit
+and implicit relative candidates must stay inside it lexically and, through
+the same canonical check `&`/`^` use, where they land. A blocked candidate is
+`RelativeTreeEscape`. `allow_external_relative()` lifts the relative boundary
+only. The ambient entry points carry no tree.
+
+`resolve()` and `resolve_from(cwd)` are compatibility entry points. They build
 an ambient context at call time; construction-time CWD never affects later
-resolution. `resolve_from` treats `base` as the composition CWD for implicit,
+resolution. `resolve_from` treats `cwd` as the composition CWD for implicit,
 explicit-relative, `@`, `&`, and `^` planning while still capturing live home
 and environment values.
 

@@ -233,6 +233,7 @@ fn serialized_field_list_matches_catalog() {
         "unmapped_native_events",
         "overlay_selector",
         "overlay_capabilities",
+        "cli_switches",
     ];
     // serde_json without `preserve_order` sorts map keys, so membership
     // (not order) is asserted here; the gen-side twin pins the order

@@ -59,8 +59,10 @@ pub enum FileRefFailure {
 impl FileRefFailure {
     /// Classifies a [`biscuit_file::FileReferenceError`] into a failure kind.
     ///
-    /// A syntactically invalid reference is [`Malformed`]; a remote URL that
-    /// cannot resolve to a local path is [`RemoteNotEnabled`]; everything else
+    /// A reference that cannot name a local path as written is [`Malformed`]:
+    /// invalid syntax, an unsupported scheme or `~user` home, or an absolute
+    /// path that belongs to another operating system. A remote URL that cannot
+    /// resolve to a local path is [`RemoteNotEnabled`]. Everything else
     /// (filesystem I/O, relative-path computation, missing env/git/workspace
     /// state, and — when present — an invalid-URL parse) is treated as
     /// [`NotFound`] via the catch-all: the reference was understood but did not
@@ -72,8 +74,17 @@ impl FileRefFailure {
     pub fn classify(error: &biscuit_file::FileReferenceError) -> Self {
         use biscuit_file::FileReferenceError as E;
         match error {
-            E::InvalidSyntax(_) => FileRefFailure::Malformed,
+            E::InvalidSyntax(_)
+            | E::UnsupportedScheme { .. }
+            | E::UnsupportedUserHome(_)
+            | E::ForeignAbsolutePath { .. } => FileRefFailure::Malformed,
             E::RemoteNotLocal(_) => FileRefFailure::RemoteNotEnabled,
+            // A relative reference that leaves the tree root, and a document
+            // outside its tree, are understood but yield no usable path, like
+            // their repository counterparts. The typed cause stays in `source`.
+            E::RelativeTreeEscape { .. }
+            | E::CwdOutsideBaseDir { .. }
+            | E::BaseDirNotRepositoryRoot { .. } => FileRefFailure::NotFound,
             _ => FileRefFailure::NotFound,
         }
     }
@@ -118,8 +129,8 @@ pub struct FileReferenceDiagnostic {
     pub reference: String,
     /// The kind of failure (absent vs malformed vs remote-not-enabled).
     pub kind: FileRefFailure,
-    /// The document-relative base directory resolution started from.
-    pub base_dir: PathBuf,
+    /// The document directory (`cwd`) resolution started from.
+    pub cwd: PathBuf,
     /// Launch-area metadata retained by the resolution diagnostic.
     pub fallback_dir: Option<PathBuf>,
     /// The underlying typed cause, when one exists (absent for a clean miss).
@@ -399,6 +410,12 @@ pub enum ExpressionError {
         path: String,
     },
 
+    /// A binding failure: a read of a global the host declared unavailable in
+    /// this scope, or an invalid host registration. Never resolved by falling
+    /// through to a same-named document property.
+    #[error(transparent)]
+    Binding(Box<super::binding::BindingError>),
+
     /// A literal token (`{{!data:…}}`) that is malformed, or that is not an
     /// entire frontmatter string value. A token never falls back to
     /// expression parsing, so this is authoring-fatal on every surface.
@@ -470,6 +487,9 @@ impl ExpressionError {
     /// - [`MalformedLiteralToken`] — a token never falls back to expression
     ///   parsing or to text, so a lenient caller cannot keep it either.
     ///
+    /// - [`Binding`] — an unavailable global must never render as an empty
+    ///   value or a same-named document property.
+    ///
     /// Every other variant (arity, arg-type, parse, arithmetic, generic
     /// [`Other`], …) is demoted to a `ComposeWarning` in lenient body
     /// interpolation. [`RemoteNotEnabled`] is
@@ -485,6 +505,7 @@ impl ExpressionError {
     /// [`ContextProjectionInvariant`]: ExpressionError::ContextProjectionInvariant
     /// [`ReservedRootPathUnknown`]: ExpressionError::ReservedRootPathUnknown
     /// [`MalformedLiteralToken`]: ExpressionError::MalformedLiteralToken
+    /// [`Binding`]: ExpressionError::Binding
     /// [`Other`]: ExpressionError::Other
     /// [`Malformed`]: FileRefFailure::Malformed
     /// [`NotFound`]: FileRefFailure::NotFound
@@ -497,6 +518,7 @@ impl ExpressionError {
             ExpressionError::ContractViolation { .. } => true,
             ExpressionError::ReservedRootPathUnknown { .. } => true,
             ExpressionError::MalformedLiteralToken(_) => true,
+            ExpressionError::Binding(_) => true,
             ExpressionError::ContextNotCaptured { .. }
             | ExpressionError::FunctionContextNotCaptured { .. }
             | ExpressionError::ContextProjectionInvariant { .. }
@@ -564,6 +586,26 @@ mod tests {
         fn invalid_syntax_is_malformed() {
             let err = FileReferenceError::InvalidSyntax("bad".to_string());
             assert_eq!(FileRefFailure::classify(&err), FileRefFailure::Malformed);
+        }
+
+        #[test]
+        fn unlocatable_as_written_is_malformed() {
+            for err in [
+                FileReferenceError::UnsupportedScheme {
+                    scheme: "ftp".to_string(),
+                    reference: "ftp:spec.md".to_string(),
+                },
+                FileReferenceError::UnsupportedUserHome("~other/spec.md".to_string()),
+                FileReferenceError::ForeignAbsolutePath {
+                    path: r"C:\spec.md".to_string(),
+                },
+            ] {
+                assert_eq!(
+                    FileRefFailure::classify(&err),
+                    FileRefFailure::Malformed,
+                    "`{err}` must not be reported as not found"
+                );
+            }
         }
 
         #[test]
@@ -635,7 +677,7 @@ mod tests {
                 function: "frontmatter",
                 reference: "does-not-exist.md".to_string(),
                 kind: FileRefFailure::NotFound,
-                base_dir: PathBuf::from("/repo"),
+                cwd: PathBuf::from("/repo"),
                 fallback_dir: None,
                 source: None,
                 caller: None,
@@ -652,7 +694,7 @@ mod tests {
                 function: "frontmatter",
                 reference: "https://example.com/spec.md".to_string(),
                 kind: FileRefFailure::RemoteNotEnabled,
-                base_dir: PathBuf::from("/repo"),
+                cwd: PathBuf::from("/repo"),
                 fallback_dir: None,
                 source: None,
                 caller: None,
@@ -754,7 +796,7 @@ mod tests {
                 function: "frontmatter",
                 reference: "features/x/spec.md".to_string(),
                 kind: FileRefFailure::NotFound,
-                base_dir: PathBuf::from("/repo"),
+                cwd: PathBuf::from("/repo"),
                 fallback_dir: None,
                 source: None,
                 caller: None,

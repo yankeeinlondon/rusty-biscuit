@@ -86,7 +86,7 @@ on_failure: ask
 
 - A default is an ordinary frontmatter key with the property's name. The caller overrides it with `key=value`, and the caller always wins, over a default and over a `proxy` overlay.
 - **A required property with no value makes Claudine ask the caller**, using a widget that fits the type: a picker for an `enum`, a switch for a `boolean`. This is the way to put a question to the caller without an agent: leave the property unset on purpose. Without a terminal the run stops with a typed error naming the property, and an unattended caller supplies it as `key=value`.
-- An optional input that was not supplied can raise when it is read in a gate or a lifecycle value. Guard it with a fallback: {{{ title || '' }}} in a value, `review || false` in a `when:`.
+- An optional input that was not supplied reads as `null`, so `when: "review"` is simply false and a plain ternary such as {{{ review ? 'yes' : 'no' }}} needs no guard. Use a fallback only to choose a default value: {{{ title || 'Untitled' }}}.
 
 ::block when="lifecycle"
 ### Lifecycle: what Claudine does around the agent

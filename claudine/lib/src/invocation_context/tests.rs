@@ -63,7 +63,7 @@ fn one_launch_observation_projects_every_existing_context() {
     let environment = invocation.environment_context();
     let after = invocation.work_snapshot();
 
-    assert_eq!(file_resolution.base_dir(), fixture.path());
+    assert_eq!(file_resolution.cwd(), fixture.path());
     // `LaunchContext` canonicalizes every path it projects so search-dir
     // dedup compares one form — in the legacy (dunce-simplified) spelling,
     // never verbatim; the authored roots below are unaffected.
@@ -1658,4 +1658,64 @@ fn siblings_sharing_one_run_keep_their_own_target_identity() {
         assert_eq!(values.get("model").and_then(serde_json::Value::as_str), Some(*model));
     }
     assert_eq!(invocation.work_snapshot().volatile_observations.get("file_changes"), Some(&1));
+}
+
+/// A prompt opened as `~/.claudine/prompts/x.md` outside any repository takes
+/// home as its tree root: its relative references may move around home but
+/// not leave it. Derived from the path alone, the same prompt has only a
+/// fallback root, which is what makes the anchor load-bearing.
+#[test]
+#[serial_test::serial(cwd, env)]
+fn an_external_prompt_opened_through_home_takes_home_as_its_tree_root() {
+    let home = TempDir::new().unwrap();
+    let launch = TempDir::new().unwrap();
+    let guards = set_home_variables(home.path());
+    let prompts = home.path().join(".claudine/prompts");
+    fs::create_dir_all(&prompts).unwrap();
+    fs::write(prompts.join("x.md"), "prompt\n").unwrap();
+    fs::write(home.path().join("shared.md"), "shared\n").unwrap();
+    fs::write(launch.path().join("outside.md"), "outside\n").unwrap();
+    // The two temp directories are siblings, so this leaves home.
+    let escaping = format!(
+        "../../../{}/outside.md",
+        launch.path().file_name().unwrap().to_string_lossy()
+    );
+
+    let invocation = InvocationContext::capture_at(launch.path());
+    let source = crate::composition::resolve_composition_source_in_context(
+        "~/.claudine/prompts/x.md",
+        invocation.launch_file_resolution_context(),
+    )
+    .unwrap();
+    let resolve = |context: &FileResolutionContext, raw: &str| {
+        biscuit_file::FileReference::new(raw)
+            .unwrap()
+            .resolve_in_context(context)
+    };
+
+    let anchored = invocation.derive_composition_source(&source).unwrap();
+    let context = anchored.file_resolution_context();
+    let home_dir = invocation.home_dir().unwrap().to_path_buf();
+    assert_eq!(context.base_dir(), home_dir);
+    assert_eq!(context.base_dir_origin(), &biscuit_file::BaseDirOrigin::Home);
+    assert_eq!(
+        resolve(context, "../../shared.md").unwrap(),
+        Some(home_dir.join("shared.md"))
+    );
+    assert!(
+        matches!(
+            resolve(context, &escaping),
+            Err(biscuit_file::FileReferenceError::RelativeTreeEscape { ref base_dir, .. })
+                if *base_dir == home_dir
+        ),
+        "{:?}",
+        resolve(context, &escaping)
+    );
+
+    let unanchored = invocation.derive_source(&source.resolved_path).unwrap();
+    let context = unanchored.file_resolution_context();
+    assert_eq!(context.base_dir_origin(), &biscuit_file::BaseDirOrigin::Fallback);
+    assert!(matches!(resolve(context, &escaping), Ok(Some(_))), "{:?}", resolve(context, &escaping));
+
+    drop(guards);
 }

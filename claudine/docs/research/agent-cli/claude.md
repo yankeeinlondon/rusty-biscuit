@@ -1,1044 +1,3274 @@
 ---
 $schema: ./_schema.yaml
+schema_revision: 2
+provider: claude
 created: 2026-07-02
-last_updated: 2026-07-03
-agent: codex
-model: default
-latest_version: "2.1.200"
+last_updated: 2026-10-01
+agent: opencode
+model: zai-coding-plan/glm-5.3
+reasoning_effort: provider_default
+latest_version: 2.1.287
+versions_examined:
+- 2.1.287
+evidence:
+- claim: Root usage line, the visible subcommand list, and every root switch spelling, alias, value placeholder, and default that help renders; commander.js renders a required value as `<x>`, an optional value as `[x]`, and a variadic list as `<x...>`.
+  id: help-root-287
+  limitations: Help is incomplete by the provider's own statement, so hidden and docs-only switches do not appear, and help alone does not prove that a value binds.
+  location: local `claude --help` output; binary /Users/ken/.local/share/claude/versions/2.1.287 via symlink /Users/ken/.local/bin/claude
+  method: local_inspection
+  observed_on: 2026-10-01
+  version: 2.1.287
+- claim: Subcommand trees below each command group and their option spellings, placeholders, defaults, and aliases.
+  id: help-subcommands-287
+  limitations: Hidden commands must be probed by name because help does not list them; `rm` and `daemon` render some options in usage prose instead of an options block.
+  location: local `claude <path> --help` output for every command family listed under Subcommands, including the hidden daemon, remote-control, and self-hosted-runner
+  method: local_inspection
+  observed_on: 2026-10-01
+  version: 2.1.287
+- claim: The documented command and flag tables, including flags absent from local help, their aliases, value notes, version gates, and removed-flag history.
+  id: docs-cli-reference
+  limitations: Describes an unspecified current version; `--exec`, documented there, is rejected by the 2.1.287 parser.
+  location: https://code.claude.com/docs/en/cli-reference
+  method: official_docs
+  observed_on: 2026-10-01
+  version: unknown
+- claim: The general runtime environment variables, their on/off spellings, and env-versus-settings precedence.
+  id: docs-env-vars
+  limitations: Model-endpoint, permission-policy, MCP-specific, and logging variables belong to their narrower topics and are not recorded here.
+  location: https://code.claude.com/docs/en/env-vars
+  method: official_docs
+  observed_on: 2026-10-01
+  version: unknown
+- claim: Install commands per operating system and channel, auto-update behavior per install method, and the Node 22+ npm engine requirement.
+  id: docs-setup
+  limitations: Install commands were not executed on this host beyond the already-installed native build.
+  location: https://code.claude.com/docs/en/setup
+  method: official_docs
+  observed_on: 2026-10-01
+  version: unknown
+- claim: Managed-settings file locations per operating system, the managed-settings.d drop-in directory, and the MDM and registry delivery paths.
+  id: docs-managed-settings
+  limitations: Enterprise paths were not locally exercised because this host has no managed deployment.
+  location: https://code.claude.com/docs/en/managed-settings
+  method: official_docs
+  observed_on: 2026-10-01
+  version: unknown
+- claim: The installed command is a native darwin-arm64 binary managed by the native installer, version 2.1.287, auto-update channel latest.
+  id: local-binary-287
+  limitations: Single host, macOS arm64 only.
+  location: command -v claude; ls -l of the symlink; claude --version; claude doctor install report
+  method: local_inspection
+  observed_on: 2026-10-01
+  version: 2.1.287
+- claim: The npm registry reports version 2.1.287 with dist-tags latest 2.1.287, stable 2.1.285, and next 2.1.287, so 2.1.287 is the newest release.
+  id: npm-dist-tags-287
+  limitations: Registry snapshot at observation time.
+  location: npm view @anthropic-ai/claude-code version dist-tags --json
+  method: local_inspection
+  observed_on: 2026-10-01
+  version: 2.1.287
+- claim: The parser is commander.js and validates choice-valued options at parse time; a value binds through both the space form and the equals form for required-value and optional-value options alike; single-dash spellings accept a short-attached value (-nfoo and -rbar parse instead of erroring as unknown); an optional-value switch does not consume a following token that looks like an option; commander applies these forms uniformly to options declared with the same shape.
+  id: test-parser-forms-287
+  limitations: Forms were proven directly only for the switches named here; other switches rest on the parser's uniform behavior for the same declaration shape.
+  location: temp directory; claude -p --output-format bogus 'q'; --output-format=bogus; --permission-mode bogus and =bogus; --input-format=bogus; --system-prompt-snapshot=bogus; --permission-prompts bogus; --autocompact bogus; --prompt-suggestions bogus and =bogus; -nfoo and -rbar before --setting-sources bogus; --from-pr --setting-sources bogus
+  method: disposable_test
+  observed_on: 2026-10-01
+  version: 2.1.287
+- claim: A variadic option grabs the immediately following token unconditionally, even when it looks like an option, and keeps consuming non-option tokens after it; equals binds a variadic value; at least one value is taken, so the variadic minimum is 1; with every token consumed and no prompt remaining, the run exits with an input-required error instead of starting a session.
+  id: test-parser-variadic-287
+  limitations: Established with --add-dir at the root entrypoint; other variadic switches share the parser.
+  location: temp directory; claude --add-dir /nonexistent-dir-xyz --setting-sources bogus; --add-dir=/nonexistent-dir-xyz alone; --add-dir --setting-sources bogus
+  method: disposable_test
+  observed_on: 2026-10-01
+  version: 2.1.287
+- claim: 'The parser rejects unknown long and short options with `error: unknown option` and a non-zero exit, and `--exec`, documented in the CLI reference, is rejected as unknown in 2.1.287.'
+  id: test-unknown-strict-287
+  limitations: Probed at the root entrypoint and for one documented flag.
+  location: temp directory; claude --bogus-flag; claude -Z; claude --exec --setting-sources bogus
+  method: disposable_test
+  observed_on: 2026-10-01
+  version: 2.1.287
+- claim: Each probed flag is accepted by the 2.1.287 root parser; required-value flags error with `option '--flag <placeholder>' argument missing`, which also gives the exact placeholder; `<servers...>` in those errors proves --channels and --dangerously-load-development-channels take variadic values; the boolean docs-only flags and the removed --enable-auto-mode parse without an unknown-option error.
+  id: test-missing-arg-287
+  limitations: Proves acceptance and arity, not semantics.
+  location: temp directory; bare claude --max-turns, --permission-prompt-tool, --advisor, --append-system-prompt-file, --append-subagent-system-prompt, --append-subagent-system-prompt-file, --teammate-mode, --ref, --fallback-model, --json-schema, --file, --agents, --settings, --environment, --model, --system-prompt, --autocompact, --effort, --sdk-url, --channels, --dangerously-load-development-channels, --init, --init-only, --maintenance, --enable-auto-mode, --remote, --rc
+  method: disposable_test
+  observed_on: 2026-10-01
+  version: 2.1.287
+- claim: '`claude --remote` fails with an error that names `--cloud`, proving --remote is an accepted alias of --cloud; the same error says piped stdout alone selects non-interactive mode and names the hidden --sdk-url flag as another non-interactive entry.'
+  id: test-remote-alias-287
+  limitations: Alias direction only; --cloud itself needs an interactive terminal to run.
+  location: temp directory; claude --remote with piped stdout
+  method: disposable_test
+  observed_on: 2026-10-01
+  version: 2.1.287
+- claim: A non-UUID --session-id value is consumed from the space form and rejected app-side with `Invalid session ID. Must be a valid UUID.` before any session starts.
+  id: test-session-id-287
+  limitations: Establishes the space form and the UUID check, not the equals form.
+  location: temp directory; claude --session-id not-a-uuid
+  method: disposable_test
+  observed_on: 2026-10-01
+  version: 2.1.287
+- claim: The space form binds the --effort value; an invalid value prints a warning naming the value and the valid set (low, medium, high, xhigh, max) and falls back to the default effort instead of exiting.
+  id: test-effort-287
+  limitations: Warning behavior only; no model call was made.
+  location: temp directory; claude --effort bogus
+  method: disposable_test
+  observed_on: 2026-10-01
+  version: 2.1.287
+- claim: '`mcp add` validates the transport app-side and rejects an invalid one naming stdio, sse, http, and the help-undocumented streamable-http; space, equals, and short-attached forms all bind the value; the failed probe wrote no server configuration.'
+  id: test-mcp-add-287
+  limitations: Transport only; scope and env values were not probed for write side effects.
+  location: temp directory; claude mcp add -t bogus probe-name probe-cmd; claude mcp add -tbogus probe-name probe-cmd; claude mcp add --transport=bogus probe-name probe-cmd
+  method: disposable_test
+  observed_on: 2026-10-01
+  version: 2.1.287
+- claim: Prints JSON with loggedIn, authMethod, apiProvider, projectsDirectory, configDirectory, forcedLoginMethod, email, orgId, orgName, and subscriptionType, and exits 0 when logged in.
+  id: probe-auth-status-287
+  limitations: The logged-out exit-1 behavior is documented, not observed on this host.
+  location: claude auth status with piped stdout
+  method: local_inspection
+  observed_on: 2026-10-01
+  version: 2.1.287
+- claim: Prints a JSON array of interactive and background sessions with id, cwd, kind, startedAt, sessionId, name, and status or state fields, and exits 0 without a TTY.
+  id: probe-agents-json-287
+  limitations: Snapshot of live sessions on one host.
+  location: claude agents --json with piped stdout
+  method: local_inspection
+  observed_on: 2026-10-01
+  version: 2.1.287
+- claim: 'Both print JSON: defaults emits the built-in environment, allow, soft_deny, and hard_deny rules; config emits the effective rules after settings.'
+  id: probe-auto-mode-287
+  limitations: Rule content is policy data, not CLI surface.
+  location: claude auto-mode defaults and claude auto-mode config with piped stdout
+  method: local_inspection
+  observed_on: 2026-10-01
+  version: 2.1.287
+- claim: Prints a JSON array of installed plugins with id, version, scope, enabled, installPath, installedAt, lastUpdated, and projectEnabled.
+  id: probe-plugin-list-287
+  limitations: Reflects this host's plugin set.
+  location: claude plugin list --json with piped stdout
+  method: local_inspection
+  observed_on: 2026-10-01
+  version: 2.1.287
+- claim: Prints human-readable supervisor state (not running, socket directory, roster age, log path) and exits 1 when no supervisor is running.
+  id: probe-daemon-status-287
+  limitations: Text output only; the running-state format was not observed.
+  location: claude daemon status with piped stdout
+  method: local_inspection
+  observed_on: 2026-10-01
+  version: 2.1.287
+- claim: Runs to completion without a TTY in well under a minute, prints install method, version, commit, platform, search, auto-update, and policy lines, and exits 0.
+  id: probe-doctor-287
+  limitations: Single healthy installation; the 2.1.200-era hang was not reproduced.
+  location: claude doctor with piped stdout and stdin closed
+  method: local_inspection
+  observed_on: 2026-10-01
+  version: 2.1.287
+- claim: Prints human-readable server names with live health-check results and performs real network connections during the listing.
+  id: probe-mcp-list-287
+  limitations: Output is text; MCP semantics belong to the MCP topic.
+  location: claude mcp list with piped stdout
+  method: local_inspection
+  observed_on: 2026-10-01
+  version: 2.1.287
+- claim: '`claude import` replies `not yet available in this build` in 2.1.287 and exits without importing, so the documented command is disabled in this build.'
+  id: probe-import-287
+  limitations: One source (codex) probed; availability may differ by channel.
+  location: claude import codex --dry-run and claude import codex --yes=bogusdigest --dry-run with piped stdout
+  method: local_inspection
+  observed_on: 2026-10-01
+  version: 2.1.287
+- claim: The user settings file holds hooks, permissions, model, statusLine, enabledPlugins, extraKnownMarketplaces, effortLevel, and tui keys; ~/.claude.json holds mutable state (installMethod, projects, oauthAccount, caches, onboarding flags); the ~/.claude tree also contains projects, sessions, plugins, skills, agents, debug, and daemon state.
+  id: local-config-keys-287
+  limitations: Values were not read; only key names and file presence.
+  location: key-only listing of ~/.claude/settings.json, ~/.claude.json, and ls of ~/.claude
+  method: local_inspection
+  observed_on: 2026-10-01
+  version: 2.1.287
 homepage: https://claude.ai/code
-repo: null
 docs: https://code.claude.com/docs/en/overview
 cli_docs: https://code.claude.com/docs/en/cli-reference
 binaries:
-  - os: macos
-    binary: claude
-    alt_binaries: []
-    notes: "Native, Homebrew, and npm installs expose `claude`. Local macOS inspection found `/Users/ken/.local/bin/claude`, a symlink to `/Users/ken/.local/share/claude/versions/2.1.200`."
-  - os: linux
-    binary: claude
-    alt_binaries: []
-    notes: "Native, apt, dnf, apk, and npm installs expose `claude`."
-  - os: windows
-    binary: claude.exe
-    alt_binaries: ["claude", "claude.cmd"]
-    notes: "Native and WinGet installs provide a Windows executable launched as `claude` from PowerShell or CMD; npm installations commonly expose command shims."
+- alt_binaries: []
+  binary: claude
+  notes: Native, Homebrew, and npm installs expose `claude`. Local inspection found /Users/ken/.local/bin/claude, a native-installer symlink into /Users/ken/.local/share/claude/versions/.
+  os: macos
+- alt_binaries: []
+  binary: claude
+  notes: Native, apt, dnf, apk, and npm installs expose `claude`; the same name is used inside WSL.
+  os: linux
+- alt_binaries:
+  - claude
+  - claude.cmd
+  binary: claude.exe
+  notes: Native PowerShell/CMD installer and WinGet provide claude.exe invoked as `claude`; npm installs link a per-platform optional dependency and create command shims such as claude.cmd.
+  os: windows
 install_methods:
-  - os: macos
-    method: other
-    command: "curl -fsSL https://claude.ai/install.sh | bash"
-    notes: "Recommended native installer; installs under `~/.local/bin` and `~/.local/share/claude`, and native installs auto-update."
-  - os: linux
-    method: other
-    command: "curl -fsSL https://claude.ai/install.sh | bash"
-    notes: "Recommended native installer for Linux and WSL; native installs auto-update."
-  - os: windows
-    method: other
-    command: "irm https://claude.ai/install.ps1 | iex"
-    notes: "Recommended native PowerShell installer; CMD form is `curl -fsSL https://claude.ai/install.cmd -o install.cmd && install.cmd && del install.cmd`."
-  - os: macos
-    method: brew
-    command: "brew install --cask claude-code"
-    notes: "Stable-channel Homebrew cask. `brew install --cask claude-code@latest` installs the latest channel. Homebrew installs do not auto-update through Claude Code."
-  - os: windows
-    method: winget
-    command: "winget install Anthropic.ClaudeCode"
-    notes: "WinGet installs do not auto-update through Claude Code."
-  - os: linux
-    method: package_manager
-    command: "sudo apt install claude-code"
-    notes: "Debian/Ubuntu after adding Anthropic's signed apt repository."
-  - os: linux
-    method: package_manager
-    command: "sudo dnf install claude-code"
-    notes: "Fedora/RHEL after adding Anthropic's signed rpm repository."
-  - os: linux
-    method: package_manager
-    command: "apk add claude-code"
-    notes: "Alpine after adding Anthropic's signed apk repository."
-  - os: macos
-    method: npm
-    command: "npm install -g @anthropic-ai/claude-code"
-    notes: "Requires Node.js 22+ for install-time engine checks as of v2.1.198; installs a native binary via optional dependencies."
-  - os: linux
-    method: npm
-    command: "npm install -g @anthropic-ai/claude-code"
-    notes: "Requires optional dependencies to be enabled; supported Linux npm binary platforms include glibc and musl x64/ARM64 builds."
-  - os: windows
-    method: npm
-    command: "npm install -g @anthropic-ai/claude-code"
-    notes: "Supported npm binary platforms include win32 x64 and ARM64; npm creates command shims."
+- command: curl -fsSL https://claude.ai/install.sh | bash
+  method: other
+  notes: Recommended native installer; installs under ~/.local/bin and ~/.local/share/claude/versions and auto-updates in the background; accepts stable, latest, or a specific version as an argument.
+  os: macos
+- command: curl -fsSL https://claude.ai/install.sh | bash
+  method: other
+  notes: Recommended native installer for Linux and WSL; auto-updates; same channel and version arguments as macOS.
+  os: linux
+- command: irm https://claude.ai/install.ps1 | iex
+  method: other
+  notes: Native PowerShell installer; the CMD form is `curl -fsSL https://claude.ai/install.cmd -o install.cmd && install.cmd && del install.cmd`; auto-updates.
+  os: windows
+- command: brew install --cask claude-code
+  method: brew
+  notes: Stable-channel cask, typically about a week behind; `brew install --cask claude-code@latest` tracks the latest channel. Homebrew installs do not auto-update through Claude Code.
+  os: macos
+- command: winget install Anthropic.ClaudeCode
+  method: winget
+  notes: WinGet installs do not auto-update; run `winget upgrade Anthropic.ClaudeCode` manually or opt in with CLAUDE_CODE_PACKAGE_MANAGER_AUTO_UPDATE=1.
+  os: windows
+- command: sudo apt install claude-code
+  method: package_manager
+  notes: Debian/Ubuntu after adding Anthropic's signed apt repository (stable or latest channel); does not auto-update.
+  os: linux
+- command: sudo dnf install claude-code
+  method: package_manager
+  notes: Fedora/RHEL after adding the signed rpm repository; does not auto-update.
+  os: linux
+- command: apk add claude-code
+  method: package_manager
+  notes: Alpine after adding the signed apk repository; requires bash, curl, libgcc, libstdc++, and ripgrep at runtime.
+  os: linux
+- command: npm install -g @anthropic-ai/claude-code
+  method: npm
+  notes: Requires Node.js 22+ for install-time engine checks as of v2.1.198; installs the same native binary via per-platform optional dependencies; the installed claude does not invoke Node at runtime.
+  os: macos
+- command: npm install -g @anthropic-ai/claude-code
+  method: npm
+  notes: Supported platforms include linux-x64, linux-arm64, and the musl variants; optional dependencies must be allowed.
+  os: linux
+- command: npm install -g @anthropic-ai/claude-code
+  method: npm
+  notes: Supported platforms include win32-x64 and win32-arm64; npm creates command shims; do not elevate.
+  os: windows
 subcommands:
-  - name: "<none>"
-    description: "Starts an interactive session by default."
-    non_interactive: false
-    notes: "A positional prompt starts an interactive session with an initial prompt unless `--print` is used."
-  - name: "--print"
-    description: "Runs a prompt in print/SDK mode and exits."
-    non_interactive: true
-    notes: "Documented and locally available as `claude -p \"query\"`; supports text, JSON, and stream-json output."
-  - name: "agents"
-    description: "Opens agent view for background sessions, or prints sessions with `--json`."
-    non_interactive: false
-    notes: "`claude agents --json` is non-interactive and locally returned a JSON array; opening agent view needs a TTY."
-  - name: "attach"
-    description: "Attaches to a background session in the current terminal."
-    non_interactive: false
-    notes: "Hidden from top-level help in 2.1.200 but `claude attach --help` works; requires an interactive terminal."
-  - name: "auth"
-    description: "Manages authentication."
-    non_interactive: false
-    notes: "`auth status` is non-interactive JSON by default; `auth login` and `auth logout` mutate local auth state and may require browser or TTY interaction."
-  - name: "auto-mode"
-    description: "Inspects auto mode classifier configuration."
-    non_interactive: true
-    notes: "`defaults` and `config` print JSON; `critique` may call a model and is not static metadata."
-  - name: "daemon"
-    description: "Manages the background-session supervisor."
-    non_interactive: true
-    notes: "Hidden from top-level help in 2.1.200 but `claude daemon --help` works; `logs` tails until interrupted."
-  - name: "gateway"
-    description: "Runs the enterprise auth/telemetry gateway."
-    non_interactive: true
-    notes: "Requires `--config gateway.yaml`; available in v2.1.195 and later."
-  - name: "install"
-    description: "Installs or reinstalls the native binary, optionally at a version or channel."
-    non_interactive: true
-    notes: "Accepts `stable`, `latest`, or a specific version; `--force` reinstalls."
-  - name: "logs"
-    description: "Prints recent terminal output from a background session."
-    non_interactive: true
-    notes: "Hidden from top-level help in 2.1.200 but `claude logs --help` works; requires a background session id."
-  - name: "mcp"
-    description: "Configures and manages MCP servers."
-    non_interactive: false
-    notes: "`mcp list` and `mcp get` are text-oriented; OAuth login/logout and project-choice reset mutate state."
-  - name: "plugin"
-    description: "Manages Claude Code plugins."
-    non_interactive: false
-    notes: "Alias: `plugins`; `plugin list --json` is machine-readable, while install/enable/disable/update mutate state."
-  - name: "project"
-    description: "Manages Claude Code project state."
-    non_interactive: false
-    notes: "`project purge --dry-run` previews deletion; mutating purge should use `--yes` for non-interactive runs if the wrapper deliberately requests it."
-  - name: "remote-control"
-    description: "Starts an interactive Remote Control session."
-    non_interactive: false
-    notes: "Also exposed as `--remote-control`; local logged-out probe exited 1 with an auth-required message."
-  - name: "respawn"
-    description: "Restarts one or all background sessions with their conversation intact."
-    non_interactive: true
-    notes: "Hidden from top-level help in 2.1.200 but `claude respawn --help` works."
-  - name: "rm"
-    description: "Deletes a background session and its worktree."
-    non_interactive: true
-    notes: "Hidden from top-level help in 2.1.200 but `claude rm --help` works; destructive for background-session state."
-  - name: "setup-token"
-    description: "Generates a long-lived authentication token for CI and scripts."
-    non_interactive: false
-    notes: "Requires a Claude subscription and prints a secret; treat as interactive/secrets flow."
-  - name: "stop"
-    description: "Stops a background session while keeping its conversation resumable."
-    non_interactive: true
-    notes: "Hidden from top-level help in 2.1.200 but `claude stop --help` works."
-  - name: "ultrareview"
-    description: "Runs a cloud-hosted multi-agent code review."
-    non_interactive: true
-    notes: "Supports `--json` and `--timeout`; requires auth and network access."
-  - name: "update"
-    description: "Checks for updates and installs if available."
-    non_interactive: true
-    notes: "Alias: `upgrade`; behavior depends on install method and update policy."
+- description: Opens agent view to monitor and dispatch background sessions.
+  name: agents
+  non_interactive: false
+  notes: Opening the view requires an interactive terminal; `--json` prints sessions as a JSON array and exits without a TTY. Accepts root-level session flags to set defaults for dispatched sessions.
+- description: Opens a background session in the current terminal.
+  name: attach
+  non_interactive: false
+  notes: Takes the short id that `--bg` prints and `claude agents` lists; requires an interactive terminal; Ctrl+Z or the left arrow returns to agent view.
+- description: Signs in to an Anthropic account.
+  name: auth login
+  non_interactive: false
+  notes: Browser or SSO flow; --email pre-fills the address, --console selects Console API billing, --sso forces SSO.
+- description: Logs out from the Anthropic account.
+  name: auth logout
+  non_interactive: true
+  notes: Mutates local auth state but prompts nobody.
+- description: Prints authentication status as JSON by default.
+  name: auth status
+  non_interactive: true
+  notes: Exits 0 when logged in and 1 when not; `--text` switches to human-readable output; the JSON includes configDirectory since v2.1.268.
+- description: Prints the effective auto mode classifier configuration as JSON.
+  name: auto-mode config
+  non_interactive: true
+  notes: User settings where set, defaults otherwise.
+- description: Gets AI feedback on custom auto mode rules.
+  name: auto-mode critique
+  non_interactive: true
+  notes: Makes a real model call that costs money and needs auth; `--model` overrides the model used.
+- description: Prints the built-in auto mode rules as JSON.
+  name: auto-mode defaults
+  non_interactive: true
+  notes: Environment, allow, soft_deny, and hard_deny rule catalogs; `--label <prefix>` filters by label prefix, case-insensitively. Requires v2.1.208+.
+- description: Resets auto mode configuration to shipped defaults.
+  name: auto-mode reset
+  non_interactive: false
+  notes: Prompts for confirmation before removing the autoMode section from user settings; `-y`/`--yes` skips the prompt. Requires v2.1.212+.
+- description: Manages the background-session supervisor.
+  name: daemon
+  non_interactive: true
+  notes: Hidden from top-level help; with piped input the bare command runs the supervisor in the foreground, and service install is disabled in this version. Carries the umbrella --json-path and --log-file options.
+- description: Tails the background-session supervisor log.
+  name: daemon logs
+  non_interactive: true
+  notes: Hidden from top-level help; runs until interrupted.
+- description: Runs the background-session supervisor in the foreground.
+  name: daemon run
+  non_interactive: true
+  notes: Hidden; takes an optional json-path positional; service install is disabled in this version, so the daemon runs on demand.
+- description: Prints supervisor pid, version, uptime, and socket state.
+  name: daemon status
+  non_interactive: true
+  notes: Hidden; exits 1 when the supervisor is not running, which is a normal state.
+- description: Shuts down the supervisor and terminates background sessions.
+  name: daemon stop
+  non_interactive: true
+  notes: Hidden; `--any` also stops a transient daemon and `--keep-workers` leaves detached sessions running.
+- description: Removes the background service integration.
+  name: daemon uninstall
+  non_interactive: true
+  notes: Hidden; destructive to service registration.
+- description: Prints read-only installation and settings diagnostics without starting a session.
+  name: doctor
+  non_interactive: true
+  notes: Ran to completion with exit 0 under piped stdout in 2.1.287, unlike the 2.1.200-era hang; reports install method, search, auto-update state, and settings validation errors. The fuller checkup is /doctor inside a session.
+- description: Runs the enterprise auth and telemetry gateway server.
+  name: gateway
+  non_interactive: true
+  notes: Long-running; requires `--config` pointing at a gateway.yaml. Available since v2.1.195.
+- description: Imports configuration from another coding agent.
+  name: import
+  non_interactive: false
+  notes: Documented (v2.1.213+) to start an interactive session running /import with codex, gemini, or cursor sources; in this 2.1.287 build the command prints `not yet available in this build` instead.
+- description: Installs or reinstalls the native binary.
+  name: install
+  non_interactive: true
+  notes: Positional target accepts stable, latest, or a specific version; `--force` reinstalls even when installed.
+- description: Prints a background session's recent terminal output.
+  name: logs
+  non_interactive: true
+  notes: Takes the short session id printed by `--bg`.
+- description: Adds an MCP server to Claude Code configuration.
+  name: mcp add
+  non_interactive: true
+  notes: stdio servers take a command and args after `--`; HTTP/SSE servers take a URL. Transport is validated app-side and an invalid value is refused before any write.
+- description: Imports MCP servers from Claude Desktop.
+  name: mcp add-from-claude-desktop
+  non_interactive: true
+  notes: Mac and WSL only.
+- description: Adds an MCP server from a JSON string.
+  name: mcp add-json
+  non_interactive: true
+  notes: Supports stdio, SSE, HTTP, and WebSocket server definitions.
+- description: Prints details about one configured MCP server.
+  name: mcp get
+  non_interactive: true
+  notes: Unapproved .mcp.json servers show as pending and are not connected to.
+- description: Lists configured MCP servers with health checks.
+  name: mcp list
+  non_interactive: true
+  notes: Performs live network health checks, so timing depends on connectivity; text output only.
+- description: Runs a configured MCP server's OAuth flow.
+  name: mcp login
+  non_interactive: false
+  notes: Opens a browser by default; `--no-browser` prints the authorization URL for SSH or headless use and asks for the redirect URL back at a prompt.
+- description: Clears stored OAuth credentials for an MCP server.
+  name: mcp logout
+  non_interactive: true
+  notes: Mutates stored credentials.
+- description: Removes an MCP server.
+  name: mcp remove
+  non_interactive: true
+  notes: Without `--scope`, removes from whichever scope the server exists in.
+- description: Resets approvals for project-scoped .mcp.json servers.
+  name: mcp reset-project-choices
+  non_interactive: true
+  notes: Clears both approvals and rejections in this project.
+- description: Starts the Claude Code MCP server.
+  name: mcp serve
+  non_interactive: true
+  notes: Long-running stdio server for another MCP client; accepts `--debug` and `--verbose`.
+- description: Shows a plugin's options or saves values from stdin.
+  name: plugin configure
+  non_interactive: true
+  notes: Prints which options are unset; `--values-stdin` reads a JSON object so no prompt is needed; `--json` machine-reads the option list.
+- description: Shows a plugin's component inventory and projected token cost.
+  name: plugin details
+  non_interactive: true
+  notes: Read-only.
+- description: Disables an enabled plugin.
+  name: plugin disable
+  non_interactive: true
+  notes: Takes a plugin name or `-a`/`--all` for every enabled plugin; scope auto-detects unless `--scope` is given.
+- description: Enables a disabled plugin.
+  name: plugin enable
+  non_interactive: true
+  notes: Scope auto-detects unless `--scope` is given.
+- description: Runs a plugin's eval suite and reports scored results.
+  name: plugin eval
+  non_interactive: false
+  notes: Large operator flag surface (--mocks, --judge-model, --concurrency, --max-cost-usd, and more) not inventoried here; the first run in an untrusted plugin directory asks for confirmation unless `--trust-plugin` is passed; makes real model calls.
+- description: Scaffolds a new plugin under ~/.claude/skills/.
+  name: plugin init
+  non_interactive: true
+  notes: Alias `new`; `--with` selects extra component scaffolds; auto-loads next session as <name>@skills-dir.
+- description: Installs a plugin from a marketplace.
+  name: plugin install
+  non_interactive: false
+  notes: Alias `i`; a marketplace-declared command must be confirmed by a person, so `-y`/`--yes` (or a pinned `--accept-command` sha256) is required when stdin or stdout is not a TTY; `--json` prints one machine-readable result line.
+- description: Lists installed plugins.
+  name: plugin list
+  non_interactive: true
+  notes: '`--json` prints a JSON array; `--available` adds marketplace plugins and `--data-size` measures saved data, both requiring `--json`.'
+- description: Adds a marketplace from a URL, path, or GitHub repo.
+  name: plugin marketplace add
+  non_interactive: true
+  notes: '`--claudeai` adds a claude.ai-hosted marketplace by name; `--sparse` limits checkout paths.'
+- description: Lists configured marketplaces.
+  name: plugin marketplace list
+  non_interactive: true
+  notes: '`--json` prints machine-readable output.'
+- description: Removes a configured marketplace.
+  name: plugin marketplace remove
+  non_interactive: true
+  notes: Alias `rm`; without `--scope`, removes the declaration from every scope.
+- description: Updates marketplace definitions from their source.
+  name: plugin marketplace update
+  non_interactive: true
+  notes: Updates all marketplaces when no name is given.
+- description: Removes auto-installed plugin dependencies no longer needed.
+  name: plugin prune
+  non_interactive: false
+  notes: Alias `autoremove`; prompts for confirmation unless `-y`/`--yes`; `--dry-run` lists what would go.
+- description: Creates a validated git tag for a plugin release.
+  name: plugin tag
+  non_interactive: true
+  notes: Validates that plugin.json and any enclosing marketplace entry agree; `--dry-run` previews and `--push` pushes to a remote.
+- description: Runs a mod's TypeScript test suite.
+  name: plugin test
+  non_interactive: true
+  notes: Runs every *.test.ts and *.test.tsx under the directory in a child of this binary; exits 1 on failure.
+- description: Uninstalls an installed plugin.
+  name: plugin uninstall
+  non_interactive: true
+  notes: Alias `remove`; `--keep-data` preserves the plugin's data directory; `--prune` also removes unneeded auto-installed dependencies but prompts, requiring `-y` in non-interactive contexts.
+- description: Updates an installed plugin to its latest version.
+  name: plugin update
+  non_interactive: false
+  notes: Same marketplace-declared-command confirmation flow as install; `-y` or `--accept-command` answers it headlessly; restart required to apply.
+- description: Validates a plugin or marketplace manifest.
+  name: plugin validate
+  non_interactive: true
+  notes: '`--json` emits the validation report; `--strict` turns warnings into exit 1 for CI.'
+- description: Deletes all Claude Code state for a project.
+  name: project purge
+  non_interactive: false
+  notes: Prompts by default; `-y`/`--yes` skips, `-i`/`--interactive` confirms each item, `--dry-run` previews, `--all` purges every project and is mutually exclusive with a path.
+- description: Starts a Remote Control server for claude.ai or the mobile app.
+  name: remote-control
+  non_interactive: false
+  notes: Hidden from top-level help; runs as a persistent server in the current directory and requires a subscribed Claude account; its own flag surface (--spawn, --capacity, --session-id, -c, --[no-]chrome) is documented in `claude remote-control --help` and not inventoried here; the root `--remote-control` flag is the interactive-session form.
+- description: Restarts a background session with its conversation intact.
+  name: respawn
+  non_interactive: true
+  notes: Takes a session id or `--all` for every running session, for example to pick up an updated binary.
+- description: Deletes a background session and its worktree.
+  name: rm
+  non_interactive: true
+  notes: Works on already-exited sessions; a refused removal prints the exact `--discard-unpushed <commit>@<worktree-id>` or `--force-remove-worktree <worktree-id>` value to re-run with; the transcript stays on disk.
+- description: Registers this machine as a self-hosted cloud-session runner.
+  name: self-hosted-runner
+  non_interactive: false
+  notes: Hidden; long-running operator surface (v2.1.224+) with setup, doctor, and orchestrator subcommands and dozens of flags; see `claude self-hosted-runner --help`; not inventoried here.
+- description: Generates a long-lived OAuth token for CI and scripts.
+  name: setup-token
+  non_interactive: false
+  notes: Requires a Claude subscription and prints a secret to the terminal without saving it; treat as an interactive secrets flow.
+- description: Stops a background session while keeping it resumable.
+  name: stop
+  non_interactive: true
+  notes: Alias `kill`; the conversation is kept and reopens with `claude attach <id>`.
+- description: Runs a cloud-hosted multi-agent code review and prints findings.
+  name: ultrareview
+  non_interactive: true
+  notes: Takes a PR number or base branch as target; exits 0 on success and 1 on failure; `--json` prints the raw payload, `--timeout` caps the wait (default 45 minutes), `--post` posts findings to a github.com PR.
+- description: Checks for updates and installs if available.
+  name: update
+  non_interactive: true
+  notes: Alias `upgrade`; behavior depends on install method and channel; reports up-to-date for package-manager installs it cannot upgrade.
 cli_switches:
-  - flag: --add-dir
-    value: "<directories...>"
-    scope: ["global", "agents"]
-    default: ""
-    description: "Adds additional directories Claude can read and edit."
-    example: "claude --add-dir ../apps ../lib"
-    notes: "Docs say most `.claude/` configuration is not discovered from added directories."
-  - flag: --advisor
-    value: "<model>"
-    scope: ["global"]
-    default: ""
-    description: "Enables the server-side advisor tool for this session."
-    example: "claude --advisor opus"
-    notes: "Documented but omitted from local 2.1.200 help; trusted docs because the CLI reference warns help is incomplete."
-  - flag: --agent
-    value: "<agent>"
-    scope: ["global", "agents"]
-    default: ""
-    description: "Specifies an agent for the current session."
-    example: "claude --agent my-custom-agent"
-    notes: "Overrides the `agent` setting."
-  - flag: --agents
-    value: "<json>"
-    scope: ["global"]
-    default: ""
-    description: "Defines custom subagents dynamically via JSON."
-    example: "claude --agents '{\"reviewer\":{\"description\":\"Reviews code\",\"prompt\":\"You are a code reviewer\"}}'"
-    notes: "Uses subagent frontmatter field names plus `prompt`."
-  - flag: --allow-dangerously-skip-permissions
-    value: ""
-    scope: ["global"]
-    default: "false"
-    description: "Makes bypass-permissions mode available in the mode cycle without starting in it."
-    example: "claude --permission-mode plan --allow-dangerously-skip-permissions"
-    notes: "Boolean."
-  - flag: --allowedTools
-    value: "<tools...>"
-    scope: ["global"]
-    default: ""
-    description: "Allows matching tools without prompting."
-    example: "claude --allowedTools \"Bash(git log *)\" Read"
-    notes: "Alias: `--allowed-tools`."
-  - flag: --append-system-prompt
-    value: "<prompt>"
-    scope: ["global", "system_prompt"]
-    default: ""
-    description: "Appends inline system prompt text to the default prompt."
-    example: "claude --append-system-prompt \"Always use TypeScript\""
-    notes: "Existence only; semantics belong to the sibling `system-prompt` topic."
-  - flag: --append-system-prompt-file
-    value: "<path>"
-    scope: ["global", "system_prompt"]
-    default: ""
-    description: "Appends system prompt text loaded from a file."
-    example: "claude --append-system-prompt-file ./style-rules.txt"
-    notes: "Documented but omitted from local 2.1.200 help; semantics belong to the sibling `system-prompt` topic."
-  - flag: --ax-screen-reader
-    value: ""
-    scope: ["global"]
-    default: "false"
-    description: "Renders screen-reader friendly flat output."
-    example: "claude --ax-screen-reader"
-    notes: "Boolean; overrides the env/settings accessibility setting."
-  - flag: --background
-    value: ""
-    scope: ["global", "background_agents"]
-    default: "false"
-    description: "Starts the session as a background agent and returns immediately."
-    example: "claude --background \"investigate the flaky test\""
-    notes: "Alias: `--bg`; docs say it cannot be combined with `--print`."
-  - flag: --bare
-    value: ""
-    scope: ["global"]
-    default: "false"
-    description: "Runs minimal mode without most user/project customization discovery."
-    example: "claude --bare -p \"query\""
-    notes: "Sets `CLAUDE_CODE_SIMPLE=1` and avoids OAuth/keychain reads."
-  - flag: --betas
-    value: "<headers...>"
-    scope: ["global"]
-    default: ""
-    description: "Adds beta headers to API requests."
-    example: "claude --betas interleaved-thinking"
-    notes: "Documented for API key users."
-  - flag: --brief
-    value: ""
-    scope: ["global"]
-    default: "false"
-    description: "Enables the SendUserMessage tool for agent-to-user communication."
-    example: "claude --brief"
-    notes: "Observed in local 2.1.200 help; not found in the official CLI-reference flag table."
-  - flag: --channels
-    value: "<channels...>"
-    scope: ["global"]
-    default: ""
-    description: "Subscribes to MCP channel notifications for this session."
-    example: "claude --channels plugin:my-notifier@my-marketplace"
-    notes: "Documented research preview; omitted from local 2.1.200 help."
-  - flag: --chrome
-    value: ""
-    scope: ["global"]
-    default: "false"
-    description: "Enables Claude in Chrome integration."
-    example: "claude --chrome"
-    notes: "Boolean."
-  - flag: --continue
-    value: ""
-    scope: ["global"]
-    default: "false"
-    description: "Continues the most recent conversation in the current directory."
-    example: "claude -c -p \"Check for type errors\""
-    notes: "Short alias: `-c`."
-  - flag: --dangerously-load-development-channels
-    value: "<channels...>"
-    scope: ["global"]
-    default: ""
-    description: "Enables unapproved development channels."
-    example: "claude --dangerously-load-development-channels server:webhook"
-    notes: "Documented but omitted from local 2.1.200 help; prompts for confirmation."
-  - flag: --dangerously-skip-permissions
-    value: ""
-    scope: ["global", "permissions"]
-    default: "false"
-    description: "Starts with permission checks bypassed."
-    example: "claude --dangerously-skip-permissions"
-    notes: "Equivalent to `--permission-mode bypassPermissions`."
-  - flag: --debug
-    value: "[filter]"
-    scope: ["global", "diagnostics"]
-    default: "false"
-    description: "Enables debug mode with optional category filtering."
-    example: "claude --debug api,mcp"
-    notes: "Short alias: `-d`."
-  - flag: --debug-file
-    value: "<path>"
-    scope: ["global", "diagnostics"]
-    default: ""
-    description: "Writes debug logs to a file and implicitly enables debug mode."
-    example: "claude --debug-file /tmp/claude-debug.log"
-    notes: "Takes precedence over `CLAUDE_CODE_DEBUG_LOGS_DIR`."
-  - flag: --disable-slash-commands
-    value: ""
-    scope: ["global"]
-    default: "false"
-    description: "Disables all skills and slash commands for the session."
-    example: "claude --disable-slash-commands"
-    notes: "Boolean."
-  - flag: --disallowedTools
-    value: "<tools...>"
-    scope: ["global"]
-    default: ""
-    description: "Denies matching tool calls or removes tools from context."
-    example: "claude --disallowedTools \"Bash(rm *)\" Edit"
-    notes: "Alias: `--disallowed-tools`."
-  - flag: --effort
-    value: "<low|medium|high|xhigh|max>"
-    scope: ["global"]
-    default: ""
-    description: "Sets effort level for the current session."
-    example: "claude --effort high"
-    notes: "Overrides `effortLevel` for the session."
-  - flag: --enable-auto-mode
-    value: ""
-    scope: ["global"]
-    default: "removed"
-    description: "Removed flag; auto mode is now in the mode cycle."
-    example: "claude --permission-mode auto"
-    notes: "Docs retain it as a removed flag; wrappers should not emit it."
-  - flag: --exclude-dynamic-system-prompt-sections
-    value: ""
-    scope: ["global", "system_prompt"]
-    default: "false"
-    description: "Moves per-machine default-prompt sections into the first user message."
-    example: "claude -p --exclude-dynamic-system-prompt-sections \"query\""
-    notes: "Ignored with replacement system-prompt flags; semantics belong to the sibling `system-prompt` topic."
-  - flag: --exec
-    value: "<command>"
-    scope: ["global", "background_agents"]
-    default: ""
-    description: "Runs a PTY-backed shell command as a background job when used with `--bg`."
-    example: "claude --bg --exec 'pytest -x'"
-    notes: "Documented but omitted from local 2.1.200 help."
-  - flag: --fallback-model
-    value: "<models>"
-    scope: ["global"]
-    default: ""
-    description: "Specifies fallback model aliases or IDs for overloaded/unavailable primary models."
-    example: "claude --fallback-model sonnet,haiku"
-    notes: "Local help says it only works with `--print`; docs frame it as a session flag."
-  - flag: --file
-    value: "<file_id:relative_path...>"
-    scope: ["global"]
-    default: ""
-    description: "Downloads file resources at startup."
-    example: "claude --file file_abc:doc.txt"
-    notes: "Observed in local 2.1.200 help; not found in the official CLI-reference flag table."
-  - flag: --fork-session
-    value: ""
-    scope: ["global", "sessions"]
-    default: "false"
-    description: "Creates a new session ID when resuming."
-    example: "claude --resume abc123 --fork-session"
-    notes: "Use with `--resume` or `--continue`."
-  - flag: --from-pr
-    value: "[value]"
-    scope: ["global", "sessions"]
-    default: ""
-    description: "Resumes a session linked to a pull request or opens an interactive picker."
-    example: "claude --from-pr 123"
-    notes: "Value may be a PR number or supported PR URL."
-  - flag: --help
-    value: ""
-    scope: ["global", "subcommands"]
-    default: "false"
-    description: "Displays help."
-    example: "claude --help"
-    notes: "Short alias: `-h`; help is useful but incomplete."
-  - flag: --ide
-    value: ""
-    scope: ["global"]
-    default: "false"
-    description: "Automatically connects to an IDE on startup if exactly one valid IDE is available."
-    example: "claude --ide"
-    notes: "Boolean."
-  - flag: --include-hook-events
-    value: ""
-    scope: ["global", "print_mode"]
-    default: "false"
-    description: "Includes hook lifecycle events in stream-json output."
-    example: "claude -p --output-format stream-json --verbose --include-hook-events \"query\""
-    notes: "Requires `--output-format stream-json`."
-  - flag: --include-partial-messages
-    value: ""
-    scope: ["global", "print_mode"]
-    default: "false"
-    description: "Includes partial streaming events as they arrive."
-    example: "claude -p --output-format stream-json --verbose --include-partial-messages \"query\""
-    notes: "Requires `--print` and stream-json output."
-  - flag: --init
-    value: ""
-    scope: ["global", "print_mode"]
-    default: "false"
-    description: "Runs setup hooks with the `init` matcher before a print-mode session."
-    example: "claude -p --init \"query\""
-    notes: "Documented but omitted from local 2.1.200 help."
-  - flag: --init-only
-    value: ""
-    scope: ["global"]
-    default: "false"
-    description: "Runs setup and SessionStart hooks, then exits without starting a conversation."
-    example: "claude --init-only"
-    notes: "Documented but omitted from local 2.1.200 help."
-  - flag: --input-format
-    value: "<text|stream-json>"
-    scope: ["global", "print_mode"]
-    default: "text"
-    description: "Selects print-mode input format."
-    example: "claude -p --output-format json --input-format stream-json"
-    notes: "Only works with `--print`."
-  - flag: --json-schema
-    value: "<schema>"
-    scope: ["global", "print_mode"]
-    default: ""
-    description: "Validates final structured output against a JSON Schema."
-    example: "claude -p --json-schema '{\"type\":\"object\"}' \"query\""
-    notes: "Print mode only."
-  - flag: --maintenance
-    value: ""
-    scope: ["global", "print_mode"]
-    default: "false"
-    description: "Runs setup hooks with the `maintenance` matcher before a print-mode session."
-    example: "claude -p --maintenance \"query\""
-    notes: "Documented but omitted from local 2.1.200 help."
-  - flag: --max-budget-usd
-    value: "<amount>"
-    scope: ["global", "print_mode"]
-    default: ""
-    description: "Stops print-mode execution after a dollar budget is reached."
-    example: "claude -p --max-budget-usd 5.00 \"query\""
-    notes: "Only works with `--print`."
-  - flag: --max-turns
-    value: "<count>"
-    scope: ["global", "print_mode"]
-    default: "unlimited"
-    description: "Limits the number of agentic turns in print mode."
-    example: "claude -p --max-turns 3 \"query\""
-    notes: "Documented but omitted from local 2.1.200 help."
-  - flag: --mcp-config
-    value: "<configs...>"
-    scope: ["global", "mcp", "agents"]
-    default: ""
-    description: "Loads MCP servers from JSON files or inline JSON strings."
-    example: "claude --mcp-config ./mcp.json"
-    notes: "Use `--strict-mcp-config` to ignore discovered MCP configuration."
-  - flag: --model
-    value: "<model>"
-    scope: ["global"]
-    default: ""
-    description: "Sets model alias or full model ID for the session."
-    example: "claude --model claude-sonnet-5"
-    notes: "Overrides model setting and `ANTHROPIC_MODEL`."
-  - flag: --name
-    value: "<name>"
-    scope: ["global", "sessions"]
-    default: ""
-    description: "Sets a display name for the session."
-    example: "claude -n my-feature-work"
-    notes: "Short alias: `-n`."
-  - flag: --no-chrome
-    value: ""
-    scope: ["global"]
-    default: "false"
-    description: "Disables Claude in Chrome integration for the session."
-    example: "claude --no-chrome"
-    notes: "Boolean."
-  - flag: --no-session-persistence
-    value: ""
-    scope: ["global", "print_mode"]
-    default: "false"
-    description: "Disables saving sessions to disk."
-    example: "claude -p --no-session-persistence \"query\""
-    notes: "Print mode only; `CLAUDE_CODE_SKIP_PROMPT_HISTORY` does the same in any mode."
-  - flag: --output-format
-    value: "<text|json|stream-json>"
-    scope: ["global", "print_mode"]
-    default: "text"
-    description: "Selects print-mode output format."
-    example: "claude -p \"query\" --output-format json"
-    notes: "Use stream-json for structured streaming wrappers."
-  - flag: --permission-mode
-    value: "<default|acceptEdits|plan|auto|dontAsk|bypassPermissions|manual>"
-    scope: ["global", "permissions"]
-    default: ""
-    description: "Sets the starting permission mode."
-    example: "claude --permission-mode plan"
-    notes: "Local help includes `manual`; docs include `default`."
-  - flag: --permission-prompt-tool
-    value: "<tool>"
-    scope: ["global", "print_mode", "permissions"]
-    default: ""
-    description: "Delegates non-interactive permission prompts to an MCP tool."
-    example: "claude -p --permission-prompt-tool mcp_auth_tool \"query\""
-    notes: "Documented but omitted from local 2.1.200 help."
-  - flag: --plugin-dir
-    value: "<path>"
-    scope: ["global", "plugins", "agents"]
-    default: "[]"
-    description: "Loads a plugin directory or zip for this session."
-    example: "claude --plugin-dir ./my-plugin"
-    notes: "Repeatable."
-  - flag: --plugin-url
-    value: "<url>"
-    scope: ["global", "plugins"]
-    default: "[]"
-    description: "Fetches a plugin zip URL for this session."
-    example: "claude --plugin-url https://example.com/plugin.zip"
-    notes: "Repeatable."
-  - flag: --print
-    value: ""
-    scope: ["global", "print_mode"]
-    default: "false"
-    description: "Prints a response and exits."
-    example: "claude -p \"query\""
-    notes: "Short alias: `-p`; skips workspace trust dialog in non-interactive mode."
-  - flag: --prompt-suggestions
-    value: "[boolean]"
-    scope: ["global", "print_mode"]
-    default: "false"
-    description: "Emits prompt_suggestion messages after turns."
-    example: "claude -p --prompt-suggestions --output-format stream-json --verbose \"query\""
-    notes: "Requires print mode, stream-json output, and verbose mode."
-  - flag: --remote
-    value: "<task>"
-    scope: ["global", "remote"]
-    default: ""
-    description: "Creates a new web session on claude.ai."
-    example: "claude --remote \"Fix the login bug\""
-    notes: "Documented but omitted from local 2.1.200 help; requires cloud auth."
-  - flag: --remote-control
-    value: "[name]"
-    scope: ["global", "remote"]
-    default: ""
-    description: "Starts an interactive session with Remote Control enabled."
-    example: "claude --remote-control \"My Project\""
-    notes: "Alias: `--rc` in docs; local logged-out subcommand probe exited 1."
-  - flag: --remote-control-session-name-prefix
-    value: "<prefix>"
-    scope: ["global", "remote"]
-    default: "hostname"
-    description: "Sets prefix for auto-generated Remote Control session names."
-    example: "claude --remote-control-session-name-prefix dev-box"
-    notes: "Equivalent env var: `CLAUDE_REMOTE_CONTROL_SESSION_NAME_PREFIX`."
-  - flag: --replay-user-messages
-    value: ""
-    scope: ["global", "print_mode"]
-    default: "false"
-    description: "Re-emits stdin user messages to stdout for acknowledgement."
-    example: "claude -p --input-format stream-json --output-format stream-json --verbose --replay-user-messages"
-    notes: "Requires stream-json input and output."
-  - flag: --resume
-    value: "[session]"
-    scope: ["global", "sessions"]
-    default: ""
-    description: "Resumes a conversation by id/name or opens a picker."
-    example: "claude --resume auth-refactor"
-    notes: "Short alias: `-r`; picker requires interaction."
-  - flag: --safe-mode
-    value: ""
-    scope: ["global"]
-    default: "false"
-    description: "Starts with most customizations disabled for troubleshooting."
-    example: "claude --safe-mode"
-    notes: "Sets `CLAUDE_CODE_SAFE_MODE=1`; managed policy still partly applies."
-  - flag: --session-id
-    value: "<uuid>"
-    scope: ["global", "sessions"]
-    default: ""
-    description: "Uses a specific UUID for the conversation."
-    example: "claude --session-id 550e8400-e29b-41d4-a716-446655440000"
-    notes: "Must be a valid UUID."
-  - flag: --setting-sources
-    value: "<sources>"
-    scope: ["global", "configuration", "agents"]
-    default: "user,project,local"
-    description: "Restricts which setting sources are loaded."
-    example: "claude --setting-sources user,project"
-    notes: "Comma-separated values: user, project, local."
-  - flag: --settings
-    value: "<file-or-json>"
-    scope: ["global", "configuration", "agents"]
-    default: ""
-    description: "Loads additional settings from a JSON file or inline JSON."
-    example: "claude --settings ./settings.json"
-    notes: "Values override same keys in settings files for this session."
-  - flag: --strict-mcp-config
-    value: ""
-    scope: ["global", "mcp", "agents"]
-    default: "false"
-    description: "Uses only MCP servers from `--mcp-config`."
-    example: "claude --strict-mcp-config --mcp-config ./mcp.json"
-    notes: "Boolean."
-  - flag: --system-prompt
-    value: "<prompt>"
-    scope: ["global", "system_prompt"]
-    default: ""
-    description: "Replaces the default system prompt with inline text."
-    example: "claude --system-prompt \"You are a Python expert\""
-    notes: "Existence only; semantics belong to the sibling `system-prompt` topic."
-  - flag: --system-prompt-file
-    value: "<path>"
-    scope: ["global", "system_prompt"]
-    default: ""
-    description: "Replaces the default system prompt with file contents."
-    example: "claude --system-prompt-file ./prompts/review.txt"
-    notes: "Documented but omitted from local 2.1.200 help; semantics belong to the sibling `system-prompt` topic."
-  - flag: --teleport
-    value: ""
-    scope: ["global", "remote"]
-    default: "false"
-    description: "Resumes a web session in the local terminal."
-    example: "claude --teleport"
-    notes: "Documented but omitted from local 2.1.200 help; requires claude.ai subscription."
-  - flag: --teammate-mode
-    value: "<in-process|auto|tmux|iterm2>"
-    scope: ["global", "agents"]
-    default: "in-process"
-    description: "Sets how agent-team teammates display."
-    example: "claude --teammate-mode auto"
-    notes: "Documented but omitted from local 2.1.200 help."
-  - flag: --tmux
-    value: "[classic]"
-    scope: ["global", "worktree"]
-    default: "false"
-    description: "Creates a tmux session for a worktree."
-    example: "claude -w feature-auth --tmux"
-    notes: "Requires `--worktree`."
-  - flag: --tools
-    value: "<tools...>"
-    scope: ["global"]
-    default: "default"
-    description: "Restricts available built-in tools."
-    example: "claude --tools \"Bash,Edit,Read\""
-    notes: "Use an empty string to disable all built-in tools."
-  - flag: --verbose
-    value: ""
-    scope: ["global", "print_mode"]
-    default: "false"
-    description: "Enables verbose turn-by-turn output."
-    example: "claude --verbose"
-    notes: "Required by several stream-json extensions."
-  - flag: --version
-    value: ""
-    scope: ["global"]
-    default: "false"
-    description: "Prints the Claude Code version."
-    example: "claude --version"
-    notes: "Short alias: `-v`."
-  - flag: --worktree
-    value: "[name]"
-    scope: ["global", "worktree"]
-    default: ""
-    description: "Starts Claude in an isolated git worktree."
-    example: "claude -w feature-auth"
-    notes: "Short alias: `-w`."
-  - flag: --all
-    value: ""
-    scope: ["agents"]
-    default: "false"
-    description: "Includes completed sessions in `claude agents --json` output."
-    example: "claude agents --json --all"
-    notes: "Scoped to `agents`."
-  - flag: --cwd
-    value: "<path>"
-    scope: ["agents"]
-    default: ""
-    description: "Filters agent view/listing to sessions started under a path."
-    example: "claude agents --json --cwd ."
-    notes: "Scoped to `agents`."
-  - flag: --json
-    value: ""
-    scope: ["agents", "plugin list", "ultrareview"]
-    default: "false"
-    description: "Requests JSON output where supported."
-    example: "claude plugin list --json"
-    notes: "Meaning is scoped to each subcommand."
-  - flag: --text
-    value: ""
-    scope: ["auth status"]
-    default: "false"
-    description: "Prints human-readable authentication status instead of JSON."
-    example: "claude auth status --text"
-    notes: "Local logged-out probe exited 1 with text."
-  - flag: --force
-    value: ""
-    scope: ["install"]
-    default: "false"
-    description: "Forces native binary installation even if already installed."
-    example: "claude install --force latest"
-    notes: "Scoped to `install`."
-  - flag: --config
-    value: "<path>"
-    scope: ["gateway"]
-    default: ""
-    description: "Path to gateway YAML configuration."
-    example: "claude gateway --config gateway.yaml"
-    notes: "Required for gateway server mode."
-  - flag: --transport
-    value: "<stdio|sse|http>"
-    scope: ["mcp add"]
-    default: "stdio"
-    description: "Selects transport when adding an MCP server."
-    example: "claude mcp add --transport http sentry https://mcp.sentry.dev/mcp"
-    notes: "Scoped to `mcp add`."
-  - flag: --header
-    value: "<header>"
-    scope: ["mcp add"]
-    default: ""
-    description: "Adds an HTTP header when adding an HTTP MCP server."
-    example: "claude mcp add --transport http corridor https://example.com/mcp --header \"Authorization: Bearer ...\""
-    notes: "Scoped to `mcp add`; repeatable."
-  - flag: --env
-    value: "<KEY=VALUE>"
-    scope: ["mcp add"]
-    default: ""
-    description: "Adds environment variables for a stdio MCP server."
-    example: "claude mcp add my-server -e API_KEY=xxx -- npx my-mcp-server"
-    notes: "Short alias observed in help example: `-e`."
-  - flag: --dry-run
-    value: ""
-    scope: ["project purge"]
-    default: "false"
-    description: "Previews project-state deletion."
-    example: "claude project purge --dry-run ."
-    notes: "Scoped to `project purge`."
-  - flag: --yes
-    value: ""
-    scope: ["project purge"]
-    default: "false"
-    description: "Skips confirmation for project-state deletion."
-    example: "claude project purge --yes ."
-    notes: "Alias may be `-y`; use only for deliberate destructive cleanup."
-  - flag: --timeout
-    value: "<minutes>"
-    scope: ["ultrareview"]
-    default: "30"
-    description: "Maximum minutes to wait for an ultrareview."
-    example: "claude ultrareview --timeout 10 --json"
-    notes: "Scoped to `ultrareview`."
+- attachment:
+  - space
+  - equals
+  description: Adds directories Claude may read and edit in addition to the working directory.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  - test-parser-variadic-287
+  example: claude --add-dir ../apps ../lib
+  flag: --add-dir
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Grants file access; most .claude/ configuration is not discovered from added directories; paths are validated to exist. The first token after the switch is consumed unconditionally, even when it looks like an option, and non-option tokens keep being consumed.
+  scope:
+  - filesystem
+  - sessions
+  value: <directories...>
+  value_type: variadic
+  variadic_min: 1
+- attachment:
+  - space
+  - equals
+  description: Adds one directory tool calls may reach in sessions dispatched from agent view.
+  evidence_ids:
+  - help-subcommands-287
+  example: claude agents --add-dir ../shared
+  flag: --add-dir
+  invocation_scope:
+  - applies_to: command
+    command:
+    - agents
+  notes: Single value per occurrence at this path, repeatable per occurrence, unlike the variadic root spelling.
+  scope:
+  - filesystem
+  - agents
+  value: <directory>
+  value_optional: false
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: Enables the server-side advisor tool for this session with a model alias or full model ID.
+  evidence_ids:
+  - docs-cli-reference
+  - test-missing-arg-287
+  example: claude --advisor opus
+  flag: --advisor
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Omitted from local 2.1.287 help but present in the parser and documented; overrides the advisorModel setting.
+  scope:
+  - model_selection
+  value: <model>
+  value_optional: false
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: Selects the agent for the session, overriding the agent setting.
+  evidence_ids:
+  - help-root-287
+  - help-subcommands-287
+  example: claude --agent my-custom-agent
+  flag: --agent
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - agents
+  notes: At `agents`, sets the default agent for dispatched sessions.
+  scope:
+  - subagents
+  value: <agent>
+  value_optional: false
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: Defines custom subagents dynamically from a JSON object, or with --print the path to a file holding one.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  - test-missing-arg-287
+  example: claude --agents '{"reviewer":{"description":"Reviews code","prompt":"You are a code reviewer"}}'
+  flag: --agents
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Validated at startup since v2.1.242; the file form requires v2.1.281+.
+  scope:
+  - subagents
+  value: <json-or-file>
+  value_optional: false
+  value_type: string
+- attachment: []
+  default: 'false'
+  description: Makes bypassPermissions available in the mode cycle without starting in it.
+  evidence_ids:
+  - help-root-287
+  - help-subcommands-287
+  - docs-cli-reference
+  example: claude --permission-mode plan --allow-dangerously-skip-permissions
+  flag: --allow-dangerously-skip-permissions
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - agents
+  notes: A leading occurrence of this switch also routes `daemon <subcommand>` to the daemon command since v2.1.199.
+  scope:
+  - permissions
+  value_type: none
+- aliases:
+  - --allowed-tools
+  attachment:
+  - space
+  - equals
+  description: Tools that execute without prompting for permission.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  example: claude --allowedTools "Bash(git log *)" Read
+  flag: --allowedTools
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Comma or space separated within and across values; use --tools to restrict which tools exist at all.
+  scope:
+  - permissions
+  value: <tools...>
+  value_type: variadic
+  variadic_min: 1
+- attachment:
+  - space
+  - equals
+  description: Appends text to every subagent's system prompt in non-interactive mode.
+  evidence_ids:
+  - docs-cli-reference
+  - test-missing-arg-287
+  example: claude -p --append-subagent-system-prompt "Cite file paths" "query"
+  flag: --append-subagent-system-prompt
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Only applies with -p; requires v2.1.205+; cannot be combined with its -file form before v2.1.283.
+  scope:
+  - system_prompt
+  - subagents
+  value: <prompt>
+  value_optional: false
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: Appends file contents to subagent system prompts in non-interactive mode.
+  evidence_ids:
+  - docs-cli-reference
+  - test-missing-arg-287
+  example: claude -p --append-subagent-system-prompt-file ./subagent-rules.txt "query"
+  flag: --append-subagent-system-prompt-file
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Only applies with -p; requires v2.1.261+.
+  scope:
+  - system_prompt
+  - subagents
+  value: <file>
+  value_optional: false
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: Appends text to the default system prompt.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  example: claude --append-system-prompt "Always use TypeScript"
+  flag: --append-system-prompt
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Works in interactive and non-interactive modes; semantics belong to the system-prompt topic.
+  scope:
+  - system_prompt
+  value: <prompt>
+  value_optional: false
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: Appends file contents to the default system prompt.
+  evidence_ids:
+  - docs-cli-reference
+  - test-missing-arg-287
+  example: claude --append-system-prompt-file ./extra-rules.txt
+  flag: --append-system-prompt-file
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Omitted from local help but present in the parser and documented; semantics belong to the system-prompt topic.
+  scope:
+  - system_prompt
+  value: <file>
+  value_optional: false
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: Sets the auto-compact window for the session without changing saved settings.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  - test-parser-forms-287
+  example: claude --autocompact 500k
+  flag: --autocompact
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: 'Validated at parse time: auto, or between 100k and 1M tokens; requires v2.1.221+.'
+  scope:
+  - model_selection
+  value: <auto|tokens>
+  value_optional: false
+  value_type: string
+- attachment: []
+  default: 'false'
+  description: Renders screen-reader friendly flat output.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  example: claude --ax-screen-reader
+  flag: --ax-screen-reader
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Forces the classic renderer; overrides CLAUDE_AX_SCREEN_READER and the axScreenReader setting; requires v2.1.181+.
+  scope:
+  - accessibility
+  value_type: none
+- aliases:
+  - --background
+  attachment: []
+  default: 'false'
+  description: Starts the session as a background agent and returns immediately, printing the id that attach, logs, stop, and rm take.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  example: claude --bg "investigate the flaky test"
+  flag: --bg
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Cannot be combined with -p; checks workspace trust before starting; with --resume, continues that session in the background under the same id.
+  scope:
+  - background_agents
+  value_type: none
+- attachment: []
+  default: 'false'
+  description: Minimal mode that skips most customization discovery so scripted calls start faster.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  example: claude --bare -p "query"
+  flag: --bare
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Sets CLAUDE_CODE_SIMPLE=1; Anthropic auth is strictly ANTHROPIC_API_KEY or apiKeyHelper via --settings, so OAuth and keychain are never read.
+  scope:
+  - config
+  - print_mode
+  value_type: none
+- attachment:
+  - space
+  - equals
+  description: Adds beta headers to API requests.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  example: claude --betas interleaved-thinking
+  flag: --betas
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: API key users only; the ANTHROPIC_BETAS variable works with all auth methods.
+  scope:
+  - api
+  value: <betas...>
+  value_type: variadic
+  variadic_min: 1
+- attachment: []
+  default: 'false'
+  description: Enables the SendUserMessage tool for agent-to-user communication.
+  evidence_ids:
+  - help-root-287
+  example: claude --brief
+  flag: --brief
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Observed in local help but not in the CLI-reference flag table.
+  scope:
+  - output
+  value_type: none
+- attachment:
+  - space
+  - equals
+  description: Subscribes to MCP channel notifications for this session.
+  evidence_ids:
+  - docs-cli-reference
+  - test-missing-arg-287
+  example: claude --channels plugin:my-notifier@my-marketplace
+  flag: --channels
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Research preview; space-separated plugin:<name>@<marketplace> entries; requires Anthropic authentication. Omitted from local help but variadic in the parser's missing-argument error.
+  scope:
+  - channels
+  value: <servers...>
+  value_type: variadic
+  variadic_min: 1
+- attachment: []
+  default: 'false'
+  description: Enables Claude in Chrome integration.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  example: claude --chrome
+  flag: --chrome
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Commander also exposes the automatic --no-chrome negation.
+  scope:
+  - browser
+  value_type: none
+- aliases:
+  - --remote
+  attachment:
+  - space
+  - equals
+  description: Creates a cloud session with a task description, or attaches to one by session ID or claude.ai/code URL.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  - test-remote-alias-287
+  example: claude --cloud "Fix the login bug"
+  flag: --cloud
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: With -p and a session id or URL, queues a message into that existing session; --remote is the deprecated alias, and an error raised by --remote names --cloud; without -p it requires an interactive terminal.
+  scope:
+  - remote
+  value: '[description|session_id|url]'
+  value_optional: true
+  value_type: string
+- aliases:
+  - -c
+  attachment: []
+  default: 'false'
+  description: Continues the most recent conversation in the current directory.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  example: claude -c -p "Check for type errors"
+  flag: --continue
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Includes finished background sessions since v2.1.257; -p --continue also includes -p, SDK, and /loop sessions.
+  scope:
+  - sessions
+  value_type: none
+- attachment:
+  - space
+  - equals
+  description: Enables channels that are not on the approved allowlist, for local development.
+  evidence_ids:
+  - docs-cli-reference
+  - test-missing-arg-287
+  example: claude --dangerously-load-development-channels server:webhook
+  flag: --dangerously-load-development-channels
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Accepts plugin:<name>@<marketplace> and server:<name> entries; prompts for confirmation; omitted from local help but variadic in the parser's missing-argument error.
+  scope:
+  - channels
+  value: <servers...>
+  value_type: variadic
+  variadic_min: 1
+- attachment: []
+  default: 'false'
+  description: Starts with permission checks bypassed.
+  evidence_ids:
+  - help-root-287
+  - help-subcommands-287
+  - docs-cli-reference
+  example: claude --dangerously-skip-permissions
+  flag: --dangerously-skip-permissions
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - agents
+  notes: Equivalent to --permission-mode bypassPermissions; a leading occurrence also routes `daemon <subcommand>` to the daemon command since v2.1.199.
+  scope:
+  - permissions
+  value_type: none
+- aliases:
+  - -d
+  attachment:
+  - equals
+  default: 'false'
+  description: Enables debug mode, optionally filtered by category.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  - help-subcommands-287
+  example: claude --debug='api,hooks'
+  flag: --debug
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: The filter binds only in the = form; a space-separated filter enables debug mode without filtering, so a wrapper must always write --debug=filter. The hidden remote-control help spells the same shape --debug[=<filter>].
+  scope:
+  - diagnostics
+  value: '[filter]'
+  value_optional: true
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: Writes debug logs to a file, implicitly enabling debug mode.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  example: claude --debug-file /tmp/claude-debug.log
+  flag: --debug-file
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Takes precedence over CLAUDE_CODE_DEBUG_LOGS_DIR.
+  scope:
+  - diagnostics
+  value: <path>
+  value_optional: false
+  value_type: string
+- attachment: []
+  default: 'false'
+  description: Opens the Claude Desktop app on the current directory instead of starting a terminal session.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  example: claude --desktop
+  flag: --desktop
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Takes no prompt and no other flags except --verbose and the --debug flags; available on macOS and x64 Windows with a Claude subscription; requires v2.1.285+.
+  scope:
+  - desktop
+  value_type: none
+- attachment: []
+  default: 'false'
+  description: Disables all skills and slash commands for the session.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  example: claude --disable-slash-commands
+  flag: --disable-slash-commands
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Local help phrases it as disabling all skills.
+  scope:
+  - skills
+  value_type: none
+- aliases:
+  - --disallowed-tools
+  attachment:
+  - space
+  - equals
+  description: Deny rules for tool calls; a bare tool name removes the tool from context.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  example: claude --disallowedTools "Bash(rm *)" Edit
+  flag: --disallowedTools
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: A scoped rule such as Bash(rm *) leaves the tool available and denies matching calls; mcp__* removes every MCP tool.
+  scope:
+  - permissions
+  value: <tools...>
+  value_type: variadic
+  variadic_min: 1
+- attachment:
+  - space
+  - equals
+  description: Sets the effort level for the current session.
+  evidence_ids:
+  - help-root-287
+  - help-subcommands-287
+  - test-effort-287
+  example: claude --effort high
+  flag: --effort
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - agents
+  notes: Help lists low, medium, high, xhigh, max and docs add ultracode; an invalid value warns, is ignored, and the default effort applies. At `agents`, sets the default for dispatched sessions. CLAUDE_CODE_EFFORT_LEVEL overrides the flag.
+  scope:
+  - model_selection
+  value: <level>
+  value_optional: false
+  value_type: string
+- attachment: []
+  default: removed
+  description: Removed flag; auto mode is now in the mode cycle by default.
+  evidence_ids:
+  - docs-cli-reference
+  - test-missing-arg-287
+  - test-unknown-strict-287
+  example: claude --permission-mode auto
+  flag: --enable-auto-mode
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Removed in v2.1.111; the 2.1.287 parser still accepts it as a no-op instead of erroring, and the parser rejects genuinely unknown options, so the quiet parse means real acceptance; wrappers must not emit it; use --permission-mode auto.
+  scope:
+  - permissions
+  value_type: none
+- attachment:
+  - space
+  - equals
+  description: Creates a new cloud session on the named self-hosted environment.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  - test-missing-arg-287
+  example: claude -p "Run the smoke test" --environment ccpool_abc123
+  flag: --environment
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Environment IDs start with ccpool_; requires v2.1.224+; combine with --ref to base the checkout on a named ref.
+  scope:
+  - remote
+  value: <environment_id>
+  value_optional: false
+  value_type: string
+- attachment: []
+  default: 'false'
+  description: Moves per-machine system prompt sections into the first user message.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  example: claude -p --exclude-dynamic-system-prompt-sections "query"
+  flag: --exclude-dynamic-system-prompt-sections
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Only applies with the default system prompt; semantics belong to the system-prompt topic.
+  scope:
+  - system_prompt
+  value_type: none
+- attachment:
+  - space
+  - equals
+  description: Enables automatic fallback to the named model or models when the primary is overloaded or unavailable.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  - test-missing-arg-287
+  example: claude --fallback-model sonnet,haiku
+  flag: --fallback-model
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: One value holding a comma-separated chain tried in order; overrides the fallbackModel setting.
+  scope:
+  - model_selection
+  value: <model>
+  value_optional: false
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: Downloads file resources at startup.
+  evidence_ids:
+  - help-root-287
+  example: claude --file file_abc:doc.txt file_def:img.png
+  flag: --file
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Format file_id:relative_path; observed in local help but not in the CLI-reference flag table.
+  scope:
+  - input
+  value: <specs...>
+  value_type: variadic
+  variadic_min: 1
+- attachment: []
+  default: 'false'
+  description: Creates a new session ID when resuming instead of reusing the original.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  example: claude --resume abc123 --fork-session
+  flag: --fork-session
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Use with --resume or --continue.
+  scope:
+  - sessions
+  value_type: none
+- attachment: []
+  default: 'false'
+  description: Emits subagent text and thinking blocks in the output stream with parent_tool_use_id set.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  example: claude -p --output-format stream-json --verbose --forward-subagent-text "query"
+  flag: --forward-subagent-text
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Requires --print and --output-format stream-json; CLAUDE_CODE_FORWARD_SUBAGENT_TEXT does the same; requires v2.1.211+.
+  scope:
+  - print_mode
+  - subagents
+  value_type: none
+- attachment:
+  - space
+  - equals
+  description: Resumes a session linked to a pull request, or opens the picker filtered to it.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  - test-parser-forms-287
+  example: claude --from-pr 123
+  flag: --from-pr
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Accepts a PR number or a GitHub, GitHub Enterprise, GitLab, or Bitbucket URL; without a value opens an interactive picker; does not consume a following token that looks like an option.
+  scope:
+  - sessions
+  value: '[value]'
+  value_optional: true
+  value_type: string
+- aliases:
+  - -h
+  attachment: []
+  description: Displays help for the command.
+  evidence_ids:
+  - help-root-287
+  - help-subcommands-287
+  example: claude --help
+  flag: --help
+  invocation_scope:
+  - applies_to: global
+  notes: Present at every command path probed; help is incomplete by design, so absence from help does not mean a flag is unavailable.
+  scope:
+  - diagnostics
+  value_type: none
+- attachment: []
+  default: 'false'
+  description: Connects to an IDE on startup when exactly one valid IDE is available.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  example: claude --ide
+  flag: --ide
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: CLAUDE_CODE_AUTO_CONNECT_IDE overrides auto-detection.
+  scope:
+  - ide
+  value_type: none
+- attachment: []
+  default: 'false'
+  description: Includes hook lifecycle events in the output stream.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  example: claude -p --output-format stream-json --verbose --include-hook-events "query"
+  flag: --include-hook-events
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Requires --output-format stream-json; SessionStart and Setup events are always included; some events never produce hook_started even with the flag.
+  scope:
+  - print_mode
+  - hooks
+  value_type: none
+- attachment: []
+  default: 'false'
+  description: Includes partial streaming events in output as they arrive.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  example: claude -p --output-format stream-json --verbose --include-partial-messages "query"
+  flag: --include-partial-messages
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Requires --print and --output-format stream-json.
+  scope:
+  - print_mode
+  value_type: none
+- attachment: []
+  default: 'false'
+  description: Runs Setup hooks with the init matcher before a print-mode session.
+  evidence_ids:
+  - docs-cli-reference
+  - test-missing-arg-287
+  example: claude -p --init "query"
+  flag: --init
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Omitted from local help but accepted by the parser; print mode only.
+  scope:
+  - hooks
+  - print_mode
+  value_type: none
+- attachment: []
+  default: 'false'
+  description: Runs Setup and SessionStart hooks, then exits without starting a conversation.
+  evidence_ids:
+  - docs-cli-reference
+  - test-missing-arg-287
+  example: claude --init-only
+  flag: --init-only
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Omitted from local help but accepted; a local bare run completed silently with exit 0; also counts as a non-interactive invocation that refuses --cloud.
+  scope:
+  - hooks
+  value_type: none
+- attachment:
+  - space
+  - equals
+  default: text
+  description: Selects the print-mode input format.
+  evidence_ids:
+  - help-root-287
+  - test-parser-forms-287
+  example: claude -p --output-format json --input-format stream-json
+  flag: --input-format
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Choices text and stream-json validated at parse time in both space and equals forms; only works with --print.
+  scope:
+  - print_mode
+  value: <format>
+  value_optional: false
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: Validates final structured output against a JSON Schema.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  - test-missing-arg-287
+  example: claude -p --json-schema '{"type":"object"}' "query"
+  flag: --json-schema
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Print mode only; an invalid schema exits with an error.
+  scope:
+  - print_mode
+  value: <schema>
+  value_optional: false
+  value_type: string
+- attachment: []
+  default: 'false'
+  description: Runs Setup hooks with the maintenance matcher before a print-mode session.
+  evidence_ids:
+  - docs-cli-reference
+  - test-missing-arg-287
+  example: claude -p --maintenance "query"
+  flag: --maintenance
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Omitted from local help but accepted by the parser; print mode only.
+  scope:
+  - hooks
+  - print_mode
+  value_type: none
+- attachment:
+  - space
+  - equals
+  description: Stops print-mode execution after a dollar budget is reached.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  example: claude -p --max-budget-usd 5.00 "query"
+  flag: --max-budget-usd
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Subagent spend counts toward the cap; only works with --print.
+  scope:
+  - print_mode
+  - costs
+  value: <amount>
+  value_optional: false
+  value_type: number
+- attachment:
+  - space
+  - equals
+  default: unlimited
+  description: Limits the number of agentic turns and exits with an error when the limit is reached.
+  evidence_ids:
+  - docs-cli-reference
+  - test-missing-arg-287
+  example: claude -p --max-turns 3 "query"
+  flag: --max-turns
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Omitted from local help but accepted by the parser; print mode only; with stream-json input a still-queued message starts a new turn with its own limit.
+  scope:
+  - print_mode
+  value: <turns>
+  value_optional: false
+  value_type: number
+- attachment:
+  - space
+  - equals
+  description: Loads MCP servers from JSON files or inline JSON strings.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  example: claude --mcp-config ./mcp.json
+  flag: --mcp-config
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Space-separated; with -p, waits for pending servers up to MCP_TIMEOUT (30 s default) before the first turn; use --strict-mcp-config to ignore discovered MCP configuration.
+  scope:
+  - mcp
+  value: <configs...>
+  value_type: variadic
+  variadic_min: 1
+- attachment:
+  - space
+  - equals
+  description: Loads one MCP configuration for sessions dispatched from agent view.
+  evidence_ids:
+  - help-subcommands-287
+  example: claude agents --mcp-config ./mcp.json
+  flag: --mcp-config
+  invocation_scope:
+  - applies_to: command
+    command:
+    - agents
+  notes: Single value per occurrence at this path, repeatable per occurrence, unlike the variadic root spelling.
+  scope:
+  - mcp
+  - agents
+  value: <config>
+  value_optional: false
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: Sets the model alias or full model ID for the session.
+  evidence_ids:
+  - help-root-287
+  - help-subcommands-287
+  example: claude --model claude-sonnet-5
+  flag: --model
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - agents
+  - applies_to: command
+    command:
+    - auto-mode
+    - critique
+  notes: No short alias; overrides the model setting and ANTHROPIC_MODEL; at `agents` sets the dispatched-session default; at `auto-mode critique` overrides the critique model.
+  scope:
+  - model_selection
+  value: <model>
+  value_optional: false
+  value_type: string
+- aliases:
+  - -n
+  attachment:
+  - space
+  - equals
+  - short_attached
+  description: Sets a display name for the session.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  - test-parser-forms-287
+  example: claude -n my-feature-work
+  flag: --name
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Shown in /resume and the terminal title; a live duplicate name gets a variant; the short-attached form was proven locally (-nfoo parsed as a name).
+  scope:
+  - sessions
+  value: <name>
+  value_optional: false
+  value_type: string
+- attachment: []
+  default: 'false'
+  description: Disables Claude in Chrome integration for the session.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  example: claude --no-chrome
+  flag: --no-chrome
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Commander's automatic negation of --chrome.
+  scope:
+  - browser
+  value_type: none
+- attachment: []
+  default: 'false'
+  description: Disables saving sessions to disk so they cannot be resumed.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  example: claude -p --no-session-persistence "query"
+  flag: --no-session-persistence
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Print mode only; CLAUDE_CODE_SKIP_PROMPT_HISTORY does the same in any mode.
+  scope:
+  - print_mode
+  - sessions
+  value_type: none
+- attachment:
+  - space
+  - equals
+  default: text
+  description: Selects the print-mode output format.
+  evidence_ids:
+  - help-root-287
+  - test-parser-forms-287
+  example: claude -p "query" --output-format json
+  flag: --output-format
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Choices text, json, stream-json validated at parse time in both space and equals forms; use stream-json for structured streaming wrappers.
+  scope:
+  - print_mode
+  value: <format>
+  value_optional: false
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: Sets the starting permission mode.
+  evidence_ids:
+  - help-root-287
+  - help-subcommands-287
+  - test-parser-forms-287
+  example: claude --permission-mode plan
+  flag: --permission-mode
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - agents
+  notes: 'Choices validated at parse time in both forms: acceptEdits, auto, bypassPermissions, manual, dontAsk, plan; manual is an alias of default (v2.1.200+); overrides defaultMode from settings.'
+  scope:
+  - permissions
+  value: <mode>
+  value_optional: false
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: Delegates non-interactive permission prompts to an MCP tool.
+  evidence_ids:
+  - docs-cli-reference
+  - test-missing-arg-287
+  example: claude -p --permission-prompt-tool mcp_auth_tool "query"
+  flag: --permission-prompt-tool
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Omitted from local help but accepted by the parser; waits for the tool's server up to MCP_TIMEOUT.
+  scope:
+  - print_mode
+  - permissions
+  value: <tool>
+  value_optional: false
+  value_type: string
+- attachment:
+  - space
+  - equals
+  default: host
+  description: Sets who answers permission prompts in print mode.
+  evidence_ids:
+  - help-root-287
+  - test-parser-forms-287
+  example: claude -p --permission-prompts none "query"
+  flag: --permission-prompts
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Choices host and none validated at parse time; none denies anything that would prompt; requires v2.1.259+.
+  scope:
+  - print_mode
+  - permissions
+  value: <target>
+  value_optional: false
+  value_type: string
+- attachment:
+  - space
+  - equals
+  default: '[]'
+  description: Loads a plugin from a directory or .zip for this session only.
+  evidence_ids:
+  - help-root-287
+  - help-subcommands-287
+  - docs-cli-reference
+  example: claude --plugin-dir ./my-plugin
+  flag: --plugin-dir
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - agents
+  notes: One path per occurrence; repeat the flag for more; a folder of plugins loads each child (v2.1.265+).
+  scope:
+  - plugins
+  value: <path>
+  value_optional: false
+  value_type: string
+- attachment:
+  - space
+  - equals
+  default: '[]'
+  description: Fetches a plugin .zip from a URL for this session only.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  example: claude --plugin-url https://example.com/plugin.zip
+  flag: --plugin-url
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Repeat the flag for multiple plugins or pass space-separated URLs in one quoted value.
+  scope:
+  - plugins
+  value: <url>
+  value_optional: false
+  value_type: string
+- aliases:
+  - -p
+  attachment: []
+  default: 'false'
+  description: Prints a response and exits without interactive mode.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  - test-remote-alias-287
+  example: claude -p "query"
+  flag: --print
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Skips the workspace trust dialog and silently ignores settings files that fail validation; piped stdout alone also selects the same non-interactive input requirement even without -p.
+  scope:
+  - print_mode
+  value_type: none
+- attachment:
+  - space
+  - equals
+  default: 'true'
+  description: Emits prompt_suggestion messages after turns that generate one.
+  evidence_ids:
+  - help-root-287
+  - test-parser-forms-287
+  example: claude -p --prompt-suggestions --output-format stream-json --verbose "query"
+  flag: --prompt-suggestions
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Optional value with choices true, false, 1, 0, yes, no, on, off validated at parse time in both space and equals forms; requires --print, stream-json output, and --verbose.
+  scope:
+  - print_mode
+  value: '[value]'
+  value_optional: true
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: Bases a new --environment session's checkout on a named ref instead of local HEAD.
+  evidence_ids:
+  - docs-cli-reference
+  - test-missing-arg-287
+  example: claude -p "Run the smoke test" --environment ccpool_abc123 --ref main
+  flag: --ref
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Documented alongside --environment; omitted from local help but accepted by the parser.
+  scope:
+  - remote
+  value: <ref>
+  value_optional: false
+  value_type: string
+- aliases:
+  - --rc
+  attachment:
+  - space
+  - equals
+  description: Starts an interactive session with Remote Control enabled, optionally named.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  - test-missing-arg-287
+  example: claude --remote-control "My Project"
+  flag: --remote-control
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: The hidden `claude remote-control` subcommand is the server-mode form with its own flags; --rc parses as this flag's alias.
+  scope:
+  - remote
+  value: '[name]'
+  value_optional: true
+  value_type: string
+- attachment:
+  - space
+  - equals
+  default: hostname
+  description: Sets the prefix for auto-generated Remote Control session names.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  example: claude --remote-control-session-name-prefix dev-box
+  flag: --remote-control-session-name-prefix
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: CLAUDE_REMOTE_CONTROL_SESSION_NAME_PREFIX does the same; also accepted at the hidden remote-control subcommand.
+  scope:
+  - remote
+  value: <prefix>
+  value_optional: false
+  value_type: string
+- attachment: []
+  default: 'false'
+  description: Re-emits stdin user messages to stdout for acknowledgement.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  example: claude -p --input-format stream-json --output-format stream-json --verbose --replay-user-messages
+  flag: --replay-user-messages
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Requires stream-json input and output.
+  scope:
+  - print_mode
+  value_type: none
+- attachment: []
+  default: 'false'
+  description: Starts in restricted mode, removing built-in tools that run commands or code and ignoring user, project, and local settings.
+  evidence_ids:
+  - help-root-287
+  - help-subcommands-287
+  - docs-cli-reference
+  example: claude --restricted -p "query"
+  flag: --restricted
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - agents
+  notes: Confines file tools to working directories, refuses bypassPermissions, and refuses cloud sessions; managed settings and --settings still apply; requires v2.1.248+.
+  scope:
+  - permissions
+  value_type: none
+- aliases:
+  - -r
+  attachment:
+  - space
+  - equals
+  - short_attached
+  description: Resumes a session by ID, name, or transcript path, or opens an interactive picker.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  - test-parser-forms-287
+  example: claude --resume auth-refactor
+  flag: --resume
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: The picker needs interaction; a value may also be an absolute path to a .jsonl transcript; resuming a running background session attaches to it (v2.1.285+); the short-attached form was proven locally (-rbar parsed as a value).
+  scope:
+  - sessions
+  value: '[value]'
+  value_optional: true
+  value_type: string
+- attachment: []
+  default: 'false'
+  description: Starts with all customizations disabled for troubleshooting.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  example: claude --safe-mode
+  flag: --safe-mode
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Sets CLAUDE_CODE_SAFE_MODE=1; auth, model selection, built-in tools, and permissions work normally; managed policy still partly applies.
+  scope:
+  - config
+  value_type: none
+- attachment:
+  - space
+  - equals
+  description: Puts the CLI into the SDK's non-interactive invocation mode.
+  evidence_ids:
+  - test-remote-alias-287
+  - test-missing-arg-287
+  flag: --sdk-url
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: 'Hidden: absent from help and the CLI reference; revealed by a --cloud error message listing non-interactive entry modes (piped stdout, --init-only, --sdk-url) and by the parser''s missing-argument error.'
+  scope:
+  - sdk
+  value: <url>
+  value_optional: false
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: Uses a specific session ID for the conversation.
+  evidence_ids:
+  - help-root-287
+  - test-session-id-287
+  example: claude --session-id 550e8400-e29b-41d4-a716-446655440000
+  flag: --session-id
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Must be a valid UUID; an invalid value is rejected app-side before any session starts.
+  scope:
+  - sessions
+  value: <uuid>
+  value_optional: false
+  value_type: string
+- attachment:
+  - space
+  - equals
+  default: user,project,local
+  description: Restricts which setting sources are loaded.
+  evidence_ids:
+  - help-root-287
+  - help-subcommands-287
+  - test-parser-variadic-287
+  example: claude --setting-sources user,project
+  flag: --setting-sources
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - agents
+  notes: One comma-separated value; validated app-side with a fatal error naming the valid set; inherited by sessions started from this one.
+  scope:
+  - config
+  value: <sources>
+  value_optional: false
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: Loads additional settings from a JSON file or inline JSON string.
+  evidence_ids:
+  - help-root-287
+  - help-subcommands-287
+  - docs-cli-reference
+  example: claude --settings ./settings.json
+  flag: --settings
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - agents
+  notes: Overrides same keys in settings files for this session; the file must be a regular file no larger than 2 MiB; managed values still win.
+  scope:
+  - config
+  value: <file-or-json>
+  value_optional: false
+  value_type: string
+- attachment: []
+  default: 'false'
+  description: Uses only MCP servers from --mcp-config, ignoring all other MCP configurations.
+  evidence_ids:
+  - help-root-287
+  - help-subcommands-287
+  example: claude --strict-mcp-config --mcp-config ./mcp.json
+  flag: --strict-mcp-config
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - agents
+  notes: At `agents`, applies to dispatched sessions.
+  scope:
+  - mcp
+  value_type: none
+- attachment:
+  - space
+  - equals
+  description: Replaces the default system prompt with inline text.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  example: claude --system-prompt "You are a Python expert"
+  flag: --system-prompt
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Semantics belong to the system-prompt topic.
+  scope:
+  - system_prompt
+  value: <prompt>
+  value_optional: false
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: Replaces the default system prompt with file contents.
+  evidence_ids:
+  - docs-cli-reference
+  example: claude --system-prompt-file ./custom-prompt.txt
+  flag: --system-prompt-file
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Omitted from local help; documented in the CLI reference; semantics belong to the system-prompt topic.
+  scope:
+  - system_prompt
+  value: <path>
+  value_optional: false
+  value_type: string
+- attachment:
+  - space
+  - equals
+  default: on
+  description: Controls whether a conversation records its system prompt once and reuses it.
+  evidence_ids:
+  - help-root-287
+  - test-parser-forms-287
+  example: claude --append-system-prompt "Draft rules" --system-prompt-snapshot off
+  flag: --system-prompt-snapshot
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Choices on and off validated at parse time; requires v2.1.257+; semantics belong to the system-prompt topic.
+  scope:
+  - system_prompt
+  value: <on|off>
+  value_optional: false
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: Resumes a cloud session in the local terminal, optionally by session ID.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  example: claude --teleport
+  flag: --teleport
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Requires a claude.ai subscription.
+  scope:
+  - remote
+  value: '[session]'
+  value_optional: true
+  value_type: string
+- attachment:
+  - space
+  - equals
+  default: in-process
+  description: Sets how agent team teammates display.
+  evidence_ids:
+  - docs-cli-reference
+  - test-missing-arg-287
+  example: claude --teammate-mode auto
+  flag: --teammate-mode
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Values in-process, auto, tmux, iterm2; overrides the teammateMode setting; omitted from local help but accepted by the parser.
+  scope:
+  - agents
+  value: <mode>
+  value_optional: false
+  value_type: string
+- attachment:
+  - equals
+  default: 'false'
+  description: Creates a tmux session for the worktree, using iTerm2 native panes when available.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  example: claude -w feature-auth --tmux=classic
+  flag: --tmux
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Requires --worktree; the classic spelling is documented only in the equals form, which is why attachment records equals alone.
+  scope:
+  - worktree
+  value: classic
+  value_optional: true
+  value_type: string
+- attachment:
+  - space
+  - equals
+  default: default
+  description: Restricts which built-in tools are available.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  example: claude --tools "Bash,Edit,Read"
+  flag: --tools
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: Use "" to disable all and "default" for the default set; does not affect MCP tools, which --disallowedTools governs.
+  scope:
+  - permissions
+  value: <tools...>
+  value_type: variadic
+  variadic_min: 1
+- attachment: []
+  default: 'false'
+  description: Enables verbose turn-by-turn output, overriding the viewMode setting.
+  evidence_ids:
+  - help-root-287
+  - help-subcommands-287
+  example: claude --verbose
+  flag: --verbose
+  invocation_scope:
+  - applies_to: command
+    command: []
+  - applies_to: command
+    command:
+    - mcp
+    - serve
+  notes: Required by several stream-json extensions; no short alias, since -v is --version; also accepted at `mcp serve`.
+  scope:
+  - print_mode
+  - diagnostics
+  value_type: none
+- aliases:
+  - -v
+  attachment: []
+  description: Prints the version number.
+  evidence_ids:
+  - help-root-287
+  - local-binary-287
+  example: claude --version
+  flag: --version
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: 'Output form: 2.1.287 (Claude Code).'
+  scope:
+  - diagnostics
+  value_type: none
+- aliases:
+  - -w
+  attachment:
+  - space
+  - equals
+  - short_attached
+  description: Starts Claude in an isolated git worktree.
+  evidence_ids:
+  - help-root-287
+  - docs-cli-reference
+  - test-parser-forms-287
+  example: claude -w feature-auth
+  flag: --worktree
+  invocation_scope:
+  - applies_to: command
+    command: []
+  notes: 'Without a name one is generated; #<number> or a PR or MR URL branches the worktree from it; the short-attached form rests on the parser''s uniform short-flag behavior.'
+  scope:
+  - worktree
+  value: '[name]'
+  value_optional: true
+  value_type: string
+- attachment: []
+  default: 'false'
+  description: Applies the command to all items instead of one.
+  evidence_ids:
+  - help-subcommands-287
+  - help-root-287
+  - docs-cli-reference
+  example: claude agents --json --all
+  flag: --all
+  invocation_scope:
+  - applies_to: command
+    command:
+    - agents
+  - applies_to: command
+    command:
+    - respawn
+  - applies_to: command
+    command:
+    - project
+    - purge
+  notes: At `agents`, includes completed background sessions in --json output; at `respawn`, restarts every running session; at `project purge`, purges every project and is mutually exclusive with a path.
+  scope:
+  - background_agents
+  - sessions
+  value_type: none
+- aliases:
+  - -a
+  attachment: []
+  default: 'false'
+  description: Disables all enabled plugins.
+  evidence_ids:
+  - help-subcommands-287
+  example: claude plugin disable --all
+  flag: --all
+  invocation_scope:
+  - applies_to: command
+    command:
+    - plugin
+    - disable
+  notes: The -a short alias is specific to this path.
+  scope:
+  - plugins
+  value_type: none
+- attachment:
+  - space
+  - equals
+  description: Filters the agent view or listing to sessions started under a path.
+  evidence_ids:
+  - help-subcommands-287
+  example: claude agents --json --cwd .
+  flag: --cwd
+  invocation_scope:
+  - applies_to: command
+    command:
+    - agents
+  notes: Scoped to `agents`.
+  scope:
+  - agents
+  value: <path>
+  value_optional: false
+  value_type: string
+- attachment: []
+  description: Requests JSON output for commands that support it.
+  evidence_ids:
+  - help-subcommands-287
+  - probe-auth-status-287
+  - probe-agents-json-287
+  - probe-plugin-list-287
+  example: claude plugin list --json
+  flag: --json
+  invocation_scope:
+  - applies_to: command
+    command:
+    - auth
+    - status
+  - applies_to: command
+    command:
+    - agents
+  - applies_to: command
+    command:
+    - plugin
+    - list
+  - applies_to: command
+    command:
+    - plugin
+    - configure
+  - applies_to: command
+    command:
+    - plugin
+    - uninstall
+  - applies_to: command
+    command:
+    - plugin
+    - enable
+  - applies_to: command
+    command:
+    - plugin
+    - disable
+  - applies_to: command
+    command:
+    - plugin
+    - validate
+  - applies_to: command
+    command:
+    - plugin
+    - marketplace
+    - add
+  - applies_to: command
+    command:
+    - plugin
+    - marketplace
+    - list
+  - applies_to: command
+    command:
+    - plugin
+    - marketplace
+    - remove
+  - applies_to: command
+    command:
+    - plugin
+    - marketplace
+    - update
+  - applies_to: command
+    command:
+    - ultrareview
+  notes: At `auth status` JSON is the default and --text opts out; mutating plugin paths print one machine-readable result line with the same exit codes; plugin install and plugin update also accept --json per their help.
+  scope:
+  - output
+  value_type: none
+- attachment: []
+  default: 'false'
+  description: Prints human-readable authentication status instead of JSON.
+  evidence_ids:
+  - help-subcommands-287
+  example: claude auth status --text
+  flag: --text
+  invocation_scope:
+  - applies_to: command
+    command:
+    - auth
+    - status
+  notes: Scoped to `auth status`.
+  scope:
+  - output
+  value_type: none
+- attachment:
+  - space
+  - equals
+  description: Filters printed auto mode rules by label prefix, case-insensitively.
+  evidence_ids:
+  - help-subcommands-287
+  - docs-cli-reference
+  example: claude auto-mode defaults --label 'Git Destructive'
+  flag: --label
+  invocation_scope:
+  - applies_to: command
+    command:
+    - auto-mode
+    - defaults
+  notes: Scoped to `auto-mode defaults`.
+  scope:
+  - permissions
+  value: <prefix>
+  value_optional: false
+  value_type: string
+- aliases:
+  - -y
+  attachment: []
+  default: 'false'
+  description: Skips the command's confirmation prompt.
+  evidence_ids:
+  - help-subcommands-287
+  - docs-cli-reference
+  example: claude auto-mode reset --yes
+  flag: --yes
+  invocation_scope:
+  - applies_to: command
+    command:
+    - auto-mode
+    - reset
+  - applies_to: command
+    command:
+    - project
+    - purge
+  - applies_to: command
+    command:
+    - plugin
+    - uninstall
+  - applies_to: command
+    command:
+    - plugin
+    - prune
+  notes: Required for non-interactive runs of these paths when a confirmation would otherwise appear; plugin install and plugin update take the same flag plus --accept-command but prompt by design; `import` documents a --yes=<digest> value form.
+  scope:
+  - prompts
+  value_type: none
+- attachment:
+  - space
+  - equals
+  default: ~/.claude/daemon.json
+  description: Points the background-session supervisor at a JSON config file.
+  evidence_ids:
+  - help-subcommands-287
+  example: claude daemon run --json-path ./daemon.json
+  flag: --json-path
+  invocation_scope:
+  - applies_to: command
+    command:
+    - daemon
+  notes: Umbrella option of the hidden `daemon` command; `daemon run` also takes the same value as a positional.
+  scope:
+  - background_agents
+  value: <p>
+  value_optional: false
+  value_type: string
+- attachment:
+  - space
+  - equals
+  default: ~/.claude/daemon.log
+  description: Points the background-session supervisor at a log file.
+  evidence_ids:
+  - help-subcommands-287
+  example: claude daemon run --log-file ./daemon.log
+  flag: --log-file
+  invocation_scope:
+  - applies_to: command
+    command:
+    - daemon
+  notes: Umbrella option of the hidden `daemon` command.
+  scope:
+  - background_agents
+  - diagnostics
+  value: <p>
+  value_optional: false
+  value_type: string
+- attachment: []
+  default: 'false'
+  description: Also stops a transient, non-service daemon.
+  evidence_ids:
+  - help-subcommands-287
+  - docs-cli-reference
+  example: claude daemon stop --any
+  flag: --any
+  invocation_scope:
+  - applies_to: command
+    command:
+    - daemon
+    - stop
+  notes: Scoped to `daemon stop`.
+  scope:
+  - background_agents
+  value_type: none
+- attachment: []
+  default: 'false'
+  description: Leaves detached background sessions running when the supervisor stops.
+  evidence_ids:
+  - help-subcommands-287
+  - docs-cli-reference
+  example: claude daemon stop --keep-workers
+  flag: --keep-workers
+  invocation_scope:
+  - applies_to: command
+    command:
+    - daemon
+    - stop
+  notes: Scoped to `daemon stop`.
+  scope:
+  - background_agents
+  value_type: none
+- attachment:
+  - space
+  - equals
+  description: Points the gateway at its YAML configuration.
+  evidence_ids:
+  - help-subcommands-287
+  - docs-cli-reference
+  example: claude gateway --config gateway.yaml
+  flag: --config
+  invocation_scope:
+  - applies_to: command
+    command:
+    - gateway
+  notes: Required for gateway server mode.
+  scope:
+  - gateway
+  value: <path>
+  value_optional: false
+  value_type: string
+- attachment: []
+  default: 'false'
+  description: Forces native binary installation even if already installed.
+  evidence_ids:
+  - help-subcommands-287
+  example: claude install --force latest
+  flag: --force
+  invocation_scope:
+  - applies_to: command
+    command:
+    - install
+  notes: Scoped to `install`; no short alias here, unlike plugin init and plugin tag.
+  scope:
+  - install
+  value_type: none
+- aliases:
+  - -f
+  attachment: []
+  default: 'false'
+  description: Forces the operation past its overwrite or pre-flight checks.
+  evidence_ids:
+  - help-subcommands-287
+  example: claude plugin init -f my-plugin
+  flag: --force
+  invocation_scope:
+  - applies_to: command
+    command:
+    - plugin
+    - init
+  - applies_to: command
+    command:
+    - plugin
+    - tag
+  notes: At `plugin init`, overwrites an existing .claude-plugin; at `plugin tag`, skips the dirty-tree and existing-tag checks.
+  scope:
+  - plugins
+  value_type: none
+- attachment:
+  - space
+  - equals
+  default: git config user.name
+  description: Sets the author name written to the scaffolded manifest.
+  evidence_ids:
+  - help-subcommands-287
+  example: claude plugin init --author "Ken Snyder" my-plugin
+  flag: --author
+  invocation_scope:
+  - applies_to: command
+    command:
+    - plugin
+    - init
+  notes: Scoped to `plugin init`.
+  scope:
+  - plugins
+  value: <name>
+  value_optional: false
+  value_type: string
+- attachment:
+  - space
+  - equals
+  default: git config user.email
+  description: Sets the author email written to the scaffolded manifest.
+  evidence_ids:
+  - help-subcommands-287
+  example: claude plugin init --author-email ken@example.com my-plugin
+  flag: --author-email
+  invocation_scope:
+  - applies_to: command
+    command:
+    - plugin
+    - init
+  notes: Scoped to `plugin init`.
+  scope:
+  - plugins
+  value: <email>
+  value_optional: false
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: Sets the manifest description of a scaffolded plugin.
+  evidence_ids:
+  - help-subcommands-287
+  example: claude plugin init --description "Code review helpers" my-plugin
+  flag: --description
+  invocation_scope:
+  - applies_to: command
+    command:
+    - plugin
+    - init
+  notes: Scoped to `plugin init`.
+  scope:
+  - plugins
+  value: <text>
+  value_optional: false
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: Also scaffolds the named components.
+  evidence_ids:
+  - help-subcommands-287
+  example: claude plugin init --with skills hooks my-plugin
+  flag: --with
+  invocation_scope:
+  - applies_to: command
+    command:
+    - plugin
+    - init
+  notes: 'Component names: skills, agents, hooks, mcp, lsp, output-style, channel.'
+  scope:
+  - plugins
+  value: <components...>
+  value_type: variadic
+  variadic_min: 1
+- attachment: []
+  default: 'false'
+  description: Includes available marketplace plugins in the listing.
+  evidence_ids:
+  - help-subcommands-287
+  example: claude plugin list --json --available
+  flag: --available
+  invocation_scope:
+  - applies_to: command
+    command:
+    - plugin
+    - list
+  notes: Requires --json.
+  scope:
+  - plugins
+  value_type: none
+- attachment:
+  - space
+  - equals
+  description: Measures each installed plugin's saved data directory, or only the named plugin's.
+  evidence_ids:
+  - help-subcommands-287
+  example: claude plugin list --json --data-size
+  flag: --data-size
+  invocation_scope:
+  - applies_to: command
+    command:
+    - plugin
+    - list
+  notes: Requires --json.
+  scope:
+  - plugins
+  value: '[plugin]'
+  value_optional: true
+  value_type: string
+- attachment: []
+  default: 'false'
+  description: Reads option values from stdin as a JSON object of single-line strings.
+  evidence_ids:
+  - help-subcommands-287
+  example: claude plugin configure --values-stdin my-plugin < values.json
+  flag: --values-stdin
+  invocation_scope:
+  - applies_to: command
+    command:
+    - plugin
+    - configure
+  notes: Options left out keep their values; scoped to `plugin configure`.
+  scope:
+  - plugins
+  value_type: none
+- attachment: []
+  default: 'false'
+  description: Preserves the plugin's persistent data directory on uninstall.
+  evidence_ids:
+  - help-subcommands-287
+  example: claude plugin uninstall --keep-data my-plugin
+  flag: --keep-data
+  invocation_scope:
+  - applies_to: command
+    command:
+    - plugin
+    - uninstall
+  notes: Data lives under ~/.claude/plugins/data/{id}/.
+  scope:
+  - plugins
+  value_type: none
+- attachment: []
+  default: 'false'
+  description: Also removes auto-installed dependencies that are no longer needed.
+  evidence_ids:
+  - help-subcommands-287
+  example: claude plugin uninstall --prune my-plugin
+  flag: --prune
+  invocation_scope:
+  - applies_to: command
+    command:
+    - plugin
+    - uninstall
+  notes: Requires -y in non-interactive contexts; not valid with --json.
+  scope:
+  - plugins
+  value_type: none
+- attachment: []
+  default: 'false'
+  description: Adds the claude.ai-hosted marketplace of the given name.
+  evidence_ids:
+  - help-subcommands-287
+  example: claude plugin marketplace add --claudeai my-marketplace
+  flag: --claudeai
+  invocation_scope:
+  - applies_to: command
+    command:
+    - plugin
+    - marketplace
+    - add
+  notes: Scoped to `plugin marketplace add`.
+  scope:
+  - plugins
+  value_type: none
+- attachment:
+  - space
+  - equals
+  description: Limits a marketplace checkout to specific directories via git sparse-checkout.
+  evidence_ids:
+  - help-subcommands-287
+  example: claude plugin marketplace add --sparse .claude-plugin plugins owner/repo
+  flag: --sparse
+  invocation_scope:
+  - applies_to: command
+    command:
+    - plugin
+    - marketplace
+    - add
+  notes: For monorepos; scoped to `plugin marketplace add`.
+  scope:
+  - plugins
+  value: <paths...>
+  value_type: variadic
+  variadic_min: 1
+- attachment: []
+  default: 'false'
+  description: Treats validation warnings as errors for CI.
+  evidence_ids:
+  - help-subcommands-287
+  example: claude plugin validate --strict ./my-plugin
+  flag: --strict
+  invocation_scope:
+  - applies_to: command
+    command:
+    - plugin
+    - validate
+  notes: Exits 1 on unrecognized fields and missing metadata the runtime tolerates.
+  scope:
+  - plugins
+  value_type: none
+- attachment:
+  - space
+  - equals
+  default: '45'
+  description: Caps how long ultrareview waits for the review to finish.
+  evidence_ids:
+  - help-subcommands-287
+  example: claude ultrareview --timeout 10 --json 1234
+  flag: --timeout
+  invocation_scope:
+  - applies_to: command
+    command:
+    - ultrareview
+  notes: Measured in minutes; scoped to `ultrareview`.
+  scope:
+  - ultrareview
+  value: <minutes>
+  value_optional: false
+  value_type: number
+- attachment: []
+  default: 'false'
+  description: Posts the finished review's findings to the PR as one plain comment.
+  evidence_ids:
+  - help-subcommands-287
+  - docs-cli-reference
+  example: claude ultrareview --post 1234
+  flag: --post
+  invocation_scope:
+  - applies_to: command
+    command:
+    - ultrareview
+  notes: PR targets on github.com only; requires v2.1.227+.
+  scope:
+  - ultrareview
+  value_type: none
+- attachment: []
+  default: 'true'
+  description: Does not post findings to the PR; the default.
+  evidence_ids:
+  - help-subcommands-287
+  - docs-cli-reference
+  example: claude ultrareview --no-post 1234
+  flag: --no-post
+  invocation_scope:
+  - applies_to: command
+    command:
+    - ultrareview
+  notes: Accepted for parity with the /ultrareview and /code-review ultra flags; requires v2.1.227+.
+  scope:
+  - ultrareview
+  value_type: none
+- attachment: []
+  default: 'false'
+  description: Previews what the command would change without changing anything.
+  evidence_ids:
+  - help-subcommands-287
+  - docs-cli-reference
+  example: claude project purge --dry-run ~/work/repo
+  flag: --dry-run
+  invocation_scope:
+  - applies_to: command
+    command:
+    - project
+    - purge
+  - applies_to: command
+    command:
+    - plugin
+    - tag
+  - applies_to: command
+    command:
+    - plugin
+    - prune
+  - applies_to: command
+    command:
+    - import
+  notes: At `project purge`, lists what would be deleted; at `plugin tag`, prints what would be tagged; at `plugin prune`, lists what would be removed; at `import`, shows what would be imported.
+  scope:
+  - prompts
+  value_type: none
+- aliases:
+  - -i
+  attachment: []
+  default: 'false'
+  description: Prompts for each item before deleting during a project purge.
+  evidence_ids:
+  - help-subcommands-287
+  - docs-cli-reference
+  example: claude project purge -i ~/work/repo
+  flag: --interactive
+  invocation_scope:
+  - applies_to: command
+    command:
+    - project
+    - purge
+  notes: Scoped to `project purge`.
+  scope:
+  - prompts
+  value_type: none
+- attachment:
+  - space
+  - equals
+  description: Discards a worktree's unpushed commits while removing a session.
+  evidence_ids:
+  - help-subcommands-287
+  - docs-cli-reference
+  example: claude rm 7c5dcf5d --discard-unpushed abc123@wt-9
+  flag: --discard-unpushed
+  invocation_scope:
+  - applies_to: command
+    command:
+    - rm
+  notes: Pass the value a previous refused `claude rm` reported; requires v2.1.260+.
+  scope:
+  - background_agents
+  value: <commit>@<worktree-id>
+  value_optional: false
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: Deletes a worktree directory that git or the WorktreeRemove hook could not remove.
+  evidence_ids:
+  - help-subcommands-287
+  - docs-cli-reference
+  example: claude rm 7c5dcf5d --force-remove-worktree wt-9
+  flag: --force-remove-worktree
+  invocation_scope:
+  - applies_to: command
+    command:
+    - rm
+  notes: Pass the value a previous refused `claude rm` reported; the branch is kept; requires v2.1.268+.
+  scope:
+  - background_agents
+  value: <worktree-id>
+  value_optional: false
+  value_type: string
+- aliases:
+  - -e
+  attachment:
+  - space
+  - equals
+  - short_attached
+  description: Sets environment variables for a stdio MCP server being added.
+  evidence_ids:
+  - help-subcommands-287
+  - test-parser-forms-287
+  example: claude mcp add my-server -e API_KEY=xxx -- npx my-mcp-server
+  flag: --env
+  invocation_scope:
+  - applies_to: command
+    command:
+    - mcp
+    - add
+  notes: KEY=value entries; scoped to `mcp add`.
+  scope:
+  - mcp
+  value: <env...>
+  value_type: variadic
+  variadic_min: 1
+- aliases:
+  - -H
+  attachment:
+  - space
+  - equals
+  - short_attached
+  description: Sets headers for an HTTP or SSE MCP server being added.
+  evidence_ids:
+  - help-subcommands-287
+  - test-parser-forms-287
+  example: 'claude mcp add --transport http corridor https://app.corridor.dev/api/mcp --header "Authorization: Bearer ..."'
+  flag: --header
+  invocation_scope:
+  - applies_to: command
+    command:
+    - mcp
+    - add
+  notes: Repeatable and space-separated; scoped to `mcp add`.
+  scope:
+  - mcp
+  value: <header...>
+  value_type: variadic
+  variadic_min: 1
+- aliases:
+  - -s
+  attachment:
+  - space
+  - equals
+  - short_attached
+  default: local
+  description: Chooses which configuration scope an MCP server is added to.
+  evidence_ids:
+  - help-subcommands-287
+  - test-parser-forms-287
+  example: claude mcp add --scope user my-server -- npx my-mcp-server
+  flag: --scope
+  invocation_scope:
+  - applies_to: command
+    command:
+    - mcp
+    - add
+  - applies_to: command
+    command:
+    - mcp
+    - add-json
+  - applies_to: command
+    command:
+    - mcp
+    - add-from-claude-desktop
+  notes: Values local, user, project.
+  scope:
+  - mcp
+  value: <scope>
+  value_optional: false
+  value_type: string
+- aliases:
+  - -s
+  attachment:
+  - space
+  - equals
+  - short_attached
+  description: Removes an MCP server from a specific configuration scope.
+  evidence_ids:
+  - help-subcommands-287
+  example: claude mcp remove --scope user my-server
+  flag: --scope
+  invocation_scope:
+  - applies_to: command
+    command:
+    - mcp
+    - remove
+  notes: Without the flag, removes from whichever scope the server exists in.
+  scope:
+  - mcp
+  value: <scope>
+  value_optional: false
+  value_type: string
+- aliases:
+  - -s
+  attachment:
+  - space
+  - equals
+  - short_attached
+  default: auto-detect
+  description: Chooses the installation scope a plugin is enabled or disabled in.
+  evidence_ids:
+  - help-subcommands-287
+  example: claude plugin enable --scope user my-plugin
+  flag: --scope
+  invocation_scope:
+  - applies_to: command
+    command:
+    - plugin
+    - enable
+  - applies_to: command
+    command:
+    - plugin
+    - disable
+  notes: Values user, project, local; auto-detects when omitted.
+  scope:
+  - plugins
+  value: <scope>
+  value_optional: false
+  value_type: string
+- aliases:
+  - -s
+  attachment:
+  - space
+  - equals
+  - short_attached
+  default: user
+  description: Chooses the installation scope a plugin is uninstalled from.
+  evidence_ids:
+  - help-subcommands-287
+  example: claude plugin uninstall --scope user my-plugin
+  flag: --scope
+  invocation_scope:
+  - applies_to: command
+    command:
+    - plugin
+    - uninstall
+  notes: plugin install and plugin update take the same flag with their own defaults.
+  scope:
+  - plugins
+  value: <scope>
+  value_optional: false
+  value_type: string
+- aliases:
+  - -t
+  attachment:
+  - space
+  - equals
+  - short_attached
+  default: stdio
+  description: Selects the transport type of an MCP server being added.
+  evidence_ids:
+  - help-subcommands-287
+  - test-mcp-add-287
+  example: claude mcp add --transport http sentry https://mcp.sentry.dev/mcp
+  flag: --transport
+  invocation_scope:
+  - applies_to: command
+    command:
+    - mcp
+    - add
+  notes: Validated app-side as stdio, sse, http, or the help-undocumented streamable-http; all three attachment forms proven locally.
+  scope:
+  - mcp
+  value: <transport>
+  value_optional: false
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: Fixes the OAuth callback port for servers requiring pre-registered redirect URIs.
+  evidence_ids:
+  - help-subcommands-287
+  example: claude mcp add --transport http --callback-port 9090 my-server https://example.com/mcp
+  flag: --callback-port
+  invocation_scope:
+  - applies_to: command
+    command:
+    - mcp
+    - add
+  notes: Scoped to `mcp add`.
+  scope:
+  - mcp
+  value: <port>
+  value_optional: false
+  value_type: string
+- attachment:
+  - space
+  - equals
+  description: Sets the OAuth client ID for an HTTP or SSE MCP server being added.
+  evidence_ids:
+  - help-subcommands-287
+  example: claude mcp add --transport http --client-id abc my-server https://example.com/mcp
+  flag: --client-id
+  invocation_scope:
+  - applies_to: command
+    command:
+    - mcp
+    - add
+  notes: Scoped to `mcp add`.
+  scope:
+  - mcp
+  value: <clientId>
+  value_optional: false
+  value_type: string
+- attachment: []
+  default: 'false'
+  description: Prompts for the OAuth client secret instead of taking it on the command line.
+  evidence_ids:
+  - help-subcommands-287
+  example: claude mcp add --transport http --client-secret my-server https://example.com/mcp
+  flag: --client-secret
+  invocation_scope:
+  - applies_to: command
+    command:
+    - mcp
+    - add
+  - applies_to: command
+    command:
+    - mcp
+    - add-json
+  notes: Prompts, so it is interactive; the MCP_CLIENT_SECRET variable is the non-interactive alternative.
+  scope:
+  - mcp
+  value_type: none
+- attachment: []
+  default: 'false'
+  description: Prints the MCP OAuth authorization URL instead of opening a browser.
+  evidence_ids:
+  - help-subcommands-287
+  - docs-cli-reference
+  example: claude mcp login --no-browser sentry
+  flag: --no-browser
+  invocation_scope:
+  - applies_to: command
+    command:
+    - mcp
+    - login
+  notes: For SSH and headless sessions; the redirect URL is pasted back at a prompt, so the flow still needs a person.
+  scope:
+  - mcp
+  value_type: none
+- aliases:
+  - -d
+  attachment: []
+  default: 'false'
+  description: Enables debug mode for the Claude Code MCP server.
+  evidence_ids:
+  - help-subcommands-287
+  example: claude mcp serve --debug
+  flag: --debug
+  invocation_scope:
+  - applies_to: command
+    command:
+    - mcp
+    - serve
+  notes: Boolean at this path, unlike the root --debug whose optional filter binds only in the equals form.
+  scope:
+  - diagnostics
+  - mcp
+  value_type: none
 config_paths:
-  - os: macos
-    scope: user
-    path: "~/.claude/settings.json"
-    format: json
-    notes: "User settings. Local file exists and contains keys such as hooks, model, permissions, statusLine, enabledPlugins, and effortLevel."
-  - os: linux
-    scope: user
-    path: "~/.claude/settings.json"
-    format: json
-    notes: "Same user settings path under the Linux home directory."
-  - os: windows
-    scope: user
-    path: "%USERPROFILE%\\.claude\\settings.json"
-    format: json
-    notes: "Windows expansion of `~/.claude/settings.json`."
-  - os: macos
-    scope: user
-    path: "~/.claude.json"
-    format: json
-    notes: "Mutable user state/cache including install method, project state, OAuth account metadata, feature caches, and usage caches. Local file exists."
-  - os: linux
-    scope: user
-    path: "~/.claude.json"
-    format: json
-    notes: "Mutable user state/cache written next to the home config directory."
-  - os: windows
-    scope: user
-    path: "%USERPROFILE%\\.claude.json"
-    format: json
-    notes: "Windows mutable user state/cache path."
-  - os: macos
-    scope: repo
-    path: ".claude/settings.json"
-    format: json
-    notes: "Project settings checked into source control when present."
-  - os: linux
-    scope: repo
-    path: ".claude/settings.json"
-    format: json
-    notes: "Project settings checked into source control when present."
-  - os: windows
-    scope: repo
-    path: ".claude\\settings.json"
-    format: json
-    notes: "Project settings checked into source control when present."
-  - os: macos
-    scope: repo
-    path: ".claude/settings.local.json"
-    format: json
-    notes: "Local project settings; local repo file exists and is an empty JSON object."
-  - os: linux
-    scope: repo
-    path: ".claude/settings.local.json"
-    format: json
-    notes: "Local project settings; should be gitignored if created manually."
-  - os: windows
-    scope: repo
-    path: ".claude\\settings.local.json"
-    format: json
-    notes: "Local project settings; should be gitignored if created manually."
-  - os: macos
-    scope: repo
-    path: ".mcp.json"
-    format: json
-    notes: "Project-scoped MCP servers. Unapproved servers are shown as pending by `claude mcp list/get`."
-  - os: linux
-    scope: repo
-    path: ".mcp.json"
-    format: json
-    notes: "Project-scoped MCP servers."
-  - os: windows
-    scope: repo
-    path: ".mcp.json"
-    format: json
-    notes: "Project-scoped MCP servers."
-  - os: macos
-    scope: system
-    path: "managed-settings.json"
-    format: json
-    notes: "Enterprise managed settings file; exact system-level location varies by deployment."
-  - os: linux
-    scope: system
-    path: "managed-settings.json"
-    format: json
-    notes: "Enterprise managed settings file; exact system-level location varies by deployment."
-  - os: windows
-    scope: system
-    path: "managed-settings.json or registry/MDM policy"
-    format: json
-    notes: "Enterprise managed settings can be delivered through registry/MDM policy or file-based managed settings."
-  - os: macos
-    scope: env
-    path: "CLAUDE_CONFIG_DIR"
-    format: other
-    notes: "Relocates the default `~/.claude` tree; local keychain credentials may still be outside it."
-  - os: linux
-    scope: env
-    path: "CLAUDE_CONFIG_DIR"
-    format: other
-    notes: "Relocates the default `~/.claude` tree."
-  - os: windows
-    scope: env
-    path: "CLAUDE_CONFIG_DIR"
-    format: other
-    notes: "Relocates the default `%USERPROFILE%\\.claude` tree."
+- format: json
+  notes: User settings; local file exists and holds hooks, permissions, model, statusLine, enabledPlugins, extraKnownMarketplaces, effortLevel, and tui keys. Written by Claude Code when a setting is saved.
+  os: macos
+  path: ~/.claude/settings.json
+  scope: user
+- format: json
+  notes: User settings under the Linux home directory; same shape as macOS.
+  os: linux
+  path: ~/.claude/settings.json
+  scope: user
+- format: json
+  notes: Windows expansion of the user settings path.
+  os: windows
+  path: '%USERPROFILE%\.claude\settings.json'
+  scope: user
+- format: json
+  notes: Mutable user state and cache; local file exists and holds installMethod, projects, oauthAccount, caches, and onboarding flags. Claude Code rewrites this file frequently.
+  os: macos
+  path: ~/.claude.json
+  scope: user
+- format: json
+  notes: Mutable user state and cache next to the home config directory.
+  os: linux
+  path: ~/.claude.json
+  scope: user
+- format: json
+  notes: Windows mutable user state and cache path.
+  os: windows
+  path: '%USERPROFILE%\.claude.json'
+  scope: user
+- format: json
+  notes: Project settings checked into source control when present.
+  os: macos
+  path: .claude/settings.json
+  scope: repo
+- format: json
+  notes: Project settings checked into source control when present.
+  os: linux
+  path: .claude/settings.json
+  scope: repo
+- format: json
+  notes: Project settings checked into source control when present.
+  os: windows
+  path: .claude\settings.json
+  scope: repo
+- format: json
+  notes: Local project settings; gitignored when Claude Code saves a setting to it.
+  os: macos
+  path: .claude/settings.local.json
+  scope: repo
+- format: json
+  notes: Local project settings; gitignored when Claude Code saves a setting to it.
+  os: linux
+  path: .claude/settings.local.json
+  scope: repo
+- format: json
+  notes: Local project settings; gitignored when Claude Code saves a setting to it.
+  os: windows
+  path: .claude\settings.local.json
+  scope: repo
+- format: json
+  notes: Project-scoped MCP servers; unapproved servers are shown as pending.
+  os: macos
+  path: .mcp.json
+  scope: repo
+- format: json
+  notes: Project-scoped MCP servers; unapproved servers are shown as pending.
+  os: linux
+  path: .mcp.json
+  scope: repo
+- format: json
+  notes: Project-scoped MCP servers; unapproved servers are shown as pending.
+  os: windows
+  path: .mcp.json
+  scope: repo
+- format: json
+  notes: Enterprise managed settings; a managed-settings.d/ drop-in directory beside it merges in alphabetical order; also deliverable as a com.anthropic.claudecode MDM profile.
+  os: macos
+  path: /Library/Application Support/ClaudeCode/managed-settings.json
+  scope: system
+- format: json
+  notes: Enterprise managed settings for Linux and WSL; managed-settings.d/ drop-ins merge in alphabetical order.
+  os: linux
+  path: /etc/claude-code/managed-settings.json
+  scope: system
+- format: json
+  notes: Enterprise managed settings; the legacy C:\ProgramData\ClaudeCode path is not read; an HKLM\SOFTWARE\Policies\ClaudeCode Settings value is the registry delivery.
+  os: windows
+  path: C:\Program Files\ClaudeCode\managed-settings.json
+  scope: system
+- format: other
+  notes: Relocates the ~/.claude tree; all settings, session history, and plugins move under it; ignored in project and local settings env blocks.
+  os: macos
+  path: CLAUDE_CONFIG_DIR
+  scope: env
+- format: other
+  notes: Relocates the ~/.claude tree; ignored in project and local settings env blocks.
+  os: linux
+  path: CLAUDE_CONFIG_DIR
+  scope: env
+- format: other
+  notes: Relocates the %USERPROFILE%\.claude tree; ignored in project and local settings env blocks.
+  os: windows
+  path: CLAUDE_CONFIG_DIR
+  scope: env
 env_vars:
-  - name: CLAUDE_CONFIG_DIR
-    effect: "Relocates Claude Code's user configuration and data directory normally addressed as `~/.claude`."
-  - name: CLAUDE_CODE_SAFE_MODE
-    effect: "Set by `--safe-mode`; disables most user/project customizations while leaving auth, model selection, built-in tools, and permissions available."
-  - name: CLAUDE_CODE_SIMPLE
-    effect: "Equivalent to `--bare`; uses a minimal setup, disables most customization discovery, and does not read OAuth/keychain credentials."
-  - name: CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT
-    effect: "Requests a shorter system prompt and abbreviated tool descriptions without disabling normal tool/customization discovery."
-  - name: CLAUDE_AX_SCREEN_READER
-    effect: "Enables screen-reader friendly flat output unless overridden by `--ax-screen-reader` or settings."
-  - name: CLAUDE_CODE_TMPDIR
-    effect: "Selects where Claude Code creates temporary files."
-  - name: CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
-    effect: "Disables nonessential background/network traffic."
-  - name: DISABLE_AUTOUPDATER
-    effect: "Disables automatic update checks/installation."
-  - name: DISABLE_BUG_COMMAND
-    effect: "Disables the `/bug` feedback command."
-  - name: DISABLE_COST_WARNINGS
-    effect: "Suppresses cost warning messages."
-  - name: DISABLE_ERROR_REPORTING
-    effect: "Disables automatic error reporting."
-  - name: DISABLE_NON_ESSENTIAL_MODEL_CALLS
-    effect: "Disables nonessential model calls."
-  - name: DISABLE_TELEMETRY
-    effect: "Disables telemetry."
-  - name: FORCE_AUTOUPDATER
-    effect: "Forces updater behavior even when normal install-method detection would not."
-  - name: CLAUDE_CODE_PACKAGE_MANAGER_AUTO_UPDATE
-    effect: "Allows Claude Code to run Homebrew or WinGet upgrade commands in the background when updates are available."
-  - name: CLAUDE_CODE_DISABLE_TERMINAL_TITLE
-    effect: "Disables terminal title updates."
-  - name: CLAUDE_CODE_DISABLE_TERMINAL_ALTERNATE_SCREEN
-    effect: "Disables use of the terminal alternate screen."
-  - name: CLAUDE_CODE_SHELL_PREFIX
-    effect: "Adds a wrapper prefix to shell commands launched by Claude Code."
-  - name: SHELL
-    effect: "Influences which shell Claude Code uses on Unix-like systems."
-  - name: COMSPEC
-    effect: "Influences shell discovery on Windows."
-  - name: CLAUDE_CODE_USE_POWERSHELL_TOOL
-    effect: "Controls availability/use of the PowerShell tool."
-  - name: CLAUDE_CODE_GIT_BASH_PATH
-    effect: "On Windows, points Claude Code at Git Bash when auto-discovery fails."
-  - name: CLAUDE_CODE_SKIP_PROMPT_HISTORY
-    effect: "Skips writing prompt history and session transcripts; sessions do not appear in resume/continue/history."
-  - name: CLAUDE_CODE_SYNC_PLUGIN_INSTALL
-    effect: "In print mode, waits for plugin installation before the first query."
-  - name: CLAUDE_CODE_SYNC_PLUGIN_INSTALL_TIMEOUT_MS
-    effect: "Bounds synchronous plugin-install waiting in milliseconds."
-  - name: CLAUDE_CODE_SYNC_SKILLS
-    effect: "In print mode, downloads enabled claude.ai skills into `~/.claude/skills/` before the first query and periodically resyncs."
-  - name: CLAUDE_CODE_SYNC_SKILLS_WAIT_TIMEOUT_MS
-    effect: "Bounds the initial print-mode wait for skill sync."
-  - name: CLAUDE_CODE_SYNC_SKILLS_INSTALL_TIMEOUT_MS
-    effect: "Bounds mid-session skill resync."
-  - name: CLAUDE_CODE_SUBPROCESS_ENV_SCRUB
-    effect: "Strips Anthropic and cloud-provider credentials from subprocess environments; on Linux also isolates Bash subprocesses in a PID namespace."
-  - name: CLAUDE_CODE_SYNTAX_HIGHLIGHT
-    effect: "Set to `false` to disable syntax highlighting in diff output."
-  - name: CLAUDE_CODE_TMUX_TRUECOLOR
-    effect: "Allows 24-bit truecolor output inside tmux when tmux is configured for truecolor."
-  - name: CLAUDE_CODE_PLUGIN_PREFER_HTTPS
-    effect: "Clones GitHub shorthand plugin sources over HTTPS instead of SSH."
-  - name: CLAUDE_REMOTE_CONTROL_SESSION_NAME_PREFIX
-    effect: "Sets the prefix for auto-generated Remote Control session names."
-  - name: API_TIMEOUT_MS
-    effect: "Sets API request timeout; can also be placed under the `env` key in settings files."
-  - name: BASH_DEFAULT_TIMEOUT_MS
-    effect: "Sets default Bash tool timeout when placed in shell environment or settings `env`."
-  - name: USE_BUILTIN_RIPGREP
-    effect: "Set to `0` to use system `rg` instead of Claude Code's bundled ripgrep."
+- effect: Overrides the configuration directory (default ~/.claude); settings, session history, and plugins all live under it.
+  name: CLAUDE_CONFIG_DIR
+- effect: Set to 1 to start in safe mode with customizations disabled for troubleshooting; the --safe-mode flag sets it.
+  name: CLAUDE_CODE_SAFE_MODE
+- effect: Set to 1 for minimal mode with a minimal system prompt and only Bash, file read, and file edit tools; the --bare flag sets it.
+  name: CLAUDE_CODE_SIMPLE
+- effect: Set to 1 to use a shorter system prompt and abbreviated tool descriptions; set to a false spelling to opt out.
+  name: CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT
+- effect: Set to 1 to skip writing prompt history and session transcripts; sessions do not appear in resume, continue, or up-arrow history.
+  name: CLAUDE_CODE_SKIP_PROMPT_HISTORY
+- effect: Overrides the temp directory for internal temp files; /claude-{uid} is appended on Unix.
+  name: CLAUDE_CODE_TMPDIR
+- effect: Any non-empty value disables nonessential network traffic (auto-updates, telemetry, error reporting, release notes, availability checks); 0 and false still disable it.
+  name: CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
+- effect: Set to 1 to disable automatic background updates; manual claude update still works.
+  name: DISABLE_AUTOUPDATER
+- effect: Blocks all update paths including manual claude update and claude install, for distributing Claude Code through your own channels.
+  name: DISABLE_UPDATES
+- effect: Set to 1 to disable cost warning messages.
+  name: DISABLE_COST_WARNINGS
+- effect: Any non-empty value opts out of error reporting; 0 and false still opt out.
+  name: DISABLE_ERROR_REPORTING
+- effect: Any non-empty value opts out of telemetry and also disables feature-flag fetching.
+  name: DISABLE_TELEMETRY
+- effect: Same effect as DISABLE_TELEMETRY, including on feature-flag fetching.
+  name: DO_NOT_TRACK
+- effect: Set to 1 to disable the /feedback command; the older name DISABLE_BUG_COMMAND is also accepted.
+  name: DISABLE_FEEDBACK_COMMAND
+- effect: Set to 1 to let Claude Code run the package manager's upgrade command in the background for Homebrew and WinGet installs.
+  name: CLAUDE_CODE_PACKAGE_MANAGER_AUTO_UPDATE
+- effect: Set to 1 to disable automatic terminal title updates and skip the title-generating model request.
+  name: CLAUDE_CODE_DISABLE_TERMINAL_TITLE
+- effect: Set to 1 to disable fullscreen rendering and use the classic main-screen renderer.
+  name: CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN
+- effect: 'Command prefix that wraps shell commands Claude Code spawns: Bash tool calls, hook commands, status line commands, and stdio MCP server startup.'
+  name: CLAUDE_CODE_SHELL_PREFIX
+- effect: 'Controls the PowerShell tool: on Windows without Git Bash it is on by default, on other platforms set to 1 to enable it, which requires pwsh on PATH.'
+  name: CLAUDE_CODE_USE_POWERSHELL_TOOL
+- effect: 'Windows only: path to Git Bash''s bash.exe used when auto-discovery fails; an invalid path is ignored.'
+  name: CLAUDE_CODE_GIT_BASH_PATH
+- effect: Set to 1 in print mode to wait for plugin installation to finish before the first query.
+  name: CLAUDE_CODE_SYNC_PLUGIN_INSTALL
+- effect: Set to 1 in print mode to download claude.ai-enabled skills and wait for the list before the first query.
+  name: CLAUDE_CODE_SYNC_SKILLS
+- effect: Set to 1 to strip credentials from subprocess environments (Bash tool, hooks, stdio MCP servers).
+  name: CLAUDE_CODE_SUBPROCESS_ENV_SCRUB
+- effect: Set to false to disable syntax highlighting in diff output.
+  name: CLAUDE_CODE_SYNTAX_HIGHLIGHT
+- effect: Any non-empty value allows 24-bit truecolor inside tmux; 0 and false still allow it.
+  name: CLAUDE_CODE_TMUX_TRUECOLOR
+- effect: Set to 1 to clone GitHub shorthand plugin sources over HTTPS instead of SSH.
+  name: CLAUDE_CODE_PLUGIN_PREFER_HTTPS
+- effect: Prefix for auto-generated Remote Control session names; defaults to the hostname.
+  name: CLAUDE_REMOTE_CONTROL_SESSION_NAME_PREFIX
+- effect: Timeout for API requests in milliseconds (default 600000, maximum 2147483647).
+  name: API_TIMEOUT_MS
+- effect: Default timeout for a foreground Bash or PowerShell tool command in milliseconds (default 120000).
+  name: BASH_DEFAULT_TIMEOUT_MS
+- effect: Set to 0 to use system-installed rg instead of the bundled ripgrep.
+  name: USE_BUILTIN_RIPGREP
+- effect: Set to 1 to emit subagent text and thinking blocks in print-mode stream-json output, matching --forward-subagent-text.
+  name: CLAUDE_CODE_FORWARD_SUBAGENT_TEXT
+- effect: Overrides the debug log file path (a file path despite the name); debug mode must be enabled separately.
+  name: CLAUDE_CODE_DEBUG_LOGS_DIR
+- effect: 'Set to 1 to turn off background agents and agent view: claude agents, --bg, /background, and the on-demand supervisor.'
+  name: CLAUDE_CODE_DISABLE_AGENT_VIEW
+- effect: 'Overrides automatic IDE connection: false prevents it, true forces an attempt when auto-detection fails.'
+  name: CLAUDE_CODE_AUTO_CONNECT_IDE
+- effect: Set to 1 to prevent loading any CLAUDE.md memory files into context.
+  name: CLAUDE_CODE_DISABLE_CLAUDE_MDS
+- effect: Set to 1 to disable auto memory; 0 forces it on even in --bare mode.
+  name: CLAUDE_CODE_DISABLE_AUTO_MEMORY
+- effect: Set to 1 to disable attachment processing; @ file mentions are sent as plain text.
+  name: CLAUDE_CODE_DISABLE_ATTACHMENTS
+- effect: Set to 1 in subprocesses Claude Code spawns (Bash and PowerShell tools, tmux sessions, hook and status line commands, stdio MCP servers); detect it to know a script runs inside Claude Code.
+  name: CLAUDECODE
+- effect: Set to 1 in direct tool, hook, and status line subprocesses but not stdio MCP servers; distinguishes a nested session from a top-level claude in an IDE terminal.
+  name: CLAUDE_CODE_CHILD_SESSION
 machine_introspection:
-  - command: "claude auth status"
-    purpose: env
-    machine_readable: true
-    output_format: json
-    useful_for_codegen: false
-    notes: "Reports `loggedIn`, `authMethod`, and `apiProvider`; local logged-out run emitted JSON and exited 1."
-  - command: "claude agents --json"
-    purpose: other
-    machine_readable: true
-    output_format: json
-    useful_for_codegen: false
-    notes: "Lists active sessions with pid, cwd, kind, startedAt, sessionId, name, status, and waitingFor when applicable."
-  - command: "claude agents --json --all"
-    purpose: other
-    machine_readable: true
-    output_format: json
-    useful_for_codegen: false
-    notes: "Includes completed background sessions according to docs."
-  - command: "claude auto-mode defaults"
-    purpose: config_schema
-    machine_readable: true
-    output_format: json
-    useful_for_codegen: true
-    notes: "Prints built-in auto-mode classifier environment, allow, soft_deny, and hard_deny rules."
-  - command: "claude auto-mode config"
-    purpose: config_dump
-    machine_readable: true
-    output_format: json
-    useful_for_codegen: true
-    notes: "Prints effective auto-mode config after settings are applied."
-  - command: "claude plugin list --json"
-    purpose: plugins
-    machine_readable: true
-    output_format: json
-    useful_for_codegen: false
-    notes: "Local output was a JSON array of installed plugins."
-  - command: "claude plugin list --json --available"
-    purpose: plugins
-    machine_readable: true
-    output_format: json
-    useful_for_codegen: false
-    notes: "Documented plugin inventory including available marketplace plugins."
-  - command: "claude daemon status"
-    purpose: doctor
-    machine_readable: false
-    output_format: text
-    useful_for_codegen: false
-    notes: "Prints supervisor state, socket directory, worker count, roster, and log presence; local run exited 1 with `not running`, an expected state."
-  - command: "claude doctor"
-    purpose: doctor
-    machine_readable: false
-    output_format: text
-    useful_for_codegen: false
-    notes: "Official diagnostics command. Local non-interactive run timed out after 20 seconds with no useful text."
-  - command: "claude mcp list"
-    purpose: mcp
-    machine_readable: false
-    output_format: text
-    useful_for_codegen: false
-    notes: "Local output was human text: no MCP servers configured. MCP details belong to the narrower MCP topic."
+- command: claude --version
+  machine_readable: false
+  notes: Prints `2.1.287 (Claude Code)`; one line, trivially parseable, but not a structured format.
+  output_format: text
+  purpose: version
+  useful_for_codegen: false
+- command: claude auth status
+  machine_readable: true
+  notes: JSON with loggedIn, authMethod, apiProvider, configDirectory, email, orgId, subscriptionType; exits 0 logged in, 1 logged out; --text switches to human-readable.
+  output_format: json
+  purpose: env
+  useful_for_codegen: false
+- command: claude agents --json
+  machine_readable: true
+  notes: JSON array of interactive and background sessions (id, cwd, kind, startedAt, sessionId, name, status or state); does not require a TTY; --all adds completed background sessions.
+  output_format: json
+  purpose: other
+  useful_for_codegen: false
+- command: claude auto-mode defaults
+  machine_readable: true
+  notes: Built-in auto mode environment, allow, soft_deny, and hard_deny rules as JSON; --label filters by prefix.
+  output_format: json
+  purpose: config_schema
+  useful_for_codegen: true
+- command: claude auto-mode config
+  machine_readable: true
+  notes: Effective auto mode configuration after settings are applied.
+  output_format: json
+  purpose: config_dump
+  useful_for_codegen: true
+- command: claude plugin list --json
+  machine_readable: true
+  notes: JSON array of installed plugins with id, version, scope, enabled, installPath; --available adds marketplace plugins; --data-size measures saved data.
+  output_format: json
+  purpose: plugins
+  useful_for_codegen: false
+- command: claude daemon status
+  machine_readable: false
+  notes: Supervisor pid, version, socket directory, worker roster, and log state; exits 1 when not running, which is a normal state.
+  output_format: text
+  purpose: doctor
+  useful_for_codegen: false
+- command: claude doctor
+  machine_readable: false
+  notes: Read-only install and settings diagnostics including settings-file validation errors; ran to completion with exit 0 without a TTY in 2.1.287.
+  output_format: text
+  purpose: doctor
+  useful_for_codegen: false
+- command: claude mcp list
+  machine_readable: false
+  notes: Human-readable server list with live health checks over the network; MCP details belong to the MCP topic.
+  output_format: text
+  purpose: mcp
+  useful_for_codegen: false
 wrapper_notes:
-  - "Use `claude -p` / `--print` for non-interactive wrapper runs; plain `claude \"query\"` starts an interactive session with an initial prompt."
-  - "`--output-format stream-json` is the primary structured stream output for print mode; prompt suggestions, partial messages, hook events, and replayed user messages require stream-json and often `--verbose`."
-  - "`claude --help` is incomplete by design; official docs explicitly say absence from help does not mean a flag is unavailable. Local v2.1.200 help omits documented flags such as `--advisor`, `--system-prompt-file`, `--append-system-prompt-file`, `--max-turns`, `--permission-prompt-tool`, `--remote`, `--teleport`, and `--teammate-mode`."
-  - "Several background-session commands (`daemon`, `attach`, `logs`, `respawn`, `rm`, `stop`) are hidden from top-level help in v2.1.200 but still respond to `--help`."
-  - "`claude auth status` emits JSON but exits 1 for the expected unauthenticated state; wrappers should parse stdout before classifying the exit as a crash."
-  - "`claude daemon status` exits 1 when no daemon is running; this is an expected diagnostic state."
-  - "`claude doctor` should be guarded with a timeout in wrappers; local non-interactive execution timed out after 20 seconds."
-  - "Login, MCP OAuth login, Remote Control, attach, setup-token, and many plugin/auth operations may require a TTY, browser, subscription, or state mutation."
-  - "`--bare` / `CLAUDE_CODE_SIMPLE` avoids most discovery and avoids OAuth/keychain credential reads, so wrappers using it need API-key or helper-based auth."
-  - "`--safe-mode` disables most customizations but managed policy can still partially apply."
-  - "`CLAUDE_CONFIG_DIR` is the broadest public isolation knob for config/session/plugin state; on macOS credentials can still come from Keychain unless `--bare` is used."
-  - "Native/npm installs spawn a per-platform native binary rather than bundled JavaScript; npm optional dependencies must be present."
-  - "Homebrew stable can lag latest; on 2026-07-03 npm `latest` and local `claude --version` reported 2.1.200 while public changelog docs topped out at 2.1.199."
-  - "Windows without Git for Windows uses PowerShell for shell commands; with Git for Windows it uses Git Bash unless configured otherwise."
-  - "Package-manager installs generally do not auto-update by default; native installs do."
+- Use `claude -p` for non-interactive wrapper runs; plain `claude "query"` starts an interactive session seeded with the prompt. Piped stdout alone also selects the non-interactive input requirement even without -p, so a wrapper that captures stdout changes the CLI's behavior.
+- 'The parser is strict: an unrecognized long or short option exits 1 with `error: unknown option`, so Claudine must not forward switches it cannot classify, and a user argument that looks like an unknown switch genuinely fails rather than passing through.'
+- 'Documentation can drift from the binary: `--exec` is documented in the CLI reference but rejected as unknown by the 2.1.287 parser, and `claude import` documents an interactive flow but prints `not yet available in this build`. Verify flags against the running binary, not the docs alone.'
+- A variadic root switch (--add-dir, --allowedTools, --disallowedTools, --betas, --file, --mcp-config, --tools, --channels, --dangerously-load-development-channels) grabs the immediately following token unconditionally, even when it looks like an option, and keeps consuming non-option tokens. Never place another flag directly after a variadic switch in a mixed command line.
+- An optional-value root switch (--resume, --from-pr, --worktree, --teleport, --cloud, --remote-control, --prompt-suggestions) does not consume a following token that looks like an option, but does consume a plain one, which would steal a user's positional prompt.
+- The --debug filter binds only in the equals form; `--debug api` enables debug mode without filtering, so wrappers must emit --debug=api.
+- 'Invalid values fail at three different layers: commander choice validation exits at parse time (--output-format, --permission-mode, --input-format, --system-prompt-snapshot, --permission-prompts, --autocompact, --prompt-suggestions); app-level validation exits after parsing (--setting-sources, --session-id UUID, mcp add transport); and --effort only warns and falls back to the default.'
+- '`claude auth status` exits 1 when logged out and `claude daemon status` exits 1 when no supervisor runs; both are normal states, so parse stdout before classifying the exit as a crash.'
+- '`claude mcp list` performs live network health checks; expect slow or offline-sensitive runs.'
+- '`claude doctor` now completes without a TTY; the 2.1.200-era 20-second hang did not reproduce in 2.1.287, but a timeout guard is still cheap insurance.'
+- Top-level help omits hidden commands (daemon, remote-control, self-hosted-runner) and hidden flags (--sdk-url, and docs-only flags like --max-turns, --init, --init-only, --maintenance, --advisor, --teammate-mode); help incompleteness is documented policy, so absence from help is not evidence a flag is unavailable.
+- --bg cannot be combined with -p and prints a session id that `claude attach`, `logs`, `stop`, and `rm` take; a leading --dangerously-skip-permissions or --allow-dangerously-skip-permissions routes `daemon <subcommand>` to the daemon command since v2.1.199.
+- Print mode skips the workspace trust dialog and silently ignores settings files that fail validation, so wrappers should only launch it in trusted directories and cannot rely on settings errors surfacing.
+- Native installs auto-update in the background (channel latest by default), so the binary a wrapper resolved can change between runs; the launcher is a symlink into ~/.local/share/claude/versions/.
+- CLAUDE_CONFIG_DIR is the broadest public isolation knob, moving settings, session history, and plugins together; --bare is stronger but restricts auth to ANTHROPIC_API_KEY or an apiKeyHelper, never reading OAuth or keychain credentials.
+- On Windows without Git for Windows the shell tool is PowerShell; with it, Bash via Git Bash; CLAUDE_CODE_GIT_BASH_PATH points at bash.exe when discovery fails.
+- --settings values override settings files for the session but managed policy still wins; --restricted ignores user, project, and local settings entirely.
+- System-prompt flags (--system-prompt, --system-prompt-file, --append-system-prompt, --append-system-prompt-file, --system-prompt-snapshot, --exclude-dynamic-system-prompt-sections, and the subagent variants) work in both interactive and non-interactive modes; this topic records their spellings and value shapes only, with semantics in the system-prompt topic.
 changes:
-  - "Updated verified latest version from 2.1.199 to 2.1.200 based on local `claude --version` and npm registry dist-tags."
-  - "Recorded that the public changelog page currently tops out at 2.1.199 even though npm/latest and the local binary are 2.1.200."
-  - "Added local v2.1.200 observations that hidden background-session commands still work even though top-level help omits them."
-  - "Expanded the switch inventory with v2.1.200 top-level help and official-doc flags including background, remote, worktree, init, maintenance, max-turns, permission-prompt, plugin URL/dir, and system-prompt file flags."
-  - "Refreshed configuration discovery from local `~/.claude/settings.json`, `~/.claude.json`, and repo `.claude/settings.local.json` key inspection."
-  - "Updated machine introspection findings for `auth status`, `agents --json`, auto-mode JSON commands, plugin JSON listing, daemon status, doctor timeout behavior, and MCP list text output."
+- 'Rewrote the document to research contract revision 2: every switch record now carries value type, optional-value and variadic-minimum facts, attachment forms, invocation scope, and evidence citations.'
+- Updated the verified version from 2.1.200 to 2.1.287 via local `claude --version`, `claude doctor`, and npm dist-tags (latest 2.1.287, stable 2.1.285).
+- 'Established the parser as commander.js and its attachment behavior from disposable tests: space and equals bind single and optional values, short-attached binds for one-dash spellings, equals binds variadic values, and optional-value switches do not grab option-looking tokens.'
+- 'Recorded the variadic hazard: a variadic switch consumes the immediately following token unconditionally, even an option-looking one.'
+- Recorded that unknown options are rejected with a non-zero exit, and the docs-versus-binary drift for --exec (documented, rejected in 2.1.287) and `claude import` (documented, disabled in this build).
+- 'Added newly verified root switches: --cloud (with deprecated --remote alias), --desktop, --environment, --ref, --restricted, --permission-prompts, --forward-subagent-text, --autocompact, --system-prompt-snapshot, --append-subagent-system-prompt[-file], --sdk-url (hidden), and the variadic --channels and --dangerously-load-development-channels.'
+- Dropped --exec, --teammate-mode help presence, --remote and --teleport help absence notes, and other 2.1.200-era observations that no longer hold; --teammate-mode and --teleport are now parser-verified with current placeholder spellings.
+- Expanded the subcommand list with import, the full mcp and plugin leaf paths, plugin marketplace, and the hidden remote-control and self-hosted-runner commands; marked doctor as completing without a TTY in 2.1.287.
+- Refreshed configuration discovery with exact managed-settings paths per OS, the managed-settings.d drop-in directory, and the registry and MDM delivery channels.
+- 'Refreshed the environment variable list from the current env-vars page: added DISABLE_UPDATES, DISABLE_FEEDBACK_COMMAND, DO_NOT_TRACK, CLAUDE_CODE_FORWARD_SUBAGENT_TEXT, CLAUDE_CODE_DISABLE_AGENT_VIEW, CLAUDECODE, and CLAUDE_CODE_CHILD_SESSION; removed the removed FORCE_AUTOUPDATER and the no-longer-documented DISABLE_NON_ESSENTIAL_MODEL_CALLS; renamed the alternate-screen variable to CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN.'
+- 'Refreshed machine introspection: auth status JSON now includes configDirectory; agents --json reports both interactive and background sessions with status or state; doctor behavior re-verified.'
 requires_claudine_update: true
-reason: "Claudine's Claude wrapper/provider metadata should account for the verified 2.1.200 CLI surface: hidden-but-working background-session commands, incomplete help output, new or newly verified launch flags (`--background`, `--worktree`, `--remote`, `--teleport`, `--max-turns`, `--permission-prompt-tool`, system-prompt file flags), and expected non-zero exits for auth/daemon diagnostic states."
+reason: 'Claudine''s Claude wrapper and provider metadata should consume the revision-2 switch inventory (ProviderInfo::cli_switches can now be Researched instead of Unknown), and the parser findings change partitioning behavior: variadic root switches must never be followed directly by another flag, optional-value switches steal plain positionals, unknown options hard-fail, --debug filters bind only via =, and several new or renamed switches (--permission-prompts, --cloud/--remote, --restricted, --system-prompt-snapshot) plus the --exec removal affect how a mixed command line should be forwarded.'
+contract_checked: 2026-10-01
 ---
 
 # Claude Code CLI Surface
 
 ## Overview
 
-Claude Code is Anthropic's official agentic coding CLI. The public terminal command is `claude`: running `claude` starts an interactive session, `claude "query"` starts an interactive session with an initial prompt, and `claude -p "query"` runs print/SDK mode and exits.
+Claude Code is Anthropic's official agentic coding CLI. The public terminal command is `claude`: running `claude` starts an interactive session, `claude "query"` starts an interactive session with an initial prompt, and `claude -p "query"` runs print/SDK mode, answers, and exits. A wrapper that wants one-shot execution always names `-p`/`--print`; nothing else is safe to assume.
 
-The latest verified version for this research is `2.1.200`. I verified it on 2026-07-03 in two ways: local `claude --version` returned `2.1.200 (Claude Code)`, and `npm view @anthropic-ai/claude-code version dist-tags --json` returned `version: 2.1.200`, `latest: 2.1.200`, `next: 2.1.200`, and `stable: 2.1.193`. The public changelog page was useful for release context but currently tops out at `2.1.199`, so it lags the package registry and local binary for this specific verification.
+The verified version for this research is `2.1.287`. It was verified on 2026-10-01 three ways: local `claude --version` printed `2.1.287 (Claude Code)`; `claude doctor` reported `Running: native (2.1.287)` from `/Users/ken/.local/share/claude/versions/2.1.287`; and `npm view @anthropic-ai/claude-code version dist-tags --json` reported `latest: 2.1.287` and `stable: 2.1.285`. The CLI is closed source; there is no public source repository, so the argument parser was characterized from its error output and disposable runs rather than from declarations in source.
 
-Primary URLs:
+The binary embeds a **commander.js** argument parser. Its error format (`error: option '--output-format <format>' argument 'bogus' is invalid. Allowed choices are text, json, stream-json.`), its `argument missing` errors, and its help rendering (`-h, --help  Display help for command`, `(default: ...)`) are all commander's. The placeholder grammar in help is therefore the parser's own declaration: `<x>` takes one required value, `[x]` takes one optional value, and `<x...>` takes a variadic list.
+
+Primary links:
 
 | Resource | URL |
 | --- | --- |
 | Homepage | [https://claude.ai/code](https://claude.ai/code) |
-| Repository | unknown; the public docs link to a generated changelog source, but no public CLI source repository is documented |
+| Repository | none; the CLI is closed source |
 | General docs | [https://code.claude.com/docs/en/overview](https://code.claude.com/docs/en/overview) |
 | CLI reference | [https://code.claude.com/docs/en/cli-reference](https://code.claude.com/docs/en/cli-reference) |
 
 ## Installation and Binaries
 
-The installed macOS binary on this host is `/Users/ken/.local/bin/claude`, a symlink to `/Users/ken/.local/share/claude/versions/2.1.200`; `file` identifies the target as a native Mach-O arm64 executable. Official docs say the native and npm installers now install native binaries rather than a Node.js runtime wrapper.
+The installed macOS command is `/Users/ken/.local/bin/claude`, a native-installer symlink into `/Users/ken/.local/share/claude/versions/`; `claude doctor` identifies it as a native darwin-arm64 build on the `latest` auto-update channel. Native and npm installs both ship a per-platform native binary — the npm package pulls it through an optional dependency such as `@anthropic-ai/claude-code-darwin-arm64`, and the installed `claude` does not invoke Node at runtime.
 
 | OS | Binary | Alternate shims | Install methods |
 | --- | --- | --- | --- |
 | macOS | `claude` | none observed | Native installer, Homebrew cask, npm |
 | Linux | `claude` | none documented | Native installer, apt, dnf, apk, npm |
-| Windows | `claude.exe` | `claude`, npm command shims such as `claude.cmd` | Native PowerShell/CMD installer, WinGet, npm |
+| Windows | `claude.exe` | `claude`, npm shims such as `claude.cmd` | Native PowerShell/CMD installer, WinGet, npm |
 
 Official install commands:
 
 ```sh
-curl -fsSL https://claude.ai/install.sh | bash
-irm https://claude.ai/install.ps1 | iex
-curl -fsSL https://claude.ai/install.cmd -o install.cmd && install.cmd && del install.cmd
-brew install --cask claude-code
-brew install --cask claude-code@latest
+curl -fsSL https://claude.ai/install.sh | bash            # macOS, Linux, WSL
+irm https://claude.ai/install.ps1 | iex                    # Windows PowerShell
+brew install --cask claude-code                            # stable channel
+brew install --cask claude-code@latest                     # latest channel
 winget install Anthropic.ClaudeCode
 sudo apt install claude-code
 sudo dnf install claude-code
@@ -1046,154 +3276,140 @@ apk add claude-code
 npm install -g @anthropic-ai/claude-code
 ```
 
-The apt, dnf, and apk commands require adding Anthropic's signed package repository first. Native installs auto-update. Homebrew, WinGet, apt, dnf, and apk installs do not auto-update through Claude Code by default; Homebrew and WinGet can opt into package-manager auto-update with `CLAUDE_CODE_PACKAGE_MANAGER_AUTO_UPDATE=1`.
+The apt, dnf, and apk commands require adding Anthropic's signed package repository first; each offers `stable` and `latest` channels. The native installer accepts a channel or version argument (`curl -fsSL https://claude.ai/install.sh | bash -s stable`). Native installs auto-update in the background; Homebrew, WinGet, apt, dnf, and apk installs do not, though Homebrew and WinGet can opt in with `CLAUDE_CODE_PACKAGE_MANAGER_AUTO_UPDATE=1`. The npm package requires Node.js 22+ for its install-time engine checks (as of v2.1.198) but runs the native binary regardless.
 
 ## Subcommands
 
-| Command or mode | Description | Non-interactive wrapper use |
-| --- | --- | --- |
-| `claude` | Opens an interactive session. | No |
-| `claude "query"` | Opens an interactive session seeded with a prompt. | No |
-| `claude -p "query"` | Runs print/SDK mode and exits. | Yes |
-| `claude agents` | Opens agent view; `--json` prints active sessions. | Mixed; `--json` is scriptable |
-| `claude attach <id>` | Attaches to a background session. | No |
-| `claude auth login` | Signs in to Anthropic/Claude. | No |
-| `claude auth logout` | Logs out and mutates auth state. | Usually no |
-| `claude auth status` | Prints auth status as JSON by default. | Yes |
-| `claude auto-mode defaults` | Prints built-in auto-mode rules as JSON. | Yes |
-| `claude auto-mode config` | Prints effective auto-mode rules as JSON. | Yes |
-| `claude auto-mode critique` | Gets AI feedback on custom auto-mode rules. | No static metadata use |
-| `claude daemon status` | Prints background-session supervisor diagnostics. | Yes, text only |
-| `claude daemon run` | Runs the supervisor in the foreground. | Long-running |
-| `claude daemon logs` | Tails daemon logs. | Long-running |
-| `claude daemon stop` | Stops the supervisor and optionally workers. | Yes, mutating |
-| `claude daemon uninstall` | Removes service integration. | Yes, destructive |
-| `claude gateway` | Runs the enterprise auth/telemetry gateway. | Long-running server |
-| `claude install [target]` | Installs/reinstalls native build. | Yes, mutating |
-| `claude logs <id>` | Prints background-session terminal output. | Yes |
-| `claude mcp ...` | Manages MCP servers. | Mixed; list/get are text, login/logout mutate credentials |
-| `claude plugin ...` | Manages plugins. | Mixed; `plugin list --json` is scriptable |
-| `claude project purge` | Deletes Claude Code project state. | Mutating; use `--dry-run` for preview |
-| `claude remote-control` / `--remote-control` | Starts Remote Control. | No; requires login/subscription |
-| `claude respawn <id>|--all` | Restarts background sessions. | Yes, mutating |
-| `claude rm <id>` | Deletes a background session and its worktree. | Yes, destructive |
-| `claude setup-token` | Creates a long-lived token. | No; secret-bearing auth flow |
-| `claude stop <id>` | Stops a background session. | Yes |
-| `claude ultrareview` | Runs cloud-hosted code review. | Yes, with auth/network |
-| `claude update` / `upgrade` | Checks for and installs updates. | Yes, mutating |
+The frontmatter `subcommands` list records every native command path below the executable with its non-interactive marking. Highlights for a wrapper:
 
-Top-level help in local v2.1.200 omits `daemon`, `attach`, `logs`, `respawn`, `rm`, and `stop`, but direct `--help` probes for those command names succeeded. Wrappers should not infer removal from top-level help alone.
+| Command path | Non-interactive | Wrapper use |
+| --- | --- | --- |
+| `claude -p` (root flag, not a subcommand) | Yes | The one-shot execution path |
+| `claude agents --json` | Yes (the `--json` form) | Live session discovery; the bare view needs a TTY |
+| `claude auth status` | Yes | Readiness probe; exits 1 when logged out |
+| `claude auto-mode defaults` / `config` | Yes | JSON rule catalogs |
+| `claude daemon status` | Yes | Supervisor diagnostics; exits 1 when not running |
+| `claude doctor` | Yes | Install and settings diagnostics; completes without a TTY in 2.1.287 |
+| `claude install`, `update`, `respawn`, `rm`, `stop`, `logs` | Yes | Binary and background-session management |
+| `claude mcp add` / `add-json` / `list` / `get` / `remove` / `serve` | Yes | MCP configuration (semantics in the MCP topic) |
+| `claude plugin list --json`, `plugin validate --json` | Yes | Plugin inventory and validation |
+| `claude ultrareview` | Yes | Cloud review; `--json` for the raw payload |
+| `claude import`, `plugin install`, `plugin update`, `project purge`, `auto-mode reset` | No | Prompt or are disabled; see notes for the flags that make them promptless |
+| `claude attach`, `auth login`, `mcp login`, `remote-control`, `setup-token` | No | Terminal, browser, or secrets flows |
+
+Three commands are hidden from top-level help but answer `--help`: `daemon`, `remote-control`, and `self-hosted-runner`. Since v2.1.199, a leading `--dangerously-skip-permissions` or `--allow-dangerously-skip-permissions` routes `daemon <subcommand>` to the daemon command; any other leading flag leaves `daemon ...` to start an interactive session with those words as the prompt. The `remote-control` and `self-hosted-runner` flag surfaces are large operator interfaces documented in their own `--help` output and are not inventoried here.
 
 ## CLI Switch Inventory
 
-The frontmatter `cli_switches` list is the detailed inventory. It combines local v2.1.200 help, targeted subcommand help, and official CLI documentation. When local help and docs disagree, this document trusts official docs for documented flags because the CLI reference explicitly says `claude --help` does not list every flag. Local help is still treated as evidence for observed-only flags such as `--brief` and `--file`.
+Inventoried paths: the root entrypoint (including its resume forms `-c`/`--continue`, `-r`/`--resume`, `--from-pr`, `--fork-session`, `--session-id`) and every command path marked non-interactive in `subcommands`. The `agents` command's switches are also recorded because its `--json` form is a scriptable path even though the bare view is interactive. Switches of the interactive and operator paths (`auth login`, `plugin install`, `plugin update`, `plugin eval`, `remote-control`, `self-hosted-runner`) are summarized in their `subcommands` notes rather than recorded as switch records.
 
-Wrapper-critical groups:
+How the facts were established:
+
+- **Spellings, aliases, placeholders, and defaults** come from local 2.1.287 help at every inventoried path, cross-checked against the [CLI reference](https://code.claude.com/docs/en/cli-reference). Where help and docs disagree, the parser wins: `--exec` is documented but rejected as unknown by the 2.1.287 binary.
+- **Value types** come from commander's placeholder grammar (`<x>`, `[x]`, `<x...>`) confirmed by parse errors: a bare required-value switch errors with `option '--flag <placeholder>' argument missing`, and those errors exposed both the exact placeholder and the variadic `<servers...>` shape of `--channels` and `--dangerously-load-development-channels`.
+- **Attachment forms** were proven by disposable tests: choice-validated switches reject invalid values naming the switch in both the space and equals forms (`--output-format bogus` / `--output-format=bogus`); short-attached values parse (`-nfoo`, `-rbar`, and `mcp add -tbogus`); an optional-value switch does not consume an option-looking next token (`--from-pr --setting-sources bogus` still parses `--setting-sources`); and equals binds variadic values (`--add-dir=/nonexistent` consumed the path).
+
+Wrapper-critical groups at the root entrypoint:
 
 | Scope | Switches |
 | --- | --- |
-| Non-interactive execution | `-p`/`--print`, `--input-format`, `--output-format`, `--json-schema`, `--max-turns`, `--max-budget-usd`, `--no-session-persistence` |
-| Structured stream extensions | `--include-hook-events`, `--include-partial-messages`, `--prompt-suggestions`, `--replay-user-messages`, `--verbose` |
-| Config isolation | `--settings`, `--setting-sources`, `--bare`, `--safe-mode`, `--mcp-config`, `--strict-mcp-config`, `CLAUDE_CONFIG_DIR` |
-| Background/session management | `--background`/`--bg`, `--worktree`/`-w`, `--tmux`, `--name`/`-n`, `--session-id`, `--resume`/`-r`, `--continue`/`-c`, `--fork-session`, `--from-pr` |
-| Remote/cloud entry points | `--remote`, `--remote-control`/`--rc`, `--remote-control-session-name-prefix`, `--teleport` |
-| System-prompt delivery | `--system-prompt`, `--system-prompt-file`, `--append-system-prompt`, `--append-system-prompt-file`, `--exclude-dynamic-system-prompt-sections` |
+| Non-interactive execution | `-p`/`--print`, `--input-format`, `--output-format`, `--json-schema`, `--max-turns`, `--max-budget-usd`, `--permission-prompts`, `--no-session-persistence` |
+| Structured stream extensions | `--include-hook-events`, `--include-partial-messages`, `--prompt-suggestions`, `--replay-user-messages`, `--forward-subagent-text`, `--verbose` |
+| Resume and session identity | `-c`/`--continue`, `-r`/`--resume`, `--from-pr`, `--fork-session`, `--session-id`, `-n`/`--name` |
+| Config isolation | `--settings`, `--setting-sources`, `--bare`, `--safe-mode`, `--restricted`, `--mcp-config`, `--strict-mcp-config`, `CLAUDE_CONFIG_DIR` |
+| Background sessions | `--bg`/`--background`, `-w`/`--worktree`, `--tmux`, `--agents` |
+| Cloud and remote entry points | `--cloud` (alias `--remote`), `--environment`, `--ref`, `--teleport`, `--remote-control` (alias `--rc`), `--remote-control-session-name-prefix` |
+| Permissions | `--permission-mode`, `--allowedTools`/`--allowed-tools`, `--disallowedTools`/`--disallowed-tools`, `--tools`, `--dangerously-skip-permissions`, `--allow-dangerously-skip-permissions` |
+| System-prompt delivery | `--system-prompt`, `--system-prompt-file`, `--append-system-prompt`, `--append-system-prompt-file`, `--system-prompt-snapshot`, `--exclude-dynamic-system-prompt-sections`, `--append-subagent-system-prompt[-file]` |
 
-System-prompt flags exist in both interactive and non-interactive modes. This topic records their names, value shapes, and example invocations only; replace-vs-append semantics, file-vs-inline behavior, and mode interactions belong to the sibling `system-prompt` research topic.
+The system-prompt flags exist in both interactive and non-interactive modes; this topic records their spellings and value shapes only, and their semantics belong to the `system-prompt` topic.
+
+The parsing behavior a mixed-command-line reader must reproduce:
+
+```mermaid
+flowchart TD
+    start[Token after a claude switch] --> known{Known spelling?}
+    known -- no --> fail[exit 1: unknown option]
+    known -- yes --> type{Value type}
+    type -- none --> next[consumes nothing]
+    type -- string/number --> grab[grabs the next token\nspace or =form, -xvalue for one-dash]
+    type -- optional --> opt{Next token looks like an option?}
+    opt -- yes --> next
+    opt -- no --> grab
+    type -- variadic --> var[grabs the next token unconditionally,\nthen keeps taking non-option tokens]
+```
 
 ## Configuration Discovery
 
-Claude Code discovers hierarchical JSON settings and mutable state:
+Claude Code reads hierarchical JSON settings and keeps mutable state beside them:
 
-| Scope | macOS/Linux path | Windows path | Notes |
+| Scope | macOS / Linux path | Windows path | Notes |
 | --- | --- | --- | --- |
-| User settings | `~/.claude/settings.json` | `%USERPROFILE%\.claude\settings.json` | Local file exists and contains hooks, permissions, model, status line, plugins, and related user settings. |
-| Mutable user state | `~/.claude.json` | `%USERPROFILE%\.claude.json` | Local file exists and contains install/update state, projects, OAuth account metadata, feature caches, and usage caches. |
-| Project settings | `.claude/settings.json` | `.claude\settings.json` | Shareable project settings. Not present in this repo during inspection. |
-| Local project settings | `.claude/settings.local.json` | `.claude\settings.local.json` | Local/private project settings. This repo has an empty JSON object at that path. |
-| Project MCP | `.mcp.json` | `.mcp.json` | Project-scoped MCP servers; unapproved servers are reported as pending. |
-| Managed settings | varies; `managed-settings.json`, MDM, or policy delivery | registry/MDM or `managed-settings.json` | Highest-precedence enterprise policy. |
-| Config-dir override | `CLAUDE_CONFIG_DIR` | `CLAUDE_CONFIG_DIR` | Relocates the normal `.claude` tree. |
+| User settings | `~/.claude/settings.json` | `%USERPROFILE%\.claude\settings.json` | Local file exists with hooks, permissions, model, statusLine, enabledPlugins, and related keys. |
+| Mutable user state | `~/.claude.json` | `%USERPROFILE%\.claude.json` | Local file exists with installMethod, projects, oauthAccount, caches, and onboarding flags; rewritten frequently. |
+| Project settings | `.claude/settings.json` | `.claude\settings.json` | Checked into source control when present. |
+| Local project settings | `.claude/settings.local.json` | `.claude\settings.local.json` | Gitignored when Claude Code saves a setting to it. |
+| Project MCP | `.mcp.json` | `.mcp.json` | Unapproved servers are shown as pending. |
+| Managed settings | `/Library/Application Support/ClaudeCode/managed-settings.json` (macOS), `/etc/claude-code/managed-settings.json` (Linux/WSL) | `C:\Program Files\ClaudeCode\managed-settings.json` | A `managed-settings.d/` drop-in directory merges in alphabetical order; also deliverable as an MDM profile or a `HKLM\SOFTWARE\Policies\ClaudeCode` registry value. The legacy `C:\ProgramData\ClaudeCode` path is not read. |
+| Config-dir override | `CLAUDE_CONFIG_DIR` | `CLAUDE_CONFIG_DIR` | Moves settings, session history, and plugins together. |
 
-Settings precedence is managed policy, command-line/session settings, local project, project, then user. Docs note that permission rules merge differently from scalar settings, and invalid managed entries are stripped tolerantly rather than disabling all policy. Claude Code also writes transcripts, prompt history, file snapshots, caches, plugin data, and logs under `~/.claude`; first use may create or update these files.
+Settings precedence is managed policy, command-line session values (`--settings`), local project, project, then user. Permission rules merge rather than override. Claude Code also writes transcripts, prompt history, file snapshots, caches, plugin data, and logs under `~/.claude` (relocated by `CLAUDE_CONFIG_DIR`); the local tree contains `projects`, `sessions`, `plugins`, `skills`, `agents`, `debug`, and daemon state. First use in a project may create or update these files.
 
-Trust and state caveats:
-
-- Print mode skips the workspace trust dialog, so wrappers should only use it in trusted directories.
-- Settings files that fail validation are silently ignored in print mode instead of showing an error dialog.
-- `--bare` skips most customization discovery and avoids OAuth/keychain credential reads.
-- `--safe-mode` disables most user/project customizations but still allows some managed policy to apply.
+Trust and validation caveats: print mode skips the workspace trust dialog; settings files that fail validation are silently ignored in print mode; `--bare` skips most customization discovery and never reads OAuth or keychain credentials; `--restricted` ignores user, project, and local settings but still applies managed settings and `--settings`.
 
 ## Environment Variables
 
-The frontmatter `env_vars` list records general CLI/runtime variables only. Model-endpoint variables, permission policy variables, MCP-specific variables, logging/telemetry variables, and streaming-specific variables are intentionally left to their narrower topics unless they also change general CLI behavior.
+The frontmatter `env_vars` list records general CLI and runtime variables only. Model-endpoint variables (`ANTHROPIC_*`), permission policy variables, MCP variables, and logging/telemetry variables belong to their narrower topics. Variables can be set in the shell or under the `env` key of any settings file; a settings-file `env` entry replaces the inherited shell value in most sessions, and `CLAUDE_CONFIG_DIR` plus the OpenTelemetry exporters cannot be set from project or local settings.
 
-Important general runtime controls include:
-
-| Variable | Effect |
-| --- | --- |
-| `CLAUDE_CONFIG_DIR` | Relocates user configuration/data normally under `~/.claude`. |
-| `CLAUDE_CODE_SAFE_MODE` | Mirrors `--safe-mode`; disables most customizations for troubleshooting. |
-| `CLAUDE_CODE_SIMPLE` | Mirrors `--bare`; minimal execution and no OAuth/keychain credential reads. |
-| `CLAUDE_CODE_SKIP_PROMPT_HISTORY` | Avoids writing prompt history and transcripts. |
-| `CLAUDE_CODE_SYNC_PLUGIN_INSTALL` | Makes print mode wait for plugin installation before the first query. |
-| `CLAUDE_CODE_SYNC_SKILLS` | Makes print mode sync enabled claude.ai skills before the first query and periodically after. |
-| `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` | Removes provider credentials from child process environments; adds Linux PID namespace isolation for Bash subprocesses. |
-| `CLAUDE_CODE_GIT_BASH_PATH` | Points Windows shell-tool discovery at Git Bash. |
-| `CLAUDE_REMOTE_CONTROL_SESSION_NAME_PREFIX` | Sets default Remote Control session name prefix. |
-| `USE_BUILTIN_RIPGREP` | Set to `0` to use system `rg` instead of the bundled ripgrep. |
-
-Environment variables can be set in the shell or under the `env` key in settings files. Where the same behavior has both an environment variable and a settings field, the environment variable takes precedence.
+On/off variables accept `1`, `true`, `yes`, or `on` in any casing to turn on and the false spellings to turn off — with a documented exception class (`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `DISABLE_TELEMETRY`, `DISABLE_ERROR_REPORTING`, `CLAUDE_CODE_TMUX_TRUECOLOR`) where *any* non-empty value, including `0`, turns the behavior on and only unsetting turns it off. Numeric variables accept scientific notation and digit separators. `CLAUDECODE` and `CLAUDE_CODE_CHILD_SESSION` are set by Claude Code itself in the subprocesses it spawns, which a wrapper can use to detect nesting.
 
 ## Machine Introspection
 
-Machine-usable or wrapper-useful probes:
-
 | Command | Format | Machine-readable | Wrapper use |
 | --- | --- | --- | --- |
-| `claude auth status` | JSON | Yes | Provider readiness; exits 1 when logged out. |
-| `claude agents --json` | JSON array | Yes | Active session discovery. |
-| `claude agents --json --all` | JSON array | Yes | Active plus completed background-session discovery. |
-| `claude auto-mode defaults` | JSON | Yes | Built-in policy/catalog inspection. |
-| `claude auto-mode config` | JSON | Yes | Effective auto-mode configuration. |
-| `claude plugin list --json` | JSON array | Yes | Installed plugin inventory. |
-| `claude plugin list --json --available` | JSON | Yes | Installed plus available plugin inventory, per docs. |
-| `claude daemon status` | Text | No | Supervisor diagnostics; exits 1 when not running. |
-| `claude doctor` | Text | No | Install/config diagnostics; local non-interactive run timed out after 20 seconds. |
-| `claude mcp list` | Text | No | Human MCP summary; local output reported no servers configured. |
+| `claude --version` | one line of text | No | Exact version; `2.1.287 (Claude Code)`. |
+| `claude auth status` | JSON | Yes | Readiness: `loggedIn`, `authMethod`, `configDirectory`, subscription tier; exits 1 when logged out. |
+| `claude agents --json [--all]` | JSON array | Yes | Live interactive and background sessions with pid, cwd, kind, state, sessionId, name. |
+| `claude auto-mode defaults [--label x]` | JSON | Yes | Built-in classifier rule catalogs. |
+| `claude auto-mode config` | JSON | Yes | Effective classifier configuration. |
+| `claude plugin list --json [--available] [--data-size]` | JSON array | Yes | Installed plugin inventory with versions, scopes, and paths. |
+| `claude daemon status` | text | No | Supervisor state; exits 1 when not running. |
+| `claude doctor` | text | No | Install and settings diagnostics; completes without a TTY in 2.1.287. |
+| `claude mcp list` | text | No | Server list with live network health checks. |
 
-Generic `--help` and `--version` are not counted as machine introspection in frontmatter because they do not expose structured provider state. They remain important research evidence: `--version` verified the installed version, and help output revealed current visible/hidden command differences.
+`--help` output is not counted as machine introspection, but it remains research evidence: targeted `--help` probes revealed the hidden commands and the per-path option sets recorded in the inventory.
 
 ## Wrapper Notes
 
-Use `claude -p` for automation. Plain `claude "query"` is not a one-shot command; it opens an interactive session seeded with the prompt. Pick `--output-format` explicitly, and use `stream-json` for structured streaming wrappers.
+The frontmatter `wrapper_notes` list carries the full caveats. The ones that most affect a program that mixes its own inputs with Claude Code switches:
 
-Expected non-zero exits need special handling. `claude auth status` returns useful JSON and exits `1` when logged out. `claude daemon status` exits `1` when no supervisor is running. `claude doctor` is a diagnostics command but should be run with a wrapper timeout; it did not return useful output within 20 seconds locally.
-
-Help is not an authoritative complete inventory. Official docs list flags omitted by local v2.1.200 help, and local top-level help omits several hidden-but-working background-session commands. A wrapper metadata refresh should combine docs, targeted command probes, and negative probes.
-
-For isolated runs, prefer `CLAUDE_CONFIG_DIR` plus explicit `--settings`, `--setting-sources`, `--mcp-config`, and `--strict-mcp-config` where appropriate. `--bare` is stronger but changes authentication behavior by avoiding OAuth/keychain credentials. `--safe-mode` is useful for troubleshooting user customization failures, but managed policy can still affect a run.
-
-Windows shell behavior matters. Docs recommend Git for Windows; without it, Claude Code uses PowerShell for shell commands. Use `CLAUDE_CODE_GIT_BASH_PATH` when Git Bash auto-discovery fails.
-
-## Changelog
-
-- 2026-07-03: Updated verified latest version from `2.1.199` to `2.1.200` using local `claude --version` and npm registry dist-tags.
-- 2026-07-03: Recorded that the public changelog currently tops out at `2.1.199`, so npm/local binary evidence was preferred for latest-version verification.
-- 2026-07-03: Added v2.1.200 local observations for hidden-but-working background-session commands (`daemon`, `attach`, `logs`, `respawn`, `rm`, `stop`).
-- 2026-07-03: Expanded switch inventory with official-doc and local-help flags for background sessions, worktrees, remote sessions, setup hooks, structured print mode, plugins, and system-prompt file delivery.
-- 2026-07-03: Refreshed local configuration discovery from `~/.claude/settings.json`, `~/.claude.json`, and repo `.claude/settings.local.json` without exposing private values.
-- 2026-07-03: Updated introspection notes for JSON auth/session/plugin/auto-mode surfaces and expected text/non-zero diagnostic states.
+1. **Non-interactive is not just `-p`.** Piped stdout alone imposes the same input requirement, so a wrapper that captures output has already changed the CLI's mode.
+2. **Unknown options hard-fail.** The parser rejects them with exit 1; a wrapper cannot rely on pass-through for switches it does not know, and the docs themselves drift (`--exec` documented but absent from the 2.1.287 parser; `import` documented but disabled in this build).
+3. **Variadic switches swallow neighbors.** The token after `--add-dir` is consumed even when it looks like an option, so a variadic switch must never sit directly before a flag meant for Claude Code.
+4. **Optional-value switches steal plain positionals.** `-r`, `--from-pr`, `-w`, `--teleport`, `--cloud`, and `--remote-control` do not take option-looking tokens but do take the next plain one, which would swallow a user's prompt.
+5. **`--debug` filters bind only via `=`.** Emit `--debug=api,hooks`, never `--debug api`.
+6. **Normal states exit non-zero.** `auth status` logged out and `daemon status` without a supervisor both exit 1 with useful output.
+7. **Help is incomplete by policy**, and three commands plus at least one flag are hidden; probe the binary, do not infer availability from `--help` alone.
+8. **The binary moves under you.** Native installs auto-update in the background; the resolved version can change between wrapper runs.
 
 ## Sources
 
 - [Claude Code overview](https://code.claude.com/docs/en/overview)
-- [Claude Code CLI reference](https://code.claude.com/docs/en/cli-reference)
+- [CLI reference](https://code.claude.com/docs/en/cli-reference)
 - [Advanced setup](https://code.claude.com/docs/en/setup)
-- [Claude Code settings](https://code.claude.com/docs/en/settings)
 - [Environment variables](https://code.claude.com/docs/en/env-vars)
-- [Explore the .claude directory](https://code.claude.com/docs/en/claude-directory)
-- [Debug your configuration](https://code.claude.com/docs/en/debug-your-config)
-- [Plugins reference](https://code.claude.com/docs/en/plugins-reference)
-- [Claude Code changelog](https://code.claude.com/docs/en/changelog)
-- Local inspection on 2026-07-03: `command -v claude`, `file "$(command -v claude)"`, `ls -l "$(command -v claude)"`, `claude --version`, `claude --help`, `claude auth --help`, `claude agents --help`, `claude auto-mode --help`, `claude mcp --help`, `claude plugin --help`, `claude project --help`, `claude install --help`, `claude gateway --help`, `claude ultrareview --help`, `claude daemon --help`, `claude attach --help`, `claude logs --help`, `claude respawn --help`, `claude rm --help`, `claude stop --help`, `claude remote-control --help`, `claude auth status`, `claude auth status --text`, `claude agents --json`, `claude auto-mode defaults`, `claude auto-mode config`, `claude plugin list --json`, `claude mcp list`, `claude daemon status`, `claude doctor`, `npm view @anthropic-ai/claude-code version dist-tags --json`, and key-only inspection of `~/.claude/settings.json`, `~/.claude.json`, and `.claude/settings.local.json`.
+- [Deploy managed settings](https://code.claude.com/docs/en/managed-settings)
+- Local inspection on 2026-10-01: `command -v claude`, symlink target, `claude --version`, `claude doctor`, `npm view @anthropic-ai/claude-code version dist-tags --json`, and `claude <path> --help` for every command family in the inventory (agents, attach, auth, auto-mode, daemon, doctor, gateway, import, install, logs, mcp and its leaves, plugin and its leaves including marketplace, project, respawn, rm, setup-token, stop, ultrareview, update, remote-control, self-hosted-runner).
+- Disposable parse tests on 2026-10-01 in a temp directory, each with piped stdout and closed stdin: invalid-value probes for `--output-format`, `--permission-mode`, `--input-format`, `--system-prompt-snapshot`, `--permission-prompts`, `--autocompact`, `--prompt-suggestions` (space and equals forms); `--effort bogus`; `--session-id not-a-uuid`; `--add-dir` with space, equals, and option-token forms before a `--setting-sources bogus` sentinel; `-nfoo`, `-rbar`, `-Z`, `--bogus-flag`, `--exec`; bare `--max-turns`, `--permission-prompt-tool`, `--advisor`, `--append-system-prompt-file`, `--append-subagent-system-prompt[-file]`, `--teammate-mode`, `--ref`, `--fallback-model`, `--json-schema`, `--file`, `--agents`, `--settings`, `--environment`, `--model`, `--system-prompt`, `--autocompact`, `--effort`, `--sdk-url`, `--channels`, `--dangerously-load-development-channels`, `--init`, `--init-only`, `--maintenance`, `--enable-auto-mode`, `--remote`, `--rc`; `--teleport`; `mcp add -t bogus`, `-tbogus`, `--transport=bogus`; `import codex --dry-run` and `--yes=<digest> --dry-run`.
+- Behavior probes on 2026-10-01: `claude auth status`, `claude agents --json`, `claude auto-mode defaults`, `claude auto-mode config`, `claude plugin list --json`, `claude daemon status`, `claude doctor`, `claude mcp list`; key-only inspection of `~/.claude/settings.json`, `~/.claude.json`, and `ls ~/.claude`.
+
+## Changelog
+
+- 2026-10-01: Rewrote for research contract revision 2 — typed switch inventory with value types, attachment forms, invocation scopes, and evidence citations for every record.
+- 2026-10-01: Verified version 2.1.287 (local binary, doctor, npm dist-tags; stable channel 2.1.285).
+- 2026-10-01: Identified the parser as commander.js and established attachment behavior from disposable tests, including the variadic grab hazard and the `--debug` equals-only filter binding.
+- 2026-10-01: Recorded docs-versus-binary drift: `--exec` rejected by the 2.1.287 parser despite being documented, and `claude import` disabled in this build.
+- 2026-10-01: Added newly verified switches (`--cloud`/`--remote`, `--desktop`, `--environment`, `--ref`, `--restricted`, `--permission-prompts`, `--forward-subagent-text`, `--autocompact`, `--system-prompt-snapshot`, subagent system-prompt flags, hidden `--sdk-url`, variadic `--channels` and `--dangerously-load-development-channels`) and the full mcp/plugin command-scoped inventories.
+- 2026-10-01: Expanded subcommands with import, plugin marketplace, and the hidden remote-control and self-hosted-runner; re-verified `doctor` as completing without a TTY.
+- 2026-10-01: Refreshed configuration discovery (exact managed-settings paths per OS, drop-in directory, registry and MDM channels) and the environment variable list against the current docs pages.
+- 2026-07-03: Previous revision — version 2.1.200, hidden background-session commands, first switch inventory under revision 1.

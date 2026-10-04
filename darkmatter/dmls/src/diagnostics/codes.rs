@@ -16,7 +16,8 @@
 //! | --- | --- | --- |
 //! | `dm.expression.malformed`, exactly projected schema-typed frontmatter value | `ERROR` | The schema declares the value is an expression. |
 //! | `dm.expression.malformed`, document-body span | `WARNING` | A body `{{ … }}` is only inferred to be an expression. |
-//! | `dm.expression.unknown_identifier` | `WARNING` | A late-binding global might supply it at runtime. |
+//! | `dm.expression.undeclared_property` | `WARNING` | Advisory: the property is valid and `null` unless supplied at runtime. |
+//! | `dm.expression.unknown_function` | `ERROR` | The function catalog is closed, so compose fails on the call. |
 //! | `dm.expression.nested_span_in_literal` | `ERROR` | Its surfaces never re-interpolate the literal. |
 //!
 //! Design: `claudine/fixes/2026-09-13-better-static-analysis/spec.md` (D7).
@@ -134,9 +135,11 @@ pub mod code {
     pub const TRANSCLUSION_CYCLE: &str = "dm.transclusion.cycle";
     /// A malformed `{{ … }}` interpolation or `when=` expression.
     pub const EXPRESSION_MALFORMED: &str = "dm.expression.malformed";
-    /// An interpolation identifier that names no frontmatter key, `ctx.*`,
-    /// `env.*`, or expression function.
-    pub const EXPRESSION_UNKNOWN_IDENTIFIER: &str = "dm.expression.unknown_identifier";
+    /// A bare expression root that is an undeclared document property: no
+    /// frontmatter key, schema property, reserved namespace, or function.
+    pub const EXPRESSION_UNDECLARED_PROPERTY: &str = "dm.expression.undeclared_property";
+    /// A call to a function outside Darkmatter's closed function catalog.
+    pub const EXPRESSION_UNKNOWN_FUNCTION: &str = "dm.expression.unknown_function";
     /// A `{{ … }}` span inside a quoted string literal on a single-pass
     /// lifecycle surface, where it is never interpolated.
     pub const EXPRESSION_NESTED_SPAN_IN_LITERAL: &str = "dm.expression.nested_span_in_literal";

@@ -145,24 +145,19 @@ fn diagnostic_quotes_an_underscored_root_exactly() {
     let fixture = CliProcessFixture::named("diagnostic-underscored-root");
     write_dry_run_provider_stub(fixture.bin_dir(), "goose");
     let document = fixture.cwd().join("diag.md");
-    write(
-        &document,
-        "---\nstart:\n    info: \"count is {{ _loop_countx }}\"\n---\nhello\n",
-    );
+    write(&document, "---\ntitle: t\n---\ncount is {{ _loop_countx }}\n");
 
     let output = fixture
         .command()
         .env("COLUMNS", "400")
         .args(["compose", "--goose"])
         .arg(&document)
-        .assert()
-        .failure()
-        .get_output()
-        .clone();
+        .output()
+        .unwrap();
     let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
     assert!(
-        stderr.contains("unknown root '_loop_countx' in '{{ _loop_countx }}'"),
-        "{stderr}"
+        stderr.contains("`_loop_countx` at ") && stderr.contains("is an undeclared document property"),
+        "the advisory quotes the root verbatim: {stderr}"
     );
 }
 

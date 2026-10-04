@@ -25,7 +25,7 @@ mod guardrails;
 pub mod hints;
 pub mod inline_prompt;
 #[cfg(test)]
-mod interpolation_conformance;
+pub(crate) mod interpolation_conformance;
 pub(crate) mod json_util;
 pub mod launch_workspace;
 pub mod lifecycle;
@@ -37,6 +37,8 @@ pub mod looping;
 pub mod mismatch;
 pub mod preflight;
 mod prepare;
+pub mod provider_tail;
+pub mod ownership;
 mod reserved;
 mod resolve;
 pub mod runtime_state;
@@ -44,6 +46,12 @@ pub mod schema;
 mod select;
 pub mod sequence;
 mod types;
+pub use ownership::{
+    ARGV_KEY, ArgumentOwner, ArgumentsAfterFile, CallerArgument, OwnedArguments,
+    OwnershipCandidate, OwnershipError, SchemaParameters, TailMismatch, check_launch_tail,
+    is_setter_name, own_arguments, owner_of_last_argument, setter_key,
+};
+pub use provider_tail::{ProviderTail, ProviderTailNotices, SwitchAssignment};
 
 pub use agent_message::{agent_state_breakdown, invalid_agent_message};
 pub use authored_order::AuthoredOrder;
@@ -94,9 +102,7 @@ pub use lifecycle_actions::{
     LifecycleActionKind, LifecycleControlAction, LifecycleStackItem, RetryBackoff, ShellAction,
     SideEffectAction, is_known_side_effect, side_effect_signature,
 };
-pub use lifecycle_context::{
-    LifecycleErrorInfo, LifecycleTiming, lifecycle_injected_globals,
-};
+pub use lifecycle_context::{LifecycleErrorInfo, LifecycleTiming};
 pub use lifecycle_control::{
     ControlDispatch, MAX_PROXY_HOPS, compute_backoff_delay, control_budget_for, decide_control,
     parse_delay, proxy_handoff_allowed, proxy_path_identity, resolve_proxy_target,
@@ -142,7 +148,7 @@ pub use runtime_state::{
     layered_set_overrides, trim_transport_newline,
 };
 pub use schema::{
-    InteractiveSchemaOptions, PreValidatedSchema, PropertyState, PropertyStatus,
+    InteractiveSchemaOptions, authored_schema_parameters, PreValidatedSchema, PropertyState, PropertyStatus,
     SchemaStatusReport, build_schema_status_report, build_schema_status_report_for_mode,
     description_suffix, drop_invalid_optionals, escape_schema_prose, launch_phase_for_mode,
     pre_validate_layered_for_mode, pre_validate_schema, pre_validate_schema_for_mode,

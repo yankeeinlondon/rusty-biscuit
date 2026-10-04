@@ -151,6 +151,9 @@ pub(crate) mod drain_interrupt;
 pub(crate) mod host_tools;
 pub(crate) mod incomplete_subagents;
 #[cfg(unix)]
+pub(crate) mod launch_recorder;
+pub(crate) mod owned_value_options;
+#[cfg(unix)]
 pub(crate) mod pty;
 pub(crate) mod review_router;
 #[cfg(unix)]

@@ -87,10 +87,17 @@ the compose pipeline.
 
 **Finalization** (root-only serial):
 
-- **Link Normalization** - Converts absolute path links back into portable forms:
-    - **Same-repo**: Paths inside the same git repository are made relative to the document
-    - **Home-dir**: Paths under the user's home directory use the `~/` prefix
-    - **ENV-var**: Paths under whitelisted environment variables (e.g. `PROJECT_ROOT`) use `${VAR}/` prefix
+- **Link Normalization** - Converts absolute link destinations back into portable
+  references through `biscuit_file::PortablePath` (default strategy, root document's
+  context): nearby relative (`./x`, `../peer/x`), `&repo/path`, a declared `{{VAR}}`
+  (written as the literal `{{{VAR}}}` so recompose is stable), `~/`, else the absolute
+  path is kept with a `link_normalization` warning (the document still holds a
+  host-tied link); `ComposeOptions::with_absolute_fallback_warning(false)`
+  suppresses it. `#frag` / `?q` / `:line` suffixes are split and reattached. No variable
+  is portable by default: declare names with `PORTABLE_ENV_VARIABLES` or
+  `ComposeOptions::with_portable_env` (the old `with_env_path_whitelist` and its
+  `PROJECT_ROOT` / `DOCS_BASE` defaults are gone). See
+  `darkmatter/docs/inline/link-normalization.md`.
 
 ## API
 
@@ -302,9 +309,11 @@ file changes rather than discovering the repository a second time.
   clones) shares one observation per key; calling it again starts a fresh
   memo. Claudine memoizes once per lifecycle event.
 
-Resolution rules, enforced in `EffectiveState`, `FrontmatterSeedState`, and
-`LayeredLookup` **before** frontmatter, external state, and injected globals,
-so neither can shadow a reserved root:
+Resolution rules, enforced in `EffectiveState` and `FrontmatterSeedState`
+**before** frontmatter and external state, so neither can shadow a reserved
+root. Subtree compose's `EvaluationSession` resolves reserved roots through
+the document lookup first, and refuses to register a global under one
+(`BindingError::ReservedName`):
 
 - `current.<key>` where `<key>` is cataloged: an `Invocation` or `Document`
   key is request-owned and reads the eager capture; every other group refreshes
@@ -332,9 +341,11 @@ the union across the walked graph.
 outcomes: `Present`, `NotCaptured`, `ProjectionMissing`, or `Unknown`.
 Classification uses only `ContextGroup::for_key`/`projected_keys` and the
 snapshot's `capture_requirements()`. Expression evaluation reads through
-`EvaluationLookup::get_checked`, which `EffectiveState`, `ResolvingLookup`,
-`FrontmatterSeedState`, `LayeredLookup`, `ShortcutLookup`, and `CtxLookup`
-override.
+`EvaluationLookup::resolve`, which `EffectiveState`, `ResolvingLookup`,
+`FrontmatterSeedState`, `ShortcutLookup`, `CtxLookup`, `DeferrableLookup`, and
+`EvaluationSession` override. A bare name is a document property only: no
+lookup falls back to `ctx` (the parity inventory in
+`compose/tests/lookup_parity.rs` lists every implementation and probes it).
 
 - A captured group must project every key it owns, with `null` for absence.
   `ProjectionMissing` raises `ExpressionError::ContextProjectionInvariant`
@@ -471,10 +482,11 @@ fatal), and what DMLS checks — is in `darkmatter/docs/topics/parsing/`. The
 `dm.*` code-sharing rules are in `darkmatter/dmls/docs/diagnostics.md`
 (§ "`dm.*` registry rules").
 
-### Unknown identifiers (`dm.expression.unknown_identifier`)
+### Undeclared properties (`dm.expression.undeclared_property`)
 
-A well-formed root that resolves to nothing still renders empty, but a
-full-document compose warns about it once per root per source document
+A well-formed root that resolves to nothing is an absent document property
+(`null`, renders empty), and a full-document compose reports it as an advisory
+once per root per source document
 (source `darkmatter.expression`, `path` and `line_number` set, location also
 in the Prose-escaped message because `md` and Claudine render only the
 message). The moving parts:
@@ -497,18 +509,19 @@ message). The moving parts:
   `conditions::evaluate_condition_observed`, or build the `Evaluator` with
   `.observing_missing_roots()` and drain `take_missing_roots()`. The `()`
   observer compiles the check away.
-- **Known roots** come from `EvaluationLookup::is_known_variable_root`:
-  `EffectiveState`, `ResolvingLookup`, and `FrontmatterSeedState` answer it
-  (state key even if `null`/`""`, `ctx`/`env`/`doc`/`current`/`current_env`,
-  bare context names, and `null`, which the grammar has no literal for). The
-  trait default `true` keeps other lookups silent.
+- **Candidates come from the binding classification.** Only a read that
+  resolves as `ResolvedBinding::Document { value: None }` is observed; a
+  namespace or a global never is. Reserved roots and `null` (which the grammar
+  has no literal for) are skipped. A bare runtime-context name such as
+  `branch` is a document property and is reported.
 - **Candidates, not warnings.** Surfaces push `UnknownRootCandidate`s onto
   `ComposeReport` (first read per root only, through the hash-backed
   `UnknownRootCandidates`, whose root set is private so it cannot drift from
   the list; `report.rs`'s identity-work counter pins O(1) per read).
   `unknown_identifiers::reconcile`
   runs once per document just before `attribute_to_document`. It drops roots
-  known to the final state, a caller input record, or the effective schema
+  that are keys of the final state, a caller input record, or the effective
+  schema
   (`EffectiveSchema::declares_top_level_property`: `properties`,
   `patternProperties`, union/`allOf`/`if` arms, local `$ref`), then emits.
   A discovery pass drops its candidates. A required-but-unset root never gets
@@ -793,7 +806,9 @@ every policy and located by line and column:
 - a token in the body
 - a token inside an expression's string literal
 
-Keys in `exclude_keys` (Claudine's lifecycle keys) keep their raw token text.
+Keys in `exclude_keys` (Claudine's lifecycle keys) keep their raw text: pass 1
+neither decodes their tokens nor converts their `{{{ … }}}` literals, so the
+caller's event-time evaluation sees each escape as authored.
 
 **Schema pending.** Data is final, so it is judged at validation and never
 deferred. `value_pending_composition` in `compose/schema_validation.rs`
@@ -1007,8 +1022,8 @@ otherwise it is file-only `SourceRef::OnDisk`, never a guess.
   introduced has no authored span, so it reports file-only.
 
 The helper takes an explicit
-`ExpressionFailurePolicy`; only `compose_subtree(..., Lenient)`, preflight's
-best-effort frontmatter pass, and the discovery compose pass
+`ExpressionFailurePolicy`; only preflight's best-effort frontmatter pass and
+the discovery compose pass
 (`ComposeOptions::defer_expression_failures`, crate-private) use `Lenient`.
 Discovery must stay lenient because it runs without page blocks and would
 otherwise reject a failure inside a region a false `::block` removes.
@@ -1115,7 +1130,7 @@ darkmatter/lib/src/
     │   ├── catalog.rs   # Descriptor catalog (parity-tested against functions)
     │   ├── ctx.rs       # CtxLookup (ctx.* runtime context)
     │   ├── doc_namespace.rs # Reserved doc / doc.* namespace resolution
-    │   └── resolve_ctx.rs   # ResolutionContext (base_dir, magic paths, remote)
+    │   └── resolve_ctx.rs   # ResolutionContext (cwd, base_dir() tree root, magic paths, remote)
     └── interpolation/
         ├── mod.rs       # Module exports
         ├── lexer.rs     # Expression finder

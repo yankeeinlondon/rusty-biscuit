@@ -16,8 +16,7 @@
 //!   `document_body_is_strict_whatever_fail_fast_says` cell pins that the
 //!   document entry passes `Strict`, not only that the helper honors it.
 //! - **The helper under [`ExpressionFailurePolicy::Lenient`]**
-//!   ([`interpolate_text`]) is what `compose_subtree(..., Lenient)` and
-//!   preflight discovery still use. There, **three** classes are fatal: an
+//!   ([`interpolate_text`]) is what preflight discovery still uses. There, **three** classes are fatal: an
 //!   **unknown function**, a **present file reference that fails to resolve**
 //!   (missing file or malformed path), and a **focused provider failure**
 //!   ([`ExpressionError::Provider`]). A present file reference that does not

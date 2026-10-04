@@ -747,7 +747,7 @@ fn a_refused_resolution_leaves_no_entry_for_the_next_request() {
 fn a_refused_overlay_evaluation_leaves_no_entry_for_the_next_request() {
     refused_then_legitimate_row(
         "handoff-refused-overlay",
-        "{ action: proxy, target: ./target.md, with: { topic: \"{{ no_such_root }}\" } }",
+        "{ action: proxy, target: ./target.md, with: { topic: \"{{ no_such_root() }}\" } }",
         "no_such_root",
     );
 }

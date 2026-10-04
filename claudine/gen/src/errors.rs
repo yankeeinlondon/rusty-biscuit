@@ -99,11 +99,14 @@ pub enum GenError {
     )]
     UnknownOverrideField { field: String },
 
-    #[error("override for `{field}` is missing its required `reason:` string")]
-    OverrideMissingReason { field: String },
+    #[error("override for `{field}` needs a non-empty `reason:` string, found {found}")]
+    OverrideInvalidReason { field: String, found: &'static str },
 
     #[error("override for `{field}` is missing its required `value:` key")]
     OverrideMissingValue { field: String },
+
+    #[error("override for `{field}` has the key `{key}`; an override holds only `value:` and `reason:`")]
+    OverrideUnknownKey { field: String, key: String },
 
     #[error(
         "wired provider slug `{slug}` has no active roster entry (missing, or flagged \
@@ -114,6 +117,16 @@ pub enum GenError {
 
     #[error("--scaffold requires a provider slug (e.g. `claudine-gen generate <slug> --scaffold`)")]
     ScaffoldRequiresSlug,
+
+    #[error(
+        "research document `{path}` carries contract revision {found}, but its contract is at \
+         revision {current} and no frozen `_schema.r{found}.yaml` exists beside it; re-research \
+         the document"
+    )]
+    ResearchRevisionUnsupported { path: PathBuf, found: u64, current: u64 },
+
+    #[error("agent-cli `cli_switches` record `{record}`: {message}")]
+    CliSwitchInvalid { record: String, message: String },
 
     #[error("missing value for field `{field}`: {message}")]
     MissingValue { field: &'static str, message: String },

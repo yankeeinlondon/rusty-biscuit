@@ -1126,7 +1126,9 @@ pub fn hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
     }
     let path = ast.path_of(entry);
 
-    if path.first() == Some(&FmPathSegment::Key("ctx")) && entry.key_span.is_some() {
+    if path.first() == Some(&FmPathSegment::Key(expressions::context_root().name))
+        && entry.key_span.is_some()
+    {
         return ctx_hover(ctx, entry);
     }
     schema_hover(ctx, &path, entry)
@@ -1353,7 +1355,7 @@ fn ctx_hover(ctx: &DocumentContext, entry: &FmEntry) -> Option<Hover> {
 /// interpolation hover's block for the same variable; the compose-time note is
 /// interpolation-specific and never appears here.
 fn ctx_hover_markdown(dotted: &str, key: &str) -> String {
-    if dotted == "ctx" {
+    if dotted == expressions::context_root().name {
         return "**`ctx`** — Darkmatter-generated context (read-only)".to_string();
     }
     match expressions::ctx_descriptor(key) {

@@ -70,6 +70,14 @@ enum Command {
         /// catalog.json is always checked against the full scope.
         slug: Option<String>,
     },
+    /// Generate one provider from the current inputs and report only whether
+    /// the generator accepts them; drift from the committed data.rs is not a
+    /// failure. A research fleet runs this in its `success` event, so a
+    /// document is refused by the generator's own rules before it is accepted.
+    Validate {
+        /// Provider slug (the research document stem).
+        slug: String,
+    },
     /// Deterministic validate-and-resume gate for the `agent-errors` research
     /// topic (spec D10). Its subcommands are the mechanical half of the fleet
     /// lifecycle: the fleet `success` stack runs `check`, then branches on the
@@ -264,6 +272,21 @@ fn run(term: &Terminal, area: Option<PathBuf>, command: Command) -> Result<ExitC
                 ExitCode::FAILURE
             } else {
                 ExitCode::SUCCESS
+            })
+        }
+        Command::Validate { slug } => {
+            let area = resolve_area(area)?;
+            // Input errors go to stdout with a failing exit, so the caller
+            // reads the refusal from the same stream as the acceptance.
+            Ok(match claudine_gen::generate_for_area(&area, &slug) {
+                Ok(_) => {
+                    print!("{}", report::inputs_accepted(term, &slug));
+                    ExitCode::SUCCESS
+                }
+                Err(err) => {
+                    print!("{}", report::inputs_refused(term, &slug, &err));
+                    ExitCode::FAILURE
+                }
             })
         }
         Command::AgentErrors { command } => {
