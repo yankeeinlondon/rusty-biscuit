@@ -3,7 +3,7 @@ name = "biscuit-contract"
 version = "0.1.0"
 edition = "2024"
 description = "Shared provider-neutral contract for one text-inference operation"
-license = "MIT"
+license = "AGPL-3.0-only"
 
 [lib]
 name = "biscuit_contract"

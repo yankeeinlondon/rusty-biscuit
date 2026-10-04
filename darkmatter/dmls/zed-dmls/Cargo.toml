@@ -2,6 +2,7 @@
 name = "zed-dmls"
 version = "0.0.1"
 edition = "2021"
+license = "AGPL-3.0-only"
 publish = false
 description = "Zed extension launching the native Darkmatter Language Server"
 

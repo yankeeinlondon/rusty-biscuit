@@ -3,6 +3,7 @@ name = "zed-dmls-cli"
 description = "Stable staging and diagnostics for the DMLS Zed extension"
 version = "0.1.0"
 edition = "2024"
+license = "AGPL-3.0-only"
 
 [lib]
 name = "zed_dmls_cli"

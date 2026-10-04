@@ -2,6 +2,7 @@
 name = "repo-deps"
 version = "0.1.0"
 edition = "2021"
+license = "AGPL-3.0-only"
 publish = false
 
 # Cargo compiles the union of a package's enabled dependencies regardless of
