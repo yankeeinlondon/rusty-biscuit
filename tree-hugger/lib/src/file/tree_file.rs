@@ -1787,6 +1787,10 @@ impl TreeFile {
         let root = self.tree.root_node();
         let capture_names = query.capture_names();
         let mut deduped: HashMap<(usize, usize, String), PendingSymbol<'_>> = HashMap::new();
+        let is_ecma_module = matches!(
+            self.language,
+            ProgrammingLanguage::JavaScript | ProgrammingLanguage::TypeScript
+        ) && is_ecma_module_file(&self.file, root, &self.source);
 
         let mut matches = cursor.matches(query.as_ref(), root, self.source.as_bytes());
         matches.advance();
@@ -1844,6 +1848,9 @@ impl TreeFile {
                 let declaration_context = DeclarationContext {
                     language: self.language,
                     source: &self.source,
+                    name: capture.node,
+                    root,
+                    is_ecma_module,
                     kind,
                     is_local: is_local_declaration(declaration),
                 };
@@ -1930,6 +1937,8 @@ impl TreeFile {
             )
         });
 
+        align_field_metadata(&mut pending);
+
         let mut kinds_by_node: HashMap<usize, SymbolKind> = HashMap::new();
         for entry in &pending {
             for node in [entry.extracted.declaration, entry.extracted.anchor] {
@@ -1972,6 +1981,44 @@ struct PendingSymbol<'tree> {
     extracted: ExtractedSymbol<'tree>,
     container: Option<ContainerRef<'tree>>,
     priority: u8,
+}
+
+/// A `FieldInfo` entry in a type's metadata copies the access and member
+/// `static` of the standalone field or property it describes, so the type
+/// metadata (`hug classes`) and the standalone symbols (`hug symbols`) never
+/// disagree. Entries with no standalone symbol keep what metadata extraction
+/// read.
+fn align_field_metadata(pending: &mut [PendingSymbol<'_>]) {
+    let members: Vec<(usize, String, Option<Visibility>, bool)> = pending
+        .iter()
+        .filter_map(|entry| {
+            let ContainerLookup::Node { node, .. } = entry.container.as_ref()?.lookup else {
+                return None;
+            };
+            let symbol = &entry.extracted.symbol;
+            matches!(
+                symbol.kind,
+                SymbolKind::Field | SymbolKind::Property | SymbolKind::Constant
+            )
+            .then(|| (node.id(), symbol.name.clone(), symbol.visibility, symbol.is_static))
+        })
+        .collect();
+
+    for entry in pending.iter_mut() {
+        let owners = [entry.extracted.declaration.id(), entry.extracted.anchor.id()];
+        let Some(metadata) = entry.extracted.symbol.type_metadata.as_mut() else {
+            continue;
+        };
+        for field in &mut metadata.fields {
+            if let Some((_, _, visibility, is_static)) = members
+                .iter()
+                .find(|(owner, name, ..)| owners.contains(owner) && *name == field.name)
+            {
+                field.visibility = *visibility;
+                field.is_static = *is_static;
+            }
+        }
+    }
 }
 
 /// The container's kind is the kind extracted for the container's own
