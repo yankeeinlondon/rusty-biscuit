@@ -62,6 +62,13 @@ spell yours in one of them or the file's next edit will not run your test:
 - **Or write the full repository-relative path** as a literal (a table of
   documents walked later), in a file that reads through a root somewhere.
 
+Two near misses are not reads: a join onto one top-level directory
+(`repo_root().join("prompts")` is too coarse; name the file), and a root call
+followed by a comma (`stage(&repo_root(), "prompts/x.md")` leaves the file
+unanchored; bind `let root = repo_root();` first). A Markdown document's
+`::file` targets need no spelling of their own: a test that reads the document
+is scheduled when a file it transcludes changes.
+
 Paths assembled from `format!`, a value computed at run time, or a helper
 defined in another file are invisible, and a literal joined onto a tempdir is
 correctly treated as a fixture, not a read. Only an L1 test is scheduled.

@@ -56,6 +56,36 @@ into temporary directories using names like `.claude/skills/x/SKILL.md` or
 `README.md`; counting those would schedule tests for every README edit. A path
 built at run time (`format!`) is invisible to the index.
 
+Two spellings look like reads but are not counted:
+
+| Spelling | Why it is not a read | Write instead |
+|---|---|---|
+| `repo_root().join("prompts")` | a single top-level directory is too coarse to say which file is read | the full path, `"prompts/implement.md"` |
+| `stage(&repo_root(), "prompts/implement.md")` | a root call followed by `,` does not mark the file as reading through a root, so the literal beside it is ignored | `let root = repo_root();` then `stage(&root, …)` |
+
+### Files a read document transcludes
+
+A Markdown document can pull other files in with Darkmatter's `::file`
+directive, and a test that composes the document reads those files too. The
+planner follows the directives: when a changed file is transcluded by a
+document some test reads, directly or through other documents, that test is
+scheduled exactly as if it named the changed file.
+
+```text
+prompts/_os.md changed
+  ← transcluded by prompts/_implement/implement-plan.md   (::file "../_os.md")
+    ← named by compose_caller_file_provenance::shipped_implement_router_…
+→ one narrowed L1 cell for that test, its reason naming prompts/_os.md
+```
+
+The search covers Markdown files in the changed file's top-level directory
+(`prompts/` for `prompts/_os.md`). A target is relative to the document, or to
+the repository root when spelled `@…`; a target holding an expression
+(`{{lessons_learned}}`) names no file until run time and is skipped. Only test
+references carry over: a document embedded into shipped code holds its own
+text, not the files it transcludes, so a transcluded file never becomes source
+of the package that embeds the document.
+
 Because the walk is exact, each reference resolves to a precise nextest test
 identity: `binary_id(darkmatter::l1) & test(=schema_phase_validation::public_docs_…)`
 for a literal inside a test function, or the whole binary,
