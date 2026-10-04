@@ -1,0 +1,129 @@
+
+
+
+  - variable $default_size perl.pl:4:4
+  - variable $queue perl.pl:12:9
+  - variable $size perl.pl:7:8
+  - parameter a [in namespace geometry] cpp.cpp:16:23
+  - public class Account { balance: int } php.php:4:1
+  - public method Add(amount: int) -> void [in class Ledger] c_sharp.cs:11:9
+  - parameter amount [in class Account] php.php:8:34
+  - parameter amount [in class Ledger] c_sharp.cs:11:29
+  - parameter amount [in type Widget] rust.rs:13:28
+  - parameter amount [in class Panel] typescript.ts:16:8
+  - public method Audit() -> void [in interface IAuditable] c_sharp.cs:24:9
+  - parameter b [in namespace geometry] cpp.cpp:16:40
+  - private field balance [in class Account] php.php:6:18
+  - function build_target() bash.sh:6:1
+  - public function build_widget() -> Widget rust.rs:25:1
+  - public function buildButton() javascript.js:13:8
+  - internal function buildMeter() -> Meter swift.swift:15:1
+  - public function buildPanel(): Panel typescript.ts:21:8
+  - public class Button javascript.js:3:8
+  - public enum variant Circle [in enum Shape] rust.rs:19:5
+  - function clean_target() bash.sh:11:1
+  - public constructor constructor(label) [in class Button] javascript.js:4:3
+  - public constructor constructor(size: Size) [in class Panel] typescript.ts:12:3
+  - private field count [in class Counter] java.java:4:17
+  - public class Counter { count: int } java.java:3:1
+  - public const DEFAULT_LABEL javascript.js:17:14
+  - module-private variable default_size lua.lua:5:7
+  - variable DEFAULT_TARGET bash.sh:4:1
+  - public method deposit(amount: int) -> void [in class Account] php.php:8:5
+  - method describe() lua.lua:11:1
+  - public function dot(a: Vector, b: Vector) -> int [in namespace geometry] cpp.cpp:16:5
+  - internal method doubled() -> Int [in type Meter] swift.swift:6:5
+  - public method empty() -> Tag [in module Tag] scala.scala:14:3
+  - public method Empty() -> Ledger [in class Ledger] c_sharp.cs:16:9
+  - namespace geometry cpp.cpp:3:11
+  - public method grow(self, amount: u32) -> () [in type Widget] rust.rs:13:5
+  - public method grow(amount: number): void [in class Panel] typescript.ts:16:3
+  - module-private function helper() lua.lua:15:1
+  - public interface IAuditable c_sharp.cs:22:5
+  - public method increment() -> void [in class Counter] java.java:10:5
+  - parameter label [in class Button] javascript.js:4:15
+  - public class Ledger { total: int, Total: int } c_sharp.cs:5:5
+  - public method length() -> int [in class Vector] cpp.cpp:9:5
+  - module-private variable M lua.lua:3:7
+  - public const MAX_SIZE rust.rs:23:11
+  - internal type Meter { reading: Int } swift.swift:3:1
+  - namespace Multi c_sharp.cs:3:1
+  - module Multi::Queue perl.pl:2:1
+  - public method name() [in trait Named] scala.scala:6:3
+  - parameter name [in class Tag] scala.scala:9:15
+  - public trait Named scala.scala:5:1
+  - public method new(size: u32) -> Self [in type Widget] rust.rs:9:5
+  - function new_bag(size) lua.lua:7:1
+  - function new_queue() [in module Multi::Queue] perl.pl:6:1
+  - public method open() -> Account [in class Account] php.php:13:5
+  - public function open_account() -> Account php.php:19:1
+  - module-private variable origin_count c.c:10:12
+  - parameter p c.c:12:28
+  - public class Panel { size: Size } typescript.ts:9:8
+  - type point { x: int, y: int } c.c:3:1
+  - type point c.c:8:9
+  - type point c.c:12:15
+  - public function point_sum(p: struct point) -> int c.c:12:5
+  - type alias point_t c.c:8:1
+  - public method press() [in class Button] javascript.js:8:3
+  - typeset PROMPT_STYLE zsh.zsh:4:12
+  - variable PROMPT_STYLE zsh.zsh:12:5
+  - function queue_size() [in module Multi::Queue] perl.pl:11:1
+  - internal method read() -> Int [in interface Readable] swift.swift:12:5
+  - internal interface Readable swift.swift:11:1
+  - internal var reading [in type Meter] swift.swift:4:9
+  - function render_prompt() zsh.zsh:6:1
+  - public method reset() -> void [in interface Resettable] java.java:20:5
+  - public function reset_origin() -> void c.c:16:6
+  - function reset_prompt() zsh.zsh:11:1
+  - package interface Resettable java.java:19:1
+  - parameter self [in type Widget] rust.rs:13:22
+  - public enum Shape { Circle, Square } rust.rs:18:1
+  - public property size [in interface Sized] typescript.ts:4:3
+  - public field size [in type Widget] rust.rs:5:9
+  - public type alias Size typescript.ts:7:8
+  - parameter size lua.lua:7:20
+  - parameter size [in type Widget] rust.rs:9:16
+  - public property size [in class Panel] typescript.ts:10:3
+  - parameter size [in class Panel] typescript.ts:12:15
+  - public interface Sized { size: number } typescript.ts:3:8
+  - public enum variant Square [in enum Shape] rust.rs:20:5
+  - parameter start [in class Counter] java.java:6:24
+  - local style zsh.zsh:7:11
+  - public class Tag { name: String } scala.scala:9:1
+  - public module Tag scala.scala:13:1
+  - local target bash.sh:7:11
+  - private field total [in class Ledger] c_sharp.cs:7:21
+  - public property Total [in class Ledger] c_sharp.cs:9:9
+  - public method upper() -> String [in class Tag] scala.scala:10:3
+  - class Vector { x_: int, y_: int } cpp.cpp:5:1
+  - public method Vector(x: int, y: int) [in class Vector] cpp.cpp:7:5
+  - public struct Widget { size: u32 } rust.rs:4:1
+  - field x [in type point] c.c:4:9
+  - parameter x [in class Vector] cpp.cpp:7:16
+  - private field x_ [in class Vector] cpp.cpp:12:9
+  - field y [in type point] c.c:5:9
+  - parameter y [in class Vector] cpp.cpp:7:23
+  - private field y_ [in class Vector] cpp.cpp:13:9
+  - public method zero() -> Counter [in class Counter] java.java:14:5
+
+
+nested
+
+  - method __init__(self, size) [in class Gadget] nested/python.py:9:5
+  - parameter amount nested/go.go:9:23
+  - parameter amount [in class Gadget] nested/python.py:12:20
+  - function build_gadget() nested/python.py:16:1
+  - public function BuildWidget() Widget nested/go.go:15:1
+  - class Gadget nested/python.py:6:1
+  - public method Grow(amount int) (amount int) nested/go.go:9:1
+  - method grow(self, amount) [in class Gadget] nested/python.py:12:5
+  - = MAX_SIZE nested/python.py:3:1
+  - public const MaxSize nested/go.go:13:7
+  - namespace nested nested/go.go:2:9
+  - parameter self [in class Gadget] nested/python.py:9:18
+  - parameter self [in class Gadget] nested/python.py:12:14
+  - parameter size [in class Gadget] nested/python.py:9:24
+  - parameter w nested/go.go:9:7
+  - public type Widget { Size int } nested/go.go:5:1
+

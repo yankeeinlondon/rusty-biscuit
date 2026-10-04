@@ -1,10 +1,12 @@
 //! `hug` checks for `2026-10-03-visibility-and-kind`: representative CLI wiring
 //! of kinds, visibility and static members (test 7), and the warm-cache
 //! upgrade across a schema and an extractor revision change (test 8), and the
-//! persistent-cache reader contract for malformed symbol fields.
+//! persistent-cache reader contract for malformed symbol fields, plus the
+//! `hug symbols` output goldens over the 16-language `multi/` fixture tree.
 
 mod cache_robustness;
 mod cache_upgrade;
+mod golden;
 mod wiring;
 
 use std::path::{Path, PathBuf};
@@ -51,7 +53,11 @@ impl Scratch {
             .expect("git must be on PATH to create the scratch repository");
         assert!(status.success(), "git init failed in the scratch repository");
         for (name, contents) in files {
-            std::fs::write(scratch.repo.path().join(name), contents).expect("write fixture");
+            let path = scratch.repo.path().join(name);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).expect("create fixture directory");
+            }
+            std::fs::write(path, contents).expect("write fixture");
         }
         scratch
     }
