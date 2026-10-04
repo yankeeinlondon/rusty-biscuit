@@ -251,3 +251,6 @@ Other L1 facts:
   used to keep only the current branch and its parent, so a holder `wt`
   passed was silently dropped and its fork reported as undrawn. It now keeps
   the parent chain and any lane holding an in-view lane's fork.
+- `GraphFacts::to_git_graph` tags each `MergedElsewhere` tip `in <into>`
+  (`with_ref`), only when that tip is one of the branch line's drawn
+  entries: an undrawn ref would come back as a `GraphOmission::Tag` note.

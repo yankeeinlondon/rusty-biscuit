@@ -309,3 +309,13 @@ Pure over `TableFacts`; snapshot tests in `cli/tests/list_table.rs`.
 
 See [testing.md](testing.md#wt-list) and `worktree/docs/performance-testing.md`
 (measurements and the `git status` findings).
+- **Caption own-line note.** `Caption::behind_on_line` (`listing::line_steps`,
+  one `rev-list --first-parent --parents`) is read in `gather_ref_facts` only
+  when strictly behind, through `line_steps_cached`: it rides on the caption
+  comparison's cache entry (`CacheValue::line`, optional, so older files
+  load). **Trap:** an uncached call breaks
+  `one_cache_serves_the_caption_and_both_target_columns`, which pins a warm
+  listing at zero `rev-list` calls. `own_line_markup` puts an italic aside
+  after the count (`45 commits (1 merge) behind`, or `(3 on main's line)`)
+  only when it is fewer than `behind`; it reconciles the caption's count with the graph's
+  first-parent default lane.
