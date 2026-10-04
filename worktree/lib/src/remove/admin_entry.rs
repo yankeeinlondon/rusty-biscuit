@@ -7,6 +7,11 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::availability::EntryKind;
+use crate::copy_record::canonical_worktree_path;
+use crate::error::WorktreeError;
+use crate::git::git_from;
+
 /// Why a `gitdir` back-reference could not be read.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum BackReferenceError {
@@ -73,6 +78,109 @@ fn path_from_bytes(bytes: &[u8]) -> Result<PathBuf, BackReferenceError> {
     std::str::from_utf8(bytes).map(PathBuf::from).map_err(|_| BackReferenceError::NotUtf8)
 }
 
+/// A linked worktree's administrative directory, identified through its
+/// back-reference.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdminEntry {
+    /// `<common-git-dir>/worktrees/<id>` as listed from the common directory.
+    pub dir: PathBuf,
+}
+
+impl AdminEntry {
+    /// The entry's own index, which outlives a deleted checkout.
+    pub fn index(&self) -> PathBuf {
+        self.dir.join("index")
+    }
+}
+
+/// Why no single administrative entry could be associated with a target.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum AssociationError {
+    #[error("Git's common directory could not be found: {0}")]
+    CommonDirUnknown(String),
+    #[error("Git's worktree records at {} could not be listed: {reason}", .dir.display())]
+    Unlistable { dir: PathBuf, reason: String },
+    #[error("the worktree record at {} can't be read: {error}", .dir.display())]
+    Unreadable { dir: PathBuf, error: BackReferenceError },
+    #[error("no worktree record points to this checkout")]
+    NotFound,
+    #[error("more than one worktree record points to this checkout: {}", display_list(.0))]
+    Ambiguous(Vec<PathBuf>),
+}
+
+fn display_list(paths: &[PathBuf]) -> String {
+    paths.iter().map(|path| path.display().to_string()).collect::<Vec<_>>().join(", ")
+}
+
+/// This repository's common Git directory, as an absolute path, from Git
+/// itself (the base checkout's `.git` may be a file).
+pub fn common_git_dir(base: &Path) -> Result<PathBuf, WorktreeError> {
+    git_from(base, base, &["rev-parse", "--path-format=absolute", "--git-common-dir"]).map(PathBuf::from)
+}
+
+/// The one administrative entry whose back-reference names `target`'s `.git`.
+///
+/// Every directory under `<common-git-dir>/worktrees/` is read; a single
+/// unreadable record (or one that is a link) refuses the association, because it might be the one
+/// that points here. Paths compare after canonicalizing their longest
+/// existing ancestor, so a missing checkout still matches across symlink
+/// aliases and Windows short names.
+///
+/// ## Errors
+///
+/// Every [`AssociationError`]: no common directory, an unlistable or
+/// unreadable record, no match, or more than one match.
+pub fn admin_entry_for(base: &Path, target: &Path) -> Result<AdminEntry, AssociationError> {
+    let common = common_git_dir(base).map_err(|error| AssociationError::CommonDirUnknown(error.to_string()))?;
+    admin_entry_in(&common, target)
+}
+
+/// [`admin_entry_for`] with the common directory already known.
+pub fn admin_entry_in(common_dir: &Path, target: &Path) -> Result<AdminEntry, AssociationError> {
+    let records = common_dir.join("worktrees");
+    let unlistable = |error: std::io::Error| AssociationError::Unlistable { dir: records.clone(), reason: error.to_string() };
+    // Checkouts are compared rather than their `.git` entries: the reader
+    // proved each back-reference ends in `.git`, and another record's
+    // checkout replaced by a file must not make `<file>/.git` unresolvable.
+    let wanted = canonical_worktree_path(target).map_err(unlistable)?;
+    let mut matches = Vec::new();
+    let mut dirs = std::fs::read_dir(&records).map_err(unlistable)?
+        .map(|record| record.map(|record| record.path()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(unlistable)?;
+    dirs.sort();
+    for dir in dirs {
+        let unreadable = |error| AssociationError::Unreadable { dir: dir.clone(), error };
+        match crate::availability::inspect(&dir) {
+            Ok(EntryKind::Directory) => {}
+            // A plain file is no worktree record (Git skips it too).
+            Ok(EntryKind::File) => continue,
+            Ok(EntryKind::Link) => return Err(unreadable(BackReferenceError::Unreadable("the record is a link".into()))),
+            Err(error) => return Err(unreadable(BackReferenceError::Unreadable(error.to_string()))),
+        }
+        let named = read_back_reference(&dir).map_err(unreadable)?;
+        let named = canonical_worktree_path(named.parent().unwrap_or(&named))
+            .map_err(|error| unreadable(BackReferenceError::Unreadable(error.to_string())))?;
+        if named == wanted {
+            matches.push(dir);
+        }
+    }
+    match matches.len() {
+        0 => Err(AssociationError::NotFound),
+        1 => Ok(AdminEntry { dir: matches.remove(0) }),
+        _ => Err(AssociationError::Ambiguous(matches)),
+    }
+}
+
+/// Whether `a` and `b` name the same location; see [`canonical_worktree_path`].
+/// A path that can't be resolved at all compares unequal.
+pub(crate) fn same_location(a: &Path, b: &Path) -> bool {
+    match (canonical_worktree_path(a), canonical_worktree_path(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -134,5 +242,79 @@ mod tests {
 
         fs::create_dir(&gitdir).unwrap();
         assert!(matches!(read_back_reference(&admin), Err(BackReferenceError::Unreadable(_))), "a directory, not a file");
+    }
+
+    /// Association walks every record: one match is the control row, and
+    /// each later cell edits a real Git fixture once.
+    #[test]
+    fn association_requires_exactly_one_readable_record() {
+        let repo = TestRepo::new();
+        let target = repo.add_worktree("feat/t", "t", "main");
+        repo.add_worktree("feat/o", "o", "main");
+        fs::remove_file(target.join(".git")).unwrap();
+        let common = common_git_dir(&repo.path()).unwrap();
+        let records = common.join("worktrees");
+        let own = records.join("t");
+
+        let found = admin_entry_for(&repo.path(), &target).expect("control row");
+        assert_eq!(found.dir, own);
+        assert_eq!(found.index(), own.join("index"));
+
+        let other = repo.path().parent().unwrap().join("wts").join("o");
+        fs::remove_dir_all(&other).unwrap();
+        fs::write(&other, "replaced by a file").unwrap();
+        assert_eq!(admin_entry_in(&common, &target).map(|entry| entry.dir), Ok(own.clone()), "another record's checkout replaced by a file");
+
+        fs::write(records.join("stray-file"), "not a record").unwrap();
+        assert_eq!(admin_entry_in(&common, &target).map(|entry| entry.dir), Ok(own.clone()), "a plain file is skipped");
+
+        let duplicate = records.join("t-copy");
+        fs::create_dir(&duplicate).unwrap();
+        fs::copy(own.join("gitdir"), duplicate.join("gitdir")).unwrap();
+        assert_eq!(admin_entry_in(&common, &target), Err(AssociationError::Ambiguous(vec![own.clone(), duplicate.clone()])), "two records, never last-wins");
+        fs::remove_dir_all(&duplicate).unwrap();
+
+        fs::write(records.join("o").join("gitdir"), "").unwrap();
+        assert!(matches!(admin_entry_in(&common, &target), Err(AssociationError::Unreadable { ref dir, error: BackReferenceError::Empty }) if *dir == records.join("o")), "any unreadable record refuses");
+        fs::remove_file(records.join("o").join("gitdir")).unwrap();
+        assert!(matches!(admin_entry_in(&common, &target), Err(AssociationError::Unreadable { error: BackReferenceError::Missing, .. })), "a record without gitdir refuses");
+        fs::remove_dir_all(records.join("o")).unwrap();
+
+        fs::write(own.join("gitdir"), b"../../../../wts/t/.git\n").unwrap();
+        assert_eq!(admin_entry_in(&common, &target).map(|entry| entry.dir), Ok(own.clone()), "relative back-reference");
+
+        fs::write(own.join("gitdir"), format!("{}\n", repo.path().join("elsewhere").join(".git").display())).unwrap();
+        assert_eq!(admin_entry_in(&common, &target), Err(AssociationError::NotFound), "no match is a refusal, never safe");
+    }
+
+    #[test]
+    fn a_missing_checkout_is_associated_by_its_spelling() {
+        let repo = TestRepo::new();
+        let target = repo.add_worktree("feat/m", "m", "main");
+        fs::remove_dir_all(&target).unwrap();
+        let found = admin_entry_for(&repo.path(), &target).unwrap();
+        assert!(found.dir.ends_with("worktrees/m"));
+    }
+
+    /// The base checkout's `.git` is a file here; the common directory comes
+    /// from Git, not from assuming `<base>/.git` is it.
+    #[test]
+    fn the_common_directory_comes_from_git_not_from_the_base_layout() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join("base");
+        let separate = dir.path().join("separate.git");
+        let git = |cwd: &Path, args: &[&str]| {
+            let status = std::process::Command::new("git").current_dir(cwd).args(args).output().unwrap();
+            assert!(status.status.success(), "{args:?}: {}", String::from_utf8_lossy(&status.stderr));
+        };
+        fs::create_dir(&base).unwrap();
+        git(&base, &["init", "-q", "-b", "main", "--separate-git-dir", separate.to_str().unwrap()]);
+        git(&base, &["-c", "user.email=t@example.com", "-c", "user.name=T", "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "init"]);
+        let target = dir.path().join("wt");
+        git(&base, &["worktree", "add", "-q", "-b", "feat/s", target.to_str().unwrap()]);
+        assert!(base.join(".git").is_file());
+
+        let found = admin_entry_for(&base, &target).unwrap();
+        assert!(same_location(&found.dir, &separate.join("worktrees").join("wt")), "{found:?}");
     }
 }

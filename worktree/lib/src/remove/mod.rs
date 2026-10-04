@@ -12,7 +12,9 @@ pub mod admin_entry;
 pub mod handoff;
 pub mod included;
 pub mod inventory;
+pub mod missing;
 pub mod remote;
+pub mod repair;
 pub mod safety;
 
 #[cfg(test)]
@@ -20,10 +22,52 @@ pub(crate) mod test_support;
 
 use std::path::Path;
 
+use crate::availability::{self, Availability, OtherCondition};
 use crate::error::WorktreeError;
 use crate::git::git_from;
+use crate::worktree::WorktreeEntry;
 
 pub use inventory::{DirtyEntry, Inventory, collect_inventory};
+use missing::{MissingCheckout, MissingRefusal, inspect_missing};
+use repair::{RepairGit, RepairRefusal, RepairReport, repair_unlinked};
+
+/// The removal target's checkout as prepared for removal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CheckoutState {
+    /// Git can read the checkout; nothing was done to it.
+    Healthy,
+    /// The directory is gone; its surviving record was inspected instead.
+    Missing(MissingCheckout),
+    /// The `.git` file was missing and its link was restored and verified.
+    Repaired(RepairReport),
+}
+
+/// Why the target could not be prepared. Nothing was removed; only
+/// [`PrepareRefusal::Repair`] with an attempted repair may have changed Git
+/// metadata (see [`RepairRefusal::repair_attempted`]).
+#[derive(Debug, thiserror::Error)]
+pub enum PrepareRefusal {
+    /// Git can't read the checkout, and it is neither missing nor unlinked.
+    #[error("Git can't read this worktree")]
+    Unavailable(OtherCondition),
+    #[error(transparent)]
+    Missing(MissingRefusal),
+    #[error(transparent)]
+    Repair(RepairRefusal),
+}
+
+/// Classifies `entry` from a fresh look at the filesystem and readies it for
+/// the removal checks: a healthy checkout is left alone, a missing one has
+/// its record inspected, an unlinked one is repaired and verified, and any
+/// other state refuses.
+pub fn prepare(base: &Path, entry: &WorktreeEntry, git: &dyn RepairGit) -> Result<CheckoutState, PrepareRefusal> {
+    match availability::classify(entry) {
+        Availability::Healthy => Ok(CheckoutState::Healthy),
+        Availability::Missing => inspect_missing(base, entry).map(CheckoutState::Missing).map_err(PrepareRefusal::Missing),
+        Availability::Unlinked => repair_unlinked(base, entry, git).map(CheckoutState::Repaired).map_err(PrepareRefusal::Repair),
+        Availability::Other(condition) => Err(PrepareRefusal::Unavailable(condition)),
+    }
+}
 
 /// Removes the worktree at `path` (`git worktree remove`, with `--force` when
 /// its files may be discarded).
@@ -97,7 +141,41 @@ pub fn check_not_in_use(path: &Path) -> Result<(), WorktreeError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::worktree::parse_worktree_list;
     use test_support::TestRepo;
+
+    fn listed(repo: &TestRepo, path: &Path) -> WorktreeEntry {
+        parse_worktree_list(&repo.git(&["worktree", "list", "--porcelain"]))
+            .into_iter()
+            .find(|entry| admin_entry::same_location(&entry.path, path))
+            .expect("listed")
+    }
+
+    #[test]
+    fn preparation_follows_the_checkout_state() {
+        let repo = TestRepo::new();
+        let base = repo.path();
+        let healthy = repo.add_worktree("feat/h", "h", "main");
+        let missing = repo.add_worktree("feat/m", "m", "main");
+        let unlinked = repo.add_worktree("feat/u", "u", "main");
+        let damaged = repo.add_worktree("feat/d", "d", "main");
+        std::fs::remove_dir_all(&missing).unwrap();
+        std::fs::remove_file(unlinked.join(".git")).unwrap();
+        // Prunable, yet not unlinked: the directory was replaced by a file.
+        std::fs::remove_dir_all(&damaged).unwrap();
+        std::fs::write(&damaged, "not a checkout").unwrap();
+
+        assert_eq!(prepare(&base, &listed(&repo, &healthy), &repair::Git).unwrap(), CheckoutState::Healthy);
+        let prepared = prepare(&base, &listed(&repo, &missing), &repair::Git);
+        assert!(matches!(&prepared, Ok(CheckoutState::Missing(m)) if !m.needs_consent()), "{prepared:?}");
+        assert!(matches!(prepare(&base, &listed(&repo, &unlinked), &repair::Git), Ok(CheckoutState::Repaired(_))));
+        assert!(unlinked.join(".git").is_file(), "repaired before any inventory");
+        assert!(matches!(
+            prepare(&base, &listed(&repo, &damaged), &repair::Git),
+            Err(PrepareRefusal::Unavailable(OtherCondition::NotADirectory))
+        ));
+        assert_eq!(std::fs::read_to_string(&damaged).unwrap(), "not a checkout");
+    }
 
     #[test]
     fn an_unheld_directory_passes_the_lock_check_untouched() {

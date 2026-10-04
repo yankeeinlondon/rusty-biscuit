@@ -203,14 +203,14 @@ pub fn collect_inventory(base: &Path, worktree: &Path) -> Result<Inventory, Work
 /// not UTF-8 there name no file this process could address, and are refused
 /// rather than decoded lossily into a different name.
 #[cfg(unix)]
-fn path_from_git(bytes: &[u8]) -> Result<PathBuf, WorktreeError> {
+pub(crate) fn path_from_git(bytes: &[u8]) -> Result<PathBuf, WorktreeError> {
     use std::os::unix::ffi::OsStrExt;
     Ok(PathBuf::from(OsStr::from_bytes(bytes)))
 }
 
 /// See the Unix variant.
 #[cfg(not(unix))]
-fn path_from_git(bytes: &[u8]) -> Result<PathBuf, WorktreeError> {
+pub(crate) fn path_from_git(bytes: &[u8]) -> Result<PathBuf, WorktreeError> {
     String::from_utf8(bytes.to_vec()).map(PathBuf::from).map_err(|_| {
         WorktreeError::GitParse(format!(
             "git listed a path that is not UTF-8: {}",
