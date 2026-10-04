@@ -468,6 +468,31 @@ fn format_package_items(pkg: &sniff::filesystem::repo::Package, verbose: u8) -> 
 
     items
 }
+/// The dimmed indicator legend, preceded by a blank spacing row.
+fn indicator_legend(
+    has_updatable: bool,
+    has_major: bool,
+    has_excluded: bool,
+    terminal: &Terminal,
+) -> String {
+    let mut legend = String::from("<dim>");
+    if has_updatable {
+        legend.push_str("<yellow>*</yellow> dependency updates available");
+        if has_major {
+            legend.push_str("  <red>*</red> major version update available");
+        }
+        if has_excluded {
+            legend.push_str("  ");
+        }
+    }
+    if has_excluded {
+        legend.push_str("packages in <orange>orange</orange> are excluded from the workspace");
+    }
+    legend.push_str("</dim>");
+    // The blank row sits outside the Prose, which trims edge newlines.
+    format!("\n{}\n", Prose::new(&legend).render(terminal))
+}
+
 pub fn render_repo_section(
     repo: &sniff::filesystem::repo::RepoInfo,
     verbose: u8,
@@ -591,26 +616,11 @@ pub fn render_repo_section(
 
         // Legend for indicators
         if has_updatable || has_excluded {
-            let mut legend = String::from("\n<dim>");
-            if has_updatable {
-                legend.push_str("<yellow>*</yellow> dependency updates available");
-                let has_major = filtered
+            let has_major = has_updatable
+                && filtered
                     .iter()
                     .any(|pkg| pkg.has_major_update == Some(true));
-                if has_major {
-                    legend.push_str("  <red>*</red> major version update available");
-                }
-                if has_excluded {
-                    legend.push_str("  ");
-                }
-            }
-            if has_excluded {
-                legend.push_str(
-                    "packages in <orange>orange</orange> are excluded from the workspace",
-                );
-            }
-            legend.push_str("</dim>");
-            writeln!(out, "{}", Prose::new(&legend).render(&terminal)).unwrap();
+            out.push_str(&indicator_legend(has_updatable, has_major, has_excluded, &terminal));
         }
     } else {
         let summary = format_monorepo_summary(repo);
@@ -1004,4 +1014,24 @@ pub fn render_filesystem_section(
     }
 
     out
+}
+
+#[cfg(test)]
+mod legend_tests {
+    use super::*;
+
+    #[test]
+    fn the_indicator_legend_follows_one_blank_row() {
+        let terminal = Terminal::builder()
+            .width(200)
+            .color_depth(biscuit_terminal::discovery::detection::ColorDepth::None)
+            .build();
+        let legend = indicator_legend(true, true, true, &terminal);
+        let rows: Vec<&str> = legend.split('\n').collect();
+        assert_eq!(rows.len(), 3, "{legend:?}");
+        assert_eq!(rows[0], "", "{legend:?}");
+        assert!(rows[1].starts_with("* dependency updates available"), "{legend:?}");
+        assert!(rows[1].ends_with("are excluded from the workspace"), "{legend:?}");
+        assert_eq!(rows[2], "", "{legend:?}");
+    }
 }

@@ -415,8 +415,10 @@ fn closing_backtick_run(text: &str, ticks: usize) -> Option<usize> {
 fn escape_chars(text: &str, format: Format) -> String {
     let mut escaped = String::with_capacity(text.len());
     for character in text.chars() {
+        // Markdown alone also reads `~` (strikethrough) and `&` (an entity
+        // or character reference such as `&copy;`) as markup.
         let markup = matches!(character, '\\' | '*' | '_' | '[' | ']' | '<' | '>')
-            || (character == '`' && format == Format::Markdown);
+            || (matches!(character, '`' | '~' | '&') && format == Format::Markdown);
         if markup {
             escaped.push('\\');
         }
@@ -425,9 +427,11 @@ fn escape_chars(text: &str, format: Format) -> String {
     escaped
 }
 
-/// Percent-encode characters that would end a `[text](url)` target early.
+/// Percent-encode characters that would end a `[text](url)` target early or,
+/// for `&`, be decoded as an entity reference.
 fn link_target(url: &str) -> String {
-    url.replace('(', "%28")
+    url.replace('&', "%26")
+        .replace('(', "%28")
         .replace(')', "%29")
         .replace(' ', "%20")
         .replace('<', "%3C")
@@ -840,6 +844,16 @@ mod tests {
             assert_eq!(escape("odd ` a_b", Format::Prose), r"odd ` a\_b");
             // Markdown escapes the backticks, so it opens no span.
             assert_eq!(escape("`a_b`", Format::Markdown), r"\`a\_b\`");
+        }
+
+        #[test]
+        fn markdown_keeps_strikethrough_and_entity_spellings_literal() {
+            assert_eq!(
+                escape("~~gone~~ &copy; AT&T", Format::Markdown),
+                r"\~\~gone\~\~ \&copy; AT\&T"
+            );
+            assert_eq!(escape("~ &", Format::Prose), "~ &");
+            assert_eq!(link_target("file:///a&copy;b"), "file:///a%26copy;b");
         }
 
         #[test]
