@@ -700,9 +700,10 @@ impl GraphRun {
     }
 }
 
-/// A short window: the base view's graph is capped at half the rows, so
-/// lanes are left out and the notice counts them; the image Kitty draws fills
-/// exactly the rows `wt` reserved.
+/// A short window: the base view's graph gets only the rows the rest of the
+/// listing leaves (`graph_row_budget`, unit tested), so lanes are left out
+/// and a note counts them; the image Kitty draws fills exactly the rows `wt`
+/// reserved.
 #[test]
 #[serial(level2_terminal)]
 fn level2_graph_height_cap_elides_lanes_in_a_short_kitty_window() {
@@ -711,7 +712,7 @@ fn level2_graph_height_cap_elides_lanes_in_a_short_kitty_window() {
     let fixture = Fixture::new();
     let run = GraphRun::new(&fixture, 100, 32);
 
-    assert!(run.transmitted.rows <= run.lines / 2, "{} rows exceed half of {}", run.transmitted.rows, run.lines);
+    assert!(run.transmitted.rows < run.lines, "{} rows fill the {}-row window", run.transmitted.rows, run.lines);
     run.assert_table_intact();
     let hidden = graph_drawn_or_skip!(run).unwrap_or_else(|| {
         panic!("the capped graph should note the lanes it left out:\n{}", run.screen.join("\n"))
@@ -753,7 +754,7 @@ fn level2_graph_draws_a_merged_branch_in_kitty() {
         run.keep_evidence("merged");
         assert!(run.transmitted.rows <= run.lines / 2, "{} rows exceed half of {}", run.transmitted.rows, run.lines);
         let all = run.all.join("\n");
-        assert!(!all.contains("at its own commit") && !all.contains("clone is shallow"), "a merged branch is complete history:\n{all}");
+        assert!(!names_an_omission(&all), "a merged branch is complete history:\n{all}");
         run.assert_table_intact();
         assert_eq!(graph_drawn_or_skip!(run), None, "no lane is left out:\n{}", run.screen.join("\n"));
     }
@@ -776,7 +777,7 @@ fn level2_graph_restores_lane_density_in_kitty() {
     run.keep_evidence("sparse");
     assert!(run.transmitted.rows <= run.lines / 2, "{} rows exceed half of {}", run.transmitted.rows, run.lines);
     let all = run.all.join("\n");
-    assert!(!all.contains("at its own commit") && !all.contains("clone is shallow"), "every fork and merge is drawn:\n{all}");
+    assert!(!names_an_omission(&all), "every fork and merge is drawn:\n{all}");
     assert!(!all.contains("in the graph:"), "no lane is left out:\n{all}");
     run.assert_table_intact();
     assert_eq!(graph_drawn_or_skip!(run), None, "no lane is left out:\n{}", run.screen.join("\n"));
@@ -798,7 +799,7 @@ fn level2_graph_draws_a_branch_continued_after_its_merge_in_kitty() {
     run.keep_evidence("continued");
     assert!(run.transmitted.rows <= run.lines / 2, "{} rows exceed half of {}", run.transmitted.rows, run.lines);
     let all = run.all.join("\n");
-    assert!(!all.contains("at its own commit") && !all.contains("clone is shallow"), "the continued branch is connected:\n{all}");
+    assert!(!names_an_omission(&all), "the continued branch is connected:\n{all}");
     assert!(!all.contains("in the graph:"), "no lane is left out:\n{all}");
     run.assert_table_intact();
     assert_eq!(graph_drawn_or_skip!(run), None, "no lane is left out:\n{}", run.screen.join("\n"));
@@ -836,4 +837,21 @@ fn level2_sparse_lanes_fixture_has_the_observed_topology() {
     assert_eq!(record("fix/sniff"), Some(("fix/wt-ux", sparse.w1.as_str())), "created at W1");
     assert_eq!(record("fix/wt-ux"), Some(("main", sparse.d5.as_str())), "created at d5");
     assert_eq!(record("feat/schema-enhancement"), Some(("main", sparse.d2.as_str())), "created at d2");
+}
+
+/// Whether the closing notes say the graph left something out: a lane it
+/// couldn't join, a merge or label it couldn't draw, or history Git couldn't
+/// establish.
+fn names_an_omission(text: &str) -> bool {
+    let joined = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    [
+        "isn't joined to the others",
+        "doesn't join its lane",
+        "drawn as a plain commit",
+        "label isn't in the graph",
+        "clone is shallow",
+        "couldn't answer every question",
+    ]
+    .iter()
+    .any(|phrase| joined.contains(phrase))
 }

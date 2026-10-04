@@ -29,7 +29,8 @@ use biscuit_terminal::utils::color::{BasicColor, Color, RgbColor};
 use biscuit_terminal::utils::wrap_policy::WordWrap;
 use worktree::default_target::DefaultTarget;
 
-pub use crate::commands::git_graph::MergedElsewhere;
+pub use biscuit_terminal::components::git_graph::GraphOmission;
+pub use crate::commands::git_graph::{ForkedOffLine, MergedElsewhere};
 use worktree::listing::{
     BranchComparisons, Caption, CaptionState, Comparison, MergeState, ParentComparison, TreeNode,
     TreeRow,
@@ -86,11 +87,15 @@ pub struct TableFacts<'a> {
 pub struct GraphOmissions {
     /// Worktree lanes the height cap left out.
     pub hidden_lanes: usize,
-    /// A fork, merge, or tag the graph could not draw at its own commit.
-    pub incomplete: bool,
-    /// The clone is shallow, the usual reason for `incomplete`.
+    /// What the graph left out rather than draw at another commit.
+    pub omissions: Vec<GraphOmission>,
+    /// Gathering could not establish some history (a Git command failed, or
+    /// a shallow clone's cut).
+    pub history_gap: bool,
+    /// The clone is shallow, which explains every omission and gap.
     pub shallow: bool,
     pub merged_elsewhere: Vec<MergedElsewhere>,
+    pub forked_off_line: Vec<ForkedOffLine>,
 }
 
 /// What this run's PR half came to, for the badges and the status list. The
@@ -221,8 +226,7 @@ impl<'a> TableFacts<'a> {
     }
 }
 
-/// The caption, the §5 line, the table, and the legend, each separated as
-/// printed.
+/// The caption, the table, and the legend, each separated as printed.
 ///
 /// `now` is Unix seconds, for the remote-observation ages.
 pub fn render(facts: &TableFacts<'_>, terminal: &Terminal, now: u64) -> String {
@@ -235,13 +239,8 @@ pub fn render(facts: &TableFacts<'_>, terminal: &Terminal, now: u64) -> String {
             .to_string()
     };
     let mut out = String::from("\n");
-    let caption = facts.remote.as_ref().map(|remote| caption_markup(facts.caption, remote, now));
-    let credentials = facts.credential_line.as_ref().map(credential_markup);
-    if caption.is_some() || credentials.is_some() {
-        for line in caption.into_iter().chain(credentials) {
-            out.push_str(&format!(" {}\n", wrapped(line)));
-        }
-        out.push('\n');
+    if let Some(remote) = &facts.remote {
+        out.push_str(&format!(" {}\n\n", wrapped(caption_markup(facts.caption, remote, now))));
     }
     out.push_str(table(facts, terminal).render(terminal).trim_end());
     out.push_str("\n\n");
@@ -289,9 +288,9 @@ pub fn render_status(facts: &TableFacts<'_>, terminal: &Terminal, now: u64) -> O
     (!lines.is_empty()).then(|| notes_list(&lines, terminal))
 }
 
-/// The closing notes: the `--ff` result or the §9 suggestion, then the §8
-/// notice, then what the graph left out, then one note per unavailable
-/// worktree, in table row order;
+/// The closing notes: the `--ff` result or the §9 suggestion, then the §5
+/// credentials line, then the §8 notice, then what the graph left out, then
+/// one note per unavailable worktree, in table row order;
 /// `None` when there is nothing to say.
 pub fn render_notes(facts: &TableFacts<'_>, terminal: &Terminal) -> Option<String> {
     let local = Prose::escape_text(facts.default_branch);
@@ -326,6 +325,9 @@ pub fn render_notes(facts: &TableFacts<'_>, terminal: &Terminal) -> Option<Strin
             .into(),
         );
     }
+    if let Some(line) = &facts.credential_line {
+        lines.push(credential_markup(line).into());
+    }
     if let Some(keys) = &facts.fallback_notice {
         lines.push("Git checked origin using `ls-remote`; this can take longer than the provider API.".into());
         lines.push(
@@ -348,7 +350,8 @@ pub fn render_notes(facts: &TableFacts<'_>, terminal: &Terminal) -> Option<Strin
                 .into(),
         );
     }
-    if omissions.incomplete && omissions.shallow {
+    let left_out = omissions.history_gap || !omissions.omissions.is_empty();
+    if left_out && omissions.shallow {
         lines.push(
             format!(
                 "This clone is shallow, so the graph can't connect some older history; run {} to fill it in.",
@@ -356,12 +359,18 @@ pub fn render_notes(facts: &TableFacts<'_>, terminal: &Terminal) -> Option<Strin
             )
             .into(),
         );
-    } else if omissions.incomplete {
-        lines.push(
-            "The graph leaves out a fork, merge, or tag it couldn't draw at its own commit; the table above \
-            is unaffected."
+    } else {
+        if omissions.history_gap {
+            lines.push(
+                format!(
+                    "Git couldn't answer every question about this history, so the graph may be missing \
+                    connections; run {} again to retry.",
+                    command_badge("wt list")
+                )
                 .into(),
-        );
+            );
+        }
+        lines.extend(omissions.omissions.iter().map(|omission| omission_markup(omission, &omissions.forked_off_line).into()));
     }
     for merged in &omissions.merged_elsewhere {
         let through = match &merged.through {
@@ -379,6 +388,60 @@ pub fn render_notes(facts: &TableFacts<'_>, terminal: &Terminal) -> Option<Strin
     }
     lines.extend(facts.row_statuses().into_iter().filter_map(|status| unavailable_note(status, facts.statuses)));
     (!lines.is_empty()).then(|| notes_list(&lines, terminal))
+}
+
+/// What one [`GraphOmission`] means, naming the branch and commits, and the
+/// merge that explains an unconnected lane when gathering found one.
+fn omission_markup(omission: &GraphOmission, forked_off_line: &[ForkedOffLine]) -> String {
+    let short = |sha: &str| Prose::escape_text(&sha[..sha.len().min(7)]);
+    match omission {
+        GraphOmission::UnconnectedLane { branch, fork } => {
+            let name = Prose::escape_text(branch);
+            match (forked_off_line.iter().find(|line| &line.branch == branch), fork) {
+                (Some(line), _) => format!(
+                    "{name} branched from {}, which reached {into} through merge {}, so the graph doesn't join \
+                    its lane to {into}.",
+                    short(&line.fork),
+                    short(&line.merge),
+                    into = Prose::escape_text(&line.into),
+                ),
+                (None, Some(fork)) => format!(
+                    "{name} branched from {}, which isn't in the graph, so its lane isn't joined to the others.",
+                    short(fork)
+                ),
+                (None, None) => {
+                    format!("The graph couldn't tell where {name} branched from, so its lane isn't joined to the others.")
+                }
+            }
+        }
+        GraphOmission::Merge { branch, destination } => format!(
+            "{} is drawn as a plain commit, not as {}'s merge: the graph couldn't place both ends of it.",
+            short(destination),
+            Prose::escape_text(branch)
+        ),
+        GraphOmission::Tag(name) => {
+            format!("The {} label isn't in the graph: its commit isn't drawn.", Prose::escape_text(name))
+        }
+    }
+}
+
+/// The fewest rows the graph is given, however full the screen: the default
+/// lane and about one more.
+pub const GRAPH_MIN_ROWS: u32 = 12;
+
+/// Rows held back for what is printed after the graph is planned: the
+/// graph's own closing notes (lanes left out, what it couldn't draw) and the
+/// shell prompt that follows the listing.
+const GRAPH_ROW_RESERVE: u32 = 4;
+
+/// The rows the graph may take so the whole listing fits on a `rows`-row
+/// screen: what is left after every other `section` (each counted by its
+/// lines, with the blank line before the notes) and [`GRAPH_ROW_RESERVE`],
+/// never fewer than [`GRAPH_MIN_ROWS`].
+pub fn graph_row_budget(rows: u32, sections: &[Option<&str>]) -> u32 {
+    let used: usize = sections.iter().flatten().map(|section| section.lines().count()).sum::<usize>() + 1;
+    let used = u32::try_from(used).unwrap_or(u32::MAX).saturating_add(GRAPH_ROW_RESERVE);
+    rows.saturating_sub(used).max(GRAPH_MIN_ROWS)
 }
 
 /// The sections of one listing, in the order [`assemble`] prints them.
@@ -660,7 +723,7 @@ fn last_known_text(last: LastKnown, now: u64) -> String {
     }
 }
 
-/// The dim §5 line.
+/// The §5 line, one of the closing notes.
 pub fn credential_markup(line: &CredentialLine) -> String {
     let provider = &line.provider;
     let key = &line.key;
@@ -687,7 +750,7 @@ pub fn credential_markup(line: &CredentialLine) -> String {
             format!("{provider} answered without an API key; set {key} to authenticate API requests.")
         }
     };
-    format!("<dim>{}</dim>", Prose::escape_text(&text))
+    Prose::escape_text(&text)
 }
 
 /// An age in the PR age line's units: `less than 1 min` below a minute, then
@@ -704,7 +767,8 @@ pub fn age_text(seconds: u64) -> String {
 
 /// The legend lines: the Worktree column's glyphs, then the Branch column's.
 /// The `conflicts` sample sits in the column of the source-files dot above
-/// it. `✕` and `?` are explained only when a row of `facts` shows them, at
+/// it, and the `parent deleted` sample in the column of the `✕` entry (or
+/// where it would be). `✕` and `?` are explained only when a row of `facts` shows them, at
 /// the end of the Worktree line; `✕` is worded for the rows that show it
 /// (see [`Availability::Other`]).
 pub fn legend_markup(facts: &TableFacts<'_>) -> Vec<String> {
@@ -734,7 +798,7 @@ pub fn legend_markup(facts: &TableFacts<'_>) -> Vec<String> {
     }
     let mut lines = vec![worktree.join("    ")];
     lines.push(format!(
-        "Branch     {} <dim>merges cleanly into parent</dim>     {} <dim>conflicts with parent</dim>    {} <dim>parent deleted</dim>",
+        "Branch     {} <dim>merges cleanly into parent</dim>     {} <dim>conflicts with parent</dim>      {} <dim>parent deleted</dim>",
         connector_markup("└─", Some(MergeState::Clean), false),
         connector_markup("└─", Some(MergeState::Conflicts), false),
         connector_markup("└┄", None, true),
@@ -1040,7 +1104,7 @@ fn dirty_dot(dirty: DirtyStatus) -> &'static str {
     }
 }
 
-/// The dim note for an unavailable row, `None` for an available one.
+/// The note for an unavailable row, `None` for an available one.
 /// `statuses` is every listed worktree, for name resolution. Commands are
 /// shown only when [`shell_word`] can spell every argument; they are display
 /// text, never run.
@@ -1074,7 +1138,7 @@ fn unavailable_note(status: &WorktreeStatus, statuses: &[WorktreeStatus]) -> Opt
             Note::from(format!("{label}: ")).then(reason_note(entry, condition, path())).markup(".")
         }
     };
-    Some(Note::from("<dim>").then(text).markup("</dim>"))
+    Some(text)
 }
 
 /// Prose markup for why `entry`, in [`Availability::Other`], can't be used:
@@ -1182,10 +1246,9 @@ fn command_badge(command: &str) -> String {
     format!("<inverse> {} </inverse>", Prose::escape_text(command))
 }
 
-/// [`command_badge`] whose command [`notes_list`] keeps whole, for a dim
-/// note: the badge leaves the dim so it reads like every other command badge.
+/// [`command_badge`] whose command [`notes_list`] keeps whole.
 fn copyable_badge(command: String) -> Note {
-    Note::from("</dim><inverse> ").copyable(command).markup(" </inverse><dim>")
+    Note::from("<inverse> ").copyable(command).markup(" </inverse>")
 }
 
 /// A remote-tracking branch badge.

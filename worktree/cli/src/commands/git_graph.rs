@@ -112,6 +112,21 @@ pub struct GraphFacts {
     /// branch's merge. Their lanes are drawn without a merge, and that is
     /// complete history, not a gap.
     pub merged_elsewhere: Vec<MergedElsewhere>,
+    /// Branches whose fork commit is not on any drawn lane, so `GitGraph`
+    /// leaves their lane unconnected, with the merge that brought the fork
+    /// into the lane it was expected on.
+    pub forked_off_line: Vec<ForkedOffLine>,
+}
+
+/// A branch that forked from a commit its expected lane holds only through
+/// a merge: `fork` is not on `into`'s own line of commits, `merge` is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForkedOffLine {
+    pub branch: String,
+    pub fork: String,
+    /// The lane's name, as in [`MergedElsewhere::into`].
+    pub into: String,
+    pub merge: String,
 }
 
 /// A branch whose commits are all on `into`, brought there by another
@@ -878,6 +893,38 @@ fn assemble(
         lines.push(line);
     }
 
+    // A fork no lane drew leaves `GitGraph` an unconnected lane. When the
+    // expected lane contains the fork, the commit that brought it in says why.
+    let drawn = |sha: &str| default_built.placed.contains(sha) || lanes.values().any(|built| built.placed.contains(sha));
+    let tip_of = |lane: &LaneId| -> Option<&str> {
+        match lane {
+            LaneId::Default => Some(tips.lane_tip.as_str()),
+            LaneId::Origin => diverged.map(|(_, tip)| tip),
+            LaneId::Branch(branch) => placements.iter().find(|placement| &placement.branch == branch).map(|placement| placement.tip.as_str()),
+        }
+    };
+    let forked_off_line = placements
+        .iter()
+        .filter_map(|placement| {
+            let Shape::Lane { fork: Some((fork, lane)), .. } = &placement.shape else {
+                return None;
+            };
+            if drawn(fork) {
+                return None;
+            }
+            let merge = match classifications.classify(history, fork, &[tip_of(lane)?]) {
+                Ok(Integration::MergedDirectly { merge, .. } | Integration::IntegratedOtherwise { merge, .. }) => merge,
+                _ => return None,
+            };
+            Some(ForkedOffLine {
+                branch: placement.branch.clone(),
+                fork: fork.clone(),
+                into: lane_name(input, tips, lane),
+                merge,
+            })
+        })
+        .collect();
+
     let merged_elsewhere = placements
         .iter()
         .filter_map(|placement| {
@@ -899,6 +946,7 @@ fn assemble(
         incomplete,
         shallow: false,
         merged_elsewhere,
+        forked_off_line,
     }
 }
 

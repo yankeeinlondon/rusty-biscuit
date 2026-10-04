@@ -1386,6 +1386,39 @@ fn an_indirectly_integrated_branch_gets_a_lane_without_a_merge_and_no_notice() {
     assert!(!mermaid(&graph).contains("merge "));
 }
 
+/// `t` forked from `s1`, which reached main only through `side`'s merge `M`
+/// of `s2` (so not as `M`'s parent): no drawn lane holds the fork, and the
+/// facts name `M` as the reason.
+#[test]
+#[serial_test::serial]
+fn a_fork_main_holds_only_through_a_merge_is_explained() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().to_path_buf();
+    init_repo(&path);
+    let _r = commit(&path, "r");
+    let d1 = commit(&path, "d1");
+    run_git(&path, &["checkout", "-q", "-b", "side"]);
+    let s1 = commit(&path, "s1");
+    run_git(&path, &["checkout", "-q", "-b", "t"]);
+    commit(&path, "t1");
+    run_git(&path, &["checkout", "-q", "side"]);
+    commit(&path, "s2");
+    run_git(&path, &["checkout", "-q", "main"]);
+    let merge = merge_no_ff(&path, "side");
+    let _guard = DirGuard::enter(&path);
+
+    let (graph, _) = gather(&input("main", &["main", "t"], ForkOriginStore::default()), true, false);
+    let graph = graph.expect("base view");
+
+    assert_eq!(line(&graph, "t").fork_sha.as_ref(), Some(&s1));
+    assert!(!graph.default_entries.contains(&LaneEntry::Commit(s1.clone())), "s1 is not on main's own line");
+    assert!(graph.default_entries.contains(&LaneEntry::Commit(d1)));
+    assert_eq!(
+        graph.forked_off_line,
+        vec![ForkedOffLine { branch: "t".into(), fork: s1, into: "main".into(), merge }]
+    );
+}
+
 /// Records `branch` as created from `parent` at `base_sha`, as `wt create`
 /// does.
 fn forked_at(store: &mut ForkOriginStore, branch: &str, parent: &str, base_sha: &str, created_at: u64) {
@@ -2251,6 +2284,7 @@ fn an_ordinary_unmerged_branch_gathers_unchanged_facts() {
         incomplete: false,
         shallow: false,
         merged_elsewhere: Vec::new(),
+        forked_off_line: Vec::new(),
     };
     assert_eq!(graph, Some(expected));
 }

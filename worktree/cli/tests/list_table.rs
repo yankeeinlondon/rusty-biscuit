@@ -21,7 +21,7 @@ use worktree::pull_requests::{OpenPullRequest, PrListing};
 use worktree::remote_head::{CheckFailure, FetchFailure};
 use worktree::worktree::{DirtyStatus, WorktreeEntry, WorktreeStatus};
 use worktree_cli::commands::list_table::{
-    self, CredentialCondition, CredentialLine, FfNotice, FfSuggestion, GraphOmissions, LastKnown, MergedElsewhere, PrOutcome, RemoteFacts,
+    self, CredentialCondition, CredentialLine, FfNotice, FfSuggestion, ForkedOffLine, GraphOmission, GraphOmissions, LastKnown, MergedElsewhere, PrOutcome, RemoteFacts,
     RemoteStatus, Sections, TableFacts,
 };
 
@@ -428,7 +428,7 @@ fn the_legend_explains_both_columns() {
     );
     assert_eq!(
         lines[legend + 1].trim_end(),
-        " Branch     └─ merges cleanly into parent     └─ conflicts with parent    └┄ parent deleted"
+        " Branch     └─ merges cleanly into parent     └─ conflicts with parent      └┄ parent deleted"
     );
 }
 
@@ -1008,8 +1008,8 @@ const PROVIDERS: [(&str, &str); 4] = [
 fn with_credentials(line: CredentialLine) -> String {
     let example = Example::new();
     let facts = TableFacts { credential_line: Some(line), ..example.facts() };
-    let rendered = list_table::render(&facts, &terminal_at(400, false), NOW);
-    rendered.lines().nth(2).expect("the line after the caption").trim().to_string()
+    let notes = list_table::render_notes(&facts, &terminal_at(400, false)).expect("notes");
+    notes.trim().strip_prefix("- ").expect("one note").to_string()
 }
 
 #[test]
@@ -1045,42 +1045,28 @@ fn credential_lines_snapshot_every_condition_for_every_provider() {
     insta::assert_snapshot!("credential_lines_every_condition_for_every_provider", labeled(cases));
 }
 
+/// Every §5 line, warning or keyless notice, is an undimmed closing note
+/// after the `--ff` suggestion; nothing about credentials is printed above
+/// the table.
 #[test]
-fn the_credentials_line_is_dim_and_directly_follows_the_caption() {
+fn the_credentials_line_is_a_closing_note() {
     let example = Example::new();
-    let line = CredentialLine {
-        provider: "GitHub".into(),
-        key: "GITHUB_TOKEN".into(),
-        condition: CredentialCondition::Rejected,
-    };
-    let facts = TableFacts { credential_line: Some(line), ..example.facts() };
-    let colored = list_table::render(&facts, &color_terminal(), NOW);
-    let lines: Vec<&str> = colored.lines().collect();
-    assert!(lines[1].contains("origin/main"), "the caption: {colored}");
-    assert!(lines[2].contains("\u{1b}[2m") && lines[2].contains("didn't accept GITHUB_TOKEN"), "{colored}");
-    assert!(lines[3].trim().is_empty(), "then the blank line before the table: {colored}");
-
-    // Without a caption paragraph the line still opens the output.
-    let facts = TableFacts {
-        credential_line: facts.credential_line.clone(),
-        remote: None,
-        caption: None,
-        ..example.facts()
-    };
-    let plain = list_table::render(&facts, &plain_terminal(), NOW);
-    assert!(plain.lines().nth(1).unwrap().contains("didn't accept"), "{plain}");
-
-    // The keyless notice is the same dim line in the same place.
-    let line = CredentialLine {
-        provider: "GitHub".into(),
-        key: "GH_TOKEN or GITHUB_TOKEN".into(),
-        condition: CredentialCondition::AnsweredWithoutKey { higher_limits: true },
-    };
-    let facts = TableFacts { credential_line: Some(line), ..example.facts() };
-    let colored = list_table::render(&facts, &color_terminal(), NOW);
-    let lines: Vec<&str> = colored.lines().collect();
-    assert!(lines[1].contains("origin/main"), "the caption: {colored}");
-    assert!(lines[2].contains("\u{1b}[2m") && lines[2].contains("GitHub answered without an API key"), "{colored}");
+    for condition in [CredentialCondition::Rejected, CredentialCondition::AnsweredWithoutKey { higher_limits: true }] {
+        let line = CredentialLine { provider: "GitHub".into(), key: "GITHUB_TOKEN".into(), condition };
+        let facts = TableFacts {
+            credential_line: Some(line),
+            ff_suggestion: Some(FfSuggestion { behind: 3 }),
+            ..example.facts()
+        };
+        let table = list_table::render(&facts, &color_terminal(), NOW);
+        assert!(!table.contains("GITHUB_TOKEN"), "{table}");
+        let notes = list_table::render_notes(&facts, &terminal_at(400, true)).expect("notes");
+        let items: Vec<&str> = notes.lines().collect();
+        assert_eq!(items.len(), 2, "{notes:?}");
+        assert!(items[0].contains("fast-forward"), "{notes:?}");
+        assert!(items[1].starts_with(" - ") && items[1].contains("GITHUB_TOKEN"), "{notes:?}");
+        assert!(!items[1].contains("\u{1b}[2m"), "not dim: {notes:?}");
+    }
 }
 
 // The hint (§6), the closing notes (§8, §9, `--ff`), and the order of all
@@ -1121,7 +1107,22 @@ fn closing_notes_snapshot() {
             notes(TableFacts {
                 graph_omissions: GraphOmissions {
                     hidden_lanes: 3,
-                    incomplete: true,
+                    omissions: vec![
+                        GraphOmission::UnconnectedLane {
+                            branch: "fix/globs".into(),
+                            fork: Some("e23d0c2b3a00fa6369b00619374eaa9c9664ff40".into()),
+                        },
+                        GraphOmission::UnconnectedLane { branch: "feat/far".into(), fork: Some("abcdef0123456789".into()) },
+                        GraphOmission::UnconnectedLane { branch: "feat/lost".into(), fork: None },
+                        GraphOmission::Merge { branch: "feat/m".into(), destination: "8888888abc".into() },
+                        GraphOmission::Tag("v0.1.0".into()),
+                    ],
+                    forked_off_line: vec![ForkedOffLine {
+                        branch: "fix/globs".into(),
+                        fork: "e23d0c2b3a00fa6369b00619374eaa9c9664ff40".into(),
+                        into: "origin/main".into(),
+                        merge: "21debbcc5c98000f5b9a331be59e7ef24cdde66f".into(),
+                    }],
                     merged_elsewhere: vec![
                         MergedElsewhere {
                             branch: "feat/schema".into(),
@@ -1145,7 +1146,19 @@ fn closing_notes_snapshot() {
         (
             "incomplete in a shallow clone".to_string(),
             notes(TableFacts {
-                graph_omissions: GraphOmissions { incomplete: true, shallow: true, ..GraphOmissions::default() },
+                graph_omissions: GraphOmissions {
+                    history_gap: true,
+                    shallow: true,
+                    omissions: vec![GraphOmission::UnconnectedLane { branch: "feat/lost".into(), fork: None }],
+                    ..GraphOmissions::default()
+                },
+                ..example.facts()
+            }),
+        ),
+        (
+            "a history gap in a complete clone".to_string(),
+            notes(TableFacts {
+                graph_omissions: GraphOmissions { history_gap: true, ..GraphOmissions::default() },
                 ..example.facts()
             }),
         ),
@@ -1387,7 +1400,7 @@ fn legend_entries_appear_only_for_markers_in_the_table() {
         rendered.lines().skip(start).map(str::trim_end).collect::<Vec<_>>().join("\n")
     };
     let healthy = " Worktree   ○ clean    ● uncommitted files    ● uncommitted source files";
-    let branch = " Branch     └─ merges cleanly into parent     └─ conflicts with parent    └┄ parent deleted";
+    let branch = " Branch     └─ merges cleanly into parent     └─ conflicts with parent      └┄ parent deleted";
 
     assert_eq!(legend(vec![base()]), format!("{healthy}\n{branch}"));
     assert_eq!(
@@ -1406,6 +1419,9 @@ fn legend_entries_appear_only_for_markers_in_the_table() {
         ]),
         format!("{healthy}    ✕ git can't read worktree    ? couldn't check\n{branch}")
     );
+    let with_mark = format!("{healthy}    ✕ git can't read worktree");
+    let column = |line: &str, needle: &str| line[..line.find(needle).unwrap()].chars().count();
+    assert_eq!(column(branch, "└┄"), column(&with_mark, "✕"), "the parent-deleted elbow sits under the ✕");
 }
 
 /// Git reads a checkout through a link that replaced it and does not mark it
@@ -1447,7 +1463,8 @@ fn a_narrow_table_is_as_wide_as_its_widest_legend_line() {
         status("odd", Some("odd"), false, false, DirtyStatus::Unknown),
         unavailable("gone", Some("gone"), Availability::Missing, GIT_REASON),
     ]);
-    let rendered = example.table();
+    // Wide enough for the Worktree legend line with both marker entries.
+    let rendered = list_table::render(&example.facts(), &terminal_at(160, false), NOW);
     let width = |line: &str| line.trim_end().chars().count();
     let legend_start = rendered.lines().position(|line| line.starts_with(" Worktree ")).expect("legend");
     let widest = rendered.lines().skip(legend_start).map(width).max().unwrap();
@@ -1506,12 +1523,10 @@ fn unavailable_notes_follow_the_existing_notes_in_table_row_order() {
 }
 
 #[test]
-fn unavailable_notes_are_dim() {
+fn unavailable_notes_are_not_dim() {
     let example = Unavailable::new();
     let colored = list_table::render_notes(&example.facts(), &terminal_at(400, true)).expect("notes");
-    for line in colored.lines().filter(|line| line.contains("feat-gone") || line.contains("lhg-before")) {
-        assert!(line.contains("\u{1b}[2m"), "dim: {line:?}");
-    }
+    assert!(!colored.contains("\u{1b}[2m"), "styled like the other notes: {colored:?}");
     assert!(colored.contains("\u{1b}[7m wt remove lhg-before "), "commands in reverse video: {colored:?}");
 }
 
@@ -1789,10 +1804,10 @@ fn a_note_claims_a_missing_git_file_only_for_an_unlinked_row() {
     assert!(claims[0].contains("lhg-before"), "{notes}");
 }
 
-/// A command badge in a dim note is styled exactly like the `wt --ff` badge;
-/// only the note's prose is dim.
+/// An unavailable worktree's note is styled like every other note, its
+/// command badge exactly like the `wt --ff` badge.
 #[test]
-fn a_badge_in_a_dim_note_is_not_dim() {
+fn an_unavailable_note_is_styled_like_the_other_notes() {
     let example = Unavailable::with(vec![
         status("repo", Some("main"), true, true, DirtyStatus::Clean),
         at("/code/wts/plain", Some("feat/plain"), Availability::Unlinked, GIT_REASON),
@@ -1800,5 +1815,18 @@ fn a_badge_in_a_dim_note_is_not_dim() {
     let facts = TableFacts { ff_suggestion: Some(FfSuggestion { behind: 3 }), ..example.facts() };
     let notes = list_table::render_notes(&facts, &terminal_at(400, true)).expect("notes");
     assert!(notes.contains("\u{1b}[7m wt --ff \u{1b}[0m"), "{notes:?}");
-    assert!(notes.contains("\u{1b}[0m\u{1b}[7m wt remove feat/plain \u{1b}[0m\u{1b}[2m"), "{notes:?}");
+    assert!(notes.contains("\u{1b}[7m wt remove feat/plain \u{1b}[0m"), "{notes:?}");
+    assert!(!notes.contains("\u{1b}[2m"), "nothing is dim: {notes:?}");
+}
+
+/// The graph gets the rows the rest of the listing leaves on screen, less
+/// four for its own notes and the prompt, and never fewer than the minimum.
+#[test]
+fn the_graph_gets_the_rows_the_rest_of_the_listing_leaves() {
+    let table = "line\n".repeat(20);
+    let notes = " - a\n - b\n";
+    // 80 rows - (20 + 2 + 1 blank) - 4 reserved.
+    assert_eq!(list_table::graph_row_budget(80, &[Some(&table), None, None, Some(notes)]), 53);
+    assert_eq!(list_table::graph_row_budget(80, &[Some(&table), Some("status\n"), None, None]), 54);
+    assert_eq!(list_table::graph_row_budget(30, &[Some(&table), None, None, Some(notes)]), list_table::GRAPH_MIN_ROWS);
 }

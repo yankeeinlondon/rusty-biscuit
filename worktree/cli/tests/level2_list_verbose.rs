@@ -11,7 +11,7 @@
 //! pane to exactly 99 and 100 columns to prove the counts' width gate on the
 //! terminal's own width, including a `-> parent` cell against a non-default
 //! parent. Two scenes point `origin` at a local Gitea stand-in: one proves the
-//! dim credentials warning beneath the caption, the other holds the check
+//! credentials warning as a closing note, the other holds the check
 //! past the 3 s wait to prove the spinner is drawn and then cleared before
 //! the caption, and that the dim refresh hint follows the legend. Two more
 //! let the pane's git reach a bare repository through the stand-in and hold
@@ -26,7 +26,7 @@
 //! deleted directory, a deleted `.git` file, a link in place of a moved
 //! checkout, and a corrupt index that makes only `git status` fail) and check
 //! the `✕` and dim `?` glyphs, each legend variant and its absence, the table
-//! borders, and the dim notes' order and wrapping at the spawn width, 80, and
+//! borders, and the notes' order and wrapping at the spawn width, 80, and
 //! 60 columns, with every path and command in a note shown whole. The graph
 //! as an
 //! image-capable terminal draws it is tested in
@@ -1049,13 +1049,13 @@ fn assert_worker_gone(fixture: &DesignFixture) {
     assert!(!head_lock_held(fixture), "the live-head lock is free");
 }
 
-/// A confirmed credentials condition this run observed prints one dim line
-/// directly beneath the caption, not italic like the caption's suffix. The
+/// A confirmed credentials condition this run observed prints one closing
+/// note after the legend, styled like the other notes (not dim). The
 /// worker's branch-head request gets a 404 without a key, and git's fallback
 /// is refused, so Gitea "did not show this repository".
 #[test]
 #[serial(level2_terminal)]
-fn level2_list_credentials_warning_is_a_dim_line_beneath_the_caption_in_tmux() {
+fn level2_list_credentials_warning_is_a_closing_note_in_tmux() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let fixture = DesignFixture::with_gitea_origin();
@@ -1075,11 +1075,10 @@ fn level2_list_credentials_warning_is_a_dim_line_beneath_the_caption_in_tmux() {
         ),
         "{plain}"
     );
-    let suffix_end = screen.row_with(&["ago)"]);
     let warning = screen.row_with(&["did not show this repository"]);
-    assert_eq!(warning, suffix_end + 1, "the warning follows the caption:\n{plain}");
-    screen.assert_span(warning, "did not show this repository", "dim, not italic", |s| s.dim && !s.italic);
-    assert!(warning < screen.row_with(&["Worktree", "Branch"]), "the warning precedes the table:\n{plain}");
+    assert!(screen.text(warning).starts_with(" - Gitea did not show"), "a list item:\n{plain}");
+    screen.assert_span(warning, "did not show this repository", "plain", |s| !s.dim && !s.italic);
+    assert!(warning > screen.row_with(&["parent deleted"]), "the warning follows the legend:\n{plain}");
     assert!(!sentences.contains("running this command again"), "the worker finished, so no hint:\n{plain}");
     assert!(!plain.contains("GITEA_TOKEN="), "a variable is named, never assigned:\n{plain}");
 
@@ -1092,13 +1091,13 @@ fn level2_list_credentials_warning_is_a_dim_line_beneath_the_caption_in_tmux() {
 
 /// The keyless notice in a real pane: the worker's PR request is answered
 /// without a key while its head check fails generically (HTTP 500, then the
-/// refused fallback), so the notice is the one credentials line. It is dim,
-/// directly beneath the caption, and drawn after the spinner (seen while the
+/// refused fallback), so the notice is the one credentials line. It is a
+/// closing note, not dim, and drawn after the spinner (seen while the
 /// check is held) has been cleared. In the warning test above the same
 /// anonymous PR answer is outranked by the head's confirmed warning.
 #[test]
 #[serial(level2_terminal)]
-fn level2_list_keyless_notice_is_a_dim_line_beneath_the_caption_after_the_spinner_in_tmux() {
+fn level2_list_keyless_notice_is_a_closing_note_after_the_spinner_in_tmux() {
     use biscuit_terminal::components::spinner::FRAMES;
 
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
@@ -1127,11 +1126,10 @@ fn level2_list_keyless_notice_is_a_dim_line_beneath_the_caption_after_the_spinne
         "{plain}"
     );
     assert!(!sentences.contains("did not show this repository"), "one credentials line:\n{plain}");
-    let suffix_end = screen.row_with(&["ago)"]);
     let notice = screen.row_with(&["Gitea", "answered", "without"]);
-    assert_eq!(notice, suffix_end + 1, "the notice follows the caption:\n{plain}");
-    screen.assert_span(notice, "answered without an API key", "dim, not italic", |s| s.dim && !s.italic);
-    assert!(notice < screen.row_with(&["Worktree", "Branch"]), "the notice precedes the table:\n{plain}");
+    assert!(screen.text(notice).starts_with(" - Gitea answered"), "a list item:\n{plain}");
+    screen.assert_span(notice, "answered without an API key", "plain", |s| !s.dim && !s.italic);
+    assert!(notice > screen.row_with(&["parent deleted"]), "the notice follows the legend:\n{plain}");
     assert!(!plain.contains("GITEA_TOKEN="), "a variable is named, never assigned:\n{plain}");
 
     assert_worker_gone(&fixture);
@@ -1440,9 +1438,9 @@ fn broken_glyph(kind: Broken) -> char {
     if kind == Broken::StatusFails { '?' } else { '✕' }
 }
 
-/// The second Worktree legend line `wt` owes a table holding `broken`, or
-/// `None` when it shows neither `✕` nor `?`.
-fn expected_second_legend(broken: &[Broken]) -> Option<String> {
+/// The `✕`/`?` entries that end the Worktree legend line for a table holding
+/// `broken`, or `None` when it shows neither.
+fn expected_legend_markers(broken: &[Broken]) -> Option<String> {
     #[cfg(unix)]
     let link = broken.contains(&Broken::Link);
     #[cfg(not(unix))]
@@ -1508,7 +1506,7 @@ fn recorded_paths(main: &std::path::Path) -> Vec<String> {
 /// spawn width, at least 100, for `None`) and asserts what the terminal
 /// shows: each new row's glyph and style in the Worktree column beside the
 /// unchanged design rows, intact table borders no wider than the pane, the
-/// second legend line exactly when a row needs it, and one dim note per
+/// `✕`/`?` legend entries exactly when a row needs them, and one note per
 /// unavailable row, in table row order, after the existing `--ff` note,
 /// wrapped to the pane except for a path or command too long for any line,
 /// which is shown whole.
@@ -1573,35 +1571,35 @@ fn assert_unavailable_scene(fixture: &DesignFixture, broken: &[Broken], cols: Op
     let marks = rows.iter().filter(|(_, cell)| cell.starts_with(['✕', '?'])).count();
     assert_eq!(marks, broken.len(), "only the broken rows are marked\n{plain}");
 
-    // Legend: the second Worktree line exactly when a row shows `✕` or `?`.
+    // Legend: `✕` and `?` entries end the Worktree line exactly when a row
+    // shows them.
     let legend = (bottom..done)
         .filter(|_| !narrow)
         .find(|&row| screen.text(row).starts_with(" Worktree ") && screen.text(row).contains("uncommitted source files"))
         .or(narrow.then_some(0));
     let listing = (top..done).map(|row| screen.text(row)).collect::<Vec<_>>().join("\n");
-    match legend.map(|legend| (legend, expected_second_legend(broken))) {
+    match legend.map(|legend| (legend, expected_legend_markers(broken))) {
         _ if narrow => {}
         None => panic!("no Worktree legend\n{plain}"),
         Some((legend, Some(expected))) => {
-            let second = legend + 1;
-            let text = screen.text(second);
-            assert!(text.starts_with(&format!("{}{}", " ".repeat(12), expected.chars().next().unwrap())), "{text:?}\n{plain}");
             // A legend line wider than the pane is soft-wrapped by the
             // terminal, as the Branch line is; the capture joins it.
-            assert_eq!(unwrapped(&text), unwrapped(&expected), "{plain}");
-            assert!(screen.text(second + 1).starts_with(" Branch "), "{plain}");
+            let text = screen.text(legend);
+            assert!(unwrapped(&text).ends_with(&format!("uncommitted source files {}", unwrapped(&expected))), "{text:?}\n{plain}");
+            assert!(screen.text(legend + 1).starts_with(" Branch "), "one Worktree line\n{plain}");
             if expected.starts_with('✕') {
-                screen.assert_span(second, "✕", "red", |s| s.fg_is(RED) && !s.dim);
+                screen.assert_span(legend, "✕", "red", |s| s.fg_is(RED) && !s.dim);
                 let meaning = expected.split("    ").next().unwrap().trim_start_matches("✕ ");
-                screen.assert_span(second, meaning.split(' ').next().unwrap(), "dim", |s| s.dim);
+                screen.assert_span(legend, meaning.split(' ').next().unwrap(), "dim", |s| s.dim);
             }
             if expected.contains("? couldn't") {
-                screen.assert_span(second, "?", "dim", |s| s.dim);
-                screen.assert_span(second, "couldn't", "dim", |s| s.dim);
+                screen.assert_span(legend, "?", "dim", |s| s.dim);
+                screen.assert_span(legend, "couldn't", "dim", |s| s.dim);
             }
         }
         Some((legend, None)) => {
-            assert!(screen.text(legend + 1).starts_with(" Branch "), "no second Worktree line\n{plain}");
+            assert!(screen.text(legend).trim_end().ends_with("uncommitted source files"), "no marker entries\n{plain}");
+            assert!(screen.text(legend + 1).starts_with(" Branch "), "{plain}");
             assert!(!listing.contains('✕') && !listing.contains("couldn't check"), "{plain}");
         }
     }
@@ -1641,15 +1639,11 @@ fn assert_unavailable_scene(fixture: &DesignFixture, broken: &[Broken], cols: Op
         assert_eq!(squeezed(text), squeezed(&expected), "the {name} note, in row order\n{plain}");
         let copyable = expected_copyable(kind, path).expect("a ✕ row's command or path");
         assert!(text.contains(&copyable), "the {name} note shows {copyable:?} whole\n{plain}");
-        // The prose is dim; a command badge leaves the dim, like `wt --ff`.
+        // Styled like the `--ff` note: nothing dim, the command a badge.
         for &row in item {
             assert!(
-                screen.rows[row]
-                    .iter()
-                    .skip(3)
-                    .filter(|cell| cell.ch != ' ')
-                    .all(|cell| cell.style.dim != cell.style.inverse),
-                "the {name} note is dim except its badge: {:?}",
+                screen.rows[row].iter().skip(3).filter(|cell| cell.ch != ' ').all(|cell| !cell.style.dim),
+                "the {name} note is not dim: {:?}",
                 screen.text(row)
             );
         }
@@ -1720,7 +1714,7 @@ fn level2_list_legend_explains_only_unknown_status_in_tmux() {
     assert_unavailable_scene(&fixture, &[Broken::StatusFails], None);
 }
 
-/// The control: with no unavailable or unknown row, no second legend line,
+/// The control: with no unavailable or unknown row, no marker legend entries,
 /// no `✕` or `?`, and only the `--ff` note, at both widths.
 #[test]
 #[serial(level2_terminal)]

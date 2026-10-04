@@ -47,7 +47,7 @@ Selection does not depend on whether a branch is merged.
 
 - The default branch and every worktree branch.
 - A branch's recorded parent is used only when that parent is also drawn.
-- When the graph is taller than half the terminal, `GitGraph` keeps the most recently active lanes (each line carries its tip's commit time, in whole seconds; lanes whose tips share a second keep their lane order) and `wt list` notes "N worktrees aren't in the graph". A lane is kept together with its parent's lane and the lanes holding its fork and merge commits. The focused view is never cut this way.
+- When the graph is taller than the rows `wt list` gives it (`GitGraph::with_max_rows`: whatever the rest of the listing leaves on screen, less four, at least 12; see `list_table::graph_row_budget`), `GitGraph` keeps the most recently active lanes (each line carries its tip's commit time, in whole seconds; lanes whose tips share a second keep their lane order) and `wt list` notes "N worktrees aren't in the graph". A lane is kept together with its parent's lane and the lanes holding its fork and merge commits. The focused view is never cut this way.
 
 ## The default lane
 
@@ -219,14 +219,18 @@ The default lane is drawn down to its oldest anchor plus that anchor's first par
 - A merge whose source or destination is not drawn, or whose destination would be emitted before its source, is not drawn, and counted.
 - A branch with no commits of its own is labeled at its own tip (`GraphLine::with_tip`), never at its fork commit.
 
-Anything counted this way sets `GitGraphPlan::incomplete`. `wt list` draws the graph with `GitGraph::render_without_notes` and turns that flag into one closing note, after the note counting the lanes the height cap left out (those lanes are counted by that note, not by this one):
+Each thing counted this way is a `GraphOmission` in `GitGraphPlan::omissions` (and sets `GitGraphPlan::incomplete`). `wt list` draws the graph with `GitGraph::render_without_notes` and writes one closing note per omission, naming the branch and commits, after the note counting the lanes the height cap left out (those lanes are counted by that note, not here):
 
-| Clone | Note |
+| Omission | Note |
 |---|---|
-| shallow (`rev-parse --is-shallow-repository` read `true`) | **"This clone is shallow, so the graph can't connect some older history; run git fetch --unshallow to fill it in."** |
-| complete, or its state couldn't be read | **"The graph leaves out a fork, merge, or tag it couldn't draw at its own commit; the table above is unaffected."** |
+| a lane whose fork its expected lane holds only through a merge (gathering records it as a `ForkedOffLine`) | `fix/magic-globs branched from e23d0c2, which reached origin/main through merge 21debbc, so the graph doesn't join its lane to origin/main.` |
+| a lane whose fork no lane draws, for another reason | `feat/far branched from abcdef0, which isn't in the graph, so its lane isn't joined to the others.` |
+| a lane whose fork is unknown | `The graph couldn't tell where feat/lost branched from, so its lane isn't joined to the others.` |
+| a merge it can't draw | `8888888 is drawn as a plain commit, not as feat/m's merge: the graph couldn't place both ends of it.` |
+| a label whose commit isn't drawn | `The v0.1.0 label isn't in the graph: its commit isn't drawn.` |
+| gathering couldn't establish something (a Git command failed) | `Git couldn't answer every question about this history, so the graph may be missing connections; run wt list again to retry.` |
 
-Only the shallow case has something to run. The rest are limits of what the graph can draw, or a Git command that failed during this listing.
+In a shallow clone (`rev-parse --is-shallow-repository` read `true`) all of these come from the cut, so the one note **"This clone is shallow, so the graph can't connect some older history; run git fetch --unshallow to fill it in."** replaces them.
 
 ## Unavailable history
 
