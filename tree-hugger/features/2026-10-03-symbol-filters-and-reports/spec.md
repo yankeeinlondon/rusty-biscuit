@@ -259,8 +259,9 @@ it does not widen it. Unknown kind names are argument errors, and unsupported
 kinds return no matches. The intersection is pushed into extraction through the
 same mechanism as the command sets.
 
-`classes` keeps Class and Type as its container kinds, along with its current
-static/instance partitioning. Kind, scope, name, visibility, test, docs and
+`classes` keeps the container kinds defined by
+`2026-10-03-symbol-improvements` (Class, Type, Interface and Trait), along
+with its current static/instance partitioning. Kind, scope, name, visibility, test, docs and
 deprecation filters select containers. `--in` matches the selected class/type's
 own name as a member container. Member-shaped filters (async, return/parameter
 type, parameter count, static/instance) select its displayed members. To apply
@@ -354,7 +355,7 @@ in `cli/src/scanner.rs`). `--file <path|glob>` and `--name <pattern>` bypass
 that classification when it guesses wrong. Values within each include list
 are alternatives; file and name lists intersect, and exclusions take precedence.
 Keep existing `--exclude-files`, `--exclude-symbols`, `--language`, `--prelude`,
-`--comments`, grouping and sorting flags, documenting any aliases/conflicts.
+`--comments`, `--sort` and the grouping flags, documenting any aliases/conflicts.
 File references use `biscuit-file::FileReference`; discovery retains `.gitignore`
 and the default fixture exclusions, with explicitly targeted files re-included.
 `imports` retains file-only positional tokens and gains symbol matching through
@@ -379,7 +380,7 @@ same name matcher on import records, preserving alias/original-name fields.
 `--jsonl` writes one selected-record line, in deterministic
 file/source order. The recommended versioned envelope is an author choice under “JSON Lines record
 shape” in Open Questions. Do not emit records in worker-completion order.
-`--sort name` or `--sort kind` needs global ordering and may buffer all matches;
+Any `--sort` other than the default `file` needs global ordering and may buffer all matches;
 streaming then describes serialization, not constant memory. Class lines must
 carry the selected container and its selected members together. Paths follow
 the portable scan-root-relative convention of the `--json` envelope, and
@@ -531,8 +532,7 @@ collapsed to `Crate` by the prerequisite fix. What should “minimum” mean?
 #### Kind precision deferred by the prerequisite fix
 
 The prerequisite matrix marks several constructs as future precision work
-(its `FEAT` cells name `2026-10-03-symbol-improvements`, written before the
-split): for example Python/Java/C#/C++/Swift/PHP constructors, some enum
+(its `FEAT` cells name this feature): for example Python/Java/C#/C++/Swift/PHP constructors, some enum
 variants, Go fields/type aliases, and Lua methods. That marker does not define
 an implementation plan here. Existing grammar limitations are also not
 promises that this feature will lift them.

@@ -221,8 +221,29 @@ Each declaration command has a fixed kind set:
 |---|---|
 | `functions` | Function, Method, Constructor |
 | `types` | Type, Class, Interface, Enum, Trait, TypeAlias |
-| `classes` | Class and Type as containers, plus the members it displays today |
+| `classes` | containers: Class, Type, Interface, Trait; members: Method, Constructor |
 | `symbols` | all kinds |
+
+`classes` today (`extract_class_summaries` in `cli/src/main.rs`) summarizes
+Class, Type, Interface and Trait records; enums, modules and Scala objects are
+not summarized. For each container it lists:
+
+- the Method and Constructor records reached through the container's
+  `relations.members`, split into static and instance sections by `is_static`
+- the fields in the container's own type metadata (`kind_data` fields), not
+  member records, split the same way
+
+`--static-only` empties the instance sections and `--instance-only` the static
+ones. The two flags are not declared as conflicting, so passing both shows
+containers with no members. `--name`/`-n` keeps containers whose name contains
+the value. This feature keeps all of that behavior.
+
+Container field metadata takes each field's visibility and `static` flag from
+the matching Field, Property or Constant member declaration
+(`align_field_metadata` in `lib/src/file/tree_file.rs`). Those declarations
+fall outside the `classes` kind set, so they keep visibility and `static` as
+well as the lightweight data below. This is inferred from the code, not a new
+behavior.
 
 When the command's kind set excludes a kind, the library skips metadata
 extraction, and when safe the reference-binding work, for that kind. Keep
@@ -235,8 +256,10 @@ as the `SymbolQuery` described under “A `SymbolQuery` API.” A user-supplied
 
 ### A6. Files are analyzed in parallel
 
-`rayon` is already a dependency (`god_files` uses it). Per-file analysis
-becomes `par_iter`, and results are collected back into file order, so output
+Parallelism lives in the CLI. `rayon` is a dependency of the tree-hugger
+library (`god_files` uses it) but not of tree-hugger-cli, so this feature adds
+`rayon` to tree-hugger-cli. The library's per-file APIs stay sequential. The
+CLI's per-file analysis becomes `par_iter`, and results are collected back into file order, so output
 is byte-identical to a sequential run. Each worker owns its parser and
 per-file state; hash maps never determine output order. Use a bounded number
 of outstanding file results and serialize them in the requested order. Cache
@@ -270,8 +293,17 @@ its recorded coverage proves completeness. Name, export and output-format
 filters do not invalidate complete extraction data. A full-index request
 cannot reuse an entry missing relations, docs or diagnostics. Corrupt or
 incompatible entries are misses, not empty results; `--no-cache` bypasses reads
-and writes. Cache failures remain recoverable and quiet unless verbose output
-is requested.
+and writes. Cache failures remain recoverable and print nothing unless
+`--verbose` is given (see “Quiet by default”).
+
+**A partial hit is written back as one wider entry.** When a cached entry
+covers some of the requested capabilities, the CLI runs only the missing
+passes. It then writes one merged entry whose recorded coverage includes both
+the old and the new passes, replacing the narrower entry. The write is atomic:
+write a temporary file, then rename it over the entry. If two processes write
+the same entry at once, the last rename wins. That is acceptable only because
+each entry is internally valid and its recorded coverage matches its contents;
+a reader can never see a half-written or mislabeled entry.
 
 ### A8. The bind pass indexes candidate names
 
@@ -292,6 +324,9 @@ resolution is the unscheduled `scoped-references` feature.
 targets the enclosing function, nor that none does. Whenever semantic analysis
 runs, `semantics.is_recursive` reports `Unknown`, never a guessed `Yes` or
 `No`, until scoped resolution exists. No analysis requested remains `None`.
+The v1 adapter has only a `bool`, so it maps both `Unknown` and `None` to
+`false`. A v1 `is_recursive: false` therefore means "not known to be
+recursive", not "proven non-recursive".
 
 ### A9. Output is deterministic and streamed
 
@@ -307,9 +342,11 @@ runs, `semantics.is_recursive` reports `Unknown`, never a guessed `Yes` or
   (see “The library reports the declaring keyword”).
 
 A stdout write error stops work; a broken pipe exits quietly without a panic.
-Read/parse failures go to stderr and produce a nonzero status. For JSON,
-collect analysis errors before writing the single document so failures cannot
-silently produce a success report.
+Read/parse failures go to stderr and produce a nonzero status. JSON reports
+stream their file entries and then end with an `errors` array listing every
+file that failed (shape under “JSON sized to the selection”), so a failure
+can never produce a report that looks successful. A failed file has no file
+entry, and the run still exits nonzero.
 
 ### A10. Prelude resolution reuses analysis without losing exports
 
@@ -339,6 +376,14 @@ with the remaining cost rather than triggering a larger measurement program:
 | `hug functions` warm | ≤ 15% of baseline |
 | `hug lint --no-cache` | no slower than baseline |
 | Peak RSS, `hug symbols` on the whole repo | no higher than baseline |
+
+The peak-RSS baseline has not been measured yet. Measuring it is a required
+preparatory step, done before any code change and recorded in the
+implementation log with the command, build and cache state. From the
+repository root, on macOS, run
+`/usr/bin/time -l hug symbols --no-cache > /dev/null` with a release build
+and read "maximum resident set size"; GNU `/usr/bin/time -v` on Linux is
+equally acceptable.
 
 The targets measure the fixed command kind sets. Filters such as `--kind`
 beyond those sets arrive with `2026-10-03-symbol-filters-and-reports` and are
@@ -375,7 +420,11 @@ signature, and `2026-10-03-symbol-filters-and-reports` renders it under
 Preserve internal whitespace and line breaks; strip only outer whitespace.
 Declaration-only signatures stop at the terminator; expression bodies stop at
 their grammar-defined boundary. The header excludes initializer expressions,
-in-node annotations and decorators, doc comments, and a trailing `=` or `=>`.
+leading in-node annotations and decorators, doc comments, and a trailing `=`
+or `=>`. Only annotations before the first modifier or keyword are stripped.
+An annotation written between modifiers, such as Java
+`public @Nullable String name()` or a C# attribute inside a modifier list,
+stays in the header, because removing it would break contiguity.
 Missing grammar support returns `None` and a compact-rendering fallback, never
 the full body.
 
@@ -401,6 +450,7 @@ Both texts are filled from one declaration node in one extraction pass, and
 | `pub const TABLE: [u8; 256] = [0, 1, …];` | `pub const TABLE: [u8; 256] = [0, 1, …];` | `pub const TABLE: [u8; 256]` | `const` |
 | `public private(set) var count = 0` | `public private(set) var count = 0` | `public private(set) var count` | `var` |
 | `@Override public void run() { … }` | `@Override public void run()` | `public void run()` | `None` (renders `method`) |
+| `@Override public @Nullable String name() { … }` | `@Override public @Nullable String name()` | `public @Nullable String name()` | `None` (renders `method`) |
 | `private[Shape] def secret() = 2` | `private[Shape] def secret() =` | `private[Shape] def secret()` | `def` |
 
 Syntax the grammar places outside the declaration node, such as a Rust `#[…]`
@@ -462,16 +512,26 @@ declarations forced into `SymbolQuery`.
 ### D1. JSON sized to the selection
 
 - `--json` emits `{ report_schema_version, schema_version, root_dir, files:
-  [{ file, language, completed_passes, completed_capabilities, symbols: [SymbolRecord] }] }`,
-  containing only selected records. Class reports additionally contain
-  `members`, keyed by selected container ID, with the member records the
-  command displays; their `symbols` array contains the selected containers.
+  [{ file, language, completed_passes, completed_capabilities, symbols: [SymbolRecord] }],
+  errors: [{ file, kind, message }] }`, containing only selected records.
+  Class reports additionally contain `members`, keyed by selected container
+  ID, with the Method and Constructor records the command displays; their
+  `symbols` array contains the selected containers, whose fields stay in the
+  container record's `kind_data`.
+- `errors` is always present and comes last, so file entries can stream
+  before it; a successful report has `errors: []`. Each entry names one failed
+  file: `file` is its portable scan-root-relative path, `kind` is the
+  snake_case name of the `TreeHuggerError` variant (for example `io`,
+  `unsupported_language`, `parse_failed`), and `message` is that error's
+  display text. Entries are in file order. A non-empty `errors` array means
+  the process exits nonzero, and each failure is also written to stderr.
 - Remove the old v1 symbols payload and unconditional `symbol_indexes` block.
   Empty selections use `files: []`; omit file entries with no matches.
-- `--json-full` emits the same versioned envelope with complete per-file
-  `indexes` instead of selected `files`. File selectors still apply; symbol
-  selectors are rejected rather than implying a complete index is filtered.
-  Request every index capability, including diagnostics.
+- `--json-full` emits the same versioned envelope, including the trailing
+  `errors` array, with complete per-file `indexes` instead of selected
+  `files`. File selectors still apply; symbol selectors are rejected rather
+  than implying a complete index is filtered. Request every index capability,
+  including diagnostics.
 - Default records omit unrequested relations/semantics and large
   source/body/AST blobs, including `declaration_text`. `completed_passes` and
   query result capabilities make omitted work explicit. A reference may name an
@@ -489,23 +549,55 @@ the new declaration envelope is not a global change to `--json`.
 
 ### D7. A useful default order
 
+`--sort file|name|kind|container` replaces `--sort-by-kind` and
+`--sort-by-module`. Both old flags are removed outright, with no aliases, so
+passing either is an argument error. Like them, `--sort` is one of the shared
+scan options (`ScanOptions` in `cli/src/main.rs`).
+
 | Order | Today | After |
 |---|---|---|
-| default | by name across all files | by file, then source position (`--sort name` keeps the old order) |
+| default (`--sort file`) | by case-insensitive name across all files | by file, then source position |
+| `--sort name` | (the default) | by the written, case-sensitive name |
 | `--sort kind` | alphabetical by the kind's name (`--sort-by-kind`) | Module, Namespace, Type, Class, Interface, Trait, Enum, TypeAlias, Function, Method, Constructor, Macro, Constant, Field, Property, EnumVariant, Variable, Parameter, Unknown |
+| `--sort container` | by the file's directory (`--sort-by-module`) | by `identity.container_name`, written and case-sensitive; declarations with no container come first |
 
-Tie-breakers are portable file path, start byte, end byte, kind and ID; name
-sorting first uses the written case-sensitive name. Sort relation targets
-deterministically too. Existing sorting/grouping flags (`--sort-by-kind`,
-`--sort-by-module` and the grouping options) map to these rules where
-equivalent; conflicting explicit orders are argument errors. Byte identity
-applies to the same input/root/options/build, not different absolute roots or
-terminal widths.
+Every order ends with the same tie-breakers: portable file path, start byte,
+end byte, kind (in the `--sort kind` order) and ID. `--sort file` is exactly
+these tie-breakers. For example, `--sort container` puts every member of two
+same-named `Point` types in different files together, the first file's
+members first, each file's in source order. Sort relation targets
+deterministically too. `--sort` takes one value; repeating it is an argument
+error.
+
+`--sort container` is not a rename of `--sort-by-module`: the old flag sorted
+by directory, and the new order sorts by the declaring container. Directory
+grouping remains available through `--group-by-module`.
+
+`--group-by-file` and `--group-by-module` are unchanged and independent of
+`--sort`. They group terminal output by the file's scan-root-relative path or
+its parent directory (both flags: directory, then file), with groups ordered
+by that path. `--sort` then orders the declarations within each group.
+
+Byte identity applies to the same input/root/options/build, not different
+absolute roots or terminal widths.
 
 ### D8. Quiet by default
 
 The cache-stats line printed to stderr on every warm run moves behind a new
-`--verbose` flag.
+`--verbose` flag. It is a global flag on `Cli`, like `--json` and `--plain`,
+the existing output-presentation flags; scan behavior flags such as
+`--no-cache` stay per-command in `ScanOptions`. `--verbose` gates exactly two
+kinds of stderr output:
+
+- the cache-stats line. Today it reports the in-process cache, which
+  “One persistent CLI cache, with complete keys” removes, so it now reports
+  persistent-cache hits, partial hits and misses.
+- recoverable cache-failure messages: an unreadable, corrupt or incompatible
+  entry treated as a miss, and a failed cache write. Today these failures are
+  discarded silently.
+
+Analysis errors, lint's external-adapter warnings and argument errors are
+printed with or without `--verbose`.
 
 ### D10. One renderer
 
@@ -532,7 +624,8 @@ flowchart LR
 ```
 
 Each phase leaves `hug` working, and updates relevant docs/tests with its code.
-Phase 1 consumes records directly and removes diagnostics from listing work.
+Before Phase 1 changes any code, measure the peak-RSS baseline (see
+“Performance targets”). Phase 1 consumes records directly and removes diagnostics from listing work.
 Preserve v1 library adapters until the separate author decision on removing
 them. Introduce the shared query planner before kind-restricted cache entries
 or parallel prelude reuse, so those optimizations have one completeness
@@ -582,6 +675,33 @@ Decided by the author on 2026-10-03:
   node in one pass keeps them consistent and cheap.
 - **`declaration_text` is omitted from default JSON.** It is a source blob like
   body text; `--json-full` carries it.
+- **JSON reports end with an always-present `errors` array.** File entries
+  stream first and failures are listed last, so a report can stream without
+  ever looking successful when a file failed; an always-present field keeps
+  the schema simple.
+- **Parallelism lives in the CLI, which gains `rayon`.** The CLI owns file
+  discovery and output order, so it owns scheduling; the library stays
+  sequential per file.
+- **`signature_text` strips only leading in-node annotations.** An annotation
+  between modifiers stays in the header, so `signature_text` remains one
+  contiguous sub-range of `declaration_text`.
+- **`--sort file|name|kind|container` replaces `--sort-by-kind` and
+  `--sort-by-module`, with no aliases.** One value-taking flag cannot express
+  conflicting orders; grouping flags stay separate because grouping and order
+  are independent.
+- **The v1 adapter maps `is_recursive` `Unknown` and `None` to `false`.** v1
+  has only a `bool`; `false` is documented as "not known to be recursive".
+- **The peak-RSS target stays, and its baseline is measured first.** A
+  target with no recorded baseline cannot be checked afterward.
+- **A partial cache hit writes back one merged entry.** Replacing the narrower
+  entry keeps one entry per key; atomic last-rename-wins is safe because every
+  entry is internally valid.
+- **The `module_path` → `container_name` rename stays in this feature.** Every
+  breaking record change then shares schema 4.0, and
+  `2026-10-03-symbol-filters-and-reports` stays additive (4.x).
+- **Naming context joins the cache key in
+  `2026-10-03-symbol-filters-and-reports`.** That feature introduces the
+  input, so it extends the key.
 
 ### Open Questions
 
@@ -597,21 +717,35 @@ Moving the CLI does not prove that other packages have no v1 callers.
 - **Recommendation:** audit then remove in a follow-up. Complete the CLI move
   first and record actual remaining callers before estimating removal work.
 
-#### Annotations interleaved with modifiers
+---
 
-`signature_text` excludes in-node annotations and must be a contiguous
-sub-range of `declaration_text`. Leading annotations (`@Override public void
-run()`) satisfy both. An annotation written after a modifier, such as Java
-`public @Nullable String name()` or a C# attribute inside a modifier list,
-cannot be removed without breaking contiguity.
+## Pre-authorized implementation actions
 
-- **Keep interleaved annotations:** `signature_text` starts after the leading
-  annotations only; contiguity holds, and the exclusion rule becomes "leading
-  in-node annotations".
-- **Drop contiguity for these cases:** removes every annotation; the
-  sub-range test becomes a subsequence test.
-- **Recommendation:** none recorded; this case surfaced while splitting the
-  spec and needs an author decision before signature extraction is planned.
+The author has authorized the implementer to take these actions without
+pausing for approval:
+
+- **Prerequisite fix text.** Edit the text of `2026-10-03-visibility-and-kind`
+  where it refers to this feature for content now owned by
+  `2026-10-03-symbol-filters-and-reports`.
+- **Fixtures and tests asserting superseded behavior.**
+  - Create the 16-language `lib/tests/fixtures/symbols/multi/` tree and extend
+    the per-language fixtures as described under “Shared fixtures”.
+  - Rewrite existing CLI and library tests whose expectations this feature
+    deliberately changes: the old JSON shape, name-first default ordering, the
+    removed `--sort-by-kind` and `--sort-by-module` flags, record timestamps,
+    schema 3.0 records, and guessed `is_recursive` values.
+- **Query files.** Edit the vendored query files under `lib/queries/vendor/`
+  where capture deduplication requires it (“Metadata is extracted after
+  duplicates are removed”), updating query provenance to match.
+- **Dependencies.** Add `rayon` to tree-hugger-cli, and `biscuit-hash` to any
+  tree-hugger package that needs it as a normal dependency (tree-hugger-cli
+  has it only as a dev-dependency today). Update `docs/dependencies.md` and
+  the area's dependency docs to match.
+
+Anything outside this list still needs the author, including any other new
+crate dependency and changes outside the `tree-hugger` area other than the
+tree-hugger skill and the `docs/` updates listed under “Documentation to
+update in the same change”.
 
 ---
 
@@ -648,6 +782,7 @@ resolve. No implementation test should read this dated spec as its contract.
   - a multi-line declaration header
   - an annotated or decorated declaration whose annotation is inside the
     declaration node
+  - an annotation between modifiers (Java, C#)
   - a comment containing a declaration keyword
 - **A `lib/tests/fixtures/symbols/multi/` tree** containing all 16 languages,
   for multi-file, parallel, ordering and CLI golden tests.
@@ -666,7 +801,7 @@ names its language.
 | Capability | Asserted per language |
 |---|---|
 | Keyword | every declaration in the fixture reports the expected keyword from its syntax node; `None` only where the language has no keyword for that construct; a keyword inside a comment never produces a label |
-| Signature text | expected `signature_text` per declaration; it is a contiguous sub-range of `declaration_text`; it excludes initializers, in-node annotations/decorators, doc comments and trailing `=`/`=>`; missing grammar support is `None`, never the body |
+| Signature text | expected `signature_text` per declaration; it is a contiguous sub-range of `declaration_text`; it excludes initializers, leading in-node annotations/decorators, doc comments and trailing `=`/`=>`; an annotation between modifiers is kept; missing grammar support is `None`, never the body |
 | Cache correctness | a warm-cache result equals a `--no-cache` result |
 
 ### CLI output goldens
@@ -690,7 +825,12 @@ members in `members`.
   language, `completed_passes` and `completed_capabilities`, and round-trips
   through serde. It omits `declaration_text`; `--json-full` includes it and
   complete indexes, and rejects symbol selectors. An empty selection is
-  `files: []`.
+  `files: []` with `errors: []`. A class report's `members` holds only Method
+  and Constructor records.
+- **JSON with a failed file.** Over a scratch tree with one unreadable or
+  unparsable file, `--json` and `--json-full` still parse, list the good files,
+  end with one `errors` entry (portable path, `kind`, `message`) for the bad
+  file, write the failure to stderr and exit nonzero.
 - **Performance counters.** A symbol command over `multi/` records zero
   diagnostics-pass executions. This is observed through a pass counter exposed
   for tests, not through timing. Propagate counters into parallel workers.
@@ -704,27 +844,40 @@ members in `members`.
 - **Cache correctness.** Editing a language's query text in a test-local copy
   invalidates the entry. Also vary extractor revision, language override,
   query kinds, schema and requested capabilities. Warm narrow then broad
-  queries (and the reverse) must match uncached results. Simulate corrupt and
-  concurrent writes without treating either as empty success.
+  queries (and the reverse) must match uncached results. After a narrow-then-
+  broad run, the key holds one entry whose recorded coverage includes both
+  requests, and a third, narrow run is a complete hit. Simulate corrupt and
+  concurrent writes without treating either as empty success; every entry left
+  after concurrent writes is readable and its coverage matches its contents.
 - **Binding.** The candidate index selects the same targets as the previous
   full scan; `push_unique_ref` keeps distinct unresolved references with
   missing IDs; `is_recursive` is `Unknown` whenever semantics run and `None`
-  when not requested.
+  when not requested, and the v1 adapter maps both to `false`.
 - **Prelude behavior survives.** Cover aliases, unresolved re-exports,
   environment names and targets outside the selected scan, with no duplicate
   parse.
-- **Order.** Default file/source order, `--sort name`, `--sort kind`, mapped
-  legacy flags and conflicting-order argument errors.
+- **Order.** Default (`--sort file`) file/source order, `--sort name`,
+  `--sort kind` and `--sort container`, each with the shared tie-breakers;
+  `--sort` within `--group-by-file` and `--group-by-module` groups; the removed
+  `--sort-by-kind` and `--sort-by-module` flags and a repeated `--sort` are
+  argument errors.
+- **Classes.** Interface and Trait containers are summarized; `--static-only`
+  and `--instance-only` keep their current sections; a field's visibility and
+  `static` flag are unchanged when Field, Property and Constant are outside the
+  extraction kind set.
 - **Output failures are observable.** Cover broken pipes, file errors and
   deterministic parallel error reporting without real terminal focus.
-- **Quiet stderr.** A warm run prints no cache stats without `--verbose`.
+- **Quiet stderr.** A warm run, and a run whose cache write fails, print
+  nothing to stderr without `--verbose`; with `--verbose` they print the
+  cache-stats line and the cache-failure message.
 
 ### Performance sample
 
 Use one host and a quick release-build before/after sample of the existing
 baseline commands and inputs. Record elapsed time, serialized bytes and the
-already requested peak RSS comparison in the implementation log; record the
-build and cache state. The baseline already establishes that listings spend
+peak RSS comparison against the baseline measured before any code change (see
+“Performance targets”) in the implementation log; record the build and cache
+state. The baseline already establishes that listings spend
 lint-like time, so no separate exploratory spike is needed to prove that cost.
 Do not expand measurements to every language, additional hosts, repetitions,
 statistical thresholds or new benchmark corpora. The existing Criterion suite
@@ -749,14 +902,19 @@ focus changes.
   contracts, including the comparison table.
 - **A new `tree-hugger/docs/symbol-reports.md`.** It covers, for a reader new
   to the repository:
-  - every symbol command and its fixed kind set
-  - the JSON envelope, with a short sample, and what `--json-full` adds
-  - default and explicit ordering
+  - every symbol command and its fixed kind set, including what `classes`
+    displays
+  - the JSON envelope, with a short sample, the trailing `errors` array and
+    exit status, and what `--json-full` adds
+  - default and `--sort` ordering, its tie-breakers, and how grouping combines
+    with it
+  - `--verbose` and what it gates
   - a Mermaid diagram of the query → passes → render flow
-- **`tree-hugger/docs/cache-design.md`:** the single cache layer and the
-  computed fingerprint.
+- **`tree-hugger/docs/cache-design.md`:** the single cache layer, the
+  computed fingerprint, and partial-hit write-back.
 - **`tree-hugger/README.md`, `cli` help text and the shell completions:**
-  `--sort`, `--verbose`, and the changed JSON shape and default order.
+  `--sort`, `--verbose`, the removed `--sort-by-kind` and `--sort-by-module`,
+  and the changed JSON shape and default order.
 - **`.claude/skills/tree-hugger/SKILL.md` and `api-reference.md`:**
   - `SourceFile` and `SymbolQuery`
   - `keyword` and `signature_text`
@@ -764,10 +922,10 @@ focus changes.
     path
 - **`tree-hugger/docs/symbol-schema-design.md`:** record/index version 4.0,
   removed timestamps, container rename, `keyword`, the two text contracts,
-  `is_recursive` reporting `Unknown`, explicit pass dependencies and retained
-  v1 adapters.
-- **`docs/dependencies.md` and area dependency docs:** update only if dependency
-  declarations change; no new dependency is planned.
+  `is_recursive` reporting `Unknown` (and v1 `false` meaning "not known to be
+  recursive"), explicit pass dependencies and retained v1 adapters.
+- **`docs/dependencies.md` and area dependency docs:** `rayon` added to
+  tree-hugger-cli, and `biscuit-hash` wherever it becomes a normal dependency.
 
 ## Out of scope
 
