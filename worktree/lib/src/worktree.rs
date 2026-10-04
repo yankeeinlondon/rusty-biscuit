@@ -8,11 +8,11 @@ use crate::default_target::{DefaultTarget, choose_default_target};
 use crate::error::WorktreeError;
 use crate::fork_origin::ForkOriginStore;
 use crate::listing::{
-    BranchComparisons, Caption, ParentComparison, RefTips, TreeRow, build_tree, compare_cached,
+    BranchComparisons, Caption, ParentComparison, RefSnapshot, RefTips, TreeRow, build_tree, compare_cached,
 };
+use crate::availability::{self, Availability};
 use crate::git::{git_command, git_command_in, git_from, repo_info};
 use crate::include::{IncludeRules, copy::{self, RealCopyOps, SkipReason}};
-use crate::pull_requests::unix_now;
 use crate::util::dasherize;
 
 #[derive(Debug, Clone)]
@@ -27,6 +27,10 @@ pub struct WorktreeEntry {
     pub is_main: bool,
     /// Whether the worktree is the one the user is currently in
     pub is_current: bool,
+    /// Git's `prunable` marker: `None` without one, `Some("")` for a bare
+    /// marker, otherwise Git's reason verbatim. Display text only: the reason
+    /// is localized, so safety decisions read [`crate::availability`] instead.
+    pub prunable: Option<String>,
 }
 
 /// Working-tree dirtiness, classified by file kind.
@@ -41,6 +45,9 @@ pub enum DirtyStatus {
     DirtyNonSource,
     /// At least one dirty file is source code.
     DirtySource,
+    /// Not checked: `git status` failed, or Git marks the entry `prunable`.
+    /// Never counts as clean, nor as known source changes.
+    Unknown,
 }
 
 #[derive(Debug, Clone)]
@@ -48,6 +55,9 @@ pub struct WorktreeStatus {
     pub entry: WorktreeEntry,
     /// Working-tree dirtiness in this worktree's checkout
     pub dirty: DirtyStatus,
+    /// Whether the checkout is usable (Git can read it and its path is not a
+    /// link), classified once per listing.
+    pub availability: Availability,
 }
 
 #[derive(Debug)]
@@ -127,6 +137,10 @@ pub fn default_branch_in(repo: &Path) -> Result<String, WorktreeError> {
 }
 
 /// Parse `git worktree list --porcelain` output into entries.
+///
+/// A `prunable` line sets [`WorktreeEntry::prunable`]. Git writes at most one
+/// per entry; should two appear, both reasons are kept, joined by `"; "`, so
+/// neither silently wins.
 pub fn parse_worktree_list(porcelain_output: &str) -> Vec<WorktreeEntry> {
     let cwd = std::env::current_dir().unwrap_or_default();
     let cwd_canonical = std::fs::canonicalize(&cwd).unwrap_or(cwd.clone());
@@ -135,25 +149,24 @@ pub fn parse_worktree_list(porcelain_output: &str) -> Vec<WorktreeEntry> {
     let mut path: Option<PathBuf> = None;
     let mut branch: Option<String> = None;
     let mut head_sha: Option<String> = None;
+    let mut prunable: Option<String> = None;
     let mut is_main = false;
     let mut first = true;
 
+    let mut flush = |path: PathBuf, branch: Option<String>, head_sha: Option<String>, prunable: Option<String>, is_main: bool| {
+        let is_current = is_current_worktree(&cwd, &cwd_canonical, &path);
+        entries.push(WorktreeEntry { path, branch, head_sha, is_main, is_current, prunable });
+    };
+
     for line in porcelain_output.lines() {
         if let Some(rest) = line.strip_prefix("worktree ") {
-            // Flush previous entry
             if let Some(p) = path.take() {
-                let is_current = is_current_worktree(&cwd, &cwd_canonical, &p);
-                entries.push(WorktreeEntry {
-                    path: p,
-                    branch: branch.take(),
-                    head_sha: head_sha.take(),
-                    is_main,
-                    is_current,
-                });
+                flush(p, branch.take(), head_sha.take(), prunable.take(), is_main);
             }
             path = Some(PathBuf::from(rest));
             branch = None;
             head_sha = None;
+            prunable = None;
             is_main = first;
             first = false;
         } else if let Some(rest) = line.strip_prefix("HEAD ") {
@@ -161,23 +174,28 @@ pub fn parse_worktree_list(porcelain_output: &str) -> Vec<WorktreeEntry> {
         } else if let Some(rest) = line.strip_prefix("branch ") {
             // refs/heads/main -> main
             branch = Some(rest.strip_prefix("refs/heads/").unwrap_or(rest).to_string());
+        } else if let Some(reason) = prunable_reason(line) {
+            prunable = Some(match prunable.take() {
+                Some(earlier) => format!("{earlier}; {reason}"),
+                None => reason.to_string(),
+            });
         }
-        // We skip bare, detached, prunable lines.
     }
 
-    // Flush last entry
     if let Some(p) = path {
-        let is_current = is_current_worktree(&cwd, &cwd_canonical, &p);
-        entries.push(WorktreeEntry {
-            path: p,
-            branch: branch.take(),
-            head_sha: head_sha.take(),
-            is_main,
-            is_current,
-        });
+        flush(p, branch, head_sha, prunable, is_main);
     }
 
     entries
+}
+
+/// The reason on a `prunable` line, `""` for a bare marker; `None` for any
+/// other line.
+fn prunable_reason(line: &str) -> Option<&str> {
+    match line.strip_prefix("prunable")? {
+        "" => Some(""),
+        rest => rest.strip_prefix(' '),
+    }
 }
 
 /// Determine whether a worktree path is the current working directory.
@@ -201,18 +219,18 @@ fn is_current_worktree(cwd: &Path, cwd_canonical: &Path, worktree_path: &Path) -
 /// A snapshot of the worktree listing for a single invocation.
 ///
 /// [`parse_worktree_state`] fills the cheap facts (entries, default branch,
-/// ref tips, fork-origin records) and [`fill_worktree_statuses`] the rest, so
-/// callers can start other work from the parsed state while the expensive
-/// per-worktree pass runs.
+/// ref tips, fork-origin records). The expensive facts are gathered without
+/// persistent side effects ([`WorktreeList::gather_local`],
+/// [`WorktreeList::gather_ref_facts`]), so a caller can gather speculatively
+/// and discard the result, and are adopted by one [`WorktreeList::commit`].
+/// [`fill_worktree_statuses`] composes the two for an ordinary listing.
 #[derive(Debug)]
 pub struct WorktreeList {
     pub default_branch: String,
     entries: Vec<WorktreeEntry>,
-    refs: RefTips,
-    /// `for-each-ref` succeeded, so a branch missing from `refs` is deleted.
-    refs_read: bool,
-    /// Unix seconds just before `refs` was read.
-    refs_read_at: u64,
+    /// The parse step's read until [`WorktreeList::commit`] adopts the
+    /// accepted one.
+    refs: RefSnapshot,
     forks: ForkOriginStore,
     fork_file: Option<PathBuf>,
     cache_file: Option<PathBuf>,
@@ -226,6 +244,15 @@ pub struct WorktreeList {
     /// The Branch column's rows, in display order.
     pub tree: Vec<TreeRow>,
     /// Keyed by branch name, for every existing non-default branch in the tree.
+    pub comparisons: HashMap<String, BranchComparisons>,
+}
+
+/// The ref-dependent facts of one gather, all computed from one [`RefTips`].
+#[derive(Debug, Clone, Default)]
+pub struct RefFacts {
+    pub caption: Option<Caption>,
+    pub target: Option<DefaultTarget>,
+    pub tree: Vec<TreeRow>,
     pub comparisons: HashMap<String, BranchComparisons>,
 }
 
@@ -246,9 +273,7 @@ pub fn parse_worktree_state() -> Result<WorktreeList, WorktreeError> {
     let porcelain = git_command(&["worktree", "list", "--porcelain"])?;
     let entries = parse_worktree_list(&porcelain);
     let default_branch = default_branch()?;
-    let refs_read_at = unix_now();
-    let refs = RefTips::read();
-    let refs_read = refs.is_some();
+    let refs = RefSnapshot::read();
     let main_path = entries.first().map(|entry| entry.path.clone());
     let cache_file = main_path.as_deref().and_then(|path| cache_path(path).ok());
     if let Some(parent) = cache_file.as_ref().and_then(|path| path.parent()) {
@@ -265,9 +290,7 @@ pub fn parse_worktree_state() -> Result<WorktreeList, WorktreeError> {
     Ok(WorktreeList {
         default_branch,
         entries,
-        refs: refs.unwrap_or_default(),
-        refs_read,
-        refs_read_at,
+        refs,
         forks,
         fork_file,
         cache_file,
@@ -280,101 +303,29 @@ pub fn parse_worktree_state() -> Result<WorktreeList, WorktreeError> {
 }
 
 /// Populate dirty status, the caption, the default-branch target, the fork
-/// tree, and every branch comparison for a parsed worktree state.
-///
-/// Records of deleted branches and removed worktrees are pruned here.
+/// tree, and every branch comparison from the parse step's ref read, then
+/// [`WorktreeList::commit`] them.
 pub fn fill_worktree_statuses(list: &mut WorktreeList) -> Result<(), WorktreeError> {
-    let cache = Mutex::new(
-        list.cache_file
-            .as_deref()
-            .map(Cache::load_or_default_from)
-            .unwrap_or_default(),
-    );
+    let cache = list.load_comparison_cache();
     let refs = list.refs.clone();
-    let default_branch = list.default_branch.clone();
-    let entries = list.entries.clone();
-
-    let tree = build_tree(&entries, &default_branch, &refs.local, &list.forks);
-
-    let (statuses, caption, target, comparisons) = std::thread::scope(|scope| {
-        let dirty_handles: Vec<_> = entries
-            .iter()
-            .map(|entry| {
-                let path = entry.path.clone();
-                scope.spawn(move || dirty_status(&path))
-            })
-            .collect();
-
-        let local_tip = refs.local(&default_branch).map(str::to_string);
-        let remote_name = format!("origin/{default_branch}");
-        let remote_tip = refs.remote(&remote_name).map(str::to_string);
-        let caption = local_tip.as_deref().zip(remote_tip.as_deref()).and_then(|(local, remote)| {
-            compare_cached(&cache, remote, local).map(|comparison| Caption {
-                local: default_branch.clone(),
-                remote: remote_name.clone(),
-                tracking_sha: remote.to_string(),
-                ahead: comparison.ahead,
-                behind: comparison.behind,
-            })
-        });
-        let target = choose_default_target(&default_branch, local_tip, remote_tip, |ancestor, descendant| {
-            match &caption {
-                // The caption compared the local tip (branch) with the remote
-                // tip (target): the remote contains the local tip when the
-                // local side is 0 ahead, and vice versa.
-                Some(caption) if refs.remote(&remote_name) == Some(ancestor) => caption.behind == 0,
-                Some(caption) if refs.remote(&remote_name) == Some(descendant) => caption.ahead == 0,
-                _ => git_command(&["merge-base", "--is-ancestor", ancestor, descendant]).is_ok(),
-            }
-        });
-
-        let comparisons = compare_tree(&tree, &refs, &default_branch, target.as_ref(), &cache, scope);
-
-        let statuses: Vec<WorktreeStatus> = entries
-            .iter()
-            .cloned()
-            .zip(dirty_handles)
-            .map(|(entry, handle)| WorktreeStatus {
-                entry,
-                dirty: handle.join().expect("dirty_status thread panicked"),
-            })
-            .collect();
-        (statuses, caption, target, comparisons)
-    });
-
-    if let Some(path) = list.cache_file.as_ref() {
-        let _ = cache.lock().expect("cache mutex poisoned").save_atomic(path);
-    }
-    // Without a successful `for-each-ref` every branch would look deleted.
-    if let (true, Some(path)) = (list.refs_read, list.fork_file.as_ref()) {
-        // The file is pruned as it is now, not as loaded before the remote
-        // wait: a `wt create` may have added a record since. A record no
-        // older than the ref read may name a branch that read could not see,
-        // so only that rare record costs a git call.
-        let mut stored = ForkOriginStore::load_from(path);
-        let refs_read_at = list.refs_read_at;
-        let local = &list.refs.local;
-        let pruned = stored.prune(|branch, origin| {
-            local.contains_key(branch)
-                || (origin.created_at >= refs_read_at
-                    && git_command(&["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")]).is_ok())
-        });
-        if pruned > 0 {
-            let _ = stored.save_atomic(path);
-        }
-        list.forks = stored;
-    }
-    if let Some(repo_root) = entries.iter().find(|entry| entry.is_main).map(|entry| &entry.path) {
-        let live = entries.iter().filter_map(|entry| std::fs::canonicalize(&entry.path).ok()).collect();
-        let _ = copy_record::prune(repo_root, &live);
-    }
-
-    list.statuses = statuses;
-    list.caption = caption;
-    list.target = target;
-    list.tree = tree;
-    list.comparisons = comparisons;
+    let (dirty, facts) = list.gather_local(refs.tips(), &cache);
+    list.commit(refs, dirty, facts, cache);
     Ok(())
+}
+
+/// Every entry's dirtiness, one `git status` per entry on its own thread, in
+/// entry order. Independent of every ref.
+pub fn gather_dirtiness(entries: &[WorktreeEntry]) -> Vec<DirtyStatus> {
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = entries
+            .iter()
+            .map(|entry| scope.spawn(move || entry_dirtiness(entry)))
+            .collect();
+        handles
+            .into_iter()
+            .map(|handle| handle.join().expect("dirty_status thread panicked"))
+            .collect()
+    })
 }
 
 /// Compares every existing non-default branch in the tree with the target and,
@@ -427,26 +378,154 @@ impl WorktreeList {
         &self.entries
     }
 
-    /// Branch tips from the parse step, or from the last
-    /// [`WorktreeList::reread_refs`]; empty when `for-each-ref` failed.
+    /// Branch tips from the parse step, or from the read
+    /// [`WorktreeList::commit`] adopted; empty when `for-each-ref` failed.
     pub fn refs(&self) -> &RefTips {
+        self.refs.tips()
+    }
+
+    /// The ref read behind [`WorktreeList::refs`], with its success and time.
+    pub fn ref_snapshot(&self) -> &RefSnapshot {
         &self.refs
     }
 
-    /// Takes a new ref snapshot, for a caller that may have moved refs since
-    /// [`parse_worktree_state`] (`wt list`'s fetch and fast-forward), so the
-    /// statuses [`fill_worktree_statuses`] computes describe one state.
-    pub fn reread_refs(&mut self) {
-        self.refs_read_at = unix_now();
-        let refs = RefTips::read();
-        self.refs_read = refs.is_some();
-        self.refs = refs.unwrap_or_default();
-    }
-
     /// Fork-origin records as loaded, replaced by the pruned file once
-    /// statuses are filled.
+    /// committed.
     pub fn fork_origins(&self) -> &ForkOriginStore {
         &self.forks
+    }
+
+    /// The stored SHA-pair comparisons, held in memory so every gather of
+    /// this listing adds to them; [`WorktreeList::commit`] saves them once.
+    pub fn load_comparison_cache(&self) -> Mutex<Cache> {
+        Mutex::new(self.cache_file.as_deref().map(Cache::load_or_default_from).unwrap_or_default())
+    }
+
+    /// Dirtiness ([`gather_dirtiness`]) and the ref-dependent facts
+    /// ([`WorktreeList::gather_ref_facts`]) for `refs`, measured concurrently.
+    /// Writes nothing persistent.
+    pub fn gather_local(&self, refs: &RefTips, cache: &Mutex<Cache>) -> (Vec<DirtyStatus>, RefFacts) {
+        std::thread::scope(|scope| {
+            let dirty = scope.spawn(|| gather_dirtiness(&self.entries));
+            let facts = self.gather_ref_facts(refs, cache);
+            (dirty.join().expect("dirtiness thread panicked"), facts)
+        })
+    }
+
+    /// The caption, the default-branch target, the fork tree, and every
+    /// branch comparison, from `refs` alone: every comparison names the
+    /// object IDs `refs` captured, never a branch, so a ref moving meanwhile
+    /// cannot leak into the result. New comparisons are added to `cache` in
+    /// memory only; failed ones are not added.
+    pub fn gather_ref_facts(&self, refs: &RefTips, cache: &Mutex<Cache>) -> RefFacts {
+        let default_branch = self.default_branch.as_str();
+        let tree = build_tree(&self.entries, default_branch, &refs.local, &self.forks);
+
+        let local_tip = refs.local(default_branch).map(str::to_string);
+        let remote_name = format!("origin/{default_branch}");
+        let remote_tip = refs.remote(&remote_name).map(str::to_string);
+        let caption = local_tip.as_deref().zip(remote_tip.as_deref()).and_then(|(local, remote)| {
+            compare_cached(cache, remote, local).map(|comparison| Caption {
+                local: default_branch.to_string(),
+                remote: remote_name.clone(),
+                tracking_sha: remote.to_string(),
+                ahead: comparison.ahead,
+                behind: comparison.behind,
+            })
+        });
+        let target = choose_default_target(default_branch, local_tip, remote_tip, |ancestor, descendant| {
+            match &caption {
+                // The caption compared the local tip (branch) with the remote
+                // tip (target): the remote contains the local tip when the
+                // local side is 0 ahead, and vice versa.
+                Some(caption) if refs.remote(&remote_name) == Some(ancestor) => caption.behind == 0,
+                Some(caption) if refs.remote(&remote_name) == Some(descendant) => caption.ahead == 0,
+                _ => git_command(&["merge-base", "--is-ancestor", ancestor, descendant]).is_ok(),
+            }
+        });
+
+        let comparisons = std::thread::scope(|scope| {
+            compare_tree(&tree, refs, default_branch, target.as_ref(), cache, scope)
+        });
+        RefFacts { caption, target, tree, comparisons }
+    }
+
+    /// Adopts one accepted gather and makes its persistent effects, once:
+    /// saves `cache` (every successful comparison of this listing, a
+    /// discarded gather's included), prunes fork-origin records of branches
+    /// `refs` shows deleted, and prunes include-copy records of removed
+    /// worktrees.
+    ///
+    /// `dirty` is in entry order. Fork records are pruned only when `refs`
+    /// succeeded: without a successful `for-each-ref` every branch would look
+    /// deleted.
+    pub fn commit(&mut self, refs: RefSnapshot, dirty: Vec<DirtyStatus>, facts: RefFacts, cache: Mutex<Cache>) {
+        if let Some(path) = self.cache_file.as_ref() {
+            let _ = cache.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner).save_atomic(path);
+        }
+        if let (true, Some(path)) = (refs.succeeded(), self.fork_file.as_ref()) {
+            // The file is pruned as it is now, not as loaded before the remote
+            // wait: a `wt create` may have added a record since. A record no
+            // older than the ref read may name a branch that read could not see,
+            // so only that rare record costs a git call.
+            let mut stored = ForkOriginStore::load_from(path);
+            let refs_read_at = refs.read_at();
+            let local = &refs.tips().local;
+            let pruned = stored.prune(|branch, origin| {
+                local.contains_key(branch)
+                    || (origin.created_at >= refs_read_at
+                        && git_command(&["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")]).is_ok())
+            });
+            if pruned > 0 {
+                let _ = stored.save_atomic(path);
+            }
+            self.forks = stored;
+        }
+        if let Some(repo_root) = self.entries.iter().find(|entry| entry.is_main).map(|entry| &entry.path) {
+            let live = self.entries.iter().filter_map(|entry| std::fs::canonicalize(&entry.path).ok()).collect();
+            let _ = copy_record::prune(repo_root, &live);
+        }
+
+        self.refs = refs;
+        self.statuses = self
+            .entries
+            .iter()
+            .cloned()
+            .zip(dirty)
+            .map(|(entry, dirty)| {
+                let availability = availability::classify(&entry);
+                WorktreeStatus { entry, dirty, availability }
+            })
+            .collect();
+        self.caption = facts.caption;
+        self.target = facts.target;
+        self.tree = facts.tree;
+        self.comparisons = facts.comparisons;
+    }
+
+    /// Measures the dirtiness of the committed entry at `checkout` again and
+    /// replaces its earlier result, for a checkout whose files this command
+    /// moved (`--ff`). `checkout` is spelled as `git worktree list` spells
+    /// it. Returns whether an entry matched; other entries are untouched.
+    pub fn refresh_dirty_status(&mut self, checkout: &Path) -> bool {
+        match self.statuses.iter_mut().find(|status| status.entry.path == checkout) {
+            Some(status) => {
+                status.dirty = entry_dirtiness(&status.entry);
+                true
+            }
+            None => false,
+        }
+    }
+}
+
+/// [`dirty_status`] for a readable entry; [`DirtyStatus::Unknown`] without
+/// running Git for one Git marks `prunable`, where `git status` would fail or
+/// report a parent repository's files as this entry's.
+fn entry_dirtiness(entry: &WorktreeEntry) -> DirtyStatus {
+    if entry.prunable.is_some() {
+        DirtyStatus::Unknown
+    } else {
+        dirty_status(&entry.path)
     }
 }
 
@@ -454,8 +533,8 @@ impl WorktreeList {
 ///
 /// Runs `git status --porcelain` in `path` and partitions changed paths into
 /// source-code files (via `sniff::filesystem::path_kind::is_source_code_path`)
-/// and everything else. Falls back to [`DirtyStatus::Clean`] on git failure so
-/// listing still works in degraded environments.
+/// and everything else. A spawn failure or nonzero exit is
+/// [`DirtyStatus::Unknown`], so a failed check never reads as clean.
 pub fn dirty_status(path: &Path) -> DirtyStatus {
     // `core.untrackedCache=true` enables git's untracked-files cache (persisted
     // in the worktree's `.git/index`). Walking untracked files in a large
@@ -465,7 +544,7 @@ pub fn dirty_status(path: &Path) -> DirtyStatus {
         path,
         &["-c", "core.untrackedCache=true", "status", "--porcelain"],
     ) else {
-        return DirtyStatus::Clean;
+        return DirtyStatus::Unknown;
     };
 
     let mut any_dirty = false;
@@ -1026,6 +1105,76 @@ branch refs/heads/fix/bug-42
         assert!(entries.is_empty());
     }
 
+    /// Real porcelain records keyed by checkout directory name: `main`, a
+    /// healthy `kept`, and a deleted `gone` (which Git marks `prunable`).
+    fn git_porcelain_records() -> (crate::remove::test_support::TestRepo, HashMap<String, String>) {
+        let repo = crate::remove::test_support::TestRepo::new();
+        repo.add_worktree("feat/kept", "kept", "main");
+        let gone = repo.add_worktree("feat/gone", "gone", "main");
+        fs::remove_dir_all(&gone).unwrap();
+        let porcelain = repo.git(&["worktree", "list", "--porcelain"]);
+        let records = porcelain
+            .split("\n\n")
+            .map(|record| {
+                let path = record.lines().next().and_then(|line| line.strip_prefix("worktree ")).unwrap();
+                let name = Path::new(path).file_name().unwrap().to_string_lossy();
+                let name = if name == "repo" { "main".to_string() } else { name.into_owned() };
+                (name, format!("{}\n", record.trim_end()))
+            })
+            .collect();
+        (repo, records)
+    }
+
+    fn prunable_of(porcelain: &str) -> Vec<Option<String>> {
+        parse_worktree_list(porcelain).into_iter().map(|entry| entry.prunable).collect()
+    }
+
+    /// Walks the `prunable` input matrix: one edit of Git's own output per
+    /// cell, after a control row proving the unedited output marks only the
+    /// deleted checkout.
+    #[test]
+    fn the_prunable_line_matrix_from_real_git_output() {
+        let (_repo, records) = git_porcelain_records();
+        let (main, kept, gone) = (&records["main"], &records["kept"], &records["gone"]);
+        let reason_line = gone.lines().find(|line| line.starts_with("prunable")).expect("Git marks a deleted checkout prunable");
+        let reason = reason_line.strip_prefix("prunable ").expect("Git writes a reason").to_string();
+        assert!(!reason.is_empty());
+
+        let gone_last = format!("{main}\n{kept}\n{gone}");
+        assert_eq!(prunable_of(&gone_last), [None, None, Some(reason.clone())], "control: last entry flushed with its marker");
+        let gone_middle = format!("{main}\n{gone}\n{kept}");
+        assert_eq!(prunable_of(&gone_middle), [None, Some(reason.clone()), None], "reset before the next entry");
+
+        let edit = |line: &str| format!("{main}\n{kept}\n{}", gone.replace(reason_line, line));
+        assert_eq!(prunable_of(&format!("{main}\n{kept}\n{}", gone.replace(&format!("{reason_line}\n"), ""))), [None, None, None], "absent");
+        assert_eq!(prunable_of(&edit("prunable")), [None, None, Some(String::new())], "bare marker");
+        assert_eq!(prunable_of(&edit("prunable ")), [None, None, Some(String::new())], "marker with empty reason");
+        assert_eq!(prunable_of(&edit("prunablex")), [None, None, None], "a longer keyword is not the marker");
+        assert_eq!(
+            prunable_of(&edit(&format!("{reason_line}\nprunable second"))),
+            [None, None, Some(format!("{reason}; second"))],
+            "duplicate markers keep both reasons in order"
+        );
+        let lossy = String::from_utf8_lossy(b"prunable bad \xff").into_owned();
+        assert_eq!(prunable_of(&edit(&lossy)), [None, None, Some("bad \u{FFFD}".to_string())], "non-UTF-8 kept lossily for display");
+
+        let kept_path = kept.lines().next().unwrap().strip_prefix("worktree ").unwrap();
+        let embedded = kept
+            .replace(&format!("worktree {kept_path}"), &format!("worktree {kept_path}/prunable x"))
+            .replace("branch refs/heads/feat/kept", "branch refs/heads/prunable");
+        assert_eq!(prunable_of(&format!("{main}\n{embedded}\n{gone}")), [None, None, Some(reason.clone())], "marker text inside a path or branch");
+
+        assert_eq!(prunable_of(&gone_last.replace('\n', "\r\n")), [None, None, Some(reason.clone())], "CRLF");
+        assert_eq!(prunable_of(&format!("{gone_last}\n\n\n")), [None, None, Some(reason)], "trailing blank records");
+    }
+
+    #[test]
+    fn a_failed_status_check_is_unknown_never_clean() {
+        let outside = tempfile::tempdir().unwrap();
+        assert_eq!(dirty_status(outside.path()), DirtyStatus::Unknown, "nonzero exit outside a repository");
+        assert_eq!(dirty_status(&outside.path().join("absent")), DirtyStatus::Unknown, "spawn failure in a missing directory");
+    }
+
     #[test]
     fn porcelain_path_extracts_modified_file() {
         assert_eq!(porcelain_path(" M src/lib.rs"), Some("src/lib.rs"));
@@ -1546,7 +1695,7 @@ branch refs/heads/fix/bug-42
     fn copy_source_prefers_checkout_and_handles_reuse_and_ambiguity() {
         let entry = |path: &str, branch: &str, is_main| WorktreeEntry {
             path: PathBuf::from(path), branch: Some(branch.into()), head_sha: None,
-            is_main, is_current: false,
+            is_main, is_current: false, prunable: None,
         };
         let base = entry("/base", "main", true);
         let theme = entry("/theme", "feat/theme", false);

@@ -59,7 +59,10 @@ pub fn record_path(repo_root: &Path, worktree: &Path) -> Result<PathBuf, Worktre
     repo_cache_file(repo_root, &format!("copy-{}.json", path_hex(&hash[..8])))
 }
 
-fn canonical_worktree_path(path: &Path) -> io::Result<PathBuf> {
+/// `path` with its longest existing ancestor canonicalized and the missing
+/// components re-appended as spelled, so a path that no longer exists still
+/// compares equal across symlink aliases and Windows short names.
+pub(crate) fn canonical_worktree_path(path: &Path) -> io::Result<PathBuf> {
     let absolute = std::path::absolute(path)?;
     let mut missing = Vec::new();
     let mut existing = absolute.as_path();
