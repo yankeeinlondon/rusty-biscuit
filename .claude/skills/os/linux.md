@@ -65,3 +65,13 @@ WSL2 follows these Linux code paths; its archive-mode traps are in
   spawns a thread, while macOS and Windows count it once.
 - Filter with `process.thread_kind().is_none()`
   (`worktree/cli/tests/perf_support::refresh_workers`).
+
+## `ld terminated with signal 9` on `BUILD_LINUX` during cross-check
+
+- `just cross-check worktree-cli --os linux` once failed while linking a
+  test binary (`collect2: fatal error: ld terminated with signal 9 [Killed]`):
+  the host killed the linker for memory while parallel links ran (possibly
+  beside other sessions' builds). It is not a code error.
+- Retry once with fewer parallel builds; extra arguments go to
+  `cargo nextest run`: `just cross-check <package> --os linux --build-jobs 2`.
+  The retry reused the cached build and passed.

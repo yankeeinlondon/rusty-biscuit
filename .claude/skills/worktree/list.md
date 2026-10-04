@@ -120,6 +120,18 @@ Pure over `TableFacts`; snapshot tests in `cli/tests/list_table.rs`.
 
 ### Lines beneath the caption and table
 
+- **One identity guard.** `RemoteAnswers::observed()` returns
+  `Option<list::Observed>`, `None` when `origin` was replaced or removed
+  during the wait (`origin_changed`). Every projection of request evidence
+  reads through it: `list::request_notices` (PR item, credentials line,
+  keyless notice, fallback notice) and `list::caption_status` (the caption's
+  head status, which for a changed `origin` is `CheckFailed { Other }` dated
+  only from the reflog). `pr_outcome`, `observed_pr_failure`, and
+  `observed_keyless` take `&Observed`, so they cannot be called around the
+  guard; a new projection must too. Proven by
+  `list::tests::gather::a_replaced_or_removed_origin_suppresses_every_request_notice`
+  (each projection × unchanged/replaced/removed) and, through the binary,
+  `list_prs::a_changed_origin_drops_the_old_head_checks_*`.
 - `list::credential_line` (§5) and `list::fallback_notice` (§8) read only this
   run's followed attempt's `ApiNote` and this run's PR failure
   (`list::observed_pr_failure`: the receipt's, in every mode), with names from
@@ -128,8 +140,8 @@ Pure over `TableFacts`; snapshot tests in `cli/tests/list_table.rs`.
   else the PR failure's, else `CredentialCondition::AnsweredWithoutKey` when
   `list::observed_keyless` holds: the followed attempt's `credentials` or the
   wait's `pr_credentials` (with `PrEnd::Published`) is `anonymous`, the
-  repository is not ignored, `origin` did not change (here, or as the
-  attempt's `Unavailable` outcome). Never from the foreground environment.
+  repository is not ignored, and the attempt is not `Unavailable` (its worker
+  saw `origin` change). Never from the foreground environment.
   `keyed_limits_are_higher` decides the wording by sniff's display name
   (GitHub, GitLab, Bitbucket: "for higher rate limits"; Gitea/Forgejo:
   "to authenticate API requests"); its test pins the names. Proven by

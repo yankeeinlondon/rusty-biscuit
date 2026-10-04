@@ -253,8 +253,10 @@ id, clock) and follows only its own token's attempt.
   attempt's `credentials` and `pr_credentials` with `PrEnd::Published`; see
   [list.md](list.md#lines-beneath-the-caption-and-table).
 - Rereads the PR store on every exit path and rechecks `origin`. An `origin`
-  changed during the wait drops the old badges and this run's PR result
-  (`RemoteAnswers::origin_changed`).
+  changed or removed during the wait drops the old badges and every notice
+  about either half's requests (`RemoteAnswers::origin_changed`, enforced by
+  `RemoteAnswers::observed`; see
+  [list.md](list.md#lines-beneath-the-caption-and-table)).
 - Spinner (`wait::Progress`, biscuit-terminal `Spinner`, 150 ms delay, stderr
   only when it is a terminal) follows the phase, says the generic `updating`
   once only the PR half is left, and is cleared before anything renders.

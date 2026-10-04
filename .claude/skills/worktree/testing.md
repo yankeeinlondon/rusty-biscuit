@@ -146,7 +146,18 @@ worker is gone.
 - `remote_fixture::UploadPackGate` points `remote.origin.uploadpack` at a script
   that counts runs and holds the Nth one (0: the check's `ls-remote`, 1: the
   fetch) until released — how the still-checking, still-pulling, and adoption
-  rows are proven with a local origin.
+  rows are proven with a local origin. The hold loop also ends when the gate
+  directory disappears: a test killed before the gate's `Drop` (nextest
+  timeout, Ctrl-C) once left a `git ls-remote` + `upload-pack.sh` pair
+  orphaned under launchd for hours. A long-lived `upload-pack.sh` in `ps`
+  points to a gate written without that exit.
+- A held-worker test that finds the worker with `refresh_workers` after
+  `gate.wait_for_runs` (e.g.
+  `a_failed_assertion_while_upload_pack_is_held_still_reaps_the_worker_before_the_fixture_goes`)
+  can see zero workers under heavy host load (load average 40+): once 10 s
+  pass from the worker's launch, its check deadline kills the held
+  transport and the worker exits. A run near 10 s rather than the usual
+  3.4 s is load, not a regression; rerun before investigating.
 - Binary tests find receipts by prefix beside the store
   (`list_flags::receipts_beside`), since the wait deletes them.
 - Library transport tests reuse `live_remote::tests::Loopback` (the module is
