@@ -169,7 +169,7 @@ fn a_stale_store_shows_its_badges_and_its_workers_failed_request_stores_nothing(
     assert!(stderr.contains("PRs as of 12 min ago"), "{stderr}");
     // A foreground request would be a third connection. Its duration is
     // `perf_pr_request.rs`'s to bound: parallel L1 load on Windows pushes
-    // even a no-request `pr gather` past that file's 300 ms stage bound.
+    // even no-request PR store reads past that file's 300 ms stage bound.
     assert_eq!(proxy.connections(), 2, "one worker, one request per half, none in the foreground");
     assert_eq!(fs::read(fixture.pr_store()).expect("store"), stored, "a failed refresh is never stored");
 }
@@ -862,3 +862,106 @@ fn a_failed_assertion_kills_a_test_owned_worker_and_frees_its_lock() {
     assert!(!fixture.head_lock_held(), "the live-head lock is free");
 }
 
+
+// The keyless notice through the shipped binary: one dim line beneath the
+// caption whenever this listing saw an API answer sent without a key, in
+// either half, and a generic failure in the other half never hides it.
+
+const GITEA_KEYLESS: &str = "Gitea answered without an API key; set GITEA_TOKEN or FORGEJO_TOKEN or CODEBERG_TOKEN to authenticate API requests.";
+
+/// A listing through `command` whose worker is waited for, so the stores it
+/// leaves are final.
+fn keyless_listing(fixture: &MixedFixture, command: Command) -> String {
+    let (_, stderr) = list_with(command);
+    assert!(wait_for_refresh_workers(fixture.main(), 0, WORKER_WAIT).is_empty(), "the worker finished");
+    stderr
+}
+
+fn keyless_lines(stderr: &str) -> usize {
+    collapsed(stderr).matches("answered without an API key").count()
+}
+
+#[test]
+#[serial]
+fn an_anonymous_pr_answer_with_a_failed_head_check_shows_the_keyless_notice() {
+    let fixture = MixedFixture::new().with_gitea_origin();
+    let gitea = FakeGitea::new(GiteaReply::Open(Vec::new()));
+    gitea.answer_branch_heads_with(500);
+    let _reaper = WorkerReaper::new(&fixture, &gitea);
+
+    let stderr = keyless_listing(&fixture, fixture.wt_command_via_gitea(&gitea));
+
+    assert_eq!((gitea.requests(), gitea.branch_requests()), (1, 1), "no extra request");
+    assert!(collapsed(&stderr).contains(GITEA_KEYLESS), "{stderr}");
+    assert_eq!(keyless_lines(&stderr), 1, "{stderr}");
+}
+
+#[test]
+#[serial]
+fn an_anonymous_head_answer_with_a_failed_pr_request_shows_the_keyless_notice_through_the_fetch() {
+    let fixture = MixedFixture::new().with_gitea_origin();
+    let gitea = FakeGitea::new(GiteaReply::Status(500));
+    let _reaper = WorkerReaper::new(&fixture, &gitea);
+    let pushed = fixture.serve_gitea_origin_one_commit_ahead(&gitea);
+    gitea.answer_branch_heads_at(&pushed);
+
+    let stderr = keyless_listing(&fixture, fixture.wt_command_via_gitea_git(&gitea));
+
+    assert_eq!((gitea.requests(), gitea.branch_requests()), (1, 1), "no extra request");
+    assert!(collapsed(&stderr).contains(GITEA_KEYLESS), "{stderr}");
+    assert_eq!(keyless_lines(&stderr), 1, "{stderr}");
+    let attempt = read_store(&fixture.remote_head_store()).attempt.expect("the attempt");
+    assert_eq!(attempt.phase, Phase::Fetching, "the API answer moved on to the fetch");
+    assert_eq!(attempt.credentials, worktree::remote_head::CredentialEvidence::Anonymous);
+}
+
+#[test]
+#[serial]
+fn two_anonymous_answers_show_exactly_one_keyless_line_and_a_key_shows_none() {
+    const SECRET: &str = "gitea-secret-token-value";
+    let fixture = MixedFixture::new().with_gitea_origin();
+    let gitea = FakeGitea::new(GiteaReply::Open(Vec::new()));
+    let _reaper = WorkerReaper::new(&fixture, &gitea);
+    let pushed = fixture.serve_gitea_origin_one_commit_ahead(&gitea);
+    gitea.answer_branch_heads_at(&pushed);
+
+    let stderr = keyless_listing(&fixture, fixture.wt_command_via_gitea_git(&gitea));
+
+    assert_eq!((gitea.requests(), gitea.branch_requests()), (1, 1), "no extra request");
+    assert_eq!(keyless_lines(&stderr), 1, "{stderr}");
+    let lines: Vec<&str> = stderr.lines().collect();
+    let caption = lines.iter().position(|line| line.contains("origin/main")).expect("the caption");
+    assert!(lines[caption + 1].trim_start().starts_with("Gitea answered without"), "directly beneath the caption:\n{stderr}");
+
+    // The same answers sent with a key: no notice, and the key's value is
+    // in neither store nor the output.
+    let mut command = fixture.wt_command_via_gitea_git(&gitea);
+    command.env("GITEA_TOKEN", SECRET);
+    let stderr = keyless_listing(&fixture, command);
+    assert_eq!(keyless_lines(&stderr), 0, "{stderr}");
+    assert!(!stderr.contains(SECRET), "{stderr}");
+    for store in [fixture.pr_store(), fixture.remote_head_store()] {
+        let text = fs::read_to_string(&store).expect("store");
+        assert!(!text.contains(SECRET), "{}: {text}", store.display());
+        assert!(text.contains("GITEA_TOKEN"), "the variable's name is recorded: {text}");
+    }
+}
+
+/// A keyless head check that fell back to an answering `ls-remote` keeps its
+/// closing notice, and the anonymous PR answer adds the keyless line.
+#[test]
+#[serial]
+fn the_keyless_notice_coexists_with_the_closing_fallback_notice() {
+    let fixture = MixedFixture::new().with_gitea_origin();
+    let gitea = FakeGitea::new(GiteaReply::Open(Vec::new()));
+    gitea.answer_branch_heads_with(401);
+    let _reaper = WorkerReaper::new(&fixture, &gitea);
+    fixture.serve_gitea_origin_one_commit_ahead(&gitea);
+
+    let stderr = keyless_listing(&fixture, fixture.wt_command_via_gitea_git(&gitea));
+
+    let text = collapsed(&stderr);
+    assert!(text.contains(GITEA_KEYLESS), "{stderr}");
+    assert!(text.contains("Git checked origin using `ls-remote`"), "{stderr}");
+    assert_eq!(keyless_lines(&stderr), 1, "{stderr}");
+}

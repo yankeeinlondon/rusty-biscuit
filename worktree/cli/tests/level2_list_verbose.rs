@@ -502,6 +502,8 @@ impl DesignFixture {
             "publication": worktree::remote_head::new_attempt_id().expect("a publication id"),
             "source_repo": source_repo,
             "pull_requests": pull_requests,
+            // A seeded answer: nothing is known of how it was asked.
+            "credentials": { "state": "unknown" },
         });
         fs::write(self.pr_store(), serde_json::to_vec(&prs).unwrap()).expect("write PR store");
 
@@ -1075,6 +1077,55 @@ fn level2_list_credentials_warning_is_a_dim_line_beneath_the_caption_in_tmux() {
     assert!(!plain.contains("GITEA_TOKEN="), "a variable is named, never assigned:\n{plain}");
 
     assert!(!sentences.contains("PRs as of") && !sentences.contains("couldn't get"), "the PRs answered:\n{plain}");
+
+    assert_worker_gone(&fixture);
+    assert!(gitea.branch_requests() >= 1, "the worker asked Gitea for the branch head");
+    assert_eq!(gitea.requests(), 1, "and, like every listing, for open PRs");
+}
+
+/// The keyless notice in a real pane: the worker's PR request is answered
+/// without a key while its head check fails generically (HTTP 500, then the
+/// refused fallback), so the notice is the one credentials line. It is dim,
+/// directly beneath the caption, and drawn after the spinner (seen while the
+/// check is held) has been cleared. In the warning test above the same
+/// anonymous PR answer is outranked by the head's confirmed warning.
+#[test]
+#[serial(level2_terminal)]
+fn level2_list_keyless_notice_is_a_dim_line_beneath_the_caption_after_the_spinner_in_tmux() {
+    use biscuit_terminal::components::spinner::FRAMES;
+
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+
+    let fixture = DesignFixture::with_gitea_origin();
+    let gitea = FakeGitea::new(GiteaReply::Open(Vec::new()));
+    gitea.answer_branch_heads_with(500);
+    gitea.hold_branch_heads();
+
+    let mut harness = fixture.start_in_pane(None, "list", "15;0", &gitea.url());
+    let during = wait_for_pane(&mut harness, |plain| plain.contains("updating"));
+    assert!(FRAMES.iter().any(|glyph| during.plain.contains(glyph)), "the spinner drew a frame:\n{}", during.plain);
+    gitea.release(GiteaReply::Open(Vec::new()));
+    let screen = StyledScreen::parse(&wait_for_pane(&mut harness, |plain| plain.contains("parent deleted")).raw);
+    let plain = screen.plain();
+    let sentences = unwrapped(&plain);
+
+    for glyph in FRAMES {
+        assert!(!plain.contains(glyph), "a spinner frame is left on the pane:\n{plain}");
+    }
+    assert!(!plain.contains("updating"), "the spinner's text is left on the pane:\n{plain}");
+    assert!(
+        sentences.contains(
+            "Gitea answered without an API key; set GITEA_TOKEN or FORGEJO_TOKEN or CODEBERG_TOKEN to authenticate API requests."
+        ),
+        "{plain}"
+    );
+    assert!(!sentences.contains("did not show this repository"), "one credentials line:\n{plain}");
+    let suffix_end = screen.row_with(&["ago)"]);
+    let notice = screen.row_with(&["Gitea", "answered", "without"]);
+    assert_eq!(notice, suffix_end + 1, "the notice follows the caption:\n{plain}");
+    screen.assert_span(notice, "answered without an API key", "dim, not italic", |s| s.dim && !s.italic);
+    assert!(notice < screen.row_with(&["Worktree", "Branch"]), "the notice precedes the table:\n{plain}");
+    assert!(!plain.contains("GITEA_TOKEN="), "a variable is named, never assigned:\n{plain}");
 
     assert_worker_gone(&fixture);
     assert!(gitea.branch_requests() >= 1, "the worker asked Gitea for the branch head");

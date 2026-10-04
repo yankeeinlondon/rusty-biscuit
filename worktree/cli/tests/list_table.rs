@@ -1016,6 +1016,16 @@ fn credential_lines_snapshot_every_condition_for_every_provider() {
         ("the key lacks rights", CredentialCondition::Insufficient, Some("used")),
         ("rate limited without a key", CredentialCondition::RateLimited { authenticated: false }, None),
         ("rate limited with a key", CredentialCondition::RateLimited { authenticated: true }, Some("used")),
+        (
+            "answered without a key, higher limits with one",
+            CredentialCondition::AnsweredWithoutKey { higher_limits: true },
+            None,
+        ),
+        (
+            "answered without a key, no established limit",
+            CredentialCondition::AnsweredWithoutKey { higher_limits: false },
+            None,
+        ),
     ];
     let mut cases = Vec::new();
     for (provider, accepted) in PROVIDERS {
@@ -1055,6 +1065,18 @@ fn the_credentials_line_is_dim_and_directly_follows_the_caption() {
     };
     let plain = list_table::render(&facts, &plain_terminal(), NOW);
     assert!(plain.lines().nth(1).unwrap().contains("didn't accept"), "{plain}");
+
+    // The keyless notice is the same dim line in the same place.
+    let line = CredentialLine {
+        provider: "GitHub".into(),
+        key: "GH_TOKEN or GITHUB_TOKEN".into(),
+        condition: CredentialCondition::AnsweredWithoutKey { higher_limits: true },
+    };
+    let facts = TableFacts { credential_line: Some(line), ..example.facts() };
+    let colored = list_table::render(&facts, &color_terminal(), NOW);
+    let lines: Vec<&str> = colored.lines().collect();
+    assert!(lines[1].contains("origin/main"), "the caption: {colored}");
+    assert!(lines[2].contains("\u{1b}[2m") && lines[2].contains("GitHub answered without an API key"), "{colored}");
 }
 
 // The hint (§6), the closing notes (§8, §9, `--ff`), and the order of all
