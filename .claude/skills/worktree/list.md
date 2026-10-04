@@ -58,6 +58,16 @@ flowchart TD
 - Dirtiness is measured once. `--ff` runs after the join; only
   `FfResult::Moved { checkout: Some(path) }` re-runs `git status`, for the
   entry whose path equals `path` (both spelled by `git worktree list`).
+- **Unknown is never clean.** `dirty_status` returns `DirtyStatus::Unknown` on
+  a spawn failure or nonzero exit. An entry with Git's `prunable` marker
+  (`WorktreeEntry::prunable`) gets `Unknown` without running `git status`,
+  in both `gather_dirtiness` and `refresh_dirty_status`. Running status there
+  could report a *parent* repository's files as the entry's (a nested
+  unlinked checkout discovers the base). Availability (`availability::classify`:
+  Healthy / Missing / Unlinked / Other) is a separate fact, classified in
+  `commit` onto `WorktreeStatus::availability` from `symlink_metadata` alone.
+  Only `NotFound` counts as absence, and a link or reparse point is Other.
+  Never read Git's reason text for a decision; it is localized.
 - Scoped tasks never print; the spinner lives on the calling thread and is
   cleared inside `follow_remote`. A scoped panic surfaces at `join` after the
   wait.
@@ -93,7 +103,14 @@ Pure over `TableFacts`; snapshot tests in `cli/tests/list_table.rs`.
 - `list_table::assemble` order: table, graph, status, verbose, blank line,
   notes.
 - `Table::with_min_width` is the widest legend line, so a short table is never
-  narrower than its legend.
+  narrower than its legend. `legend_markup(facts)` adds a second Worktree line
+  (`✕ git can't read this worktree`, `? couldn't check`) only when a table row
+  shows that glyph. Those entries sit on their own line because appending them
+  to the first line made it 126 columns wide.
+- **Worktree glyph:** `worktree_marker` gives `✕` for any unavailable
+  `availability`, whatever `dirty` says, and otherwise `dirty_dot` (`?` for
+  `DirtyStatus::Unknown`). `TableFacts::row_statuses` is the one "rows in
+  table order, each worktree once" walk shared by the legend and the notes.
 - PR badges link only when `terminal.osc_link_support`: `Table` never breaks
   inside a word, so a degraded `[text](url)` can leave it no width at all.
 - Match PRs by source repository **and** branch (`PrListing::for_branch`);
@@ -151,7 +168,25 @@ Pure over `TableFacts`; snapshot tests in `cli/tests/list_table.rs`.
   `list_table::PrOutcome` via `pr_status_markup`, then §6 when the wait timed
   out. Every row is the `list_table::pr_presentation_snapshot_every_row`
   snapshot.
-- `render_notes`: `--ff` refusal or §9 suggestion, then §8. The suggestion
+- `render_notes`: `--ff` refusal or §9 suggestion, then §8, then one dim
+  `unavailable_note` per unavailable row in table order (a `?` row gets no
+  note). Notes name a command only when it can be typed:
+  - `remove_argument` tries the branch, then the basename. It keeps a
+    candidate only if `resolve_worktree` maps it to this entry's path;
+    otherwise it says which entry the name selects instead.
+  - `shell_word` accepts only a spelling that bash, zsh, fish, and PowerShell
+    all read back unchanged. Spellings it refuses:
+    - a leading `-` or `~`;
+    - `'` or PowerShell's `‘’‚‛`;
+    - control characters;
+    - `\\`, or a final `\` (fish escapes inside single quotes).
+
+    A refused name or path drops the command, and the note says why.
+  - Only `Unlinked` claims `.git` is missing. Snapshots are
+    `unavailable_notes` and `unavailable_note_quoting`. Put a Windows spelling
+    on the base path in tests, because `file_name` of `C:\x\y` differs
+    between hosts.
+- The §9 suggestion
   follows the post-wait comparison under every `RemoteStatus` except
   `StillChecking` and `StillPulling`, so a failed check or fetch still suggests
   `--ff` to the local tracking ref.
@@ -186,6 +221,12 @@ Pure over `TableFacts`; snapshot tests in `cli/tests/list_table.rs`.
 
 - Re-reads `refs/heads/<d>` and `refs/remotes/origin/<d>` and their ancestry
   right before the move.
+- `holder_of` parses with `parse_worktree_list`. A `prunable` holder is
+  `FfRefusal::UnavailableHolder(path)` (`FfNotice::UnavailableHolder`), but
+  only when a move is needed; an up-to-date branch is still `UpToDate`.
+  Before this, the holder reached `git -C <holder> symbolic-ref`/`merge`,
+  which in an unlinked directory nested in another repository runs against
+  **that** repository. Nothing repairs or prunes the holder.
 - No checkout holds the branch: `update-ref` compare-and-swap.
 - Otherwise re-verifies the holder is still on the branch and runs
   `merge --ff-only --no-autostash <verified sha>` there under `LC_ALL=C`
