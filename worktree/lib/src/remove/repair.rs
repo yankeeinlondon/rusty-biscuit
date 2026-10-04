@@ -4,13 +4,13 @@
 //! `git worktree repair` can exit nonzero after fully restoring the link, and
 //! run from the base checkout it also restores every other worktree's broken
 //! link, so its exit status and output are diagnostics only. Success is the
-//! four postconditions of [`Postcondition`], all checked through Git from the
-//! base checkout.
+//! postconditions of [`Postcondition`]: the path is still a real directory,
+//! and Git, run from the base checkout, reads the expected link through it.
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
-use crate::availability::{self, Availability};
+use crate::availability::{self, Availability, EntryKind};
 use crate::error::WorktreeError;
 use crate::git::{git_from, git_from_output};
 use crate::worktree::{WorktreeEntry, parse_worktree_list};
@@ -81,6 +81,11 @@ impl RepairAttempt {
 /// A postcondition that did not hold after the repair attempt.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum Postcondition {
+    /// The path no longer holds a real directory, as read without following
+    /// links. Every other check resolves links, so this one alone catches a
+    /// checkout moved away and replaced by a link to it.
+    #[error("{}", .0)]
+    NotADirectory(String),
     #[error("the checkout's .git leads to {}, not its worktree record {}", .found.display(), .expected.display())]
     GitDir { expected: PathBuf, found: PathBuf },
     #[error("the checkout belongs to the repository at {}, not this one", .found.display())]
@@ -159,6 +164,15 @@ fn postcondition_failures(base: &Path, entry: &WorktreeEntry, common: &Path, adm
     let target = &entry.path;
     let mut failures = Vec::new();
 
+    match availability::inspect(target) {
+        Ok(EntryKind::Directory) => {}
+        Ok(EntryKind::Link) => failures.push(Postcondition::NotADirectory(format!(
+            "{} is now a link, which may have replaced the checkout",
+            target.display()
+        ))),
+        Ok(EntryKind::File) => failures.push(Postcondition::NotADirectory(format!("{} is not a directory", target.display()))),
+        Err(error) => failures.push(Postcondition::NotADirectory(format!("{} couldn't be inspected: {error}", target.display()))),
+    }
     match git.rev_parse_path(base, target, "--git-dir") {
         Ok(found) if same_location(&found, &admin.dir) => {}
         Ok(found) => failures.push(Postcondition::GitDir { expected: admin.dir.clone(), found }),
@@ -457,6 +471,33 @@ mod tests {
             matches!(failures.as_slice(), [Postcondition::Listing(text)] if text.contains("branch other") && text.contains("branch feat/x")),
             "{failures:?}"
         );
+    }
+
+    /// Every Git-side check reads through the link and holds; only the
+    /// target's own kind shows the checkout was replaced.
+    #[test]
+    fn a_checkout_replaced_by_a_link_after_repair_refuses() {
+        let repo = TestRepo::new();
+        let (checkout, entry) = unlinked(&repo);
+        let git = Scripted {
+            repair: Some(Box::new(|base, target| {
+                let attempt = Git.repair(base, target);
+                crate::remove::test_support::replace_with_link(target, "saved");
+                attempt
+            })),
+            ..Scripted::default()
+        };
+
+        let (failures, _) = failures(repair_unlinked(&repo.path(), &entry, &git));
+
+        assert!(
+            matches!(failures.as_slice(), [Postcondition::NotADirectory(text)] if text.contains("is now a link")),
+            "{failures:?}"
+        );
+        let saved = checkout.with_file_name("saved");
+        assert_eq!(fs::read_to_string(saved.join("README.md")).unwrap(), "edited\n");
+        assert_eq!(availability::inspect(&checkout).unwrap(), EntryKind::Link, "the link is left alone");
+        assert!(admin_of(&repo, "x").is_dir(), "record kept");
     }
 
     #[test]

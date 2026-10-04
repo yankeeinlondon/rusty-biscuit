@@ -19,7 +19,7 @@ pub const BLOCKED_BY_ENVIRONMENT: i32 = 4;
 pub fn exit_code(error: &WorktreeError) -> i32 {
     match error {
         WorktreeError::Cancelled => SUCCESS,
-        WorktreeError::RefusedToLoseWork(_) => REFUSED_TO_LOSE_WORK,
+        WorktreeError::RefusedToLoseWork(_) | WorktreeError::NotARealDirectory(_) => REFUSED_TO_LOSE_WORK,
         WorktreeError::BlockedByEnvironment(_) | WorktreeError::DirectoryInUse(_) => {
             BLOCKED_BY_ENVIRONMENT
         }
@@ -38,6 +38,7 @@ mod tests {
             exit_code(&WorktreeError::RefusedToLoseWork("dirty".into())),
             3
         );
+        assert_eq!(exit_code(&WorktreeError::NotARealDirectory("/wt/feat-x".into())), 3);
         assert_eq!(
             exit_code(&WorktreeError::BlockedByEnvironment("no wrapper".into())),
             4

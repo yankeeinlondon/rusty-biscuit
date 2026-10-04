@@ -25,7 +25,7 @@ use biscuit_terminal::components::renderable::TerminalRenderable as _;
 use biscuit_terminal::terminal::Terminal;
 use inquire::{Confirm, InquireError, Select};
 use worktree::WorktreeError;
-use worktree::availability;
+use worktree::availability::{self, Availability, OtherCondition};
 use worktree::fork_origin::{ForkOriginStore, fork_origin_path};
 use worktree::git::git_command;
 use worktree::remove::handoff::{
@@ -50,7 +50,7 @@ use worktree::remove::{
 use worktree::remove::included::classify_included;
 use worktree::worktree::{WorktreeEntry, default_branch, find_worktree, parse_worktree_list};
 
-use super::list_table::{observed_condition, shell_word};
+use super::list_table::{shell_word, unavailable_reason};
 
 pub use policy::Flags;
 use policy::{Actions, BranchStep, Decision, Question, Refusal, Situation};
@@ -113,6 +113,10 @@ struct Facts {
     /// The live preflight for an attached branch: with `--force-remote` in
     /// the first run, and when remote deletion was approved in the second.
     remote: Option<RemoteState>,
+    /// [`fingerprint`] of the files as reported, taken in the first run
+    /// before the report when consent may cover them or a handoff will bind
+    /// them. Discarding files is approved for this state only.
+    reported: Option<String>,
 }
 
 impl Facts {
@@ -156,6 +160,7 @@ impl Facts {
             safety: None,
             has_origin: false,
             remote: None,
+            reported: None,
         })
     }
 
@@ -316,6 +321,9 @@ pub fn run(name: &str, flags: Flags) -> Result<(), WorktreeError> {
     }
 
     let mut facts = Facts::local(&base, entry, checkout)?;
+    if facts.missing().is_none() && (inside || facts.inventory.needs_consent()) {
+        facts.reported = Some(fingerprint(&facts)?);
+    }
     facts.assess(flags.force_remote);
     eprintln!("{}", facts.render_report(&terminal));
     if let Some(refusal) = unprovable_remote(facts.remote.as_ref()) {
@@ -350,8 +358,30 @@ pub fn run(name: &str, flags: Flags) -> Result<(), WorktreeError> {
         Decision::Proceed(actions) if inside && facts.missing().is_none() => {
             hand_off(&terminal, &facts, &cwd, actions)
         }
-        Decision::Proceed(actions) => execute(&terminal, &facts, actions),
+        Decision::Proceed(actions) => {
+            if actions.discard_files && facts.missing().is_none() {
+                files_unchanged(&facts)?;
+            }
+            execute(&terminal, &facts, actions)
+        }
     }
+}
+
+/// Refuses (exit 3) unless the files still match the report: the same
+/// listed entries and the same [`Facts::reported`] fingerprint.
+///
+/// `git worktree remove --force` discards whatever the checkout holds when it
+/// runs, so consent given to the report (by a question or
+/// `--force-worktree`) would otherwise also cover files changed or staged
+/// while the question was open.
+fn files_unchanged(facts: &Facts) -> Result<(), WorktreeError> {
+    let fresh = Facts::local(&facts.base, facts.entry.clone(), facts.checkout.clone())?;
+    if fresh.inventory.dirty == facts.inventory.dirty && facts.reported.as_deref() == Some(fingerprint(&fresh)?.as_str()) {
+        return Ok(());
+    }
+    Err(WorktreeError::RefusedToLoseWork(
+        start_again("The worktree's files or staged changes changed after they were checked.") + &facts.kept_link_note(),
+    ))
 }
 
 /// `--force-remote` cannot show that it deletes from exactly the repository
@@ -414,8 +444,9 @@ fn refusal_markup(refusal: Refusal, facts: &Facts) -> String {
     }
 }
 
-/// Why `wt remove name` stopped before checking anything: Git can't read the
-/// worktree and [`prepare`] could not make it checkable. Every case is a
+/// Why `wt remove name` stopped before checking anything: the worktree is
+/// unavailable (Git can't read it, or its path is a link) and [`prepare`]
+/// could not make it checkable. Every case is a
 /// refusal (exit 3) that removed nothing; only a repair attempt may have
 /// changed Git metadata, and then the message says so.
 fn prepare_refusal_markup(refusal: &PrepareRefusal, name: &str, entry: &WorktreeEntry) -> String {
@@ -463,10 +494,10 @@ fn prepare_refusal_markup(refusal: &PrepareRefusal, name: &str, entry: &Worktree
             esc(&refusal.to_string())
         ),
         PrepareRefusal::Unavailable(condition) => format!(
-            "\n<red><b>Can't remove {label}:</b></red> Git can't read this worktree: {}.\n{nothing} \
+            "\n<red><b>Can't remove {label}:</b></red> {}.\n{nothing} \
             <i>wt remove</i> deletes a directory only after checking its files, and no <i>--force</i> \
             flag changes that.\n  <dim>Restore or move what is at {}, then retry {retry}.</dim>",
-            observed_condition(entry, condition),
+            unavailable_reason(entry, condition),
             esc(&path)
         ),
     }
@@ -537,11 +568,19 @@ fn map_inquire_err(e: InquireError) -> WorktreeError {
 /// failed step runs.
 fn execute(terminal: &Terminal, facts: &Facts, actions: Actions) -> Result<(), WorktreeError> {
     let target = format!("worktree {} at {}", facts.display_name, facts.entry.path.display());
-    let copy_record_warning = if facts.missing().is_some() {
-        remove_missing_record(&facts.base, &facts.entry).map_err(|refusal| missing_record_error(refusal, facts))?
+    let copy_record_warning = if let Some(missing) = facts.missing() {
+        remove_missing_record(&facts.base, &facts.entry, missing).map_err(|refusal| missing_record_error(refusal, facts))?
     } else {
-        remove_worktree(&facts.base, &facts.entry.path, actions.discard_files)
-            .map_err(|error| in_context(error, &format!("could not remove {target}")))?;
+        remove_worktree(&facts.base, &facts.entry.path, actions.discard_files).map_err(|error| match error {
+            WorktreeError::NotARealDirectory(_) => WorktreeError::RefusedToLoseWork(format!(
+                "\n<red><b>Nothing was removed.</b></red> {} is no longer the directory of worktree <blue>{}</blue> \
+                that was checked: a link or something else replaced it.\n  <dim>Put the checkout back at that \
+                path, then run <i>wt remove</i> again.</dim>",
+                esc(&facts.entry.path.display().to_string()),
+                esc(&facts.display_name)
+            )),
+            other => in_context(other, &format!("could not remove {target}")),
+        })?;
         worktree::copy_record::delete_for(&facts.base, &facts.entry.path)
     };
     if let Some(warning) = copy_record_warning {
@@ -565,7 +604,7 @@ fn execute(terminal: &Terminal, facts: &Facts, actions: Actions) -> Result<(), W
     if let (Some(branch), Some(step)) = (facts.branch(), actions.branch) {
         match step {
             BranchStep::Delete { .. } => {
-                remove_local_branch(&facts.base, branch).map_err(|error| {
+                remove_local_branch(&facts.base, branch, &facts.head).map_err(|error| {
                     in_context(error, &format!("removed {}, but could not delete branch {branch}", removed.join(" and ")))
                 })?;
                 removed.push(format!("branch {branch}"));
@@ -744,7 +783,9 @@ fn hand_off(terminal: &Terminal, facts: &Facts, cwd: &Path, actions: Actions) ->
         head: facts.head.clone(),
         branch: facts.entry.branch.clone(),
         git_dir,
-        fingerprint: fingerprint(facts)?,
+        fingerprint: facts.reported.clone().ok_or_else(|| {
+            WorktreeError::GitParse("the reported files were not fingerprinted before the handoff".into())
+        })?,
         rules: facts.inventory.included.rules.clone(),
         baseline: facts.inventory.included.baseline.clone(),
         landing: canonical(&landing),
@@ -946,11 +987,21 @@ pub fn run_handoff(token: &str) -> Result<(), WorktreeError> {
 
     // The second run never repairs: a link that broke since the first run
     // refuses, and one redirected elsewhere fails the `git_dir` comparison.
-    if availability::classify(&entry).is_unavailable() {
-        return Err(WorktreeError::RefusedToLoseWork(start_again(
-            "Git can no longer read the worktree: its .git link broke since you confirmed. \
-            Nothing was repaired.",
-        )));
+    // A checkout replaced by a link passes every comparison below, because
+    // both sides resolve through the new link, so its kind is checked here.
+    match availability::classify(&entry) {
+        Availability::Healthy => {}
+        Availability::Other(OtherCondition::Link) => {
+            return Err(WorktreeError::RefusedToLoseWork(start_again(
+                "The worktree's path is now a link, which may have replaced the checkout you confirmed.",
+            )));
+        }
+        _ => {
+            return Err(WorktreeError::RefusedToLoseWork(start_again(
+                "Git can no longer read the worktree: its .git link broke since you confirmed. \
+                Nothing was repaired.",
+            )));
+        }
     }
     let git_dir = checkout_git_dir(&base, &entry.path).map_err(|error| {
         WorktreeError::RefusedToLoseWork(start_again(&format!(

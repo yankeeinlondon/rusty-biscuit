@@ -4,8 +4,12 @@
 //! administrative record and can still hold staged work. That index is
 //! compared with the worktree's recorded HEAD; differences need the same
 //! consent as staged files in an existing checkout, and an index that can't
-//! be inspected refuses. Only `git worktree remove` of this one record is
-//! ever run: never `prune`, never a second `--force`.
+//! be inspected refuses. Removal re-reads that index (its own bytes and Git's
+//! reading of every entry, which in a split index also come from the
+//! `sharedindex.*` file it references) and the HEAD it was compared with, and
+//! refuses if either changed, or can no longer be read, since the inspection
+//! that informed the report and any consent. Only `git worktree remove` of this
+//! one record is ever run: never `prune`, never a second `--force`.
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -32,6 +36,15 @@ pub struct MissingCheckout {
     /// recorded HEAD when detached.
     pub head: String,
     pub staged: Vec<DirtyEntry>,
+    /// BLAKE3 of the index bytes, read before `staged` was computed. Removal
+    /// requires the index to still hash to this, so consent covers only
+    /// the staged work that was reported.
+    pub index_digest: [u8; 32],
+    /// BLAKE3 of Git's reading of the whole index (`ls-files --stage
+    /// --debug`), taken alongside `index_digest`. A split index keeps entries
+    /// in a `sharedindex.*` file that `index_digest` does not cover; Git reads
+    /// it here, and removal requires the same reading again.
+    pub entries_digest: [u8; 32],
 }
 
 impl MissingCheckout {
@@ -55,6 +68,13 @@ pub enum MissingRefusal {
     IndexAbsent(PathBuf),
     #[error("its index at {} can't be inspected: {reason}", .path.display())]
     IndexUninspectable { path: PathBuf, reason: String },
+    /// The index no longer holds the bytes or entries that were inspected;
+    /// what it stages now was never reported.
+    #[error("its index at {} changed after it was checked", .0.display())]
+    IndexChanged(PathBuf),
+    /// The commit the index was compared with is no longer the recorded HEAD.
+    #[error("its recorded HEAD moved from {was} to {now} after it was checked")]
+    HeadChanged { was: String, now: String },
     /// A fresh listing no longer shows the same worktree at the path.
     #[error("Git's worktree list {0}")]
     Changed(String),
@@ -89,20 +109,53 @@ pub fn inspect_missing(base: &Path, entry: &WorktreeEntry) -> Result<MissingChec
     }
     let admin = admin_entry_for(base, &entry.path).map_err(MissingRefusal::Association)?;
     let head = recorded_head(base, entry).map_err(MissingRefusal::Head)?;
-    let staged = staged_changes(base, &admin.index(), &head)?;
-    Ok(MissingCheckout { admin, head, staged })
+    let index = admin.index();
+    // Hashed before Git reads it: a write in between makes removal refuse,
+    // never binds consent to bytes the report did not describe.
+    let index_digest = biscuit_hash::blake3_hash_bytes(&index_bytes(&index)?);
+    let entries_digest = entries_digest(base, &index)?;
+    let staged = staged_changes(base, &index, &head)?;
+    Ok(MissingCheckout { admin, head, staged, index_digest, entries_digest })
+}
+
+/// The bytes of the surviving `index`, which must be a regular file.
+fn index_bytes(index: &Path) -> Result<Vec<u8>, MissingRefusal> {
+    let uninspectable = |reason: String| MissingRefusal::IndexUninspectable { path: index.to_path_buf(), reason };
+    let absent = |error: &std::io::Error| error.kind() == std::io::ErrorKind::NotFound;
+    match availability::inspect(index) {
+        Ok(EntryKind::File) => {}
+        Ok(_) => return Err(uninspectable("it is not a regular file".into())),
+        Err(error) if absent(&error) => return Err(MissingRefusal::IndexAbsent(index.to_path_buf())),
+        Err(error) => return Err(uninspectable(error.to_string())),
+    }
+    std::fs::read(index).map_err(|error| {
+        if absent(&error) { MissingRefusal::IndexAbsent(index.to_path_buf()) } else { uninspectable(error.to_string()) }
+    })
+}
+
+/// BLAKE3 of every entry Git reads from `index`: mode, object ID, stage,
+/// path, stat data, and flags such as intent-to-add and skip-worktree.
+///
+/// Git, not this crate, parses the index, so a split index's entries count
+/// from whichever `sharedindex.*` file it resolves. Git refuses a referenced
+/// shared index that is missing, empty, truncated, corrupt, carries trailing
+/// bytes, or is a directory; that refusal is
+/// [`MissingRefusal::IndexUninspectable`].
+fn entries_digest(base: &Path, index: &Path) -> Result<[u8; 32], MissingRefusal> {
+    let listing = git_from_bytes_with_env(
+        base,
+        base,
+        &["ls-files", "--stage", "--debug", "-z"],
+        &[("GIT_INDEX_FILE", index.as_os_str())],
+    )
+    .map_err(|error| MissingRefusal::IndexUninspectable { path: index.to_path_buf(), reason: error.to_string() })?;
+    Ok(biscuit_hash::blake3_hash_bytes(&listing))
 }
 
 /// The index's differences from `head`'s tree, as `status` `"A "`, `"M "`,
 /// `"D "`, ... (the index column of `git status`).
 fn staged_changes(base: &Path, index: &Path, head: &str) -> Result<Vec<DirtyEntry>, MissingRefusal> {
     let uninspectable = |reason: String| MissingRefusal::IndexUninspectable { path: index.to_path_buf(), reason };
-    match availability::inspect(index) {
-        Ok(EntryKind::File) => {}
-        Ok(_) => return Err(uninspectable("it is not a regular file".into())),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Err(MissingRefusal::IndexAbsent(index.to_path_buf())),
-        Err(error) => return Err(uninspectable(error.to_string())),
-    }
     let output = git_from_bytes_with_env(
         base,
         base,
@@ -137,19 +190,29 @@ fn parse_name_status_z(output: &[u8]) -> Result<Vec<DirtyEntry>, String> {
     Ok(entries)
 }
 
-/// Removes the record of `entry`, then its copy record.
+/// Removes the record of `entry`, which `inspected` describes, then its copy
+/// record.
 ///
-/// Immediately before, a fresh listing must show the same worktree at
-/// `entry.path` and the path must still be confirmed absent; anything that
-/// has appeared there refuses, so its contents get checked by a new run.
-/// Runs plain `git worktree remove <path>`, so a lock still stops it. The
-/// Windows directory-lock probe is skipped: there is no directory to hold.
+/// Immediately before, the state `inspected` reported must still hold: a
+/// fresh listing shows the same worktree at `entry.path`, the same
+/// administrative entry points to it, its recorded HEAD is still
+/// `inspected.head`, the path is still confirmed absent, and the index still
+/// has the inspected bytes and Git still reads the inspected entries from it
+/// (including any held in a split index's shared file). Any difference, or a fact that can't be read,
+/// refuses so a new run reports and asks again; consent to discard covers
+/// only what was reported. Runs plain `git worktree remove <path>`, so a lock
+/// still stops it. The Windows directory-lock probe is skipped: there is no
+/// directory to hold.
 ///
 /// ## Returns
 ///
 /// A warning when the copy record could not be deleted; the worktree record
 /// is gone either way.
-pub fn remove_missing_record(base: &Path, entry: &WorktreeEntry) -> Result<Option<String>, MissingRefusal> {
+pub fn remove_missing_record(
+    base: &Path,
+    entry: &WorktreeEntry,
+    inspected: &MissingCheckout,
+) -> Result<Option<String>, MissingRefusal> {
     let listing = git_from(base, base, &["worktree", "list", "--porcelain"]).map_err(|error| MissingRefusal::Changed(format!("could not be read: {error}")))?;
     let entries = parse_worktree_list(&listing);
     let found: Vec<&WorktreeEntry> = entries.iter().filter(|listed| same_location(&listed.path, &entry.path)).collect();
@@ -159,10 +222,24 @@ pub fn remove_missing_record(base: &Path, entry: &WorktreeEntry) -> Result<Optio
     if let Some(change) = identity_change(entry, listed) {
         return Err(MissingRefusal::Changed(change));
     }
+    let admin = admin_entry_for(base, &entry.path).map_err(MissingRefusal::Association)?;
+    if admin != inspected.admin {
+        return Err(MissingRefusal::Changed(format!("now associates this path with another record, {}", admin.dir.display())));
+    }
+    let head = recorded_head(base, listed).map_err(MissingRefusal::Head)?;
+    if head != inspected.head {
+        return Err(MissingRefusal::HeadChanged { was: inspected.head.clone(), now: head });
+    }
     match availability::inspect(&entry.path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(MissingRefusal::PathUninspectable(error.to_string())),
         Ok(kind) => return Err(MissingRefusal::Reappeared(kind)),
+    }
+    let index = inspected.admin.index();
+    if biscuit_hash::blake3_hash_bytes(&index_bytes(&index)?) != inspected.index_digest
+        || entries_digest(base, &index)? != inspected.entries_digest
+    {
+        return Err(MissingRefusal::IndexChanged(index));
     }
 
     let output = git_from_output(base, base, &[OsStr::new("worktree"), OsStr::new("remove"), entry.path.as_os_str()])
@@ -225,7 +302,7 @@ mod tests {
         fs::write(&record, "{}").unwrap();
 
         recorder::start_recording();
-        let warning = remove_missing_record(&repo.path(), &entry).unwrap();
+        let warning = remove_missing_record(&repo.path(), &entry, &inspected).unwrap();
         let calls = recorder::finish_recording();
 
         assert_eq!(warning, None);
@@ -302,11 +379,11 @@ mod tests {
     fn a_directory_that_reappears_is_never_removed() {
         let repo = TestRepo::new();
         let entry = missing(&repo, "feat/r", "r", |_| {});
-        inspect_missing(&repo.path(), &entry).unwrap();
+        let inspected = inspect_missing(&repo.path(), &entry).unwrap();
         fs::create_dir(&entry.path).unwrap();
         fs::write(entry.path.join("new-work.txt"), "x\n").unwrap();
 
-        let result = remove_missing_record(&repo.path(), &entry);
+        let result = remove_missing_record(&repo.path(), &entry, &inspected);
 
         assert!(matches!(result, Err(MissingRefusal::Reappeared(EntryKind::Directory))), "{result:?}");
         assert!(entry.path.join("new-work.txt").exists());
@@ -318,10 +395,11 @@ mod tests {
     fn a_link_that_appears_is_never_followed_or_removed() {
         let repo = TestRepo::new();
         let entry = missing(&repo, "feat/l", "l", |_| {});
+        let inspected = inspect_missing(&repo.path(), &entry).unwrap();
         let elsewhere = tempfile::tempdir().unwrap();
         std::os::unix::fs::symlink(elsewhere.path(), &entry.path).unwrap();
 
-        let result = remove_missing_record(&repo.path(), &entry);
+        let result = remove_missing_record(&repo.path(), &entry, &inspected);
 
         assert!(matches!(result, Err(MissingRefusal::Reappeared(EntryKind::Link))), "{result:?}");
         assert!(is_listed(&repo, &entry.path) && elsewhere.path().is_dir());
@@ -331,9 +409,10 @@ mod tests {
     fn a_changed_entry_at_the_path_refuses() {
         let repo = TestRepo::new();
         let mut entry = missing(&repo, "feat/c", "c", |_| {});
+        let inspected = inspect_missing(&repo.path(), &entry).unwrap();
         entry.branch = Some("feat/other".into());
 
-        let result = remove_missing_record(&repo.path(), &entry);
+        let result = remove_missing_record(&repo.path(), &entry, &inspected);
         assert!(matches!(&result, Err(MissingRefusal::Changed(text)) if text.contains("branch feat/c")), "{result:?}");
         assert!(is_listed(&repo, &entry.path));
     }
@@ -344,16 +423,221 @@ mod tests {
     fn a_failed_record_removal_keeps_the_record_and_its_copy_record() {
         let repo = TestRepo::new();
         let entry = missing(&repo, "feat/k", "k", |_| {});
+        let inspected = inspect_missing(&repo.path(), &entry).unwrap();
         repo.git(&["worktree", "lock", "--reason", "kept on purpose", entry.path.to_str().unwrap()]);
         let record = copy_record::record_path(&repo.path(), &entry.path).unwrap();
         fs::create_dir_all(record.parent().unwrap()).unwrap();
         fs::write(&record, "{}").unwrap();
 
-        let result = remove_missing_record(&repo.path(), &entry);
+        let result = remove_missing_record(&repo.path(), &entry, &inspected);
 
         assert!(matches!(&result, Err(MissingRefusal::RecordRemoval(WorktreeError::GitCommand(text))) if text.contains("locked")), "{result:?}");
         assert!(is_listed(&repo, &entry.path));
         assert!(record.exists(), "no cleanup before the record is gone");
+    }
+
+    /// A missing worktree on `branch` whose surviving index matches HEAD,
+    /// plus the bytes of a version of that index staging `staged.txt`.
+    fn missing_with_a_staged_index(repo: &TestRepo, branch: &str, name: &str) -> (WorktreeEntry, PathBuf, Vec<u8>) {
+        let mut staged_index = Vec::new();
+        let entry = missing(repo, branch, name, |checkout| {
+            let index = PathBuf::from(repo.git_in(checkout, &["rev-parse", "--path-format=absolute", "--git-path", "index"]));
+            let clean = fs::read(&index).unwrap();
+            fs::write(checkout.join("staged.txt"), "staged after the check\n").unwrap();
+            repo.git_in(checkout, &["add", "staged.txt"]);
+            staged_index = fs::read(&index).unwrap();
+            fs::write(&index, clean).unwrap();
+        });
+        let index = admin_entry_for(&repo.path(), &entry.path).unwrap().index();
+        (entry, index, staged_index)
+    }
+
+    fn assert_kept(repo: &TestRepo, entry: &WorktreeEntry, index: &Path, branch: &str) {
+        assert!(is_listed(repo, &entry.path), "record kept");
+        assert!(index.parent().unwrap().is_dir(), "administrative entry kept");
+        repo.git(&["rev-parse", "--verify", &format!("refs/heads/{branch}")]);
+    }
+
+    /// Consent covers what was reported: an index written between inspection
+    /// and removal (here, by staging a file) is never discarded unseen.
+    #[test]
+    fn an_index_changed_after_inspection_refuses_and_is_kept() {
+        let repo = TestRepo::new();
+        let (entry, index, staged_index) = missing_with_a_staged_index(&repo, "feat/s", "s");
+        let inspected = inspect_missing(&repo.path(), &entry).unwrap();
+        assert!(!inspected.needs_consent(), "{:?}", inspected.staged);
+
+        fs::write(&index, &staged_index).unwrap();
+        let result = remove_missing_record(&repo.path(), &entry, &inspected);
+
+        assert!(matches!(&result, Err(MissingRefusal::IndexChanged(path)) if *path == index), "{result:?}");
+        assert_kept(&repo, &entry, &index, "feat/s");
+        assert_eq!(fs::read(&index).unwrap(), staged_index, "the new staged version survives");
+    }
+
+    #[test]
+    fn an_index_that_disappears_or_is_corrupted_after_inspection_refuses() {
+        let repo = TestRepo::new();
+        let entry = missing(&repo, "feat/x", "x", |_| {});
+        let inspected = inspect_missing(&repo.path(), &entry).unwrap();
+        let index = inspected.admin.index();
+        let original = fs::read(&index).unwrap();
+
+        fs::write(&index, b"not an index").unwrap();
+        let corrupted = remove_missing_record(&repo.path(), &entry, &inspected);
+        assert!(matches!(corrupted, Err(MissingRefusal::IndexChanged(_))), "{corrupted:?}");
+        assert_eq!(fs::read(&index).unwrap(), b"not an index");
+
+        fs::remove_file(&index).unwrap();
+        let disappeared = remove_missing_record(&repo.path(), &entry, &inspected);
+        assert!(matches!(disappeared, Err(MissingRefusal::IndexAbsent(_))), "{disappeared:?}");
+        assert_kept(&repo, &entry, &index, "feat/x");
+
+        // The same record, restored to the inspected bytes, is removed.
+        fs::write(&index, original).unwrap();
+        remove_missing_record(&repo.path(), &entry, &inspected).unwrap();
+        assert!(!is_listed(&repo, &entry.path));
+    }
+
+    /// The index was compared with this tip, and branch safety was judged on
+    /// it, so a moved tip invalidates both.
+    #[test]
+    fn a_branch_tip_moved_after_inspection_refuses() {
+        let repo = TestRepo::new();
+        let entry = missing(&repo, "feat/t", "t", |_| {});
+        let inspected = inspect_missing(&repo.path(), &entry).unwrap();
+        let other = repo.add_worktree("feat/other", "other", "main");
+        let moved = repo.commit_in(&other, "elsewhere.txt");
+        repo.git(&["update-ref", "refs/heads/feat/t", &moved]);
+
+        let result = remove_missing_record(&repo.path(), &entry, &inspected);
+
+        assert!(
+            matches!(&result, Err(MissingRefusal::HeadChanged { was, now }) if *was == inspected.head && *now == moved),
+            "{result:?}"
+        );
+        assert_kept(&repo, &entry, &inspected.admin.index(), "feat/t");
+        assert_eq!(repo.sha("refs/heads/feat/t"), moved);
+    }
+
+    /// Git now lists the path under another administrative entry (here, the
+    /// entry's directory renamed), so the index that was inspected is not
+    /// the one removal would discard. The CLI renders `Changed` as exit 3.
+    #[test]
+    fn a_record_under_another_administrative_entry_after_inspection_refuses() {
+        let repo = TestRepo::new();
+        let entry = missing(&repo, "feat/a", "a", |_| {});
+        let inspected = inspect_missing(&repo.path(), &entry).unwrap();
+        let renamed = inspected.admin.dir.with_file_name("a-renamed");
+        fs::rename(&inspected.admin.dir, &renamed).unwrap();
+        assert!(is_listed(&repo, &entry.path), "Git lists the same worktree under the new entry");
+
+        let result = remove_missing_record(&repo.path(), &entry, &inspected);
+
+        assert!(
+            matches!(&result, Err(MissingRefusal::Changed(text)) if text.contains("another record")),
+            "{result:?}"
+        );
+        assert_kept(&repo, &entry, &renamed.join("index"), "feat/a");
+    }
+
+    /// The control for the refusals above: staged work that was reported
+    /// (and so could be consented to) is removed while it is unchanged.
+    #[test]
+    fn unchanged_reported_staged_work_is_removed() {
+        let repo = TestRepo::new();
+        let (entry, index, staged_index) = missing_with_a_staged_index(&repo, "feat/u", "u");
+        fs::write(&index, &staged_index).unwrap();
+        let inspected = inspect_missing(&repo.path(), &entry).unwrap();
+        assert!(inspected.needs_consent());
+
+        remove_missing_record(&repo.path(), &entry, &inspected).unwrap();
+
+        assert!(!is_listed(&repo, &entry.path));
+        assert!(!inspected.admin.dir.exists());
+    }
+
+    /// A missing worktree on `branch` whose index Git keeps split (`update-index
+    /// --split-index`), optionally with `staged.txt` staged first, and the
+    /// `sharedindex.*` file its index references.
+    fn missing_with_a_split_index(repo: &TestRepo, branch: &str, name: &str, stage: bool) -> (WorktreeEntry, PathBuf) {
+        let entry = missing(repo, branch, name, |checkout| {
+            if stage {
+                fs::write(checkout.join("staged.txt"), "staged\n").unwrap();
+                repo.git_in(checkout, &["add", "staged.txt"]);
+            }
+            repo.git_in(checkout, &["update-index", "--split-index"]);
+        });
+        let admin = admin_entry_for(&repo.path(), &entry.path).unwrap();
+        let shared: Vec<PathBuf> = fs::read_dir(&admin.dir)
+            .unwrap()
+            .map(|dirent| dirent.unwrap().path())
+            .filter(|path| path.file_name().unwrap().to_string_lossy().starts_with("sharedindex."))
+            .collect();
+        let [shared] = shared.as_slice() else { panic!("one shared index: {shared:?}") };
+        (entry, shared.clone())
+    }
+
+    /// The controls for the split-index refusals below: an unchanged split
+    /// index, clean or holding reported staged work, is removed.
+    #[test]
+    fn an_unchanged_split_index_is_removed() {
+        for stage in [false, true] {
+            let repo = TestRepo::new();
+            let (entry, _) = missing_with_a_split_index(&repo, "feat/split", "split", stage);
+            let inspected = inspect_missing(&repo.path(), &entry).unwrap();
+            assert_eq!(inspected.needs_consent(), stage, "{:?}", inspected.staged);
+            if stage {
+                assert_eq!(statuses(&inspected), [("A ".into(), "staged.txt".into())]);
+            }
+
+            remove_missing_record(&repo.path(), &entry, &inspected).unwrap();
+
+            assert!(!is_listed(&repo, &entry.path), "staged: {stage}");
+            assert!(!inspected.admin.dir.exists());
+        }
+    }
+
+    /// A split index's entries live in the shared file, not in `index`. Each
+    /// edit to that file after inspection leaves `index` byte-identical, yet
+    /// what Git would read (and removal discard) is no longer what was
+    /// reported, so removal refuses and keeps the record and branch.
+    #[test]
+    fn a_split_index_whose_shared_file_changes_after_inspection_refuses() {
+        type Edit = fn(&Path);
+        let edits: [(&str, Edit); 5] = [
+            ("corrupted", |shared| fs::write(shared, b"corrupt").unwrap()),
+            ("removed", |shared| fs::remove_file(shared).unwrap()),
+            ("emptied", |shared| fs::write(shared, b"").unwrap()),
+            ("given trailing garbage", |shared| {
+                let mut bytes = fs::read(shared).unwrap();
+                bytes.extend_from_slice(b"garbage\n");
+                fs::write(shared, bytes).unwrap();
+            }),
+            ("replaced by a directory", |shared| {
+                fs::remove_file(shared).unwrap();
+                fs::create_dir(shared).unwrap();
+            }),
+        ];
+        for stage in [false, true] {
+            for (shape, edit) in edits {
+                let repo = TestRepo::new();
+                let (entry, shared) = missing_with_a_split_index(&repo, "feat/split", "split", stage);
+                let inspected = inspect_missing(&repo.path(), &entry).unwrap();
+                let index = inspected.admin.index();
+                let primary = fs::read(&index).unwrap();
+
+                edit(&shared);
+                let result = remove_missing_record(&repo.path(), &entry, &inspected);
+
+                assert!(
+                    matches!(&result, Err(MissingRefusal::IndexUninspectable { path, .. }) if *path == index),
+                    "{shape} (staged: {stage}): {result:?}"
+                );
+                assert_eq!(fs::read(&index).unwrap(), primary, "{shape}: only the shared file changed");
+                assert_kept(&repo, &entry, &index, "feat/split");
+            }
+        }
     }
 
     #[test]

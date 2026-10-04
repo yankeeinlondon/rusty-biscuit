@@ -55,7 +55,8 @@ pub struct WorktreeStatus {
     pub entry: WorktreeEntry,
     /// Working-tree dirtiness in this worktree's checkout
     pub dirty: DirtyStatus,
-    /// Whether Git can read the checkout, classified once per listing.
+    /// Whether the checkout is usable (Git can read it and its path is not a
+    /// link), classified once per listing.
     pub availability: Availability,
 }
 

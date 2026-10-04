@@ -64,6 +64,17 @@ pub enum WorktreeError {
     #[error("{0}")]
     BlockedByEnvironment(String),
 
+    /// The worktree's path no longer holds a real directory when removal is
+    /// about to run (for example, a link replaced the checkout after it was
+    /// checked). Nothing was removed.
+    #[error("{} is no longer the worktree's own directory (it is a link or not a directory), so nothing was removed", .0.display())]
+    NotARealDirectory(std::path::PathBuf),
+
+    /// A branch about to be deleted no longer points at the tip its deletion
+    /// was decided on. The branch is kept.
+    #[error("branch {branch} moved from {expected} to {found} after it was checked, so it was kept")]
+    BranchMoved { branch: String, expected: String, found: String },
+
     /// Another program holds the worktree directory (Windows only: its
     /// current directory, or an open file inside). Nothing was removed.
     #[error("the folder {} is in use by another program", .0.display())]
