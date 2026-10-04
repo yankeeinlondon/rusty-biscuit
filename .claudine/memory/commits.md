@@ -38,6 +38,13 @@ or a fix; a rule that needs an example to be understood is not a rule yet.
 - For large non-rename batches, `git diff --cached --name-only <glob> >
   /tmp/paths.txt` then `--pathspec-from-file=/tmp/paths.txt`. Never pass a
   glob to `git commit` unquoted, and never loop `git commit` per path.
+- When `--only` would sweep in live working-tree edits and the blob-swap is
+  unsafe, a temp index seeded with `read-tree HEAD` (never an empty index)
+  is acceptable: `GIT_INDEX_FILE=<tmp> git read-tree HEAD`, put the staged
+  blobs in with `update-index --cacheinfo`, then `write-tree`/`commit-tree`
+  and sign. Verify `git show --stat` shows only the assigned paths. The real
+  index entries for those paths then equal HEAD, so the developer's extra
+  edits show as plain ` M`.
 - Use `git log` for history; there is no `sniff git commits`.
 
 ## Inspect First
