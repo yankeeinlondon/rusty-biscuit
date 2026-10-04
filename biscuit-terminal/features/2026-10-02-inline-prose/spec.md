@@ -41,82 +41,24 @@ packages:
     - homelab-cli
 human_review: false
 message_to_agent: |-
-    Phase 6 (bt CLI, docs, skills) is done; see "## Phase 6" in
-    implementation-log.md. Facts for Phase 7+:
-    - SHELL TRAP: in this worktree `cd biscuit-terminal` (or any bare package
-      dir name) can resolve through CDPATH to the MAIN checkout at
-      /Volumes/coding/personal/rusty-biscuit. Use absolute paths or `./dir`,
-      and confirm with `pwd -P` before editing or building.
-    - `bt prose` margins all live on the Prose `Layout` (vertical margins are
-      `Length::ch` on margin.top/bottom: blank rows on terminal, `lh` in CSS).
-      Only `--alignment` adds a CLI wrapper, via the shared
-      `cli/src/commands/shared.rs::render_html_with_alignment` (also used by
-      `bt section` and `bt list`), because renderable's `layout_to_css`
-      lowers alignment only with `max_width`.
-    - `Prose::render_via_tree` word-wrap now splits on '\n' (was `lines()`),
-      so a bottom margin survives wrapping. No consumer sets a bottom
-      margin/padding on a Prose, so no downstream snapshot should move from
-      this; if one does, it is that fix.
-    - `bt section --content` items are now `Prose` (markup parsed, one <p>
-      each).
-    - `Status::from_prose` / `Todo::from_prose` still build block `Prose` for
-      an inline description: a Phase 7 "biscuit-terminal internal sites"
-      candidate for `InlineProse` (R5).
-    - Phase 8 open finding (renderable): a text node ending in a literal
-      backslash before a soft break renders to Markdown as `a\` + newline,
-      which Markdown reads as a hard break. Not fixed; see the Phase 6
-      Departures.
-    Phase 5 (darkmatter `code_link()`) is done; see "## Phase 5" in
-    implementation-log.md. Facts for Phase 6+:
-    - `code_link(file)` / `code_link(target, desc)` (alias `codelink`) exist
-      in darkmatter, the catalog (order 78), DMLS completion, and `claudine
-      context --expressions`. The four templates are migrated. The manual
-      step for Ken is still open: `~/.claudine/prompts/plan.md` and
-      `~/.claudine/prompts/_reviews/review-spec-inline.md` still use
-      `` `{{link(x)}}` ``; replace with `{{code_link(x)}}`. Phase 8 must list
-      this in the final report.
-    - Phase 6 doc work: `biscuit-terminal/docs/components/prose.md:93` still
-      describes the removed "code span holding exactly one link is a link"
-      rewrite and recommends `` `{{link(plan)}}` ``; rewrite it to say a code
-      span is opaque and point at `code_link()`.
-    - Phase 7 snapshot ledger: `error_snapshots::link::missing_href` and
-      `error_snapshots::image_ref::*` moved for the same reason as
-      `unrecognized_format` (backticks around a code span are gone under ANSI
-      strip). They were left unaccepted because they are Phase 7's. Their
-      `.snap.new` files are untracked and regenerate on any run.
-    - Known-red after Phase 5: darkmatter area 49 fail + 2 timeouts. The
-      second timeout is `entry_point_parity` under load; it passes alone.
-      claudine `nested_span_error_renders_property_literal_rewrite_and_escape_hint`
-      is an AC 17 `escape_text` site (line 15, `success.say`).
-    Phase 4 facts (still current):
-    biscuit-terminal `just test`/`just lint` are green and the whole workspace
-    compiles (`cargo check --workspace --all-targets`).
-    Facts for Phase 5+:
-    - Containers: table cells, `TableColumn::header_prose`, and InlineContent
-      take `InlineProse` only (no `From<Prose>`; variant
-      `TableCellContent::StyledInlineProse`, hint token `styled_inline_prose`;
-      `InlineContent::add_inline_prose`). Lists, BlockQuote, TwoColumn,
-      StatusBlock body, Section and Compose embed `Prose` as its own blocks via
-      `Prose::embedded_nodes()` (prose/tree.rs), special-cased in
-      `render_tree/projection.rs`; no nested Root; layout moves onto the Prose
-      blocks (never the container node). `Prose::is_block_level()` is true.
-    - StatusBlock body is now STRUCTURAL (each item's blocks, inline styling,
-      and its LineBreaks mode), so Phase 7's `LineBreaks::Hard` on single-`\n`
-      body sites will take effect; header and hint are still plain text.
-    - Compose inserts a "\n\n" Text between blocks of one Prose part.
-      Trailing-`\n` Prose parts no longer produce a newline: move the newline
-      to `.add_text("\n")` (done for three lib tests).
-    - Four downstream cell sites were migrated type-only so the workspace
-      compiles: darkmatter-cli schema/about.rs `prose_cell`, biscuit-icon-cli
-      (commands.rs x2, sets_table.rs), claudine-cli steer/render.rs `cell()`.
-      biscuit-icon-cli is a consumer missing from this spec's packages list.
-    - Known-red unchanged from Phase 3: darkmatter 50 fail + 1 timeout (2
-      pre-existing `current_root_*`), claudine 33 fail. NOTE: `just test` in
-      claudine ran only 7359 tests in this worktree; measure claudine with
-      `cargo nextest run -p claudine -p claudine-cli -p claudine-gen
-      -p claudine-contract -p claudine-catalog-types --no-fail-fast` (8045).
-    - Phase 5 can rely on `renderable::markdown::code_span` (Phase 2) and on
-      darkmatter compiling; darkmatter snapshot reds remain Phase 7's.
+    Review cycle, as of 2026-10-04: the phases are done, and their facts are
+    in implementation-log.md ("## Phase N" sections). Review 14 is the open
+    review. Two decisions dated 2026-10-04 bound what remains:
+    - "Markdown output fidelity is bounded by the acceptance criteria": a
+      review finding that cites no acceptance criterion, decision, or spec
+      sentence, and no regression a real call site reaches, is disputed, not
+      repaired.
+    - "A Markdown link destination is never lifted as code or comment"
+      (criterion 32) is the one repair review 14 still requires. Destination
+      defects in pre-existing darkmatter code are out of scope (see Scope).
+    Also still owed: narrow the "every reader sees exactly" promises in
+    renderable/docs/tree-rendering.md (Definition of Done), and Ken's manual
+    `code_link()` update of ~/.claudine/prompts/plan.md and
+    _reviews/review-spec-inline.md, which waits until the installed `md` and
+    `claudine` binaries include `code_link()`.
+    SHELL TRAP: in this worktree `cd biscuit-terminal` (or any bare package
+    dir name) can resolve through CDPATH to the MAIN checkout. Use absolute
+    paths and confirm with `pwd -P`.
 clarified: false
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
@@ -336,8 +278,9 @@ Prose::new(msg).with_line_breaks(LineBreaks::Hard)
 | `Hard` | hard break | block boundary |
 
 The default is the same for both components, so a string means the same
-thing in either one. Markdown output preserves the resulting meaning, but
-may normalize the source spelling; it is not a byte-for-byte serializer. The mode is
+thing in either one. Markdown output keeps the break the mode produced (a
+soft break stays soft, a hard break stays hard), but may normalize the source
+spelling; it is not a byte-for-byte serializer. The mode is
 part of the shared grammar: a `Prose` passes its mode to the inline parser
 of each paragraph. This is the same switch as markdown-it's `breaks` option.
 
@@ -727,6 +670,16 @@ the existing workflow.
   itself is worthwhile but separate.
 - Other Markdown block syntax (headings, lists, block quotes) inside
   `Prose`. Those are components of their own.
+- Making the shared Markdown writer a faithful serializer for arbitrary
+  content. Beyond the cases the acceptance criteria name, Markdown output is
+  not required to read back identically through an independent CommonMark or
+  GFM reader (see the Markdown output fidelity decision).
+- Markdown escaping in darkmatter code that predates this feature: literal
+  backslashes and entity spellings (`&amp;`, `&copy;`, `&#10;`) in link
+  destinations written by `link()` (and therefore `code_link()`, which shares
+  its destination formatting), destination escapes lost by cleanup
+  reserialization, and the pull-request and CI-job link helpers. These are
+  not part of this feature.
 
 ## Decisions
 
@@ -804,6 +757,25 @@ the existing workflow.
 - **Inline code and the `Prose`/`InlineProse` split are one feature.** They
   were drafted as two specs and merged because they land together and
   touch the same files, docs, and snapshots. (Ken, 2026-10-02)
+- **Markdown output fidelity is bounded by the acceptance criteria.** The
+  Markdown target must produce what criteria 1–7, 14–19, 22, 25, and 30
+  name, and must not change text that real call sites, templates, and
+  fixtures produce. It is not required to round-trip arbitrary or adversarial
+  content (raw HTML payloads, comment-shaped text, entity spellings,
+  delimiter runs assembled across nodes) through an independent reader. The
+  Markdown hardening already built during the review cycle stays, but it does
+  not raise the bar: a `docs/` page that promises more than this is narrowed
+  to describe what the writer does, not what every reader sees. Rejected:
+  continuing to treat every reader-visible difference as a defect. Ten
+  consecutive review cycles each found one more such difference, and two of
+  them were created by the previous cycle's repair. (Ken, 2026-10-04)
+- **A Markdown link destination is never lifted as code or comment.** Code
+  spans, comments, and fenced code inside a link destination are destination
+  text, not placeholders: the destination keeps its literal value on every
+  target. This is a regression this feature introduced (the opaque-content
+  scan runs before links are recognized) and is fixed here. Other
+  destination-spelling defects are fixed here only when they are regressions
+  from the base branch. (Ken, 2026-10-04)
 
 ## Open Questions
 
@@ -910,6 +882,11 @@ None.
     placements are rejected. Embedded `Prose` retains layout exactly once
     without a nested `Root`. Inline callers with layout builders migrate the
     positioning to their container.
+32. In both components, `` [x](https://x.io/a`y`b) `` and
+    `[x](https://x.io/a<!-- -->b)` keep those exact destinations in the
+    render tree, the HTML `href`, the Markdown output, and the terminal OSC 8
+    target, with no parser placeholder in any of them; the label `x` and the
+    text after the link are unchanged.
 
 ## Definition of Done
 
@@ -931,3 +908,6 @@ None.
   its styling topic describes code spans as inline code.
 - Every moved snapshot was reviewed for an unexpected change, not accepted
   in bulk.
+- `renderable/docs/tree-rendering.md` describes which characters the Markdown
+  writer escapes and why, and no longer promises that every reader sees
+  exactly the original text.
