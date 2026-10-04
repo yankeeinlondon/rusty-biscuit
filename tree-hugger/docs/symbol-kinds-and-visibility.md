@@ -5,7 +5,8 @@ This page explains what Tree Hugger reports for each declaration it finds:
 - its **kind**: function, method, class, field, and so on
 - its **visibility**: the access level the source declares or implies
 - whether it is **`static`**, and which of the two meanings of `static` applies
-- its **container**, and the **declaration text** stored on its record
+- its **container**, and the **declaration text**, **display header** and
+  **declaring keyword** stored on its record
 
 It covers all 16 supported languages. Read it to learn why `hug` prints
 `crate method new() [in type Point]`, why a declaration has no visibility
@@ -28,8 +29,9 @@ flowchart LR
     QUERY --> KIND["kind<br/>(capture + declaration node)"]
     KIND --> READERS["per-language readers:<br/>visibility, static, storage static"]
     READERS --> CONT["container name + container kind"]
+    CONT --> HEADER["declaration text, display header,<br/>declaring keyword"]
     CONT --> V1["SymbolInfo<br/>TreeFile::symbols()"]
-    CONT --> V2["SymbolRecord<br/>TreeFile::symbol_records()"]
+    HEADER --> V2["SymbolRecord<br/>TreeFile::symbol_records()"]
     V1 <-->|adapter| V2
     V1 --> CLI["hug output"]
 ```
@@ -39,12 +41,13 @@ The two models are:
 | Model | API | Where kind, visibility and `static` live |
 |---|---|---|
 | `SymbolInfo` (v1) | `TreeFile::symbols()` | `kind`, `visibility` (`None` = unknown), `is_static`, `is_static_storage`, `container_name`, `container_kind` |
-| `SymbolRecord` (schema 3.0) | `TreeFile::symbol_records()`, `symbol_index_v2()` | `kind`, `visibility.level`, `modifiers` (`Static`, `StaticStorage`), `identity.module_path`, `identity.container_kind`, `source.declaration_text`, `relations.implements` |
+| `SymbolRecord` (schema 4.0) | `TreeFile::symbol_records()`, `symbol_index_v2()` | `kind`, `visibility.level`, `modifiers` (`Static`, `StaticStorage`), `identity.container_name`, `identity.container_kind`, `identity.keyword`, `source.declaration_text`, `source.signature_text`, `relations.implements` |
 
 The adapter between them (`From<SymbolInfo> for SymbolRecord` and back)
 preserves kind, visibility, both `static` flags, container kind and the
-signature, with its parameters. Declaration text and `relations.implements` exist only on records,
-because `SymbolInfo` has no field for them.
+signature, with its parameters. The declaring keyword, declaration text,
+display header and `relations.implements` exist only on records, because
+`SymbolInfo` has no field for them.
 
 Every change to what extraction produces bumps
 `tree_hugger::EXTRACTOR_REVISION`, including a repair made on a branch that has
@@ -919,6 +922,87 @@ Syntax the grammar places outside the declaration node, such as a Rust
 `#[…]` attribute, a Python decorator or a TypeScript `export` wrapper, is not
 included. The text appears in records and in the JSON `symbol_indexes`, not
 in `SymbolInfo`.
+
+## Display header
+
+`source.signature_text` is the declaration as a reader recognizes it: the
+header without what follows it. `declaration_text` is evidence (everything up
+to the body, initializers included); `signature_text` is display, and is
+always a contiguous part of `declaration_text`, read from the same node in
+the same pass.
+
+Starting from `declaration_text`, the header drops:
+
+- **leading annotations**: annotations, attributes and decorators written
+  before the first modifier or keyword (Java `@Override`, C# `[Obsolete]`,
+  Swift `@available`, Scala `@deprecated`, JavaScript `@decorator`, PHP
+  `#[…]`, C/C++ `[[…]]`)
+- **initializers**: everything from the `=` (Go: `:=`) that binds a value,
+  including a type alias's aliased type and a C macro's replacement text
+- **bodies and accessors**: a C# `{ get; set; }` list, a Swift `{ get }`
+  requirement or computed body, a Go struct field list or interface method
+  list
+- **introducers and terminators**: the `=`, `=>` or `:` that introduces a
+  body, and a `;` (Lua: `end`) that ends a bodyless declaration
+
+Outer whitespace is stripped; line breaks and indentation inside a
+multi-line header are kept.
+
+| Declaration | `signature_text` |
+|---|---|
+| `@Override public void run() { … }` | `public void run()` |
+| `public @Deprecated static void m() { … }` | `public @Deprecated static void m()` (an annotation between modifiers stays) |
+| `pub const TABLE: [u32; 4] = [ … ];` | `pub const TABLE: [u32; 4]` |
+| `fn area(&self) -> u32;` (trait method) | `fn area(&self) -> u32` |
+| `def total(self) -> int:` | `def total(self) -> int` |
+| `const twice = (value: number): number => value * 2;` | `(value: number): number` (the arrow function is the declaration) |
+| `type Point struct { X int }` | `type Point struct` |
+| `local function helper() end` (Lua, empty body) | `local function helper()` |
+
+The header is omitted when no contiguous part names the symbol by itself:
+
+| Declaration | Why `signature_text` is omitted |
+|---|---|
+| `typedef struct { int x; } Point;` | the alias name follows the struct body |
+| `type ( A struct{ … }; B int )` (Go group) | one header would span several types |
+| `int a = 1, b = 2;` (for `b`) | `a`'s initializer ends the header before `b` |
+| `first = second = 0` (Python, for `second`) | `first`'s `=` ends the header before `second` |
+
+## Declaring keywords
+
+`identity.keyword` is the grammar token that introduces a declaration. It is
+read from the syntax tree, so a comment naming a keyword never supplies one,
+and it is a single token: Scala `case class` reports `class`, C++ `enum
+class` reports `enum`, Swift `class func` reports `func`, Lua `local function`
+reports `function`. It is omitted when the construct has no keyword. A
+construct the extractor does not report as a symbol (see
+[Current limitations](#current-limitations)) has no record to carry one.
+
+| Language | Keywords reported | No keyword |
+|---|---|---|
+| Rust | `fn`, `struct`, `union`, `enum`, `trait`, `type`, `mod`, `const`, `static`, `let`, `macro_rules!` | fields, enum variants, parameters |
+| Go | `func`, `type`, `const`, `var`, `package` | `:=` locals, parameters, struct fields |
+| Swift | `class`, `struct`, `enum`, `actor`, `protocol`, `func`, `case`, `var`, `let` | parameters |
+| Scala | `def`, `val`, `var`, `class`, `object`, `trait`, `enum`; `val`/`var` on a class parameter | plain class and method parameters |
+| TypeScript | `function`, `class`, `interface`, `enum`, `type`, `const`, `let`, `var` | methods, fields, constructors, arrow functions, parameters |
+| JavaScript | `function`, `class`, `const`, `let`, `var` | methods, fields, constructors, arrow functions, parameters |
+| Java | `class`, `interface`, `enum`, `record`, `package` | methods, constructors, fields, locals, parameters |
+| C# | `class`, `struct`, `interface`, `enum`, `record`, `namespace`, `event` | methods, properties, fields (`const` is a modifier), locals, parameters |
+| C | `struct`, `union`, `enum`, `typedef`, `#define` | functions, variables, fields, enumerators, parameters |
+| C++ | C's, plus `class`, `namespace`, `using`, and `class`/`typename` template parameters | as C, plus methods |
+| PHP | `function`, `class`, `interface`, `trait`, `enum`, `const`, legacy `var` properties | typed properties, parameters |
+| Python | `def`, `class` | assignments, parameters |
+| Perl | `sub`, `package`, `my`, `our`, `state` | — |
+| Lua | `function`, `local` | global assignments, parameters |
+| Bash, Zsh | `function`; `local`, `declare`, `typeset`, `export`, `readonly` (and Zsh `integer`, `float`) on a variable | `name()` functions, plain assignments |
+
+For a Go `const`/`var` spec and a Lua or shell `local`, the keyword belongs
+to the statement that wraps the declaration, so the record reports it even
+though its `declaration_text` and `signature_text` do not contain it:
+
+```go
+const Limit = 3 // keyword "const", signature_text "Limit"
+```
 
 ## Current limitations
 

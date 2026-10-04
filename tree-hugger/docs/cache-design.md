@@ -119,7 +119,6 @@ pub struct SymbolSnapshot {
     pub imports: Vec<ImportRecord>,
     pub exports: Vec<ExportRecord>,
     pub diagnostics: Vec<Diagnostic>,
-    pub created_at_epoch_ms: u64,
 }
 ```
 
@@ -140,14 +139,16 @@ and defaulted collections accept their defaults; everything else is rejected:
 |---|---|---|
 | `identity.container_kind` | absent or `null` | no container kind |
 | `modifiers` | absent or `[]` | no modifiers (not `static`) |
+| `identity.keyword` | absent, `null` or `""` | no keyword, or the empty keyword |
 | `source.declaration_text` | absent, `null` or `""` | no text, or the empty text |
+| `source.signature_text` | absent, `null` or `""` | no header, or the empty header |
 | `relations.implements` | absent or `[]` | empty list |
 | `kind_data.data.fields` (type data) | absent or `[]` | empty field list |
 | field data `visibility` | absent or `null` | Unknown access |
 
 `kind`, `visibility.level`, `kind_data.kind_data_type` and field data
-`is_static` are required: absent, `null` or `""` rejects the entry. For all ten
-fields, a wrong type (`123`, or an array holding a wrong element), a duplicate
+`is_static` are required: absent, `null` or `""` rejects the entry. For all
+twelve fields, a wrong type (`123`, or an array holding a wrong element), a duplicate
 key and invalid JSON reject the entry. For example, an entry whose method
 record carries `"modifiers": null` is recomputed, while one with no
 `modifiers` key reports that method as an instance method. The CLI test

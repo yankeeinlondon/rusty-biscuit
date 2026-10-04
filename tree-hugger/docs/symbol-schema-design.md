@@ -4,7 +4,7 @@
 
 Draft design for a major refactor, partly implemented. `SymbolRecord` and
 `FileSymbolIndex` ship in `lib/src/shared/schema_v2/` and serialize as schema
-**3.0** (the Rust module and type names keep their historical `v2`). Sections
+**4.0** (the Rust module and type names keep their historical `v2`). Sections
 below describe the implemented shape unless marked **planned**. Per-language
 extraction rules for kinds, visibility and `static` are in
 [Symbol Kinds, Visibility and `static`](./symbol-kinds-and-visibility.md).
@@ -169,15 +169,16 @@ pub struct IdentityFacet {
     pub name: String,
     pub display_name: String,
     pub qualified_name: Option<String>,
-    pub module_path: Option<String>,               // the container's name
+    pub container_name: Option<String>,            // the container's name
     pub container_kind: Option<SymbolKindV2>,      // the container's kind
+    pub keyword: Option<String>,                   // the declaring keyword
     pub stable_key: String, // language + file + kind + lexical path
 }
 ```
 
 `stable_key` is deterministic and used to produce `SymbolId`.
 
-`module_path` holds the name of the symbol's nearest container (a class, trait,
+`container_name` holds the name of the symbol's nearest container (a class, trait,
 module, or the implemented type of a Rust `impl`), and `container_kind` holds
 that container's kind as extracted from its own declaration. `container_kind`
 is omitted when there is no container or the file cannot tell its kind, for
@@ -187,12 +188,23 @@ example a Rust `impl` for a type declared in another file:
 "identity": {
   "name": "fmt",
   "qualified_name": "PublicStruct::fmt",
-  "module_path": "PublicStruct",
-  "container_kind": "Type"
+  "container_name": "PublicStruct",
+  "container_kind": "Type",
+  "keyword": "fn"
 }
 ```
 
-**Planned (schema 4.0):** `module_path` is renamed `container_name`.
+`keyword` is the grammar token that introduces the declaration, such as `fn`,
+`struct`, `def`, `func`, `const`, `let`, `var`, `class`, `protocol`, `sub`,
+`my` or `#define`. It is read from the syntax tree, never from source text, so
+a comment that names a keyword cannot supply one. It is one token: Scala
+`case class` reports `class`, C++ `enum class` reports `enum`, Swift
+`class func` reports `func`. It is omitted when the construct has none, for
+example a Java or C# method, a C variable or a TypeScript class member. For a
+Go `const`/`var` spec and a Lua or shell `local`, the keyword belongs to the
+statement that wraps the declaration, so it is reported even though
+`declaration_text` does not contain it. Per-language keywords are listed in
+[Symbol Kinds, Visibility and `static`](./symbol-kinds-and-visibility.md#declaring-keywords).
 
 ### Source Facet
 
@@ -227,7 +239,43 @@ syntax a `VisibilityLevel` cannot express survives:
 
 Doc comments and syntax outside the declaration node (a Rust `#[…]` attribute,
 a Python decorator, a TypeScript `export` wrapper) are not included.
-`signature_text` and `body_text` are not yet filled (**planned**).
+
+`signature_text` is the display header: the part of the same declaration a
+reader needs to recognize the symbol. It is always a contiguous part of
+`declaration_text`, filled from the same node in the same extraction pass:
+
+- outer whitespace is stripped; internal whitespace and line breaks are kept
+- it excludes initializers, accessor lists (C# `{ get; set; }`, Swift
+  `{ get }`), the annotations, attributes and decorators that come before the
+  first modifier or keyword, doc comments, a `;` (Lua: `end`) terminator, and
+  the `=`, `=>` or `:` that introduces a body
+- an annotation written between modifiers stays, because removing it would
+  break contiguity
+- it is omitted when no contiguous header can be isolated: a C/C++
+  declaration whose type carries a body (`typedef struct { … } Point;`), a
+  grouped Go `type ( … )` block, or a second name that an earlier name's
+  initializer would cut off (`int a = 1, b = 2;` for `b`)
+
+The three fields have distinct contracts: `declaration_text` is evidence,
+`signature_text` is display, and `keyword` comes from the syntax tree rather
+than either text.
+
+| Declaration | `declaration_text` | `signature_text` | `keyword` |
+|---|---|---|---|
+| `pub(in crate::a) fn f() { … }` | `pub(in crate::a) fn f()` | `pub(in crate::a) fn f()` | `fn` |
+| `pub const TABLE: [u8; 256] = [0, 1, …];` | `pub const TABLE: [u8; 256] = [0, 1, …];` | `pub const TABLE: [u8; 256]` | `const` |
+| `public private(set) var count = 0` | `public private(set) var count = 0` | `public private(set) var count` | `var` |
+| `@Override public void run() { … }` | `@Override public void run()` | `public void run()` | omitted |
+| `public @Deprecated static void m() { … }` | `public @Deprecated static void m()` | `public @Deprecated static void m()` | omitted |
+| `private[Shape] def secret() = 2` | `private[Shape] def secret() =` | `private[Shape] def secret()` | `def` |
+| `public int Count { get; private set; }` | `public int Count { get; private set; }` | `public int Count` | omitted |
+
+A type alias's aliased type counts as its initializer: `pub type Alias = u32;`
+has the header `pub type Alias` (the aliased type is in `kind_data`). A C
+`typedef` names the alias last, so `typedef unsigned long Count;` keeps its
+whole text.
+
+`body_text` is not yet filled (**planned**).
 
 ### Visibility Facet
 
@@ -491,10 +539,11 @@ pub struct ProvenanceFacet {
     pub extractor: String, // e.g. "tree-sitter"
     pub extractor_version: String,
     pub parse_pass: String, // parse, bind, semantic, docs
-    pub created_at_epoch_ms: u64,
-    pub updated_at_epoch_ms: u64,
 }
 ```
+
+Records carry no wall-clock time, so two runs over the same files produce
+identical records and identical cache entries.
 
 ## Kind-Specific Payloads
 
@@ -663,7 +712,7 @@ The schema is designed for four passes:
 3. Semantic pass: inferred flags (purity, mutation, throws/panics, recursion).
 4. Docs pass: parse doc comments into structured `ParsedDocs`.
 
-Each pass updates `provenance.parse_pass` and timestamps.
+Each pass updates `provenance.parse_pass`.
 
 ## Serialization and Compatibility
 
@@ -679,8 +728,30 @@ Version history:
 | Version | Change |
 |---|---|
 | 2.0 | first emitted record shape; no longer emitted |
-| 3.0 (current) | kinds decided at extraction (Constructor, Property, TypeAlias, EnumVariant no longer collapse to Unknown); visibility for every kind with the C# compound levels; `Modifier::StaticStorage`; `identity.container_kind`; `declaration_text`; Rust `relations.implements`; `is_exported` no longer derived from a Public level. Emitted on records, file indexes, CLI envelopes and analyzer fingerprints |
-| 4.0 (**planned**) | `identity.module_path` renamed `container_name`, with the smaller default JSON shape |
+| 3.0 | kinds decided at extraction (Constructor, Property, TypeAlias, EnumVariant no longer collapse to Unknown); visibility for every kind with the C# compound levels; `Modifier::StaticStorage`; `identity.container_kind`; `declaration_text`; Rust `relations.implements`; `is_exported` no longer derived from a Public level. Emitted on records, file indexes, CLI envelopes and analyzer fingerprints |
+| 4.0 (current) | `identity.module_path` renamed `container_name`; `identity.keyword` added; `source.signature_text` filled; `provenance.created_at_epoch_ms` and `updated_at_epoch_ms` removed. Emitted on records, file indexes, CLI envelopes and analyzer fingerprints |
+
+A record before and after 4.0 (other fields unchanged):
+
+```json
+// 3.0
+"identity": { "name": "fmt", "module_path": "PublicStruct", "container_kind": "Type" },
+"source": { "declaration_text": "fn fmt(&self, f: &mut Formatter) -> Result" },
+"provenance": { "extractor": "tree-sitter", "extractor_version": "0.1.0+rev.4",
+                "parse_pass": "docs", "created_at_epoch_ms": 1759500000000,
+                "updated_at_epoch_ms": 1759500000004 }
+
+// 4.0
+"identity": { "name": "fmt", "container_name": "PublicStruct", "container_kind": "Type",
+              "keyword": "fn" },
+"source": { "declaration_text": "fn fmt(&self, f: &mut Formatter) -> Result",
+            "signature_text": "fn fmt(&self, f: &mut Formatter) -> Result" },
+"provenance": { "extractor": "tree-sitter", "extractor_version": "0.1.0+rev.5",
+                "parse_pass": "docs" }
+```
+
+Cache entries written under 3.0 are not migrated; their key no longer matches,
+so they are recomputed.
 
 The CLI cache key also contains `EXTRACTOR_REVISION`, so a change to
 extraction rules invalidates cached records without a schema bump (see
@@ -698,12 +769,12 @@ extraction rules invalidates cached records without a schema bump (see
 6. `TypeMetadata` -> `kind_data: TypeData` or `EnumData`.
 7. `SymbolInfo.visibility` <-> `visibility.level` (`None` <-> `Unknown`).
 8. `SymbolInfo.is_static` <-> `Modifier::Static`; `SymbolInfo.is_static_storage` <-> `Modifier::StaticStorage`.
-9. `SymbolInfo.container_name` / `container_kind` <-> `identity.module_path` / `identity.container_kind`.
+9. `SymbolInfo.container_name` / `container_kind` <-> `identity.container_name` / `identity.container_kind`.
 
 Both kind and visibility conversions are wildcard-free `match`es, so a new
 variant on one side fails to compile until the other side handles it. The
-adapter does not carry `declaration_text` or `relations` (v1 has no field for
-them), `TypeMetadata::type_parameters`, or a TypeAlias's field metadata.
+adapter does not carry `keyword`, `declaration_text`, `signature_text` or
+`relations` (v1 has no field for them), `TypeMetadata::type_parameters`, or a TypeAlias's field metadata.
 
 ### Recommended migration phases
 
@@ -711,7 +782,7 @@ them), `TypeMetadata::type_parameters`, or a TypeAlias's field metadata.
 2. Add adapters:
    1. `impl From<SymbolInfo> for SymbolRecord`.
    2. `impl TryFrom<SymbolRecord> for SymbolInfo` (best effort).
-3. Update CLI `--json` to emit the schema version (done; currently 3.0).
+3. Update CLI `--json` to emit the schema version (done; currently 4.0).
 4. Remove v1 schema after one release cycle.
 
 ## Testing Strategy for the New Schema

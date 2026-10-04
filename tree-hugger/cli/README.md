@@ -86,14 +86,16 @@ a Rust `impl` block are grouped under the implemented type, so a method in
 
 ### JSON Output
 
-With `--json`, output is one document stamped `"schema_version": {"major": 3, "minor": 0}`.
+With `--json`, output is one document stamped `"schema_version": {"major": 4, "minor": 0}`.
 `files[].symbols` holds the v1 symbols and `symbol_indexes` holds the full
-schema records (with `visibility.level`, `modifiers`, `identity.container_kind`,
-`source.declaration_text` and `relations.implements`):
+schema records (with `visibility.level`, `modifiers`, `identity.container_name`,
+`identity.container_kind`, `identity.keyword`, `source.declaration_text`,
+`source.signature_text` and `relations.implements`). Records carry no
+timestamps, so two runs over the same files print the same bytes:
 
 ```json
 {
-  "schema_version": { "major": 3, "minor": 0 },
+  "schema_version": { "major": 4, "minor": 0 },
   "root_dir": "/path/to/project",
   "language": "Rust",
   "files": [
@@ -120,7 +122,7 @@ schema records (with `visibility.level`, `modifiers`, `identity.container_kind`,
       ]
     }
   ],
-  "symbol_indexes": [ { "schema_version": { "major": 3, "minor": 0 }, "symbols": [] } ]
+  "symbol_indexes": [ { "schema_version": { "major": 4, "minor": 0 }, "symbols": [] } ]
 }
 ```
 

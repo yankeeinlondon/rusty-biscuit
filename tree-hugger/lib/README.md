@@ -174,14 +174,21 @@ metadata and standalone symbols agree.
 
 ### Schema records
 
-`SymbolRecord` (schema 3.0) carries the same facts:
+`SymbolRecord` (schema 4.0) carries the same facts:
 
 - `visibility.level` holds the level; `modifiers` holds `Static` for member
   `static` and `StaticStorage` for storage/linkage `static`.
 - `identity.container_kind` holds the container's kind next to
-  `identity.module_path` (the container name).
+  `identity.container_name` (the container name).
+- `identity.keyword` holds the declaring keyword (`fn`, `struct`, `def`,
+  `const`, ...) read from the syntax tree; it is absent when the construct
+  has none, such as a Java method.
 - `source.declaration_text` holds the declaration up to its body, keeping
   modifiers such as `pub(in crate::a)` that a level cannot express.
+- `source.signature_text` holds the display header: `declaration_text`
+  without leading annotations, initializers, accessors or a terminator
+  (`pub const TABLE: [u8; 4] = [...];` has the header
+  `pub const TABLE: [u8; 4]`).
 - `relations.implements` lists the trait of a Rust trait-impl member.
 - `visibility.is_exported` comes only from export syntax and the bind pass,
   never from a Public level; converting a `SymbolInfo` always yields
@@ -195,7 +202,7 @@ visibility, both `static` flags, container kind and signature presence.
 The library provides `FileSummary` and `PackageSummary` structs for JSON output. These types are
 used by the CLI but are also available to library consumers.
 
-Schema output (version 3.0) is exposed via `SymbolRecord` and `FileSymbolIndex`, including `schema_version`
+Schema output (version 4.0) is exposed via `SymbolRecord` and `FileSymbolIndex`, including `schema_version`
 and `completed_passes` metadata for staged analysis.
 
 ## Testing
