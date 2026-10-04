@@ -13,7 +13,8 @@ The `worktree` package area has two crates:
 | `worktree-cli` | `worktree/cli/` | The `wt` binary, plus rendering, the shell wrapper, and the refresh worker |
 
 User-facing behavior is documented in `worktree/README.md`,
-`worktree/docs/cli/list.md`, `worktree/docs/git-graph.md`, and
+`worktree/docs/cli/list.md`, `worktree/docs/cli/remove.md`,
+`worktree/docs/git-graph.md`, and
 `worktree/docs/performance-testing.md`. The pages below hold implementation
 facts and traps, not user docs.
 

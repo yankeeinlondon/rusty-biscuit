@@ -186,6 +186,29 @@ Pure over `TableFacts`; snapshot tests in `cli/tests/list_table.rs`.
     `unavailable_notes` and `unavailable_note_quoting`. Put a Windows spelling
     on the base path in tests, because `file_name` of `C:\x\y` differs
     between hosts.
+  - Notes and status items are `Note`s: typed segments of markup (fixed
+    wording, or external text through `Prose::escape_text`) and raw
+    copyable text. Add every path or command a note shows with
+    `Note::copyable` (or `copyable_badge`), never as escaped markup. Prose's
+    `WrapProse` breaks at whitespace and `-` and force-breaks a word longer
+    than the line with an inserted `-`, so a narrow pane once showed a repair
+    command nobody could copy. `notes_list` replaces those characters in
+    copyable text with one stand-in, `KEEP` (U+FDD0), or a too-long run with
+    a whole line of it, and `restore_kept` puts back the `n`th original for
+    the `n`th stand-in after rendering.
+  - Trap: never build a note as a markup string with in-band delimiters, and
+    never restore stand-ins by replacing every occurrence. Names, paths,
+    reasons, and errors come from Git metadata and can hold any character,
+    including the stand-in; an earlier scheme of five noncharacter markers
+    turned such input into wrap instructions, changed suggested commands, and
+    dropped text. `wrap_markup` records genuine stand-ins too, so positions
+    stay exact. Regressions:
+    `list_table::every_external_field_in_the_notes_is_shown_literally`
+    (every projection × U+FDD0–U+FDD4 × `<red>` markup, 400 and 60 columns),
+    `list_output::a_missing_entry_named_with_delimiter_like_text_gets_its_exact_remove_command`,
+    and `list_table::notes_keep_paths_and_commands_whole_at_a_narrow_width`.
+    `unavailable_reason`, which `wt remove` renders unwrapped, flattens its
+    `Note` with `to_markup`.
 - The §9 suggestion
   follows the post-wait comparison under every `RemoteStatus` except
   `StillChecking` and `StillPulling`, so a failed check or fetch still suggests

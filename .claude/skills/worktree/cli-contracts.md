@@ -43,6 +43,12 @@ Load before touching `cli/src/shell_integration.rs`, `cli/src/env.rs`,
 | 3 | `WorktreeError::RefusedToLoseWork` |
 | 4 | `WorktreeError::BlockedByEnvironment`, `WorktreeError::DirectoryInUse` |
 
+- Exit 3 and 4 promise **nothing removed**, not "nothing changed". `wt remove`
+  repairs an unlinked worktree's `.git` link before any consent, and that
+  repair (which can also touch other worktrees' links) is never rolled back.
+  A refusal after a repair attempt says Git metadata may have changed, and a
+  refusal or cancellation after a successful repair says the restored link was
+  left in place. Never print "nothing was changed" on those paths.
 - Mapping lives in `cli/src/exit.rs`.
 - The exit-3 and exit-4 variants carry Prose markup that `main.rs` prints as-is.
   Other errors are escaped with `Prose::escape_text`.

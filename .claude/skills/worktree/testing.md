@@ -231,3 +231,24 @@ params and 256-color downgrade).
 | `level2_list_spinner_moves_from_the_fallback_to_the_fetch_on_one_line_in_tmux`, `level2_list_spinner_shows_the_rate_limited_fallback_in_tmux` | `DesignFixture::with_gitea_repository` (bare `o/r.git` one commit past `origin/main`, pane's `http.proxy` at the stand-in) + `FakeGitea::serve_repositories` + `hold_git(GitHold::All \| Fetch)`; `answer_branch_heads_with(429)` for rate-limited | under `wt list -r` each phase is exactly one `<frame> <text>` line, fetch text replaces the longer fallback text with no remnant, no spinner before the caption when finished |
 
 The caption suffix's dim italic is asserted in the design test.
+
+### Unavailable rows at L2 (`DesignFixture::break_worktree`)
+
+- **A deterministic `?` row:** overwrite the linked worktree's
+  `<base>/.git/worktrees/<name>/index` with junk. `git worktree list` still
+  lists it without `prunable`, but `git status` in it exits 128 ("index file
+  smaller than expected") on every OS, so `wt` shows a dim `?`. Deleting the
+  directory or the `.git` file makes Git mark the entry `prunable` instead
+  (`✕`); a directory link in place of a moved checkout is unmarked but `✕`
+  (Unix-only fixture: Windows symlinks need a privilege).
+- Notes print after the legend, so waiting for `parent deleted` can capture
+  before them. `DesignFixture::list_to_end` runs `wt list; echo wt-list-""done`
+  (the quotes keep the typed line from matching), waits for the marker, and
+  captures with `capture-pane -J`, which joins each soft-wrapped line into
+  one row and keeps the spaces at the break; without `-J` a narrow pane splits
+  a soft-wrapped line into rows and drops the space at the break.
+- `break_worktree` puts its worktrees under `LONG_DIR`, a name longer than a
+  note line at 80 columns, so every host (Linux temp paths are short) proves
+  that a path or command is shown whole rather than broken by the wrap. The
+  60-column pass checks rows and notes only: the table's `-> parent` header
+  and the legend lines overrun the pane there with or without broken rows.

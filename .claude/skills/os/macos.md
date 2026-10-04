@@ -6,6 +6,10 @@ conditions that masquerade as repository defects.
 
 ## Paths
 
+- APFS on the primary macOS host rejects `U+FDD1` in a filename with
+  "Illegal byte sequence". Git metadata can still record a missing path
+  containing it. Exercise such renderer inputs through a real Git record's
+  `gitdir` text or the public rendering API rather than creating that filename.
 - `/var` and `/tmp` are symlinks into `/private`. A test that compares a
   `tempfile` path with what a child process reports must canonicalize on
   Unix (the `launched_spelling` helper does) or the two spellings differ.

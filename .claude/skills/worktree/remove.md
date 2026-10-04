@@ -1,11 +1,12 @@
 # `wt remove`
 
 Load before changing `worktree::remove` (`lib/src/remove/`) or
-`cli/src/commands/remove/` (`mod.rs` flow, `policy.rs`, `report.rs`).
+`cli/src/commands/remove/` (`mod.rs` flow, `policy.rs`, `report.rs`). The
+user-facing rules are in `worktree/docs/cli/remove.md`; keep it in step.
 
 ```mermaid
 flowchart LR
-  I[inventory] --> S[safety::assess] --> P[policy::decide] --> R{inside target<br/>under wrapper?}
+  P0[prepare] --> I[inventory] --> S[safety::assess] --> P[policy::decide] --> R{inside target<br/>under wrapper?}
   R -- no --> X[remove now]
   R -- yes --> H[write HandoffRecord<br/>print cd: + remove-handoff:] --> H2[wt remove --handoff<br/>verify + reconfirm] --> X
 ```
@@ -112,11 +113,31 @@ Observed with Git 2.56 on macOS. These describe Git, not `wt`:
   missing directory exits 0 and silently discards staged work in that index.
 - `GIT_INDEX_FILE=<absent> git diff-index --cached` reads the missing file as an
   empty index without error. Prove the index exists before trusting the diff.
+- A **split index** (`update-index --split-index`) keeps its entries in a
+  `sharedindex.<oid>` file that `index` only references, so hashing `index`
+  alone misses edits to the entries. Git (2.56 measured) exits 128 when that
+  file is corrupt, removed, empty, has trailing bytes, or is a directory; it
+  looks for it in the running process's git dir, then beside the
+  `GIT_INDEX_FILE`. Only `ls-files --debug` shows entry flags
+  (intent-to-add, skip-worktree); `--stage` alone does not.
+- Test shims that capture Git output with `$(...)` drop NUL bytes, mangling
+  any non-empty `-z` output; the `one_shot_git_shim` buffers through a file.
 - `git -C <base> worktree repair <path>` can exit 1 even when it has fully
   restored the link, and **it also repairs every other broken worktree link**,
-  not only `<path>`. Judge repair by postconditions, never by exit code, and
-  never describe it as touching only the target.
+  not only `<path>`. That includes **overwriting another worktree's existing
+  `.git` file** that holds something Git can't use (checked 2026-10-03: a
+  `gitdir: /nowhere` file was rewritten to the right record), a state `wt`
+  itself refuses to touch. Judge repair by postconditions, never by exit code,
+  and never describe it as touching only the target.
+- **Trap for manual testing:** because of that, one `wt remove` of an unlinked
+  worktree silently heals every other broken fixture in the same repository.
+  Give each broken-state scenario its own repository, or break it after the
+  last repair.
 - One `--force` does not remove a locked record (`remove -f -f` is required).
+- **A checkout moved away and replaced by a directory link to it is not
+  `prunable`**: Git reads it through the link. `git worktree remove` then
+  deletes the files behind the link and fails on the link itself ("Not a
+  directory"), so a failing Git exit is too late to serve as a guard.
 - In a directory whose `.git` is gone, `git rev-parse --show-toplevel` finds
   any enclosing repository (for example the base, when the worktree is nested
   inside it). A Git command that succeeds there does not prove the worktree is
@@ -127,6 +148,19 @@ Observed with Git 2.56 on macOS. These describe Git, not `wt`:
 `prepare(base, entry, &repair::Git)` classifies the entry afresh and returns
 `CheckoutState::{Healthy, Missing, Repaired}` or a `PrepareRefusal`. The CLI
 must call it before any inventory.
+
+- **Trap: no `prunable` marker is not proof of a safe target.**
+  `availability::classify_with` inspects the recorded path itself
+  (`symlink_metadata`, plus `FILE_ATTRIBUTE_REPARSE_POINT` on Windows) for
+  every entry and returns `Other(OtherCondition::Link)` for a link even when
+  Git reads through it. That one check is what `prepare`, both handoff runs,
+  and `wt list` rely on. Repair adds `Postcondition::NotADirectory` (every
+  Git-side postcondition resolves links and passes), and `remove_worktree`
+  refuses with `WorktreeError::NotARealDirectory` (exit 3) unless the path is
+  a real directory immediately before Git runs. Only the final component
+  counts: an ancestor alias such as macOS `/tmp` stays healthy. Tests make
+  the link with `replace_with_link` (a junction on Windows, which needs no
+  privilege).
 
 - **Association** (`admin_entry::admin_entry_for`): the common dir comes from
   `rev-parse --path-format=absolute --git-common-dir`. Every directory under
@@ -144,14 +178,27 @@ must call it before any inventory.
   branch or detached HEAD with no `prunable`. All failures are collected. Only
   `RepairRefusal::Unverified` follows an attempt (`repair_attempted()`).
 - **Missing** (`missing::inspect_missing`): the admin `index` must be a
-  regular file (`IndexAbsent` otherwise). It is diffed with
+  regular file (`IndexAbsent` otherwise). Its bytes are hashed
+  (`index_digest`, BLAKE3 via biscuit-hash) **before** the diff, so a write
+  between the hash and the diff can only make removal refuse. Git's reading of
+  every entry, `GIT_INDEX_FILE=<admin>/index git ls-files --stage --debug -z`,
+  is hashed then too (`entries_digest`): it is the only binding of a split
+  index's shared file, and a Git failure is `IndexUninspectable`. It is diffed with
   `GIT_INDEX_FILE=<admin>/index git diff-index --cached --name-status -z <head>`
   against the branch tip, or the recorded HEAD when detached. Differences become
   `DirtyEntry`s with index-column statuses (`"A "`, `"M "`). An empty
   `staged` list means "index matches HEAD", never "checkout checked".
-- **Record removal** (`missing::remove_missing_record`): it re-lists, requires
-  the same identity, and requires the path to be `NotFound` (a reappeared
-  directory or link refuses). Then it runs plain `git worktree remove <path>`
+- **Record removal** (`missing::remove_missing_record(base, entry, &inspected)`):
+  it re-lists and requires the same identity, the same `AdminEntry`, the same
+  recorded HEAD (`HeadChanged`), the path still `NotFound` (a reappeared
+  directory or link refuses), the index bytes still hashing to
+  `index_digest` (`IndexChanged`; absent is `IndexAbsent`), and Git's entry
+  listing still hashing to `entries_digest` (`IndexChanged`; a shared index Git
+  can no longer read is `IndexUninspectable`, also exit 3). **Trap:** nothing
+  in Git protects a missing checkout's index, so this final comparison is the
+  only thing standing between consent and discarding staged work written after
+  the report; `--force-worktree` approves the reported state, never a newer
+  one. Then it runs plain `git worktree remove <path>`
   with no `--force` and no `check_not_in_use`, and deletes the copy record
   only after Git succeeds. Branch steps stay with the caller.
 - Git receives paths as `OsStr` (`git::git_from_output`), never through a
@@ -168,6 +215,18 @@ must call it before any inventory.
   discard question, and `refusal_markup` all branch on `facts.missing()`
   first. A missing target never hands off, and `execute` runs
   `remove_missing_record` instead of `remove_worktree`.
+- `remove_local_branch(base, branch, expected_tip)` refuses with
+  `WorktreeError::BranchMoved` (exit 1, after the worktree is gone) when the
+  tip is no longer `Facts::head`, the tip the tier and any approval were
+  decided on.
+- **Trap: consent is to a state, not a license.** `git worktree remove` without
+  `--force` refuses newly staged work itself, but with `--force` it discards
+  whatever is there. So `run` fingerprints the files (`Facts::reported`)
+  before the report whenever consent may be needed or a handoff will bind them,
+  and `files_unchanged` re-collects and compares the listed entries and the
+  fingerprint before an approved discard (exit 3 on any difference). The
+  handoff record carries that report-time fingerprint, not one taken after the
+  questions.
 - After `Repaired`, every refusal and cancellation appends
   `Facts::kept_link_note`, and a failed inventory says the link was left in
   place. Never print "nothing was changed" there.
@@ -196,8 +255,12 @@ Inside the target with `WT_SHELL_WRAPPER=1`:
 2. `--handoff` **consumes the record before judging it**, then `verify` checks
    "caller outside the target" first (exit 4) and then every stored field
    (exit 3). Before that, the second run requires `availability::classify` to
-   be `Healthy` (a link broken since the first run refuses with exit 3) and
-   **never calls `prepare`**, so it never repairs.
+   be `Healthy` (a link broken since the first run, or a checkout replaced by
+   a link, refuses with exit 3) and **never calls `prepare`**, so it never
+   repairs. The kind check is the only guard against a replacement link
+   there: the stored target and the listed path are both canonicalized
+   through the new link, so they still compare equal, and `git_dir` and the
+   fingerprint are read through it unchanged.
 3. `run_handoff` refuses (exit 3) when the `--force-remote` destination, its push
    endpoint, or its live head differs from the approved one, is now absent, or
    cannot be reached (approved-absent accepts only a verified absence).
