@@ -655,7 +655,7 @@ fn a_hash_stamp_that_would_repoint_an_alias_is_refused_without_writing() {
     let agent_wrote = original.replace("Old body\n", "Agent body\n");
     let (file, plan) = agent_run(&dir, original, &agent_wrote);
 
-    let error = reconcile_inline_artifact(&plan, "2026-09-06").unwrap_err();
+    let error = reconcile_inline_artifact(&plan, "2026-09-06T12:00:00Z".parse().unwrap()).unwrap_err();
 
     let CompositionError::InlineHashMalformed(MarkdownError::FrontmatterTextEdit { reason }) =
         &error
@@ -690,7 +690,7 @@ fn an_owned_restoration_that_would_repoint_an_alias_is_refused_without_writing()
     );
     let (file, plan) = agent_run(&dir, original, agent_wrote);
 
-    let error = reconcile_inline_artifact(&plan, "2026-09-06").unwrap_err();
+    let error = reconcile_inline_artifact(&plan, "2026-09-06T12:00:00Z".parse().unwrap()).unwrap_err();
 
     let CompositionError::InlineArtifactEditFailed(MarkdownError::FrontmatterTextEdit { reason }) =
         &error
@@ -727,7 +727,7 @@ fn stamps_a_date_above_an_indented_comment_and_keeps_every_byte() {
             let agent_wrote = document(authored, stale, "Agent body", newline);
             let (file, plan) = agent_run(&dir, &original, &agent_wrote);
 
-            let artifact = written(reconcile_inline_artifact(&plan, "2026-09-06").unwrap());
+            let artifact = written(reconcile_inline_artifact(&plan, "2026-09-06T12:00:00Z".parse().unwrap()).unwrap());
 
             let on_disk = std::fs::read_to_string(&file).unwrap();
             assert_eq!(on_disk, artifact.text);
@@ -772,7 +772,7 @@ fn stamps_a_date_after_a_quote_inside_a_plain_value_and_keeps_its_comment() {
             let agent_wrote = document(authored, stale, "Agent body", newline);
             let (file, plan) = agent_run(&dir, &original, &agent_wrote);
 
-            let artifact = written(reconcile_inline_artifact(&plan, "2026-09-06").unwrap());
+            let artifact = written(reconcile_inline_artifact(&plan, "2026-09-06T12:00:00Z".parse().unwrap()).unwrap());
 
             let on_disk = std::fs::read_to_string(&file).unwrap();
             assert_eq!(on_disk, artifact.text);
@@ -846,7 +846,7 @@ fn assert_quoted_flow_targets_persist_exactly(rows: &[(&str, &str)]) {
             let (file, plan) = agent_run(&dir, &original, &agent_wrote);
 
             let artifact = written(
-                reconcile_inline_artifact(&plan, "2026-09-06")
+                reconcile_inline_artifact(&plan, "2026-09-06T12:00:00Z".parse().unwrap())
                     .unwrap_or_else(|error| panic!("{authored:?} {newline:?}: {error}")),
             );
 
@@ -886,7 +886,7 @@ fn assert_quoted_flow_targets_persist_exactly(rows: &[(&str, &str)]) {
 
             let markdown: Markdown = on_disk.into();
             let options = inline_hash_options();
-            let stored = parse_inline_stored_hash(&markdown, &options).unwrap().unwrap();
+            let stored = markdown.stored_hash(&options).unwrap().unwrap();
             let comparison = markdown.compare_hash(&stored, &options).unwrap();
             assert!(!comparison.frontmatter_changed && !comparison.body_changed, "{authored:?}");
         }
@@ -955,7 +955,7 @@ fn encodes_a_quoted_flow_target_beside_a_plain_scalar_holding_a_quote() {
             let (file, plan) = agent_run(&dir, &original, &agent_wrote);
 
             let artifact = written(
-                reconcile_inline_artifact(&plan, "2026-09-06")
+                reconcile_inline_artifact(&plan, "2026-09-06T12:00:00Z".parse().unwrap())
                     .unwrap_or_else(|error| panic!("{authored:?} {newline:?}: {error}")),
             );
 
@@ -983,7 +983,7 @@ fn encodes_a_quoted_flow_target_beside_a_plain_scalar_holding_a_quote() {
 
             let markdown: Markdown = on_disk.into();
             let options = inline_hash_options();
-            let stored = parse_inline_stored_hash(&markdown, &options).unwrap().unwrap();
+            let stored = markdown.stored_hash(&options).unwrap().unwrap();
             let comparison = markdown.compare_hash(&stored, &options).unwrap();
             assert!(!comparison.frontmatter_changed && !comparison.body_changed, "{authored:?}");
         }
