@@ -18,9 +18,23 @@ source_files_during_phase_4:
 docs_updated_during_phase_4: []
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+  - worktree/cli/src/commands/git_graph/tests.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+source_files_during_phase_6:
+  - worktree/cli/src/commands/list/tests.rs
+  - worktree/cli/src/commands/list/tests/pipeline.rs
+  - worktree/cli/tests/list_prs.rs
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - .claude/skills/worktree/testing.md
 packages:
   - sniff
   - worktree
+  - worktree-cli
 created: 2026-10-03
 phase: 1
 agent: claude/sonnet
@@ -196,11 +210,11 @@ Wave 2 (independent of P2/P3; may run concurrently with them). Package: `worktre
 
 Wave 3. Depends on P4 and spike S1. Package: `worktree-cli` (`git_graph.rs`).
 
-- [ ] **Take tips as input.** `GatherInput` is built from the initial or final `RefTips` plus entries, not from a filled `WorktreeList`, so it can be built before the caption/tree exist (derive what it needs from `build_tree`, which is pure).
-- [ ] **Object IDs only.** Replace branch names with captured SHAs in every `git log`/`rev-list`/`merge-base`/`merge-tree` call the graph and verbose gatherers issue.
-- [ ] **Verbose labels** from the accepted snapshot per S1, preserving tag and HEAD labeling.
-- [ ] **Preserve** graph `incomplete` behavior and existing conditions for the graph (image-capable path) and verbose rows.
-- [ ] **Tests (L1).** Existing git-graph tests pass; new tests: a ref moved after capture does not change gathered output; `%D`-equivalent labels match the snapshot, with tag/HEAD cases.
+- [x] **Take tips as input.** `GatherInput` is built from the initial or final `RefTips` plus entries, not from a filled `WorktreeList`, so it can be built before the caption/tree exist (derive what it needs from `build_tree`, which is pure).
+- [x] **Object IDs only.** Replace branch names with captured SHAs in every `git log`/`rev-list`/`merge-base`/`merge-tree` call the graph and verbose gatherers issue.
+- [x] **Verbose labels** from the accepted snapshot per S1, preserving tag and HEAD labeling.
+- [x] **Preserve** graph `incomplete` behavior and existing conditions for the graph (image-capable path) and verbose rows.
+- [x] **Tests (L1).** Existing git-graph tests pass; new tests: a ref moved after capture does not change gathered output; `%D`-equivalent labels match the snapshot, with tag/HEAD cases.
 
 **Checkpoint 5:** `git_graph` and `perf_graph_stages` tests pass.
 
@@ -208,15 +222,15 @@ Wave 3. Depends on P4 and spike S1. Package: `worktree-cli` (`git_graph.rs`).
 
 Wave 4. Depends on P4, P5, P7 (group recording) and, for `RemoteAnswers`, nothing from P3.
 
-- [ ] **Reorder `run_pipeline`.** After `parse_worktree_state`: record `--ignore-api` and prepare the remote request (preference-write error still exits with no listing or launch). Then in `std::thread::scope`: scoped threads run dirtiness (parallel per worktree), the ref-dependent gather, and graph/verbose gather from the initial snapshot; the calling thread runs `gather_remote`/the wait. Keep list∥graph and per-worktree parallelism. The monotonic budget still starts before the first launch.
-- [ ] **Join, then `--ff`.** Local tasks are joined before `fast_forward_default`; the detached worker is never joined or killed. A timeout limits waiting, not local computation.
-- [ ] **Accept or regather.** Reread refs when `remote.waited.is_some()` or `--ff` ran (as today); equal successful snapshots accept; changed or failed read → one regather of caption, target, tree, comparisons, graph facts, verbose from the final snapshot (no retry loop); failed final read keeps degraded behavior and skips pruning. A fetch observed by the final read invalidates the first gather even after a timeout.
-- [ ] **Dirtiness reuse.** Keep initial results; if `FfResult` is a successful move with a checkout path, refresh only that checkout; other outcomes need no status walk.
-- [ ] **Commit once.** Save cache, prune forks and copy records once on the accepted results; then render once (caption, table, graph, verbose) with the PR answer applied at render time.
-- [ ] **Exit paths.** Scoped tasks joined and the spinner cleared on every exit (local gather error included); no output from scoped tasks; no-origin, ignored-API, captured-output and non-image paths unchanged; origin-changed handling unchanged.
-- [ ] **Test seam.** Extend `tests::overlap` (list-versus-graph only today) so a held worker outcome releases only after both local gathers arrived; bounded waits, no sleeps, released on failure, no leaked processes.
-- [ ] **Tests (L1)** per spec: overlap; unchanged refs run status/comparison once; remote advance/rewind/add/delete reflect final tips in caption/target/tree/counts/graph/verbose; `--ff` without holder / up-to-date / refused / moved-with-holder reruns only that checkout; failed initial or final read; local gather error cleanup; persistence-once; timeout (budget not exceeded by the wait, first gather reused when tips match, regather when a fetch was observed, pending status and hint kept, worker not joined, long local gather allowed to finish).
-- [ ] **Existing suites.** `list/tests.rs`, `list_prs.rs`, `cache_*_path.rs`, `remote_fixture` L1/L2 stay green; update only what the reorder changes.
+- [x] **Reorder `run_pipeline`.** After `parse_worktree_state`: record `--ignore-api` and prepare the remote request (preference-write error still exits with no listing or launch). Then in `std::thread::scope`: scoped threads run dirtiness (parallel per worktree), the ref-dependent gather, and graph/verbose gather from the initial snapshot; the calling thread runs `gather_remote`/the wait. Keep list∥graph and per-worktree parallelism. The monotonic budget still starts before the first launch.
+- [x] **Join, then `--ff`.** Local tasks are joined before `fast_forward_default`; the detached worker is never joined or killed. A timeout limits waiting, not local computation.
+- [x] **Accept or regather.** Reread refs when `remote.waited.is_some()` or `--ff` ran (as today); equal successful snapshots accept; changed or failed read → one regather of caption, target, tree, comparisons, graph facts, verbose from the final snapshot (no retry loop); failed final read keeps degraded behavior and skips pruning. A fetch observed by the final read invalidates the first gather even after a timeout.
+- [x] **Dirtiness reuse.** Keep initial results; if `FfResult` is a successful move with a checkout path, refresh only that checkout; other outcomes need no status walk.
+- [x] **Commit once.** Save cache, prune forks and copy records once on the accepted results; then render once (caption, table, graph, verbose) with the PR answer applied at render time.
+- [x] **Exit paths.** Scoped tasks joined and the spinner cleared on every exit (local gather error included); no output from scoped tasks; no-origin, ignored-API, captured-output and non-image paths unchanged; origin-changed handling unchanged.
+- [x] **Test seam.** Extend `tests::overlap` (list-versus-graph only today) so a held worker outcome releases only after both local gathers arrived; bounded waits, no sleeps, released on failure, no leaked processes.
+- [x] **Tests (L1)** per spec: overlap; unchanged refs run status/comparison once; remote advance/rewind/add/delete reflect final tips in caption/target/tree/counts/graph/verbose; `--ff` without holder / up-to-date / refused / moved-with-holder reruns only that checkout; failed initial or final read; local gather error cleanup; persistence-once; timeout (budget not exceeded by the wait, first gather reused when tips match, regather when a fetch was observed, pending status and hint kept, worker not joined, long local gather allowed to finish).
+- [x] **Existing suites.** `list/tests.rs`, `list_prs.rs`, `cache_*_path.rs`, `remote_fixture` L1/L2 stay green; update only what the reorder changes.
 
 **Checkpoint 6:** `just test` and `just test-l2 list` green in `worktree/`.
 

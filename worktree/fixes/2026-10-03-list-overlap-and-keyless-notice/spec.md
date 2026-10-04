@@ -54,6 +54,21 @@ message_to_agent: |-
     `a_detached_workers_answer_replaces_the_stale_one_on_the_next_list`, failed the
     same way once (11.2 s under load; 3.9 s isolated, 3 of 3 passing), so review the
     timing bounds across `cli/tests/list_prs.rs`, not just the first test.
+    Phase 5 (snapshot-addressed graph and verbose) was verified; its only change was
+    one added test, `git_graph::tests::refs_moved_after_the_snapshot_leave_the_gather_unchanged`
+    (moved refs change no gathered output; no Git call names a ref). `GatherInput::from_list`
+    needs only the parse step's list plus a `RefTips`, so Phase 6 can build it before
+    the local gather (it already does). After phase 5: worktree `just test` 948 passed,
+    `just lint` clean; `packages` now includes `worktree-cli`.
+    Phase 6 (overlapped pipeline) was verified with no change to `list.rs`; it added
+    two pipeline tests (no-origin/non-image control paths; a failed `--ignore-api`
+    preference write starts no local gather and launches nothing) and an
+    `overlap::Installed::started` accessor. It also settled the hand-forward above:
+    the two `list_prs.rs` held-request tests now bound the `remote wait` perf row,
+    not the whole command (the module's `list_with` already runs `--perf`).
+    After phase 6: worktree `just test` 952 passed, `just lint` clean,
+    `just test-l2 list` 14 passed. Phase 7 note: `--perf` groups are already wired
+    into `gather_listing`; verify against `perf.rs` rather than re-wiring.
 related:
     - 2026-09-27-list-freshness-ux
     - 2026-10-02-fresh-prs

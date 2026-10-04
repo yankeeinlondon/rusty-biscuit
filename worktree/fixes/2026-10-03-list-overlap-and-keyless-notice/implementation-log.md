@@ -18,9 +18,23 @@ source_files_during_phase_4:
 docs_updated_during_phase_4: []
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+  - worktree/cli/src/commands/git_graph/tests.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+source_files_during_phase_6:
+  - worktree/cli/src/commands/list/tests.rs
+  - worktree/cli/src/commands/list/tests/pipeline.rs
+  - worktree/cli/tests/list_prs.rs
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - .claude/skills/worktree/testing.md
 packages:
   - sniff
   - worktree
+  - worktree-cli
 implementation_1: "2026-10-03T14:50:53-07:00"
 ---
 
@@ -211,3 +225,53 @@ The files changed in this cycle:
         - one run failed `worktree-cli::list_prs a_held_pr_request_with_nothing_stored_ends_at_the_budget_with_only_the_hint` (11.8 s; it asserts the whole command takes under 5 s). Five isolated runs of that test passed (about 3.7 s each). It is a load-sensitive wall-clock bound in Phase 6's territory and is unrelated to this phase's test-only change, so it is flagged in `spec.md` `message_to_agent` and was not changed here
 - skills: no `worktree` skill change needed; `list.md` already describes the gather/commit split
 - re-verification run (2026-10-03, same phase): `just lint` exit 0; `just check-tier-coverage worktree` 0 stranded; `just test` run three times. The first stopped on `worktree-cli::list_prs a_detached_workers_answer_replaces_the_stale_one_on_the_next_list` (11.2 s under full-suite load). It passed three of three isolated runs (about 3.9 s each), and the next two full runs passed, 946 tests, 32 skipped. This is a second `list_prs` test with the same load-sensitive timing as the one above, so the Phase 6 note in `spec.md` now names both
+
+## Phase 5
+
+> **phase:** snapshot-addressed graph and verbose gathering (plan Phase 5), 2026-10-03
+
+- state found: review cycle 1 had already built this phase, and the working tree had no source changes. I checked each task against the code and found one test gap, which is now closed (below). No behavior changed
+- task verification:
+        - tips as input: `GatherInput::from_list(list, refs)` (`worktree/cli/src/commands/git_graph.rs`) takes the parse step's `WorktreeList` (entries, default branch, fork records) plus an explicit `RefTips`. It reads nothing the caption, target, or tree produce, so `run_pipeline` builds it before the local gather from `initial.tips()` and, for a regather, from `accepted_refs.tips()` (`list.rs`). The plan's "derive what it needs from `build_tree`" was not needed: the gatherer uses no tree facts
+        - object IDs only: every revision the graph and verbose gatherers hand to Git comes from `input.refs` (`DefaultTips::read`, `recorded_parent`, the current tip, fork records' `base_sha`) or from Git output. `topology.rs` (`merge-base`, `rev-list`, `log --no-walk`) and `commit_details{,_since}` receive only SHAs or `SHA..SHA` ranges
+        - verbose labels: per the S1 ruling, `LIVE_DECORATION_EXCLUDES` leaves Git's `%D` only tags and other non-branch refs, and `snapshot_labels` rebuilds `HEAD -> <current>`, remote-tracking names (with symbolic `origin/HEAD` from `RefTips.remote_heads`), and local branches from the snapshot in Git's order
+        - preserved: `incomplete` still comes from `History::read` (shallow check, graph only), a `merge-base` gap, and placement or lane gaps. The graph and verbose conditions (`needs_graph`, `has_verbose`, detached → nothing) are unchanged; `nothing_is_gathered_when_detached_or_not_needed` and the existing git-graph suites pass
+- requirement-to-test mapping (all L1, `worktree-cli`, in `commands::git_graph::tests`; each runs under both the library and `bin/wt` targets):
+        - `%D`-equivalent labels match the snapshot, with tag and HEAD cases; equal to Git's own `%D` when nothing moved → `verbose_labels_follow_the_snapshot_and_keep_live_tags` (existing)
+        - **added:** a ref moved after capture does not change gathered output → `refs_moved_after_the_snapshot_leave_the_gather_unchanged`. After the snapshot, both focused-view branches advance, `origin/main` is fetched forward, `feature-b` is deleted, and `late` is created. The focused graph, verbose (merge base and branch commits with their SHAs, messages, and labels), and base-view graph all equal the first gather. A recorder also asserts that no Git call names a ref (`HEAD`, a branch, `origin/main`, `origin/HEAD`, including either side of a `..` range)
+        - mutation check: making verbose pass the branch name `current` instead of `current_tip` to `commit_details_since` fails the new test (an extra `a2` commit appears). The file was restored from a copy, and `git diff` shows no change to `git_graph.rs`
+- input robustness matrix: not applicable. This phase reads no file format
+- OS: no OS-specific code; the test uses Git subprocesses in a temp repo, like its neighbors, so no cross-check was run
+- gates (with `LIBGIT2_NO_PKG_CONFIG=1`): `worktree/` `just test` 948 passed (946 plus the new test under two targets), 32 skipped; `worktree/` `just lint` exit 0; `just check-tier-coverage worktree` 0 stranded. Checkpoint 5: `cargo nextest run -p worktree-cli git_graph perf_graph_stages` 104 passed. No failures, pre-existing or new; the load-sensitive `list_prs` timings noted in Phase 4 did not recur
+- frontmatter: `packages` now adds `worktree-cli`, the crate this phase covers
+- skills: no `worktree` skill change needed; `git-graph.md` already describes snapshot addressing and the verbose labels
+
+## Phase 6
+
+> **phase:** overlapped pipeline and acceptance (plan Phase 6), 2026-10-03
+
+- state found: review cycle 1 had already built this phase (`gather_listing` in `worktree/cli/src/commands/list.rs`), and the working tree had no change to it. I checked each task against the code and closed two test gaps and one timing-bound decision handed forward from Phase 4. `list.rs` is unchanged; no behavior changed
+- task verification:
+        - reorder: `prepare_remote` (origin lookup, `--ignore-api` write) runs before `std::thread::scope`; inside it, scoped threads run `gather_local` (dirtiness ∥ ref facts, per-worktree parallel in the library) and `git_graph::gather` from `initial.tips()`, while the calling thread runs `follow_remote` (launch, wait, spinner, PR reread). The budget starts in `wait::wait`, before the launch
+        - join, then `--ff`: both scoped handles are joined inside the scope, before `fast_forward_default`; the worker handle is never joined
+        - accept or regather: reread only when `remote.waited.is_some() || ff.is_some()`; `RefSnapshot::matches` accepts only two successful equal reads; otherwise one regather (ref facts ∥ history) from the final snapshot, no loop
+        - dirtiness reuse: initial results kept; `refresh_dirty_status` only for `FfResult::Moved { checkout: Some(_) }`
+        - commit once: `WorktreeList::commit(accepted_refs, …)` once, then `run_pipeline` renders once with the PR answer applied in `TableFacts`
+        - exit paths: the only fallible steps (`parse_worktree_state`, `prepare_remote`) run before any spawn; `gather_local`/`gather` return values, not errors, so a local failure is degraded output rather than an exit; the spinner is cleared inside `follow_remote` before it returns; scoped tasks never print
+- requirement-to-test mapping (L1, `worktree-cli`, `commands::list::tests::pipeline` unless noted; each runs under the library and `bin/wt` targets):
+        - overlap with the remote wait → `the_local_gathers_start_while_the_worker_outcome_is_held` (existing)
+        - unchanged refs, status and comparisons once → `unchanged_tips_accept_the_first_gather_and_measure_everything_once` (existing)
+        - **added:** no-origin and non-image control paths → `without_an_origin_or_an_image_the_single_gather_is_accepted`. No origin: no launch, `waited` is `None`, one ref read, group `local gather` (no `remote wait`), no regather, no caption (removing `origin` removes its tracking refs). Non-image: launch, two ref reads, group without `graph gather`, no graph, no regather. Both describe the final state
+        - **added:** a preference-write error exits before speculative work → `a_failed_preference_write_starts_no_local_gather_and_launches_nothing` (`--ignore-api` with a local-path origin): `NoRepositoryIdentity`, no launch, neither local gather started (new `overlap::Installed::started`), no cache saved, nothing pruned
+        - advance/rewind/addition/deletion reflect the final tips → `a_ref_change_during_the_wait_is_regathered_from_the_final_tips` (existing)
+        - `--ff` moved with a holder / without / up to date / refused → `fast_forward_measures_again_only_the_checkout_it_moved` (existing)
+        - failed initial or final read → `a_failed_ref_read_never_counts_as_unchanged_and_a_failed_final_read_never_prunes` (existing)
+        - persistence once, speculative cache entries kept → `nothing_persists_before_the_accepted_gather_is_committed_once` (existing)
+        - timeout → `a_timed_out_wait_keeps_pending_status_and_lets_a_longer_local_gather_finish` (existing); the budget bound itself → `gather::a_silent_worker_is_waited_for_only_until_the_budget` (existing)
+        - ignored API: covered end to end by `list_flags::ignore_api` (existing); not repeated in-process, because it needs a `~/.wt.json` under an overridden home
+- mutation checks (each applied to a copy of `list.rs`, then restored; `git diff` shows `list.rs` unchanged): always rereading refs fails the no-origin case (2 reads, expected 1); moving `prepare_remote` inside the scope, after the local spawn, fails the preference-write test
+- decision handed forward from Phase 4 (`list_prs.rs` timing bounds): `a_held_live_head_check_holds_the_listing_only_until_its_deadline` and `a_held_pr_request_with_nothing_stored_ends_at_the_budget_with_only_the_hint` bounded the whole `wt list` process at < 5 s, which includes the local gather. Since the overlap, the spec says a timeout limits the wait, not local computation, so both now bound the `remote wait` row of `--perf` (which `list_with` already passed) with the same limits; `.output()` returning while the request is held still proves the worker was not joined. `a_detached_workers_answer_replaces_the_stale_one_on_the_next_list` asserts no duration, so its one slow failure under load was not a command-duration bound and was left alone. The full-command timing gates stay in `perf_pr_request.rs` (`just test-perf`). Recorded in the skill's `testing.md`
+- input robustness matrix: not applicable. This phase reads no file format
+- OS: no OS-specific code; the tests use Git subprocesses in temp repos and in-process seams, like their neighbors. No cross-check run
+- gates (with `LIBGIT2_NO_PKG_CONFIG=1`): `worktree/` `just test` 952 passed (948 plus 2 new tests × 2 targets), 32 skipped, both before and after the `list_prs.rs` edit; `just lint` exit 0; `just test-l2 list` 14 passed (the first attempt ended on a signal while blocked on Cargo's package-cache lock held by another process, before running any test; the rerun passed); `just check-tier-coverage worktree` 0 stranded; `--test list_prs` 31 passed, and the two edited tests 3 of 3 in isolation. No pre-existing failures observed
+- frontmatter: `packages` unchanged (`worktree-cli` already listed)
