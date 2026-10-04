@@ -139,7 +139,7 @@ The component never draws something at a commit other than the one it was given:
 |---|---|---|
 | `forked_at` | unset, or its commit is not drawn | The lane is drawn **unconnected** (declared before the default lane's first commit, so its first commit has no parent), never from the start of another lane |
 | a ref, a label-only line's tip, a PR's source tip | its commit is not drawn | The tag is left out |
-| a line's merge | its source is not drawn on that line, its destination is not drawn or is on the same line, the destination would be emitted before the source, the destination already merges another source, or two lanes' merges depend on each other (only the first is drawn) | A plain `commit`, no merge |
+| a line's merge | its source is not drawn on that line, its destination is not drawn or is on the same line, the destination would still be emitted before the source after its lane waits for it (a lane that reaches a destination first waits before it until the source is drawn), the destination already merges another source, or two lanes' merges depend on each other (only the first is drawn) | A plain `commit`, no merge |
 
 Each of these is recorded in `GitGraphPlan::omissions` as a `GraphOmission` (`UnconnectedLane { branch, fork }`, `Merge { branch, destination }`, or `Tag(name)`), so a caller can say what is missing. Each, and `with_incomplete_history()`, sets `GitGraphPlan::incomplete`, and the rendered graph is followed by the dim line `INCOMPLETE_HISTORY_NOTE` ("Some history is not shown"), after the hidden-lanes note. Tags of lanes the height cap leaves out are counted by that note instead. A PR for a branch the graph does not know has no commit to account for, and is not counted.
 

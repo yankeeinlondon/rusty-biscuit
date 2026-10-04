@@ -33,9 +33,10 @@
 //! A commit is the destination of **one** merge: the first edge in line order,
 //! then edge order. A merge is drawn only when its source is a drawn commit on
 //! its own lane, its destination is a drawn commit on another lane, and the
-//! source is emitted before the destination. A destination reached first is a
-//! plain commit, and a cycle of merges between lanes is broken by drawing the
-//! later ones as plain commits.
+//! source is emitted before the destination. A lane that reaches a
+//! destination first waits before it until the source's lane has emitted the
+//! source; a wait that can never end, and a cycle of merges between lanes, is
+//! broken by drawing the later merges as plain commits.
 //!
 //! ## Nothing undrawn is substituted
 //!
