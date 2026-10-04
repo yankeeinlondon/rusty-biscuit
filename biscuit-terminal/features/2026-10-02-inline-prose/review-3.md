@@ -24,10 +24,13 @@ reviewed_by: codex/gpt-6.1-sol
 recurrence: true
 created: 2026-10-03T16:17:14-07:00
 spec: 2026-10-02-inline-prose/spec.md
-implemented: false
+implemented: true
 description: 'A **feature** review of `2026-10-02-inline-prose/spec.md`'
 feature: 2026-10-02-inline-prose/review-3.md
 previous: 2026-10-02-inline-prose/review-2.md
+next: 2026-10-02-inline-prose/review-4.md
+implemented_by: claude/opus
+log: biscuit-terminal/features/2026-10-02-inline-prose/log.md
 ---
 
 # Inline Prose — Review 3
