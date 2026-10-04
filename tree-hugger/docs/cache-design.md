@@ -61,8 +61,11 @@ Correct invalidation depends on precise fingerprints.
    `typescript`; grammar versions/checksums are **planned**).
 4. `query_fingerprint`: `locals+imports+references;extractor-revision=<N>`,
    where `<N>` is `tree_hugger::EXTRACTOR_REVISION`. The library bumps that
-   constant with any change to extracted records, so a warm cache written by
-   older extraction rules is never served. A hash of the query sources is
+   constant with any change to extracted records, including a repair on an
+   unreleased branch, a `.scm` query edit or a grammar crate upgrade, so a
+   warm cache written by older extraction rules is never served. Until the
+   planned query hash and grammar versions exist, the revision is the only
+   key component those changes move. A hash of the query sources is
    **planned**.
 5. `config_fingerprint` (the CLI's analysis options: experimental semantics,
    rule selectors, strict mode, external adapters).
@@ -121,6 +124,34 @@ pub struct SymbolSnapshot {
 ```
 
 `completed_passes` enables incremental upgrading of cache entries instead of full recompute.
+
+#### Which entries are served
+
+`hug` reads an entry with plain `serde_json` deserialization of the whole
+`SymbolSnapshot`. An entry that does not deserialize is ignored: the file is
+re-analyzed and the entry is overwritten, so the output is the same as a
+`--no-cache` run. An entry that deserializes is served as written; there is no
+second, semantic check.
+
+So a field accepts exactly the shapes its schema type allows. Optional values
+and defaulted collections accept their defaults; everything else is rejected:
+
+| Field | Served when | Public result |
+|---|---|---|
+| `identity.container_kind` | absent or `null` | no container kind |
+| `modifiers` | absent or `[]` | no modifiers (not `static`) |
+| `source.declaration_text` | absent, `null` or `""` | no text, or the empty text |
+| `relations.implements` | absent or `[]` | empty list |
+| `kind_data.data.fields` (type data) | absent or `[]` | empty field list |
+| field data `visibility` | absent or `null` | Unknown access |
+
+`kind`, `visibility.level`, `kind_data.kind_data_type` and field data
+`is_static` are required: absent, `null` or `""` rejects the entry. For all ten
+fields, a wrong type (`123`, or an array holding a wrong element), a duplicate
+key and invalid JSON reject the entry. For example, an entry whose method
+record carries `"modifiers": null` is recomputed, while one with no
+`modifiers` key reports that method as an instance method. The CLI test
+`cache_robustness` in `cli/tests/symbols/` pins this table.
 
 ### Package Graph Snapshot (L3)
 

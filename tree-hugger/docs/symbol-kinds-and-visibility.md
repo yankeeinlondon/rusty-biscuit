@@ -17,7 +17,9 @@ Tree Hugger parses a file with Tree-sitter, runs the language's `locals.scm`
 query to find declarations, and then decides every fact about a declaration
 **once**, at extraction, from that declaration's own syntax node. Nothing
 re-classifies a symbol later, so the library's two symbol models and the CLI
-always agree.
+always agree. A type's field list (what `hug classes` shows) is built from the
+same standalone member symbols, so it lists the same members with the same
+flags; see [Field lists](#field-lists).
 
 ```mermaid
 flowchart LR
@@ -40,12 +42,14 @@ The two models are:
 | `SymbolRecord` (schema 3.0) | `TreeFile::symbol_records()`, `symbol_index_v2()` | `kind`, `visibility.level`, `modifiers` (`Static`, `StaticStorage`), `identity.module_path`, `identity.container_kind`, `source.declaration_text`, `relations.implements` |
 
 The adapter between them (`From<SymbolInfo> for SymbolRecord` and back)
-preserves kind, visibility, both `static` flags, container kind and signature
-presence. Declaration text and `relations.implements` exist only on records,
+preserves kind, visibility, both `static` flags, container kind and the
+signature, with its parameters. Declaration text and `relations.implements` exist only on records,
 because `SymbolInfo` has no field for them.
 
 Every change to what extraction produces bumps
-`tree_hugger::EXTRACTOR_REVISION`. The CLI's persistent cache key contains
+`tree_hugger::EXTRACTOR_REVISION`, including a repair made on a branch that has
+not been released: a warm cache written from an earlier commit of that branch
+is otherwise served unchanged. The CLI's persistent cache key contains
 that value, so cached output from an older extractor is recomputed instead of
 being shown (see [Cache Design](./cache-design.md)).
 
@@ -61,28 +65,38 @@ Unknown. No construct in the test fixtures of any language reports `Unknown`.
 | Language | Function / method | Types | Members | Modules |
 |---|---|---|---|---|
 | Rust | `fn` → Function; `fn` in an `impl` or trait → Method (with or without `self`, with or without a body) | `struct`, `union` → Type; `enum` → Enum; `trait` → Trait; `type` and associated `type` → TypeAlias | field → Field; variant → EnumVariant; `const` → Constant; `static`, `static mut` → Variable | `mod` → Module |
-| TypeScript | function → Function; class, abstract and interface method signatures (also `#private`) → Method; `constructor` → Constructor | `class`, `abstract class` → Class; `interface` → Interface; `enum` → Enum; `type` → TypeAlias | class-body property and interface property signature → Property | `namespace` is not yet reported |
-| JavaScript | function → Function; class method → Method; `constructor` → Constructor | `class` → Class | class-body field (`x = 1;`, `static y;`, `#z`) → Property | — |
+| TypeScript | function → Function; class, abstract and interface method signatures (also `#private`) → Method; `constructor` in a class body → Constructor (an object literal's `constructor()` is a Method) | `class`, `abstract class` → Class; `interface` → Interface; `enum` → Enum; `type` → TypeAlias | class-body property (also `#private`, quoted `"label"` and numeric names; a quoted name is reported without its quotes) and interface property signature → Property | `namespace` is not yet reported |
+| JavaScript | function → Function; class method → Method; `constructor` in a class body → Constructor (an object literal's `constructor()` is a Method) | `class` → Class | class-body field (`x = 1;`, `static y;`, `#z`, `"quoted" = 1;`) → Property | — |
 | Go | `func` → Function; method with a receiver → Method | every `type` declaration (struct and interface alike) → Type | not yet reported | `package` → Namespace |
-| Python | `def` → Function; `def` in a class body (also `@staticmethod`, `@classmethod`) → Method | `class` → Class | class-body attribute → Field | — |
+| Python | `def` → Function; `def` in a class body (also `@staticmethod`, `@classmethod`) → Method | `class` → Class | class-body attribute, every target of a chained (`a = b = 0`) or one-level tuple/list (`a, b = …`) assignment → Field | — |
 | Java | method → Method (constructors are not yet distinguished) | `class` → Class; `interface` → Interface; `enum` → Enum; `record` → Type | field and interface constant → Field | `package` → Namespace |
-| C# | method → Method (constructors are not yet distinguished) | `class` → Class; `interface` → Interface; `enum` → Enum; `struct`, `record` → Type | field → Field; property → Property | `namespace` (block and file-scoped) → Namespace |
-| C | function → Function | named `struct`/`union` tag → Type; `enum` → Enum; `typedef` → TypeAlias | struct field (pointer fields too) → Field | — |
-| C++ | function → Function; function declared or defined in a class body → Method | `class` → Class; `struct`, `union` → Type; `enum` → Enum; `typedef`, `using` → TypeAlias | data member → Field | `namespace` → Namespace |
-| Swift | `func` → Function; `func` in a type, extension or protocol (requirements too) → Method | `struct`, `class` and `enum` all → Type; `protocol` → Interface | stored property and protocol property requirement → Field; `case` → EnumVariant | — |
-| Scala | `def` → Function; `def` in a class, trait or object → Method | `class`, `case class` → Class; `trait` → Trait; `enum` → Enum | not yet reported | `object` → Module |
-| PHP | function → Function; method (also in a trait) → Method | `class` → Class; `interface` → Interface; `trait` → Trait; `enum` → Enum | property → Field | `namespace` is not yet reported |
+| C# | method → Method (constructors are not yet distinguished); local function → Function | `class` → Class; `interface` → Interface; `enum` → Enum; `struct`, `record` → Type | field and `event` field → Field; property → Property (in classes, structs, records and interfaces) | `namespace` (block and file-scoped) → Namespace |
+| C | function → Function | named `struct`/`union` tag → Type; `enum` → Enum; `typedef` → TypeAlias (also `typedef int *P;`, `typedef int (*Fn)(int);`) | struct or union field, under any pointer, array, function-pointer or attributed declarator (`**p`, `a[3]`, `(*cb)(int)`, `x [[maybe_unused]]`), and the members of an anonymous `struct`/`union` → Field | — |
+| C++ | function → Function; function declared or defined in a class body, whatever its return declarators (`int (*m(int))(long);`) → Method | `class` → Class; `struct`, `union` → Type; `enum` → Enum; `typedef` (also behind a declarator), `using` → TypeAlias | data member, under any pointer, array, reference, function-pointer or attributed declarator, also a variable template (`template<class T> static T cache[3];`) and an anonymous union's members → Field | `namespace` → Namespace |
+| Swift | `func` → Function; `func` in a type, extension or protocol (requirements too) → Method | `struct`, `class` and `enum` all → Type; `protocol` → Interface | stored property (every binding of `var a = 1, b = 2`) and protocol property requirement → Field; `case` → EnumVariant | — |
+| Scala | `def` → Function; `def` in a class, trait, enum, object, anonymous class (`new T { … }`) or `given … with` instance → Method; an `extension` method belongs to the type around the block (a Function at top level); a `package object`'s `def` stays a Function with no container | `class`, `case class` → Class; `trait` → Trait; `enum` → Enum (its `case` entries are not yet reported) | not yet reported | `object` → Module |
+| PHP | function → Function; method (also in a trait) → Method | `class` → Class; `interface` → Interface; `trait` → Trait; `enum` → Enum | property → Field; `const` → Constant (members and top-level) | `namespace` is not yet reported |
 | Lua | `function` and `M.f` → Function; `function M:m()` → Method | — | — | — |
 | Perl | named `sub` → Function | — | `my`, `our`, `state` names → Variable | `package` → Module |
 | Bash, Zsh | function → Function | — | — | — |
 
 Variables, constants and parameters are reported in every language that has
-them; a Swift `let` inside a function body is a Variable, never a Field.
+them; a Swift `let` inside a function body is a Variable, never a Field. A
+parameter of function type is a Parameter, never a Function: in C and C++
+`int f(void cb(int), void (*ptr)(int))` reports `cb` and `ptr` as Parameters
+(and so are names inside them, such as `value` in `void cb(int value)`).
 
 **One rule makes a function a method.** A function declared directly in the
 body of a class, struct, enum, trait, interface, protocol, object, `impl`
 block or extension is a Method, whatever its receiver, decorators or
 `static`-ness. A function nested inside another function stays a Function.
+The rule holds whatever a query captured: a C# local function, even a
+`static` one, is a Function, and a field or property capture inside a
+function body would be a Variable. What decides is the nearest enclosing
+function or type: a member of a class, struct, class expression, anonymous
+class or object literal declared inside a function is still that type's
+member. A Lua `function M:m()` names its table, so it is a Method wherever it
+is written.
 
 ```python
 class Shape:
@@ -90,6 +104,57 @@ class Shape:
     def unit():            # Method (static)
         def helper(): ...  # Function: nested in a function, not in the class
 ```
+
+**Wrappers do not change membership.** A Python decorator list, a C++
+`template<…>` header and a C, C++ or C# preprocessor conditional (`#if`,
+`#ifdef`, `#elif`, `#else`, …) sit between a declaration and the body around
+it without being a scope. A member stays a member through any number of them,
+nested or not, for its kind, both `static` flags, its access (a C++ section or
+a C# default) and its type's field and enum-member lists alike; a declaration
+outside a type stays outside:
+
+```cpp
+class Sweep {
+public:
+    template<class T> static void make(T x) {}  // Method, member static, Public
+    template<class T> void use(T x) {}          // Method, instance, Public
+    template<class T> static T cache;           // Field, member static, Public
+#ifdef DEBUG
+    int probes;                                 // Field, Public
+#endif
+};
+template<class T> void free_helper(T x) {}      // Function
+```
+
+The same holds in C#: an unmarked member under `#if` is Private in a class,
+struct or record and Public in an interface, and an unmarked type under `#if`
+at the top level or in a namespace is Internal:
+
+```csharp
+class Conditional {
+#if FLAG
+    static int count;      // Field, member static, Private, in the field list
+    void Tick() {}         // Method, Private
+#else
+    int fallback;          // Field, Private, in the field list
+#endif
+}
+interface IConditional {
+#if FLAG
+    int Count { get; }     // Property, Public, in the field list
+#endif
+}
+```
+
+Swift `#if`, `#elseif` and `#else` and C# `#region` are not wrappers: the
+grammars parse them as directives beside the members they guard, so those
+members read exactly like unguarded ones.
+
+A `friend` function declared in a class is not a member and stays a
+Function. A C++ access section written inside a conditional applies to the
+members after it in the same branch; an `#else` branch does not inherit one
+from the branch it replaces, and members after `#endif` take the nearest
+section outside the conditional.
 
 ### Module or Namespace
 
@@ -146,6 +211,47 @@ and the record also stores that container's kind. `hug` prints both:
 `[in class Box]`, `[in trait Shape]`, or just `[in Box]` when the kind is
 unknown. A declaration is never its own container, and a C++ class member's
 container is its class, never the namespace around the class.
+
+When the nearest owner has no name, the member has **no container**, never
+the named type around the owner. Unnamed owners are anonymous classes (Java
+`new T() { … }` and enum-constant bodies, PHP `new class { … }`, Scala
+`new T { … }` and `given … with` instances), JavaScript and TypeScript class expressions and object
+literals, and a C or C++ `struct`, `class` or `union` without a tag. So
+`hug classes` never lists their members under the enclosing class:
+
+```java
+class Sweep {
+    void outer() {                                   // container Sweep
+        Runnable r = new Runnable() {
+            public void run() {}                     // Method, no container, Public
+        };
+    }
+}
+```
+
+A tagless `struct` or `union` that declares no member name of its own
+(`union { int a; float b; };`) is an anonymous member: C and C++ make its
+fields members of the enclosing type, so they keep that type as their
+container and, in C++, the access of the section that holds the anonymous
+member (`class K { union { int u; }; };` makes `u` Private). A member of any type declared inside a function, named or not,
+keeps its written access; only the function's own locals have none.
+
+A block that computes a value is local scope too, even outside a function: a
+Scala `val`, `var`, `lazy val` or alias `given` initializer block and a
+`match` arm, a Rust `const` or `static` initializer block, a Java `static { … }`
+or instance initializer block, and a Swift computed property, accessor or
+`willSet`/`didSet` body. A `def`, `fn` or `func` written there is a Function
+with Unknown access, never static, and keeps the enclosing type as its
+container like any nested function; the member that holds the block keeps its
+own access and `static`:
+
+```scala
+object Host:
+  val held: Int = {               // Public, static
+    def helper(): Int = 1         // Function, Unknown, container Host
+    helper()
+  }
+```
 
 Perl `package Foo;` statements and C# file-scoped namespaces contain the
 declarations that **follow** them, up to the next package statement or the
@@ -270,7 +376,7 @@ unless any of these holds, which makes it ModulePrivate:
 - it is declared `static`
 - it is inside an unnamed `namespace { … }` (C++)
 - it is a C++ variable that is itself `const` (`constexpr` counts), declared
-  without `extern` or `inline`
+  without `extern` or `inline` (see "Which `const` counts" below)
 - an **earlier** declaration of the same function in the same file is `static`
 
 ```cpp
@@ -286,12 +392,143 @@ extern const int SHARED = 4;     // Public
 extern "C" void api(void);       // Public
 ```
 
+**Which `const` counts.** Only the variable's own type decides, and that is
+the declarator nearest its name: read the declarator from the name outward,
+through any parentheses and attributes. A `const` written after the `*`
+next to the name makes the pointer itself const; a `const` deeper in, or on
+the base type, belongs to what the pointer points to. An array is as const
+as its elements. A reference is never a const object, even when declared
+`constexpr`; any other `constexpr` variable is const. Each name of a
+multi-name declaration is decided on its own.
+
+```cpp
+char **const a = 0;              // ModulePrivate: a is a const pointer
+char *const *b;                  // Public: b points to a const pointer
+char **const c[2] = {};          // ModulePrivate: array of const pointers
+char *const *d[2];               // Public: array of mutable pointers
+int (*const e)(int) = 0;         // ModulePrivate: const function pointer
+const int (*f)[2];               // Public: pointer to a const array
+int (*const g)[2] = 0;           // ModulePrivate: const pointer to an array
+const int (&h)[2] = arr;         // Public: a reference
+constexpr const int &i = arr[0]; // Public: a reference
+constexpr int *j = nullptr;      // ModulePrivate: constexpr pointer
+int k, **const l = 0, *const *m = 0; // k Public, l ModulePrivate, m Public
+```
+
+The same rule holds inside a named namespace, a preprocessor conditional or an
+`extern "C" { … }` block. C has no such rule: a file-scope `const` object in C
+is Public unless it is `static`. A function-local variable has no linkage
+(Unknown), and a member takes its access level, never this rule.
+
 "The same function" means the same name in C. In C++ it means the same
-enclosing namespace, name, and parameter types compared as text (whitespace
-and parameter names ignored). A typedef'd spelling of a parameter type does
-not match, so that declaration falls back to its own rule. The scan can only
-miss a `static`, never invent one. Whether the file is a header does not
-matter.
+name, the same namespace, and the same parameter types; for a function
+template, the rest of its signature as well (see **Function templates**
+below), since a template and a non-template function with the same
+parameters are different functions. Spelling that changes none of these is
+ignored:
+
+- **The function is the declarator that names it.** In
+  `int (*make(int value))(long)`, `make` takes `int` and returns a pointer to
+  a function taking `long`. Only the parameters of `make` itself are compared,
+  so naming them, or the parameters of the returned type, changes nothing.
+  The same holds for a returned function reference (`int (&f(int))(int)`) or
+  pointer to an array (`int (*f(int))[2]`). A function pointer variable
+  (`int (*p)(int);`) declares no function.
+- **Namespaces** are compared as a list of segments, so
+  `namespace a::b { … }` and `namespace a { namespace b { … } }` are the same
+  namespace. An unqualified declaration belongs to exactly the namespace it
+  sits in: a `static` in an enclosing namespace does not reach a function in
+  a nested one. A definition qualified by a namespace (`int b::f(int x)`
+  inside `namespace a`) looks `b` up outward, as the compiler does: it
+  belongs to `a::b` when the file declares `a::b` before it, otherwise to
+  `b` when the file declares `b`, otherwise to no namespace the file knows,
+  and then no earlier declaration matches it. An `inline` namespace is still
+  a segment of its own.
+- **Parameter names** are ignored at every level, including the parameters of
+  a callback parameter, and so are comments, default arguments, attributes
+  on a name (`int x [[maybe_unused]]`), and parentheses around a name.
+- **Parameter adjustments** apply: a top-level `const` or `volatile` is
+  dropped, an array parameter is a pointer, a function parameter is a pointer
+  to that function, `(void)` is an empty list, and `const int` equals
+  `int const`.
+- **Function templates** also compare, token by token as written, the
+  `template<…>` parameter list, the return type in both its leading
+  (`int f(T)`) and trailing (`auto f(T) -> int`) position, the `requires`
+  clause after the `template<…>` header, and the `requires` clause after the
+  parameter list. A constraint present on one declaration and absent on the
+  other, or moved from one position to the other, is a different template.
+  A function with an `auto` parameter (`void f(auto x)`,
+  `void f(Concept auto x)`) is an abbreviated template and is compared the
+  same way. The exception specification (`noexcept`) is never compared, and
+  an ordinary function's return type is not either, since a redeclaration
+  cannot change it.
+
+```cpp
+static int callback(void (*)(int));
+int callback(void (*cb)(int value)) { return 0; }  // ModulePrivate
+
+static int (*make(int))(long);
+int (*make(int value))(long) { return 0; }         // ModulePrivate
+
+namespace a { namespace b { static int helper(int); } }
+namespace a::b { int helper(int value) { return value; } }  // ModulePrivate
+
+static int leak(int);
+namespace other { int leak(int x) { return x; } }  // Public: other::leak
+
+namespace shadow { static int choose(int); }
+namespace host {
+namespace shadow { int choose(int); }              // Public
+int shadow::choose(int x) { return x; }            // Public: host::shadow::choose
+}
+
+static int limit(const int);
+int limit(int n) { return n; }                     // ModulePrivate
+
+static int pick(const int*);
+int pick(int* p) { return 0; }                     // Public: pointee differs
+
+static int log(int, ...);
+int log(int level) { return level; }               // Public: no `...`
+
+template<class T> static int convert(int);
+int convert(int x) { return x; }                   // Public: not a template
+
+template<class T> static auto shape(T) -> int;
+template<class T> auto shape(T v) -> long { return 0; }  // Public: returns long
+template<class T> static auto size(T) -> int;
+template<class T> auto size(T v) -> int { return 0; }    // ModulePrivate
+
+template<class T> requires Small<T> static int fit(T);
+template<class T> requires Big<T> int fit(T v) { return 0; }   // Public
+template<class T> static int span(T) requires Small<T>;
+template<class T> int span(T v) { return 0; }                  // Public: unconstrained
+template<class T> static int keep(T) requires Small<T>;
+template<class T> int keep(T v) requires Small<T> { return 0; } // ModulePrivate
+
+static auto twice(auto) -> int;
+auto twice(auto v) -> long { return 0; }           // Public: abbreviated template
+```
+
+Every declarator of a declaration counts: `static int a(int), b(int);` makes
+later definitions of both `a` and `b` ModulePrivate, and so does
+`static int a(int), (*b(int))(int);` for `b`. A declaration under a
+`template<…>` header, a preprocessor conditional, a reopened namespace block
+or an `extern "C"`/`extern "C++"` block counts like any other.
+
+Type names are compared as written. A typedef'd spelling of a parameter type,
+or a synonym such as `long int` for `long`, does not match, so that
+declaration falls back to its own rule. A definition qualified by more than
+one level (`int a::b::f(int)`) or from the global namespace
+(`int ::a::f(int)`) is not reported as a symbol at all. Type names are
+assumed to name the same type in both declarations.
+
+Every condition above is one a redeclaration must meet, so the scan can only
+miss a `static`, never invent one: whatever it cannot establish (a typedef'd
+spelling, a qualifier naming a namespace declared in another file, a renamed
+template parameter, a constraint spelled differently, `auto f() -> int`
+redeclared as `int f()`) leaves the later declaration with its own rule. Whether
+the file is a header does not matter.
 
 ### JavaScript and TypeScript module files
 
@@ -422,18 +659,73 @@ Public Java class or TypeScript class method is not exported. Converting a
 Member `static` is set for:
 
 - TypeScript, JavaScript, Java, C# and PHP `static`
-- Java interface constants, which are implicitly `static` whether or not they
-  say so
+- members the language makes static without the keyword: Java interface
+  constants (implicitly `static` whether or not they say so), C# `const`
+  fields (in a class, struct, record or interface), Rust associated `const`s
+  (in an inherent `impl` or a trait) and PHP `const` constants (in a class,
+  interface, trait or enum; a top-level `const` is not a member)
 - C++ `static` data members and member functions
 - Swift `static` and `class` members
-- Scala `object` members
-- Python `@staticmethod` and `@classmethod` methods, and class attributes
-  (below)
-- Rust associated functions without a `self` receiver, in impls and traits
+- Scala members whose nearest owning type is an `object` (a standalone or
+  companion object, also one nested in a class)
+- Python methods declared in a class body with the decorator `@staticmethod`
+  or `@classmethod`, also spelled `@builtins.staticmethod` /
+  `@builtins.classmethod`, and class attributes (below)
+- Rust associated functions without a `self` receiver, in impls and traits; a
+  typed receiver such as `self: Box<Self>` is a receiver
+
+No other supported language makes a member static without a keyword: a C++
+`static constexpr` member says `static`, and Swift, TypeScript, JavaScript and
+Scala `let`/`readonly`/`val` members are instance members unless declared
+`static` (or, in Scala, in an `object`).
+
+```csharp
+class Limits {
+    public const int Max = 1;    // Static Fields
+    int count;                   // Instance Fields
+}
+```
+
+```rust
+trait Shape { const SIDES: u32; }   // SIDES: Static Fields of Shape
+```
 
 Python class methods and Swift `class` methods are grouped with static members
 because they need no instance, although they are not identical to static
 methods.
+
+Only the declaration's own keyword, modifier or decorator counts, never a name
+or text that contains it, and only the type that directly owns the member
+decides:
+
+```python
+class Sweep:
+    @notstaticmethod        # some other decorator: instance method
+    def probe(self): ...
+    @wrap(staticmethod)     # a call to `wrap`: instance method
+    def wrapped(self): ...
+    @staticmethod           # Static Methods
+    def make(): ...
+
+@staticmethod               # not in a class: never a static member
+def helper(): ...
+```
+
+```scala
+object Registry {
+  def lookup(): Unit = ()                  // static: owned by the object
+  trait Entry { def key(): String }        // instance: owned by the trait
+  class Slot { def fill(): Unit = () }     // instance: owned by the class
+  val anon = new Runnable { def run(): Unit = () } // `run` is an instance member
+}
+```
+
+A member of a Scala `class`, `trait`, `case class`, `enum`, anonymous class
+(`new T { … }`) or `given` instance is never static, even when that type is
+declared inside an object. An `extension` method written in an object belongs
+to the object and is static; one written in a class is an instance method. A
+`package object` is not a container, so its members are top-level Functions
+and never static.
 
 Storage `static` is set for Rust `static` and `static mut` items, C and C++
 file-scope or namespace-scope `static` functions and variables, and C and C++
@@ -453,7 +745,10 @@ static int helper() { return 0; } // storage static (and ModulePrivate)
 ### Python class attributes
 
 A name declared in a class body is a Field of that class; its annotation
-decides whether it is static:
+decides whether it is static. The annotation's expression is read, not its
+text: `ClassVar`, bare or subscripted, under any qualifier (`typing.ClassVar`,
+`t.ClassVar[int]`), makes a class attribute; `ClassVarLike[int]`,
+`MyClassVar` and a string annotation such as `"ClassVar[int]"` do not:
 
 ```python
 from typing import ClassVar
@@ -472,6 +767,135 @@ An unannotated `count = 0` is a class attribute that an instance may shadow by
 assigning `self.count`; the record describes the class-level declaration.
 This follows PEP 526 and dataclass semantics. `hug symbols` and `hug classes`
 apply the same rule.
+
+Every name an unannotated class-body assignment binds is a static Field: each
+target of a chain and each name directly in a tuple or list pattern, with or
+without parentheses. A chained assignment outside a class declares Variables.
+
+```python
+class Pair:
+    first = second = 0           # both static Fields
+    a, b = (1, 2)                # both static Fields
+    [c, d] = 1, 2                # both static Fields
+```
+
+## Field lists
+
+A type's `TypeMetadata::fields` is its field list: `hug classes` prints it as
+*Static Fields* and *Instance Fields*, and `hug symbols` prints it after the
+type's name (`struct Point { x: i32, y: i32 }`). It lists exactly the
+members the type declares in its own body, in source order:
+
+- every standalone `Field`, `Property` or `Constant` symbol whose container is
+  the type, with that symbol's access and member `static`, so a member is in
+  `hug classes` exactly when `hug symbols` reports it inside the type;
+- members that have no standalone symbol: Java and C# record components (they
+  are Parameters), Rust tuple-struct positions (`0`, `1`), Go struct fields
+  and Scala class parameters. Their access and `static` are read from the
+  declaration.
+
+```mermaid
+flowchart LR
+    BODY["type body"] --> READER["per-language field reader<br/>(names, type annotations)"]
+    BODY --> QUERY["locals.scm captures<br/>(standalone Field / Property / Constant)"]
+    READER --> MERGE["field list"]
+    QUERY -->|"access and static copied;<br/>members the reader missed added"| MERGE
+    MERGE --> CLASSES["hug classes"]
+    QUERY --> SYMBOLS["hug symbols"]
+```
+
+The per-language reader supplies each entry's type annotation; an entry added
+from a standalone symbol that no reader listed carries its doc comment but no
+type. Readers cover the forms in the [kinds table](#what-each-language-reports),
+including unions, anonymous members, every declarator form, C# properties and
+`event` fields, record bodies, Python chains and patterns and Swift
+multi-binding declarations.
+
+```typescript
+abstract class Shape { static count = 0; }   // Static Fields: count
+class Counter { static #total = 0; }         // Static Fields: private #total
+interface Named { "label": string; }         // Instance Fields: label: string
+```
+
+```cpp
+struct Fields {
+    int values[3];                           // Instance Fields
+    int (*callback)(int);                    // Instance Fields
+    template<class T> static T cache[3];     // Static Fields
+    union { int i; float f; };               // i and f: Instance Fields
+};
+```
+
+Two owners keep a narrower list:
+
+- an **enum** lists its variants, not fields (`hug classes` lists no enums);
+- a **Rust `impl`** is not the type's body, so its associated constants are
+  not in the struct's field list (its methods appear in `hug classes` through
+  the type's members). A trait's associated constants are in the trait's
+  list, under *Static Fields*.
+
+## C and C++ names behind declarators
+
+A C or C++ name is reported wherever its declarator puts it: behind an
+attribute written after the name, inside extra parentheses, or under the
+pointer, reference, array and callback layers of a return type. What the
+declarator declares decides the kind, so a function-pointer field stays a
+Field while a member function returning a callback is a Method:
+
+```cpp
+int count [[maybe_unused]];              // Variable
+int legacy [[deprecated]] (int value);   // Function, parameter value
+int (wrapped)(int value);                // Function
+struct Owner {
+    int values [[maybe_unused]] [2];     // Field, listed by `hug classes`
+    int (*callback)(int);                // Field: a pointer, not a function
+    int (*handler(int value))(long);     // Method, parameter value
+    int **lookup(int key) { return 0; }  // Method
+    int size();                          // Method
+};
+int Owner::size [[nodiscard]] () { return 0; }  // Function (out of class)
+typedef int (*Callback)(int);            // TypeAlias
+```
+
+These names get the same access, `static` flags and signature as the same
+declaration without the wrapper, and an attributed field is in its type's
+field list. An attribute before the declaration (`[[maybe_unused]] int x;`)
+was never in the way. A typedef name behind a declarator (`typedef struct
+node *NodePtr;`) carries the typedef's doc comment but no field list: the
+fields belong to the struct, not to the pointer.
+
+## C and C++ signatures
+
+A C or C++ function's signature lists the parameters of that function, read
+from the declarator nearest its name with only parentheses between. Pointers,
+references, arrays and function types wrapped around it belong to the return
+type, so their parameters are never the function's:
+
+```c
+int *pointer_return(int value);                  // value
+int (*callback_return(int actual))(long other);  // actual, not other
+int (*array_return(int actual))[2];              // actual
+```
+
+The same rule applies to prototypes, definitions, `static`, `#if`,
+`extern "C"`, templates, in-class members and out-of-class `A::f`
+definitions. Each parameter is named by its own declarator, under any
+pointer, reference, array, parenthesized, attributed or function-pointer
+layer; a callback parameter is named by its own name, never one from its
+parameter list:
+
+| Parameter | Reported |
+|---|---|
+| `char **argv`, `int values[2]`, `int (*value)`, `int value [[maybe_unused]]` | the name |
+| `int (*callback)(long ignored)` | `callback` |
+| `int defaulted = 1` (C++) | `defaulted`, default value `1` |
+| `Ts... values`, `Ts&&... values` (C++ pack) | `values`, variadic |
+| `...` (C and C++) | `...`, variadic |
+| `int`, `int (*)(long)` (unnamed) | not listed |
+
+`int (value)` is an unnamed parameter of function type, not a parenthesized
+name: the grammar applies C's rule that a parenthesized identifier in a
+parameter is read as a type name.
 
 ## Declaration text
 
@@ -508,6 +932,18 @@ These are limits of the extractor today, not of the grammars:
 - **Enum variants** are reported only for Rust and Swift.
 - **TypeScript and PHP namespaces** are not reported.
 - **Scala** fields are not reported.
+- **Destructuring members**: a Python class-body target nested more than one
+  pattern deep or starred (`a, (b, c) = …`, `a, *rest = …`) and a Swift
+  tuple-pattern property (`let (a, b) = (1, 2)`) are not reported, as
+  symbols or field-list entries.
+- **C and C++ field types** list the base type only: `int *ptrs[2]` is
+  `ptrs: int`. Parameter and return types do the same: `char **argv` has
+  type `char`, and `int (*f(int))(long)` returns `int`.
+- **C and C++ unnamed parameters** (`int f(int);`) are not listed in the
+  signature.
+- **C++ out-of-class definitions** are reported behind one attribute or one
+  pair of parentheses around the qualified name (`int S::f [[nodiscard]] ()`),
+  not behind more (`int (S::f [[nodiscard]])()`).
 - **Python `self.x`** attributes and **JavaScript `this.x`** properties
   assigned only in methods, never declared in the class body, are not
   reported. TypeScript never reported them.

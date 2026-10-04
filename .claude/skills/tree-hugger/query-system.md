@@ -86,6 +86,12 @@ a function declared directly in a class/struct/enum/trait/interface/protocol/
 object/`impl`/extension body becomes Method; a `var` capture becomes Parameter,
 Field or Constant only from the path between the name and its own declaration
 (a Swift `let` in a function body stays Variable).
+A Python chained assignment (`first = second = 0`) is one declaration, the
+outermost `assignment`; a later target, captured only as `var`, becomes a
+Field when that statement is directly in a class body.
+
+JS/TS quoted member names capture the `string_fragment` inside the `string`,
+so `"label": string` is reported as `label`.
 
 ### Context Captures
 
@@ -111,6 +117,18 @@ flags, signatures, `declaration_text` and the container search all read that
 declaration node, so a capture does not need `.context` to get them. A C/C++
 `function_declarator` context is widened to its enclosing definition or
 declaration, where storage class and access sections live.
+
+C/C++ names can sit under any chain of declarators, which a query cannot
+follow, so those queries capture a name by its **immediate parent**
+(`attributed_declarator`, `parenthesized_declarator`, `pointer_declarator`,
+or `function_declarator` for a C++ member function) and leave the rest to
+Rust: `classify_symbol_kind` turns a captured variable or field into a
+function (a method in a type body) when `declared_function_named`
+(`file/extract/c_declarators.rs`) says its declarator declares one, and
+`implied_c_function_context` supplies the context such a pattern could not
+capture (the member's declaration, or a free function's own
+`function_declarator`). Add a C/C++ capture the same way, not as a fixed
+outer shape like `(field_declaration declarator: (function_declarator …))`.
 
 ### Query Inheritance
 

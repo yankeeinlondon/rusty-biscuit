@@ -137,7 +137,7 @@ that type's same-file kind, absent when declared elsewhere. Every other
 container kind is the kind extracted for the container's own declaration.
 
 `tree_hugger::EXTRACTOR_REVISION` names the extraction rules; bump it in any
-change that alters extracted records. It is stamped into
+change that alters extracted records, unreleased branches included. It is stamped into
 `provenance.extractor_version` (`<crate version>+rev.<revision>`) and the CLI's
 persistent-cache `query_fingerprint`, so a warm cache never serves records
 produced by older rules.
