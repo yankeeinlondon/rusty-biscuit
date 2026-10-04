@@ -8,7 +8,8 @@ use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 
-use perf_support::{PerfRow, perf_rows, stage_from_perf};
+use perf_support::{FakeGitea, GiteaReply, MixedFixture, PerfRow, WorkerReaper, perf_rows, stage_from_perf};
+use serial_test::serial;
 
 fn temp_repo() -> tempfile::TempDir {
     let dir = tempfile::tempdir().expect("create temp dir");
@@ -201,20 +202,56 @@ fn list_perf_reports_a_local_only_group_that_reconciles() {
     let stderr = String::from_utf8_lossy(&output.stderr);
 
     let rows = perf_rows(&stderr);
-    let group = rows.iter().position(|row| row.label == "local gather").unwrap_or_else(|| panic!("{rows:#?}"));
-    assert_eq!(rows[group].depth, 1, "{rows:#?}");
-    let children: Vec<&str> =
-        rows[group + 1..].iter().take_while(|row| row.depth == 2).map(|row| row.label.as_str()).collect();
-    assert_eq!(children, ["list gather"], "{rows:#?}");
+    assert_eq!(group_children(&rows, "local gather"), ["list gather"], "{rows:#?}");
     assert!(rows.iter().all(|row| row.label != "remote wait"), "no remote work, no remote wait row: {rows:#?}");
     assert!(stage_from_perf(&stderr, "list gather").is_some());
+    assert_top_level_reconciles(&rows);
+}
 
+/// Asserts that the report's top-level rows add up to its total, within the
+/// report's display rounding (each value is rounded to a tenth of its unit).
+fn assert_top_level_reconciles(rows: &[PerfRow]) {
     let root = rows.iter().find(|row| row.depth == 0).expect("root row").duration;
     let top_level: Vec<&PerfRow> = rows.iter().filter(|row| row.depth == 1).collect();
     assert_eq!(top_level.last().map(|row| row.label.as_str()), Some("unattributed"), "{rows:#?}");
     let sum: Duration = top_level.iter().map(|row| row.duration).sum();
-    // Each printed value is rounded to a tenth of its unit.
     let rounding = |d: Duration| if d >= Duration::from_secs(1) { Duration::from_millis(50) } else { Duration::from_micros(50) };
     let slack: Duration = top_level.iter().map(|row| rounding(row.duration)).sum::<Duration>() + rounding(root);
     assert!(sum.abs_diff(root) <= slack, "top-level rows {sum:?} vs total {root:?}: {rows:#?}");
+}
+
+/// The children of the top-level group labeled `group`, in report order.
+fn group_children<'a>(rows: &'a [PerfRow], group: &str) -> Vec<&'a str> {
+    let at = rows.iter().position(|row| row.label == group).unwrap_or_else(|| panic!("no `{group}` row: {rows:#?}"));
+    assert_eq!(rows[at].depth, 1, "{rows:#?}");
+    rows[at + 1..].iter().take_while(|row| row.depth == 2).map(|row| row.label.as_str()).collect()
+}
+
+/// A real report with remote work, from the shipped renderer: the wait and
+/// the local gather sit under one `remote wait ‖ local gather` group, the
+/// post-wait PR read is its `pr reread` child, `pr gather` stays a top-level
+/// row, nothing is regathered when no ref moved, and the stage reader finds
+/// each child by its own name rather than the group containing it.
+#[test]
+#[serial]
+fn list_perf_reports_the_remote_group_from_the_real_renderer() {
+    let fixture = MixedFixture::new().with_gitea_origin();
+    let gitea = FakeGitea::new(GiteaReply::Open(vec![]));
+    let _reaper = WorkerReaper::new(&fixture, &gitea);
+
+    let output = fixture.wt_command_via_gitea(&gitea).args(["list", "--perf"]).output().expect("wt list --perf runs");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
+
+    let rows = perf_rows(&stderr);
+    assert_eq!(group_children(&rows, "remote wait ‖ local gather"), ["remote wait", "pr reread", "list gather"]);
+    let top_level: Vec<&str> = rows.iter().filter(|row| row.depth == 1).map(|row| row.label.as_str()).collect();
+    assert!(top_level.contains(&"pr gather"), "{rows:#?}");
+    for absent in ["local gather", "regather", "fast-forward", "checkout status refresh"] {
+        assert!(!top_level.contains(&absent), "`{absent}` without its cause: {rows:#?}");
+    }
+    let group = stage_from_perf(&stderr, "remote wait ‖ local gather").expect("group row");
+    let wait = stage_from_perf(&stderr, "remote wait").expect("remote wait child");
+    assert!(wait <= group, "the group spans its wait: {wait:?} > {group:?}");
+    assert_top_level_reconciles(&rows);
 }

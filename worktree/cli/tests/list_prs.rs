@@ -965,3 +965,48 @@ fn the_keyless_notice_coexists_with_the_closing_fallback_notice() {
     assert!(text.contains("Git checked origin using `ls-remote`"), "{stderr}");
     assert_eq!(keyless_lines(&stderr), 1, "{stderr}");
 }
+
+/// Anonymous evidence an earlier listing stored is never this listing's: a
+/// later listing whose own requests fail shows no notice while the store
+/// still holds the earlier anonymous publication, and an ignored repository
+/// shows none either.
+#[test]
+#[serial]
+fn stored_anonymous_evidence_from_an_earlier_listing_never_gives_the_notice() {
+    let fixture = MixedFixture::new().with_gitea_origin();
+    let gitea = FakeGitea::new(GiteaReply::Open(Vec::new()));
+    let _reaper = WorkerReaper::new(&fixture, &gitea);
+    let pushed = fixture.serve_gitea_origin_one_commit_ahead(&gitea);
+    gitea.answer_branch_heads_at(&pushed);
+
+    // Control: this listing's own anonymous answers give the notice.
+    let stderr = keyless_listing(&fixture, fixture.wt_command_via_gitea_git(&gitea));
+    assert_eq!(keyless_lines(&stderr), 1, "{stderr}");
+
+    // Both halves fail now; only the earlier listing's evidence is anonymous.
+    gitea.release(GiteaReply::Status(500));
+    gitea.answer_branch_heads_with(500);
+    let requests = (gitea.requests(), gitea.branch_requests());
+    let stderr = keyless_listing(&fixture, fixture.wt_command_via_gitea_git(&gitea));
+    assert_eq!(keyless_lines(&stderr), 0, "{stderr}");
+    assert!(
+        gitea.requests() > requests.0 && gitea.branch_requests() > requests.1,
+        "this listing asked both halves again: {requests:?}"
+    );
+    let stored: serde_json::Value =
+        serde_json::from_slice(&fs::read(fixture.pr_store()).expect("PR store")).expect("json");
+    assert_eq!(stored["credentials"]["state"], "anonymous", "the earlier publication is still stored: {stored}");
+
+    #[cfg(unix)]
+    {
+        // Ignored: nothing is asked and the stored evidence stays unread.
+        gitea.release(GiteaReply::Open(Vec::new()));
+        gitea.answer_branch_heads_at(&pushed);
+        let requests = (gitea.requests(), gitea.branch_requests());
+        let mut command = fixture.wt_command_via_gitea_git(&gitea);
+        command.arg("--ignore-api");
+        let stderr = keyless_listing(&fixture, command);
+        assert_eq!(keyless_lines(&stderr), 0, "{stderr}");
+        assert_eq!((gitea.requests(), gitea.branch_requests()), requests, "no API request");
+    }
+}
