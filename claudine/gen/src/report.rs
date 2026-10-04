@@ -17,6 +17,7 @@ use std::io::IsTerminal;
 use std::path::Path;
 
 use biscuit_terminal::discovery::detection::ColorDepth;
+use biscuit_terminal::components::prose::LineBreaks;
 use biscuit_terminal::prelude::{Prose, TerminalRenderable, UnorderedList};
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::{Length, TargetValue};
@@ -54,8 +55,12 @@ fn esc(text: &str) -> String {
 }
 
 /// Renders one Prose line (markup interpreted, trailing newline appended).
+/// A newline inside it, such as an error listing one problem per row, stays a
+/// row break.
 fn line(term: &Terminal, markup: impl AsRef<str>) -> String {
-    let mut out = Prose::new(markup.as_ref()).render(term);
+    let mut out = Prose::new(markup.as_ref())
+        .with_line_breaks(LineBreaks::Hard)
+        .render(term);
     out.push('\n');
     out
 }

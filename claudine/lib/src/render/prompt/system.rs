@@ -25,12 +25,15 @@ use super::{ReportMode, TruncationMode};
 /// supports Nerd Fonts. Stands in for the repo root path.
 const NERD_FONT_REPO_GLYPH: char = '\u{F02A2}';
 
-/// Render the system-prompt header line. `action` is `appended` or `replaced`.
+/// Render the system-prompt header line, preceded by a blank spacing row.
+/// `action` is `appended` or `replaced`.
 fn render_system_prompt_header(action: &str, term: &Terminal) -> String {
-    Prose::new(format!(
-        "\n<orange-500><b>■ System Prompt (<i>{action}</i>)</b></orange-500>"
+    // The spacing row sits outside the Prose, which trims edge newlines.
+    let header = Prose::new(format!(
+        "<orange-500><b>■ System Prompt (<i>{action}</i>)</b></orange-500>"
     ))
-    .render(term)
+    .render(term);
+    format!("\n{header}")
 }
 
 /// Resolve the visible label for a prompt-file hyperlink. Returns plain

@@ -110,3 +110,13 @@ fn unrecognized_answer_renders_literally_in_its_code_span() {
     let out = prompt_unrecognized(&plain(), "a`b");
     assert_eq!(out, "unrecognized ``a`b`` — expected y, n, or q\n");
 }
+
+#[test]
+fn a_line_keeps_the_rows_of_a_multi_line_message() {
+    let rendered = line(&plain(), "claudine-gen error: steering activation is invalid:\n- first\n- second");
+    assert_eq!(
+        rendered.lines().collect::<Vec<_>>(),
+        ["claudine-gen error: steering activation is invalid:", "- first", "- second"],
+        "{rendered:?}"
+    );
+}

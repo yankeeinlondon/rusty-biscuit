@@ -176,7 +176,7 @@ pub(crate) fn render_watchdog_error_to_stream(
     termination: &WatchdogTermination,
     stream_output: &StreamOutput,
 ) {
-    use biscuit_terminal::components::prose::Prose;
+    use biscuit_terminal::components::prose::{LineBreaks, Prose};
     use biscuit_terminal::components::renderable::TerminalRenderable;
     use biscuit_terminal::components::status::StatusState;
     use biscuit_terminal::prelude::StatusBlock;
@@ -186,8 +186,11 @@ pub(crate) fn render_watchdog_error_to_stream(
     let term = crate::log::terminal();
     let border_color = Color::Tailwind(Tailwind::Red700);
     let body_text = escape_prose(&termination.message);
+    // The label, the breach summary, and each subagent are separate rows.
     let body = format!("<red><b>Agent Error</b></red>\n{body_text}");
-    let prose = Prose::new(body).with_word_wrap(WordWrap::WrapProse(None, None));
+    let prose = Prose::new(body)
+        .with_line_breaks(LineBreaks::Hard)
+        .with_word_wrap(WordWrap::WrapProse(None, None));
     let block = StatusBlock::new(StatusState::Error)
         .body(prose)
         .border_color(border_color)

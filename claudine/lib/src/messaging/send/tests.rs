@@ -728,3 +728,25 @@ fn redact_webhook_urls_in_error_strings() {
         "redaction marker should be present"
     );
 }
+
+#[test]
+fn send_failure_hint_is_its_own_indented_row() {
+    let route = route(
+        "ops",
+        MessagingRouteConfig::Slack {
+            channel_id: "C123".to_string(),
+            bot_token: None,
+            bot_token_env: "SLACK_BOT_TOKEN".to_string(),
+        },
+    );
+    let term = Terminal::builder()
+        .width(300)
+        .color_depth(biscuit_terminal::discovery::detection::ColorDepth::None)
+        .build();
+    let rendered = send_failure_text(&route, "provider said 401 unauthorized", "message", &term);
+    let rows: Vec<&str> = rendered.lines().collect();
+    assert_eq!(rows.len(), 2, "{rendered}");
+    assert!(rows[0].contains("Failed to send message via"), "{rendered}");
+    assert!(rows[0].ends_with("provider said 401 unauthorized"), "{rendered}");
+    assert!(rows[1].starts_with("  → Check the route's credentials"), "{rendered}");
+}

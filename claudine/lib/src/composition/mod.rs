@@ -53,7 +53,7 @@ pub use ownership::{
 };
 pub use provider_tail::{ProviderTail, ProviderTailNotices, SwitchAssignment};
 
-pub use agent_message::{agent_state_breakdown, invalid_agent_message};
+pub use agent_message::{agent_message_prose, agent_state_breakdown, invalid_agent_message};
 pub use authored_order::AuthoredOrder;
 pub use closure::{
     AgentFrontmatterRejection, BodyRejection, CLOSURE_OWNED_PROPERTIES, EncodeError, InlineArtifact,

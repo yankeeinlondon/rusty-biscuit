@@ -11,12 +11,21 @@
 //! These helpers return Prose **markup** (e.g. `<red>…</red>`), not
 //! terminal-rendered strings: each caller renders with its own
 //! [`biscuit_terminal::terminal::Terminal`] so terminal-capability downgrades
-//! (no-color, no-OSC8) are honored at the call site.
+//! (no-color, no-OSC8) are honored at the call site. A single newline in the
+//! markup separates display rows (a heading and its `- agent` rows), so wrap
+//! it with [`agent_message_prose`] rather than a default [`Prose`], which
+//! would join the rows.
 
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{LineBreaks, Prose};
 
 use super::types::AgentResolutionState;
 use crate::provider::Provider;
+
+/// Wrap agent-message markup from this module as [`Prose`] whose single
+/// newlines stay row breaks.
+pub fn agent_message_prose(markup: impl Into<String>) -> Prose {
+    Prose::new(markup).with_line_breaks(LineBreaks::Hard)
+}
 
 /// Render the multi-line breakdown for an agent-resolution state as Prose
 /// markup.

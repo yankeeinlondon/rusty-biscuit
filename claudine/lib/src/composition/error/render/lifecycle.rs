@@ -6,7 +6,7 @@
 //! copying styles.
 
 use super::super::*;
-use super::{escape_prose_path, render_file_link};
+use super::{escape_prose_path, render_file_link, rows};
 use renderable::markdown::code_span;
 
 /// Render the [`StatusBlock`] for a lifecycle-family [`CompositionError`].
@@ -34,14 +34,15 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                     Some(field) => format!("{property}.{field}"),
                     None => property.clone(),
                 };
-                let mut body = format!(
+                let mut body = vec![Prose::new(format!(
                     "Unknown property <cyan>`{dotted_property}`</cyan> in {file_link}"
-                );
+                ))];
                 if !expected_fields.is_empty() {
-                    body.push_str("\n\n<b>Expected one of:</b>");
+                    let mut expected = String::from("<b>Expected one of:</b>");
                     for field in expected_fields {
-                        body.push_str(&format!("\n- <cyan>`{field}`</cyan>"));
+                        expected.push_str(&format!("\n- <cyan>`{field}`</cyan>"));
                     }
+                    body.push(rows(expected));
                 }
                 (
                     body,
@@ -49,11 +50,11 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                         .to_string(),
                 )
             } else {
-                let body = format!(
+                let body = vec![Prose::new(format!(
                     "Invalid value for lifecycle property <cyan>`{property}`</cyan> in \
                      {file_link}\n\n{}",
                     escape_prose_path(message)
-                );
+                ))];
                 // The only sequence-typed field on a lifecycle event block
                 // is `stack`, so a "expected a sequence" mismatch almost
                 // always means `stack:` was authored as a map.
@@ -799,11 +800,14 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                 ),
                 None => format!("<cyan>`{property}`</cyan> in {file_link}"),
             };
-            let mut body = format!(
-                "Cannot resolve <cyan>{}</cyan>, referenced by {surface}.\n\n{}",
-                code_span(reference),
-                Prose::escape_text_outside_code_spans(&source.to_string())
-            );
+            // The resolver's message can carry its own `hint:` row.
+            let mut body = vec![
+                Prose::new(format!(
+                    "Cannot resolve <cyan>{}</cyan>, referenced by {surface}.",
+                    code_span(reference),
+                )),
+                rows(Prose::escape_text_outside_code_spans(&source.to_string())),
+            ];
             // Enumerate the ordered plan only when the resolver tried more than
             // one candidate: the single-candidate `Display` above already names
             // its one path, so a "Tried:" list adds information solely for an
@@ -811,11 +815,12 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             // repository-relative candidates (spec §D8).
             let candidates = source.resolution_candidates();
             if candidates.len() >= 2 {
-                body.push_str("\n\nTried:");
+                let mut tried = String::from("Tried:");
                 for (index, probed) in candidates.iter().enumerate() {
                     let path = biscuit_file::to_portable_string(probed.candidate().path());
-                    body.push_str(&format!("\n  {}. {}", index + 1, Prose::escape_text(&path)));
+                    tried.push_str(&format!("\n  {}. {}", index + 1, Prose::escape_text(&path)));
                 }
+                body.push(rows(tried));
             }
             StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(

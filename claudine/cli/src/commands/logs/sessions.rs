@@ -1,4 +1,4 @@
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::table::TableColumn;
 use biscuit_terminal::utils::layout::{Alignment, WordWrap};
@@ -74,7 +74,9 @@ pub(super) fn render_session_detail(report: &SessionDetailReport) {
 
     let term = crate::log::terminal();
     let session = &report.session;
-    let p = |markup: &str| Prose::new(markup).render(&term);
+    // Every markup string here is built in code, so a single newline is
+    // always a row break (the per-error detail rows).
+    let p = |markup: &str| Prose::new(markup).with_line_breaks(LineBreaks::Hard).render(&term);
 
     // ── Title ──
     log::data("");

@@ -7,7 +7,7 @@
 
 use super::super::*;
 use biscuit_file::{FileReference, FileReferenceKind, RootProvenance};
-use biscuit_terminal::components::list::UnorderedList;
+use super::rows;
 use crate::composition::types::CompositionMode;
 use crate::harness::ResolutionDetail;
 use renderable::markdown::code_span;
@@ -26,24 +26,25 @@ pub(super) fn status_block(err: &CompositionError, term: &Terminal) -> StatusBlo
                 CompositionMode::ChainedDocument => "chained (compose)",
                 CompositionMode::InlineFrontmatterPrompt => "inline (inline-compose)",
             };
-            let mut body = format!(
+            let mut body = vec![Prose::new(format!(
                 "Composition produced an <b>empty prompt body</b> for {file_link}.\n\n\
                  Mode: <i>{mode_label}</i>"
-            );
+            ))];
             if provided_overrides.is_empty() {
-                body.push_str("\n\nNo `key=value` overrides were provided.");
+                body.push(Prose::new("No `key=value` overrides were provided."));
             } else {
-                body.push_str("\n\n<b>Provided overrides:</b>");
+                let mut overrides = String::from("<b>Provided overrides:</b>");
                 for key in provided_overrides {
-                    body.push_str(&format!("\n- <cyan>`{key}`</cyan>"));
+                    overrides.push_str(&format!("\n- <cyan>`{key}`</cyan>"));
                 }
+                body.push(rows(overrides));
             }
-            body.push_str(
-                "\n\nThe document composed without error, but every block in the body \
+            body.push(Prose::new(
+                "The document composed without error, but every block in the body \
                  was stripped by its `when` condition (or the body was empty to begin with). \
                  The provider CLI would otherwise reject this as \"Input must be provided …\" \
                  without naming the real cause.",
-            );
+            ));
             StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
                     "CompositionError",
@@ -78,11 +79,11 @@ pub(super) fn status_block(err: &CompositionError, term: &Terminal) -> StatusBlo
             let body = if resolution.kind() == FileReferenceKind::Magic
                 && !resolution.magic_search_roots().is_empty()
             {
-                render_magic_no_match_body(reference, resolution, suggestions, term)
+                render_magic_no_match_body(reference, resolution, suggestions)
             } else {
-                render_candidate_no_match_body(reference, resolution, suggestions, term)
+                render_candidate_no_match_body(reference, resolution, suggestions)
             };
-            let body = super::with_failure_row(body, err);
+            let body: Vec<Prose> = body.into_iter().chain(super::failure_row(err)).collect();
 
             StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
@@ -93,10 +94,12 @@ pub(super) fn status_block(err: &CompositionError, term: &Terminal) -> StatusBlo
                 .hint(err.glob_hint().unwrap_or("Correct the reference and try again."))
         }
         _ => {
-            let msg = super::with_failure_row(err.to_string(), err);
+            // A variant's message can carry its own rows (a `hint:` line).
+            let body: Vec<Prose> =
+                std::iter::once(rows(err.to_string())).chain(super::failure_row(err)).collect();
             StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("CompositionError", "composition failed"))
-                .body(msg)
+                .body(body)
         }
     }
 }
@@ -112,37 +115,29 @@ fn render_magic_no_match_body(
     reference: &str,
     resolution: &ResolutionDetail,
     suggestions: &[String],
-    term: &Terminal,
-) -> String {
+) -> Vec<Prose> {
     // The reference already parsed to reach a no-match, so the fallback to the
     // authored text is unreachable in practice.
     let parsed = FileReference::new(reference).ok();
     let payload = parsed.as_ref().map_or(reference, FileReference::payload);
-    let mut body = Prose::new(format!(
+    let mut roots = format!(
         "<cyan>{}</cyan> was not found under any directory an <b>`@` reference</b> searches:",
         code_span(payload),
-    ))
-    .render(term);
-    body.push('\n');
-    let mut roots = UnorderedList::empty();
+    );
     for root in resolution.magic_search_roots() {
         let path = biscuit_file::to_portable_string(root.path());
         let marker = (root.provenance() == RootProvenance::Magic).then_some(" (*)");
-        roots.add(Prose::new(format!(
-            "<cyan>{}</cyan>{}",
+        roots.push_str(&format!(
+            "\n- <cyan>{}</cyan>{}",
             code_span(&path),
             marker.unwrap_or_default(),
-        )));
+        ));
     }
-    body.push_str(&roots.render(term));
-    body.push_str("\n\n");
-    body.push_str(
-        &Prose::new(
-            "<i>(*) searched in addition to the standard `@` roots, for this context</i>",
-        )
-        .render(term),
-    );
-    append_suggestions(&mut body, suggestions, term);
+    let mut body = vec![
+        rows(roots),
+        Prose::new("<i>(*) searched in addition to the standard `@` roots, for this context</i>"),
+    ];
+    body.extend(suggestions_rows(suggestions));
     body
 }
 
@@ -154,20 +149,15 @@ fn render_candidate_no_match_body(
     reference: &str,
     resolution: &ResolutionDetail,
     suggestions: &[String],
-    term: &Terminal,
-) -> String {
-    let mut body = Prose::new(format!(
+) -> Vec<Prose> {
+    let mut body = vec![Prose::new(format!(
         "Cannot resolve <cyan>{}</cyan> from launch directory <cyan>{}</cyan>.",
         code_span(reference),
         code_span(&biscuit_file::to_portable_string(resolution.base_dir())),
-    ))
-    .render(term);
+    ))];
 
     if !resolution.candidates().is_empty() {
-        body.push_str("\n\n");
-        body.push_str(&Prose::new("<b>Tried:</b>").render(term));
-        body.push('\n');
-        let mut candidates = UnorderedList::empty();
+        let mut tried = String::from("<b>Tried:</b>");
         for probed in resolution.candidates() {
             let provenance = match probed.candidate().provenance() {
                 RootProvenance::Repository => "repository",
@@ -181,31 +171,26 @@ fn render_candidate_no_match_body(
                 RootProvenance::LocalRoot => "local root",
             };
             let path = biscuit_file::to_portable_string(probed.candidate().path());
-            candidates.add(Prose::new(format!(
-                "<b>{provenance}</b>: <cyan>{}</cyan>",
+            tried.push_str(&format!(
+                "\n- <b>{provenance}</b>: <cyan>{}</cyan>",
                 code_span(&path),
-            )));
+            ));
         }
-        body.push_str(&candidates.render(term));
+        body.push(rows(tried));
     }
 
-    append_suggestions(&mut body, suggestions, term);
+    body.extend(suggestions_rows(suggestions));
     body
 }
 
-fn append_suggestions(body: &mut String, suggestions: &[String], term: &Terminal) {
+/// The `Did you mean:` heading and one row per suggested path, if any.
+fn suggestions_rows(suggestions: &[String]) -> Option<Prose> {
     if suggestions.is_empty() {
-        return;
+        return None;
     }
-    body.push_str("\n\n");
-    body.push_str(&Prose::new("<b>Did you mean:</b>").render(term));
-    body.push('\n');
-    let mut paths = UnorderedList::empty();
+    let mut listed = String::from("<b>Did you mean:</b>");
     for path in suggestions {
-        paths.add(Prose::new(format!(
-            "<cyan>{}</cyan>",
-            code_span(path),
-        )));
+        listed.push_str(&format!("\n- <cyan>{}</cyan>", code_span(path)));
     }
-    body.push_str(&paths.render(term));
+    Some(rows(listed))
 }

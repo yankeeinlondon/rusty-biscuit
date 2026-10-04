@@ -520,4 +520,64 @@ mod tests {
         assert!(units.is_empty(), "SessionStart is envelope-only");
         assert_eq!(renderer.api_key_source(), Some("ANTHROPIC_API_KEY"));
     }
+
+    /// Visible rows of rendered lines on a wide colorless terminal, with the
+    /// `┃` border removed.
+    fn visible_rows(lines: &[String]) -> Vec<String> {
+        lines
+            .iter()
+            .flat_map(|line| line.lines())
+            .map(|line| {
+                biscuit_terminal::utils::escape_codes::strip_escape_codes(line)
+                    .trim_start()
+                    .trim_start_matches('┃')
+                    .trim()
+                    .to_string()
+            })
+            .collect()
+    }
+
+    fn wide_plain_terminal() -> Terminal {
+        Terminal::builder()
+            .width(300)
+            .color_depth(biscuit_terminal::discovery::detection::ColorDepth::None)
+            .build()
+    }
+
+    #[test]
+    fn error_block_keeps_the_label_and_each_message_line_on_rows() {
+        let lines = renderer().render_error_block(
+            &wide_plain_terminal(),
+            crate::stream::semantic::SemanticErrorKind::AgentNative,
+            "first line\nsecond line",
+        );
+        let rows = visible_rows(&lines);
+        let first = rows.iter().position(|row| row == "first line").expect("first row");
+        assert_eq!(rows[first - 1], "Agent Error", "{rows:#?}");
+        assert_eq!(rows[first + 1], "second line", "{rows:#?}");
+    }
+
+    #[test]
+    fn warning_body_keeps_each_diagnostic_line_on_its_own_row() {
+        let lines = renderer().render_tracing_diagnostic(
+            &wide_plain_terminal(),
+            "codex_core::exec",
+            "failed to spawn\ncaused by: ENOENT",
+        );
+        let rows = visible_rows(&lines);
+        let first = rows.iter().position(|row| row == "failed to spawn").expect("first row");
+        assert_eq!(rows[first + 1], "caused by: ENOENT", "{rows:#?}");
+    }
+
+    #[test]
+    fn tool_result_body_keeps_each_output_line_on_its_own_row() {
+        let body = tool_use::ToolResultBody {
+            text: "alpha\nbeta\ngamma".to_string(),
+            truncated: false,
+        };
+        let lines = renderer().render_tool_result_body(&wide_plain_terminal(), &body);
+        let rows = visible_rows(&lines);
+        let first = rows.iter().position(|row| row == "alpha").expect("first row");
+        assert_eq!(rows[first..first + 3], ["alpha", "beta", "gamma"], "{rows:#?}");
+    }
 }

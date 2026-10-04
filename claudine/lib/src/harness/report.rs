@@ -5,7 +5,7 @@
 
 use std::path::Path;
 
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use biscuit_terminal::components::status::{Status, StatusState, StatusTheme};
 use biscuit_terminal::prelude::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
@@ -158,8 +158,18 @@ pub fn report_prompt_property(has_prompt: bool, is_non_empty: bool, term: &Termi
 ///
 /// `message` is plain text — often a provider's own diagnostic — and is shown
 /// exactly as written, so a masked secret (`****`) is not read as emphasis.
+/// Its first line is the status line; any further line (such as a `hint:`
+/// row) follows on a row of its own.
 pub fn report_unhandled_failure(message: &str, term: &Terminal) {
-    emit_status(&prose_escape(message), StatusState::Error, term);
+    eprintln!("{}", unhandled_failure_text(message, term));
+}
+
+fn unhandled_failure_text(message: &str, term: &Terminal) -> String {
+    Status::from_prose(prose_escape(message))
+        .with_line_breaks(LineBreaks::Hard)
+        .state(StatusState::Error)
+        .theme(StatusTheme::Circular)
+        .render(term)
 }
 
 #[cfg(test)]
@@ -337,6 +347,21 @@ mod tests {
     }
 
     // -- report_unhandled_failure --
+
+    #[test]
+    fn unhandled_failure_keeps_each_further_line_on_its_own_row() {
+        let term = Terminal::builder()
+            .width(200)
+            .color_depth(biscuit_terminal::discovery::detection::ColorDepth::None)
+            .build();
+        let rendered = biscuit_terminal::utils::escape_codes::strip_escape_codes(
+            unhandled_failure_text("file not found: a*.md\nhint: quote it", &term),
+        );
+        let rows: Vec<&str> = rendered.lines().collect();
+        assert_eq!(rows.len(), 2, "{rendered:?}");
+        assert!(rows[0].ends_with("file not found: a*.md"), "{rendered:?}");
+        assert_eq!(rows[1], "hint: quote it", "{rendered:?}");
+    }
 
     #[test]
     fn report_unhandled_failure_renders() {

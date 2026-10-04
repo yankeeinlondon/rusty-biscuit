@@ -548,7 +548,9 @@ pub(crate) fn execute_sequence(
                     && let Some(markup) =
                         super::composition::agent_prompt_message(state, &source.resolved_path)
                 {
-                    log::message(&Prose::new(markup).render(&log::terminal()));
+                    log::message(
+                        &claudine::composition::agent_message_prose(markup).render(&log::terminal()),
+                    );
                 }
                 // The --dry-run arm above returns before this point, so the
                 // dry-run seam never invokes a picker.

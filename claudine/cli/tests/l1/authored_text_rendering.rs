@@ -220,3 +220,15 @@ fn run_header_and_source_status_keep_an_underscored_file_name() {
         "{stderr}"
     );
 }
+
+#[test]
+fn header_agent_breakdown_keeps_one_row_per_bullet() {
+    let fixture = CliProcessFixture::named("header-agent-rows");
+    let document = description_document(&fixture);
+
+    let (_, stderr) = dry_run(&fixture, &document, "200");
+    let cell = field_cell(&stderr, "Agent");
+    let bullets: Vec<&String> = cell.iter().filter(|row| row.starts_with("- ")).collect();
+    assert_eq!(bullets.len(), 3, "one row per bullet: {cell:#?}\n{stderr}");
+    assert!(bullets[0].starts_with("- CLI caller didn't specify the Agent"), "{cell:#?}");
+}

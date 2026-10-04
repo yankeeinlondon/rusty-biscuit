@@ -21,7 +21,7 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             let body = render_agent_resolution_failed_body(state, installed, &file_link);
             StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("CompositionError", "agent resolution failed"))
-                .body(body)
+                .body(crate::composition::agent_message::agent_message_prose(body))
                 .hint(
                     "Specify an installed provider with --claude, --codex, etc., run in an \
                      interactive terminal, or correct the `agent` frontmatter property."

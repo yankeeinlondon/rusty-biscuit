@@ -36,6 +36,16 @@ fn header_contains_marker_glyph() {
 }
 
 #[test]
+fn header_is_preceded_by_one_blank_spacing_row() {
+    let term = test_terminal();
+    let header = strip_ansi_codes(&render_system_prompt_header("appended", &term));
+    let rows: Vec<&str> = header.split('\n').collect();
+    assert_eq!(rows.len(), 2, "{header:?}");
+    assert_eq!(rows[0], "", "{header:?}");
+    assert!(rows[1].contains("System Prompt"), "{header:?}");
+}
+
+#[test]
 fn header_contains_action_appended() {
     let term = test_terminal();
     let header = render_system_prompt_header("appended", &term);

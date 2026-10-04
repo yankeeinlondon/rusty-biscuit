@@ -158,6 +158,23 @@ pub(super) fn pointer_to_dotted(pointer: &str) -> String {
 /// `body` followed by `err`'s `failure: <class>` row, when it has a class
 /// ([`CompositionError::resolution_failure`]). The class name is the stable
 /// spelling Darkmatter renders, so one reader parses both.
+/// A paragraph whose single newlines separate display rows, such as a bold
+/// heading followed by one `- item` row per entry. Default [`Prose`] would
+/// join those rows into one wrapped line.
+pub(super) fn rows(text: impl Into<String>) -> Prose {
+    Prose::new(text).with_line_breaks(biscuit_terminal::components::prose::LineBreaks::Hard)
+}
+
+/// The `failure:` row [`with_failure_row`] appends, as its own body paragraph.
+pub(super) fn failure_row(err: &CompositionError) -> Option<Prose> {
+    err.resolution_failure().map(|failure| {
+        Prose::new(format!(
+            "<dim>failure:</dim> {}",
+            darkmatter::markdown::errors::resolution_failure_name(failure)
+        ))
+    })
+}
+
 pub(super) fn with_failure_row(mut body: String, err: &CompositionError) -> String {
     if let Some(failure) = err.resolution_failure() {
         body.push_str(&format!(
