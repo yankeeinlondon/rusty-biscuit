@@ -539,7 +539,7 @@ fn level2_ac28_shipped_prompt_that_references_a_lazy_root_composes() {
     fs::create_dir_all(fixture.repo.join("features/f1")).unwrap();
     fs::write(fixture.repo.join("features/f1/spec.md"), "# fixture spec\n").unwrap();
     // What `plan.md` transcludes must sit beside both documents composed below.
-    stage_shipped_prompts(&workspace_root().join("prompts"), &fixture.repo, &["plan.md"]);
+    stage_shipped_prompts(&workspace_root(), &fixture.repo, &["prompts/plan.md"]);
     let real = "plan.md".to_string();
     let control = write_document(
         &fixture,

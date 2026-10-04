@@ -577,10 +577,11 @@ fn inline_compose_proxy_target_initialize_creates_a_file_its_prompt_includes() {
 /// `fixes/2026-09-14-cicd-improvements/` location and no log file.
 fn stage_shipped_route(accept: &Acceptance, plan_phase: u32, target_suffix: &str) {
     let manifest = biscuit_test_harness::manifest_dir!();
+    let repository = workspace_root();
     stage_shipped_prompts(
-        &workspace_root().join("prompts"),
+        &repository,
         &accept.path("prompts"),
-        &["implement.md", "_implement/implement-plan.md"],
+        &["prompts/implement.md", "prompts/_implement/implement-plan.md"],
     );
     let target = fs::read_to_string(
         manifest.join("tests/fixtures/shipped_implement_route/_implement/implement-plan.md"),

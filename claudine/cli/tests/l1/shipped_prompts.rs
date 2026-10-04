@@ -461,7 +461,7 @@ fn shipped_implement_router_reads_absent_optional_inputs_unguarded() {
 /// it without a hand-kept snippet list.
 #[test]
 fn staging_a_prompt_brings_every_file_it_transcludes() {
-    let shipped = tempfile::tempdir().expect("temp dir");
+    let repository = tempfile::tempdir().expect("temp dir");
     let staged = tempfile::tempdir().expect("temp dir");
     for (path, content) in [
         (
@@ -473,13 +473,13 @@ fn staging_a_prompt_brings_every_file_it_transcludes() {
         ("_nested/leaf.md", "leaf\n"),
         ("_unreached.md", "unreached\n"),
     ] {
-        write(&shipped.path().join(path), content);
+        write(&repository.path().join("prompts").join(path), content);
     }
 
     let paths = common::prompt_staging::stage_shipped_prompts(
-        shipped.path(),
+        repository.path(),
         staged.path(),
-        &["_implement/entry.md"],
+        &["prompts/_implement/entry.md"],
     );
 
     assert_eq!(

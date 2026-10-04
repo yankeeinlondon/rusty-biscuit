@@ -1181,9 +1181,9 @@ fn compose_eager_spec_setter_anchors_before_plan_expression_from_root_and_area()
     fixture.initialize_repository();
     let root = fixture.cwd().to_path_buf();
     common::prompt_staging::stage_shipped_prompts(
-        &common::prompt_staging::workspace_root().join("prompts"),
+        &common::prompt_staging::workspace_root(),
         &root.join("prompts"),
-        &["plan.md"],
+        &["prompts/plan.md"],
     );
     let relative = "claudine/cli/tests/fixtures/shipped_plan_route/spec.md";
     common::write(

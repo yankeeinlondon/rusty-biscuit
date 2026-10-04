@@ -284,13 +284,14 @@ fn shipped_implement_router_prefers_an_unimplemented_review_over_the_completed_p
     );
 
     let router = fixture.cwd().join("prompts/implement.md");
+    let repository = workspace_root();
     stage_shipped_prompts(
-        &workspace_root().join("prompts"),
+        &repository,
         &fixture.cwd().join("prompts"),
         &[
-            "implement.md",
-            "_implement/implement-suggestions.md",
-            "_implement/implement-plan.md",
+            "prompts/implement.md",
+            "prompts/_implement/implement-suggestions.md",
+            "prompts/_implement/implement-plan.md",
         ],
     );
     write(

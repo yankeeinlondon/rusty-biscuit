@@ -33,14 +33,14 @@ const HELPER_ARG: &str = "pr-flow-stub=";
 /// The shipped prompts a PR run routes to, staged into each repository with
 /// everything they transclude.
 const PROMPTS: &[&str] = &[
-    "pr.md",
-    "commit.md",
-    "_pr/dirty.md",
-    "_pr/push.md",
-    "_pr/diagnose.md",
-    "_pr/triage.md",
-    "_pr/fix.md",
-    "_pr/open.md",
+    "prompts/pr.md",
+    "prompts/commit.md",
+    "prompts/_pr/dirty.md",
+    "prompts/_pr/push.md",
+    "prompts/_pr/diagnose.md",
+    "prompts/_pr/triage.md",
+    "prompts/_pr/fix.md",
+    "prompts/_pr/open.md",
 ];
 
 /// What the stub does at each stage of one route.
@@ -263,7 +263,8 @@ impl Rehearsal {
         git_in(&repo, &["remote", "add", "origin", origin]);
         git_in(&repo, &["config", &format!("url.{}.insteadOf", portable(&bare)), origin]);
 
-        stage_shipped_prompts(&workspace_root().join("prompts"), &repo.join("prompts"), PROMPTS);
+        let repository = workspace_root();
+        stage_shipped_prompts(&repository, &repo.join("prompts"), PROMPTS);
         write(&repo.join(".claudine/memory/commits.md"), "# Commit lessons\n");
         write(&repo.join(".gitignore"), ".claudine/tmp/\n");
         write(&repo.join(".darkmatter-shell-whitelist"), "prefix git\nprefix just\n");

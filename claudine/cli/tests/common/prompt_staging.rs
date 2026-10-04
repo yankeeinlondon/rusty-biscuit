@@ -6,10 +6,11 @@
 //! a hand-kept list of snippets. [`stage_shipped_prompts`] follows the
 //! directives instead, so the staged set always matches what the prompt reads.
 //!
-//! Spell the source directory as `workspace_root().join("prompts")` at the
-//! call site. CI's test-input index (`docs/cicd/test-inputs.md`) reads that
-//! spelling as a read of every file under `prompts/`, so a change to any
-//! fragment schedules the tests that stage it.
+//! Call sites bind `let repository = workspace_root();` and name each entry
+//! by its full repository path (`"prompts/implement.md"`). CI's test-input
+//! index (`docs/cicd/test-inputs.md`) reads that spelling as a read of the
+//! entry, and follows the entry's `::file` directives, so a change to the entry
+//! or to any fragment it transcludes schedules the test.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -25,18 +26,28 @@ pub fn workspace_root() -> PathBuf {
         .to_path_buf()
 }
 
-/// Copies each `entries` prompt from `shipped` into `staged` at the same
-/// relative path, together with every file those prompts transclude through
-/// `::file`, recursively, and returns the staged relative paths in order.
+/// Copies each `entries` prompt, a repository path under `prompts/`, from
+/// `repository` into `staged`, which stands in for `prompts/`, together with
+/// every file those prompts transclude through `::file`, recursively. Returns
+/// the staged paths relative to `staged`, in order.
 ///
 /// A directive whose target is an expression (`{{…}}`) is skipped: it names
-/// nothing a test can stage ahead of time. A target outside `shipped`, or one
+/// nothing a test can stage ahead of time. A target outside `prompts/`, or one
 /// spelled `@…`, panics, because the staged prompt could not resolve it.
 /// Route targets reached through frontmatter rather than `::file` are not
 /// followed; list them in `entries`.
-pub fn stage_shipped_prompts(shipped: &Path, staged: &Path, entries: &[&str]) -> Vec<String> {
+pub fn stage_shipped_prompts(repository: &Path, staged: &Path, entries: &[&str]) -> Vec<String> {
+    let shipped = repository.join("prompts");
     let mut seen = BTreeSet::new();
-    let mut pending: Vec<String> = entries.iter().map(|entry| (*entry).to_owned()).collect();
+    let mut pending: Vec<String> = entries
+        .iter()
+        .map(|entry| {
+            entry
+                .strip_prefix("prompts/")
+                .unwrap_or_else(|| panic!("`{entry}` is not a repository path under `prompts/`"))
+                .to_owned()
+        })
+        .collect();
     while let Some(relative) = pending.pop() {
         if !seen.insert(relative.clone()) {
             continue;
@@ -48,7 +59,7 @@ pub fn stage_shipped_prompts(shipped: &Path, staged: &Path, entries: &[&str]) ->
         let directory = Path::new(&relative).parent().unwrap_or(Path::new(""));
         for target in transcluded_paths(&content) {
             pending.push(resolve_within(directory, &target).unwrap_or_else(|| {
-                panic!("`{relative}` transcludes `{target}`, which is outside the shipped prompts")
+                panic!("`{relative}` transcludes `{target}`, which is outside `prompts/`")
             }));
         }
     }
@@ -95,4 +106,3 @@ fn resolve_within(directory: &Path, target: &str) -> Option<String> {
     }
     Some(parts.join("/"))
 }
-

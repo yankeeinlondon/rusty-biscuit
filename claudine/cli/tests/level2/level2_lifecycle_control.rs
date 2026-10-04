@@ -4936,10 +4936,11 @@ fn stage_shipped_implement_route(entry: &str, total_phases: usize) -> Staged {
     let manifest = biscuit_test_harness::manifest_dir!();
     // The snippets the target transcludes are prose only, so the shipped bytes
     // serve as-is; only the target itself is the side-effect-free fixture.
+    let repository = workspace_root();
     stage_shipped_prompts(
-        &workspace_root().join("prompts"),
+        &repository,
         &root,
-        &["implement.md", "_implement/implement-plan.md"],
+        &["prompts/implement.md", "prompts/_implement/implement-plan.md"],
     );
     fs::copy(
         manifest.join("tests/fixtures/shipped_implement_route/_implement/implement-plan.md"),
@@ -5048,10 +5049,11 @@ exit 0
     // Staged in the shipped layout: the prompt transcludes `../` snippets, so
     // it lives one directory down and the snippets sit beside that directory,
     // inside the workspace.
+    let repository = workspace_root();
     stage_shipped_prompts(
-        &workspace_root().join("prompts"),
+        &repository,
         &root,
-        &["_implement/implement-plan.md"],
+        &["prompts/_implement/implement-plan.md"],
     );
     let md_file = root.join("_implement/implement-plan.md");
     fs::write(
