@@ -41,6 +41,65 @@ source_files_during_phase_8:
 docs_updated_during_phase_8: []
 docs_created_during_phase_8: []
 skills_files_updated_during_phase_8: []
+source_files_during_phase_9:
+  - worktree/lib/src/pull_requests.rs
+  - worktree/cli/src/commands/list.rs
+  - worktree/cli/src/commands/list/wait.rs
+  - worktree/cli/tests/remote_fixture/mod.rs
+docs_updated_during_phase_9: []
+docs_created_during_phase_9: []
+skills_files_updated_during_phase_9:
+  - .claude/skills/worktree/testing.md
+  - .claude/skills/os/linux.md
+source_code:
+  - sniff/lib/src/credentials.rs
+  - sniff/lib/src/remote/blocking.rs
+  - sniff/lib/src/remote/focused.rs
+  - sniff/lib/tests/l1/branch_head.rs
+  - sniff/lib/tests/l1/open_pull_requests.rs
+  - worktree/lib/src/listing.rs
+  - worktree/lib/src/worktree.rs
+  - worktree/lib/src/pull_requests.rs
+  - worktree/lib/src/remote_head.rs
+  - worktree/lib/src/remote_update.rs
+  - worktree/lib/src/remote_update/tests.rs
+  - worktree/cli/src/commands/list.rs
+  - worktree/cli/src/commands/list/tests.rs
+  - worktree/cli/src/commands/list/tests/pipeline.rs
+  - worktree/cli/src/commands/list/wait.rs
+  - worktree/cli/src/commands/list/wait/tests.rs
+  - worktree/cli/src/commands/list_table.rs
+  - worktree/cli/src/commands/git_graph.rs
+  - worktree/cli/src/commands/git_graph/tests.rs
+  - worktree/cli/src/commands/refresh_worker.rs
+  - worktree/cli/src/perf.rs
+  - worktree/cli/tests/level2_list_verbose.rs
+  - worktree/cli/tests/list_prs.rs
+  - worktree/cli/tests/list_remote_head.rs
+  - worktree/cli/tests/list_table.rs
+  - worktree/cli/tests/snapshots/list_table__credential_lines_every_condition_for_every_provider.snap
+  - worktree/cli/tests/perf_flag.rs
+  - worktree/cli/tests/perf_pr_request.rs
+  - worktree/cli/tests/perf_support/mod.rs
+  - worktree/cli/tests/remote_fixture/mod.rs
+documentation:
+  - worktree/README.md
+  - worktree/docs/cli/list.md
+  - worktree/docs/git-graph.md
+  - worktree/docs/performance-testing.md
+  - sniff/lib/README.md
+  - sniff/lib/CHANGELOG.md
+  - .claude/skills/worktree/list.md
+  - .claude/skills/worktree/list-remote.md
+  - .claude/skills/worktree/git-graph.md
+  - .claude/skills/worktree/testing.md
+  - .claude/skills/worktree/create-and-include.md
+  - .claude/skills/sniff/SKILL.md
+  - .claude/skills/sniff/remote-and-repository.md
+  - .claude/skills/os/macos.md
+  - .claude/skills/os/linux.md
+completed_phase: 9
+implemented: true
 packages:
   - sniff
   - worktree
@@ -79,14 +138,14 @@ Two independent changes share one listing:
 
 Done when every acceptance bullet of the spec holds:
 
-- [ ] bounded-synchronization L1 test proves local gathers start before a held worker outcome is released
-- [ ] unchanged refs: gather, status and comparison work run once; changed refs: all output describes final tips; only a `--ff`-moved checkout reruns dirtiness
-- [ ] cache save, fork prune, copy-record prune run once, after acceptance
-- [ ] one keyless line, correct precedence, none for cached/ignored/unsupported/changed-origin/unknown evidence
-- [ ] old stores migrate per spec; malformed auth metadata is never read as anonymous; no token value is ever stored or printed
-- [ ] no new network request or wait is introduced
-- [ ] `just test`, `just test-l2`, `just test-perf`, `just lint` pass in `worktree/`; affected `sniff` tests and lint pass
-- [ ] docs listed in the spec updated, without naming this fix; agent stops at "implementation complete, ready for review" (no `just complete`, no move to `_completed`, no commit unless asked)
+- [x] bounded-synchronization L1 test proves local gathers start before a held worker outcome is released
+- [x] unchanged refs: gather, status and comparison work run once; changed refs: all output describes final tips; only a `--ff`-moved checkout reruns dirtiness
+- [x] cache save, fork prune, copy-record prune run once, after acceptance
+- [x] one keyless line, correct precedence, none for cached/ignored/unsupported/changed-origin/unknown evidence
+- [x] old stores migrate per spec; malformed auth metadata is never read as anonymous; no token value is ever stored or printed
+- [x] no new network request or wait is introduced
+- [x] `just test`, `just test-l2`, `just test-perf`, `just lint` pass in `worktree/`; affected `sniff` tests and lint pass
+- [x] docs listed in the spec updated, without naming this fix; agent stops at "implementation complete, ready for review" (no `just complete`, no move to `_completed`, no commit unless asked)
 
 ## Wave schedule (overview)
 
@@ -274,12 +333,12 @@ Wave 4. Depends on P3 (evidence in `WaitEnd`). Package: `worktree-cli` (`list.rs
 
 Wave 5. Depends on all phases.
 
-- [ ] **Docs** (current behavior only; never name this fix or another dated spec): `worktree/README.md`, `worktree/docs/cli/list.md`, `worktree/docs/performance-testing.md` (append the new sample; keep dated history), `worktree/docs/git-graph.md`, `.claude/skills/worktree/list.md`, `list-remote.md` (formats 3 and 6, metadata), `testing.md`; relevant `sniff` remote docs and skill topic page. Use Mermaid for the pipeline and accept/regather flow; target reader is a developer new to the repo. Fix the stale "run after the wait" statement in `list.md`.
-- [ ] **Comment drift pass** over every touched symbol; report any drift found and how it was resolved.
-- [ ] **Quick sample.** One release build on the dev host, same listing shape when available (9 worktrees, authenticated); record overlap and any regather cost in `performance-testing.md`. No extra hosts, repetitions, or thresholds.
-- [ ] **Full verification.** In `worktree/`: `just test`, `just test-l2`, `just test-perf`, `just lint`. In `sniff/`: its test and lint recipes. Confirm no leftover background processes from tests, and OS notes (macOS, Linux, native Windows, WSL2) for scoped-thread and detached-process behavior; use the `os` skill for any `cfg(windows)` or path-comparison edits.
-- [ ] **Smell greps** from the matrix section clean; confirm no token appears in any serialized file or rendered output.
-- [ ] **Implementation log** in the fix directory records every departure from the spec and any ruling the author should revisit. Leave `spec.md` as decided. Stop at "implementation complete, ready for review".
+- [x] **Docs** (current behavior only; never name this fix or another dated spec): `worktree/README.md`, `worktree/docs/cli/list.md`, `worktree/docs/performance-testing.md` (append the new sample; keep dated history), `worktree/docs/git-graph.md`, `.claude/skills/worktree/list.md`, `list-remote.md` (formats 3 and 6, metadata), `testing.md`; relevant `sniff` remote docs and skill topic page. Use Mermaid for the pipeline and accept/regather flow; target reader is a developer new to the repo. Fix the stale "run after the wait" statement in `list.md`.
+- [x] **Comment drift pass** over every touched symbol; report any drift found and how it was resolved.
+- [x] **Quick sample.** One release build on the dev host, same listing shape when available (9 worktrees, authenticated); record overlap and any regather cost in `performance-testing.md`. No extra hosts, repetitions, or thresholds.
+- [x] **Full verification.** In `worktree/`: `just test`, `just test-l2`, `just test-perf`, `just lint`. In `sniff/`: its test and lint recipes. Confirm no leftover background processes from tests, and OS notes (macOS, Linux, native Windows, WSL2) for scoped-thread and detached-process behavior; use the `os` skill for any `cfg(windows)` or path-comparison edits.
+- [x] **Smell greps** from the matrix section clean; confirm no token appears in any serialized file or rendered output.
+- [x] **Implementation log** in the fix directory records every departure from the spec and any ruling the author should revisit. Leave `spec.md` as decided. Stop at "implementation complete, ready for review".
 
 **Checkpoint 9 (exit):** all Definition-of-done boxes above are checked.
 

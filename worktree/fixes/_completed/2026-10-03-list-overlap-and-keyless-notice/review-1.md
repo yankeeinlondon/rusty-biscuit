@@ -20,6 +20,7 @@ implemented_by: claude/opus
 log: worktree/fixes/2026-10-03-list-overlap-and-keyless-notice/implementation-log.md
 description: "A **fix** review of `2026-10-03-list-overlap-and-keyless-notice/spec.md`"
 fix: 2026-10-03-list-overlap-and-keyless-notice/review-1.md
+next: 2026-10-03-list-overlap-and-keyless-notice/review-2.md
 ---
 
 # Review 1

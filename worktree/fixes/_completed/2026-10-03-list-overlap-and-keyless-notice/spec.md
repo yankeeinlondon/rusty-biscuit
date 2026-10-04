@@ -23,9 +23,10 @@ status: draft-spec
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-03
-review_iterations: 1
+review_iterations: 3
 clarified: true
-implemented: false
+implemented: true
+completed: true
 human_review: false
 message_to_agent: |-
     Phases 2-8 (and most of 9) were already implemented by review cycle 1 before
@@ -85,6 +86,16 @@ message_to_agent: |-
     Phase 9 note: `list_prs::a_detached_workers_answer_replaces_the_stale_one_on_the_next_list`
     failed once more under load (11.3 s, load average about 24) and passed on every rerun;
     if it fails during full verification, rerun it before treating it as a regression.
+    Phase 9 (docs, sample, full verification) is complete: all plan phases are
+    implemented and the fix is ready for review. Phase 9 changed no product behavior.
+    It fixed three comments in `list.rs` / `list/wait.rs` and a stale "format 5"
+    assertion message in `pull_requests.rs`, and made `UploadPackGate`'s hold loop
+    (`cli/tests/remote_fixture/mod.rs`) end when its gate directory is gone, after a
+    10-hour orphaned `upload-pack.sh` from an earlier killed test was found. Final:
+    worktree `just test` 954, `just test-l2` 32, `just test-perf` 32, `just lint`
+    clean; sniff `just test` 3127, `just lint` clean. See implementation-log.md
+    "## Phase 9" for the author-facing decision list and pre-existing doc-rule
+    violations in `docs/performance-testing.md` (older dated-spec names, left alone).
 related:
     - 2026-09-27-list-freshness-ux
     - 2026-10-02-fresh-prs

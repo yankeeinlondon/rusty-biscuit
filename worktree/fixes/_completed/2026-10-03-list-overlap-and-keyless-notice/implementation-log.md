@@ -41,6 +41,65 @@ source_files_during_phase_8:
 docs_updated_during_phase_8: []
 docs_created_during_phase_8: []
 skills_files_updated_during_phase_8: []
+source_files_during_phase_9:
+  - worktree/lib/src/pull_requests.rs
+  - worktree/cli/src/commands/list.rs
+  - worktree/cli/src/commands/list/wait.rs
+  - worktree/cli/tests/remote_fixture/mod.rs
+docs_updated_during_phase_9: []
+docs_created_during_phase_9: []
+skills_files_updated_during_phase_9:
+  - .claude/skills/worktree/testing.md
+  - .claude/skills/os/linux.md
+source_code:
+  - sniff/lib/src/credentials.rs
+  - sniff/lib/src/remote/blocking.rs
+  - sniff/lib/src/remote/focused.rs
+  - sniff/lib/tests/l1/branch_head.rs
+  - sniff/lib/tests/l1/open_pull_requests.rs
+  - worktree/lib/src/listing.rs
+  - worktree/lib/src/worktree.rs
+  - worktree/lib/src/pull_requests.rs
+  - worktree/lib/src/remote_head.rs
+  - worktree/lib/src/remote_update.rs
+  - worktree/lib/src/remote_update/tests.rs
+  - worktree/cli/src/commands/list.rs
+  - worktree/cli/src/commands/list/tests.rs
+  - worktree/cli/src/commands/list/tests/pipeline.rs
+  - worktree/cli/src/commands/list/wait.rs
+  - worktree/cli/src/commands/list/wait/tests.rs
+  - worktree/cli/src/commands/list_table.rs
+  - worktree/cli/src/commands/git_graph.rs
+  - worktree/cli/src/commands/git_graph/tests.rs
+  - worktree/cli/src/commands/refresh_worker.rs
+  - worktree/cli/src/perf.rs
+  - worktree/cli/tests/level2_list_verbose.rs
+  - worktree/cli/tests/list_prs.rs
+  - worktree/cli/tests/list_remote_head.rs
+  - worktree/cli/tests/list_table.rs
+  - worktree/cli/tests/snapshots/list_table__credential_lines_every_condition_for_every_provider.snap
+  - worktree/cli/tests/perf_flag.rs
+  - worktree/cli/tests/perf_pr_request.rs
+  - worktree/cli/tests/perf_support/mod.rs
+  - worktree/cli/tests/remote_fixture/mod.rs
+documentation:
+  - worktree/README.md
+  - worktree/docs/cli/list.md
+  - worktree/docs/git-graph.md
+  - worktree/docs/performance-testing.md
+  - sniff/lib/README.md
+  - sniff/lib/CHANGELOG.md
+  - .claude/skills/worktree/list.md
+  - .claude/skills/worktree/list-remote.md
+  - .claude/skills/worktree/git-graph.md
+  - .claude/skills/worktree/testing.md
+  - .claude/skills/worktree/create-and-include.md
+  - .claude/skills/sniff/SKILL.md
+  - .claude/skills/sniff/remote-and-repository.md
+  - .claude/skills/os/macos.md
+  - .claude/skills/os/linux.md
+completed_phase: 9
+implemented: true
 packages:
   - sniff
   - worktree
@@ -341,3 +400,32 @@ The files changed in this cycle:
 - pre-existing flake: one standalone `--test list_prs` run failed `a_detached_workers_answer_replaces_the_stale_one_on_the_next_list` at 11.3 s (load average about 24). It passed alone (3.9 s) and in three more full `list_prs` runs (32 of 32 each), and inside `just test`. This is the same intermittent failure logged in Phases 4 and 6; this phase did not touch that test
 - frontmatter: `packages` unchanged (`worktree-cli` already listed)
 - skills: no `worktree` skill change needed
+
+## Phase 9
+
+> **phase:** docs, sample, and full verification (plan Phase 9), 2026-10-03
+
+- state found: review cycle 1 had already written the docs and taken the quick sample. This phase verified each item against the code and fixed what it found: three comments, one test-assertion message, and one test-fixture leak (below). No product behavior changed
+- docs (verified, none edited this phase):
+        - `worktree/README.md` and `docs/cli/list.md`: the overlap, snapshot validation, targeted status refresh ("Local work during the wait", with a Mermaid accept/regather flow), and the keyless line's precedence ("Credentials line", with a Mermaid choice flow). The example line uses `credential_env`'s order, `GH_TOKEN or GITHUB_TOKEN`
+        - `docs/performance-testing.md`: nested groups, reconciliation, and the full-command contract, plus the quick sample (appended in review cycle 1); dated history kept
+        - `docs/git-graph.md`: accepted-snapshot gathering for the graph and `-v`
+        - skill `list.md` (pipeline Mermaid; the stale "run after the wait" statement is gone), `list-remote.md` (PR store format 6, live-head store format 3, `CredentialEvidence`), `testing.md`; sniff `README.md`, `CHANGELOG.md`, and skill `SKILL.md` / `remote-and-repository.md` (`RequestCredentials`, `OpenPullRequests`, the selection contract)
+        - `rg` finds no current topic page naming this fix. Pre-existing and left alone (out of scope): `docs/performance-testing.md` lines 74 and 92 name older dated specs (`2026-09-27-list-freshness-ux`, `2026-06-16-two-problems`, `2026-09-24-ux-improvements`) outside its dated-history section, which the repository's doc rule disallows. The author may want a separate cleanup
+- comment drift pass (read-only review subagent over every touched symbol in `worktree` lib/cli and sniff `credentials.rs` / `remote/{blocking,focused}.rs`, plus my own greps for the removed names `reread_refs`, `refs_read`, `key_in_use`, `credential_key`, `gather_remote`, `saturating_sub` clipping, and old format numbers). No comment described removed behavior. Fixed (comment-only; the code was right):
+        - `list.rs` `RemotePlan::pr_gather`: said "the origin lookup", but the timed span also covers the `--ignore-api` write and the preference read
+        - `list.rs` `gather_listing`: "Persistent effects happen once, in `commit`" was too broad, because `prepare_remote` may already have written `~/.wt.json` and `--ff` moves refs. Now names the gathers' effects (cache save, fork-record and copy-record pruning)
+        - `list/wait.rs` module doc: the credentials paragraph had been inserted mid-paragraph and one line was overlong. Split into paragraphs, no wording change
+        - `lib/src/pull_requests.rs` `the_store_records_only_a_digest_of_the_origin`: the assertion message said "format 5 has no writer", but the store is now format 6. Now "the store has no writer"
+- quick sample: the release-build sample in `performance-testing.md` (10 worktrees, overlap hidden inside the wait, no regather observed, `regather` cost described) was taken by review cycle 1 on the same code. Phases 2–8 changed only tests and comments, so it was not retaken. It is still unauthenticated: no `GH_TOKEN`/`GITHUB_TOKEN` is set on this host (the departure from "authenticated" is already logged above)
+- smell greps (`serde(default)`, `Option` on the credentials fields, `filter_map(..as_str())`, `unwrap_or_default()`, `.ok()` in `pull_requests.rs` / `remote_head.rs`): clean. The only hits are whole-file reads that turn a malformed file into a miss (never into anonymous), `unix_now`, `origin_url`, and receipt file-name parsing. No token can reach a store or output: the writers refuse any name outside `[A-Z_][A-Z0-9_]*`, pinned by `remote_head::tests::credentials_survive_every_later_write_of_the_attempt_and_never_hold_a_value`, `pull_requests::tests::a_publication_records_what_its_request_was_sent_with_and_only_names`, and `list_prs::two_anonymous_answers_show_exactly_one_keyless_line_and_a_key_shows_none` (stores and output searched for the token)
+- skills updated: `.claude/skills/worktree/testing.md` (gate exit and the load-sensitive teardown test) and `.claude/skills/os/linux.md` (linker memory kill on build-linux)
+- leftover processes: after the runs, `ps` showed one orphan, a `git ls-remote` plus `upload-pack.sh` against a deleted `$TMPDIR/.tmp…/gate`, reparented to launchd and running for 10 h 23 min. It predates this session, so its run is unknown. Cause: `UploadPackGate`'s hold loop (`while [ ! -f "$dir/release" ]`) waits only for the release file, so a test killed before the gate's `Drop` (nextest timeout or Ctrl-C) left it spinning forever. Fixed in `cli/tests/remote_fixture/mod.rs`: the loop also ends when the gate directory is gone (`&& [ -d "$dir" ]`, plain `sh`, so the same on every OS's Git shell). Checked by hand (the loop exits once the directory is removed), then `list_flags`, `list_remote_head`, and `perf_pr_request` 49 of 49 passed with no `upload-pack.sh` left. The orphan pair (pids 45350/45392) was killed. Recorded in the skill's `testing.md`
+- pre-existing flake (load): the first `just test` stopped on `list_remote_head::a_failed_assertion_while_upload_pack_is_held_still_reaps_the_worker_before_the_fixture_goes` (10.8 s, load average 46): it found 0 workers where it expected 1. It passed 5 of 5 alone (3.4 s each) and in both later full runs. Likely mechanism: under that load, 10 s passed from the worker's launch, so its check deadline killed the held transport and the worker had exited before `refresh_workers` looked. Not touched by this fix's phases; recorded in the skill's `testing.md`, not changed
+- OS: no `cfg(windows)` or path-comparison code was touched in any phase. The overlap uses `std::thread::scope` (std, every OS); the detached worker launch is unchanged. Linux evidence: `just cross-check worktree-cli --os linux` (build-linux) passed 632 of 632, 66 skipped. The first attempt failed while linking: the host killed `ld` with signal 9 (memory). The retry with `--build-jobs 2` passed; recorded in the `os` skill's `linux.md`. Native Windows and WSL2 are left to CI (a push to `main` adds Windows; nightly adds WSL2)
+- gates (with `LIBGIT2_NO_PKG_CONFIG=1`; L2 with `BISCUIT_TEST_REQUIRED_BACKENDS=tmux`, windowless):
+        - `worktree/`: `just test` 954 passed, 32 skipped (final run after every edit; one earlier run hit the flake above); `just lint` exit 0 (after the edits); `just test-perf` 32 passed; `just test-l2` 32 passed; `just check-tier-coverage worktree` 0 stranded
+        - `sniff/`: `just test` 3127 passed, 32 skipped; `just lint` exit 0
+- requirement-to-test mapping: this phase changed no product behavior. Its one fixture change is covered by the 49 tests that use the gate, plus the manual loop check above. The acceptance-level mapping is in Phases 2–8
+- decisions for the author (collected from all phases, unchanged): empty token variables count as unset in sniff's selection; sniff failure keys come from the request sent (`NotFoundOrNotPermitted { key }`); stored names are upper case only; "higher rate limits" wording only for GitHub, GitLab, and Bitbucket; a retargeted `origin/HEAD` costs one regather; group children show `—` in `--perf`; the sample is unauthenticated
+- status: implementation complete, ready for review. The spec was not moved and nothing was committed
