@@ -2,7 +2,7 @@
 
 Lists all git worktrees along with their status. This is the default command -- running `wt` with no subcommand is equivalent to `wt list`.
 
-Before it lists anything, `wt list` checks whether `origin/<default>` is current (fetching it when it is not) and asks for the open pull requests, both in one short wait; see [Checking origin](#checking-origin). The output is then, in order: a caption, an optional credentials line (a warning, or the keyless notice), the worktree table, a two-line legend, the git graph (image-capable terminals only), a status list holding this run's PR item and the refresh hint, the verbose section (`-v` only), and, after a blank line, any closing notes. Everything is written to stderr.
+Before it lists anything, `wt list` checks whether `origin/<default>` is current (fetching it when it is not) and asks for the open pull requests, both in one short wait; see [Checking origin](#checking-origin). The output is then, in order: a caption, an optional credentials line (a warning, or the keyless notice), the worktree table, a legend, the git graph (image-capable terminals only), a status list holding this run's PR item and the refresh hint, the verbose section (`-v` only), and, after a blank line, any closing notes. Everything is written to stderr.
 
 ## Output
 
@@ -51,7 +51,7 @@ Without an `origin` nothing is asked, nothing is waited for, and no PR item or r
 
 #### Local work during the wait
 
-The expensive local work (`git status` in every worktree, the branch comparisons behind the caption and the columns, and the graph and `-v` history) starts as soon as the branch tips are read, and runs while the listing waits. An ordinary listing therefore costs roughly the slower of the wait and the local work, not their sum. A wait that runs out limits only the waiting: local work that takes longer is still finished before anything prints.
+The expensive local work (`git status` in every worktree Git can read, the branch comparisons behind the caption and the columns, and the graph and `-v` history) starts as soon as the branch tips are read, and runs while the listing waits. An ordinary listing therefore costs roughly the slower of the wait and the local work, not their sum. A wait that runs out limits only the waiting: local work that takes longer is still finished before anything prints.
 
 That first pass describes the branch tips as they were before the wait, so when the wait ends (and after `--ff`, which runs only once the local work is done), the listing reads every local and `origin/*` tip again and compares the two reads:
 
@@ -193,14 +193,24 @@ What counts is what the refresh worker recorded for the exact answer this listin
 
 The closing fallback notice below is about a different request and may appear in the same listing.
 
+The `Worktree` legend gains a second line only when the table needs it: `✕ git can't read this worktree` when some row shows `✕` for that reason, and `? couldn't check` when some row shows `?`. A `✕` row whose path is [a link Git still reads through](#a-link-in-place-of-the-worktree) is explained as `✕ its path is a link`, or, beside rows Git can't read, `✕ git can't read this worktree, or its path is a link`. A listing with neither keeps the two lines above:
+
+```text
+ Worktree   ○ clean    ● uncommitted files    ● uncommitted source files
+            ✕ git can't read this worktree    ? couldn't check
+ Branch     └─ merges cleanly into parent     └─ conflicts with parent    └┄ parent deleted
+```
+
 The table is never narrower than the legend beneath it; a table with short content widens its last column to match. In the legend the `conflicts` sample sits in the same column as the source-files dot above it.
 
 ### Columns
 
-- **Worktree** -- a status dot and the directory name; the main checkout is `base repo`. The current worktree's name is bold and its whole row is highlighted.
-    - `○` (dim): no uncommitted files
+- **Worktree** -- a status marker and the directory name; the main checkout is `base repo`. The current worktree's name is bold and its whole row is highlighted.
+    - `○` (dim): `git status` ran and found no uncommitted files
     - `●` (yellow): uncommitted files, none of them source code
     - `●` (red, the same red as `conflicts`): at least one uncommitted source file
+    - `✕` (red): Git can't read this worktree, so its files were not checked, or its path is a link that may have replaced it; a [closing note](#closing-notes) says what is wrong and how to recover
+    - `?` (dim): `git status` failed for a worktree Git otherwise lists normally, so its files are unknown. A `?` is never shown as clean
 - **Branch** -- a tree built from the fork records `wt create` keeps (see `--from` in the [README](../../README.md)):
     - the default branch comes first, as a badge; branches forked from another branch nest under it
     - the connector (`├─`, `└─`) is gray when the branch merges cleanly into its parent and red when it conflicts
@@ -217,6 +227,30 @@ The table is never narrower than the legend beneath it; a table with short conte
 - **`-> parent`** -- the same comparison, counts included, against the recorded fork parent's local branch (never its `origin/*` copy). `—` when there is no non-default parent; `parent deleted` when the recorded parent is gone.
 
 Comparison results are cached by the pair of commit SHAs, so a warm `wt list` runs no `rev-list` or `merge-base`; see [performance-testing.md](../performance-testing.md). Uncommitted-file status is always checked live.
+
+The Worktree marker and the comparison cells answer different questions. The marker is about the checkout's **files** (`git status`); the comparison cells are about the branch's **commits**, read from refs. So a comparison cell saying `clean` means "merges without conflicts", never "the working files were checked", and a `✕` or `?` row still shows the ordinary comparison cells for its branch:
+
+```text
+│ ○ feat-ok      │ feat/ok            │ clean +2 -1 │ —   │   files checked, none uncommitted
+│ ✕ feat-gone    │ feat/gone          │ clean +2 -1 │ —   │   files not checked; the branch still merges cleanly
+│ ? feat-unknown │ feat/unknown       │ clean +2 -1 │ —   │   git status failed; the branch still merges cleanly
+```
+
+#### Worktrees Git can't read
+
+A linked worktree can lose its connection to the repository while Git still records it; `git worktree list --porcelain` then marks it `prunable`. `wt list` never runs `git status` for such an entry (it could fail, or report an enclosing repository's files as this one's) and never repairs or removes anything. It looks at the recorded path instead and shows `✕` with one of three explanations:
+
+| What `wt` finds on disk | Called | Note |
+|---|---|---|
+| The recorded directory does not exist | missing | `its directory is gone; wt remove <name> checks whether its remaining Git record can be removed safely.` |
+| The directory exists but its `.git` file does not | unlinked | `its .git file is missing; wt remove <name> attempts to restore the link before checking its files. To restore it without removing it, run git -C <base> worktree repair <path>.` |
+| Anything else: a file or a link at the path, a path or `.git` that can't be inspected, or a `.git` that exists but Git can't use | other | `Git can't read this worktree: <what was found>; Git reports: <Git's reason>.` |
+
+"Does not exist" means the operating system answered "not found". A permission or I/O error is never read as absence; it is the "other" case, with the system's message. See [`wt remove`](remove.md) for what removing each kind does.
+
+#### A link in place of the worktree
+
+A worktree directory moved away and replaced by a link to its new location (a symbolic link, or on Windows any reparse point such as a junction) is not marked `prunable`: Git reads the checkout through the link. `wt list` looks at every recorded path without following it, shows such a row as `✕`, and notes `<name>: <path> is a link, which may have replaced the original checkout.` `wt remove` refuses it ([why](remove.md#a-link-in-place-of-the-worktree)). Only the path itself counts; a link among its parent directories, such as macOS's `/tmp`, is not reported.
 
 ### PR badges
 
@@ -296,7 +330,7 @@ Commits are formatted as conventional commits when possible (e.g. `feat(scope): 
 
 ### Closing notes
 
-After a blank line, the output can end with up to three kinds of note, in this order. A command a note tells you to run (`wt --ff`, `--ignore-api`) is shown in reverse video, so it stands out as something to type. The examples below are plain text.
+After a blank line, the output can end with up to four kinds of note, in this order. A command a note tells you to run (`wt --ff`, `--ignore-api`) is shown in reverse video, so it stands out as something to type. The examples below are plain text.
 
 - **Fast-forward suggestion.** When the local default branch is strictly behind `origin/<default>` (not diverged):
 
@@ -313,6 +347,24 @@ After a blank line, the output can end with up to three kinds of note, in this o
     ```
 
     A rate-limit fallback never produces it, and neither does a check made for an `origin` that was replaced or removed during the wait.
+- **Unavailable worktrees.** One dim note per `✕` row, in table order (a `?` row gets none), as described under [Worktrees Git can't read](#worktrees-git-cant-read):
+
+    ```text
+    - feat-gone: its directory is gone; wt remove feat/gone checks whether its remaining Git record can be removed safely.
+    - lhg-before: its .git file is missing; wt remove lhg-before attempts to restore the link before checking its files. To restore it without removing it, run git -C /code/wts/rusty-biscuit worktree repair /code/wts/lhg-before.
+    ```
+
+    The suggested name is one that `wt remove` resolves to exactly this worktree: its branch, else its directory name. When neither does (another worktree matches the same name, for example), the note says `wt remove` without a name and explains why: `No name selects it for wt remove: feat also matches /code/wts/other.` Names and paths that need it are single-quoted (`wt remove 'my work'`). A value that can't be spelled the same way in bash, zsh, fish, and PowerShell (a leading `-` or `~`, a single quote, two backslashes in a row or a trailing one, a control character) is never offered as something to type: the note names the command and the value separately instead, for example `run git worktree repair from the base checkout, naming /code/wts/it's.` Nothing in a note is ever executed. Names, paths, Git's reasons, and error messages are shown exactly as recorded, whatever characters they hold: text that looks like styling, such as `<red>`, is printed as is.
+
+    A path or command in these notes, and the path in the `--ff` refusal for a worktree Git can't read, is never broken by the wrap, so what you copy is what `wt` means. It moves to the next line whole, and one too long for any line gets a line of its own that your terminal wraps, without an added `-`. In a 60-column terminal:
+
+    ```text
+    - lhg-before: its .git file is missing;
+      wt remove lhg-before  attempts to restore the link
+      before checking its files. To restore it without
+      removing it, run
+      git -C /code/wts/rusty-biscuit worktree repair /code/wts/lhg-before .
+    ```
 
 ## Flags
 
@@ -355,6 +407,7 @@ Waits for the check like `--refresh`, then moves the local default branch to `or
 - when no worktree has the default branch checked out, it updates the branch with a compare-and-swap (`git update-ref`), so a concurrent change makes it refuse
 - when a worktree has it checked out, it runs `git merge --ff-only` there, which refuses rather than overwrite local changes to files the update touches
 - a diverged branch, or a missing local branch or tracking ref, is refused with a note and nothing is created or changed; in sync or ahead does nothing and prints nothing
+- when the worktree holding the default branch is one Git can't read (`✕`), the move is refused rather than made underneath it: `main wasn't fast-forwarded: Git can't read the worktree that has it checked out, /code/wts/main-copy.` `--ff` never repairs that worktree. When the branch is already in sync, there is nothing to refuse and no note
 
 Both refs and their ancestry are read again immediately before the move. The move happens after the listing's local work is done, and a checkout whose files it moved gets its uncommitted-file status measured again; see [Local work during the wait](#local-work-during-the-wait). When the check or fetch failed, `--ff` still fast-forwards to the local `origin/<default>` if that is ahead, and the caption keeps the failure reason, so you know the target may itself be out of date. A refusal does not fail the listing.
 
