@@ -83,6 +83,12 @@ exit marker timed out. Consequences:
   pair.
 - The prompt is the shell's stock `PS1` (`bash-5.3$`, `host%`). Never
   grep a captured frame for a literal the stock prompt contains.
+- Never locate a command's output from its echo. tmux's bash shortens a
+  long command line with a leading `<` instead of wrapping it, so the
+  full echo (or a `bt <subcommand>` anchor) is missing. Print begin/end
+  markers around the command, assembled by `printf` so the echo never
+  spells them out; `biscuit-terminal/cli/tests/common/output_region.rs`
+  is the worked example.
 - The outer shell still runs the login profile, so a profile that
   sources an rc file unconditionally still executes it — but
   non-interactively, in a shell that is then replaced. Anything guarded

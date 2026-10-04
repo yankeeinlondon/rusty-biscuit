@@ -268,7 +268,8 @@ pub trait CodeRenderer {
 - **Markdown** — `render_markdown_node` / `render_markdown_document` with
   `MarkdownRenderOptions` and `MarkdownDialect` (`Markdown` / `MarkdownPlus`).
 - **Browser** — `render_browser_node` / `render_browser_document` with
-  `BrowserRenderOptions` and `RawHtmlPolicy` (`Allow` / `Escape` / `Reject`).
+  `BrowserRenderOptions` and `RawHtmlPolicy` (`Allow` / `Escape` / `Reject`;
+  a comment-only `Html` node renders as nothing under `Escape`/`Reject`).
   `render_browser_document_html(doc, opts)` is the direct `Document` → final
   HTML `String` path: it streams the tree into one buffer (no fragment per
   node) and emits bytes identical to
