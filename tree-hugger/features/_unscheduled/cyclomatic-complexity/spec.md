@@ -2,9 +2,9 @@
 
 ## Problem
 
-Symbol reports carry basic metrics (`lines`, `parameters`, `has_docs`) after
-`2026-10-03-symbol-filters-and-reports`, but no measure of control-flow
-complexity.
+Symbol reports carry basic metrics (`parameters` and `has_docs` after
+`2026-10-03-symbol-filters-and-reports`; `lines` from the unscheduled
+`symbol-type-relations` feature), but no measure of control-flow complexity.
 
 ## What was proposed
 
