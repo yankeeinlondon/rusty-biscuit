@@ -113,7 +113,7 @@ hug lint "src/**/*.rs" --lint-only
 
 When `--json` is selected, output includes v2 schema metadata and pass-aware symbol indexes:
 
-- `schema_version` - active symbol schema version (`2.0`)
+- `schema_version` - active symbol schema version (`3.0`)
 - `root_dir` - the directory scanned
 - `language` - primary language for the run
 - `files` - command-specific v1-compatible `FileSummary` list
@@ -122,7 +122,7 @@ When `--json` is selected, output includes v2 schema metadata and pass-aware sym
 Each `FileSummary` includes:
 
 - `file`, `language`, `hash`
-- `symbols` (for `functions`, `types`, or `symbols`) - each with a `kind` field
+- `symbols` (for `functions`, `types`, or `symbols`) - each with a `kind` field, and a `visibility` field when the access level is known (omitted for Unknown)
 - `imports` (for `imports` and `symbols`)
 - `exports` (for `symbols`)
 - `locals` (for `symbols`)

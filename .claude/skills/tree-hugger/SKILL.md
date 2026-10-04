@@ -59,7 +59,16 @@ file.experimental_semantics = true; // Enable experimental semantic rules
 
 ### SymbolKind Enum
 
-Function, Method, Type, Class, Interface, Enum, Trait, Module, Namespace, Variable, Parameter, Field, Macro, Constant, Unknown
+Function, Method, Constructor, Type, TypeAlias, Class, Interface, Enum, EnumVariant, Trait, Module, Namespace, Variable, Parameter, Field, Property, Macro, Constant, Unknown
+
+Kinds, containers, visibility and both `static` flags are decided once, at
+extraction, from each symbol's declaration node (`file/extract/`:
+`classify.rs`, `declaration.rs`, `rust_impl.rs`, per-language `visibility/`
+and `static_flags/` readers behind one dispatcher each); there is no
+post-conversion kind override. Bump `EXTRACTOR_REVISION` with any change to
+extracted records. See [Query System](./query-system.md#capture-to-symbolkind-mapping).
+
+Access lives on `SymbolInfo::visibility` (`None` = Unknown), not on the signature; `is_static` (member without an instance) and `is_static_storage` (storage/linkage `static`) are separate flags. The v1↔v2 adapter round-trips all of them plus `container_kind`; see [API Reference](./api-reference.md#symbolinfo).
 
 ## Key Architecture
 
@@ -69,7 +78,7 @@ Function, Method, Type, Class, Interface, Enum, Trait, Module, Namespace, Variab
 - **Capture naming**: `@local.definition.<kind>` for symbols, `@diagnostic.<rule-id>` for lint
 - **Query caching**: Global `OnceLock<QueryCache>` for thread-safe caching
 - **Builtin database**: Per-language builtin lists to avoid false positive undefined-symbol/undefined-module errors
-- **Schema v2**: `shared/schema_v2` with facet-based `SymbolRecord` and staged `FileSymbolIndex`
+- **Schema v2 module, schema version 3.0**: `shared/schema_v2` with facet-based `SymbolRecord` and staged `FileSymbolIndex`; records, file indexes, CLI envelopes and analyzer fingerprints emit `SchemaVersion::V3_0` (the module keeps its historical `v2` name)
 - **CLI filters**: `hug <subcommand> <filter...>` with all-files default scan for symbol commands. A pathless scan honors `.gitignore` and skips test-data dirs by default (`**/fixtures/**`, `**/__fixtures__/**`, `**/snapshots/**`, `**/testdata/**`); an explicit path/glob re-includes a targeted file. `lint` scans hide clean files (single-file lint still shows `(no diagnostics)`).
 
 ## Detailed Documentation

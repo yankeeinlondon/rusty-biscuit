@@ -104,37 +104,73 @@ pub struct SymbolInfo {
     pub range: CodeRange,
     pub language: ProgrammingLanguage,
     pub file: PathBuf,
+    pub container_name: Option<String>,
+    pub container_kind: Option<SymbolKind>,
     pub doc_comment: Option<String>,
-    pub signature: Option<FunctionSignature>,    // For functions/methods
+    pub visibility: Option<Visibility>,          // None = Unknown; the only home of a symbol's access level
+    pub is_static: bool,                         // Member usable without an instance
+    pub is_static_storage: bool,                 // Storage/linkage `static` (Rust static, C/C++); never implies is_static
+    pub signature: Option<FunctionSignature>,    // For functions/methods/constructors
     pub type_metadata: Option<TypeMetadata>,     // For types/classes/enums
 }
 ```
+
+The v1 ↔ v2 adapter (`From<SymbolInfo> for SymbolRecord`,
+`TryFrom<SymbolRecord> for SymbolInfo`) is lossless for kind, visibility,
+`is_static` (`Modifier::Static`), `is_static_storage`
+(`Modifier::StaticStorage`) and container kind
+(`IdentityFacet::container_kind`). Every kind/visibility conversion is a
+wildcard-free `match`: adding a variant on one side is a compile error until
+the other side handles it. A converted record is never `is_exported` (export
+comes from declaration syntax, set by `symbol_records()` and the bind pass),
+and a function-like kind always converts back with `Some(signature)`.
+Records, file indexes and analyzer fingerprints carry `SchemaVersion::V3_0`.
+
+Extraction fills the record-only facets in `symbol_records()`:
+`source.declaration_text` (declaration start up to its body, trailing
+whitespace trimmed; keeps `pub(...)`, setter-only modifiers, annotations) and,
+for members of a Rust `impl Trait for Type`, one `relations.implements` entry
+named after the trait's last path segment (`id` only when exactly one trait of
+that name is declared in the file). A Rust `impl` member's container is the
+implemented type's last path segment without generics; its container kind is
+that type's same-file kind, absent when declared elsewhere. Every other
+container kind is the kind extracted for the container's own declaration.
+
+`tree_hugger::EXTRACTOR_REVISION` names the extraction rules; bump it in any
+change that alters extracted records. It is stamped into
+`provenance.extractor_version` (`<crate version>+rev.<revision>`) and the CLI's
+persistent-cache `query_fingerprint`, so a warm cache never serves records
+produced by older rules.
 
 ### SymbolKind
 
 ```rust
 pub enum SymbolKind {
-    Function,   // Regular functions
-    Method,     // Functions with self/this
-    Type,       // Structs, type aliases
-    Class,      // Class definitions
-    Interface,  // Interfaces, protocols
-    Enum,       // Enumerations
-    Trait,      // Traits (Rust, Scala, PHP)
-    Module,     // Modules, namespaces
-    Namespace,  // Package declarations
-    Variable,   // Variables
-    Parameter,  // Function parameters
-    Field,      // Struct/class fields
-    Macro,      // Macro definitions
-    Constant,   // Constants
-    Unknown,    // Unrecognized
+    Function,     // Regular functions
+    Method,       // Functions declared directly in a type/trait/impl body
+    Constructor,  // Constructors / initializers
+    Type,         // Structs, records, unions
+    TypeAlias,    // Type aliases
+    Class,        // Class definitions
+    Interface,    // Interfaces, protocols
+    Enum,         // Enumerations
+    EnumVariant,  // Enum members / cases
+    Trait,        // Traits (Rust, Scala, PHP)
+    Module,       // Modules, namespaces
+    Namespace,    // Package declarations
+    Variable,     // Variables
+    Parameter,    // Function parameters
+    Field,        // Struct/class fields
+    Property,     // Properties (C#, TS/JS class fields)
+    Macro,        // Macro definitions
+    Constant,     // Constants
+    Unknown,      // Unrecognized
 }
 
 impl SymbolKind {
-    fn is_function(&self) -> bool  // Function or Method
-    fn is_type(&self) -> bool      // Type, Class, Interface, Enum, Trait
-    fn is_class(&self) -> bool     // Class only
+    fn is_function(&self) -> bool  // Function, Method or Constructor
+    fn is_type(&self) -> bool      // Type, TypeAlias, Class, Interface, Enum, Trait
+    fn is_class(&self) -> bool     // Class or Type
 }
 ```
 
@@ -144,8 +180,7 @@ impl SymbolKind {
 pub struct FunctionSignature {
     pub parameters: Vec<ParameterInfo>,
     pub return_type: Option<String>,
-    pub visibility: Option<Visibility>,
-    pub is_static: bool,
+    pub is_static: bool,                 // Copy of SymbolInfo::is_static
 }
 
 pub struct ParameterInfo {
@@ -155,11 +190,17 @@ pub struct ParameterInfo {
     pub is_variadic: bool,
 }
 
+// Mirrors v2 VisibilityLevel one-to-one; Unknown is `None`.
 pub enum Visibility {
     Public,
     Protected,
     Private,
-    Internal,
+    Internal,           // C# / Swift `internal`
+    Package,            // Java default, Swift `package`
+    Crate,              // Rust `pub(crate)`
+    ModulePrivate,      // Swift `fileprivate`, C `static` linkage
+    ProtectedInternal,  // C# `protected internal`
+    PrivateProtected,   // C# `private protected`
 }
 ```
 

@@ -59,7 +59,9 @@ The `locals.scm` queries follow nvim-treesitter conventions for capturing symbol
 |---------|------------|
 | `@local.definition.function` | Function |
 | `@local.definition.method` | Method |
+| `@local.definition.constructor` | Constructor |
 | `@local.definition.type` | Type |
+| `@local.definition.type_alias` | TypeAlias |
 | `@local.definition.class` | Class |
 | `@local.definition.interface` | Interface |
 | `@local.definition.enum` | Enum |
@@ -67,11 +69,23 @@ The `locals.scm` queries follow nvim-treesitter conventions for capturing symbol
 | `@local.definition.module` | Module |
 | `@local.definition.namespace` | Namespace |
 | `@local.definition.field` | Field |
-| `@local.definition.variable` | Variable |
+| `@local.definition.property` | Property |
+| `@local.definition.enum_variant` | EnumVariant |
+| `@local.definition.var` (or bare `@local.definition`) | Variable |
 | `@local.definition.parameter` | Parameter |
 | `@local.definition.macro` | Macro |
 | `@local.definition.constant` | Constant |
 | `@local.definition.import` | (imports) |
+
+The capture is only the starting kind. `refine_symbol_kind`
+(`file/extract/classify.rs`) decides the final kind from the declaration node:
+node-kind rules (TS `constructor` → Constructor, class fields → Property,
+`type_alias_declaration` / Rust `type_item` → TypeAlias, Rust `enum_variant` →
+EnumVariant, `mod_item` → Module, `static_item` → Variable) outrank the capture;
+a function declared directly in a class/struct/enum/trait/interface/protocol/
+object/`impl`/extension body becomes Method; a `var` capture becomes Parameter,
+Field or Constant only from the path between the name and its own declaration
+(a Swift `let` in a function body stays Variable).
 
 ### Context Captures
 
@@ -88,7 +102,15 @@ The `.context` capture provides the full AST node for extracting:
 - Function signatures (parameters, return type)
 - Type metadata (fields, variants, generics)
 - Doc comments
-- Visibility modifiers
+- The record's `declaration_span`
+
+Without a context capture, the declaration is found by walking up from the
+name (`resolve_declaration_node`, `file/extract/declaration.rs`) to the
+nearest declaration-like node, never past a body or block. Visibility, static
+flags, signatures, `declaration_text` and the container search all read that
+declaration node, so a capture does not need `.context` to get them. A C/C++
+`function_declarator` context is widened to its enclosing definition or
+declaration, where storage class and access sections live.
 
 ### Query Inheritance
 
