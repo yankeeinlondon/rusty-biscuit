@@ -66,19 +66,28 @@ pub(crate) fn provider_token_variables(flavor: ApiFlavor) -> &'static [&'static 
 
 /// The first set variable of [`provider_token_variables`] as
 /// `(name, value)`, and the variable to name when none is set.
+///
+/// A variable set to the empty string is unset: an empty token is never sent,
+/// and it does not hide a later variable.
 pub(crate) fn provider_token(flavor: ApiFlavor) -> (Option<(&'static str, String)>, &'static str) {
     let names = provider_token_variables(flavor);
     (
         names
             .iter()
-            .find_map(|name| std::env::var(name).ok().map(|token| (*name, token))),
+            .find_map(|name| token_in(name).map(|token| (*name, token))),
         names.first().copied().unwrap_or("PROVIDER_TOKEN"),
     )
 }
 
+/// The host-bound `SNIFF_{PROVIDER}_{HOST}_TOKEN` override and its name; an
+/// empty value is unset, as for [`provider_token`].
 pub(crate) fn host_bound_provider_token(flavor: ApiFlavor, host: &str) -> (Option<String>, String) {
     let variable = host_bound_provider_variable(flavor, host);
-    (std::env::var(&variable).ok(), variable)
+    (token_in(&variable), variable)
+}
+
+fn token_in(variable: &str) -> Option<String> {
+    std::env::var(variable).ok().filter(|token| !token.is_empty())
 }
 
 fn host_bound_provider_variable(flavor: ApiFlavor, host: &str) -> String {

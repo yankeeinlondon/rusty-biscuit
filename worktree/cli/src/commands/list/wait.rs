@@ -20,21 +20,32 @@
 //! budget has not run out; a second such contention is a PR failure too.
 //!
 //! The two results are kept apart, so a timeout caused by one half never
-//! hides the other's. A relaunch (for either half) also runs the other half
-//! again, so each half's result from an earlier launch is retained: a
-//! finished head check, and a PR result the earlier receipt reported. The
-//! replacement's own result supersedes it; a replacement that cannot start,
-//! stops, times out, or exits without a receipt leaves it standing. The core ([`wait`]) is pure over [`WaitEnv`], so tests
-//! script the stores, the receipt, the locks, and the clock.
+//! hides the other's.
+//!
+//! What a successful request was sent with is taken from exactly the
+//! publications the wait accepted: the head attempt it followed (its own or
+//! an adopted one, whatever environment that worker inherited) and the first
+//! new PR publication it saw, read in the same atomic write as the id, so no
+//! receipt is needed for it. A PR success known only from a receipt has
+//! unknown credentials.
+//!
+//! A relaunch (for either half) also runs the other half again, so each
+//! half's result from an earlier launch is retained: a finished head check,
+//! and a PR result the earlier receipt reported. The replacement's own result
+//! supersedes it; a replacement that cannot start, stops, times out, or exits
+//! without a receipt leaves it standing.
+//!
+//! The core ([`wait`]) is pure over [`WaitEnv`], so tests script the stores,
+//! the receipt, the locks, and the clock.
 
 use std::path::{Path, PathBuf};
 use std::process::Child;
 use std::time::{Duration, Instant};
 
 use biscuit_terminal::components::spinner::{Spinner, SpinnerHandle};
-use worktree::pull_requests::{pr_lock_held, stored_publication, unix_now};
+use worktree::pull_requests::{StoredPublication, pr_lock_held, stored_publication, unix_now};
 use worktree::remote_head::{
-    ATTEMPT_MAX_AGE, Attempt, FallbackReason, HeadStatus, Phase, PrFailure, PrStatus, Receipt, StoreState,
+    ATTEMPT_MAX_AGE, Attempt, CredentialEvidence, FallbackReason, HeadStatus, Phase, PrFailure, PrStatus, Receipt, StoreState,
     load_receipt, new_attempt_id, read_store, receipt_path_beside, refresh_lock_held,
 };
 
@@ -104,11 +115,11 @@ pub trait WaitEnv {
     fn head_lock_held(&self) -> bool;
     /// As [`WaitEnv::head_lock_held`], for the PR lock.
     fn pr_lock_held(&self) -> bool;
-    /// The publication id of the usable stored PR answer for the current
-    /// `origin` (`worktree::pull_requests::stored_publication`). It changes
-    /// with every successful write, whereas `fetched_at` can repeat within a
+    /// The usable stored PR answer's publication for the current `origin`
+    /// (`worktree::pull_requests::stored_publication`). Its id changes with
+    /// every successful write, whereas `fetched_at` can repeat within a
     /// second.
-    fn pr_publication(&self) -> Option<String>;
+    fn pr_publication(&self) -> Option<StoredPublication>;
     /// Time since the wait began.
     fn elapsed(&self) -> Duration;
     fn unix_now(&self) -> u64;
@@ -121,6 +132,10 @@ pub trait WaitEnv {
 pub struct WaitEnd {
     pub head: HeadEnd,
     pub prs: PrEnd,
+    /// What the new PR publication this wait accepted was sent with;
+    /// [`CredentialEvidence::Unknown`] when it accepted none (a success
+    /// known only from a receipt included). Never an older answer's.
+    pub pr_credentials: CredentialEvidence,
     /// The budget ran out before both halves had a result.
     pub timed_out: bool,
 }
@@ -190,7 +205,7 @@ fn launch_and_follow(
 ) -> WaitEnd {
     // Read once, before the first launch: any later id is a publication made
     // during this wait, whichever launch caused it.
-    let pr_before = env.pr_publication();
+    let pr_before = env.pr_publication().map(|publication| publication.id);
     let mut follow = Follow {
         request,
         env,
@@ -198,6 +213,7 @@ fn launch_and_follow(
         last: None,
         pr_before,
         pr_published: false,
+        pr_credentials: CredentialEvidence::Unknown,
         pr_retried: false,
         pr_only: false,
         head_retained: None,
@@ -230,6 +246,9 @@ struct Follow<'r, 'e> {
     pr_before: Option<String>,
     /// A new publication was seen; nothing the receipt says undoes that.
     pr_published: bool,
+    /// The credentials of the first new publication seen, read with its id;
+    /// a later publication never replaces them.
+    pr_credentials: CredentialEvidence,
     /// A contended PR half has already cost one relaunch.
     pr_retried: bool,
     /// The spinner was told that only the PR half is left, and no head phase
@@ -321,7 +340,9 @@ impl Follow<'_, '_> {
             };
 
             match (head, prs) {
-                (Some(head), Some(prs)) => return Some(WaitEnd { head, prs, timed_out: false }),
+                (Some(head), Some(prs)) => {
+                    return Some(WaitEnd { head, prs, pr_credentials: self.pr_credentials.clone(), timed_out: false });
+                }
                 (head, prs) => {
                     if head.is_some() && !self.pr_only {
                         // The head's last phase no longer describes the wait.
@@ -337,7 +358,12 @@ impl Follow<'_, '_> {
                         // A holder that published nothing has finished: not pending.
                         let unresolved =
                             if retry { self.pr_unknown() } else { self.pr_retained.clone().unwrap_or(PrEnd::Pending) };
-                        return Some(WaitEnd { head, prs: prs.unwrap_or(unresolved), timed_out: true });
+                        return Some(WaitEnd {
+                            head,
+                            prs: prs.unwrap_or(unresolved),
+                            pr_credentials: self.pr_credentials.clone(),
+                            timed_out: true,
+                        });
                     }
                 }
             }
@@ -350,7 +376,12 @@ impl Follow<'_, '_> {
     /// PR failure.
     fn unavailable(&mut self) -> WaitEnd {
         let prs = if self.published() { PrEnd::Published } else { self.pr_unknown() };
-        WaitEnd { head: self.head_or_retained(HeadEnd::Unavailable), prs, timed_out: false }
+        WaitEnd {
+            head: self.head_or_retained(HeadEnd::Unavailable),
+            prs,
+            pr_credentials: self.pr_credentials.clone(),
+            timed_out: false,
+        }
     }
 
     /// The gate for every replacement launch. The budget is shared, so a
@@ -390,10 +421,15 @@ impl Follow<'_, '_> {
     }
 
     /// A usable publication id other than the one stored before launch.
+    /// The first one seen is the accepted publication: its credentials are
+    /// kept, from the same read as its id.
     fn published(&mut self) -> bool {
-        if !self.pr_published {
-            let now = self.env.pr_publication();
-            self.pr_published = now.is_some() && now != self.pr_before;
+        if !self.pr_published
+            && let Some(publication) = self.env.pr_publication()
+            && Some(&publication.id) != self.pr_before.as_ref()
+        {
+            self.pr_published = true;
+            self.pr_credentials = publication.credentials;
         }
         self.pr_published
     }
@@ -564,7 +600,7 @@ impl WaitEnv for StoreEnv {
         pr_lock_held(&self.pr_store)
     }
 
-    fn pr_publication(&self) -> Option<String> {
+    fn pr_publication(&self) -> Option<StoredPublication> {
         stored_publication(&self.pr_store, &self.origin, unix_now())
     }
 

@@ -5710,7 +5710,7 @@ fn the_ci_documentation_states_the_implemented_behavior() {
         ("CLAUDE.md", "BISCUIT_CI_CONSTRAINTS_DIR"),
         ("CLAUDE.md", "Area groups, package identifies"),
         (".claude/skills/rust-devops/ci-cd.md", "ACCEPTED GAP"),
-        (".claude/skills/os/SKILL.md", "BISCUIT_CI_CONSTRAINTS_DIR"),
+        (".claude/skills/os/ci-evidence.md", "BISCUIT_CI_CONSTRAINTS_DIR"),
         (".claude/skills/os/ci-runners.md", "gate-input identity"),
         // fixes/2026-09-13-cicd-redundancies, Phase 10.
         (".github/ci/README.md", "ci-reporting"),
@@ -5726,7 +5726,7 @@ fn the_ci_documentation_states_the_implemented_behavior() {
         (".claude/skills/rust-devops/ci-cd.md", "change_inventory"),
         (".claude/skills/rust-testing/verification-scope.md", "repo-deps"),
         (
-            ".claude/skills/os/windows.md",
+            ".claude/skills/os/windows-console.md",
             "Attaching a console inside a nextest process",
         ),
         ("docs/dependencies.md", "root Cargo workspace member"),

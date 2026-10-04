@@ -221,9 +221,9 @@ mod tests {
 
     use sniff::remote::blocking::PrUnavailable;
     use worktree::live_remote::GitFailure;
-    use worktree::pull_requests::{CachedPrs, OpenPullRequest, PrRequestError, select_cached};
-    use worktree::remote_head::{Attempt, load_receipt, read_store};
-    use worktree::remote_update::{AttemptEnd, BranchHeadSource, GitRemote};
+    use worktree::pull_requests::{CachedPrs, FetchedPrs, PrRequestError, select_cached};
+    use worktree::remote_head::{Attempt, CredentialEvidence, load_receipt, read_store};
+    use worktree::remote_update::{ApiHead, AttemptEnd, BranchHeadSource, GitRemote};
 
     use super::*;
 
@@ -347,9 +347,9 @@ mod tests {
                 _ => Some("owner/repo".into()),
             }
         }
-        fn fetch(&self) -> Result<Vec<OpenPullRequest>, PrRequestError> {
+        fn fetch(&self) -> Result<FetchedPrs, PrRequestError> {
             match self {
-                Pr::Answer => Ok(Vec::new()),
+                Pr::Answer => Ok(FetchedPrs { pull_requests: Vec::new(), credentials: CredentialEvidence::Anonymous }),
                 Pr::Fail => Err(PrFailure::CredentialsRejected { key: Some("GITHUB_TOKEN".into()) }.into()),
                 Pr::Unsupported => Err(PrRequestError::Unsupported),
             }
@@ -360,11 +360,8 @@ mod tests {
     struct Head(Result<String, PrUnavailable>);
 
     impl BranchHeadSource for Head {
-        fn branch_head(&self, _origin: &str, _branch: &str, _deadline: Duration) -> Result<String, PrUnavailable> {
-            self.0.clone()
-        }
-        fn key_in_use(&self, _origin: &str) -> Option<String> {
-            None
+        fn branch_head(&self, _origin: &str, _branch: &str, _deadline: Duration) -> Result<ApiHead, PrUnavailable> {
+            self.0.clone().map(|sha| ApiHead { sha, credentials: CredentialEvidence::Anonymous })
         }
     }
 
@@ -481,7 +478,7 @@ mod tests {
             fn source_repo(&self) -> Option<String> {
                 Some("owner/repo".into())
             }
-            fn fetch(&self) -> Result<Vec<OpenPullRequest>, PrRequestError> {
+            fn fetch(&self) -> Result<FetchedPrs, PrRequestError> {
                 let _ = self.entered.send(());
                 let _ = self.released.lock().unwrap().recv_timeout(WAIT);
                 Err(PrFailure::Other.into())
@@ -705,9 +702,9 @@ mod tests {
         fn source_repo(&self) -> Option<String> {
             Some("owner/repo".into())
         }
-        fn fetch(&self) -> Result<Vec<OpenPullRequest>, PrRequestError> {
+        fn fetch(&self) -> Result<FetchedPrs, PrRequestError> {
             self.0.fetch_add(1, Ordering::SeqCst);
-            Ok(Vec::new())
+            Ok(FetchedPrs { pull_requests: Vec::new(), credentials: CredentialEvidence::Anonymous })
         }
     }
 

@@ -576,8 +576,10 @@ classification below). Only hosts the URL identifies without a probe are support
 `source_head_sha`.
 
 `remote::blocking::open_pull_requests(remote_url, deadline)` lists every open PR
-against a repository as `PrSummary` records (number, URL, source repository,
-source branch, target branch), on the same runtime, deadline, host support,
+against a repository as `OpenPullRequests { pull_requests, credentials }`: the
+`PrSummary` records (number, URL, source repository, source branch, target
+branch) and the credentials its requests were sent with (see below), on the
+same runtime, deadline, host support,
 and error contract as `pull_request_for_branch`; `open_pull_requests_with`
 takes a prebuilt client. It follows pages up to the focused client's bound and
 reports more than that as an error rather than a truncated list. A 401, 403,
@@ -587,7 +589,7 @@ branch name. A GitLab fork's project path costs one lookup per distinct fork;
 a fork the caller cannot see keeps `source_repo: None`.
 
 `remote::blocking::branch_head(remote_url, branch, deadline)` returns the
-provider's `BranchHead { sha }` for one branch, on the same runtime, deadline,
+provider's `BranchHead { sha, credentials }` for one branch, on the same runtime, deadline,
 host support, and error contract (`branch_head_with` takes a prebuilt client).
 Pass the remote's *fetch* URL. The branch is sent as one percent-encoded path
 segment (GitHub `git/ref/heads/{branch}`, Gitea/Forgejo `branches/{branch}`,
@@ -606,14 +608,37 @@ The blocking lookups classify provider failures as follows. `key` is always the
 | 401 with a token | `CredentialsRejected { key }` |
 | 403 with a token whose body names a missing permission or scope | `CredentialsInsufficient { key }` |
 | 429, or a 403 with `x-ratelimit-remaining: 0` or a rate-limit body | `RateLimited { authenticated, key }` |
-| 404, or any other 403 | `NotFoundOrNotPermitted` |
+| 404, or any other 403 | `NotFoundOrNotPermitted { key }` (`key: None` when sent without a token) |
 
-A token comes from the first set variable that
+A successful `branch_head` or `open_pull_requests` also says what its requests
+were sent with, as `RequestCredentials`: `Anonymous` (every request went
+without a token), `Keyed { variables }` (the variable names that supplied a
+token, never the values), or `Unknown` (nothing is known to have been sent).
+It is recorded by the client for each request as it sends it, so it covers
+every page and auxiliary request of the lookup, includes a host-bound
+`SNIFF_{PROVIDER}_{HOST}_TOKEN` override used by a discovered client, and costs
+no extra request. A paginated answer is `Anonymous` only when every page was;
+one keyed page makes it `Keyed`. A failure's `key` is the variable the failing
+request sent, by the same record.
+
+```rust,ignore
+use sniff::remote::blocking::{branch_head, RequestCredentials};
+
+let head = branch_head("https://github.com/acme/project.git", "main", deadline)?;
+if head.credentials == RequestCredentials::Anonymous {
+    // answered without a key: lower rate limits apply
+}
+```
+
+A token comes from the first set, nonempty variable that
 `remote::blocking::credential_env(remote_url)` lists: GitHub `GH_TOKEN`,
 `GITHUB_TOKEN`; GitLab `GITLAB_TOKEN`, `GITLAB_PRIVATE_TOKEN`; Gitea and Forgejo
 `GITEA_TOKEN`, `FORGEJO_TOKEN`, `CODEBERG_TOKEN`; Bitbucket `BITBUCKET_TOKEN`.
-It returns `None` for a remote the blocking lookups do not support. A rejected
-or insufficient token is reported rather than retried anonymously.
+It returns `None` for a remote the blocking lookups do not support. A variable
+set to the empty string counts as unset everywhere sniff reads a provider token
+(host-bound overrides included): an empty token is never sent and does not
+hide a later variable. A rejected or insufficient token is reported rather than
+retried anonymously.
 
 `filesystem::git::remote_identity(url)` returns a remote URL's raw
 `RemoteIdentity { scheme, host, port, path }`: the host ASCII-lowercased

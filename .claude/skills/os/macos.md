@@ -6,11 +6,15 @@ conditions that masquerade as repository defects.
 
 ## Paths
 
+- APFS on the primary macOS host rejects `U+FDD1` in a filename with
+  "Illegal byte sequence". Git metadata can still record a missing path
+  containing it. Exercise such renderer inputs through a real Git record's
+  `gitdir` text or the public rendering API rather than creating that filename.
 - `/var` and `/tmp` are symlinks into `/private`. A test that compares a
   `tempfile` path with what a child process reports must canonicalize on
   Unix (the `launched_spelling` helper does) or the two spellings differ.
   This is the macOS half of the same trap Windows has with short names
-  ([windows.md](windows.md)).
+  ([windows-paths.md](windows-paths.md)).
 - The same split reaches production code: a launch directory from
   `current_dir()` is physical (`/private/var/…`) while `$HOME` keeps its
   authored spelling (`/var/…`), so a lexical `launch == home` or
@@ -89,6 +93,21 @@ focus-stealing tests could run, and they do not run on CI at all. Details in
 [ci-runners.md](ci-runners.md).
 
 ## Host conditions that look like repo failures
+
+- **A Homebrew upgrade of `libgit2` breaks linking with `ld: library 'git2'
+  not found`.** `libgit2-sys` links the system library when `pkg-config`
+  finds a compatible one, and its build-script output records the versioned
+  Cellar path (`/opt/homebrew/Cellar/libgit2/1.9.4/lib`). After `brew upgrade`
+  moves it (1.9.7 on 2026-10-03), every feature combination whose
+  `libgit2-sys` build predates the upgrade fails to link (for example
+  `cd sniff && just test`, `just check-tier-coverage sniff`), while another
+  combination built later links fine, so it looks like a change-specific
+  failure. Confirm with `grep link-search target/debug/build/libgit2-sys-*/output`.
+  `cargo clean -p libgit2-sys` did **not** help: the rerun build script wrote
+  the same stale path (the cached build under `kache` is the suspect, not
+  proven). Prefixing the command with `LIBGIT2_NO_PKG_CONFIG=1` builds the
+  vendored libgit2 instead and links (one-time C build, about 4 min under
+  load).
 
 - **`CDPATH` sends a relative `cd` from a linked worktree into the main
   checkout.** Agent shells on this host inherit a `CDPATH` that lists

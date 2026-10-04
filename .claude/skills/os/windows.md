@@ -4,171 +4,16 @@ Native Windows is the environment most often broken by code that passed on
 macOS and Linux. Each trap below has bitten a real PR; the fix or the shared
 helper that resolves it is named so it is not re-derived.
 
-## Path spelling
+This page covers processes, the environment, current-directory locks, the
+`windows-latest` leg, and compile evidence from macOS. Two companion pages
+hold the rest:
 
-1. **`std::fs::canonicalize` returns a verbatim `\\?\C:\...` path with long
-   names.** Any such value that crosses a comparison, containment, or
-   reference-grammar boundary breaks: the `?` becomes an extra lexical
-   segment and the finalized reference grammar rejects device-prefix
-   spellings outright. Route through `biscuit_file::canonicalize_simplified`
-   (dunce-backed). Raw `canonicalize` is only safe inside a closed key space
-   that never leaves the process.
-
-   Two concrete instances live in `cargo nextest`'s own argument grammar
-   (found 2026-09-14, `scripts/ci-build-archive.rs`): `--tool-config-file` is
-   split on the colon after the tool name, and `--workspace-remap` is compared
-   against ordinary paths. A verbatim value breaks both. `repo-deps` is the one
-   place that may not reach for `biscuit_file` — the planner calls `ci-build`
-   on every scope calculation, so that binary is deliberately kept to
-   `biscuit-hash` plus `biscuit-terminal` — so it carries a six-line
-   `canonical_path` that strips the prefix for a drive-qualified path under 260
-   characters and leaves a long or UNC one alone. Anywhere else, use
-   `biscuit_file`.
-
-   Git for Windows also rejects a verbatim absolute path passed to
-   `ls-files --exclude-from=`. The include resolver uses
-   `biscuit_file::canonicalize_simplified` for that argument. Raw canonical
-   paths remain inside the copy record's identity comparison.
-   `reflink-copy` reports an unsupported block clone on NTFS as an HRESULT
-   shaped `io::Error` (`0x80070001`, "Incorrect function"), not raw error 1.
-   The worktree copy fallback recognizes that form and byte-copies instead.
-2. **`dirs::home_dir()` on Windows uses the known-folder API and ignores
-   `USERPROFILE` and `HOME`.** Hermetic test homes silently do not apply, so
-   a Windows test reads the machine's real `~/.claudine`. Use
-   `std::env::home_dir()` (un-deprecated, environment-first on Rust ≥ 1.97).
-   Python's `Path.home()` is environment-first but reads `USERPROFILE` on
-   Windows and ignores `HOME` (which native Windows does not set outside Git
-   Bash), so a fixture that relocates the home for a Python tool such as
-   `scripts/ci/constraints.py` must set both `HOME` and `USERPROFILE`; a
-   shell `$HOME` literal is a Unix-only spelling.
-   Claudine's provider overlay still resolves through the known folder, so a
-   Windows launch test names its roots instead: the provider selector (e.g.
-   `CODEX_HOME`) for the source and `CLAUDINE_OVERLAY_DIR` for overlay
-   storage (`level2_provider_overlay_capture.rs`, 2026-09-16).
-   `dirs::cache_dir()` is the same (`%LOCALAPPDATA%` from the known folder),
-   so a Windows test that seeds a cache file writes to the real per-user
-   path, keyed by its temporary repository, and deletes what it seeded
-   (`worktree/cli/tests/perf_support`'s `pr_store`, 2026-09-25).
-3. **GitHub's Windows runner has an 8.3 short-name TEMP (`RUNNER~1`); no
-   developer machine does.** Short-versus-long spelling bugs reproduce only
-   on CI. `current_dir()` reports the spelling it was given; `canonicalize`
-   re-spells to long names. Model "what the child reports": the
-   `launched_spelling` test helper canonicalizes on Unix (for the macOS
-   `/var` symlink) and keeps the raw path on Windows.
-4. **`Path::join("a/b")` keeps the literal `/`.** A native-spelling needle
-   built from it has mixed separators and matches nothing. Re-join through
-   `.components().collect::<PathBuf>()` to normalize.
-5. **Windows temp dirs contain a dot-initial segment (`\.tmpXXXX`).** Any
-   Markdown round-trip that resolves CommonMark backslash escapes will eat
-   the `\` before `.`, `-`, or `_`. Darkmatter's compose Cleanup phase now
-   preserves them; when a Windows-only failure shows a path missing one
-   backslash, suspect Markdown escape handling, not path resolution.
-
-6. **`$PWD` in a `shell: bash` step is an MSYS path; `$RUNNER_TEMP` in the
-   same shell is a Windows one.** Git Bash answers `/d/a/repo/repo` for the
-   checkout and `D:\a\_temp` for the temp directory, and a CI step routinely
-   hands both to native programs. `cargo-nextest`'s `--workspace-remap`,
-   `INSTA_WORKSPACE_ROOT`, and `BISCUIT_JUNIT_*` cannot open the first; MSYS
-   `test`/`mkdir` cope with the second only by conversion. `just _native_path`
-   (`just/devops.just`) answers the one spelling both layers accept —
-   `cygpath -m`, drive-qualified with forward slashes, no verbatim prefix.
-   Measured 2026-09-14 on `build-win-native`: `/w/…/rusty-biscuit` →
-   `W:/…/rusty-biscuit`, `D:\a\_temp/build` → `D:/a/_temp/build`. In CI,
-   `_ci_build_verify` computes it once and publishes it as its `workspace`
-   step output.
-7. **Backslashes do not survive a `just` recipe's `*args` list.** A recipe
-   pastes `{{ args }}` raw into `forwarded=({{ args }})`, so bash word-splits
-   it *and* processes backslash escapes:
-   `--archive-file=C:\Users\ken\…\x.tar.zst` reaches the command as
-   `C:Usersken…x.tar.zst`, and the tool reports a missing file for a path
-   nobody typed. Pass what `just _native_path` answers. A recipe parameter
-   interpolated inside **single quotes** (`'{{ path }}'`) is safe, which is why
-   `_native_path` itself can be handed a native spelling; an array literal is
-   not. `_archive_file_check` refuses an unreadable `--archive-file` and names
-   this hazard rather than letting the mangled value reach nextest.
-8. **A `file://` URI must carry neither the verbatim prefix nor a `\`.**
-   Percent-encoding a canonicalized Windows path yields
-   `file://%5C%5C%3F%5CC:/…`, which no terminal opens, and a drive-absolute
-   path still needs the extra leading `/` that makes `file:///C:/…`. Normalize
-   separators to `/`, strip `\\?\` (mapping `\\?\UNC\server\share` to the URI
-   authority `server/share`), then prefix. Test the spellings as string
-   literals so the macOS and Linux cells cover them too — `fs::canonicalize`
-   only produces the verbatim form on Windows, so a fixture built from it is
-   dead code everywhere else. Found 2026-09-14 in `scripts/drift.rs::file_uri`.
-
-Contract to test against: `ctx.repo_root`, `package_root`,
-`package_area_root`, and `area_root` are portable `/`-separated strings
-without verbatim prefixes on every OS (`biscuit_file::to_portable_string`).
-Compare against that, never against `to_string_lossy()`.
-
-9. **A user-typed path fragment never matches walker output by raw text.**
-   `ignore::Walk` yields native `\` paths; the fragment is whatever was typed,
-   `/` on every platform. Claudine's partial-file and operation-file
-   autocomplete compared them raw and found zero candidates on Windows for
-   every `/`-spelled partial, so the typed "no existing file matched" failure
-   fired where macOS offered the confirmation (found 2026-09-10 by the first
-   native-Windows Level 2 run; `claudine/cli/src/completion/scopes.rs`
-   `path_matches_query`). Compare both sides through `to_portable_string`
-   and normalize `\` in the fragment. The non-interactive Windows tests had
-   passed the whole time — the zero-candidate path and the interaction-denied
-   path produce the same diagnostic — which is why only a real-terminal run
-   on Windows could see it.
-10. **A fixture joined as `root.join("a/b/x.md")` keeps the `/` in the native
-    text.** Ordinary Win32 calls accept it, so most tests pass, but it breaks
-    the two places where `/` is not a separator: a `\\?\` path built from it
-    fails every probe with os error 123 ("filename, directory name, or volume
-    label syntax is incorrect"), and `cmd /C mklink /J` refuses the link.
-    Join name by name (`rel.split('/').fold(root, |p, n| p.join(n))`) in any
-    fixture that feeds a verbatim spelling or `mklink`. Found 2026-10-01 by the
-    `biscuit-file` `portable_path::platform` tests on `build-win-native`.
-11. **A `{{VAR}}` reference whose value is a verbatim path does not resolve.**
-    `FileReference` interpolation concatenates text, so `{{ROOT}}/x.md` with
-    `ROOT=\\?\C:\r` becomes `\\?\C:\r/x.md`, one component under the
-    verbatim prefix. `PortablePath` therefore never writes `{{ROOT}}/…` for
-    such a value (verification rejects it) and falls through to `~` or the
-    absolute path. A test that sets a variable from `fs::canonicalize` must
-    store `to_portable_string(&path)`, the spelling a user would export.
-    Found 2026-10-01 by the Darkmatter `link_normalization` tests.
-12. **A suffix splitter that cuts at `?` cuts a verbatim path at its prefix.**
-    `\\?\C:\…` contains `?`, so treating the first `?` as a URL query turns
-    every verbatim destination into `\\` (not absolute) and silently skips
-    it. Skip the `\\?\` / `//?/` prefix before looking for `#`, `?`, or `:`.
-    Darkmatter's `link_normalization::split_suffix` does; the macOS and Linux
-    legs cannot see it. Found 2026-10-01 on `build-win-native`.
-13. **`PathBuf::push` drops `.` and `..` pushed onto a verbatim buffer**, and
-    `collect::<PathBuf>()` pushes, so rebuilding `\\?\C:\a\..\b` from its
-    components yields `\\?\C:\b`, a different directory (under `\\?\` the
-    dots are literal names). A lexical normalizer that must keep them, such
-    as `biscuit-file`'s `normalize_native`, assembles the result as text.
-    Likewise, never write a `..` loop that calls `Vec::pop` on components:
-    it pops the `RootDir` or drive prefix and makes `/../a` relative.
-    Confirmed 2026-10-01 on `build-win-native`.
-
-## WezTerm on `build-win`
-
-- `~/.wezterm.lua` there `dofile`s the shared config from `X:` and then a UNC
-  path. `X:` is a per-logon mapped drive that no SSH, nextest, or mux-server
-  process has, so every config *evaluation* from those contexts blocks for
-  the SMB connect timeout — measured at 21.2–21.3 s, deterministic, on each
-  `wezterm cli spawn`; Windows negative-caches the failure for well under a
-  minute, so a second spawn seconds later is 0.1 s. `wezterm cli list` does
-  not evaluate the config at all, which is why the harness's availability
-  gate passes and only the spawn times out (15 s `SPAWN_TIMEOUT`).
-  `biscuit-test-harness` now runs every `wezterm` client under an empty
-  `WEZTERM_CONFIG_FILE` unless the caller set one; the mux server keeps its
-  own config. The empty config is a private, uniquely created temporary file
-  retained until that client exits and then removed; creation/write errors
-  propagate rather than selecting an existing shared pathname. Do not "fix"
-  this by raising the timeout.
-- A headless `wezterm-mux-server` reachable through `WEZTERM_UNIX_SOCKET`
-  (`C:\Users\ken\.local\share\wezterm\sock`) is all the Level 2 tier needs
-  there; the twin in `level2_windows_provided_partial_file_capture.rs` passes
-  against it in ~4 s. Never blanket-stop mux servers on that host — one of
-  them may be carrying the session the developer is working in.
-- `cross-check --os windows` runs in an SSH session with no
-  `WEZTERM_UNIX_SOCKET`, so a WezTerm Level 2 test **skips there and nextest
-  prints PASS in ~0.02 s**. Read the duration, or set
-  `BISCUIT_TEST_REQUIRED_BACKENDS=wezterm` so a missing backend fails.
+- [windows-paths.md](windows-paths.md): verbatim `\\?\` paths, 8.3 short
+  names, the home and cache known folders, separators, `file://` URIs,
+  Markdown escapes, junctions and reparse points.
+- [windows-console.md](windows-console.md): WezTerm on `build-win`,
+  PowerShell output and encoding, a windowless ConPTY console for Level 2,
+  and attaching a console inside nextest.
 
 ## Environment and processes
 
@@ -247,22 +92,13 @@ Compare against that, never against `to_string_lossy()`.
   plus the bounded retry above for replace-in-place. Measured on
   build-win-native (NTFS), 2026-09-17; see
   `messenger/features/2026-09-17-research-metadata-pipeline/spikes/publication/findings.md`.
-- **A PowerShell function's output stream is not its return value.** Every
-  native command inside a function writes its stdout into that function's
-  output, so `$code = Invoke-Thing` binds an *array* whose first element is
-  some program's chatter, and `exit $code` reports that. Symptom: a remote run
-  whose tier exited 1 is summarized as a pass (`cross-check --os windows`,
-  build-win-native, 2026-09-14). Assign a `$script:`-scoped variable at every
-  failure point and call the function as `Invoke-Thing | Out-Host`, which keeps
-  the log on the console without binding it. `$LASTEXITCODE` after each native
-  command is still the right check — the bug is in how the result leaves the
-  function, not in how it is read.
 - **Claudine's Ctrl+C on Windows goes through one process-wide
   `SetConsoleCtrlHandler` handler** that accepts `CTRL_C_EVENT` and
   `CTRL_BREAK_EVENT`, and its force-exit rung exits `130` through
   `ExitProcess`. A test can deliver a press either way: `CTRL_BREAK_EVENT`
   to a `CREATE_NEW_PROCESS_GROUP` child, or ETX typed into a pseudoconsole
-  (see the ConPTY section below for the inherited-ignore trap). See the
+  (see the ConPTY section of [windows-console.md](windows-console.md) for the
+  inherited-ignore trap). See the
   claudine skill's `signal-handling.md`, "Windows parity".
 - **The main thread gets a 1 MiB stack, not 8 MiB.** Symptom: a test's
   spawned binary dies with `code=-1073741571` (`0xC00000FD`,
@@ -286,14 +122,6 @@ Compare against that, never against `to_string_lossy()`.
   stderr) and is fixed by `process_group(0)` plus a negative-PID `SIGKILL`.
   Measured on build-win-native, 2026-09-24
   (`worktree/fixes/2026-09-24-ux-improvements/spike-s2.md`).
-- **Windows PowerShell 5.1 re-encodes a native command's captured stdout** with
-  `[Console]::OutputEncoding`, which is the OEM code page (IBM437 on
-  build-win-native). A UTF-8 `café-ü日` arrived as `caf├⌐-├╝µùÑ`. A wrapper
-  that captures a Rust binary's output (`$out = & tool.exe`) must set
-  `[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)` around
-  the call and restore it in `finally`. stdin and stderr stay TTYs while
-  stdout is captured. Measured 2026-09-24 under `ssh -tt`
-  (`worktree/fixes/2026-09-24-ux-improvements/spike-s3.md`).
 
 ## Current-directory locks
 
@@ -342,99 +170,6 @@ is standing in (`worktree/fixes/2026-09-24-ux-improvements`).
   `ping` itself with `current_dir` set and null stdio
   (`worktree/lib/src/remove/mod.rs`, `worktree/cli/tests/powershell_wrapper_exec.rs`,
   2026-09-24).
-
-## A real console without a window: ConPTY
-
-Measured on `build-win-native` on 2026-09-25 through `just cross-check`
-(`worktree/cli/tests/level2_powershell_remove.rs`).
-
-- **A pseudoconsole is a Level 2 console that needs no backend.** `xpty`
-  (already in `Cargo.lock` for `unchained-ai`) opens ConPTY from inside the SSH
-  session's nextest process, with no window and no focus change. Interactive
-  Windows PowerShell 5.1 runs in it with PSReadLine, keystrokes are plain bytes
-  (`\r` for Enter), and a Rust prompt (inquire) sees a terminal. `xpty` leaves
-  out `PSEUDOCONSOLE_INHERIT_CURSOR`, so conhost sends no DSR that the test
-  would have to answer.
-- **The output stream is a repaint, not the text.** PSReadLine's echo of one
-  typed line arrived as `. 'C:\…\s. 'C:\…\sc. 'C:\…\sce…`. Wait for a single
-  word in the stream at most; assert on the console's own screen buffer,
-  which the session can dump with `$Host.UI.RawUI.GetBufferContents` (the
-  Windows counterpart of `tmux capture-pane`).
-- **Index that buffer with `GetValue`.** In a script, `$cells[$y, $x]` on the
-  `BufferCell[,]` it returns failed to parse ("Missing ']' after array index
-  expression"); `$cells.GetValue($y, $x).Character` works.
-- **The screen buffer hard-wraps at the column width, mid-word.** A long
-  error line (a temp path) split as `…': P` / `ermission denied`. Join a
-  full-width row to the next without a space before matching a phrase
-  (`unwrapped` in that test, 2026-09-25).
-- **`build-win-native` checks files out with CRLF** (`core.autocrlf`), so a
-  test that wrote `"guide\n"`, committed it, and read the file back from a
-  `git worktree add` checkout got `"guide\r\n"`. Normalize line endings
-  before comparing checked-out content (2026-09-25).
-- **Ctrl+C typed into a pseudoconsole is ignored unless the child inherits
-  Ctrl+C processing.** Writing ETX (`\x03`) to the ConPTY input makes conhost
-  raise `CTRL_C_EVENT`, as a terminal key press does, but "ignore Ctrl+C"
-  (`SetConsoleCtrlHandler(NULL, TRUE)`) is a process attribute that children
-  inherit, and a process chain under sshd and nextest can carry it. The child
-  then never sees the event, its registered handler is never called, and it
-  runs to completion; `CTRL_BREAK_EVENT` is unaffected, which is why the
-  group-targeted Ctrl+Break tests pass on the same host. Call
-  `SetConsoleCtrlHandler(None, FALSE)` in the test process before spawning,
-  as a terminal launching a shell effectively does
-  (`claudine/cli/tests/l1/lifecycle_message_drain_console_windows.rs`,
-  `build-win-native`, 2026-09-27).
-- **`xpty::CommandBuilder` starts from the parent's environment**, like
-  `std::process::Command`. When copying a `Command` built by a fixture that
-  inherits and only overrides, apply its `get_envs()` on top without
-  `env_clear()`: clearing dropped `PATHEXT`, so `which("claude")` no longer
-  matched `claude.cmd` (2026-09-27).
-- The process's working directory is the one passed to `CommandBuilder::cwd`,
-  so this is also how a test reproduces "a window launched inside the
-  directory" for the current-directory lock above.
-
-## Attaching a console inside a nextest process
-
-`biscuit-tui/cli/tests/level2/windows_captured_stdout.rs` is ordinary `windows-latest`
-**L1** evidence inside `biscuit-tui-cli`'s own cell — not an `#[ignore]`d test
-behind a hand-invoked recipe or workflow. It compiles into the `level2` binary
-because it needs `terminal-tests`, but its test name has no tier marker, so the
-L1 filter selects it there (2026-09-22-consolidated-test-binaries-wave-2, R4).
-Everything below was measured on
-`build-win-native` at the CI thread count (`--test-threads 4`), 2026-09-14.
-
-- **Process-wide handle rewiring is safe only because nextest gives each test
-  its own process.** `AllocConsole` + `SetStdHandle` mutate process state; under
-  `cargo test`'s shared harness they would corrupt every sibling test in the
-  binary. Say so in the test's `//!` docs — it is the reason the tier is L1
-  rather than a serialized L3.
-- **`AllocConsole` returning `ERROR_ACCESS_DENIED` (0x80070005) is the normal
-  path, not a failure.** A console is usually already present, and the API
-  reports that as access denied. Treat "already present or failed" as one state
-  and assert the *precondition you actually need* — `stderr.is_terminal()` and
-  `CONOUT$` openable — instead of the call's return value.
-- **Redirecting a std handle to `CONOUT$` makes everything printed afterwards
-  invisible to nextest.** The line goes to the attached console, not to the
-  harness pipe. Two consequences, both found the hard way: a success diagnostic
-  printed after the redirect never reaches the log (`grep -c` returns 0), and —
-  worse — an assertion that panics *after* the redirect leaves nextest reporting
-  `FAIL` with an empty message. Redirect only the handle the contract requires
-  (stderr here; the stdout redirect was deleted as unnecessary), capture the
-  original handle before redirecting, and restore it the moment the child exits
-  so later failures are reported through the pipe.
-- **The console input buffer queues injected records**, so a written input
-  record survives the child not having started its event loop yet. The 750 ms /
-  250 ms fixed sleeps this test shipped with were covering a measured
-  requirement of **0 ms**: the test's real work is ~45 ms and the sleep *was*
-  its 0.78 s runtime. A bounded readiness loop — 2 s deadline, 25 ms poll,
-  re-inject at 500 ms — replaced them; no passing run has needed the second
-  injection. Keep the loop anyway: it converts a timing assumption into an
-  assertion that fails loudly at its own deadline rather than at nextest's 90 s
-  `ci` termination ceiling, and it kills and reaps the child so the cell reports
-  `FAIL` rather than `LEAK`.
-- Six consecutive clean runs, zero flakes (392 run / 392 passed / 7 skipped).
-  Runs that died in `git fetch` with `ssh: connect to host github.com port 22`
-  are a build-host network fault, not a test result — exclude them rather than
-  counting them as failures.
 
 ## The `windows-latest` leg
 
@@ -486,25 +221,3 @@ because overlapping host-network detections fail-fast the test process
 
 A cross-compile is compile evidence. Behavioral evidence comes from
 `just cross-check <pkg> --os windows` or the `windows-latest` CI leg.
-# Worktree include links and junctions
-
-For `.worktreeinclude` traversal, treat any directory with
-`FILE_ATTRIBUTE_REPARSE_POINT` (`0x400`) as a boundary. A native Windows probe
-created a junction whose attributes were `Directory, ReparsePoint`; Git for
-Windows **traversed it** during `ls-files` and returned a file underneath.
-Check every candidate ancestor, not only the final file. A file
-symlink reported `Archive, ReparsePoint`. `std::os::windows::fs::FileTypeExt`
-distinguishes file and directory symlinks, while
-`std::os::windows::fs::MetadataExt::file_attributes()` exposes the reparse bit
-needed to catch junctions too. Check `symlink_metadata` before entering an
-ancestor. The stable Windows metadata API does not expose file index; do not
-use it as a copy-record registration ID.
-
-The native build host allowed `mklink` to create a file symlink, so it does
-not exercise the denial path. A machine without symlink privilege can return
-Win32 `ERROR_PRIVILEGE_NOT_HELD` (1314); match `raw_os_error() == Some(1314)`
-for the warning-and-skip path instead of assuming a particular Rust
-`ErrorKind`. Developer Mode can permit unprivileged creation. Git reused the
-same worktree admin-directory name after remove, prune, and re-add, but removed
-a marker stored inside the old admin directory. See the runnable
-`worktree/fixes/2026-09-25-worktree-file/spike_windows.ps1` probe.

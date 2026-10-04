@@ -11,6 +11,7 @@ use std::sync::Mutex;
 use crate::cache::{CACHE_FORMAT_VERSION, Cache, CacheKey, CacheValue};
 use crate::fork_origin::ForkOriginStore;
 use crate::git::git_command;
+use crate::pull_requests::unix_now;
 use crate::worktree::WorktreeEntry;
 
 /// Local and remote-tracking branch tips, read with one `git for-each-ref`.
@@ -21,11 +22,15 @@ pub struct RefTips {
     /// Remote-tracking name (`origin/main`) to full SHA. Symbolic `HEAD`
     /// entries are left out.
     pub remote: BTreeMap<String, String>,
+    /// Symbolic remote `HEAD` (`origin/HEAD`) to the remote-tracking name it
+    /// points at (`origin/main`), so its label can follow that name's tip in
+    /// this snapshot.
+    pub remote_heads: BTreeMap<String, String>,
 }
 
 impl RefTips {
     /// The `--format` [`RefTips::parse`] reads.
-    pub const FORMAT: &'static str = "--format=%(objectname) %(refname)";
+    pub const FORMAT: &'static str = "--format=%(objectname) %(refname) %(symref)";
 
     /// Reads every local and remote-tracking branch tip in the current
     /// repository. `None` when git fails, so a failure is never mistaken for
@@ -36,19 +41,23 @@ impl RefTips {
             .map(|output| Self::parse(&output))
     }
 
-    /// Parses `<sha> <full refname>` lines; other lines are skipped.
+    /// Parses `<sha> <full refname> [<symref target>]` lines; other lines are
+    /// skipped.
     pub fn parse(output: &str) -> Self {
         let mut tips = Self::default();
         for line in output.lines() {
-            let Some((sha, refname)) = line.trim().split_once(' ') else {
+            let mut fields = line.split_whitespace();
+            let (Some(sha), Some(refname)) = (fields.next(), fields.next()) else {
                 continue;
             };
             if let Some(branch) = refname.strip_prefix("refs/heads/") {
                 tips.local.insert(branch.to_string(), sha.to_string());
-            } else if let Some(remote) = refname.strip_prefix("refs/remotes/")
-                && !remote.ends_with("/HEAD")
-            {
-                tips.remote.insert(remote.to_string(), sha.to_string());
+            } else if let Some(remote) = refname.strip_prefix("refs/remotes/") {
+                if !remote.ends_with("/HEAD") {
+                    tips.remote.insert(remote.to_string(), sha.to_string());
+                } else if let Some(target) = fields.next().and_then(|target| target.strip_prefix("refs/remotes/")) {
+                    tips.remote_heads.insert(remote.to_string(), target.to_string());
+                }
             }
         }
         tips
@@ -60,6 +69,53 @@ impl RefTips {
 
     pub fn remote(&self, name: &str) -> Option<&str> {
         self.remote.get(name).map(String::as_str)
+    }
+}
+
+/// One ref read: the tips it found, whether `for-each-ref` succeeded, and
+/// when it ran.
+#[derive(Debug, Clone, Default)]
+pub struct RefSnapshot {
+    tips: RefTips,
+    succeeded: bool,
+    read_at: u64,
+}
+
+impl RefSnapshot {
+    /// `tips` is `None` for a failed read; `read_at` is Unix seconds just
+    /// before the read.
+    pub fn new(tips: Option<RefTips>, read_at: u64) -> Self {
+        Self { succeeded: tips.is_some(), tips: tips.unwrap_or_default(), read_at }
+    }
+
+    /// Reads the current repository's tips ([`RefTips::read`]).
+    pub fn read() -> Self {
+        let read_at = unix_now();
+        Self::new(RefTips::read(), read_at)
+    }
+
+    /// The tips read; empty when the read failed.
+    pub fn tips(&self) -> &RefTips {
+        &self.tips
+    }
+
+    /// `for-each-ref` succeeded, so a branch missing from [`Self::tips`] is
+    /// deleted.
+    pub fn succeeded(&self) -> bool {
+        self.succeeded
+    }
+
+    /// Unix seconds just before the read.
+    pub fn read_at(&self) -> u64 {
+        self.read_at
+    }
+
+    /// Both reads succeeded and found the same complete local,
+    /// remote-tracking, and remote `HEAD` maps, so an addition or deletion
+    /// counts as a change. A failed read is not an empty repository: it
+    /// matches nothing, not even itself.
+    pub fn matches(&self, other: &Self) -> bool {
+        self.succeeded && other.succeeded && self.tips == other.tips
     }
 }
 
@@ -452,6 +508,7 @@ mod tests {
             head_sha: Some("a1b2c3d4e5f60718293a4b5c6d7e8f9012345678".to_string()),
             is_main,
             is_current: false,
+            prunable: None,
         }
     }
 
@@ -710,6 +767,40 @@ malformed
         assert_eq!(tips.remote("origin/HEAD"), None);
         assert_eq!(tips.local.len(), 2);
         assert_eq!(tips.remote.len(), 1);
+    }
+
+    #[test]
+    fn ref_tips_record_where_a_symbolic_remote_head_points() {
+        let output = "\
+3333333333333333333333333333333333333333 refs/remotes/origin/HEAD refs/remotes/origin/main
+3333333333333333333333333333333333333333 refs/remotes/origin/main 
+";
+        let tips = RefTips::parse(output);
+        assert_eq!(tips.remote_heads.get("origin/HEAD").map(String::as_str), Some("origin/main"));
+        assert_eq!(tips.remote("origin/HEAD"), None, "the symbolic name is never a tip of its own");
+    }
+
+    #[test]
+    fn only_two_successful_reads_of_equal_maps_match() {
+        let tips = |output: &str| Some(RefTips::parse(output));
+        let base = "1111111111111111111111111111111111111111 refs/heads/main\n\
+                    1111111111111111111111111111111111111111 refs/remotes/origin/main\n";
+        let advanced = "1111111111111111111111111111111111111111 refs/heads/main\n\
+                        2222222222222222222222222222222222222222 refs/remotes/origin/main\n";
+        let added = format!("{base}3333333333333333333333333333333333333333 refs/remotes/origin/feat\n");
+        let deleted = "1111111111111111111111111111111111111111 refs/heads/main\n";
+        let initial = RefSnapshot::new(tips(base), 1);
+
+        assert!(initial.matches(&RefSnapshot::new(tips(base), 2)), "same maps, later read");
+        for (changed, label) in [(advanced, "advance"), (added.as_str(), "addition"), (deleted, "deletion")] {
+            assert!(!initial.matches(&RefSnapshot::new(tips(changed), 2)), "{label}");
+        }
+        let failed = RefSnapshot::new(None, 2);
+        assert!(!failed.succeeded() && failed.tips() == &RefTips::default());
+        assert!(!initial.matches(&failed) && !failed.matches(&initial), "a failed final or initial read");
+        assert!(!failed.matches(&failed.clone()), "two failed reads are not two empty repositories");
+        let empty = RefSnapshot::new(tips(""), 2);
+        assert!(empty.matches(&RefSnapshot::new(tips(""), 3)), "an empty repository read twice is unchanged");
     }
 
     #[test]
@@ -974,6 +1065,207 @@ mod repo_tests {
         let store = crate::fork_origin::ForkOriginStore::load_from(&fork_origin_path(&repo.path()).unwrap());
         assert!(store.get("gone").is_none(), "the deleted branch's record was pruned");
         assert_eq!(store.get("fix/during-the-wait").map(|origin| origin.base_branch.as_str()), Some("main"));
+    }
+
+    /// A copy record for a worktree that no longer exists, which a commit
+    /// prunes. Returns its path.
+    fn stale_copy_record(repo: &TestRepo) -> PathBuf {
+        let gone = repo.path().with_file_name("removed-worktree");
+        let record = crate::copy_record::CopyRecord {
+            format_version: 1,
+            worktree: gone.clone(),
+            admin_dir: gone.join("admin"),
+            registration: "nonce".into(),
+            source: repo.path(),
+            source_label: "main".into(),
+            files: Vec::new(),
+        };
+        let path = crate::copy_record::record_path(&repo.path(), &gone).unwrap();
+        crate::copy_record::write_atomic(&path, &record).unwrap();
+        path
+    }
+
+    fn cached(repo: &TestRepo, target: &str, branch: &str) -> bool {
+        let cache = crate::cache::Cache::load_or_default_from(&crate::cache::cache_path(&repo.path()).unwrap());
+        cache
+            .get(&CacheKey { target_tip_sha: target.into(), branch_tip_sha: branch.into(), version: CACHE_FORMAT_VERSION })
+            .is_some()
+    }
+
+    /// `wt list` gathers while the worker may still fetch, and may discard
+    /// that gather. Nothing is persisted until the accepted one is committed,
+    /// and the cache then keeps the discarded gather's comparisons too.
+    #[test]
+    #[serial_test::serial]
+    fn gathers_persist_nothing_until_one_commit_that_keeps_every_comparison() {
+        let repo = TestRepo::with_origin();
+        let _stores = stores(&repo);
+        let copy_record = stale_copy_record(&repo);
+        let _guard = DirGuard::enter(&repo.path());
+        let feature = repo.add_worktree("fix/x", "fix-x", "main");
+        repo.commit_in(&feature, "fix.txt");
+        fork(&repo, "gone", "main", 4);
+        let cache_file = crate::cache::cache_path(&repo.path()).unwrap();
+        let forks = || crate::fork_origin::ForkOriginStore::load_from(&fork_origin_path(&repo.path()).unwrap());
+
+        let mut list = crate::worktree::parse_worktree_state().unwrap();
+        let initial = list.ref_snapshot().clone();
+        let cache = list.load_comparison_cache();
+        let (dirty, first) = list.gather_local(initial.tips(), &cache);
+        let initial_origin = repo.sha("origin/main");
+        assert_eq!(first.caption.as_ref().map(Caption::state), Some(CaptionState::InSync));
+
+        // The fetch lands after the first gather.
+        repo.push_commit_to_origin("main", "upstream.txt");
+        repo.git(&["fetch", "-q", "origin"]);
+        let after = RefSnapshot::read();
+        assert!(!initial.matches(&after));
+        let last = list.gather_ref_facts(after.tips(), &cache);
+        assert!(!cache_file.exists(), "no gather saves the cache");
+        assert!(forks().get("gone").is_some(), "no gather prunes fork records");
+        assert!(copy_record.exists(), "no gather prunes copy records");
+
+        list.commit(after, dirty, last, cache);
+
+        assert_eq!(caption_state(&list), Some(CaptionState::Behind(1)), "the committed gather is the final one");
+        assert!(forks().get("gone").is_none(), "pruned by the commit");
+        assert!(!copy_record.exists(), "pruned by the commit");
+        let feature_tip = repo.sha("fix/x");
+        assert!(cached(&repo, &initial_origin, &feature_tip), "the discarded gather's comparison is kept");
+        assert!(cached(&repo, &repo.sha("origin/main"), &feature_tip), "and the final one's");
+    }
+
+    /// The cache one listing shares between its gathers seeds the final one:
+    /// unchanged tips are not compared again. A comparison that fails is
+    /// left out of that cache and out of the file the commit saves.
+    #[test]
+    #[serial_test::serial]
+    fn the_shared_cache_seeds_the_final_gather_and_never_holds_a_failure() {
+        let repo = TestRepo::with_origin();
+        let _stores = stores(&repo);
+        let _guard = DirGuard::enter(&repo.path());
+        let feature = repo.add_worktree("fix/x", "fix-x", "main");
+        repo.commit_in(&feature, "fix.txt");
+        let missing = "0".repeat(40);
+        let compares = |calls: &[Vec<String>]| {
+            recorder::count_matching(calls, |args| {
+                matches!(args.first().map(String::as_str), Some("rev-list" | "merge-tree"))
+            })
+        };
+
+        let mut list = crate::worktree::parse_worktree_state().unwrap();
+        let initial = list.ref_snapshot().clone();
+        let mut broken = initial.tips().clone();
+        broken.local.insert("fix/x".into(), missing.clone());
+        let cache = list.load_comparison_cache();
+        let (dirty, first) = list.gather_local(initial.tips(), &cache);
+        assert!(comparisons_of(&first, "fix/x").target.is_some());
+
+        let failed = list.gather_ref_facts(&broken, &cache);
+        assert_eq!(comparisons_of(&failed, "fix/x").target, None, "an object the repository lacks");
+        let failed_key = CacheKey { target_tip_sha: repo.sha("main"), branch_tip_sha: missing.clone(), version: CACHE_FORMAT_VERSION };
+        assert!(cache.lock().unwrap().get(&failed_key).is_none(), "a failed comparison is not cached in memory");
+
+        recorder::start_recording();
+        let last = list.gather_ref_facts(initial.tips(), &cache);
+        let calls = recorder::finish_recording();
+        assert_eq!(compares(&calls), 0, "the final gather reuses the first one's comparisons: {calls:?}");
+        assert_eq!(comparisons_of(&last, "fix/x").target, comparisons_of(&first, "fix/x").target);
+
+        list.commit(initial, dirty, last, cache);
+        assert!(cached(&repo, &repo.sha("main"), &repo.sha("fix/x")), "the comparison is saved");
+        assert!(!cached(&repo, &repo.sha("main"), &missing), "and the failure is not");
+    }
+
+    fn comparisons_of<'a>(facts: &'a crate::worktree::RefFacts, branch: &str) -> &'a crate::listing::BranchComparisons {
+        facts.comparisons.get(branch).unwrap_or_else(|| panic!("no comparison for {branch}"))
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn a_commit_after_a_failed_ref_read_never_prunes_fork_records() {
+        let repo = TestRepo::new();
+        let _stores = stores(&repo);
+        let _guard = DirGuard::enter(&repo.path());
+        fork(&repo, "gone", "main", 4);
+
+        let mut list = crate::worktree::parse_worktree_state().unwrap();
+        let cache = list.load_comparison_cache();
+        let failed = RefSnapshot::new(None, crate::pull_requests::unix_now());
+        let (dirty, facts) = list.gather_local(failed.tips(), &cache);
+        list.commit(failed, dirty, facts, cache);
+
+        let store = crate::fork_origin::ForkOriginStore::load_from(&fork_origin_path(&repo.path()).unwrap());
+        assert!(store.get("gone").is_some(), "an empty failed read would make every record look deleted");
+        assert!(!list.ref_snapshot().succeeded());
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn a_dirtiness_refresh_measures_only_the_named_checkout_again() {
+        let repo = TestRepo::new();
+        let _stores = stores(&repo);
+        let _guard = DirGuard::enter(&repo.path());
+        let feature = repo.add_worktree("fix/x", "fix-x", "main");
+        let mut list = list_worktrees().unwrap();
+        let status_of = |list: &WorktreeList, path: &Path| {
+            list.statuses.iter().find(|status| fs::canonicalize(&status.entry.path).unwrap() == fs::canonicalize(path).unwrap()).unwrap().dirty
+        };
+        fs::write(repo.path().join("main.rs"), "fn main() {}\n").unwrap();
+        fs::write(feature.join("feature.rs"), "fn f() {}\n").unwrap();
+        let main_entry = list.entries().iter().find(|entry| entry.is_main).unwrap().path.clone();
+
+        recorder::start_recording();
+        assert!(list.refresh_dirty_status(&main_entry));
+        let calls = recorder::finish_recording();
+
+        assert_eq!(calls.iter().filter(|args| args.iter().any(|arg| arg == "status")).count(), 1, "{calls:?}");
+        assert_eq!(status_of(&list, &repo.path()), crate::worktree::DirtyStatus::DirtySource);
+        assert_eq!(status_of(&list, &feature), crate::worktree::DirtyStatus::Clean, "not measured again");
+        assert!(!list.refresh_dirty_status(&repo.path().join("not-a-worktree")));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn prunable_entries_are_unknown_and_never_run_git_status() {
+        use crate::availability::Availability;
+        use crate::worktree::DirtyStatus;
+
+        let repo = TestRepo::new();
+        let _stores = stores(&repo);
+        let _guard = DirGuard::enter(&repo.path());
+        let healthy = repo.add_worktree("feat/healthy", "healthy", "main");
+        let missing = repo.add_worktree("feat/missing", "missing", "main");
+        let unlinked = repo.add_worktree("feat/unlinked", "unlinked", "main");
+        fs::write(healthy.join("dirty.rs"), "fn f() {}\n").unwrap();
+        fs::remove_dir_all(&missing).unwrap();
+        fs::remove_file(unlinked.join(".git")).unwrap();
+
+        recorder::start_recording();
+        let mut list = list_worktrees().unwrap();
+        let calls = recorder::finish_recording();
+
+        let status_calls = calls.iter().filter(|args| args.iter().any(|arg| arg == "status")).count();
+        assert_eq!(status_calls, 2, "one status for the main checkout and one for the healthy worktree: {calls:?}");
+        for forbidden in ["repair", "prune", "remove"] {
+            assert!(!calls.iter().any(|args| args.iter().any(|arg| arg == forbidden)), "listing ran {forbidden}: {calls:?}");
+        }
+        let by_name = |list: &WorktreeList, name: &str| {
+            let status = list.statuses.iter().find(|status| status.entry.path.file_name() == Some(name.as_ref())).unwrap();
+            (status.dirty, status.availability.clone())
+        };
+        assert_eq!(by_name(&list, "repo"), (DirtyStatus::Clean, Availability::Healthy));
+        assert_eq!(by_name(&list, "healthy"), (DirtyStatus::DirtySource, Availability::Healthy));
+        assert_eq!(by_name(&list, "missing"), (DirtyStatus::Unknown, Availability::Missing));
+        assert_eq!(by_name(&list, "unlinked"), (DirtyStatus::Unknown, Availability::Unlinked));
+        assert!(unlinked.is_dir() && !unlinked.join(".git").exists(), "listing changes nothing on disk");
+        assert!(list.comparisons.contains_key("feat/unlinked"), "branch comparisons still come from refs");
+
+        let unlinked_entry = list.entries().iter().find(|entry| entry.path.file_name() == Some("unlinked".as_ref())).unwrap().path.clone();
+        recorder::start_recording();
+        assert!(list.refresh_dirty_status(&unlinked_entry));
+        assert!(recorder::finish_recording().is_empty(), "a refresh of a prunable entry runs no git");
+        assert_eq!(by_name(&list, "unlinked").0, DirtyStatus::Unknown);
     }
 
     #[test]

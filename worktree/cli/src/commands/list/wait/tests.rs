@@ -7,8 +7,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use worktree::pull_requests::StoredPublication;
 use worktree::remote_head::{
-    Attempt, CheckFailure, FallbackReason, FetchFailure, HeadStatus, Outcome, Phase, PrFailure, PrStatus, Receipt, StoreState,
+    Attempt, CheckFailure, CredentialEvidence, FallbackReason, FetchFailure, HeadStatus, Outcome, Phase, PrFailure, PrStatus, Receipt, StoreState,
 };
 
 use super::*;
@@ -80,6 +81,8 @@ struct Fake {
     head_lock: Script<bool>,
     pr_lock: Script<bool>,
     pr_answer: Script<Option<&'static str>>,
+    /// What each scripted publication id's request was sent with.
+    pr_evidence: Box<dyn Fn(&str) -> CredentialEvidence>,
     ids: RefCell<Vec<&'static str>>,
     /// Head-lock probes made while a worker of ours was still running.
     early_probes: Cell<usize>,
@@ -104,6 +107,7 @@ impl Fake {
             head_lock: Box::new(|_| false),
             pr_lock: Box::new(|_| false),
             pr_answer: Box::new(|_| None),
+            pr_evidence: Box::new(|_| CredentialEvidence::Unknown),
             ids: RefCell::new(vec![OURS, SECOND]),
             early_probes: Cell::new(0),
             pr_probes: RefCell::new(Vec::new()),
@@ -147,6 +151,12 @@ impl Fake {
         self.pr_answer = Box::new(publication);
         self
     }
+
+    /// The credentials stored with each publication id.
+    fn pr_evidence(mut self, evidence: impl Fn(&str) -> CredentialEvidence + 'static) -> Self {
+        self.pr_evidence = Box::new(evidence);
+        self
+    }
 }
 
 impl WaitEnv for Fake {
@@ -177,10 +187,11 @@ impl WaitEnv for Fake {
         }
     }
 
-    fn pr_publication(&self) -> Option<String> {
+    fn pr_publication(&self) -> Option<StoredPublication> {
         match &self.real_prs {
             Some((store, origin)) => stored_publication(store, origin, unix_now()),
-            None => (self.pr_answer)(now()).map(str::to_string),
+            None => (self.pr_answer)(now())
+                .map(|id| StoredPublication { id: id.to_string(), credentials: (self.pr_evidence)(id) }),
         }
     }
 
@@ -239,11 +250,11 @@ fn receipt_at(at: Duration, prs: PrStatus) -> impl Fn(Duration, &Attempt) -> Opt
 }
 
 fn ended(head: HeadEnd, prs: PrEnd) -> WaitEnd {
-    WaitEnd { head, prs, timed_out: false }
+    WaitEnd { head, prs, pr_credentials: CredentialEvidence::Unknown, timed_out: false }
 }
 
 fn timed_out(head: HeadEnd, prs: PrEnd) -> WaitEnd {
-    WaitEnd { head, prs, timed_out: true }
+    WaitEnd { head, prs, pr_credentials: CredentialEvidence::Unknown, timed_out: true }
 }
 
 fn other() -> PrEnd {
@@ -423,6 +434,93 @@ fn a_worker_that_exits_without_a_receipt_keeps_a_new_publication() {
     let (end, _, _) = run(&fake, false, launching);
 
     assert_eq!(end, ended(in_sync(OURS), PrEnd::Published), "a first answer into an empty store counts");
+}
+
+// Credentials of the accepted publication.
+
+fn keyed() -> CredentialEvidence {
+    CredentialEvidence::Keyed { variables: vec!["GH_TOKEN".into()] }
+}
+
+#[test]
+fn a_publication_before_the_receipt_carries_its_own_credentials() {
+    // No receipt ever arrives: the publication alone ends the PR half.
+    let fake = Fake::new(|_| with(attempt(OURS, Phase::Checking, Some(Outcome::InSync))))
+        .pr_answer(|t| Some(if t < ms(100) { SEEDED } else { PUBLISHED }))
+        .pr_evidence(|id| if id == PUBLISHED { CredentialEvidence::Anonymous } else { keyed() });
+
+    let (end, _, at) = run(&fake, false, launching);
+
+    let expected = WaitEnd { pr_credentials: CredentialEvidence::Anonymous, ..ended(in_sync(OURS), PrEnd::Published) };
+    assert_eq!(end, expected);
+    assert!(at < ms(200), "no wait for the receipt: {at:?}");
+}
+
+#[test]
+fn an_older_cached_answers_credentials_are_never_borrowed() {
+    // The answer stored before launch was anonymous; this run's success is
+    // known only from its receipt, with no new publication to read.
+    let fake = Fake::new(|_| with(attempt(OURS, Phase::Checking, Some(Outcome::InSync))))
+        .pr_answer(|_| Some(SEEDED))
+        .pr_evidence(|_| CredentialEvidence::Anonymous)
+        .receipts(receipt_at(ms(100), PrStatus::Ok))
+        .exits(&[Some(ms(100))]);
+
+    let (end, _, _) = run(&fake, false, launching);
+
+    assert_eq!(end, ended(in_sync(OURS), PrEnd::Published), "unknown credentials, never the cached answer's");
+}
+
+#[test]
+fn a_later_publication_never_replaces_the_accepted_ones_credentials() {
+    // The head finishes after both publications, so the wait polls past the
+    // second one.
+    const LATER: &str = "1a7e0000000000000000000000000000";
+    let fake = Fake::new(|t| with(attempt(OURS, Phase::Checking, (t >= ms(400)).then_some(Outcome::InSync))))
+        .pr_answer(|t| {
+            Some(match t {
+                t if t < ms(100) => SEEDED,
+                t if t < ms(200) => PUBLISHED,
+                _ => LATER,
+            })
+        })
+        .pr_evidence(|id| if id == PUBLISHED { CredentialEvidence::Anonymous } else { keyed() });
+
+    let (end, _, at) = run(&fake, false, launching);
+
+    assert!(at >= ms(400), "{at:?}");
+    let expected = WaitEnd { pr_credentials: CredentialEvidence::Anonymous, ..ended(in_sync(OURS), PrEnd::Published) };
+    assert_eq!(end, expected);
+}
+
+#[test]
+fn a_publication_seen_at_the_timeout_keeps_its_credentials_without_extending_the_budget() {
+    let fake = Fake::new(|_| with(attempt(OURS, Phase::Fetching, None)))
+        .pr_answer(|t| Some(if t < ms(500) { SEEDED } else { PUBLISHED }))
+        .pr_evidence(|id| if id == PUBLISHED { CredentialEvidence::Anonymous } else { keyed() });
+
+    let (end, _, at) = run(&fake, false, launching);
+
+    assert!(within_the_budget(at, ORDINARY_BUDGET), "{at:?}");
+    let head = HeadEnd::Running { last: Some(attempt(OURS, Phase::Fetching, None)) };
+    assert_eq!(end, WaitEnd { pr_credentials: CredentialEvidence::Anonymous, ..timed_out(head, PrEnd::Published) });
+}
+
+#[test]
+fn an_adopted_attempt_carries_the_credentials_its_own_worker_recorded() {
+    // Another run's worker (another environment) answered keyed; ours
+    // never recorded an attempt and its receipt says the head was adopted.
+    let theirs = Attempt { credentials: keyed(), ..attempt(OTHER, Phase::Checking, None) };
+    let finished_theirs = Attempt { outcome: Some(Outcome::InSync), ..theirs.clone() };
+    let fake = Fake::new(move |t| with(if t < ms(300) { theirs.clone() } else { finished_theirs.clone() }))
+        .head_lock(|t| t < ms(300))
+        .receipts(|t, _| (t >= ms(50)).then(|| receipt(OURS, HeadStatus::AdoptedElsewhere, PrStatus::Ok)))
+        .exits(&[Some(ms(50))]);
+
+    let (end, _, _) = run(&fake, false, launching);
+
+    let HeadEnd::Finished(followed) = &end.head else { panic!("{end:?}") };
+    assert_eq!((followed.id.as_str(), &followed.credentials), (OTHER, &keyed()));
 }
 
 #[test]
@@ -1138,7 +1236,9 @@ fn a_finished_heads_phase_gives_way_to_updating_while_prs_are_pending_on_every_r
 mod stored_prs {
     use std::process::Command;
 
-    use worktree::pull_requests::{OpenPrSource, OpenPullRequest, PrRequestError, RefreshOutcome, origin_digest, refresh};
+    use worktree::pull_requests::{
+        FetchedPrs, OpenPrSource, OpenPullRequest, PrRequestError, RefreshOutcome, origin_digest, refresh,
+    };
 
     use super::*;
 
@@ -1198,15 +1298,17 @@ mod stored_prs {
         fn source_repo(&self) -> Option<String> {
             Some("owner/repo".into())
         }
-        fn fetch(&self) -> Result<Vec<OpenPullRequest>, PrRequestError> {
-            self.0.clone().map_err(PrRequestError::from).map(|number| {
-                vec![OpenPullRequest {
+        /// An anonymous answer, as from a holder with no key.
+        fn fetch(&self) -> Result<FetchedPrs, PrRequestError> {
+            self.0.clone().map_err(PrRequestError::from).map(|number| FetchedPrs {
+                pull_requests: vec![OpenPullRequest {
                     number,
                     url: None,
                     source_repo: Some("owner/repo".into()),
                     source_branch: "feat".into(),
                     target_branch: "main".into(),
-                }]
+                }],
+                credentials: CredentialEvidence::Anonymous,
             })
         }
     }
@@ -1242,7 +1344,9 @@ fn a_contending_holders_real_refresh_is_followed_by_its_publication_id() {
 
         let (end, _, _) = run(&fake, force, stored_prs::holder_answers);
 
-        assert_eq!(end, ended(in_sync(OURS), PrEnd::Published), "force: {force}");
+        // The holder's anonymous request is the accepted publication's.
+        let expected = WaitEnd { pr_credentials: CredentialEvidence::Anonymous, ..ended(in_sync(OURS), PrEnd::Published) };
+        assert_eq!(end, expected, "force: {force}");
         assert_eq!(launches().len(), 1, "the holder's answer needs no second request");
     }
 }
@@ -1694,7 +1798,12 @@ fn overlapping_forced_runs_each_read_their_own_receipt() {
     };
     assert_eq!(a.prs, PrEnd::Failed(overlapping_runs::credentials_rejected()));
     assert!(
-        super::super::credential_line(overlapping_runs::ORIGIN, None, Some(&overlapping_runs::credentials_rejected()))
+        super::super::credential_line(
+            overlapping_runs::ORIGIN,
+            None,
+            Some(&overlapping_runs::credentials_rejected()),
+            false
+        )
             .is_some(),
         "run A still gets its PR failure line"
     );

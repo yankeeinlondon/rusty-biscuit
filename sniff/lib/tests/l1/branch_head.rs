@@ -10,14 +10,15 @@ use serde_json::{Value, json};
 use serial_test::serial;
 use sniff::filesystem::git::ApiFlavor;
 use sniff::remote::blocking::{
-    BranchHead, CredentialEnv, PrUnavailable, branch_head, branch_head_with, credential_env,
+    BranchHead, CredentialEnv, PrUnavailable, RequestCredentials, branch_head, branch_head_with,
+    credential_env,
 };
 use test_toolkit::EnvGuard;
 use wiremock::matchers::{method, path_regex};
 use wiremock::{Mock, ResponseTemplate};
 
 use super::pr_for_branch::{
-    FLAVORS, Provider, SECRET, SHA, check_credential_cases, without_tokens,
+    FLAVORS, Provider, SECRET, SHA, check_credential_cases, token_variable, without_tokens,
 };
 
 const SHA256: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -86,7 +87,8 @@ fn each_provider_reports_its_own_sha_field() {
             assert_eq!(
                 head,
                 Ok(BranchHead {
-                    sha: sha.to_string()
+                    sha: sha.to_string(),
+                    credentials: RequestCredentials::Anonymous,
                 }),
                 "{flavor:?}"
             );
@@ -326,4 +328,196 @@ fn credential_env_lists_each_providers_variables_in_lookup_order() {
     ] {
         assert_eq!(credential_env(url), expected, "{url}");
     }
+}
+
+#[test]
+#[serial]
+fn a_success_reports_the_provider_token_variable_its_request_sent() {
+    let _tokens = without_tokens();
+    for flavor in FLAVORS {
+        let variable = token_variable(flavor);
+        let _token = EnvGuard::set_safe(variable, SECRET);
+        let provider = Provider::start(flavor);
+        provider.serve_head(SHA);
+
+        let head = provider.head("feature").expect("an answer");
+
+        assert_eq!(
+            head.credentials,
+            RequestCredentials::Keyed {
+                variables: vec![variable.to_string()]
+            },
+            "{flavor:?}"
+        );
+        assert!(!format!("{head:?}").contains(SECRET), "{flavor:?}");
+        assert_eq!(provider.received_requests().len(), 1, "{flavor:?}: no extra request");
+    }
+}
+
+#[test]
+#[serial]
+fn a_success_without_a_token_reports_an_anonymous_request() {
+    let _tokens = without_tokens();
+    for flavor in FLAVORS {
+        let provider = Provider::start(flavor);
+        provider.serve_head(SHA);
+
+        let head = provider.head("feature").expect("an answer");
+
+        assert_eq!(head.credentials, RequestCredentials::Anonymous, "{flavor:?}");
+        assert_eq!(provider.received_requests().len(), 1, "{flavor:?}");
+    }
+}
+
+#[test]
+#[serial]
+fn an_empty_variable_is_unset_for_both_the_request_and_its_credentials() {
+    let _tokens = without_tokens();
+    let _empty = EnvGuard::set_safe("GH_TOKEN", "");
+    let provider = Provider::start(ApiFlavor::GitHub);
+    provider.serve_head(SHA);
+
+    let head = provider.head("feature").expect("an answer");
+
+    assert_eq!(head.credentials, RequestCredentials::Anonymous);
+    assert!(!provider.received_requests()[0].headers.contains_key("authorization"));
+
+    // An empty first candidate does not hide the next one.
+    let _second = EnvGuard::set_safe("GITHUB_TOKEN", SECRET);
+    let provider = Provider::start(ApiFlavor::GitHub);
+    provider.serve_head(SHA);
+
+    let head = provider.head("feature").expect("an answer");
+
+    assert_eq!(
+        head.credentials,
+        RequestCredentials::Keyed {
+            variables: vec!["GITHUB_TOKEN".to_string()]
+        }
+    );
+    let authorization = provider.received_requests()[0]
+        .headers
+        .get("authorization")
+        .map(|value| value.to_str().unwrap().to_string());
+    assert_eq!(authorization, Some(format!("Bearer {SECRET}")));
+}
+
+/// A self-hosted Gitea found by discovery: its client sends only the
+/// host-bound `SNIFF_GITEA_{host}_TOKEN`, whatever `GITEA_TOKEN` holds.
+struct DiscoveredGitea {
+    runtime: tokio::runtime::Runtime,
+    server: wiremock::MockServer,
+    _repository: tempfile::TempDir,
+    client: sniff::remote::FocusedProviderClient,
+}
+
+const HOST_VARIABLE: &str = "SNIFF_GITEA_127_2E_0_2E_0_2E_1_TOKEN";
+
+impl DiscoveredGitea {
+    /// `branch` answers `status` (200 carries `SHA`).
+    fn start(status: u16) -> Self {
+        use biscuit_file::FetchPolicy;
+        use wiremock::matchers::path;
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("fixture runtime");
+        let server = runtime.block_on(wiremock::MockServer::start());
+        let mount = |mock: Mock| runtime.block_on(mock.mount(&server));
+        mount(
+            Mock::given(method("GET"))
+                .and(path("/api/v1/version"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({"version": "1.25.0"}))),
+        );
+        mount(
+            Mock::given(method("GET"))
+                .and(path("/api/v1/repos/acme/project/branches/main"))
+                .respond_with(
+                    ResponseTemplate::new(status).set_body_json(head_body(ApiFlavor::Gitea, SHA)),
+                ),
+        );
+        let repository = tempfile::tempdir().unwrap();
+        git2::Repository::init(repository.path())
+            .unwrap()
+            .remote("origin", &format!("{}/acme/project.git", server.uri()))
+            .unwrap();
+        let resolved = sniff::filesystem::git::resolve_remote_at(repository.path(), None)
+            .unwrap()
+            .expect("remote resolved");
+        let client = runtime
+            .block_on(sniff::remote::FocusedProviderClient::discover(
+                resolved,
+                FetchPolicy::deny_all().allow_host("127.0.0.1"),
+            ))
+            .expect("discovered");
+        assert_eq!(client.remote().api_flavor, ApiFlavor::Gitea);
+        Self {
+            runtime,
+            server,
+            _repository: repository,
+            client,
+        }
+    }
+
+    fn branch_requests(&self) -> Vec<wiremock::Request> {
+        self.runtime
+            .block_on(self.server.received_requests())
+            .unwrap()
+            .into_iter()
+            .filter(|request| request.url.path().contains("/branches/"))
+            .collect()
+    }
+}
+
+#[test]
+#[serial]
+fn a_host_bound_token_is_the_selection_reported_for_success_and_404() {
+    let _tokens = without_tokens();
+    let _host = EnvGuard::remove_safe(HOST_VARIABLE);
+    let _global = EnvGuard::set_safe("GITEA_TOKEN", "sniff-test-global-token");
+    let _host_token = EnvGuard::set_safe(HOST_VARIABLE, SECRET);
+
+    let gitea = DiscoveredGitea::start(200);
+    let head = branch_head_with(&gitea.client, "main", Duration::from_secs(5)).expect("an answer");
+    assert_eq!(
+        head.credentials,
+        RequestCredentials::Keyed {
+            variables: vec![HOST_VARIABLE.to_string()]
+        }
+    );
+    let requests = gitea.branch_requests();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0].headers["authorization"].to_str().unwrap(),
+        format!("token {SECRET}")
+    );
+
+    let gitea = DiscoveredGitea::start(404);
+    let error = branch_head_with(&gitea.client, "main", Duration::from_secs(5)).expect_err("404");
+    assert!(
+        matches!(&error, PrUnavailable::NotFoundOrNotPermitted { key: Some(key), .. } if key == HOST_VARIABLE),
+        "{error:?}"
+    );
+    assert!(!format!("{error:?} {error}").contains(SECRET));
+}
+
+#[test]
+#[serial]
+fn an_empty_host_bound_token_leaves_a_discovered_request_anonymous() {
+    let _tokens = without_tokens();
+    let _host_token = EnvGuard::set_safe(HOST_VARIABLE, "");
+
+    let gitea = DiscoveredGitea::start(200);
+    let head = branch_head_with(&gitea.client, "main", Duration::from_secs(5)).expect("an answer");
+
+    assert_eq!(head.credentials, RequestCredentials::Anonymous);
+    assert!(!gitea.branch_requests()[0].headers.contains_key("authorization"));
+
+    let gitea = DiscoveredGitea::start(404);
+    let error = branch_head_with(&gitea.client, "main", Duration::from_secs(5)).expect_err("404");
+    assert!(
+        matches!(error, PrUnavailable::NotFoundOrNotPermitted { key: None, .. }),
+        "{error:?}"
+    );
 }

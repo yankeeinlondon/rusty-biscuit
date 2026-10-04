@@ -12,11 +12,13 @@
 //! Contracts:
 //!
 //! - The file is `<repo hash>.remote-head.json` beside the comparison cache
-//!   (see [`crate::cache::repo_cache_file`]). Format 2 holds two independent
+//!   (see [`crate::cache::repo_cache_file`]). Format 3 holds two independent
 //!   halves, `answer` and `attempt`, each bound to the [`origin_digest`] of
 //!   `origin`'s exact URL and to the default branch. The URL itself is never
 //!   stored or logged. A format-1 file (a bare answer) reads as an `answer`
-//!   from [`AnswerSource::Git`] with no attempt.
+//!   from [`AnswerSource::Git`] with no attempt. A format-2 file keeps its
+//!   `answer` and loses its `attempt`, which cannot say which credentials its
+//!   API check was sent with ([`Attempt::credentials`]).
 //! - Each half is validated on its own: an invalid half is dropped and the
 //!   other is kept. Only an unreadable document or an unknown
 //!   `format_version` loses both. A discarded attempt never touches `answer`,
@@ -52,10 +54,15 @@ use crate::live_remote::is_object_id;
 use crate::pull_requests::{FRESHNESS_WINDOW, origin_digest};
 use crate::strict_json;
 
-pub const REMOTE_HEAD_FORMAT_VERSION: u32 = 2;
+/// Format 3 added [`Attempt::credentials`].
+pub const REMOTE_HEAD_FORMAT_VERSION: u32 = 3;
 
 /// The bare-answer format, still read so an upgrade keeps its evidence.
 const LEGACY_FORMAT_VERSION: u64 = 1;
+
+/// The format before attempt credentials: its answer is kept, its attempt
+/// dropped.
+const ATTEMPTLESS_FORMAT_VERSION: u64 = 2;
 
 pub const RECEIPT_FORMAT_VERSION: u32 = 1;
 
@@ -194,6 +201,51 @@ impl ApiNote {
     }
 }
 
+/// Which credentials a successful provider API request was sent with, as the
+/// worker recorded it from sniff's own selection for that request.
+///
+/// Serialized as `{"state": "anonymous"}`,
+/// `{"state": "keyed", "variables": ["GITHUB_TOKEN"]}`, or
+/// `{"state": "unknown"}`. Only names are stored, never token values. Only
+/// [`CredentialEvidence::Anonymous`] may ever be shown as a keyless answer:
+/// `unknown` is what a record that predates the evidence, or an attempt
+/// whose API check did not succeed, carries.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "kebab-case")]
+pub enum CredentialEvidence {
+    /// Every request was sent without a token.
+    Anonymous,
+    /// At least one request carried a token from these variables (never
+    /// empty).
+    Keyed { variables: Vec<String> },
+    /// Nothing is known about what was sent.
+    Unknown,
+}
+
+impl CredentialEvidence {
+    /// What sniff reported for a successful lookup.
+    pub fn from_sniff(credentials: &sniff::remote::blocking::RequestCredentials) -> Self {
+        use sniff::remote::blocking::RequestCredentials;
+        match credentials {
+            RequestCredentials::Anonymous => Self::Anonymous,
+            RequestCredentials::Keyed { variables } => Self::Keyed { variables: variables.clone() },
+            // `Unknown`, and any state a later sniff adds: nothing to claim.
+            _ => Self::Unknown,
+        }
+    }
+
+    /// A `keyed` state names at least one variable, and every name is an
+    /// upper-case variable name, as every variable sniff reads is, so nothing
+    /// shaped like a token (`ghp_…` is mixed case) is ever stored.
+    pub(crate) fn is_valid(&self) -> bool {
+        let credential_variable = |name: &str| is_variable_name(name) && !name.bytes().any(|b| b.is_ascii_lowercase());
+        match self {
+            Self::Keyed { variables } => !variables.is_empty() && variables.iter().all(|name| credential_variable(name)),
+            Self::Anonymous | Self::Unknown => true,
+        }
+    }
+}
+
 /// One worker's refresh, from its first write to its outcome.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Attempt {
@@ -209,12 +261,28 @@ pub struct Attempt {
     pub outcome: Option<Outcome>,
     #[serde(deserialize_with = "Option::deserialize")]
     pub api: Option<ApiNote>,
+    /// The credentials of the check's successful API request, recorded as
+    /// it succeeds and kept through the fetch, its failure, or its timeout.
+    /// [`CredentialEvidence::Unknown`] until then, and for a check the API
+    /// did not answer. Required: an attempt without it is dropped, never
+    /// read as anonymous.
+    #[serde(deserialize_with = "strict_json::nested")]
+    pub credentials: CredentialEvidence,
 }
 
 impl Attempt {
     /// A new attempt in phase [`Phase::Checking`], with no outcome yet.
     pub fn begin(id: String, origin_digest: String, branch: String, started_at: u64) -> Self {
-        Self { id, origin_digest, branch, started_at, phase: Phase::Checking, outcome: None, api: None }
+        Self {
+            id,
+            origin_digest,
+            branch,
+            started_at,
+            phase: Phase::Checking,
+            outcome: None,
+            api: None,
+            credentials: CredentialEvidence::Unknown,
+        }
     }
 
     fn is_valid(&self) -> bool {
@@ -222,6 +290,7 @@ impl Attempt {
             && !self.origin_digest.is_empty()
             && !self.branch.is_empty()
             && self.api.as_ref().is_none_or(ApiNote::is_valid)
+            && self.credentials.is_valid()
     }
 
     /// Whether the attempt still speaks for `origin_digest` and `branch` at
@@ -447,6 +516,9 @@ pub fn read_store(store: &Path) -> StoreState {
     };
     match document.get::<u64>("format_version") {
         Some(LEGACY_FORMAT_VERSION) => StoreState { answer: document.into_value().and_then(legacy_answer), attempt: None },
+        Some(ATTEMPTLESS_FORMAT_VERSION) => {
+            StoreState { answer: document.get::<Answer>("answer").filter(Answer::is_valid), attempt: None }
+        }
         Some(version) if version == u64::from(REMOTE_HEAD_FORMAT_VERSION) => StoreState {
             answer: document.get::<Answer>("answer").filter(Answer::is_valid),
             attempt: document.get::<Attempt>("attempt").filter(Attempt::is_valid),
@@ -486,6 +558,21 @@ pub fn begin_attempt(store: &Path, attempt: &Attempt) -> Result<(), WorktreeErro
 /// Fails without writing when the stored attempt is not `id`.
 pub fn set_phase(store: &Path, id: &str, phase: Phase, api: Option<ApiNote>) -> Result<(), WorktreeError> {
     update_attempt(store, id, api, |attempt| attempt.phase = phase)
+}
+
+/// Records the credentials attempt `id`'s successful API check was sent
+/// with. Every later write of the attempt keeps them. Call with the lock
+/// held.
+///
+/// ## Errors
+///
+/// Fails without writing when the stored attempt is not `id`, or
+/// `credentials` holds anything but variable names.
+pub fn set_credentials(store: &Path, id: &str, credentials: CredentialEvidence) -> Result<(), WorktreeError> {
+    if !credentials.is_valid() {
+        return Err(invalid("invalid request credentials"));
+    }
+    update_attempt(store, id, None, |attempt| attempt.credentials = credentials)
 }
 
 /// Records attempt `id`'s outcome, keeping its phase as last reached. `api`
@@ -947,21 +1034,57 @@ mod tests {
 
         let started = Attempt::begin(ID.into(), expected.origin_digest.clone(), "main".into(), NOW + 5);
         begin_attempt(&store(&repo), &started).unwrap();
-        assert_eq!(raw_json(&store(&repo))["format_version"], 2);
+        assert_eq!(raw_json(&store(&repo))["format_version"], 3);
         assert_eq!(read_store(&store(&repo)), StoreState { answer: Some(expected), attempt: Some(started) });
         assert_eq!(select(&repo, NOW + 1), CachedRemoteHead::Fresh(head(Some(SHA), NOW)));
     }
 
     #[test]
+    fn a_format_2_file_keeps_its_answer_and_drops_its_attempt() {
+        let (_dir, store) = seeded_store();
+        let mut format_2 = raw_json(&store);
+        format_2["format_version"] = serde_json::json!(2);
+        format_2["attempt"].as_object_mut().unwrap().remove("credentials");
+        write_raw(&store, &format_2);
+        let expected = read_store(&store);
+        assert_eq!(expected.attempt, None, "a format-2 attempt cannot say what its check was sent with");
+        assert_eq!(expected.answer, Some(answer(Some(SHA), NOW, AnswerSource::Git)), "its answer is kept");
+
+        // With the field a format-3 writer adds, it is still format 2.
+        format_2["attempt"]["credentials"] = serde_json::json!({ "state": "anonymous" });
+        write_raw(&store, &format_2);
+        assert_eq!(read_store(&store), expected);
+    }
+
+    #[test]
+    fn credentials_survive_every_later_write_of_the_attempt_and_never_hold_a_value() {
+        let (_dir, store) = seeded_store();
+        let keyed = CredentialEvidence::Keyed { variables: vec!["SNIFF_GITHUB_GIT_2E_EXAMPLE_TOKEN".into()] };
+        set_credentials(&store, ID, keyed.clone()).unwrap();
+        set_phase(&store, ID, Phase::Fetching, None).unwrap();
+        publish_answer(&store, &answer(Some(SHA), NOW + 1, AnswerSource::Fetch)).unwrap();
+        finish_attempt(&store, ID, Outcome::FetchFailed { reason: FetchFailure::Timeout }, None).unwrap();
+        assert_eq!(read_store(&store).attempt.map(|attempt| attempt.credentials), Some(keyed.clone()));
+
+        let before = fs::read(&store).unwrap();
+        for variables in [vec!["ghp_sentinelValueThatMustNeverBeStored".to_string()], vec!["A B".into()], Vec::new()] {
+            assert!(set_credentials(&store, ID, CredentialEvidence::Keyed { variables }).is_err());
+        }
+        assert!(set_credentials(&store, OTHER_ID, CredentialEvidence::Anonymous).is_err(), "another attempt's");
+        assert_eq!(fs::read(&store).unwrap(), before, "refused without writing");
+    }
+
+    #[test]
     fn the_store_round_trips_with_its_documented_spellings() {
         let (_dir, store) = seeded_store();
+        set_credentials(&store, ID, CredentialEvidence::Keyed { variables: vec!["GH_TOKEN".into()] }).unwrap();
         set_phase(&store, ID, Phase::CheckingFallback { reason: FallbackReason::RateLimited }, Some(note())).unwrap();
         finish_attempt(&store, ID, Outcome::FetchFailed { reason: FetchFailure::Timeout }, None).unwrap();
 
         assert_eq!(
             raw_json(&store),
             serde_json::json!({
-                "format_version": 2,
+                "format_version": 3,
                 "answer": {
                     "origin_digest": DIGEST, "branch": "main", "sha": SHA,
                     "checked_at": NOW, "source": "git",
@@ -975,9 +1098,14 @@ mod tests {
                         "key": "GITHUB_TOKEN",
                         "fallback_answered": true,
                     },
+                    "credentials": { "state": "keyed", "variables": ["GH_TOKEN"] },
                 },
             })
         );
+        set_credentials(&store, ID, CredentialEvidence::Anonymous).unwrap();
+        assert_eq!(raw_json(&store)["attempt"]["credentials"], serde_json::json!({ "state": "anonymous" }));
+        set_credentials(&store, ID, CredentialEvidence::Unknown).unwrap();
+        assert_eq!(raw_json(&store)["attempt"]["credentials"], serde_json::json!({ "state": "unknown" }));
 
         // Read, write, read: stable in value and in bytes.
         let first = read_store(&store);
@@ -1143,7 +1271,7 @@ mod tests {
         }
 
         // Only an unreadable document or an unknown format loses both halves.
-        for version in [serde_json::json!(3), serde_json::json!("2")] {
+        for version in [serde_json::json!(4), serde_json::json!("3")] {
             let mut document = valid.clone();
             document["format_version"] = version;
             write_raw(&store, &document);
@@ -1275,10 +1403,12 @@ mod tests {
         let answered = Answer { origin_digest: digest.clone(), ..answer(Some(SHA), NOW, AnswerSource::Git) };
         publish_answer(&store, &answered).unwrap();
         begin_attempt(&store, &Attempt { origin_digest: digest.clone(), ..attempt(NOW) }).unwrap();
+        set_credentials(&store, ID, CredentialEvidence::Anonymous).unwrap();
         set_phase(&store, ID, Phase::CheckingFallback { reason: FallbackReason::RateLimited }, Some(note())).unwrap();
         finish_attempt(&store, ID, Outcome::FetchFailed { reason: FetchFailure::Timeout }, None).unwrap();
         let written = raw_json(&store);
         let control = read_store(&store).attempt.expect("the written attempt");
+        assert_eq!(control.credentials, CredentialEvidence::Anonymous, "control: the writers kept the credentials");
         let read = |bytes: &[u8]| {
             fs::write(&store, bytes).unwrap();
             (
@@ -1293,7 +1423,7 @@ mod tests {
         let mut cells: Vec<(JsonEdit, bool, AttemptExpect)> = Vec::new();
         // Every field: absent, `[]`, `{}`, a wrong whole type, and a repeated
         // key spoil the half that holds it.
-        let fields: [(&str, Value); 20] = [
+        let fields: [(&str, Value); 23] = [
             ("/answer/origin_digest", json!(1)),
             ("/answer/branch", json!(1)),
             ("/answer/sha", json!(1)),
@@ -1314,6 +1444,9 @@ mod tests {
             ("/attempt/api/condition/kind", json!(3)),
             ("/attempt/api/condition/authenticated", json!("false")),
             ("/attempt/api/fallback_answered", json!("true")),
+            ("/attempt/credentials", json!("anonymous")),
+            ("/attempt/credentials/state", json!(0)),
+            ("/attempt/credentials/state", json!("keyless")),
         ];
         for (pointer, wrong) in fields {
             let in_answer = pointer.starts_with("/answer");
@@ -1346,6 +1479,8 @@ mod tests {
             "/attempt/api/condition/kind",
             "/attempt/api/condition/authenticated",
             "/attempt/api/fallback_answered",
+            "/attempt/credentials",
+            "/attempt/credentials/state",
         ] {
             let in_answer = pointer.starts_with("/answer");
             cells.push((set(pointer, Some(Value::Null)), !in_answer, if in_answer { Kept } else { Dropped }));
@@ -1358,6 +1493,38 @@ mod tests {
             cells.push((set("/attempt/api/key", shape), true, Dropped));
         }
         cells.push((Dup("/attempt/api/key".into()), true, Dropped));
+        // `credentials`: a bad shape drops the attempt and keeps the answer;
+        // it is never read as anonymous.
+        for shape in [
+            json!({ "state": "keyed" }),
+            json!({ "state": "keyed", "variables": null }),
+            json!({ "state": "keyed", "variables": "GH_TOKEN" }),
+            json!({ "state": "keyed", "variables": {} }),
+            json!({ "state": "keyed", "variables": [] }),
+            json!({ "state": "keyed", "variables": ["GH_TOKEN", 1] }),
+            json!({ "state": "keyed", "variables": [1] }),
+            json!({ "state": "keyed", "variables": [1, null] }),
+            json!({ "state": "keyed", "variables": ["GH TOKEN"] }),
+            json!({ "state": "keyed", "variables": [""] }),
+            json!({ "state": "keyed", "variables": ["ghp_looksLikeAToken123"] }),
+        ] {
+            cells.push((set("/attempt/credentials", Some(shape)), true, Dropped));
+        }
+        cells.push((
+            set("/attempt/credentials", Some(json!({ "state": "keyed", "variables": ["GH_TOKEN", "GITHUB_TOKEN"] }))),
+            true,
+            Changed(|attempt| {
+                attempt.credentials = CredentialEvidence::Keyed { variables: vec!["GH_TOKEN".into(), "GITHUB_TOKEN".into()] };
+            }),
+        ));
+        cells.push((
+            set("/attempt/credentials", Some(json!({ "state": "unknown" }))),
+            true,
+            Changed(|attempt| attempt.credentials = CredentialEvidence::Unknown),
+        ));
+        cells.push((set("/attempt/credentials/extra", Some(json!(1))), true, Kept));
+        // Format 2 keeps its answer and loses its attempt, credentials or not.
+        cells.push((set("/format_version", Some(json!(2))), true, Dropped));
         // Empty strings: an empty binding or id is invalid.
         for pointer in ["/answer/origin_digest", "/answer/branch", "/answer/sha", "/answer/source"] {
             cells.push((set(pointer, Some(json!(""))), false, Kept));
@@ -1380,7 +1547,7 @@ mod tests {
         cells.push((set("/attempt", Some(Value::Null)), true, Dropped));
         cells.push((set("/answer", Some(json!([]))), false, Kept));
         cells.push((set("/attempt", Some(json!(1))), true, Dropped));
-        for shape in [None, Some(Value::Null), Some(json!("2")), Some(json!([])), Some(json!({})), Some(json!(3))] {
+        for shape in [None, Some(Value::Null), Some(json!("3")), Some(json!([])), Some(json!({})), Some(json!(4))] {
             cells.push((set("/format_version", shape), false, Dropped));
         }
         for pointer in ["/format_version", "/answer", "/attempt"] {

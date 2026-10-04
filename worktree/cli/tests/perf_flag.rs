@@ -1,9 +1,15 @@
 //! Integration tests for the `wt list --perf` runtime performance report.
 
+mod perf_support;
+
 use predicates::prelude::*;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
+use std::time::Duration;
+
+use perf_support::{FakeGitea, GiteaReply, MixedFixture, PerfRow, WorkerReaper, perf_rows, stage_from_perf};
+use serial_test::serial;
 
 fn temp_repo() -> tempfile::TempDir {
     let dir = tempfile::tempdir().expect("create temp dir");
@@ -138,4 +144,114 @@ fn list_perf_error_path_emits_no_report() {
         .failure()
         .stdout(predicate::str::is_empty())
         .stderr(predicate::str::contains("Performance").not());
+}
+
+/// The shape `wt list --perf` renders for a listing with remote work: the
+/// group's label contains its first child's.
+const NESTED: &str = "\
+\u{1b}[33m▌\u{1b}[0m \u{1b}[1mPerformance\u{1b}[0m                      330.0ms  100%
+\u{1b}[33m▌\u{1b}[0m ├─ pr gather                       11.7ms    4%
+\u{1b}[33m▌\u{1b}[0m ├─ remote wait ‖ local gather     300.2ms   91%
+\u{1b}[33m▌\u{1b}[0m │  ├─ remote wait                 290.1ms     —
+\u{1b}[33m▌\u{1b}[0m │  ├─ pr reread                     0.3ms     —
+\u{1b}[33m▌\u{1b}[0m │  ├─ list gather                 150.0ms     —
+\u{1b}[33m▌\u{1b}[0m │  └─ graph gather                175.0ms     —
+\u{1b}[33m▌\u{1b}[0m ├─ table render                     0.5ms   \u{1b}[2m<1%\u{1b}[0m
+\u{1b}[33m▌\u{1b}[0m └─ unattributed                    17.6ms    5%
+";
+
+#[test]
+fn the_stage_reader_picks_the_nested_child_never_the_group_containing_its_name() {
+    assert_eq!(stage_from_perf(NESTED, "remote wait"), Some(Duration::from_micros(290_100)));
+    assert_eq!(stage_from_perf(NESTED, "remote wait ‖ local gather"), Some(Duration::from_micros(300_200)));
+    assert_eq!(stage_from_perf(NESTED, "list gather"), Some(Duration::from_micros(150_000)));
+    assert_eq!(stage_from_perf(NESTED, "gather"), None, "labels match whole, never as substrings");
+}
+
+#[test]
+fn report_rows_carry_their_depth() {
+    let shape: Vec<_> = perf_rows(NESTED).into_iter().map(|row| (row.depth, row.label)).collect();
+    let expected = [
+        (0, "Performance"),
+        (1, "pr gather"),
+        (1, "remote wait ‖ local gather"),
+        (2, "remote wait"),
+        (2, "pr reread"),
+        (2, "list gather"),
+        (2, "graph gather"),
+        (1, "table render"),
+        (1, "unattributed"),
+    ];
+    assert_eq!(shape, expected.map(|(depth, label)| (depth, label.to_string())));
+}
+
+/// A real local-only report: one `local gather` group whose children are the
+/// overlapping gathers, no `remote wait` row, and top-level rows that add up
+/// to the total (within the report's display rounding).
+#[test]
+fn list_perf_reports_a_local_only_group_that_reconciles() {
+    let repo = temp_repo();
+
+    let output = assert_cmd::Command::cargo_bin("wt")
+        .unwrap()
+        .current_dir(repo.path())
+        .args(["list", "--perf"])
+        .output()
+        .expect("wt list --perf runs");
+    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    let rows = perf_rows(&stderr);
+    assert_eq!(group_children(&rows, "local gather"), ["list gather"], "{rows:#?}");
+    assert!(rows.iter().all(|row| row.label != "remote wait"), "no remote work, no remote wait row: {rows:#?}");
+    assert!(stage_from_perf(&stderr, "list gather").is_some());
+    assert_top_level_reconciles(&rows);
+}
+
+/// Asserts that the report's top-level rows add up to its total, within the
+/// report's display rounding (each value is rounded to a tenth of its unit).
+fn assert_top_level_reconciles(rows: &[PerfRow]) {
+    let root = rows.iter().find(|row| row.depth == 0).expect("root row").duration;
+    let top_level: Vec<&PerfRow> = rows.iter().filter(|row| row.depth == 1).collect();
+    assert_eq!(top_level.last().map(|row| row.label.as_str()), Some("unattributed"), "{rows:#?}");
+    let sum: Duration = top_level.iter().map(|row| row.duration).sum();
+    let rounding = |d: Duration| if d >= Duration::from_secs(1) { Duration::from_millis(50) } else { Duration::from_micros(50) };
+    let slack: Duration = top_level.iter().map(|row| rounding(row.duration)).sum::<Duration>() + rounding(root);
+    assert!(sum.abs_diff(root) <= slack, "top-level rows {sum:?} vs total {root:?}: {rows:#?}");
+}
+
+/// The children of the top-level group labeled `group`, in report order.
+fn group_children<'a>(rows: &'a [PerfRow], group: &str) -> Vec<&'a str> {
+    let at = rows.iter().position(|row| row.label == group).unwrap_or_else(|| panic!("no `{group}` row: {rows:#?}"));
+    assert_eq!(rows[at].depth, 1, "{rows:#?}");
+    rows[at + 1..].iter().take_while(|row| row.depth == 2).map(|row| row.label.as_str()).collect()
+}
+
+/// A real report with remote work, from the shipped renderer: the wait and
+/// the local gather sit under one `remote wait ‖ local gather` group, the
+/// post-wait PR read is its `pr reread` child, `pr gather` stays a top-level
+/// row, nothing is regathered when no ref moved, and the stage reader finds
+/// each child by its own name rather than the group containing it.
+#[test]
+#[serial]
+fn list_perf_reports_the_remote_group_from_the_real_renderer() {
+    let fixture = MixedFixture::new().with_gitea_origin();
+    let gitea = FakeGitea::new(GiteaReply::Open(vec![]));
+    let _reaper = WorkerReaper::new(&fixture, &gitea);
+
+    let output = fixture.wt_command_via_gitea(&gitea).args(["list", "--perf"]).output().expect("wt list --perf runs");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
+
+    let rows = perf_rows(&stderr);
+    assert_eq!(group_children(&rows, "remote wait ‖ local gather"), ["remote wait", "pr reread", "list gather"]);
+    let top_level: Vec<&str> = rows.iter().filter(|row| row.depth == 1).map(|row| row.label.as_str()).collect();
+    assert!(top_level.contains(&"pr gather"), "{rows:#?}");
+    for absent in ["local gather", "regather", "fast-forward", "checkout status refresh"] {
+        assert!(!top_level.contains(&absent), "`{absent}` without its cause: {rows:#?}");
+    }
+    let group = stage_from_perf(&stderr, "remote wait ‖ local gather").expect("group row");
+    let wait = stage_from_perf(&stderr, "remote wait").expect("remote wait child");
+    assert!(wait <= group, "the group spans its wait: {wait:?} > {group:?}");
+    assert_top_level_reconciles(&rows);
 }

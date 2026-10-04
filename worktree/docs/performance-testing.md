@@ -32,7 +32,7 @@ The second owned cost center is graph data collection in [`worktree/cli/src/comm
 - Every stored answer is bound to a digest of the exact `git remote get-url origin` value, so every run pays that one git call before it may show stored badges.
 - The worker's PR half asks whenever it wins the nonblocking lock beside the store, whatever the stored answer's age, under a 10 s deadline (`REFRESH_DEADLINE`). A contender makes no request, so overlapping listings keep at most one PR request in flight. A failure is never stored, and a repository in `~/.wt.json` makes no request.
 - The two halves run concurrently, so an ordinary listing waits for the slower of the PR request and the head update (check plus any fetch), never their sum, and never more than 3 s. A stalled PR request now costs the whole 3 s even when the head answers at once; that is the accepted price of showing this run's answer.
-- The `--perf` stage `pr gather` is the origin lookup before the wait, plus the origin recheck and the stored-answer read after it; it makes no request and never adds to `list gather`. The PR request's time, and the publication-id read before the launch, are inside `remote wait`.
+- The `--perf` row `pr gather` is the origin lookup before the wait. The origin recheck and the stored-answer read after the wait are the `pr reread` child of the wait's group (see [Runtime `--perf` flag](#runtime---perf-flag)). Neither makes a request, and neither adds to `list gather`. The PR request's time, and the publication-id read before the launch, are inside `remote wait`.
 
 ### Before and after: waiting for the PR request
 
@@ -52,12 +52,15 @@ An observation, not a threshold: one quick unauthenticated sample on the macOS d
 
 Every listing with an `origin` checks the remote and, when it differs, fetches the one tracking ref, through the same detached worker that makes the PR request, and waits for both halves up to 3 s ([`remote_update.rs`](../lib/src/remote_update.rs), [`list/wait.rs`](../cli/src/commands/list/wait.rs)).
 
-- `wt list` launches (or adopts) one `wt internal-refresh <main checkout> --attempt <id>` and polls `<repo hash>.remote-head.json`'s `attempt` record and the attempt's completion receipt every 25 ms until the head attempt has an outcome **and** the PR half is resolved (a new PR publication id, or the receipt), or 3 s pass. Work still running at 3 s continues in the background, and the caption says so ("still checking" or "still pulling"). Refs, counts, and the graph are gathered *after* the wait, so they describe the post-fetch state.
+- `wt list` launches (or adopts) one `wt internal-refresh <main checkout> --attempt <id>` and polls `<repo hash>.remote-head.json`'s `attempt` record and the attempt's completion receipt every 25 ms until the head attempt has an outcome **and** the PR half is resolved (a new PR publication id, or the receipt), or 3 s pass. Work still running at 3 s continues in the background, and the caption says so ("still checking" or "still pulling").
+- The local gathers (dirtiness, comparisons, graph, and `-v` history) run on scoped threads *during* the wait, from the branch tips read before it, so an ordinary listing costs the slower of the wait and the local work. After the wait (and after `--ff`, which runs once the local work is joined) the tips are read again; when they differ, or either read failed, the comparisons, graph, and history are gathered once more from the second read, so the output still describes the post-fetch state. A changed-tip run therefore pays for one extra ref-dependent gather (the `regather` stage); dirtiness is measured again only in a checkout `--ff` moved (the `checkout status refresh` stage). The wait's budget limits only the wait: a local gather that takes longer is still finished before rendering. See [the listing docs](./cli/list.md#local-work-during-the-wait).
 - The worker's check asks the provider API, then `git ls-remote`, within one 10 s budget (`REMOTE_HEAD_REFRESH_DEADLINE`), and its fetch of `refs/remotes/origin/<default>` has its own 60 s deadline (`FETCH_DEADLINE`). Both kill the whole process tree at the deadline ([`live_remote.rs`](../lib/src/live_remote.rs)), so no worker holds `remote-head.lock` forever.
 - `-r`/`--refresh` and `--ff` wait the same way, bounded by `ATTEMPT_MAX_AGE` (75 s) instead of 3 s; in practice by the worker's own deadlines. Every attempt, ordinary or forced, writes its own receipt file (`<repo hash>.refresh-receipt.<attempt id>.json`), so overlapping runs each read their own; the run tries once to delete it as its wait ends, and every worker deletes this repository's receipts older than 75 s before writing its own. A receipt written after its wait ended (the wait timed out, or finished early on a new publication and a finished head) is left for that sweep.
-- The `--perf` stages are `remote wait` (launch through outcome or budget) and `fast-forward` (`--ff` only).
+- In `--perf`, the wait and the local gathers are one group, `remote wait ‖ local gather`, whose children are `remote wait` (launch through outcome or budget), `pr reread`, `list gather`, and `graph gather` or `verbose gather`. After it come `fast-forward` (`--ff` only), a `regather` group (only when the tips changed or a read failed), and `checkout status refresh` (only when `--ff` moved a checked-out branch), each a top-level row of its own. See [Runtime `--perf` flag](#runtime---perf-flag).
 
 ### The full-command contract
+
+An ordinary listing costs its fixed steps (parse, origin lookup, ref reread, render), plus the **slower** of the remote wait and the local gathers, plus a `regather` when the tips moved. The bounds below are what the gates hold that to.
 
 | Case | Bound | Gate |
 | --- | --- | --- |
@@ -69,6 +72,20 @@ Every listing with an `origin` checks the remote and, when it differs, fetches t
 | `--ff`, fetch held by `origin` | 60 s fetch deadline plus 3 s | `perf_pr_request::perf_fast_forward_against_a_held_fetch_reports_within_the_fetch_deadline` |
 
 The 1 s bound is no longer the whole command's: spec decision 1 of `2026-09-27-list-freshness-ux` replaced it with a bounded remote wait. The held cases prove the listing never joins its worker: each asserts that the captured `.output()` returned while the worker was still held (the held-check case by the live-head lock, the held-fetch case by the worker process and the gate's run count, the held-PR case by the provider stand-in's still-held request). The deterministic proofs are in `tests/list_prs.rs` (`a_held_live_head_check_holds_the_listing_only_until_its_deadline`) and `tests/list_remote_head.rs` (`a_fetch_still_running_at_the_deadline_is_still_pulling_and_publishes_after_the_listing`).
+
+### Quick sample: the wait and the local gathers overlap
+
+An observation, not a threshold: one quick sample on the macOS development host (Mac16,5, 16 cores, load average about 10 at the time) on 2026-10-03, in the `rusty-biscuit` checkout with 10 worktrees (`origin` is a public GitHub repository over SSH), with a release build of `wt` from the working tree on top of commit `2147b2aa2`, where the gathers first overlapped the wait. No `GITHUB_TOKEN` or `GH_TOKEN` was set, so the API requests were unauthenticated. Stderr was not a terminal, so no graph was gathered. Runs were a few seconds apart; times are the `--perf` rows.
+
+| Run | Total | `remote wait ‖ local gather` | `remote wait` | `list gather` | `verbose gather` | `pr gather` / `pr reread` | `unattributed` |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `wt list`, first after the build | 612.8 ms | 569.7 ms | 563.8 ms | 526.5 ms | — | 5.7 / 5.8 ms | 31.7 ms |
+| `wt list`, runs 2–3 | 323.9–344.1 ms | 282.6–301.2 ms | 276.5–295.9 ms | 188.5–196.2 ms | — | 6.0–7.0 / 5.3–6.0 ms | 33.4–35.6 ms |
+| `wt list -v`, 2 runs | 404.6–489.6 ms | 351.9–454.1 ms | 345.8–446.4 ms | 186.4–188.5 ms | 174.8–181.2 ms | 4.6–7.5 / 6.1–7.7 ms | 29.5–43.4 ms |
+
+- **The local work is hidden inside the wait.** The group is the wait plus the PR reread (about 6 ms); the 190 ms list gather, and with `-v` the 175–181 ms verbose gather beside it, add nothing. Run sequentially, as before this change, runs 2–3 would have taken about 190 ms longer.
+- **No regather happened**: the tips did not move during any run, so none paid for a second gather. A run whose fetch moves a tip pays one more ref-dependent gather, shown as the `regather` row.
+- The first run's list gather (526.5 ms) still finished inside its slower wait.
 
 ## Ahead/Behind + Merge Result Cache
 
@@ -121,7 +138,44 @@ Criterion benches, the `--perf` runtime diagnostic, and the `perf_*` tests toget
 
 ### Runtime `--perf` flag
 
-`wt list --perf` emits a per-stage timing report to stderr after the command completes. The report is rendered with `biscuit-terminal`'s `MetricsTree` inside a `BlockQuote` and shows only the stages that actually ran, plus an `unattributed` node so the tree reconciles to the wall-clock total. On a non-image terminal the graph-gather and graph-image-render stages are omitted, matching the package's exclusion of rasterization from worktree-owned benchmarks. Use this as a runtime diagnostic complement to the dev-time Criterion benches.
+`wt list --perf` emits a per-stage timing report to stderr after the command completes. The report is rendered with `biscuit-terminal`'s `MetricsTree` inside a `BlockQuote` and shows only the stages that actually ran. On a non-image terminal the graph-gather and graph-image-render stages are omitted, matching the package's exclusion of rasterization from worktree-owned benchmarks. Use this as a runtime diagnostic complement to the dev-time Criterion benches.
+
+Work that runs at the same time is reported as a **group**: one top-level row whose duration is measured from the start of the concurrent region until its last task has finished. It is never the sum or the maximum of its children. The children are the concurrent tasks, each with its own duration and no share (the share column shows `—`), because they overlap and adding them would count the same time twice:
+
+```text
+▌ Performance                    404.6ms  100%
+▌ ├─ pre-dispatch                936.0µs   <1%
+▌ ├─ pr gather                     7.5ms    2%
+▌ ├─ remote wait ‖ local gather  351.9ms   87%
+▌ │  ├─ remote wait              345.8ms     —
+▌ │  ├─ pr reread                  6.1ms     —
+▌ │  ├─ list gather              188.5ms     —
+▌ │  └─ verbose gather           174.8ms     —
+▌ ├─ table render                450.0µs   <1%
+▌ ├─ verbose render              308.0µs   <1%
+▌ └─ unattributed                 43.4ms   11%
+```
+
+```mermaid
+flowchart LR
+    pre[pre-dispatch] --> prg[pr gather]
+    prg --> group
+    subgraph group [remote wait ‖ local gather]
+        direction TB
+        wait[remote wait] --> reread[pr reread]
+        list[list gather]
+        hist[graph gather or verbose gather]
+    end
+    group --> ff["fast-forward (--ff)"]
+    ff --> regather["regather group (tips moved)"]
+    regather --> refresh["checkout status refresh (--ff moved a checkout)"]
+    refresh --> render[table, graph, and verbose render]
+```
+
+- **Top-level rows reconcile exactly.** They are sequential, so they and `unattributed` (time no row covers: parsing the worktree list, the ref reread, process exit) add up to the total. If the top-level rows ever exceed the total, the report shows the excess as `over-attributed (overlapping top-level rows)` instead of `unattributed`; that means overlapping work was recorded outside a group, and is a bug.
+- **Without remote work** (no `origin`) the group is `local gather`, with no `remote wait` child.
+- **`regather`** appears only when the second ref read differs from the first or either read failed. It is a group too, with children `list regather` and `graph regather` or `verbose regather`.
+- **Reading a stage in a test.** `perf_support::stage_from_perf` matches a row's whole label at any depth, so `remote wait` is the child and never the `remote wait ‖ local gather` group; `perf_support::perf_rows` returns every row with its depth.
 
 Run the perf tests with:
 

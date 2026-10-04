@@ -17,7 +17,9 @@
 //! Every successful write stamps a new random publication id beside
 //! `fetched_at`. `fetched_at` is whole seconds at the request's start, so two
 //! answers can share it; [`stored_publication`] is what tells a waiting run
-//! that another process published.
+//! that another process published. The same atomic write records which
+//! credentials the request was sent with ([`CredentialEvidence`]), so a run
+//! that sees the publication learns them without waiting for any receipt.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -28,12 +30,18 @@ use serde::{Deserialize, Serialize};
 use crate::cache::{atomic_write, repo_cache_file, try_lock_sidecar};
 use crate::error::WorktreeError;
 use crate::git::git_from;
-use crate::remote_head::{PrFailure, is_attempt_id, present};
+use crate::remote_head::{CredentialEvidence, PrFailure, is_attempt_id, present};
+use crate::strict_json;
 use sniff::remote::blocking::PrUnavailable;
 
-/// Format 3 added `publication`, format 4 `writer`, and format 5 dropped
-/// `writer` again; any other format is a [`CachedPrs::Miss`].
-pub const PR_STORE_FORMAT_VERSION: u32 = 5;
+/// Format 3 added `publication`, format 4 `writer`, format 5 dropped
+/// `writer` again, and format 6 added `credentials`. Format 5 is still read,
+/// with [`CredentialEvidence::Unknown`]; any other format is a
+/// [`CachedPrs::Miss`].
+pub const PR_STORE_FORMAT_VERSION: u32 = 6;
+
+/// The format before `credentials`.
+const UNCREDENTIALED_FORMAT_VERSION: u32 = 5;
 
 /// The age from which a stored answer is shown with its age.
 pub const FRESHNESS_WINDOW: Duration = Duration::from_secs(60);
@@ -88,7 +96,16 @@ pub trait OpenPrSource {
     fn source_repo(&self) -> Option<String>;
     /// Every open PR, or why there is no answer. Never an empty list for a
     /// failure.
-    fn fetch(&self) -> Result<Vec<OpenPullRequest>, PrRequestError>;
+    fn fetch(&self) -> Result<FetchedPrs, PrRequestError>;
+}
+
+/// A successful open-PR request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FetchedPrs {
+    pub pull_requests: Vec<OpenPullRequest>,
+    /// What the request's pages were sent with, as the sending client
+    /// selected it.
+    pub credentials: CredentialEvidence,
 }
 
 /// [`OpenPrSource`] through sniff's blocking provider client.
@@ -103,10 +120,11 @@ impl OpenPrSource for SniffOpenPrSource {
         sniff::filesystem::git::repository_link(&self.remote_url).map(|link| link.owner_repo)
     }
 
-    fn fetch(&self) -> Result<Vec<OpenPullRequest>, PrRequestError> {
-        let summaries = sniff::remote::blocking::open_pull_requests(&self.remote_url, self.deadline)
+    fn fetch(&self) -> Result<FetchedPrs, PrRequestError> {
+        let answer = sniff::remote::blocking::open_pull_requests(&self.remote_url, self.deadline)
             .map_err(|reason| PrRequestError::from_unavailable(&reason))?;
-        Ok(summaries
+        let pull_requests = answer
+            .pull_requests
             .into_iter()
             .filter_map(|summary| {
                 Some(OpenPullRequest {
@@ -117,7 +135,8 @@ impl OpenPrSource for SniffOpenPrSource {
                     target_branch: summary.target_branch?,
                 })
             })
-            .collect())
+            .collect();
+        Ok(FetchedPrs { pull_requests, credentials: CredentialEvidence::from_sniff(&answer.credentials) })
     }
 }
 
@@ -174,6 +193,51 @@ struct StoreFile {
     #[serde(deserialize_with = "present")]
     source_repo: Option<String>,
     pull_requests: Vec<OpenPullRequest>,
+    /// What the request that produced this answer was sent with. Malformed,
+    /// absent, or `null` makes the whole publication a miss.
+    #[serde(deserialize_with = "strict_json::nested")]
+    credentials: CredentialEvidence,
+}
+
+/// Format 5, read with the same strictness; its credentials are unknown.
+#[derive(Deserialize)]
+struct UncredentialedStoreFile {
+    format_version: u32,
+    origin_digest: String,
+    fetched_at: u64,
+    publication: String,
+    #[serde(deserialize_with = "present")]
+    source_repo: Option<String>,
+    pull_requests: Vec<OpenPullRequest>,
+}
+
+impl From<UncredentialedStoreFile> for StoreFile {
+    fn from(file: UncredentialedStoreFile) -> Self {
+        Self {
+            format_version: file.format_version,
+            origin_digest: file.origin_digest,
+            fetched_at: file.fetched_at,
+            publication: file.publication,
+            source_repo: file.source_repo,
+            pull_requests: file.pull_requests,
+            credentials: CredentialEvidence::Unknown,
+        }
+    }
+}
+
+/// Only `format_version`, to pick the reader.
+#[derive(Deserialize)]
+struct FormatOnly {
+    format_version: u32,
+}
+
+/// One usable publication: its id, and what its request was sent with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredPublication {
+    /// New with every successful write.
+    pub id: String,
+    /// [`CredentialEvidence::Unknown`] for a format-5 answer.
+    pub credentials: CredentialEvidence,
 }
 
 /// The open PRs `wt list` shows.
@@ -261,13 +325,14 @@ pub fn select_cached(store: &Path, origin: Option<&str>, now: u64) -> CachedPrs 
     }
 }
 
-/// The publication id of the answer [`select_cached`] would serve, or `None`
+/// The publication of the answer [`select_cached`] would serve, or `None`
 /// on a miss.
 ///
 /// The id is new with every successful write, so a changed id proves a
-/// publication even when `fetched_at` did not move.
-pub fn stored_publication(store: &Path, origin: &str, now: u64) -> Option<String> {
-    usable(store, Some(origin), now).map(|file| file.publication)
+/// publication even when `fetched_at` did not move. Its credentials were
+/// written in the same atomic write as the answer and the id.
+pub fn stored_publication(store: &Path, origin: &str, now: u64) -> Option<StoredPublication> {
+    usable(store, Some(origin), now).map(|file| StoredPublication { id: file.publication, credentials: file.credentials })
 }
 
 /// Why a [`refresh`] ended.
@@ -363,11 +428,11 @@ pub fn unix_now() -> u64 {
 /// A successful request's answer, before it is stored.
 struct Answer {
     source_repo: Option<String>,
-    pull_requests: Vec<OpenPullRequest>,
+    fetched: FetchedPrs,
 }
 
 fn fetch(source: &dyn OpenPrSource) -> Result<Answer, PrRequestError> {
-    Ok(Answer { pull_requests: source.fetch()?, source_repo: source.source_repo() })
+    Ok(Answer { fetched: source.fetch()?, source_repo: source.source_repo() })
 }
 
 /// Stores `answer` for `origin`, stamped `fetched_at`, under a new
@@ -379,8 +444,15 @@ fn publish(path: &Path, origin: &str, fetched_at: u64, answer: &Answer) -> Resul
         fetched_at,
         publication: crate::remote_head::new_attempt_id()?,
         source_repo: answer.source_repo.clone(),
-        pull_requests: answer.pull_requests.clone(),
+        pull_requests: answer.fetched.pull_requests.clone(),
+        credentials: answer.fetched.credentials.clone(),
     };
+    if !file.credentials.is_valid() {
+        return Err(WorktreeError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "refusing to store invalid request credentials",
+        )));
+    }
     save(path, &file)
 }
 
@@ -402,9 +474,12 @@ fn listing(file: &StoreFile) -> PrListing {
 
 fn load(path: &Path) -> Option<StoreFile> {
     let bytes = fs::read(path).ok()?;
-    serde_json::from_slice::<StoreFile>(&bytes)
-        .ok()
-        .filter(|file| file.format_version == PR_STORE_FORMAT_VERSION && is_attempt_id(&file.publication))
+    let file = match serde_json::from_slice::<FormatOnly>(&bytes).ok()?.format_version {
+        PR_STORE_FORMAT_VERSION => serde_json::from_slice::<StoreFile>(&bytes).ok()?,
+        UNCREDENTIALED_FORMAT_VERSION => serde_json::from_slice::<UncredentialedStoreFile>(&bytes).ok()?.into(),
+        _ => return None,
+    };
+    (is_attempt_id(&file.publication) && file.credentials.is_valid()).then_some(file)
 }
 
 fn save(path: &Path, file: &StoreFile) -> Result<(), WorktreeError> {
@@ -459,6 +534,8 @@ mod tests {
     /// A scripted source that counts its requests and can act mid-request.
     struct Stub {
         answer: Result<Vec<OpenPullRequest>, PrRequestError>,
+        /// What a successful answer reports it was sent with.
+        credentials: CredentialEvidence,
         calls: Rc<Cell<usize>>,
         during: Option<Box<dyn Fn()>>,
     }
@@ -467,18 +544,19 @@ mod tests {
         fn source_repo(&self) -> Option<String> {
             Some("o/r".to_string())
         }
-        fn fetch(&self) -> Result<Vec<OpenPullRequest>, PrRequestError> {
+        fn fetch(&self) -> Result<FetchedPrs, PrRequestError> {
             self.calls.set(self.calls.get() + 1);
             if let Some(during) = &self.during {
                 during();
             }
-            self.answer.clone()
+            let pull_requests = self.answer.clone()?;
+            Ok(FetchedPrs { pull_requests, credentials: self.credentials.clone() })
         }
     }
 
     fn stub(answer: Result<Vec<OpenPullRequest>, PrRequestError>) -> (Rc<Cell<usize>>, Stub) {
         let calls = Rc::new(Cell::new(0));
-        (Rc::clone(&calls), Stub { answer, calls, during: None })
+        (Rc::clone(&calls), Stub { answer, credentials: CredentialEvidence::Anonymous, calls, during: None })
     }
 
     fn failing(failure: PrFailure) -> (Rc<Cell<usize>>, Stub) {
@@ -567,6 +645,85 @@ mod tests {
     }
 
     #[test]
+    fn a_format_5_answer_is_served_with_unknown_credentials_and_a_future_format_is_a_miss() {
+        let (_dir, _root, store) = repo(Some(ORIGIN));
+        fs::create_dir_all(store.parent().unwrap()).unwrap();
+        let id = "0123456789abcdef0123456789abcdef";
+        let element = serde_json::json!({
+            "number": 99, "url": null, "source_repo": "o/r", "source_branch": "fix/x", "target_branch": "main",
+        });
+        let format_5 = serde_json::json!({
+            "format_version": 5, "origin_digest": origin_digest(ORIGIN), "fetched_at": NOW, "publication": id,
+            "source_repo": "o/r", "pull_requests": [element],
+        });
+        let expected = PrListing {
+            source_repo: Some("o/r".into()),
+            pull_requests: vec![OpenPullRequest { url: None, ..pr(99, Some("o/r"), "fix/x", "main") }],
+            fetched_at: Some(NOW),
+        };
+
+        fs::write(&store, serde_json::to_vec(&format_5).unwrap()).unwrap();
+        assert_eq!(select_cached(&store, Some(ORIGIN), NOW), CachedPrs::Fresh(expected));
+        assert_eq!(
+            stored_publication(&store, ORIGIN, NOW),
+            Some(StoredPublication { id: id.into(), credentials: CredentialEvidence::Unknown }),
+            "a format-5 answer can never say it was anonymous"
+        );
+        // A format-5 reader ignores unknown fields, so a stray format-6 field
+        // is ignored too; it never makes the answer anonymous.
+        let mut format_5_claiming = format_5.clone();
+        format_5_claiming["credentials"] = serde_json::json!({ "state": "anonymous" });
+        fs::write(&store, serde_json::to_vec(&format_5_claiming).unwrap()).unwrap();
+        assert_eq!(
+            stored_publication(&store, ORIGIN, NOW).map(|publication| publication.credentials),
+            Some(CredentialEvidence::Unknown),
+            "format 5 with a credentials field"
+        );
+
+        let mut format_5_ill = format_5.clone();
+        format_5_ill["publication"] = serde_json::json!("not-an-id");
+        let mut format_7 = format_5.clone();
+        format_7["format_version"] = serde_json::json!(7);
+        format_7["credentials"] = serde_json::json!({ "state": "anonymous" });
+        for (label, document) in [("an invalid format-5 field", format_5_ill), ("format 7", format_7)] {
+            fs::write(&store, serde_json::to_vec(&document).unwrap()).unwrap();
+            assert_eq!(select_cached(&store, Some(ORIGIN), NOW), CachedPrs::Miss, "{label}");
+            assert_eq!(stored_publication(&store, ORIGIN, NOW), None, "{label}");
+        }
+    }
+
+    #[test]
+    fn a_publication_records_what_its_request_was_sent_with_and_only_names() {
+        const SECRET: &str = "ghp_sentinelValueThatMustNeverBeStored";
+        let (_dir, root, store) = repo(Some(ORIGIN));
+        for credentials in [
+            CredentialEvidence::Anonymous,
+            CredentialEvidence::Keyed { variables: vec!["SNIFF_GITHUB_GIT_2E_EXAMPLE_TOKEN".into()] },
+            CredentialEvidence::Unknown,
+        ] {
+            let (_, mut source) = stub(Ok(Vec::new()));
+            source.credentials = credentials.clone();
+            assert_eq!(refresh_with(&store, &root, NOW, source), RefreshOutcome::Refreshed);
+            assert_eq!(
+                stored_publication(&store, ORIGIN, NOW).map(|publication| publication.credentials),
+                Some(credentials.clone()),
+                "an empty answer carries its credentials too"
+            );
+        }
+
+        // Anything but a variable name is refused, and the stored answer kept.
+        let before = fs::read(&store).unwrap();
+        for variables in [vec![SECRET.to_string()], vec!["GH_TOKEN".into(), "has space".into()], Vec::new()] {
+            let (_, mut source) = stub(Ok(Vec::new()));
+            source.credentials = CredentialEvidence::Keyed { variables };
+            assert_eq!(refresh_with(&store, &root, NOW, source), RefreshOutcome::PublishFailed);
+        }
+        let after = fs::read(&store).unwrap();
+        assert_eq!(after, before);
+        assert!(!String::from_utf8_lossy(&after).contains(SECRET));
+    }
+
+    #[test]
     fn earlier_formats_exactly_as_they_were_written_are_misses() {
         let (_dir, _root, store) = repo(Some(ORIGIN));
         fs::create_dir_all(store.parent().unwrap()).unwrap();
@@ -615,6 +772,8 @@ mod tests {
         Answer(fn(&mut PrListing)),
         /// The same, but at least [`FRESHNESS_WINDOW`] old.
         Stale(fn(&mut PrListing)),
+        /// The written answer, fresh, with these credentials instead.
+        Evidence(fn() -> CredentialEvidence),
     }
 
     /// The Input Robustness Matrix for the store: every load-bearing field of
@@ -628,6 +787,7 @@ mod tests {
         let written: Value = serde_json::from_slice(&fs::read(&store).unwrap()).unwrap();
         let id = written["publication"].as_str().unwrap().to_string();
         let element = written["pull_requests"][0].clone();
+        let publication = |credentials| Some(StoredPublication { id: id.clone(), credentials });
         let expected = PrListing {
             source_repo: Some("o/r".into()),
             pull_requests: vec![pr(99, Some("o/r"), "fix/x", "main")],
@@ -673,7 +833,10 @@ mod tests {
         };
 
         // Control: the unedited file, re-serialized the way every edit is.
-        assert_eq!(read(&serde_json::to_vec(&written).unwrap()), (CachedPrs::Fresh(expected.clone()), Some(id.clone())));
+        assert_eq!(
+            read(&serde_json::to_vec(&written).unwrap()),
+            (CachedPrs::Fresh(expected.clone()), publication(CredentialEvidence::Anonymous))
+        );
         // The same file is a miss for another origin, or none.
         assert_eq!(select_cached(&store, Some("https://prs.example.invalid/o/other.git"), NOW), CachedPrs::Miss);
         assert_eq!(stored_publication(&store, "https://prs.example.invalid/o/other.git", NOW), None);
@@ -695,8 +858,38 @@ mod tests {
             (Set("/format_version", Some(json!({}))), Miss),
             (Set("/format_version", Some(json!(""))), Miss),
             (Set("/format_version", Some(json!(4))), Miss),
-            (Set("/format_version", Some(json!(6))), Miss),
-            (Text("{", "{\"format_version\":5,"), Miss),
+            (Set("/format_version", Some(json!(7))), Miss),
+            (Text("{", "{\"format_version\":6,"), Miss),
+            // credentials: anything but a valid tagged state is a miss, never
+            // read as anonymous; only `anonymous` itself can become a notice
+            (Set("/credentials", None), Miss),
+            (Set("/credentials", null()), Miss),
+            (Set("/credentials", Some(json!("anonymous"))), Miss),
+            (Set("/credentials", Some(json!(1))), Miss),
+            (Set("/credentials", Some(json!([]))), Miss),
+            (Set("/credentials", Some(json!({}))), Miss),
+            (Set("/credentials", Some(json!({ "state": null }))), Miss),
+            (Set("/credentials", Some(json!({ "state": 0 }))), Miss),
+            (Set("/credentials", Some(json!({ "state": "keyless" }))), Miss),
+            (Set("/credentials", Some(json!({ "state": "keyed" }))), Miss),
+            (Set("/credentials", Some(json!({ "state": "keyed", "variables": null }))), Miss),
+            (Set("/credentials", Some(json!({ "state": "keyed", "variables": "GH_TOKEN" }))), Miss),
+            (Set("/credentials", Some(json!({ "state": "keyed", "variables": {} }))), Miss),
+            (Set("/credentials", Some(json!({ "state": "keyed", "variables": [] }))), Miss),
+            (Set("/credentials", Some(json!({ "state": "keyed", "variables": ["GH_TOKEN", 1] }))), Miss),
+            (Set("/credentials", Some(json!({ "state": "keyed", "variables": [1] }))), Miss),
+            (Set("/credentials", Some(json!({ "state": "keyed", "variables": [1, null] }))), Miss),
+            (Set("/credentials", Some(json!({ "state": "keyed", "variables": ["GH TOKEN"] }))), Miss),
+            (Set("/credentials", Some(json!({ "state": "keyed", "variables": [""] }))), Miss),
+            (Set("/credentials", Some(json!({ "state": "keyed", "variables": ["ghp_looksLikeAToken123"] }))), Miss),
+            (Text("\"state\":\"anonymous\"", "\"state\":\"anonymous\",\"state\":\"anonymous\""), Miss),
+            (Text("{", "{\"credentials\":{\"state\":\"anonymous\"},"), Miss),
+            (
+                Set("/credentials", Some(json!({ "state": "keyed", "variables": ["GH_TOKEN"] }))),
+                Evidence(|| CredentialEvidence::Keyed { variables: vec!["GH_TOKEN".into()] }),
+            ),
+            (Set("/credentials", Some(json!({ "state": "unknown" }))), Evidence(|| CredentialEvidence::Unknown)),
+            (Set("/credentials/extra", Some(json!(true))), Answer(|_| {})),
             // publication
             (Set("/publication", None), Miss),
             (Set("/publication", null()), Miss),
@@ -830,8 +1023,9 @@ mod tests {
                     let mut listing = expected.clone();
                     change(&mut listing);
                     let cached = if matches!(expect, Stale(_)) { CachedPrs::Stale(listing) } else { CachedPrs::Fresh(listing) };
-                    (cached, Some(id.clone()))
+                    (cached, publication(CredentialEvidence::Anonymous))
                 }
+                Evidence(credentials) => (CachedPrs::Fresh(expected.clone()), publication(credentials())),
             };
             let got = read(&bytes);
             if got != want {
@@ -846,12 +1040,12 @@ mod tests {
         let (_dir, root, store) = repo(Some(ORIGIN));
         assert_eq!(stored_publication(&store, ORIGIN, NOW), None, "nothing stored");
         seed(&store, &root, NOW, vec![pr(99, Some("o/r"), "fix/x", "main")]);
-        let seeded = stored_publication(&store, ORIGIN, NOW).expect("the seeded answer has an id");
+        let seeded = stored_publication(&store, ORIGIN, NOW).expect("the seeded answer has an id").id;
         assert!(is_attempt_id(&seeded), "{seeded}");
 
         let (_, source) = stub(Ok(vec![pr(8, Some("o/r"), "feat/z", "main")]));
         assert_eq!(refresh_with(&store, &root, NOW, source), RefreshOutcome::Refreshed);
-        let refreshed = stored_publication(&store, ORIGIN, NOW).expect("the new answer has an id");
+        let refreshed = stored_publication(&store, ORIGIN, NOW).expect("the new answer has an id").id;
         assert_ne!(refreshed, seeded, "same second, new answer, new id");
         let CachedPrs::Fresh(listing) = select_cached(&store, Some(ORIGIN), NOW) else {
             panic!("the refreshed answer is served");
@@ -860,7 +1054,7 @@ mod tests {
 
         let (_, source) = failing(PrFailure::Other);
         assert_eq!(refresh_with(&store, &root, NOW, source), RefreshOutcome::Failed(PrFailure::Other));
-        assert_eq!(stored_publication(&store, ORIGIN, NOW), Some(refreshed), "a failure publishes nothing");
+        assert_eq!(stored_publication(&store, ORIGIN, NOW).map(|p| p.id), Some(refreshed), "a failure publishes nothing");
     }
 
     #[test]
@@ -881,7 +1075,7 @@ mod tests {
         let bytes = String::from_utf8(fs::read(&store).unwrap()).unwrap();
         assert!(!bytes.contains("hunter2") && !bytes.contains("example.invalid"), "{bytes}");
         assert!(bytes.contains(&origin_digest(secret)));
-        assert!(!bytes.contains("writer"), "format 5 has no writer: {bytes}");
+        assert!(!bytes.contains("writer"), "the store has no writer: {bytes}");
     }
 
     #[test]
@@ -913,7 +1107,7 @@ mod tests {
                 failed(PrFailure::RateLimited { authenticated: true, key: Some(key()) }),
             ),
             (
-                PrUnavailable::NotFoundOrNotPermitted { message: "404".into() },
+                PrUnavailable::NotFoundOrNotPermitted { message: "404".into(), key: None },
                 failed(PrFailure::NotFoundOrNotPermitted),
             ),
             (PrUnavailable::Timeout { deadline: Duration::from_millis(300) }, failed(PrFailure::Other)),

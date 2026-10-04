@@ -13,6 +13,9 @@
 //!   --no-autostash`, which refuses rather than overwrite local changes.
 //! - A holder that is no longer on the default branch is re-resolved once;
 //!   anything still unsafe is refused, never merged into another branch.
+//! - A holder Git marks `prunable` still holds the branch: the move is
+//!   refused, never made underneath it, and nothing is repaired. Git run in
+//!   such a directory could find a parent repository instead.
 //!
 //! One race remains outside Git's guarantees: a checkout that switches
 //! branches between the `symbolic-ref` check and the merge.
@@ -22,6 +25,7 @@ use std::process::{Command, Stdio};
 
 use crate::git::{git_from, git_from_bytes_allow_no_match};
 use crate::live_remote::is_valid_branch_name;
+use crate::worktree::{WorktreeEntry, parse_worktree_list};
 
 /// Why a fast-forward did not move the branch.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,6 +45,9 @@ pub enum FfRefusal {
     /// lost, or the holding checkout left the default branch) and it could
     /// not be made safe.
     Changed,
+    /// The checkout holding the branch is one Git marks `prunable` (payload:
+    /// its path as `git worktree list` spells it).
+    UnavailableHolder(PathBuf),
     /// Any other git failure. Git's stderr is deliberately not carried.
     Other,
 }
@@ -69,18 +76,24 @@ pub enum FfResult {
 ///
 /// [`FfResult::UpToDate`] when the local branch equals or contains the
 /// tracking ref, and [`FfResult::Refused`] for everything that is not a clean
-/// fast-forward. An invalid branch name is [`FfRefusal::Other`] with no git
+/// fast-forward, including a needed move whose holder Git marks `prunable`. An invalid branch name is [`FfRefusal::Other`] with no git
 /// mutation.
 pub fn fast_forward_default(main: &Path, default: &str) -> FfResult {
     if !is_valid_branch_name(main, default) {
         return FfResult::Refused(FfRefusal::Other);
     }
+    // An unavailable holder refuses only a needed move, so a branch already
+    // in sync still reads as up to date.
     let holder = match holder_of(main, default) {
-        Ok(holder) => holder,
+        Ok(holder) => Ok(holder),
+        Err(FfRefusal::UnavailableHolder(path)) => Err(path),
         Err(refusal) => return FfResult::Refused(refusal),
     };
     match target(main, default) {
-        Ok(Some((old, new))) => move_branch(main, default, &old, &new, holder),
+        Ok(Some((old, new))) => match holder {
+            Ok(holder) => move_branch(main, default, &old, &new, holder),
+            Err(path) => FfResult::Refused(FfRefusal::UnavailableHolder(path)),
+        },
         Ok(None) => FfResult::UpToDate,
         Err(refusal) => FfResult::Refused(refusal),
     }
@@ -117,24 +130,22 @@ fn read_ref(main: &Path, refname: &str) -> Option<String> {
 
 /// The worktree that has `refs/heads/<default>` checked out, if any. Two
 /// holders (possible with `--force`) are refused: moving the branch under
-/// one would leave the other's files stale.
+/// one would leave the other's files stale. So is a `prunable` holder.
 fn holder_of(main: &Path, default: &str) -> Result<Option<PathBuf>, FfRefusal> {
     let listing = git_from(main, main, &["worktree", "list", "--porcelain"]).map_err(|_| FfRefusal::Other)?;
-    let branch_line = format!("branch refs/heads/{default}");
-    let mut holders = Vec::new();
-    let mut path = None;
-    for line in listing.lines() {
-        if let Some(rest) = line.strip_prefix("worktree ") {
-            path = Some(PathBuf::from(rest));
-        } else if line == branch_line
-            && let Some(path) = path.take()
-        {
-            holders.push(path);
-        }
-    }
+    let mut holders: Vec<WorktreeEntry> = parse_worktree_list(&listing)
+        .into_iter()
+        .filter(|entry| entry.branch.as_deref() == Some(default))
+        .collect();
     match holders.len() {
         0 => Ok(None),
-        1 => Ok(holders.pop()),
+        1 => {
+            let holder = holders.remove(0);
+            match holder.prunable {
+                Some(_) => Err(FfRefusal::UnavailableHolder(holder.path)),
+                None => Ok(Some(holder.path)),
+            }
+        }
         _ => Err(FfRefusal::Other),
     }
 }
@@ -436,6 +447,90 @@ mod tests {
 
         assert_eq!(result, FfResult::Moved { from: old, to: new.clone(), checkout: None });
         assert_eq!(refs(&repo), refs_with(&before, "trunk", &new));
+    }
+
+    /// A linked worktree at `<base>/nested-main` holding `main`, with the base
+    /// switched to `feature`, and origin's `main` one commit ahead.
+    fn unavailable_holder_fixture(repo: &TestRepo) -> PathBuf {
+        repo.git(&["switch", "-q", "-c", "feature"]);
+        let holder = repo.path().join("nested-main");
+        repo.git(&["worktree", "add", "-q", holder.to_str().unwrap(), "main"]);
+        advance_origin(repo, "main", "remote.txt");
+        holder
+    }
+
+    /// Git calls that could move a ref, repair a link, or run in the holder.
+    fn mutating_or_holder_calls(calls: &[Vec<String>]) -> Vec<Vec<String>> {
+        calls
+            .iter()
+            .filter(|args| {
+                matches!(args.first().map(String::as_str), Some("merge" | "update-ref" | "symbolic-ref"))
+                    || args.iter().any(|arg| arg == "repair" || arg == "prune")
+            })
+            .cloned()
+            .collect()
+    }
+
+    fn assert_refused_for(result: FfResult, holder: &Path) {
+        let FfResult::Refused(FfRefusal::UnavailableHolder(path)) = result else {
+            panic!("expected an unavailable-holder refusal, got {result:?}");
+        };
+        assert_eq!(path.file_name(), holder.file_name(), "names the holder: {}", path.display());
+    }
+
+    #[test]
+    fn refuses_a_move_under_an_unlinked_holder_without_repairing_it() {
+        let repo = TestRepo::with_origin();
+        let holder = unavailable_holder_fixture(&repo);
+        fs::remove_file(holder.join(".git")).unwrap();
+        let before = refs(&repo);
+        let feature_head = repo.sha("HEAD");
+
+        crate::git::recorder::start_recording();
+        let result = fast_forward_default(&repo.path(), "main");
+        let calls = crate::git::recorder::finish_recording();
+
+        assert_refused_for(result, &holder);
+        assert_eq!(refs(&repo), before, "no ref moved");
+        assert_eq!(mutating_or_holder_calls(&calls), Vec::<Vec<String>>::new());
+        assert!(fs::symlink_metadata(holder.join(".git")).is_err(), "the link was not repaired");
+        assert!(!holder.join("remote.txt").exists() && !repo.path().join("remote.txt").exists());
+        // The holder sits inside the base: Git run there would have found the
+        // base, which must be untouched too.
+        assert_eq!(repo.sha("HEAD"), feature_head);
+        assert!(repo.git(&["worktree", "list", "--porcelain"]).contains("prunable"));
+    }
+
+    #[test]
+    fn refuses_a_move_under_a_missing_holder_and_keeps_its_record() {
+        let repo = TestRepo::with_origin();
+        let holder = unavailable_holder_fixture(&repo);
+        fs::remove_dir_all(&holder).unwrap();
+        let before = refs(&repo);
+
+        crate::git::recorder::start_recording();
+        let result = fast_forward_default(&repo.path(), "main");
+        let calls = crate::git::recorder::finish_recording();
+
+        assert_refused_for(result, &holder);
+        assert_eq!(refs(&repo), before);
+        assert_eq!(mutating_or_holder_calls(&calls), Vec::<Vec<String>>::new());
+        assert!(fs::symlink_metadata(&holder).is_err(), "nothing was recreated");
+        let listing = repo.git(&["worktree", "list", "--porcelain"]);
+        assert!(listing.contains("nested-main") && listing.contains("prunable"), "{listing}");
+    }
+
+    #[test]
+    fn an_unavailable_holder_of_an_up_to_date_branch_is_not_a_refusal() {
+        let repo = TestRepo::with_origin();
+        repo.git(&["switch", "-q", "-c", "feature"]);
+        let holder = repo.path().join("nested-main");
+        repo.git(&["worktree", "add", "-q", holder.to_str().unwrap(), "main"]);
+        fs::remove_file(holder.join(".git")).unwrap();
+        let before = refs(&repo);
+
+        assert_eq!(fast_forward_default(&repo.path(), "main"), FfResult::UpToDate);
+        assert_eq!(refs(&repo), before);
     }
 
     #[test]

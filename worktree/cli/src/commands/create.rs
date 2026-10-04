@@ -38,17 +38,17 @@ pub fn run(branch: &str, from: Option<&str>, stay: bool) -> Result<(), WorktreeE
     let location = if relative.as_os_str().is_empty() {
         "<dim><i>repo root</i></dim>".to_string()
     } else {
-        format!("<dim>{}</dim>", relative.to_string_lossy())
+        format!("<dim>{}</dim>", Prose::escape_text(&relative.to_string_lossy()))
     };
     let forked = result
         .forked_from
         .as_deref()
-        .map(|base| format!(" <dim>(forked from <b>{base}</b>)</dim>"))
+        .map(|base| format!(" <dim>(forked from <b>{}</b>)</dim>", Prose::escape_text(base)))
         .unwrap_or_default();
     let mut msg = format!(
         "\n<green>Created worktree</green> <bold>{}</bold>{forked} at <dim>{}</dim>\n",
-        result.branch,
-        result.worktree_path.display(),
+        Prose::escape_text(&result.branch),
+        Prose::escape_text(&result.worktree_path.display().to_string()),
     );
     if move_shell {
         msg.push_str(&format!(
@@ -118,6 +118,8 @@ fn render_include_report(terminal: &Terminal, include: &IncludeOutcome) {
 /// forking a fresh one. Surfaces the commit so a stale branch is not reused
 /// silently.
 fn build_reuse_notice(branch: &str, commit: &str) -> String {
+    let branch = Prose::escape_text(branch);
+    let commit = Prose::escape_text(commit);
     format!(
         "<yellow><b>Note:</b></yellow> branch <bold>{branch}</bold> already existed and was \
         reused at <dim>{commit}</dim> — <b>not</b> forked from your current branch.\n  \
@@ -131,25 +133,28 @@ fn render_invalid_format_error(
     message: &str,
     branch: &str,
 ) {
-    let path_str = config_path.display().to_string();
+    let path_str = Prose::quoted_attr(&config_path.display().to_string());
+    let message = Prose::escape_text(message);
+    let branch = Prose::escape_text(branch);
     let msg = format!(
         "\n<red><b>Error:</b></red> <b>~/.worktree.json</b> has an invalid format: {message}\n\n\
         The file must be structured as:\n\n\
         <dim>{{</dim>\n\
         <dim>  \"base_dir\": \"/path/to/your/worktrees\"</dim>\n\
         <dim>}}</dim>\n\n\
-        <a href=\"{path_str}\">Edit ~/.worktree.json</a> to fix the format, \
+        <a href={path_str}>Edit ~/.worktree.json</a> to fix the format, \
         or delete the file and run <dim>wt create {branch}</dim> again for an interactive setup."
     );
     eprintln!("{}", Prose::new(msg).render(terminal));
 }
 
 fn render_git_repo_error(terminal: &Terminal, config_path: &Path, dir: &str) {
-    let path_str = config_path.display().to_string();
+    let path_str = Prose::quoted_attr(&config_path.display().to_string());
+    let dir = Prose::escape_text(dir);
     let suggestions: Vec<String> = considered_dirs()
         .into_iter()
         .filter(|p| !p.join(".git").exists())
-        .map(|p| format!("  • <dim>{}</dim>", p.display()))
+        .map(|p| format!("  • <dim>{}</dim>", Prose::escape_text(&p.display().to_string())))
         .collect();
     let suggestions_str = if suggestions.is_empty() {
         String::new()
@@ -159,7 +164,7 @@ fn render_git_repo_error(terminal: &Terminal, config_path: &Path, dir: &str) {
     let msg = format!(
         "\n<red><b>Error:</b></red> The configured base directory <b>{dir}</b> is itself a \
         git repository. Worktrees cannot be stored inside a git repo.\n\n\
-        <a href=\"{path_str}\">Edit ~/.worktree.json</a> to point to a plain directory.{suggestions_str}"
+        <a href={path_str}>Edit ~/.worktree.json</a> to point to a plain directory.{suggestions_str}"
     );
     eprintln!("{}", Prose::new(msg).render(terminal));
 }
@@ -206,7 +211,7 @@ fn prompt_for_base_dir(terminal: &Terminal) -> Result<PathBuf, WorktreeError> {
         let msg = format!(
             "\n<red><b>Error:</b></red> <b>{}</b> is itself a git repository. \
             Worktrees cannot be stored inside a git repo. Please choose a different directory.",
-            path.display()
+            Prose::escape_text(&path.display().to_string())
         );
         eprintln!("{}", Prose::new(msg).render(terminal));
         return Err(WorktreeError::BaseDirectoryIsGitRepo(
@@ -220,8 +225,9 @@ fn prompt_for_base_dir(terminal: &Terminal) -> Result<PathBuf, WorktreeError> {
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| "~/.worktree.json".to_string());
     let confirm = format!(
-        "\n<green>Saved</green> base directory <dim>{}</dim> to <dim>{config_str}</dim>.",
-        path.display()
+        "\n<green>Saved</green> base directory <dim>{}</dim> to <dim>{}</dim>.",
+        Prose::escape_text(&path.display().to_string()),
+        Prose::escape_text(&config_str)
     );
     eprintln!("{}", Prose::new(confirm).render(terminal));
 
@@ -247,5 +253,13 @@ mod tests {
         assert!(msg.contains("w-cli-heretic"));
         assert!(msg.contains("d4ea98a"));
         assert!(msg.contains("not"));
+    }
+
+    #[test]
+    fn reuse_notice_shows_a_markup_like_branch_literally() {
+        let msg = build_reuse_notice("feat/<red>x_y_z", "d4ea98a");
+        let rendered = biscuit_test_harness::strip_ansi(&Prose::new(msg).render_optimistic(Some(400)));
+        assert!(rendered.contains("branch feat/<red>x_y_z already existed"), "{rendered:?}");
+        assert!(rendered.contains("git branch -d feat/<red>x_y_z"), "{rendered:?}");
     }
 }
