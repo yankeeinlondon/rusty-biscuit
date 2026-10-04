@@ -27,7 +27,7 @@ Rust, TypeScript, JavaScript, Go, Python, Java, C#, C, C++, Swift, Scala, PHP, P
 | `types` | List type definitions (struct, enum, class, interface, trait) |
 | `symbols` | List all symbols |
 | `imports` | List imported symbols |
-| `classes` | List classes with static/instance member partitioning |
+| `classes` | List classes, structs, interfaces and traits with static/instance member partitioning (on `SymbolInfo::is_static`) |
 | `lint` | Run lint and syntax diagnostics |
 | `lint --deny <rule>` | Promote rule to error |
 | `lint --warn <rule>` | Promote rule to warning |
@@ -69,6 +69,10 @@ post-conversion kind override. Bump `EXTRACTOR_REVISION` with any change to
 extracted records. See [Query System](./query-system.md#capture-to-symbolkind-mapping).
 
 Access lives on `SymbolInfo::visibility` (`None` = Unknown), not on the signature; `is_static` (member without an instance) and `is_static_storage` (storage/linkage `static`) are separate flags. The v1↔v2 adapter round-trips all of them plus `container_kind`; see [API Reference](./api-reference.md#symbolinfo).
+
+- **Readers get a `DeclarationContext`** (`declaration.rs`): language, source, final kind, `is_local`, the captured `name` node (one declaration can name several things: `int a, *b;`, Swift `case east, west`), the file `root` (same-file lookups: Rust trait level, earlier C/C++ `static` prototype, Scala `package` segments) and `is_ecma_module` (computed once per JS/TS file by `is_ecma_module_file`). Add a field here rather than re-scanning the file per symbol.
+- **`FieldInfo` copies the standalone member.** `align_field_metadata` (`tree_file.rs`) overwrites each type-metadata field's `visibility`/`is_static` from the standalone `Field`/`Property`/`Constant` of the same name and container, so `hug classes` and `hug symbols` agree; metadata readers' own keyword reads are only a fallback.
+- **Type metadata lists only fields and properties.** Interface, protocol and trait methods are standalone `Method`s, never `FieldInfo` entries (Java interface constants, C# interface properties and Swift protocol property requirements are listed). Go interface method elements are the one exception left (Go fields are deferred).
 
 ## Key Architecture
 
@@ -137,6 +141,13 @@ When modifying queries or symbol extraction:
    fixture stops parsing cleanly
 5. Run `just test` in `tree-hugger/` to verify (the library package is
    `tree-hugger`, not `tree-hugger-lib`)
+6. CLI rendering checks over those fixtures live in the `cli/tests/symbols/`
+   binary: `Scratch` (in its `main.rs`) copies fixtures (`include_str!`) into a
+   scratch Git repo and runs `hug` with isolated `HOME`/config and
+   `TMPDIR`/`TMP`/`TEMP`, which is where the persistent cache lives. `hug`
+   will not scan files under the repo's own `fixtures/` directories, so CLI
+   checks always need that copy. The cache-upgrade test hard-codes the
+   pre-revision key formula; keep it unchanged when the current key changes
 
 The CLI's real-terminal `god-files` test is behind the internal
 `terminal-tests` feature. Ordinary local L1 omits its harness and target;
@@ -248,6 +259,8 @@ Every query carries provenance metadata (`QueryProvenance`) tracking:
 
 Access via `tree_hugger::query_provenance(language, kind)` or `all_query_provenance()`.
 
+Vendored `locals.scm` provenance is per language (`vendored_locals_changes` in `queries/provenance.rs`, an exhaustive match): a language whose query gained or lost patterns is `MultipleChanges` with one note per change, else `CapturesRenamed`. **Perl's `queries/vendor/perl/locals.scm` is a Tree Hugger `Original`** (repository license `AGPL-3.0-only`), not nvim-treesitter's, so drift checks skip it. When you edit a vendored query, update its notes in the same change; `phase6_neovim_query_reuse::every_locals_definition_capture_is_inventoried` fails if a new `@local.definition.*` capture is missing from the inventory.
+
 ### Nvim-treesitter Inventory
 
 `QueryInventory` records capture groups from all upstream query suites:
@@ -281,3 +294,6 @@ Use `find_unsupported_predicates(query_text)` and `find_hook_predicates(query_te
 
 - **Swift**: All types captured as `SymbolKind::Type` (grammar limitation)
 - **Go**: Struct and interface both captured as `SymbolKind::Type`
+- **Go**: `type A = B` aliases are not reported at all
+- **Python / JavaScript**: instance attributes assigned only through `self.x` / `this.x` are not reported (the catch-all assignment patterns were removed); class-body declarations are
+- **Perl**: variable names keep their sigil (`$name`); `local` is never a declaration; scope lives in the declaration text (`my`/`our`/`state`), not in the level

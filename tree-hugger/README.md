@@ -25,14 +25,14 @@ tree-hugger
 | JavaScript | Yes       | Yes   | Yes     | Yes     | class                                  |
 | Go         | Yes       | Yes   | Yes     | -       | type (struct/interface)                |
 | Python     | Yes       | Yes   | Yes     | -       | class                                  |
-| Java       | Yes       | Yes   | Yes     | -       | class, enum, record                    |
+| Java       | Yes       | Yes   | Yes     | -       | class, interface, enum, record         |
 | C#         | Yes       | Yes   | -       | -       | class, struct, interface, enum, record |
-| C          | Yes       | Yes   | -       | -       | struct, enum                           |
-| C++        | Yes       | Yes   | -       | -       | class, struct, enum                    |
+| C          | Yes       | Yes   | -       | -       | struct, union, enum, typedef alias     |
+| C++        | Yes       | Yes   | -       | -       | class, struct, union, enum, alias      |
 | Swift      | Yes       | Yes   | Yes     | -       | type, interface (protocol)             |
 | Scala      | Yes       | Yes   | -       | -       | class, trait, module, enum             |
 | PHP        | Yes       | Yes   | -       | -       | class, interface, trait, enum          |
-| Perl       | Yes       | -     | -       | -       | (minimal support)                      |
+| Perl       | Yes       | -     | -       | -       | package (module)                       |
 | Bash       | Yes       | -     | -       | -       | -                                      |
 | Zsh        | Yes       | -     | -       | -       | -                                      |
 | Lua        | Yes       | -     | -       | -       | -                                      |
@@ -41,12 +41,13 @@ tree-hugger
 
 Tree Hugger distinguishes between different kinds of type definitions where the language supports it:
 
-- **Type** - Generic type definition (structs in Rust/C/C++/Swift/Go, type aliases in TypeScript)
-- **Class** - Class definitions (C#, Swift, Scala, PHP, Python, Java)
-- **Interface** - Interface/protocol definitions (TypeScript, C#, Swift, PHP)
+- **Type** - Generic type definition (structs and unions in Rust/C/C++, Swift types, Go types, Java and C# records)
+- **TypeAlias** - Type aliases (TypeScript and Rust `type`, C `typedef`, C++ `typedef`/`using`)
+- **Class** - Class definitions (TypeScript, JavaScript, C#, C++, Scala, PHP, Python, Java)
+- **Interface** - Interface/protocol definitions (TypeScript, Java, C#, Swift, PHP)
 - **Enum** - Enumeration types (Rust, TypeScript, Java, C#, C/C++, Swift, Scala, PHP)
 - **Trait** - Trait definitions (Rust, Scala, PHP)
-- **Module** - Module/namespace definitions (Scala objects, Rust modules)
+- **Module** - Module definitions (Scala objects, Rust modules, Perl packages)
 
 ## Using the CLI
 
@@ -60,11 +61,11 @@ classified as:
 
 ### Commands
 
-- `functions` - list functions and methods
-- `types` - list type definitions (includes structs, enums, classes, interfaces, traits)
+- `functions` - list functions, methods and constructors
+- `types` - list type definitions (includes structs, enums, classes, interfaces, traits, type aliases)
 - `symbols` - list all discovered symbols
 - `imports` - list imported symbols
-- `classes` - list classes with members (static/instance partitioning)
+- `classes` - list classes, structs, interfaces and traits with their members, split into static and instance methods and fields (a Java interface constant is a static field; a Rust `impl` block's methods are listed under the type it implements)
 - `lint` - run lint and syntax diagnostics
 - `god-files` - identify oversized source files that are strong candidates for refactoring
 
@@ -157,16 +158,20 @@ Tree Hugger vendors `nvim-treesitter` query files in `tree-hugger/lib/queries/ve
 | `@local.definition.function`  | Function   |
 | `@local.definition.method`    | Method     |
 | `@local.definition.type`      | Type       |
+| `@local.definition.type_alias` | TypeAlias |
 | `@local.definition.class`     | Class      |
 | `@local.definition.interface` | Interface  |
 | `@local.definition.enum`      | Enum       |
 | `@local.definition.trait`     | Trait      |
 | `@local.definition.module`    | Module     |
 | `@local.definition.namespace` | Namespace  |
+| `@local.definition.enum_variant` | EnumVariant |
+| `@local.definition.property`  | Property   |
 | `@local.definition.import`    | (imports)  |
 
-Additional languages may be added by vendoring the corresponding `locals.scm` file. Currently,
-Perl lacks an upstream `locals.scm`, so symbol extraction for Perl is minimal until a query is added.
+Additional languages may be added by vendoring the corresponding `locals.scm` file. nvim-treesitter
+has no Perl `locals.scm`, so `queries/vendor/perl/locals.scm` is Tree Hugger's own query: named
+subs, `package` statements and blocks, and `my`/`our`/`state` variables.
 
 ## Testing
 

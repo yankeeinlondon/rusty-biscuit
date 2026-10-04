@@ -170,6 +170,12 @@
 - `tree-hugger` uses `test-toolkit` only as a development dependency, for the
   `test_layout` gate in its consolidated `l1` test binary. It adds no crate to
   the workspace: every crate it brings is already in `Cargo.lock`.
+- `tree-hugger-cli` uses `biscuit-hash` (`blake3` feature) only as a
+  development dependency, so its cache-upgrade test can compute the
+  persistent-cache key `hug` used before the extractor revision existed
+  without calling the code under test. `tree-hugger` already depends on
+  `biscuit-hash` with the same feature, so the lockfile gains one edge and no
+  package.
 - `biscuit-tui-cli` keeps its optional `terminal-tests` dependency on the
   workspace `biscuit-test-harness` and also declares it as a development
   dependency, so the `test_layout` gate in its feature-less `l1` test binary

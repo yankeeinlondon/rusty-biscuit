@@ -55,13 +55,24 @@ Correct invalidation depends on precise fingerprints.
 
 `AnalyzerFingerprint` is included in every cache key:
 
-1. `schema_version` (Symbol Schema v2 major/minor).
+1. `schema_version` (the symbol schema major/minor, currently `3.0`).
 2. `tree_hugger_version` (crate version).
-3. `grammar_fingerprint` (Tree-sitter grammar versions/checksums).
-4. `query_fingerprint` (hash of all relevant query sources).
-5. `config_fingerprint` (language override, ignore globs, feature flags, analysis options).
+3. `grammar_fingerprint` (today the language's query name, such as
+   `typescript`; grammar versions/checksums are **planned**).
+4. `query_fingerprint`: `locals+imports+references;extractor-revision=<N>`,
+   where `<N>` is `tree_hugger::EXTRACTOR_REVISION`. The library bumps that
+   constant with any change to extracted records, so a warm cache written by
+   older extraction rules is never served. A hash of the query sources is
+   **planned**.
+5. `config_fingerprint` (the CLI's analysis options: experimental semantics,
+   rule selectors, strict mode, external adapters).
 
-If any element changes, entries are treated as invalid.
+If any element changes, the key changes and the old entry is never read
+again. The old file stays on disk until the cache directory is cleared.
+
+For example, `hug symbols a.ts` before and after an `EXTRACTOR_REVISION` bump
+computes two different keys for the same unchanged `a.ts`: the second run
+misses, re-extracts, and writes a new entry beside the old one.
 
 ### File-Level Key
 
