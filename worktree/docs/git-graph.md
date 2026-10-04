@@ -8,7 +8,7 @@ In short, the graph:
 - gives a merged branch its own lane with a **merge edge** at the actual merge commit, including a branch that kept going after its merge, which stays one connected lane;
 - draws forks and merges only at **verified** commits, however old, and folds the history between them into `+N` squares;
 - never moves a label or a fork to a different commit. When it cannot show something, `wt list`'s closing notes say so instead: in a shallow clone, how to fetch the missing history; otherwise, that the graph left something out.
-- names a branch whose work reached a lane only through another branch's merge (`feat/a's commits are all in main (merged through feat/b).`). That is complete history with no merge of its own to draw, so it is not reported as missing.
+- names a branch whose work reached a lane only through another branch's merge (`feat/a's commits are all in main (merged through feat/b).`). That is complete history with no merge of its own to draw, so it is not reported as missing. When the branch's tip is drawn, it also gets an `in main` (or `in origin/main`) tag, so a tip that trails past the lane's merges doesn't read as unmerged.
 
 ## Who does what
 

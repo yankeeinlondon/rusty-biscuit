@@ -15,7 +15,7 @@ use worktree::availability::{Availability, OtherCondition};
 use worktree::default_target::DefaultTarget;
 use worktree::fork_origin::{ForkOrigin, ForkOriginStore};
 use worktree::listing::{
-    BranchComparisons, Caption, Comparison, ParentComparison, TreeRow, build_tree,
+    BranchComparisons, Caption, Comparison, LineSteps, ParentComparison, TreeRow, build_tree,
 };
 use worktree::pull_requests::{OpenPullRequest, PrListing};
 use worktree::remote_head::{CheckFailure, FetchFailure};
@@ -166,6 +166,7 @@ impl Example {
                 tracking_sha: "f".repeat(40),
                 ahead: 0,
                 behind: 7,
+                behind_on_line: None,
             },
             prs: PrListing {
                 source_repo: Some("owner/repo".to_string()),
@@ -729,6 +730,7 @@ fn comparison(ahead: usize, behind: usize) -> Caption {
         tracking_sha: TRACKING_TIP.to_string(),
         ahead,
         behind,
+        behind_on_line: None,
     }
 }
 
@@ -960,6 +962,7 @@ fn caption_snapshot_trunk_default_branch() {
         tracking_sha: TRACKING_TIP.to_string(),
         ahead: 2,
         behind: 5,
+        behind_on_line: None,
     };
     let cases = every_row()
         .into_iter()
@@ -1126,10 +1129,11 @@ fn closing_notes_snapshot() {
                     merged_elsewhere: vec![
                         MergedElsewhere {
                             branch: "feat/schema".into(),
+                            tip: "ba02e69e7ad4c8e3".into(),
                             into: "origin/main".into(),
                             through: Some("fix/skill".into()),
                         },
-                        MergedElsewhere { branch: "feat/old".into(), into: "main".into(), through: None },
+                        MergedElsewhere { branch: "feat/old".into(), tip: "0ld0000".into(), into: "main".into(), through: None },
                     ],
                     ..GraphOmissions::default()
                 },
@@ -1829,4 +1833,19 @@ fn the_graph_gets_the_rows_the_rest_of_the_listing_leaves() {
     assert_eq!(list_table::graph_row_budget(80, &[Some(&table), None, None, Some(notes)]), 53);
     assert_eq!(list_table::graph_row_budget(80, &[Some(&table), Some("status\n"), None, None]), 54);
     assert_eq!(list_table::graph_row_budget(30, &[Some(&table), None, None, Some(notes)]), list_table::GRAPH_MIN_ROWS);
+}
+
+/// A behind count that merges inflate says how far the tracking ref's own
+/// line, which the graph draws, is ahead; matching counts say nothing more.
+#[test]
+fn a_behind_caption_names_the_steps_on_the_tracking_refs_own_line() {
+    let with = |commits, merges| Caption { behind_on_line: Some(LineSteps { commits, merges }), ..comparison(0, 45) };
+    let caption = |caption: &Caption| {
+        caption_for(Some(caption), true, RemoteStatus::CheckedNow).split_whitespace().collect::<Vec<_>>().join(" ")
+    };
+    assert!(caption(&with(1, 1)).contains("main is 45 commits (1 merge) behind origin/main"));
+    assert!(caption(&with(2, 2)).contains("45 commits (2 merges) behind"));
+    assert!(caption(&with(3, 1)).contains("45 commits (3 on main's line) behind"));
+    assert!(caption(&with(45, 0)).contains("45 commits behind"), "the counts agree");
+    assert!(caption(&comparison(0, 45)).contains("45 commits behind"), "nothing measured");
 }

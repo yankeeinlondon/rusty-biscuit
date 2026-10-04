@@ -122,6 +122,8 @@ The caption is one sentence: how the local default branch compares with `origin/
 
 The comparison is `is N commits behind`, `is N commits ahead of`, `is in sync with`, or `has diverged from … (N commits ahead, M commits behind)`. Only the counts are colored. It says `local origin/main` in the two rows where this run could not bring the tracking ref up to date, so the counts may be old.
 
+The counts include every commit, merged-in ones too, as `git rev-list --count` does. When the default branch is behind and merges brought most of those commits in, an italic aside to the count says how far `origin/<default>`'s own line (its first-parent history, which is all the graph's default lane draws) is ahead: `main is 45 commits (1 merge) behind origin/main`. It reads `(2 merges)` when every step on that line is a merge, `(3 on main's line)` otherwise, and is left out when the two counts agree.
+
 | This run | Caption |
 |---|---|
 | Checked; no difference | `main is 3 commits behind origin/main` |
@@ -360,7 +362,7 @@ After a blank line, the output can end with up to six kinds of note, in this ord
     - feat/schema-enhancement's commits are all in origin/main (merged through fix/wt-skill).
     ```
 
-    The last names the lane by what you know it as (`origin/main` when it is ahead of `main`), and the carrying branch only when it is drawn; otherwise it says `merged through another branch`.
+    The last names the lane by what you know it as (`origin/main` when it is ahead of `main`), and the carrying branch only when it is drawn; otherwise it says `merged through another branch`. The graph tags that branch's tip `in origin/main` too, when the tip is drawn.
 - **Unavailable worktrees.** One note per `✕` row, in table order (a `?` row gets none), as described under [Worktrees Git can't read](#worktrees-git-cant-read):
 
     ```text

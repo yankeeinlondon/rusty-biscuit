@@ -134,6 +134,7 @@ pub struct ForkedOffLine {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MergedElsewhere {
     pub branch: String,
+    pub tip: String,
     /// The lane's name: a branch, the default branch, or `origin/<default>`.
     pub into: String,
     /// The drawn branch whose merge brought it in; `None` when no drawn
@@ -152,6 +153,17 @@ impl GraphFacts {
         }
         for (name, sha) in &self.refs {
             graph = graph.with_ref(name.clone(), sha.clone());
+        }
+        // A tip that reached a lane only through another branch's merge has
+        // no merge line of its own; the tag says it is merged anyway. Only a
+        // drawn tip gets one, so it never becomes an undrawn-label omission.
+        for merged in &self.merged_elsewhere {
+            let tip_drawn = self.lines.iter().any(|line| {
+                line.branch == merged.branch && line.entries.iter().any(|entry| matches!(entry, LaneEntry::Commit(sha) if *sha == merged.tip))
+            });
+            if tip_drawn {
+                graph = graph.with_ref(format!("in {}", merged.into), merged.tip.clone());
+            }
         }
         let mut drawn = HashSet::new();
         for line in &self.lines {
@@ -976,6 +988,7 @@ fn assemble(
             let (merge, into) = placement.merged_through.as_ref()?;
             Some(MergedElsewhere {
                 branch: placement.branch.clone(),
+                tip: placement.tip.clone(),
                 into: lane_name(input, tips, into),
                 through: placements.iter().find(|other| other.merges_at(merge)).map(|other| other.branch.clone()),
             })

@@ -1379,9 +1379,10 @@ fn an_indirectly_integrated_branch_gets_a_lane_without_a_merge_and_no_notice() {
     assert!(!graph.incomplete, "a verified indirect integration is complete history");
     assert_eq!(
         graph.merged_elsewhere,
-        vec![MergedElsewhere { branch: "t".into(), into: "main".into(), through: None }],
+        vec![MergedElsewhere { branch: "t".into(), tip: t1.clone(), into: "main".into(), through: None }],
         "other is not drawn, so it isn't named"
     );
+    assert!(mermaid(&graph).contains(r#"tag: "in main""#), "t's tip is tagged as merged: {}", mermaid(&graph));
     assert_eq!(graph.default_entries.last(), Some(&LaneEntry::Commit(merge)));
     assert!(!mermaid(&graph).contains("merge "));
 }

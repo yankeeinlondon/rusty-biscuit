@@ -656,7 +656,7 @@ pub fn caption_markup(caption: Option<&Caption>, remote: &RemoteFacts<'_>, now: 
     let count = |n: usize| format!("<yellow>{}</yellow>", commits(n));
     let comparison = match caption.state() {
         CaptionState::InSync => format!("{local} is in sync with {target}"),
-        CaptionState::Behind(n) => format!("{local} is {} behind {target}", count(n)),
+        CaptionState::Behind(n) => format!("{local} is {}{} behind {target}", count(n), own_line_markup(caption, n)),
         CaptionState::Ahead(n) => format!("{local} is {} ahead of {target}", count(n)),
         CaptionState::Diverged { ahead, behind } => format!(
             "{local} has diverged from {target} ({} ahead, {} behind)",
@@ -665,6 +665,22 @@ pub fn caption_markup(caption: Option<&Caption>, remote: &RemoteFacts<'_>, now: 
         ),
     };
     format!("{comparison}{suffix}")
+}
+
+/// When merges account for part of a `behind` count, how many steps that is
+/// on the tracking ref's own line, which is all the graph's default lane
+/// draws, as an italic aside to the count: ` (1 merge)`, or ` (3 on main's
+/// line)` when not every step is a merge. Empty when the counts agree.
+fn own_line_markup(caption: &Caption, behind: usize) -> String {
+    let Some(steps) = caption.behind_on_line.filter(|steps| steps.commits < behind) else {
+        return String::new();
+    };
+    let what = match (steps.commits == steps.merges, steps.commits) {
+        (true, 1) => "1 merge".to_string(),
+        (true, n) => format!("{n} merges"),
+        (false, n) => format!("{n} on {}'s line", Prose::escape_text(&caption.local)),
+    };
+    format!(" <i>({what})</i>")
 }
 
 /// The suffix's text, without parentheses or markup. `None` for a check this
