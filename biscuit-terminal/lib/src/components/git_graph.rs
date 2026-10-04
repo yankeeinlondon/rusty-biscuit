@@ -222,7 +222,8 @@ pub struct GraphPullRequest {
 pub struct GraphViewport {
     /// Columns available after margins.
     pub columns: u32,
-    /// Terminal rows; the base view is capped at half of them.
+    /// Terminal rows; the base view is capped at half of them unless
+    /// [`GitGraph::with_max_rows`] says otherwise.
     pub rows: u32,
     pub cell: CellSize,
 }
@@ -255,9 +256,25 @@ pub struct GitGraphPlan {
     pub hidden_lanes: usize,
     /// Commits the width cap moved into `+N` squares.
     pub trimmed_commits: usize,
-    /// Some history is not shown: an undrawn fork, merge, or tagged commit,
-    /// or the caller's [`GitGraph::with_incomplete_history`].
+    /// Some history is not shown: a [`GraphOmission`], or the caller's
+    /// [`GitGraph::with_incomplete_history`].
     pub incomplete: bool,
+    /// What this plan left out rather than draw at another commit, so a
+    /// caller can say what is missing instead of only that something is.
+    pub omissions: Vec<GraphOmission>,
+}
+
+/// Something a [`GitGraphPlan`] leaves out rather than draw at another commit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GraphOmission {
+    /// The lane's fork commit is not drawn (`fork` is `None` when it was
+    /// never known), so the lane starts unconnected.
+    UnconnectedLane { branch: String, fork: Option<String> },
+    /// The lane's merge into `destination` is drawn as a plain commit.
+    Merge { branch: String, destination: String },
+    /// A label (a ref, a branch with no commits of its own, or a PR) whose
+    /// commit is not drawn.
+    Tag(String),
 }
 
 /// A git graph for the terminal and the browser. See the module docs.
@@ -273,6 +290,7 @@ pub struct GitGraph {
     width: Option<ImageWidth>,
     theme: Option<MermaidTheme>,
     incomplete_history: bool,
+    max_rows: Option<u32>,
     layout: Layout,
 }
 
@@ -331,8 +349,8 @@ struct Layouted {
     /// index)`, in edge order.
     sources: HashMap<(usize, usize), Vec<String>>,
     tags: HashMap<String, Vec<String>>,
-    /// Something the draft should show is not drawn.
-    incomplete: bool,
+    /// What the draft should show but does not draw.
+    omissions: Vec<GraphOmission>,
 }
 
 /// A merge resolved to drawn positions: `source` on the merged lane,
@@ -343,10 +361,10 @@ struct Edge {
     destination: (LaneKey, usize),
 }
 
-/// Mermaid text and whether it leaves history out.
+/// Mermaid text and the history it leaves out.
 struct Emitted {
     text: String,
-    incomplete: bool,
+    omissions: Vec<GraphOmission>,
 }
 
 /// Emission progress.
@@ -362,7 +380,7 @@ struct EmitState {
     /// Destinations whose merge will not be drawn.
     dropped: HashSet<String>,
     elided_ids: HashSet<String>,
-    incomplete: bool,
+    omissions: Vec<GraphOmission>,
 }
 
 impl EmitState {
@@ -385,6 +403,7 @@ impl GitGraph {
             width: None,
             theme: None,
             incomplete_history: false,
+            max_rows: None,
             layout: Layout::default(),
         }
     }
@@ -428,6 +447,14 @@ impl GitGraph {
     /// The Mermaid theme; unset follows the terminal's color mode.
     pub fn with_theme(mut self, theme: MermaidTheme) -> Self {
         self.theme = Some(theme);
+        self
+    }
+
+    /// Caps the base view's height at `rows` terminal rows instead of half
+    /// the viewport's, for a caller that knows how much of the screen its
+    /// other output takes. Lanes past the cap are left out as usual.
+    pub fn with_max_rows(mut self, rows: u32) -> Self {
+        self.max_rows = Some(rows);
         self
     }
 
@@ -494,12 +521,13 @@ impl GitGraph {
                 rows: 0,
                 hidden_lanes: 0,
                 trimmed_commits: 0,
-                incomplete: full.incomplete || self.incomplete_history,
+                incomplete: !full.omissions.is_empty() || self.incomplete_history,
+                omissions: full.omissions,
             });
         };
 
         let eligible = draft.lanes.len();
-        let max_rows = (viewport.rows / 2).max(1);
+        let max_rows = self.max_rows.unwrap_or(viewport.rows / 2).max(1);
         if self.is_base_view() && rows_of(full_size) > max_rows {
             draft = self.fit_lanes(draft, max_rows, &|text| measure(text).map(rows_of));
         }
@@ -537,7 +565,8 @@ impl GitGraph {
             rows: rows_of(size),
             hidden_lanes,
             trimmed_commits,
-            incomplete: emitted.incomplete || self.incomplete_history,
+            incomplete: !emitted.omissions.is_empty() || self.incomplete_history,
+            omissions: emitted.omissions,
         })
     }
 
@@ -663,7 +692,7 @@ impl GitGraph {
         // order, is drawn and any other into the same commit is not.
         let mut merges: HashMap<String, Edge> = HashMap::new();
         let mut sources: HashMap<(usize, usize), Vec<String>> = HashMap::new();
-        let mut incomplete = false;
+        let mut omissions = Vec::new();
         for (index, _) in &draft.lanes {
             for merge in &self.lines[*index].merges {
                 let source = positions
@@ -677,7 +706,10 @@ impl GitGraph {
                         merges.insert(merge.destination.clone(), Edge { source: (*index, source), destination });
                         sources.entry((*index, source)).or_default().push(merge.destination.clone());
                     }
-                    _ => incomplete = true,
+                    _ => omissions.push(GraphOmission::Merge {
+                        branch: self.lines[*index].branch.clone(),
+                        destination: merge.destination.clone(),
+                    }),
                 }
             }
         }
@@ -693,7 +725,10 @@ impl GitGraph {
             });
             children.entry(point).or_default().push(index);
         }
-        incomplete |= !unconnected.is_empty();
+        for index in &unconnected {
+            let line = &self.lines[*index];
+            omissions.push(GraphOmission::UnconnectedLane { branch: line.branch.clone(), fork: line.fork_sha.clone() });
+        }
         let mut lane_edges: Vec<(usize, usize)> = merges
             .values()
             .filter_map(|edge| Some((edge.source.0, edge.destination.0?)))
@@ -716,6 +751,7 @@ impl GitGraph {
         }
 
         let (tags, unplaced) = self.tags(draft, &positions);
+        omissions.extend(unplaced.into_iter().map(GraphOmission::Tag));
         Some(Layouted {
             lane_names,
             children,
@@ -723,7 +759,7 @@ impl GitGraph {
             merges,
             sources,
             tags,
-            incomplete: incomplete || unplaced,
+            omissions,
         })
     }
 
@@ -748,7 +784,7 @@ impl GitGraph {
 
     /// Tags by commit, and whether any tag the view should show has no drawn
     /// commit to sit on.
-    fn tags(&self, draft: &Draft, positions: &HashMap<&str, (LaneKey, usize)>) -> (HashMap<String, Vec<String>>, bool) {
+    fn tags(&self, draft: &Draft, positions: &HashMap<&str, (LaneKey, usize)>) -> (HashMap<String, Vec<String>>, Vec<String>) {
         let drawn_tip = |key: LaneKey| last_commit(draft.entries(key));
         let lane_of = |branch: &str| {
             draft
@@ -772,7 +808,7 @@ impl GitGraph {
 
         let hidden = self.hidden_commits(draft);
         let mut tags: HashMap<String, Vec<String>> = HashMap::new();
-        let mut unplaced = false;
+        let mut unplaced = Vec::new();
         // `accountable`: the view should show this tag, so an undrawn commit
         // is reported rather than silently skipped.
         let mut add = |sha: Option<&str>, tag: String, accountable: bool| match sha {
@@ -783,7 +819,8 @@ impl GitGraph {
                 }
             }
             Some(sha) if hidden.contains(sha) => {}
-            _ => unplaced |= accountable,
+            _ if accountable && !unplaced.contains(&tag) => unplaced.push(tag),
+            _ => {}
         };
 
         for (name, sha) in &self.refs {
@@ -834,7 +871,10 @@ impl GitGraph {
             for destination in arranged.sources.get(&source).into_iter().flatten() {
                 if !state.emitted(arranged.merges[destination].destination) {
                     state.dropped.insert(destination.clone());
-                    state.incomplete = true;
+                    state.omissions.push(GraphOmission::Merge {
+                        branch: self.lines[lane].branch.clone(),
+                        destination: destination.clone(),
+                    });
                 }
             }
             lines.push(format!("    checkout {}", arranged.lane_names[&Some(lane)]));
@@ -842,7 +882,7 @@ impl GitGraph {
         }
         Some(Emitted {
             text: lines.join("\n"),
-            incomplete: arranged.incomplete || state.incomplete,
+            omissions: arranged.omissions.iter().cloned().chain(state.omissions).collect(),
         })
     }
 
@@ -945,7 +985,10 @@ impl GitGraph {
             return Some(edge.source.0);
         }
         state.dropped.insert(sha.to_string());
-        state.incomplete = true;
+        state.omissions.push(GraphOmission::Merge {
+            branch: self.lines[edge.source.0].branch.clone(),
+            destination: sha.to_string(),
+        });
         None
     }
 

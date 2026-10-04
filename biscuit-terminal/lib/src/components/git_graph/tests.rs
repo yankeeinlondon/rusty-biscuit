@@ -1206,6 +1206,16 @@ fn the_height_cap_adds_lanes_in_activity_order_until_one_does_not_fit() {
 }
 
 #[test]
+fn with_max_rows_replaces_the_half_height_cap() {
+    // 40 rows would cap at 20; 30 rows fit four lanes (25), as a 60-row
+    // viewport's default cap does.
+    let planned = plan(&base_view_with_lanes().with_max_rows(30), viewport(200, 40));
+    assert_eq!(planned.hidden_lanes, 2, "{}", planned.mermaid);
+    let tighter = plan(&base_view_with_lanes().with_max_rows(10), viewport(200, 200));
+    assert_eq!(tighter.hidden_lanes, 5, "only the default lane fits: {}", tighter.mermaid);
+}
+
+#[test]
 fn a_focused_view_is_never_cut_by_the_height_cap() {
     let planned = plan(&spec_example(), viewport(200, 10));
     assert_eq!(planned.hidden_lanes, 0);
@@ -1460,6 +1470,34 @@ fn render_without_notes_leaves_the_notes_to_the_caller() {
     assert!(plan.hidden_lanes > 0 && plan.incomplete, "{plan:?}");
     assert!(!output.contains("not shown"), "{output}");
     assert_eq!(graph.render(&term).trim_end(), with_notes(output, &plan, &term).trim_end());
+}
+
+/// Each thing left out is named, so a caller can explain it.
+#[test]
+fn the_plan_names_what_it_leaves_out() {
+    let graph = GitGraph::new("main", commits(&["1111111", "2222222"]))
+        .with_ref("v0.1.0", sha("0ld0000"))
+        .with_line(
+            GraphLine::new("feat/a")
+                .forked_at(sha("9999999"))
+                .with_entries(commits(&["aaaaaaa"]))
+                .with_merge(sha("aaaaaaa"), sha("8888888")),
+        )
+        .with_line(line("feat/b", None, "bbbbbbb", 10));
+    let planned = plan(&graph, viewport(400, 200));
+    assert!(planned.incomplete);
+    assert_eq!(
+        planned.omissions,
+        vec![
+            GraphOmission::Merge { branch: "feat/a".into(), destination: sha("8888888") },
+            GraphOmission::UnconnectedLane { branch: "feat/a".into(), fork: Some(sha("9999999")) },
+            GraphOmission::Tag("v0.1.0".into()),
+        ],
+        "{}",
+        planned.mermaid
+    );
+    let complete = plan(&GitGraph::new("main", commits(&["1111111"])).with_line(line("feat/b", None, "bbbbbbb", 10)), viewport(400, 200));
+    assert!(complete.omissions.is_empty() && !complete.incomplete, "{complete:?}");
 }
 
 #[test]
