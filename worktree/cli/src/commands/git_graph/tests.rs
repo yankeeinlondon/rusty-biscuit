@@ -1419,6 +1419,39 @@ fn a_fork_main_holds_only_through_a_merge_is_explained() {
     );
 }
 
+/// The focused view of `u`, whose parent `t` forked from `s1` on `side`'s
+/// line: `side` (no record links it) is drawn too, so `t` hangs from `s1`
+/// and nothing is reported as forked off a drawn line.
+#[test]
+#[serial_test::serial]
+fn a_focused_view_draws_the_branch_that_holds_a_lanes_fork() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().to_path_buf();
+    init_repo(&path);
+    let _r = commit(&path, "r");
+    commit(&path, "d1");
+    run_git(&path, &["checkout", "-q", "-b", "side"]);
+    let s1 = commit(&path, "s1");
+    run_git(&path, &["checkout", "-q", "-b", "t"]);
+    let t1 = commit(&path, "t1");
+    run_git(&path, &["checkout", "-q", "-b", "u"]);
+    commit(&path, "u1");
+    run_git(&path, &["checkout", "-q", "side"]);
+    commit(&path, "s2");
+    run_git(&path, &["checkout", "-q", "main"]);
+    merge_no_ff(&path, "side");
+    let _guard = DirGuard::enter(&path);
+    let mut forks = ForkOriginStore::default();
+    forked_at(&mut forks, "u", "t", &t1, 2);
+
+    let (graph, _) = gather(&input("u", &["main", "side", "t", "u"], forks), true, false);
+    let graph = graph.expect("focused view");
+
+    assert_eq!(line(&graph, "t").fork_sha.as_ref(), Some(&s1));
+    assert!(line(&graph, "side").entries.contains(&LaneEntry::Commit(s1)), "side's lane holds the fork");
+    assert!(graph.forked_off_line.is_empty(), "{:?}", graph.forked_off_line);
+}
+
 /// Records `branch` as created from `parent` at `base_sha`, as `wt create`
 /// does.
 fn forked_at(store: &mut ForkOriginStore, branch: &str, parent: &str, base_sha: &str, created_at: u64) {

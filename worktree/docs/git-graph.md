@@ -38,8 +38,9 @@ Selection does not depend on whether a branch is merged.
 ### Focused view (a feature branch is checked out)
 
 - The default branch and the current branch.
-- The current branch's recorded parent (from its fork-origin record, written by `wt create`), when that is another existing local branch. The parent does not need a worktree. It gets a lane, and its tip is passed as a ref. This is one level only: the parent's own parent is not added.
+- The current branch's recorded parent (from its fork-origin record, written by `wt create`), when that is another existing local branch. The parent does not need a worktree. It gets a lane, and its tip is passed as a ref. The parent's own parent is not added for its own sake.
 - A recorded parent that no longer exists is ignored, and the current branch is measured against the default branch.
+- Any worktree branch whose own line (first-parent history) holds the fork commit of a drawn lane, when no drawn lane holds it. A lane's recorded parent is preferred, then branches in listing order; each added branch hangs from its own recorded parent when that is drawn, and the view is gathered again until every fork that some branch holds is drawn. Example: in `fix/path-spelling`'s view, its parent `fix/magic-globs` forked at `e23d0c2`, a commit on `feat/schema-enhancement`'s line that reached `main` only through that branch's merge. Without `feat/schema-enhancement`'s lane the fork has nowhere to be drawn (putting it on `main`'s lane would claim `main` had that commit on its own line), so the lane is added and `fix/magic-globs` hangs from `e23d0c2` on it.
 
 `wt list -v` reuses the focused view's `merge-base` with the default lane for its "forked from" commit, and lists every commit on the branch that neither default tip has (all parents, not only first parents).
 

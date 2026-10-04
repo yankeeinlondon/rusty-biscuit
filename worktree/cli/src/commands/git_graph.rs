@@ -347,36 +347,78 @@ fn focused_view(
     default_base: Result<Option<String>, GatherGap>,
 ) -> GraphFacts {
     let parent = recorded_parent(input, current, |_| true);
-    let mut selected = Vec::new();
-    let mut refs = tips.refs(&input.default_branch);
-    if let Some((parent, parent_tip)) = parent {
+    // Branches drawn beyond the current one and its parent, because a drawn
+    // lane forked from a commit only their line holds.
+    let mut holders: Vec<&str> = Vec::new();
+    loop {
+        let mut drawn: HashSet<&str> = holders.iter().copied().collect();
+        drawn.extend(parent.map(|(parent, _)| parent));
+        drawn.insert(current);
+        let mut selected = Vec::new();
+        let mut refs = tips.refs(&input.default_branch);
+        for branch in holders.iter().copied().chain(parent.map(|(parent, _)| parent)) {
+            let Some(tip) = input.refs.local(branch) else {
+                continue;
+            };
+            selected.push(Selected {
+                branch,
+                tip,
+                parent: recorded_parent(input, branch, |recorded| drawn.contains(recorded)),
+                default_base: None,
+            });
+            refs.push((branch.to_string(), tip.to_string()));
+        }
         selected.push(Selected {
-            branch: parent,
-            tip: parent_tip,
-            parent: None,
-            default_base: None,
+            branch: current,
+            tip: current_tip,
+            parent,
+            default_base: parent.is_none().then_some(default_base.clone()),
         });
-        refs.push((parent.to_string(), parent_tip.to_string()));
+        let facts = assemble(
+            input,
+            history,
+            tips,
+            &selected,
+            DefaultLane {
+                window: LINE_WINDOW,
+                cap_window: true,
+            },
+            refs,
+            current,
+            gap,
+        );
+        let added: Vec<&str> = facts
+            .forked_off_line
+            .iter()
+            .filter_map(|off| fork_holder(input, history, off, &drawn))
+            .collect();
+        if added.is_empty() {
+            return facts;
+        }
+        for branch in added {
+            if !holders.contains(&branch) {
+                holders.insert(0, branch);
+            }
+        }
     }
-    selected.push(Selected {
-        branch: current,
-        tip: current_tip,
-        parent,
-        default_base: parent.is_none().then_some(default_base),
-    });
-    assemble(
-        input,
-        history,
-        tips,
-        &selected,
-        DefaultLane {
-            window: LINE_WINDOW,
-            cap_window: true,
-        },
-        refs,
-        current,
-        gap,
-    )
+}
+
+/// An undrawn worktree branch whose own line (first-parent chain) holds
+/// `off`'s fork commit: the branch's recorded parent when it does, else the
+/// first such branch in listing order.
+fn fork_holder<'a>(input: &'a GatherInput, history: &History, off: &ForkedOffLine, drawn: &HashSet<&str>) -> Option<&'a str> {
+    let holds = |branch: &str| {
+        input.refs.local(branch).is_some_and(|tip| {
+            matches!(history.classify(&off.fork, &[tip]), Ok(Integration::NoSeparateHistory { .. }))
+        })
+    };
+    let recorded = input.forks.get(&off.branch).map(|origin| origin.base_branch.as_str());
+    let candidates = recorded.into_iter().chain(input.branch_names.iter().map(String::as_str));
+    let undrawn = |branch: &&str| *branch != input.default_branch && !drawn.contains(branch);
+    candidates
+        .filter(undrawn)
+        .find(|branch| holds(branch))
+        .and_then(|branch| input.branch_names.iter().find(|name| name.as_str() == branch).map(String::as_str))
 }
 
 /// The default lane's newest commits and one line per worktree branch, each
@@ -895,7 +937,10 @@ fn assemble(
 
     // A fork no lane drew leaves `GitGraph` an unconnected lane. When the
     // expected lane contains the fork, the commit that brought it in says why.
-    let drawn = |sha: &str| default_built.placed.contains(sha) || lanes.values().any(|built| built.placed.contains(sha));
+    let on = |built: &LaneHistory, sha: &str| {
+        built.placed.contains(sha) || built.entries.iter().any(|entry| matches!(entry, LaneEntry::Commit(commit) if commit == sha))
+    };
+    let drawn = |sha: &str| on(&default_built, sha) || lanes.values().any(|built| on(built, sha));
     let tip_of = |lane: &LaneId| -> Option<&str> {
         match lane {
             LaneId::Default => Some(tips.lane_tip.as_str()),

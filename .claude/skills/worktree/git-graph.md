@@ -237,3 +237,17 @@ Other L1 facts:
 - The floor row measures the remaining fixed cost (about 350 ms).
 - Record with
   `WT_GRAPH_PERF_SAMPLES=10 just test-perf perf_graph --cargo-profile release`.
+
+## Focused view: lanes that hold a fork
+
+- `focused_view` loops: after each `assemble`, every `GraphFacts::forked_off_line`
+  entry (a fork no drawn lane holds, found by `drawn`, which checks each
+  lane's `placed` anchors **and** its drawn entries) looks for a
+  `fork_holder`: an undrawn worktree branch whose first-parent chain holds
+  the fork (`classify` gives `NoSeparateHistory`), recorded parent first.
+  Found holders are selected with their own recorded parents and the view
+  is gathered again; the loop ends when nothing new is found.
+- **Trap:** `GitGraph::in_view` filters a focused view's lanes itself. It
+  used to keep only the current branch and its parent, so a holder `wt`
+  passed was silently dropped and its fork reported as undrawn. It now keeps
+  the parent chain and any lane holding an in-view lane's fork.
