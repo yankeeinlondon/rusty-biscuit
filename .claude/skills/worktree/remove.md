@@ -122,16 +122,82 @@ Observed with Git 2.56 on macOS. These describe Git, not `wt`:
   inside it). A Git command that succeeds there does not prove the worktree is
   healthy.
 
+## Preparing a target Git can't read (`remove::prepare`)
+
+`prepare(base, entry, &repair::Git)` classifies the entry afresh and returns
+`CheckoutState::{Healthy, Missing, Repaired}` or a `PrepareRefusal`. The CLI
+must call it before any inventory.
+
+- **Association** (`admin_entry::admin_entry_for`): the common dir comes from
+  `rev-parse --path-format=absolute --git-common-dir`. Every directory under
+  `worktrees/` is read, and an unreadable or linked record refuses the whole
+  association. Exactly one record must match. Compare the **checkout
+  directories** (`canonical_worktree_path`, which canonicalizes the longest
+  existing ancestor), never the `.git` paths: another record whose checkout
+  was replaced by a file makes `<file>/.git` fail with ENOTDIR and blocked
+  every association until this was fixed.
+- **Repair** (`repair::repair_unlinked`) goes through the `RepairGit` seam.
+  The attempt's exit code and output are diagnostics only. The verdict is
+  that all of these hold: `--git-dir` is the associated record,
+  `--git-common-dir` is this repository's, the back-reference names the
+  target, `--show-toplevel` is the target, and a fresh listing shows the same
+  branch or detached HEAD with no `prunable`. All failures are collected. Only
+  `RepairRefusal::Unverified` follows an attempt (`repair_attempted()`).
+- **Missing** (`missing::inspect_missing`): the admin `index` must be a
+  regular file (`IndexAbsent` otherwise). It is diffed with
+  `GIT_INDEX_FILE=<admin>/index git diff-index --cached --name-status -z <head>`
+  against the branch tip, or the recorded HEAD when detached. Differences become
+  `DirtyEntry`s with index-column statuses (`"A "`, `"M "`). An empty
+  `staged` list means "index matches HEAD", never "checkout checked".
+- **Record removal** (`missing::remove_missing_record`): it re-lists, requires
+  the same identity, and requires the path to be `NotFound` (a reappeared
+  directory or link refuses). Then it runs plain `git worktree remove <path>`
+  with no `--force` and no `check_not_in_use`, and deletes the copy record
+  only after Git succeeds. Branch steps stay with the caller.
+- Git receives paths as `OsStr` (`git::git_from_output`), never through a
+  lossy `String`.
+
+### How `wt remove` uses it (`cli/src/commands/remove/mod.rs`)
+
+- `prepare` runs after the main-checkout guard, the inside-without-wrapper
+  guard (exit 4), and `set_current_dir(base)`, so nothing is repaired for a
+  removal that could not go ahead. Every `PrepareRefusal` is
+  `RefusedToLoseWork` (exit 3), whatever the force flags.
+- `Facts` carries the `CheckoutState`. For `Missing`, `inventory` stays empty
+  and is never read: `situation()`, the report (`report::missing_markup`), the
+  discard question, and `refusal_markup` all branch on `facts.missing()`
+  first. A missing target never hands off, and `execute` runs
+  `remove_missing_record` instead of `remove_worktree`.
+- After `Repaired`, every refusal and cancellation appends
+  `Facts::kept_link_note`, and a failed inventory says the link was left in
+  place. Never print "nothing was changed" there.
+- Bare Git errors go through `in_context(error, operation)`, which prefixes
+  target, path, and operation and keeps the variant, so the exit code is
+  unchanged (unit test `context_never_changes_an_exit_code`).
+- **Trap: a shell standing in an unlinked worktree can't reach the
+  repository** unless the worktree is nested in another checkout of it.
+  `find_worktree` runs Git in the caller's directory and fails with a bare
+  `not a git repository` before `prepare`. Handoff-after-repair tests nest
+  the worktree in the base checkout for this reason.
+- **Trap: a locked record is never `prunable`.** A locked worktree whose
+  directory is gone is `Healthy` to `prepare` and fails in
+  `collect_inventory` (exit 1, with context).
+
 ## Move-first handoff
 
 Inside the target with `WT_SHELL_WRAPPER=1`:
 
 1. The first run writes `handoff::HandoffRecord`
    (`<repo hash>.handoff-<token>.json`, 60 s) and prints `cd:` +
-   `remove-handoff:`. The v3 state binds the effective rules and copy baseline.
+   `remove-handoff:`. The v4 state binds the effective rules, the copy
+   baseline, and `git_dir` (`handoff::checkout_git_dir`: where the target's
+   `.git` leads, asked from the base). Back-references alone can't see a
+   redirected `.git`, so the forward link is what is bound.
 2. `--handoff` **consumes the record before judging it**, then `verify` checks
    "caller outside the target" first (exit 4) and then every stored field
-   (exit 3).
+   (exit 3). Before that, the second run requires `availability::classify` to
+   be `Healthy` (a link broken since the first run refuses with exit 3) and
+   **never calls `prepare`**, so it never repairs.
 3. `run_handoff` refuses (exit 3) when the `--force-remote` destination, its push
    endpoint, or its live head differs from the approved one, is now absent, or
    cannot be reached (approved-absent accepts only a verified absence).
