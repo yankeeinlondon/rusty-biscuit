@@ -555,6 +555,18 @@ impl GitGraph {
         Ok(with_notes(result.output, &plan, term))
     }
 
+    /// The graph as [`render`](TerminalRenderable::render) draws it but
+    /// without the notes below it, with the plan it was drawn from, for a
+    /// caller that reports [`GitGraphPlan::hidden_lanes`] and
+    /// [`GitGraphPlan::incomplete`] in its own words.
+    ///
+    /// `None` when there is nothing to draw (see [`mermaid`](Self::mermaid)).
+    pub fn render_without_notes(&self, term: &Terminal) -> Option<(String, GitGraphPlan)> {
+        let plan = self.plan(GraphViewport::for_terminal(term, &self.layout))?;
+        let output = self.diagram(&plan.mermaid).render(term);
+        Some((output, plan))
+    }
+
     fn diagram(&self, mermaid: &str) -> MermaidDiagram {
         let mut diagram = MermaidDiagram::new(mermaid)
             .with_width(self.width.clone().unwrap_or(ImageWidth::Scale(self.scale)));
@@ -1228,11 +1240,10 @@ impl TerminalRenderable for GitGraph {
     /// history were left out; the diagram's code block on terminals without
     /// images.
     fn render(&self, term: &Terminal) -> String {
-        let Some(plan) = self.plan(GraphViewport::for_terminal(term, &self.layout)) else {
-            return String::new();
-        };
-        let output = self.diagram(&plan.mermaid).render(term);
-        with_notes(output, &plan, term)
+        match self.render_without_notes(term) {
+            Some((output, plan)) => with_notes(output, &plan, term),
+            None => String::new(),
+        }
     }
 
     fn is_block_level(&self) -> bool {

@@ -1451,6 +1451,18 @@ fn the_incomplete_history_notice_follows_the_lane_note() {
 }
 
 #[test]
+fn render_without_notes_leaves_the_notes_to_the_caller() {
+    let term = plain_terminal(200, 24);
+    let graph = base_view_with_lanes()
+        .with_theme(MermaidTheme::Default)
+        .with_ref("v0.1.0", sha("0ld0000"));
+    let (output, plan) = graph.render_without_notes(&term).expect("a graph to draw");
+    assert!(plan.hidden_lanes > 0 && plan.incomplete, "{plan:?}");
+    assert!(!output.contains("not shown"), "{output}");
+    assert_eq!(graph.render(&term).trim_end(), with_notes(output, &plan, &term).trim_end());
+}
+
+#[test]
 fn the_tree_projection_carries_the_untrimmed_source() {
     let node = spec_example().render_tree();
     let debug = format!("{node:?}");

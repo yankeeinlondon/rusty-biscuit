@@ -142,6 +142,8 @@ The component never draws something at a commit other than the one it was given:
 
 Each of these, and `with_incomplete_history()`, sets `GitGraphPlan::incomplete`, and the rendered graph is followed by the dim line `INCOMPLETE_HISTORY_NOTE` ("Some history is not shown"), after the hidden-lanes note. Tags of lanes the height cap leaves out are counted by that note instead. A PR for a branch the graph does not know has no commit to account for, and is not counted.
 
+A caller that lists its own notes (as `wt list` does) calls `render_without_notes(&term)` instead of `render`: it returns the same drawing without either note, together with the `GitGraphPlan` it was drawn from, so the caller can report `hidden_lanes` and `incomplete` in its own words.
+
 ### Sizing and fitting
 
 | Method | Description |
