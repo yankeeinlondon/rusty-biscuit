@@ -10,6 +10,7 @@ use crate::fork_origin::ForkOriginStore;
 use crate::listing::{
     BranchComparisons, Caption, ParentComparison, RefSnapshot, RefTips, TreeRow, build_tree, compare_cached,
 };
+use crate::availability::{self, Availability};
 use crate::git::{git_command, git_command_in, git_from, repo_info};
 use crate::include::{IncludeRules, copy::{self, RealCopyOps, SkipReason}};
 use crate::util::dasherize;
@@ -26,6 +27,10 @@ pub struct WorktreeEntry {
     pub is_main: bool,
     /// Whether the worktree is the one the user is currently in
     pub is_current: bool,
+    /// Git's `prunable` marker: `None` without one, `Some("")` for a bare
+    /// marker, otherwise Git's reason verbatim. Display text only: the reason
+    /// is localized, so safety decisions read [`crate::availability`] instead.
+    pub prunable: Option<String>,
 }
 
 /// Working-tree dirtiness, classified by file kind.
@@ -40,6 +45,9 @@ pub enum DirtyStatus {
     DirtyNonSource,
     /// At least one dirty file is source code.
     DirtySource,
+    /// Not checked: `git status` failed, or Git marks the entry `prunable`.
+    /// Never counts as clean, nor as known source changes.
+    Unknown,
 }
 
 #[derive(Debug, Clone)]
@@ -47,6 +55,8 @@ pub struct WorktreeStatus {
     pub entry: WorktreeEntry,
     /// Working-tree dirtiness in this worktree's checkout
     pub dirty: DirtyStatus,
+    /// Whether Git can read the checkout, classified once per listing.
+    pub availability: Availability,
 }
 
 #[derive(Debug)]
@@ -126,6 +136,10 @@ pub fn default_branch_in(repo: &Path) -> Result<String, WorktreeError> {
 }
 
 /// Parse `git worktree list --porcelain` output into entries.
+///
+/// A `prunable` line sets [`WorktreeEntry::prunable`]. Git writes at most one
+/// per entry; should two appear, both reasons are kept, joined by `"; "`, so
+/// neither silently wins.
 pub fn parse_worktree_list(porcelain_output: &str) -> Vec<WorktreeEntry> {
     let cwd = std::env::current_dir().unwrap_or_default();
     let cwd_canonical = std::fs::canonicalize(&cwd).unwrap_or(cwd.clone());
@@ -134,25 +148,24 @@ pub fn parse_worktree_list(porcelain_output: &str) -> Vec<WorktreeEntry> {
     let mut path: Option<PathBuf> = None;
     let mut branch: Option<String> = None;
     let mut head_sha: Option<String> = None;
+    let mut prunable: Option<String> = None;
     let mut is_main = false;
     let mut first = true;
 
+    let mut flush = |path: PathBuf, branch: Option<String>, head_sha: Option<String>, prunable: Option<String>, is_main: bool| {
+        let is_current = is_current_worktree(&cwd, &cwd_canonical, &path);
+        entries.push(WorktreeEntry { path, branch, head_sha, is_main, is_current, prunable });
+    };
+
     for line in porcelain_output.lines() {
         if let Some(rest) = line.strip_prefix("worktree ") {
-            // Flush previous entry
             if let Some(p) = path.take() {
-                let is_current = is_current_worktree(&cwd, &cwd_canonical, &p);
-                entries.push(WorktreeEntry {
-                    path: p,
-                    branch: branch.take(),
-                    head_sha: head_sha.take(),
-                    is_main,
-                    is_current,
-                });
+                flush(p, branch.take(), head_sha.take(), prunable.take(), is_main);
             }
             path = Some(PathBuf::from(rest));
             branch = None;
             head_sha = None;
+            prunable = None;
             is_main = first;
             first = false;
         } else if let Some(rest) = line.strip_prefix("HEAD ") {
@@ -160,23 +173,28 @@ pub fn parse_worktree_list(porcelain_output: &str) -> Vec<WorktreeEntry> {
         } else if let Some(rest) = line.strip_prefix("branch ") {
             // refs/heads/main -> main
             branch = Some(rest.strip_prefix("refs/heads/").unwrap_or(rest).to_string());
+        } else if let Some(reason) = prunable_reason(line) {
+            prunable = Some(match prunable.take() {
+                Some(earlier) => format!("{earlier}; {reason}"),
+                None => reason.to_string(),
+            });
         }
-        // We skip bare, detached, prunable lines.
     }
 
-    // Flush last entry
     if let Some(p) = path {
-        let is_current = is_current_worktree(&cwd, &cwd_canonical, &p);
-        entries.push(WorktreeEntry {
-            path: p,
-            branch: branch.take(),
-            head_sha: head_sha.take(),
-            is_main,
-            is_current,
-        });
+        flush(p, branch, head_sha, prunable, is_main);
     }
 
     entries
+}
+
+/// The reason on a `prunable` line, `""` for a bare marker; `None` for any
+/// other line.
+fn prunable_reason(line: &str) -> Option<&str> {
+    match line.strip_prefix("prunable")? {
+        "" => Some(""),
+        rest => rest.strip_prefix(' '),
+    }
 }
 
 /// Determine whether a worktree path is the current working directory.
@@ -300,7 +318,7 @@ pub fn gather_dirtiness(entries: &[WorktreeEntry]) -> Vec<DirtyStatus> {
     std::thread::scope(|scope| {
         let handles: Vec<_> = entries
             .iter()
-            .map(|entry| scope.spawn(move || dirty_status(&entry.path)))
+            .map(|entry| scope.spawn(move || entry_dirtiness(entry)))
             .collect();
         handles
             .into_iter()
@@ -473,7 +491,10 @@ impl WorktreeList {
             .iter()
             .cloned()
             .zip(dirty)
-            .map(|(entry, dirty)| WorktreeStatus { entry, dirty })
+            .map(|(entry, dirty)| {
+                let availability = availability::classify(&entry);
+                WorktreeStatus { entry, dirty, availability }
+            })
             .collect();
         self.caption = facts.caption;
         self.target = facts.target;
@@ -488,7 +509,7 @@ impl WorktreeList {
     pub fn refresh_dirty_status(&mut self, checkout: &Path) -> bool {
         match self.statuses.iter_mut().find(|status| status.entry.path == checkout) {
             Some(status) => {
-                status.dirty = dirty_status(checkout);
+                status.dirty = entry_dirtiness(&status.entry);
                 true
             }
             None => false,
@@ -496,12 +517,23 @@ impl WorktreeList {
     }
 }
 
+/// [`dirty_status`] for a readable entry; [`DirtyStatus::Unknown`] without
+/// running Git for one Git marks `prunable`, where `git status` would fail or
+/// report a parent repository's files as this entry's.
+fn entry_dirtiness(entry: &WorktreeEntry) -> DirtyStatus {
+    if entry.prunable.is_some() {
+        DirtyStatus::Unknown
+    } else {
+        dirty_status(&entry.path)
+    }
+}
+
 /// Inspect a worktree's working tree and classify its dirtiness.
 ///
 /// Runs `git status --porcelain` in `path` and partitions changed paths into
 /// source-code files (via `sniff::filesystem::path_kind::is_source_code_path`)
-/// and everything else. Falls back to [`DirtyStatus::Clean`] on git failure so
-/// listing still works in degraded environments.
+/// and everything else. A spawn failure or nonzero exit is
+/// [`DirtyStatus::Unknown`], so a failed check never reads as clean.
 pub fn dirty_status(path: &Path) -> DirtyStatus {
     // `core.untrackedCache=true` enables git's untracked-files cache (persisted
     // in the worktree's `.git/index`). Walking untracked files in a large
@@ -511,7 +543,7 @@ pub fn dirty_status(path: &Path) -> DirtyStatus {
         path,
         &["-c", "core.untrackedCache=true", "status", "--porcelain"],
     ) else {
-        return DirtyStatus::Clean;
+        return DirtyStatus::Unknown;
     };
 
     let mut any_dirty = false;
@@ -1072,6 +1104,76 @@ branch refs/heads/fix/bug-42
         assert!(entries.is_empty());
     }
 
+    /// Real porcelain records keyed by checkout directory name: `main`, a
+    /// healthy `kept`, and a deleted `gone` (which Git marks `prunable`).
+    fn git_porcelain_records() -> (crate::remove::test_support::TestRepo, HashMap<String, String>) {
+        let repo = crate::remove::test_support::TestRepo::new();
+        repo.add_worktree("feat/kept", "kept", "main");
+        let gone = repo.add_worktree("feat/gone", "gone", "main");
+        fs::remove_dir_all(&gone).unwrap();
+        let porcelain = repo.git(&["worktree", "list", "--porcelain"]);
+        let records = porcelain
+            .split("\n\n")
+            .map(|record| {
+                let path = record.lines().next().and_then(|line| line.strip_prefix("worktree ")).unwrap();
+                let name = Path::new(path).file_name().unwrap().to_string_lossy();
+                let name = if name == "repo" { "main".to_string() } else { name.into_owned() };
+                (name, format!("{}\n", record.trim_end()))
+            })
+            .collect();
+        (repo, records)
+    }
+
+    fn prunable_of(porcelain: &str) -> Vec<Option<String>> {
+        parse_worktree_list(porcelain).into_iter().map(|entry| entry.prunable).collect()
+    }
+
+    /// Walks the `prunable` input matrix: one edit of Git's own output per
+    /// cell, after a control row proving the unedited output marks only the
+    /// deleted checkout.
+    #[test]
+    fn the_prunable_line_matrix_from_real_git_output() {
+        let (_repo, records) = git_porcelain_records();
+        let (main, kept, gone) = (&records["main"], &records["kept"], &records["gone"]);
+        let reason_line = gone.lines().find(|line| line.starts_with("prunable")).expect("Git marks a deleted checkout prunable");
+        let reason = reason_line.strip_prefix("prunable ").expect("Git writes a reason").to_string();
+        assert!(!reason.is_empty());
+
+        let gone_last = format!("{main}\n{kept}\n{gone}");
+        assert_eq!(prunable_of(&gone_last), [None, None, Some(reason.clone())], "control: last entry flushed with its marker");
+        let gone_middle = format!("{main}\n{gone}\n{kept}");
+        assert_eq!(prunable_of(&gone_middle), [None, Some(reason.clone()), None], "reset before the next entry");
+
+        let edit = |line: &str| format!("{main}\n{kept}\n{}", gone.replace(reason_line, line));
+        assert_eq!(prunable_of(&format!("{main}\n{kept}\n{}", gone.replace(&format!("{reason_line}\n"), ""))), [None, None, None], "absent");
+        assert_eq!(prunable_of(&edit("prunable")), [None, None, Some(String::new())], "bare marker");
+        assert_eq!(prunable_of(&edit("prunable ")), [None, None, Some(String::new())], "marker with empty reason");
+        assert_eq!(prunable_of(&edit("prunablex")), [None, None, None], "a longer keyword is not the marker");
+        assert_eq!(
+            prunable_of(&edit(&format!("{reason_line}\nprunable second"))),
+            [None, None, Some(format!("{reason}; second"))],
+            "duplicate markers keep both reasons in order"
+        );
+        let lossy = String::from_utf8_lossy(b"prunable bad \xff").into_owned();
+        assert_eq!(prunable_of(&edit(&lossy)), [None, None, Some("bad \u{FFFD}".to_string())], "non-UTF-8 kept lossily for display");
+
+        let kept_path = kept.lines().next().unwrap().strip_prefix("worktree ").unwrap();
+        let embedded = kept
+            .replace(&format!("worktree {kept_path}"), &format!("worktree {kept_path}/prunable x"))
+            .replace("branch refs/heads/feat/kept", "branch refs/heads/prunable");
+        assert_eq!(prunable_of(&format!("{main}\n{embedded}\n{gone}")), [None, None, Some(reason.clone())], "marker text inside a path or branch");
+
+        assert_eq!(prunable_of(&gone_last.replace('\n', "\r\n")), [None, None, Some(reason.clone())], "CRLF");
+        assert_eq!(prunable_of(&format!("{gone_last}\n\n\n")), [None, None, Some(reason)], "trailing blank records");
+    }
+
+    #[test]
+    fn a_failed_status_check_is_unknown_never_clean() {
+        let outside = tempfile::tempdir().unwrap();
+        assert_eq!(dirty_status(outside.path()), DirtyStatus::Unknown, "nonzero exit outside a repository");
+        assert_eq!(dirty_status(&outside.path().join("absent")), DirtyStatus::Unknown, "spawn failure in a missing directory");
+    }
+
     #[test]
     fn porcelain_path_extracts_modified_file() {
         assert_eq!(porcelain_path(" M src/lib.rs"), Some("src/lib.rs"));
@@ -1592,7 +1694,7 @@ branch refs/heads/fix/bug-42
     fn copy_source_prefers_checkout_and_handles_reuse_and_ambiguity() {
         let entry = |path: &str, branch: &str, is_main| WorktreeEntry {
             path: PathBuf::from(path), branch: Some(branch.into()), head_sha: None,
-            is_main, is_current: false,
+            is_main, is_current: false, prunable: None,
         };
         let base = entry("/base", "main", true);
         let theme = entry("/theme", "feat/theme", false);

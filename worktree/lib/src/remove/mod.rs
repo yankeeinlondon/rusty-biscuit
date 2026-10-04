@@ -8,6 +8,7 @@
 //! base checkout, never from inside the worktree being removed. The rules are
 //! item 3 of `2026-09-24-ux-improvements`.
 
+pub mod admin_entry;
 pub mod handoff;
 pub mod included;
 pub mod inventory;

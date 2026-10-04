@@ -508,6 +508,7 @@ mod tests {
             head_sha: Some("a1b2c3d4e5f60718293a4b5c6d7e8f9012345678".to_string()),
             is_main,
             is_current: false,
+            prunable: None,
         }
     }
 
@@ -1222,6 +1223,49 @@ mod repo_tests {
         assert_eq!(status_of(&list, &repo.path()), crate::worktree::DirtyStatus::DirtySource);
         assert_eq!(status_of(&list, &feature), crate::worktree::DirtyStatus::Clean, "not measured again");
         assert!(!list.refresh_dirty_status(&repo.path().join("not-a-worktree")));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn prunable_entries_are_unknown_and_never_run_git_status() {
+        use crate::availability::Availability;
+        use crate::worktree::DirtyStatus;
+
+        let repo = TestRepo::new();
+        let _stores = stores(&repo);
+        let _guard = DirGuard::enter(&repo.path());
+        let healthy = repo.add_worktree("feat/healthy", "healthy", "main");
+        let missing = repo.add_worktree("feat/missing", "missing", "main");
+        let unlinked = repo.add_worktree("feat/unlinked", "unlinked", "main");
+        fs::write(healthy.join("dirty.rs"), "fn f() {}\n").unwrap();
+        fs::remove_dir_all(&missing).unwrap();
+        fs::remove_file(unlinked.join(".git")).unwrap();
+
+        recorder::start_recording();
+        let mut list = list_worktrees().unwrap();
+        let calls = recorder::finish_recording();
+
+        let status_calls = calls.iter().filter(|args| args.iter().any(|arg| arg == "status")).count();
+        assert_eq!(status_calls, 2, "one status for the main checkout and one for the healthy worktree: {calls:?}");
+        for forbidden in ["repair", "prune", "remove"] {
+            assert!(!calls.iter().any(|args| args.iter().any(|arg| arg == forbidden)), "listing ran {forbidden}: {calls:?}");
+        }
+        let by_name = |list: &WorktreeList, name: &str| {
+            let status = list.statuses.iter().find(|status| status.entry.path.file_name() == Some(name.as_ref())).unwrap();
+            (status.dirty, status.availability.clone())
+        };
+        assert_eq!(by_name(&list, "repo"), (DirtyStatus::Clean, Availability::Healthy));
+        assert_eq!(by_name(&list, "healthy"), (DirtyStatus::DirtySource, Availability::Healthy));
+        assert_eq!(by_name(&list, "missing"), (DirtyStatus::Unknown, Availability::Missing));
+        assert_eq!(by_name(&list, "unlinked"), (DirtyStatus::Unknown, Availability::Unlinked));
+        assert!(unlinked.is_dir() && !unlinked.join(".git").exists(), "listing changes nothing on disk");
+        assert!(list.comparisons.contains_key("feat/unlinked"), "branch comparisons still come from refs");
+
+        let unlinked_entry = list.entries().iter().find(|entry| entry.path.file_name() == Some("unlinked".as_ref())).unwrap().path.clone();
+        recorder::start_recording();
+        assert!(list.refresh_dirty_status(&unlinked_entry));
+        assert!(recorder::finish_recording().is_empty(), "a refresh of a prunable entry runs no git");
+        assert_eq!(by_name(&list, "unlinked").0, DirtyStatus::Unknown);
     }
 
     #[test]

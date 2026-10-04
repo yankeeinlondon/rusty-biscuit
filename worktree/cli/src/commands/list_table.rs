@@ -16,6 +16,7 @@
 //! calls it "local origin/<default>".
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
@@ -34,7 +35,9 @@ use worktree::listing::{
 use worktree::pull_requests::{OpenPullRequest, PrListing, PrPlacement, placement};
 use worktree::remote_head::{CheckFailure, FetchFailure, REMOTE_HEAD_REFRESH_DEADLINE};
 use worktree::remote_update::FETCH_DEADLINE;
-use worktree::worktree::{DirtyStatus, WorktreeList, WorktreeStatus};
+use worktree::availability::{Availability, OtherCondition};
+use worktree::error::WorktreeError;
+use worktree::worktree::{DirtyStatus, WorktreeEntry, WorktreeList, WorktreeStatus, resolve_worktree};
 
 /// The narrowest terminal that shows ahead/behind counts in the two target
 /// columns; `--width` sizes only the graph and does not move this gate.
@@ -168,6 +171,9 @@ pub enum FfNotice {
     Missing(String),
     /// The branch or its checkout changed while `wt` worked.
     Changed,
+    /// Git can't read the worktree that has the branch checked out (its path
+    /// as Git records it).
+    UnavailableHolder(PathBuf),
     Failed,
 }
 
@@ -219,13 +225,24 @@ pub fn render(facts: &TableFacts<'_>, terminal: &Terminal, now: u64) -> String {
     }
     out.push_str(table(facts, terminal).render(terminal).trim_end());
     out.push_str("\n\n");
-    for line in legend_markup() {
+    for line in legend_markup(facts) {
         out.push_str(&format!(" {}\n", prose(line).trim_end()));
     }
     out
 }
 
 impl TableFacts<'_> {
+    /// Each worktree a table row shows, once, in row order.
+    fn row_statuses(&self) -> Vec<&WorktreeStatus> {
+        let mut seen = Vec::new();
+        for index in self.tree.iter().filter_map(|row| row.worktree) {
+            if !seen.contains(&index) {
+                seen.push(index);
+            }
+        }
+        seen.into_iter().filter_map(|index| self.statuses.get(index)).collect()
+    }
+
     /// The answer the badges show: none for an ignored repository or an
     /// `origin` without a provider, whatever is stored.
     pub fn badges(&self) -> &PrListing {
@@ -252,7 +269,8 @@ pub fn render_status(facts: &TableFacts<'_>, terminal: &Terminal, now: u64) -> O
 }
 
 /// The closing notes: the `--ff` result or the §9 suggestion, then the §8
-/// notice; `None` when there is nothing to say.
+/// notice, then one note per worktree Git can't read, in table row order;
+/// `None` when there is nothing to say.
 pub fn render_notes(facts: &TableFacts<'_>, terminal: &Terminal) -> Option<String> {
     let local = Prose::escape_text(facts.default_branch);
     let tracking = Prose::escape_text(&format!("origin/{}", facts.default_branch));
@@ -269,6 +287,10 @@ pub fn render_notes(facts: &TableFacts<'_>, terminal: &Terminal) -> Option<Strin
             FfNotice::Changed => {
                 format!("{local} wasn't fast-forwarded: it changed while wt was updating it.")
             }
+            FfNotice::UnavailableHolder(path) => format!(
+                "{local} wasn't fast-forwarded: Git can't read the worktree that has it checked out, {}.",
+                Prose::escape_text(&path.to_string_lossy())
+            ),
             FfNotice::Failed => format!("{local} wasn't fast-forwarded: Git couldn't complete the update."),
         });
     }
@@ -287,6 +309,7 @@ pub fn render_notes(facts: &TableFacts<'_>, terminal: &Terminal) -> Option<Strin
             command_badge("--ignore-api")
         ));
     }
+    lines.extend(facts.row_statuses().into_iter().filter_map(|status| unavailable_note(status, facts.statuses)));
     (!lines.is_empty()).then(|| notes_list(lines, terminal))
 }
 
@@ -474,23 +497,35 @@ pub fn age_text(seconds: u64) -> String {
     }
 }
 
-/// The two legend lines, one each for the Worktree and Branch column glyphs.
-/// The `conflicts` sample sits in the column of the source-files dot above it.
-pub fn legend_markup() -> [String; 2] {
-    [
-        format!(
-            "Worktree   {} <dim>clean</dim>    {} <dim>uncommitted files</dim>    {} <dim>uncommitted source files</dim>",
-            dirty_dot(DirtyStatus::Clean),
-            dirty_dot(DirtyStatus::DirtyNonSource),
-            dirty_dot(DirtyStatus::DirtySource),
-        ),
-        format!(
-            "Branch     {} <dim>merges cleanly into parent</dim>     {} <dim>conflicts with parent</dim>    {} <dim>parent deleted</dim>",
-            connector_markup("└─", Some(MergeState::Clean), false),
-            connector_markup("└─", Some(MergeState::Conflicts), false),
-            connector_markup("└┄", None, true),
-        ),
-    ]
+/// The legend lines: the Worktree column's glyphs, then the Branch column's.
+/// The `conflicts` sample sits in the column of the source-files dot above
+/// it. `✕` and `?` are explained only when a row of `facts` shows them, on a
+/// second Worktree line so the legend does not widen the table.
+pub fn legend_markup(facts: &TableFacts<'_>) -> Vec<String> {
+    let rows = facts.row_statuses();
+    let mut lines = vec![format!(
+        "Worktree   {} <dim>clean</dim>    {} <dim>uncommitted files</dim>    {} <dim>uncommitted source files</dim>",
+        dirty_dot(DirtyStatus::Clean),
+        dirty_dot(DirtyStatus::DirtyNonSource),
+        dirty_dot(DirtyStatus::DirtySource),
+    )];
+    let mut unreadable = Vec::new();
+    if rows.iter().any(|status| status.availability.is_unavailable()) {
+        unreadable.push(format!("{UNAVAILABLE_MARK} <dim>git can't read this worktree</dim>"));
+    }
+    if rows.iter().any(|status| !status.availability.is_unavailable() && status.dirty == DirtyStatus::Unknown) {
+        unreadable.push(format!("{} <dim>couldn't check</dim>", dirty_dot(DirtyStatus::Unknown)));
+    }
+    if !unreadable.is_empty() {
+        lines.push(format!("           {}", unreadable.join("    ")));
+    }
+    lines.push(format!(
+        "Branch     {} <dim>merges cleanly into parent</dim>     {} <dim>conflicts with parent</dim>    {} <dim>parent deleted</dim>",
+        connector_markup("└─", Some(MergeState::Clean), false),
+        connector_markup("└─", Some(MergeState::Conflicts), false),
+        connector_markup("└┄", None, true),
+    ));
+    lines
 }
 
 /// The status item for this run's PR half, given the stored answer `prs`:
@@ -534,7 +569,7 @@ pub fn table(facts: &TableFacts<'_>, terminal: &Terminal) -> Table {
     ];
     let mut table = Table::new()
         .with_columns(columns)
-        .with_min_width(legend_width(terminal))
+        .with_min_width(legend_width(facts, terminal))
         .prefer_cursor_alignment();
 
     let show_metrics = terminal.width() >= METRICS_MIN_WIDTH;
@@ -560,8 +595,8 @@ pub fn table(facts: &TableFacts<'_>, terminal: &Terminal) -> Table {
 }
 
 /// The widest legend line as printed, with its one-cell indent.
-fn legend_width(terminal: &Terminal) -> u32 {
-    legend_markup()
+fn legend_width(facts: &TableFacts<'_>, terminal: &Terminal) -> u32 {
+    legend_markup(facts)
         .into_iter()
         .map(|line| 1 + visible_width(Prose::new(line).render(terminal).trim_end()))
         .max()
@@ -655,7 +690,7 @@ impl<'f, 'a> RowCells<'f, 'a> {
                 basename
             }
         };
-        format!("{} {name}", dirty_dot(status.dirty))
+        format!("{} {name}", worktree_marker(status))
     }
 
     fn branch(&self) -> String {
@@ -772,13 +807,135 @@ fn connector_markup(glyph: &str, state: Option<MergeState>, parent_deleted: bool
     }
 }
 
+/// The Worktree column's glyph for a checkout Git can't read.
+const UNAVAILABLE_MARK: &str = "<red>✕</red>";
+
+/// A row's Worktree glyph: [`UNAVAILABLE_MARK`] when Git can't read the
+/// checkout, whatever its dirtiness, otherwise [`dirty_dot`].
+fn worktree_marker(status: &WorktreeStatus) -> &'static str {
+    if status.availability.is_unavailable() { UNAVAILABLE_MARK } else { dirty_dot(status.dirty) }
+}
+
 /// Single-column text glyphs.
 fn dirty_dot(dirty: DirtyStatus) -> &'static str {
     match dirty {
         DirtyStatus::Clean => "<dim>○</dim>",
         DirtyStatus::DirtyNonSource => "<yellow>●</yellow>",
         DirtyStatus::DirtySource => "<red>●</red>",
+        DirtyStatus::Unknown => "<dim>?</dim>",
     }
+}
+
+/// The dim note for a row Git can't read, `None` for an available one.
+/// `statuses` is every listed worktree, for name resolution and the base
+/// checkout's path. Commands are shown only when [`shell_word`] can spell
+/// every argument; they are display text, never run.
+fn unavailable_note(status: &WorktreeStatus, statuses: &[WorktreeStatus]) -> Option<String> {
+    let entry = &status.entry;
+    let label = Prose::escape_text(&display_name(entry));
+    let path = Prose::escape_text(&entry.path.to_string_lossy());
+    // Without a name that selects the row, the command is named but not
+    // spelled out, and a closing sentence says why.
+    let (remove, unnamed) = match remove_argument(entry, statuses) {
+        Ok(argument) => (command_badge(&format!("wt remove {argument}")), String::new()),
+        Err(reasons) => (
+            "wt remove".to_string(),
+            format!(" No name selects it for wt remove: {}.", Prose::escape_text(&reasons.join("; "))),
+        ),
+    };
+    let text = match &status.availability {
+        Availability::Healthy => return None,
+        Availability::Missing => {
+            format!("{label}: its directory is gone; {remove} checks whether its remaining Git record can be removed safely.{unnamed}")
+        }
+        Availability::Unlinked => {
+            let base = statuses.iter().find(|status| status.entry.is_main).map(|status| &status.entry.path);
+            let repair = base
+                .and_then(|base| Some((shell_word(&base.to_string_lossy())?, shell_word(&entry.path.to_string_lossy())?)))
+                .map(|(base, target)| command_badge(&format!("git -C {base} worktree repair {target}")))
+                .unwrap_or_else(|| format!("git worktree repair from the base checkout, naming {path}"));
+            format!(
+                "{label}: its .git file is missing; {remove} attempts to restore the link before checking its files. To restore it without removing it, run {repair}.{unnamed}"
+            )
+        }
+        Availability::Other(condition) => {
+            let observed = match condition {
+                OtherCondition::NotADirectory => format!("{path} is not a directory"),
+                OtherCondition::Link => format!("{path} is a link, which may have replaced the original checkout"),
+                OtherCondition::PathUninspectable(error) => {
+                    format!("{path} couldn't be inspected ({})", Prose::escape_text(error))
+                }
+                OtherCondition::GitEntryUninspectable(error) => {
+                    format!("its .git couldn't be inspected ({})", Prose::escape_text(error))
+                }
+                OtherCondition::GitEntryPresent => "its .git exists, but Git can't use it".to_string(),
+            };
+            let reason = match entry.prunable.as_deref() {
+                Some(reason) if !reason.is_empty() => format!("; Git reports: {}", Prose::escape_text(reason)),
+                _ => String::new(),
+            };
+            format!("{label}: Git can't read this worktree: {observed}{reason}.")
+        }
+    };
+    Some(format!("<dim>{text}</dim>"))
+}
+
+/// The name a row shows: its directory's basename, or `base repo`.
+fn display_name(entry: &WorktreeEntry) -> String {
+    if entry.is_main {
+        return "base repo".to_string();
+    }
+    entry.path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default()
+}
+
+/// The first of `entry`'s branch and directory basename that
+/// [`resolve_worktree`] resolves to exactly `entry` and that [`shell_word`]
+/// can spell, shell-ready; otherwise why each candidate can't be used.
+fn remove_argument(entry: &WorktreeEntry, statuses: &[WorktreeStatus]) -> Result<String, Vec<String>> {
+    let entries: Vec<WorktreeEntry> = statuses.iter().map(|status| status.entry.clone()).collect();
+    let basename = entry.path.file_name().and_then(|name| name.to_str());
+    let mut reasons = Vec::new();
+    for candidate in [entry.branch.as_deref(), basename].into_iter().flatten() {
+        match resolve_worktree(&entries, candidate) {
+            Ok(resolved) if resolved.path == entry.path => match shell_word(candidate) {
+                Some(word) => return Ok(word),
+                None => reasons.push(format!("{candidate} can't be typed the same way in every shell")),
+            },
+            Ok(resolved) => reasons.push(format!("{candidate} selects {}", resolved.path.display())),
+            Err(WorktreeError::AmbiguousWorktree { candidates, .. }) => {
+                let others: Vec<String> = candidates
+                    .iter()
+                    .filter(|other| other.path != entry.path)
+                    .map(|other| other.path.display().to_string())
+                    .collect();
+                reasons.push(format!("{candidate} also matches {}", others.join(", ")));
+            }
+            Err(_) => reasons.push(format!("{candidate} doesn't select it")),
+        }
+    }
+    if reasons.is_empty() {
+        reasons.push("it has no branch or directory name".to_string());
+    }
+    Err(reasons)
+}
+
+/// `value` as one argument that bash, zsh, fish, and PowerShell all read
+/// back unchanged: bare when it holds only `[A-Za-z0-9_./:-]`, otherwise in
+/// single quotes. `None` when no such spelling exists: a leading `-` or `~`,
+/// a quote character (PowerShell also treats `‘’‚‛` as quotes), a control
+/// character, or a backslash that fish would read as an escape inside single
+/// quotes (`\\`, or one before the closing quote).
+fn shell_word(value: &str) -> Option<String> {
+    if value.is_empty() || value.starts_with(['-', '~']) {
+        return None;
+    }
+    if value.chars().all(|c| c.is_ascii_alphanumeric() || "_./:-".contains(c)) {
+        return Some(value.to_string());
+    }
+    let unquotable = value.chars().any(|c| c.is_control() || matches!(c, '\'' | '\u{2018}'..='\u{201B}'))
+        || value.contains("\\\\")
+        || value.ends_with('\\');
+    (!unquotable).then(|| format!("'{value}'"))
 }
 
 /// A local branch badge.

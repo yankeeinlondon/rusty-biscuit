@@ -46,3 +46,7 @@ expression: labeled(cases)
 
 ## --ff refused: git failed
  - main wasn't fast-forwarded: Git couldn't complete the update.
+
+
+## --ff refused: holder unavailable
+ - main wasn't fast-forwarded: Git can't read the worktree that has it checked out, /code/wts/main-checkout.
