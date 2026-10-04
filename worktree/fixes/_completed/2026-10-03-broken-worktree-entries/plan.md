@@ -61,6 +61,55 @@ docs_updated_during_phase_5: []
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
   - .claude/skills/worktree/remove.md
+source_files_during_phase_6:
+  - worktree/lib/src/remove/mod.rs
+docs_updated_during_phase_6:
+  - worktree/docs/cli/list.md
+  - worktree/README.md
+docs_created_during_phase_6:
+  - worktree/docs/cli/remove.md
+skills_files_updated_during_phase_6:
+  - .claude/skills/worktree/remove.md
+  - .claude/skills/worktree/cli-contracts.md
+  - .claude/skills/worktree/SKILL.md
+source_code:
+  - worktree/lib/src/availability.rs
+  - worktree/lib/src/copy_record.rs
+  - worktree/lib/src/error.rs
+  - worktree/lib/src/fast_forward.rs
+  - worktree/lib/src/git.rs
+  - worktree/lib/src/lib.rs
+  - worktree/lib/src/listing.rs
+  - worktree/lib/src/worktree.rs
+  - worktree/lib/src/remove/admin_entry.rs
+  - worktree/lib/src/remove/handoff.rs
+  - worktree/lib/src/remove/inventory.rs
+  - worktree/lib/src/remove/missing.rs
+  - worktree/lib/src/remove/mod.rs
+  - worktree/lib/src/remove/repair.rs
+  - worktree/cli/src/commands/list.rs
+  - worktree/cli/src/commands/list_table.rs
+  - worktree/cli/src/commands/remove/mod.rs
+  - worktree/cli/src/commands/remove/report.rs
+  - worktree/cli/src/exit.rs
+  - worktree/cli/tests/level2_remove.rs
+  - worktree/cli/tests/list_output.rs
+  - worktree/cli/tests/list_table.rs
+  - worktree/cli/tests/remove.rs
+  - worktree/cli/tests/snapshots/list_table__closing_notes.snap
+  - worktree/cli/tests/snapshots/list_table__unavailable_and_unknown_rows.snap
+  - worktree/cli/tests/snapshots/list_table__unavailable_note_quoting.snap
+  - worktree/cli/tests/snapshots/list_table__unavailable_notes.snap
+documentation:
+  - worktree/docs/cli/list.md
+  - worktree/docs/cli/remove.md
+  - worktree/README.md
+  - .claude/skills/worktree/SKILL.md
+  - .claude/skills/worktree/cli-contracts.md
+  - .claude/skills/worktree/list.md
+  - .claude/skills/worktree/remove.md
+completed_phase: 6
+implemented: true
 packages:
   - worktree
   - worktree-cli
@@ -104,9 +153,9 @@ Done when every acceptance bullet of the spec holds:
 - [x] unlinked removal verifies repair by postconditions and then follows ordinary protections; failed verification refuses (exit 3) with no deletion and reports possible metadata changes
 - [x] an unknown inventory never permits deleting an existing directory, with any force flags
 - [x] missing removal targets only that entry, follows the staged-index ruling and existing branch rules, and refuses if the target reappears
-- [ ] `just test`, `just test-l2`, `just lint` pass in `worktree/` (nextest, focus-free helpers); evidence states the environments actually exercised
-- [ ] docs listed in the spec updated, describing current behavior without naming this fix
-- [ ] the agent stops at "implementation complete, ready for review": no `just complete`, no move to `_completed`, no commit unless asked, no `cargo fmt`
+- [x] `just test`, `just test-l2`, `just lint` pass in `worktree/` (nextest, focus-free helpers); evidence states the environments actually exercised
+- [x] docs listed in the spec updated, describing current behavior without naming this fix
+- [x] the agent stops at "implementation complete, ready for review": no `just complete`, no move to `_completed`, no commit unless asked, no `cargo fmt`
 
 ## Wave schedule (overview)
 
@@ -437,39 +486,39 @@ Write each page for a developer with no experience of this repository, lead with
 what the reader can do, give a compact example per rule, and use a Mermaid
 diagram for the removal flow. No page names this fix or links to a spec.
 
-- [ ] **`worktree/docs/cli/list.md`:** markers, conditional legends, notes,
+- [x] **`worktree/docs/cli/list.md`:** markers, conditional legends, notes,
   working-file status versus branch merge comparisons, and the `--ff` holder
   refusal.
-- [ ] **`worktree/docs/cli/remove.md` (new):** removal safety and handoff rules,
+- [x] **`worktree/docs/cli/remove.md` (new):** removal safety and handoff rules,
   recovery and refusal examples, missing versus unlinked versus other, the repair
   verification postconditions, the exit-code meaning, and the force-flag limits.
   Include the flowchart from the spec in current-behavior terms.
-- [ ] **`worktree/README.md`:** missing/unlinked removal, repair before consent,
+- [x] **`worktree/README.md`:** missing/unlinked removal, repair before consent,
   metadata changes on refusal, force limits.
-- [ ] **`.claude/skills/worktree/remove.md`:** preparation, exact repair
+- [x] **`.claude/skills/worktree/remove.md`:** preparation, exact repair
   verification, missing-directory handling, and the exit-status trap (never trust
   repair's exit code). **`list.md`:** unavailable/unknown states.
   **`cli-contracts.md`:** refusal side effects. Add the new OS facts learned
   (symlink/reparse points, short names) to `.claude/skills/os/` in the same
   change if any were learned the hard way.
-- [ ] **Symbol comments:** pass over `dirty_status`, `parse_worktree_list`,
+- [x] **Symbol comments:** pass over `dirty_status`, `parse_worktree_list`,
   `WorktreeEntry`, `DirtyStatus`, error docs, and any new public items; fix
   drifted comments and report any drift found and how it was resolved. No
   HOW-narration.
-- [ ] **`docs/dependencies.md`:** update only if a crate was added (none expected).
+- [x] **`docs/dependencies.md`:** update only if a crate was added (none expected).
 
 Wave 6 — final validation:
 
-- [ ] `just test`, `just test-l2`, `just lint` from `worktree/`; affected `sniff`
+- [x] `just test`, `just test-l2`, `just lint` from `worktree/`; affected `sniff`
   tests only if `sniff` code changed.
-- [ ] Confirm no test touches `/private/tmp/lhg-before` or any live checkout,
+- [x] Confirm no test touches `/private/tmp/lhg-before` or any live checkout,
   and that none opens or focuses a terminal/browser window.
-- [ ] Record in the implementation log which environments were actually
+- [x] Record in the implementation log which environments were actually
   exercised (the host macOS run; Windows/Linux/WSL2 evidence only if obtained
   via the `os` skill's reachable hosts, otherwise state that CI covers them).
-- [ ] Final grep: `unwrap_or(DirtyStatus::Clean)`, `Path::exists()` on classified
+- [x] Final grep: `unwrap_or(DirtyStatus::Clean)`, `Path::exists()` on classified
   paths, `canonicalize` on missing paths, `--force` appended to record removal,
   `git worktree prune` in remove code or user-facing text.
-- [ ] Set the spec `status` to `implemented` only if the spec's own process says
+- [x] Set the spec `status` to `implemented` only if the spec's own process says
   an agent does so; otherwise leave it and report "implementation complete,
   ready for review". Do not run `just complete`, move the directory, or commit.

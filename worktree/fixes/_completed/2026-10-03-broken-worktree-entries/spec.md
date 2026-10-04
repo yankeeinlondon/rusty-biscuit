@@ -23,45 +23,38 @@ status: draft-spec
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-03
-review_iterations: 0
+review_iterations: 3
+completed: true
 clarified: true
-implemented: false
+implemented: true
 human_review: true
 human_review_items:
   - |-
-    **`git worktree repair` fixes more than the worktree you name. This is still open; Phase 6 will document whichever behavior you choose, so please decide before it runs.**
+    **`git worktree repair` fixes more than the worktree you name. This is still open, and everything is now built and documented as option A.**
 
-    When a worktree folder still exists but its `.git` link file is gone, `wt remove` now runs `git worktree repair <path>` to make the files checkable before asking anything. A test on Git 2.56 showed that this command, run from the main checkout, also recreates the `.git` link of **every other** worktree whose link is missing, not only the named one. It also exits with an error code even when it succeeded. Nothing is deleted, but `wt remove foo` can quietly re-link `bar`.
+    When a worktree folder still exists but its `.git` link file is gone, `wt remove` runs `git worktree repair <path>` so it can check the files before asking anything. Run from the main checkout, Git's repair also fixes **every other** worktree whose link is broken, not only the named one. It also exits with an error code even when it succeeded. Nothing is deleted.
 
-    Phases 4 and 5 shipped option A below. After a successful repair `wt remove` prints "git worktree repair may also have restored other worktrees' links". When the repair can't be verified it refuses and says "The repair attempt may have changed Git metadata for this or other worktrees". Switching to B or C changes one guard in the library and a few message strings.
+    **New during the final phase (Git 2.56):** the repair does not only recreate *missing* link files. It also **overwrote another worktree's existing `.git` file** that held something Git couldn't use, rewriting it to point at the right place. So `wt remove foo` can rewrite `bar/.git`, even though `wt remove bar` would refuse to touch it. In practice that rewrite is what Git's own repair is meant to do, and the old content was unusable.
+
+    Shipped (option A): after a successful repair `wt remove` prints "git worktree repair may also have restored other worktrees' links". A refusal says "The repair attempt may have changed Git metadata for this or other worktrees". The docs (`worktree/docs/cli/remove.md`, `worktree/README.md`) describe exactly this. Switching to B or C changes one guard in the library, a few message strings, and those two doc paragraphs.
 
     - **A. Accept Git's behavior and say so (recommended; current behavior).** Verify only the target, and say in messages and docs that repair may have affected other worktrees.
-      Pros: uses Git's own supported tool; repair only restores links Git already knows about and never removes anything; least code.
-      Cons: a side effect on unrelated worktrees, though it is the same repair the user would run by hand.
-    - **B. Only auto-repair when the target is the only worktree with a missing link; otherwise refuse and explain.**
+      Pros: uses Git's own supported tool; it restores links Git already knows about and never removes files; least code.
+      Cons: a side effect on unrelated worktrees, now known to include overwriting a broken `.git` file rather than only creating missing ones.
+    - **B. Only auto-repair when no other worktree in the repository has a missing or broken link; otherwise refuse and explain.**
       Pros: side effects stay confined to the named worktree.
       Cons: blocks removal exactly when several worktrees are broken (for example after a bulk folder copy); more checks; a race remains between the check and the repair.
     - **C. Write the target's `.git` link file ourselves instead of calling `git worktree repair`, then verify it the same way.**
-      Pros: truly targeted; no misleading exit code.
+      Pros: truly targeted; no misleading exit code; never touches another worktree.
       Cons: reimplements a Git file format (including Git's relative-path worktree option) and departs from the spec's explicit choice of Git's repair command.
 
-    I recommend **A**. The extra effect is a non-destructive restoration that Git itself considers correct, and the messages already say so. B's refusals and C's reimplementation would cost more for little safety gain.
+    I still recommend **A**. Overwriting a `.git` file that Git can't use, with the one Git's records say is correct, is a recovery, not a loss, and the messages already warn about it. If you would rather `wt` never touch a worktree you didn't name, choose **C** over B: it is fully targeted and does not refuse in the multi-breakage case.
 message_to_agent: |-
-  Phases 1-5 are done; read the "Phase 4" and "Phase 5" sections of implementation-log.md first.
-  (1) R9 is still open (human_review_items). The shipped behavior is option A. Docs must say a repair "may have changed Git metadata for this or other worktrees" (on refusal), and that after a successful repair Git "may also have restored other worktrees' links".
-  (2) Behavior to document in docs/cli/remove.md, README.md, and the skills, exactly as built:
-      - preparation runs after the main-checkout and inside-without-wrapper guards;
-      - Missing: the surviving index is compared with the recorded HEAD; staged differences need the ordinary discard consent (--force-worktree without a terminal); an unprovable index refuses (exit 3) whatever the flags; only `git worktree remove <path>` runs (no prune, no --force); the report says "Its directory is already gone" and the success line is "Removed the record of worktree X (its directory at P was already gone)"; no handoff;
-      - Unlinked: repair, then "Restored the link for X so its files could be checked.", then the ordinary flow; refusals and cancellation say the restored link was left in place;
-      - an unverified repair refuses with the spec's three sentences plus "Not verified:" and "Repair output:" lines;
-      - Other (a file or link at the path, an uninspectable path, a present but broken .git) refuses with exit 3 and the observed condition;
-      - the handoff state is format v4 and binds `git_dir` (where the target's .git leads); the second run never repairs, and refuses with exit 3 if the link broke or changed;
-      - bare Git errors gain "could not check the files of worktree X at P" or similar, and keep their exit code (usually 1).
-  (3) Known limitation to document honestly: from a shell standing INSIDE an unlinked worktree that is not nested in another checkout of the same repository, wt cannot find the repository (bare "fatal: not a git repository" from find_worktree, before preparation). Running wt remove from any other directory works. This predates this fix and was not changed.
-  (4) A locked worktree whose directory is gone is never `prunable` in Git. It fails with context (exit 1) and keeps everything. Document it in the refusal and recovery examples.
-  (5) Phase 6 symbol-comment pass: the `//!` module doc of lib/src/remove/mod.rs lists inventory/safety/remote/handoff but not admin_entry/repair/missing; fix that drift.
-  (6) Windows: the local windows-gnu `cargo check --tests` compiles, and build-win-native compiled the MSVC test archive. The Phase 4 "1 warning" is only the MSVC linker's "Creating library" notice. Native Windows test runs are still blocked by the host's storage preflight (17.6 GiB free of 50 GiB required); retry `just cross-check worktree-cli --os windows remove a_missing_directory staged_work_left a_worktree_replaced_by a_status_failure a_link_broken a_repaired_worktree_hands_off a_locked_worktree` once there is room. Two new CLI tests are Unix-only (read-only directory, symlink). Linux passed every new test.
-  (7) Baseline after Phase 5: `just test` 1033 passed / 32 skipped; `just test-l2` 34 passed; `just lint` clean.
+  All six phases are implemented; the fix is "implementation complete, ready for review". Read the "Phase 6" section of implementation-log.md first.
+  (1) R9 (human_review_items) is still open. Everything, docs included, reflects option A. Phase 6 found that Git's repair also overwrites another worktree's garbage `.git` file, not only missing ones; it is recorded in the skill (`.claude/skills/worktree/remove.md`) and the item above.
+  (2) Native Windows test evidence is still owed. build-win-native's storage preflight blocked `just cross-check worktree-cli --os windows remove` again (17.0 GiB free of 50 GiB required; the automatic sweep freed 0). Retry when the host has room, or rely on CI's push-to-main Windows leg. Linux passed in Phase 5. WSL2 is left to the nightly run.
+  (3) Gates after Phase 6 on macOS: `just test` 1033 passed / 32 skipped; `just test-l2` 34 passed; `just lint` clean.
+  (4) The spec `status` field was left at `draft-spec`. The author advances it, and moves the directory to `_completed`, after review.
 ---
 
 # Worktrees Git can no longer read: honest listing and safe removal

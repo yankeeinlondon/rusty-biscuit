@@ -60,6 +60,55 @@ docs_updated_during_phase_5: []
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
   - .claude/skills/worktree/remove.md
+source_files_during_phase_6:
+  - worktree/lib/src/remove/mod.rs
+docs_updated_during_phase_6:
+  - worktree/docs/cli/list.md
+  - worktree/README.md
+docs_created_during_phase_6:
+  - worktree/docs/cli/remove.md
+skills_files_updated_during_phase_6:
+  - .claude/skills/worktree/remove.md
+  - .claude/skills/worktree/cli-contracts.md
+  - .claude/skills/worktree/SKILL.md
+source_code:
+  - worktree/lib/src/availability.rs
+  - worktree/lib/src/copy_record.rs
+  - worktree/lib/src/error.rs
+  - worktree/lib/src/fast_forward.rs
+  - worktree/lib/src/git.rs
+  - worktree/lib/src/lib.rs
+  - worktree/lib/src/listing.rs
+  - worktree/lib/src/worktree.rs
+  - worktree/lib/src/remove/admin_entry.rs
+  - worktree/lib/src/remove/handoff.rs
+  - worktree/lib/src/remove/inventory.rs
+  - worktree/lib/src/remove/missing.rs
+  - worktree/lib/src/remove/mod.rs
+  - worktree/lib/src/remove/repair.rs
+  - worktree/cli/src/commands/list.rs
+  - worktree/cli/src/commands/list_table.rs
+  - worktree/cli/src/commands/remove/mod.rs
+  - worktree/cli/src/commands/remove/report.rs
+  - worktree/cli/src/exit.rs
+  - worktree/cli/tests/level2_remove.rs
+  - worktree/cli/tests/list_output.rs
+  - worktree/cli/tests/list_table.rs
+  - worktree/cli/tests/remove.rs
+  - worktree/cli/tests/snapshots/list_table__closing_notes.snap
+  - worktree/cli/tests/snapshots/list_table__unavailable_and_unknown_rows.snap
+  - worktree/cli/tests/snapshots/list_table__unavailable_note_quoting.snap
+  - worktree/cli/tests/snapshots/list_table__unavailable_notes.snap
+documentation:
+  - worktree/docs/cli/list.md
+  - worktree/docs/cli/remove.md
+  - worktree/README.md
+  - .claude/skills/worktree/SKILL.md
+  - .claude/skills/worktree/cli-contracts.md
+  - .claude/skills/worktree/list.md
+  - .claude/skills/worktree/remove.md
+completed_phase: 6
+implemented: true
 packages:
   - worktree
   - worktree-cli
@@ -793,3 +842,121 @@ Code-smell grep over the added CLI lines: no `unwrap_or_default()`,
     The plain `remove` filter matches test names, not the binary, so the
     remaining new tests were run by name.
 - WSL2 was not exercised; CI's nightly run covers it.
+
+## Phase 6
+
+Docs, skill, and final validation. Host: macOS (Darwin 27.2, Git 2.56). R9
+still has the recorded default (option A), and the docs describe that
+behavior.
+
+### What changed
+
+- **`worktree/docs/cli/list.md`**:
+  - The Worktree column now lists `✕` and `?`.
+  - The conditional second legend line is shown with an example.
+  - A new subsection, "Worktrees Git can't read", has a table of the
+    missing / unlinked / other notes and the "not found only" rule for
+    absence.
+  - A paragraph separates the files marker from the commit-comparison
+    `clean`.
+  - A fourth closing-note kind (unavailable worktrees), with name selection
+    and shell-quoting rules.
+  - The `--ff` refusal for an unreadable holder.
+  - "two-line legend" became "a legend", and local work runs `git status`
+    only "in every worktree Git can read".
+- **`worktree/docs/cli/remove.md` (new)**:
+  - Usage and a Mermaid flowchart of the run, guards first.
+  - The report, the tiers table, the consent and force-flag table, and the
+    force limits.
+  - The handoff rules, including the bound `.git` link and "never repairs".
+  - Missing, unlinked (the four verification postconditions), and other.
+  - Locked+missing and a garbage `.git` (both exit 1, not `prunable`).
+  - The "run it from outside an unlinked worktree" limitation.
+  - The exit-code table ("nothing removed", not "nothing changed").
+  - Every example output was captured from the built `wt` against scratch
+    repositories under `/tmp/wtdoc`. Paths were shortened to `/code/wts/…`.
+- **`worktree/README.md`**:
+  - A link to the new page.
+  - A "worktree Git can't read" bullet group (missing, unlinked with repair
+    before consent, refusal metadata, force limits, run from outside).
+  - The `✕`/`?` markers in the list summary.
+  - Exit codes 3/4 now say "nothing was removed", and 3 names the repair
+    exception.
+- **Skill**:
+  - `remove.md`: links the user doc, adds `prepare` to the flowchart, and
+    records the new Git fact below plus a manual-testing trap.
+  - `cli-contracts.md`: the refusal side-effect contract for exit 3/4.
+  - `SKILL.md`: lists `docs/cli/remove.md` among the user docs.
+  - `list.md` already covered the unavailable/unknown states from Phases 2–3,
+    so it is unchanged. No new OS facts were learned this phase, so the `os`
+    skill is unchanged.
+- **Symbol comments**:
+  - **Drift found and fixed:** the `//!` doc of `lib/src/remove/mod.rs`
+    listed `inventory`/`safety`/`remote`/`handoff` but not `prepare`,
+    `admin_entry`, `repair`, or `missing`; it now names them.
+  - Checked with no drift found: `dirty_status`, `parse_worktree_list`,
+    `WorktreeEntry`, `DirtyStatus`, `WorktreeError::{RefusedToLoseWork,
+    BlockedByEnvironment, DirectoryInUse}`, `cli/src/exit.rs`, and the module
+    docs of `availability`, `admin_entry`, `repair`, and `missing`.
+- `docs/dependencies.md`: unchanged. No `Cargo.toml` or `Cargo.lock` differs
+  from `main`.
+
+### Findings
+
+- **New Git fact (Git 2.56, macOS):** `git -C <base> worktree repair <path>`
+  also rewrites another worktree's **existing** `.git` file that holds garbage
+  (`gitdir: /nowhere` → the right record), not only missing links. The repair
+  printed `repair: .git file broken: …` for each worktree and exited 1.
+  - So `wt remove foo` of an unlinked `foo` can overwrite `bar/.git`, a state
+    `wt` itself would refuse to touch.
+  - This sharpens R9 and was added to the spec's human review item. The docs
+    say repair restores "other worktrees' links whose `.git` is missing or
+    broken".
+  - It surfaced while capturing doc examples: a garbage-`.git` worktree was
+    removed cleanly because an earlier `wt remove` of an unlinked worktree
+    had healed it.
+  - The garbage-`.git` path itself is safe. Reproduced on its own, with a file
+    inside, it exits 1 with context and keeps everything.
+
+### Requirement-to-test mapping
+
+Phase 6 changed no behavior: one `//!` comment and documentation only. It
+added no tests. The behaviors the docs describe are pinned by the tests
+mapped in Phases 2–5. Every documented message was checked against the binary
+or the existing snapshots. Doc-only changes need no corpus or round-trip test.
+
+### Gates
+
+- **macOS** `just test` (worktree/): **1033 passed, 32 skipped** (same as
+  Phase 5).
+- **macOS** `just lint`: clean.
+- **macOS** `just test-l2`: **34 passed**, 703 skipped (other tiers). As
+  recorded in Phase 5, the remove scenes run in a detached tmux pane, which
+  never takes focus.
+- **Final greps:**
+  - no `unwrap_or(DirtyStatus::Clean)`;
+  - `prune` appears only in tests asserting it is never run, and in the doc
+    sentence saying it is never used;
+  - the only `--force` push in `remove/` is the existing healthy-path
+    `remove_worktree` after consent;
+  - no `Path::exists()` or `canonicalize` on classified paths in
+    `availability`, `missing`, `repair`, or `admin_entry`;
+  - no test or source names `/private/tmp/lhg-before`; `lhg-before`
+    appears only as a temp-dir fixture name;
+  - no `docs/` page or README names this fix or a spec.
+- **Windows:**
+  - `just cross-check worktree-cli --os windows remove` reused the accepted
+    MSVC build, but it was **blocked again by build-win-native's storage
+    preflight**: 17.0 GiB free of the 50 GiB required, and the automatic
+    sweep freed 0 GiB.
+  - Not overridden; nothing was deleted on the shared host.
+  - Native Windows test evidence remains owed to CI on push to `main` or to a
+    cross-check once the host has room. The Phase 5 windows-gnu
+    `cargo check --tests` and the MSVC compile still stand. Phase 6 changed no
+    code.
+- **Linux:** Phase 5's run on build-linux stands (no code changed since).
+- **WSL2:** not exercised; CI's nightly run covers it.
+
+Implementation complete, ready for review. The spec `status` was left
+unchanged (an agent does not advance it). `just complete` was not run, and
+nothing was moved, staged, or committed.
