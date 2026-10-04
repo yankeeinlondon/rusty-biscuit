@@ -68,6 +68,8 @@ and `static_flags/` readers behind one dispatcher each); there is no
 post-conversion kind override. Bump `EXTRACTOR_REVISION` with any change to
 extracted records, including repairs on an unreleased branch. See [Query System](./query-system.md#capture-to-symbolkind-mapping).
 
+**Keyword and display header** (`file/extract/header/`): `identity.keyword` is read from one anonymous grammar token per `(language, declaration kind)` table entry in `header/keyword.rs`, never from text; add an entry only for a declaration kind the extractor actually captures (`symbols_header::less_common_declarations_report_their_keyword` pins the non-fixture ones). `source.signature_text` is cut from `declaration_text` at node boundaries only (body, `value`/`accessors`/… fields, first `=`/`:=` in declarator children, terminator), and is `None` when the cut range would not contain the captured name. `symbols_header` holds `KEYWORD_MATRIX` and `SIGNATURE_MATRIX`; the coverage guard requires a keyword row per language and a signature row (case, `NotApplicable` or `Unsupported`) for every `Shape`.
+
 Access lives on `SymbolInfo::visibility` (`None` = Unknown), not on the signature; `is_static` (member without an instance) and `is_static_storage` (storage/linkage `static`) are separate flags. The v1↔v2 adapter round-trips all of them plus `container_kind`; see [API Reference](./api-reference.md#symbolinfo). It does not round-trip `TypeMetadata::type_parameters` (no `TypeData` slot) or a `TypeAlias`'s field metadata (C `typedef struct {…} Alias`; `TypeAliasData` holds only the aliased type); `symbols_adapter::every_fixture_symbol_round_trips_through_the_record` pins both.
 
 - **Readers get a `DeclarationContext`** (`declaration.rs`): language, source, final kind, `is_local`, the captured `name` node (one declaration can name several things: `int a, *b;`, Swift `case east, west`), the file `root` (same-file lookups: Rust trait level, earlier C/C++ `static` prototype, Scala `package` segments) and `is_ecma_module` (computed once per JS/TS file by `is_ecma_module_file`). Add a field here rather than re-scanning the file per symbol.
@@ -91,7 +93,7 @@ Access lives on `SymbolInfo::visibility` (`None` = Unknown), not on the signatur
 - **Capture naming**: `@local.definition.<kind>` for symbols, `@diagnostic.<rule-id>` for lint
 - **Query caching**: Global `OnceLock<QueryCache>` for thread-safe caching
 - **Builtin database**: Per-language builtin lists to avoid false positive undefined-symbol/undefined-module errors
-- **Schema v2 module, schema version 3.0**: `shared/schema_v2` with facet-based `SymbolRecord` and staged `FileSymbolIndex`; records, file indexes, CLI envelopes and analyzer fingerprints emit `SchemaVersion::V3_0` (the module keeps its historical `v2` name)
+- **Schema v2 module, schema version 4.0**: `shared/schema_v2` with facet-based `SymbolRecord` and staged `FileSymbolIndex`; records, file indexes, CLI envelopes and analyzer fingerprints emit `SchemaVersion::V4_0` (the module keeps its historical `v2` name). Records carry no timestamps, so output and cache entries are byte-identical across runs; the container is `identity.container_name`
 - **CLI filters**: `hug <subcommand> <filter...>` with all-files default scan for symbol commands. A pathless scan honors `.gitignore` and skips test-data dirs by default (`**/fixtures/**`, `**/__fixtures__/**`, `**/snapshots/**`, `**/testdata/**`); an explicit path/glob re-includes a targeted file. `lint` scans hide clean files (single-file lint still shows `(no diagnostics)`).
 
 ## Detailed Documentation
@@ -161,7 +163,7 @@ When modifying queries or symbol extraction:
    extractor revision (`revision_key`); keep them unchanged when the current
    key changes, and add a `StaleRevision` case for the revision a bump
    retires. `cache_robustness` pins which malformed
-   shapes of ten load-bearing snapshot fields are served or recomputed (table in
+   shapes of twelve load-bearing snapshot fields are served or recomputed (table in
    `docs/cache-design.md`); a schema change that adds a default or makes a
    field optional must update that row
 7. `lib/tests/fixtures/symbols/multi/` is a 16-language tree (one file per

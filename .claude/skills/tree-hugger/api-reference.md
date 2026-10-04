@@ -124,17 +124,35 @@ wildcard-free `match`: adding a variant on one side is a compile error until
 the other side handles it. A converted record is never `is_exported` (export
 comes from declaration syntax, set by `symbol_records()` and the bind pass),
 and a function-like kind always converts back with `Some(signature)`.
-Records, file indexes and analyzer fingerprints carry `SchemaVersion::V3_0`.
+Records, file indexes and analyzer fingerprints carry `SchemaVersion::V4_0`:
+no timestamps in `provenance`, the container in `identity.container_name`
+(formerly `module_path`).
 
 Extraction fills the record-only facets in `symbol_records()`:
 `source.declaration_text` (declaration start up to its body, trailing
-whitespace trimmed; keeps `pub(...)`, setter-only modifiers, annotations) and,
+whitespace trimmed; keeps `pub(...)`, setter-only modifiers, annotations),
+`source.signature_text` and `identity.keyword` (both from
+`file/extract/header/`, see below) and,
 for members of a Rust `impl Trait for Type`, one `relations.implements` entry
 named after the trait's last path segment (`id` only when exactly one trait of
 that name is declared in the file). A Rust `impl` member's container is the
 implemented type's last path segment without generics; its container kind is
 that type's same-file kind, absent when declared elsewhere. Every other
 container kind is the kind extracted for the container's own declaration.
+
+`source.signature_text` is the display header: a contiguous part of
+`declaration_text` with leading in-node annotations, initializers (first
+`=`/`:=`, also a type alias's target and a macro's replacement), accessor
+lists, the `=`/`=>`/`:` that introduces a body and a `;`/Lua `end`
+terminator removed; an annotation between modifiers stays. It is `None` when
+no contiguous part names the symbol alone (C/C++ type with an inline body,
+grouped Go `type ( … )`, a later name cut off by an earlier initializer).
+`identity.keyword` is one anonymous grammar token from a per-language
+`(language, declaration kind) → site` table (`header/keyword.rs`): a direct
+child, a token inside a named wrapper (Perl `scope`, Swift
+`value_binding_pattern`), a marker node (PHP `var_modifier` → `var`), or the
+wrapping statement (Go `const`/`var` specs, Lua and shell `local`). Neither
+is carried by the v1 adapter.
 
 `tree_hugger::EXTRACTOR_REVISION` names the extraction rules; bump it in any
 change that alters extracted records, unreleased branches included. It is stamped into
