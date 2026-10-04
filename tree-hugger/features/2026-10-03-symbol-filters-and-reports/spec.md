@@ -2,9 +2,15 @@
 kind: feature
 name: symbol-filters-and-reports
 date: 2026-10-03
-status: draft-spec
-reviewed: false
+status: finalized-spec
+clarified: true
+clarified_by: claude/opus
+reviewed: true
+reviewed_by: claude/opus
+reviewed_on: 2026-10-04
+review_note: "the clarification process served as a review"
 review_iterations: 0
+needs_rulings: false
 $schema:
   status: |-
     enum(
@@ -40,8 +46,8 @@ depends-on:
 
 This feature is the **metadata, filtering and reporting** half of the
 symbol-report work. It was split out of `2026-10-03-symbol-improvements` on
-2026-10-03 and is a draft; the author settled its open questions in two rounds
-on 2026-10-04.
+2026-10-03; the author settled its open questions in three rounds on
+2026-10-04, and the spec is finalized.
 
 `2026-10-03-symbol-improvements` makes the CLI consume v2 `SymbolRecord`s
 directly, adds the declaring `keyword` and `signature_text`, introduces a
@@ -58,13 +64,14 @@ component. This feature extends each of those:
 **Depends on `2026-10-03-symbol-improvements` and
 `2026-10-03-visibility-and-kind`.** The fix corrects kind, visibility, `static`
 and container data for its accepted extraction set across all 16 languages. It
-retains some grammar limits and defers some constructs (its `FEAT` cells).
-This feature keeps that accepted extraction set and adds no new kinds; the
-deferred constructs are the unscheduled `deferred-kind-precision` feature.
-The fix's `LIM` cells (Go interface and struct, and Swift class, enum and
-struct, reported as `Type`) are documented limits recorded in that same
-unscheduled entry; this feature does not own them, and its filters and
-labels report those declarations as `Type`.
+retains some extractor limits (its `LIM` cells) and defers some constructs
+(its `FEAT` cells). This feature keeps that accepted extraction set and adds
+no new kinds; the deferred constructs are the unscheduled
+`deferred-kind-precision` feature. The `LIM` cells (Go interface and struct,
+and Swift class, enum and struct, reported as `Type`) are **extractor
+limits**, not grammar limits, recorded in that same unscheduled entry; this
+feature does not own them, and its filters and labels report those
+declarations as `Type`.
 Every filter and label below uses those documented limits, and the summary's
 correctness claims apply to the accepted extraction set, not every
 declaration a language can express.
@@ -89,13 +96,23 @@ unscheduled feature.
 
 The record fields added here (`scope`, `visibility.is_test`, `metrics` with
 `parameters` and `has_docs`, the `async` entry in the existing modifier facet,
-`is_deprecated` and a populated `qualified_name`) are additive and follow the
-existing minor-version rule on top of schema 4.0. The attribute, generic and
-relation facets stay empty. The JSON Lines and `--stats` JSON envelopes are
-new report shapes carrying `report_schema_version`.
-The container-field rename already landed in 4.0. The CLI behavior changes
-(locals hidden by default in `hug symbols`, smart-case matching) are
-intentional; update the release notes with before/after examples.
+`is_deprecated`) are additive and follow the existing minor-version rule on
+top of schema 4.0. The attribute, generic and relation facets stay empty. The
+JSON Lines and `--stats` JSON envelopes are new report shapes carrying
+`report_schema_version`. The container-field rename already landed in 4.0.
+
+Two changes are not additive:
+
+- **`qualified_name` values and symbol IDs change.** Today the v1→v2 adapter
+  fills `qualified_name` as `container::name` with `::` in every language
+  (`lib/src/shared/schema_v2/mod.rs`), and `stable_symbol_key` derives the ID
+  from it. This feature builds the in-file name with language-native
+  separators and adds a display prefix (see “Qualified names with honest
+  context”), so IDs and relation IDs change once and `EXTRACTOR_REVISION` is
+  bumped.
+- **CLI behavior:** locals are hidden by default in `hug symbols`, and name
+  matching becomes smart-case. Both are intentional; the release notes get
+  before/after examples.
 
 ---
 
@@ -118,8 +135,28 @@ inline-module contents are items. This presentation classification is separate
 from the lexical scopes used to resolve names. It keeps local bindings out of
 the default listing without discarding their analysis data.
 
-Scope is lightweight data kept for declarations excluded by a kind selection,
-alongside the identity, span and container data
+Two consequences are documented rather than special-cased:
+
+- **Parameters are `Local` only where they are extracted.** Today 13
+  languages produce `Parameter` records: C, C++, C#, Java, JavaScript,
+  TypeScript, Lua, Python, Scala and Swift through explicit
+  `@local.definition.parameter` captures in `lib/queries/vendor/*/locals.scm`,
+  and Rust, Go and PHP through variable captures that the classifier labels
+  `Parameter`. Perl, Bash and Zsh produce none, so the matrix's parameter case
+  is n/a there.
+- **Bash and Zsh functions defined inside a function body are `Local`,** by
+  the same structural rule, even though the shell makes them global once the
+  outer function runs.
+
+```sh
+outer() {
+  inner() { echo hi; }   # scope: Local
+}
+```
+
+Scope is computed with every declaration (see the capability table under
+“`SymbolQuery` predicates”) and is lightweight data kept for declarations
+excluded by a kind selection, alongside the identity, span and container data
 `2026-10-03-symbol-improvements` keeps.
 
 ### B3. Async, deprecation and test flags
@@ -131,38 +168,78 @@ Only the modifier and attribute facts a filter consumes are extracted:
   Languages without async syntax return no `async` entry. Other modifiers
   (`unsafe`, `const fn`, `abstract`, `final`, `override`, `virtual`,
   `readonly`, `mut`) are the unscheduled `symbol-type-relations` feature.
-- **Attributes:** Rust attributes, Java and C# annotations, TS, JS and Python
-  decorators, and Swift attributes are parsed only as far as needed to derive
-  `is_deprecated` and `is_test` below. Parsing reads the full syntactic name
-  and raw argument text; it does not evaluate arguments or expand macros. The
+- **Attributes and deprecation markers:** Rust and C++ attributes, Java and
+  Scala annotations, C# attributes, Python decorators, Swift attributes, and
+  doc comments are parsed only as far as needed to derive `is_deprecated` and
+  `is_test` below. Parsing reads the full syntactic name and raw argument
+  text; it does not evaluate arguments, resolve imports or expand macros. The
   raw `Attribute` facet is **not** populated and stays an empty list;
   populating it is the unscheduled `symbol-type-relations` feature.
 
-From those, the library derives:
+From those, the library derives two flags.
 
-- `visibility.is_deprecated`: `#[deprecated]`, `@Deprecated`, `[Obsolete]`,
-  `@deprecated` in a doc comment
-- a new `visibility.is_test` flag. It is true for:
-  - Rust: `#[test]`, `#[tokio::test]`, and anything inside a `#[cfg(test)]`
-    module
-  - Java: `@Test`
-  - Python: `test_*` functions in `test_*.py`, and `unittest.TestCase`
-    subclasses
-  - Go: `TestXxx(t *testing.T)` in `_test.go`
-  - JS/TS: `describe` and `it` are calls, not declarations, so for JS and TS
-    every declaration in files matching `*.test.*` or `*.spec.*` has `is_test`
-    set; no test declaration is synthesized from a call
+**`visibility.is_deprecated`** is true for a declaration carrying one of these
+markers; every other language and form reports false:
 
-Test detection is a documented syntax/file-name heuristic, not a claim that
-a runner will execute the symbol. Rust `cfg(test)` ancestry includes all nested
-declarations, but `cfg(any(test, feature = "x"))` does not mean test-only.
-Python `TestCase` recognition requires an explicit `unittest.TestCase` base or
-an unambiguous same-file import alias; mark the class and its test methods,
-not every method in it. Java recognizes `Test` and qualified annotation names
-without loading dependencies. Go requires the test naming/signature convention.
-Other languages report false until a detection rule is documented and tested.
-Fixtures include similarly named non-tests and deprecation words in ordinary
-comments, which must not set either flag.
+| Language | Marker |
+|---|---|
+| Rust | `#[deprecated]`, with or without arguments |
+| Java | `@Deprecated` annotation, or a `@deprecated` doc-comment tag |
+| C# | `[Obsolete]` |
+| JavaScript, TypeScript, PHP | `@deprecated` tag in the attached doc block |
+| Go | a paragraph of the attached doc comment that starts with `Deprecated:` |
+| Swift | `@available(*, deprecated…)` |
+| Scala | `@deprecated` |
+| C++ | `[[deprecated]]` |
+| Python | `@deprecated` decorator (PEP 702), including the qualified `typing_extensions.deprecated` and `warnings.deprecated` forms |
+
+An ordinary (non-doc) comment containing the word never sets the flag:
+
+```go
+// Deprecated: use NewPoint.      <- attached doc comment: is_deprecated = true
+func MakePoint() {}
+
+func run() {
+    // this path is deprecated      <- ordinary comment: no effect
+}
+```
+
+**`visibility.is_test`** (new) means **test-only code**. It is true for:
+
+- **every declaration in a recognized test file**, helpers included:
+  - Go: `*_test.go`
+  - Python: `test_*.py`, `*_test.py`, `conftest.py`
+  - JavaScript and TypeScript: `*.test.*`, `*.spec.*`
+  - Rust: any file under a package's `tests/` directory (Cargo integration
+    tests and their modules)
+- **declarations carrying a test attribute:**
+  - Rust: `#[test]` and `#[<path>::test]` (for example `#[tokio::test]`)
+  - Java: `@Test`, including qualified forms such as `@org.junit.Test`
+  - C#: `[Test]`, `[Fact]`, `[TestMethod]`
+- **everything inside a Rust `#[cfg(test)]` item**, including nested
+  declarations. `#[cfg(any(test, feature = "x"))]` is not test-only and does
+  not set the flag.
+
+Every other language reports false. JavaScript and TypeScript `describe` and
+`it` are calls, not declarations, so no test declaration is synthesized from a
+call; the file-name rule covers them.
+
+Test detection is a documented syntax/file-name heuristic, not a claim that a
+runner will execute the symbol. A helper function in a test file is a test
+because it is test-only code. There is no separate Python
+`unittest.TestCase` rule: the file-name rule already covers `TestCase`
+classes in test files, and dropping the base-class rule removes import-alias
+resolution from the heuristic. Two limits are documented, not fixed:
+
+- **Out-of-line `#[cfg(test)] mod tests;`** marks only the `mod` declaration.
+  The contents of the other file (`src/foo/tests.rs`) are not tests unless
+  that file matches a file-name rule.
+- A Python `TestCase` subclass or `test_*` function in a file whose name
+  matches no rule is not a test.
+
+Fixtures include similarly named non-tests (a `test_helper` function in a
+non-test file, a `latest.rs`) and deprecation words in ordinary comments,
+which must not set either flag.
 
 Generic parameters and `extends`/`implements` relations (formerly B4) are not
 part of this feature; see the unscheduled `symbol-type-relations` feature.
@@ -184,6 +261,30 @@ fallback, retaining language-native separators inside the container portion.
 The standalone library defaults to the file's parent as its root. Never guess
 through Rust `#[path]`, Python import configuration, or generated module
 layouts.
+
+**A qualified name has two parts, built at different times:**
+
+| Part | Built | Stored in the cache | Example |
+|---|---|---|---|
+| in-file name | at extraction, from the file's own source | yes | `Symbol::new`, `schema::Record`, `Class.method`, `com.example.Point` |
+| prefix | after cache lookup, from query inputs | no | `src/symbol.rs#`, or a naming-context prefix such as `crate::symbol::` |
+
+The cached record holds only the in-file name: containers joined with the
+language's native separator, plus any explicit namespace or package the
+source declares (an explicit-namespace name such as `com.example.Point` is
+already complete and gets no prefix). After lookup, the library prepends
+either the naming-context prefix or the portable scan-root-relative file
+path plus `#`, taken from query inputs that are **not** part of the cache
+key. Symbol IDs derive from file identity (the normalized identity the cache
+key of `2026-10-03-symbol-improvements` uses, not the path as typed) plus the
+in-file name, so IDs and cache entries do not depend on the directory `hug`
+runs from or on the naming context:
+
+```text
+scan root tree-hugger/      ->  qualified_name  lib/src/symbol.rs#Symbol::new
+scan root tree-hugger/lib/  ->  qualified_name  src/symbol.rs#Symbol::new
+both: cached in-file name Symbol::new, one cache entry, one symbol ID
+```
 
 **`hug` never supplies a naming context in this feature.** Rust and Python
 names in `hug` output therefore always use the `file#Container.member`
@@ -209,14 +310,17 @@ caller that passes a context.
 
 **Reader's note:** JavaScript and TypeScript do have module systems. A portable
 file-qualified name avoids assuming how a project's module loader maps files.
-Normalize displayed separators to `/` without lowercasing paths. Naming context
-is part of cache validity and must be identical on cold and warm runs: it is a
-library cache-key input joining the key defined by
-`2026-10-03-symbol-improvements`. The CLI's value for that input is always the
-default (none) in this feature. IDs are stable for
-the same file identity/context and declaration position, not across edits,
-renames or different scan roots; changing qualified-name construction must
-recompute every affected relation ID consistently.
+Normalize displayed path separators to `/` without lowercasing paths.
+
+**The cache key does not change.** `2026-10-03-symbol-improvements` (A7)
+anticipated that the naming context would join its cache key. Because neither
+the naming context nor the scan root changes a cached record, neither joins
+the key; both stay query inputs applied after lookup. IDs are stable for the
+same file identity, in-file name and declaration position, not across edits
+or renames. Changing in-file name construction (for example, replacing
+today's `::` spelling for every language with native separators) changes
+`stable_symbol_key`, so every affected symbol and relation ID is recomputed
+consistently and `EXTRACTOR_REVISION` is bumped in the same change.
 
 **Basis for a later CLI option.** Two pieces already exist that a future
 `hug` naming-context option could build on: the forward Rust module-to-file
@@ -268,15 +372,30 @@ let query = SymbolQuery::new()
 ```
 
 Library defaults select all kinds and scopes; hiding locals is a CLI default
-only. The query also carries the optional naming context from “Qualified names
-with honest context”; `hug` leaves it unset. Metrics become a capability.
-Additional required work:
+only. The query also carries two inputs that are applied after cache lookup
+and are not cache-key inputs: the scan root for the file-qualified prefix,
+and the optional naming context from “Qualified names with honest context”
+(`hug` leaves the naming context unset).
+
+What is computed when:
+
+| Fact | When computed |
+|---|---|
+| scope, the `async` modifier, the in-file qualified name | always, with declarations |
+| `is_test`, `is_deprecated` (attribute, doc-marker and file-name rules) | a capability, computed only when a filter or report requests it; `--json` and `--jsonl` always request it, so a `false` in machine output always means "computed and not set", never "not computed" |
+| `parameters`, `has_docs` metrics | a capability, computed only when a filter or report requests it |
+
+The capabilities follow the coverage rules of
+`2026-10-03-symbol-improvements`: a requested capability that a cache entry
+lacks is a partial hit, and the envelope's `completed_capabilities` names
+what was computed. Additional required work per request:
 
 | Request | Required analysis |
 |---|---|
 | Outline | declarations plus containment, including excluded parent identities |
-| Undocumented/deprecated/test filtering | attached docs and the attribute parsing behind `is_deprecated`/`is_test`; structured docs only when requested |
+| Undocumented/deprecated/test filtering | attached docs and the test/deprecation capability; structured docs only when requested |
 | Metrics/stats | only requested metrics (`parameters`, `has_docs`) and doc presence, not diagnostics |
+
 The library owns record filtering once; the CLI owns a separate presentation
 step for grouping classes and building outlines.
 
@@ -290,8 +409,10 @@ that takes a list matches if any of its values matches (OR).
 
 ### C1. `--kind <kind>`
 
-`--kind` is repeatable and accepts v2 kind names
-(`hug symbols --kind trait --kind interface`). The fixed command sets are
+`--kind` is repeatable and accepts the snake_case spelling of each
+`SymbolKindV2` variant name: `function`, `method`, `type_alias`,
+`enum_variant` and so on (`hug symbols --kind trait --kind interface`). The
+fixed command sets are
 defined by `2026-10-03-symbol-improvements`; `symbols` applies its scope
 default after the kind set. An explicit kind set intersects the command set;
 it does not widen it. Unknown kind names are argument errors, and unsupported
@@ -413,7 +534,10 @@ Keep existing `--exclude-files`, `--exclude-symbols`, `--language`, `--prelude`,
 File references use `biscuit-file::FileReference`; discovery retains `.gitignore`
 and the default fixture exclusions, with explicitly targeted files re-included.
 `imports` retains file-only positional tokens and gains symbol matching through
-explicit `--name`, avoiding an accidental positional behavior change.
+explicit `--name`, avoiding an accidental positional behavior change. An
+import matches when either its alias or its original name matches, so
+`hug imports --name HashMap` finds `use std::collections::HashMap as Map;`
+and so does `--name Map`.
 
 ### C10. One filter path
 
@@ -616,19 +740,83 @@ stats modes.
 
 ---
 
+## Risks and implementation notes
+
+- **Start depends on unbuilt work.** This feature builds on
+  `2026-10-03-symbol-improvements`'s `SymbolQuery`, capability-aware cache
+  and single renderer, which are planned there but not yet built. Do not
+  start until those land.
+- **`declaration_list` is ambiguous.** The same node kind holds a Rust inline
+  module body, C++ and C# namespace bodies, and Rust `impl`/`trait` bodies.
+  `is_member_owner_kind` (`lib/src/file/extract/classify.rs`) treats every
+  `declaration_list` as a member owner, so scope must classify by the
+  parent node's kind (Rust `mod_item`, C++ `namespace_definition`, C#
+`namespace_declaration` → `Item`;
+  `impl_item`, `trait_item` → `Member`). The existing helpers
+  `is_local_declaration` (`lib/src/file/extract/declaration.rs`) and
+  `is_member_owner_kind` are the starting point. **The first plan task is a
+  scope dump over the 16 language fixtures** (each declaration with its
+  current kind, container and proposed scope), reviewed before the classifier
+  is written.
+- **IDs are coupled to qualified names.** `stable_symbol_key` hashes the
+  qualified name, so the new in-file name construction changes symbol and
+  relation IDs. Bump `EXTRACTOR_REVISION` (today `"5"`) and add the matching
+  stale-revision case to `cli/tests/symbols/cache_upgrade.rs`.
+- **Tests may rely on today's `::` spelling.** Existing tests and goldens may
+  assert `container::name` for languages whose native separator is `.`;
+  rewrite those expectations in the same change (pre-authorized below).
+- **Rust fixtures live under a `tests/` directory.** The per-language fixtures
+  sit in `lib/tests/fixtures/symbols/`, below the `tree-hugger` library
+  package's `tests/` directory, so the Rust file-name rule marks every
+  declaration in `rust.rs` as a test when it is read in place. Library tests
+  that assert `is_test == false` on Rust declarations must analyze an isolated
+  copy outside a package `tests/` directory (the Test Toolkit's temporary
+  fixtures) or supply a path that is not under one. *(Implementation note,
+  not an author decision.)*
+- **Out-of-line `cfg(test)` modules** are a documented limit (see “Async,
+  deprecation and test flags”), not a defect to fix here.
+- **Breaking CLI changes** (smart-case matching, locals hidden in
+  `hug symbols`) need before/after examples in the release notes.
+
 ## Sequencing
 
 ```mermaid
 flowchart LR
-    F1["2026-10-03-symbol-improvements"] --> META["Scope, async, deprecation/test flags,<br/>qualified names, parameters and has_docs"]
-    META --> Q["SymbolQuery predicates<br/>and naming-context cache key (library only)"]
+    F1["2026-10-03-symbol-improvements<br/>(SymbolQuery, capability cache, renderer)"] --> DUMP["Scope dump over<br/>the 16 fixtures"]
+    DUMP --> META["Scope, async, deprecation/test flags,<br/>qualified names, parameters and has_docs"]
+    META --> Q["SymbolQuery predicates, capabilities<br/>and post-lookup name prefix"]
     Q --> FILT["Shared record filters"]
     FILT --> REP["Versioned JSON Lines, outline, wrapping,<br/>signature modes, table, count and stats (terminal and JSON)"]
+    REP --> PERF["Re-run the performance sample"]
 ```
 
 Each phase leaves `hug` working, and updates relevant docs/tests with its code.
-Open author decisions must be settled or explicitly deferred in the
-implementation log before their features ship.
+
+## Definition of done
+
+- [ ] `just test`, `just test-l2` and `just lint` pass in `tree-hugger/`.
+- [ ] Every per-language library matrix under “Testing” has a row for all 16
+      languages, enforced by the coverage guard.
+- [ ] One CLI golden exists per output format or view listed under “CLI output
+      goldens”, and each focused case is covered.
+- [ ] `hug symbols` on `tree-hugger/` hides locals by default; `--all-scopes`
+      restores them.
+- [ ] `--json` and `--jsonl` output always includes computed `is_test` and
+      `is_deprecated`; the test/deprecation capability appears in
+      `completed_capabilities`.
+- [ ] A symbol's ID and cache entry are identical when `hug` runs from two
+      different scan roots over the same file; only the displayed
+      `qualified_name` prefix differs.
+- [ ] `EXTRACTOR_REVISION` is bumped and `cache_upgrade` covers the previous
+      revision.
+- [ ] The performance sample of `2026-10-03-symbol-improvements` (its
+      “Performance sample” section, same host, commands and inputs) is re-run
+      after landing and recorded in the implementation log. There is no hard
+      gate; a regression is recorded with its cause.
+- [ ] Every doc listed under “Documentation to update in the same change” is
+      updated, and the release notes carry the before/after examples.
+- [ ] Agent terminal state is "implementation complete, ready for review"; no
+      move to `_completed`, no `just complete`, no commit unless asked.
 
 ## Decisions
 
@@ -734,6 +922,50 @@ Decided by the author on 2026-10-04 (second round):
   by container ID. A line holds one container and needs no key; the whole
   report holds many.
 
+Decided by the author on 2026-10-04 (third round):
+
+- **Qualified-name prefixes are applied after cache lookup.** The cached
+  record holds only the in-file name (`Symbol::new`, `schema::Record`;
+  explicit-namespace names such as `com.example.Point` stay complete). The
+  library prepends the scan-root-relative path plus `#`, or a naming-context
+  prefix, from query inputs outside the cache key, and IDs derive from file
+  identity plus the in-file name. IDs and cache entries then do not depend on
+  where `hug` runs, and the cache key of `2026-10-03-symbol-improvements` does
+  not grow. Changing name construction changes IDs, so `EXTRACTOR_REVISION`
+  is bumped.
+- **`is_test` means test-only code.** It covers every declaration in a
+  recognized test file (Go, Python, JS/TS and Rust `tests/` rules), declarations
+  with a Rust, Java or C# test attribute, and everything inside Rust
+  `#[cfg(test)]`; helpers in test files count. The Python `unittest.TestCase`
+  base-class rule is dropped as the simpler choice: the file-name rule covers
+  `TestCase` classes in test files and avoids import-alias resolution.
+  Out-of-line `#[cfg(test)] mod tests;` content is a documented limit. A flag
+  that answers "is this test-only?" is more useful to `--exclude-tests` than
+  one that tracks only runner entry points.
+- **`is_deprecated` has an explicit source list** per language (attributes,
+  annotations, decorators, doc-comment tags and Go's `Deprecated:` paragraph);
+  ordinary comments never set it, and other languages report false. Each
+  source is a convention the language's own tooling recognizes.
+- **Compute-on-demand defaults are accepted.** Scope, `async` and the in-file
+  qualified name are always computed with declarations; test/deprecation
+  detection and metrics are capabilities computed on request, and `--json`
+  and `--jsonl` always request test/deprecation detection so `false` never
+  means "not computed". The performance sample of
+  `2026-10-03-symbol-improvements` is re-run after landing and recorded in the
+  implementation log, with no hard gate. Cheap facts every report shows stay
+  unconditional; parsing that only some filters need stays opt-in.
+- **Smaller accepted defaults.** The scope matrix's parameter case applies only
+  where parameters are extracted; `imports --name` matches alias or original
+  name; `--kind` takes the snake_case of `SymbolKindV2` names; Bash and Zsh
+  nested functions are `Local`. Each follows the structural rule already
+  stated, with no special case.
+- **The `LIM` cells are extractor limits,** not grammar limits, recorded in
+  the unscheduled `deferred-kind-precision` entry.
+- **No spike is warranted.** The risk assessment found the scope helpers
+  (`is_local_declaration`, `is_member_owner_kind`) already exist and the
+  attribute and annotation node shapes are well known; the scope dump that
+  opens the plan covers the remaining uncertainty.
+
 ### Open Questions
 
 None. Every question raised so far has an author decision above.
@@ -755,7 +987,8 @@ pausing for approval:
     under “Shared fixtures”.
   - Rewrite existing CLI and library tests whose expectations this feature
     deliberately changes: case-sensitive name matching, locals shown by
-    default in `hug symbols`, and the old `classes` filtering.
+    default in `hug symbols`, the old `classes` filtering, and the
+    `container::name` qualified-name spelling and the IDs derived from it.
 - **Query files.** Edit the vendored query files under `lib/queries/vendor/`
   where scope, attribute or test detection requires it, updating query
   provenance to match.
@@ -779,7 +1012,7 @@ Scala, PHP, Perl, Lua, Bash and Zsh.
 
 A capability that a language can't express is asserted as not applicable
 (`None`, empty, or "filter matches nothing"). Separately label unsupported
-extraction/grammar support; those constructs are not falsely classified as
+extraction; those constructs are not falsely classified as
 absent from the language. Each row identifies representative positive and
 negative cases, rather than pretending every feature is applicable everywhere.
 
@@ -806,8 +1039,12 @@ resolve. No implementation test should read this dated spec as its contract.
   - same-named methods on two types where methods exist
   - an explicit namespace/package declaration, and an inline Rust module,
     where the language has one
-- **`lib/tests/fixtures/symbols/<language>_test.<ext>`** (or the language's
-  test-file convention), for file-level `is_test` detection.
+- **Test-file fixtures** for each file-name rule: Go `*_test.go`; Python
+  `test_*.py`, `*_test.py` and `conftest.py`; JavaScript and TypeScript
+  `*.test.*` and `*.spec.*`; and a Rust file under a package `tests/`
+  directory. Each holds a test and a non-test helper, which are both
+  `is_test`. Rust fixtures that must read as non-test are analyzed from an
+  isolated copy (see “Risks and implementation notes”).
 - **The `lib/tests/fixtures/symbols/multi/` tree** from
   `2026-10-03-symbol-improvements`, for multi-file, ordering and CLI golden
   tests.
@@ -821,9 +1058,9 @@ missing fixture or matrix row) is extended to check every matrix below.
 
 | Capability | Asserted per language |
 |---|---|
-| Scope | at least one `Item`, one `Member` (or n/a) and one `Local` with the expected classification |
-| Async, deprecation and test flags | `async` is reported exactly on the fixture's async declarations (n/a where the language has none); `is_deprecated` and `is_test` are set exactly on the marked symbols; the attribute facet stays empty |
-| Qualified names | explicit-namespace names, portable file-qualified fallbacks with no context, and library-only context-supplied names, for items/members/nested declarations, including ambiguous module layouts |
+| Scope | at least one `Item`, one `Member` (or n/a) and one `Local` with the expected classification; a parameter is `Local` in the 13 languages that extract parameters and n/a in Perl, Bash and Zsh; Rust inline-module and C++/C# namespace contents are `Item`, Rust `impl`/`trait` contents are `Member`; Bash/Zsh nested functions are `Local` |
+| Async, deprecation and test flags | `async` is reported exactly on the fixture's async declarations (n/a where the language has none); `is_deprecated` is set exactly on each marker in the source table and false elsewhere (including ordinary comments); `is_test` is set exactly by the file-name, attribute and `cfg(test)` rules, false for `cfg(any(test, …))`, and false in languages without a rule; the attribute facet stays empty |
+| Qualified names | cached in-file names with native separators; explicit-namespace names; portable file-qualified fallbacks with no context; library-only context-supplied names; for items/members/nested declarations, including ambiguous module layouts; the same file under two scan roots yields one ID |
 | Metrics | `parameters` and `has_docs` for each fixture function; missing parameter lists, nested callables and languages without doc-comment detection (`None`, labeled unsupported, excluded by `--undocumented`) have explicit expected values |
 | Kind coverage | each deferred `FEAT` construct is asserted as unsupported extraction, distinct from `—` (language has no construct) |
 | Selection filters | every `SymbolQuery` predicate returns exactly the expected symbol set for that language's fixture; "matches nothing" is asserted where the construct is n/a |
@@ -856,7 +1093,13 @@ each filter, with `--format plain` and `--format table` (accepted), and with
 `--sort`, `--signatures` and `--tree` (argument errors); `hug classes --stats`
 counting containers only; `hug imports --stats` (argument error);
 `classes --static-only --instance-only` (argument error); output-mode conflicts; width wrapping with injected
-dimensions; escaped control sequences in signatures; empty selections.
+dimensions; escaped control sequences in signatures; empty selections;
+`--kind type_alias` and an unknown `--kind` (argument error);
+`hug imports --name` matching an alias and an original name; `--json` and
+`--jsonl` carrying computed `is_test`/`is_deprecated` without a test or
+deprecation filter; a warm run from a different scan root reusing the cache
+entry with a different displayed prefix; a stale-revision cache entry after
+the `EXTRACTOR_REVISION` bump.
 
 ### Host coverage
 
@@ -871,10 +1114,13 @@ focus changes.
 
 ## Documentation to update in the same change
 
-- **`tree-hugger/docs/symbol-kinds-and-visibility.md`:** scope, the `async`
-  modifier, test and deprecation heuristics, qualified-name spelling per
-  language (including that `hug` always uses the file-qualified fallback for
-  Rust and Python), the `parameters` and `has_docs` definitions, and which
+- **`tree-hugger/docs/symbol-kinds-and-visibility.md`:** scope (including
+  parameters only where extracted and Bash/Zsh nested functions as `Local`),
+  the `async` modifier, the test rules (test-only code, helpers in test files,
+  the out-of-line `cfg(test)` limit) and the deprecation source table,
+  qualified-name spelling per language (the cached in-file name, the
+  post-lookup prefix, and that `hug` always uses the file-qualified fallback
+  for Rust and Python), the `parameters` and `has_docs` definitions, and which
   constructs remain unsupported extraction.
 - **`tree-hugger/docs/symbol-reports.md`** (created by
   `2026-10-03-symbol-improvements`): every filter with one example, the output
@@ -890,7 +1136,11 @@ focus changes.
   facets, `SymbolQuery` predicates and the CLI filter list.
 - **`tree-hugger/docs/symbol-schema-design.md`:** the additive 4.x fields, the
   facets that stay empty (attributes, generics, relations), the library-only
-  naming context, and metric absence semantics.
+  naming context, that qualified-name prefixes are applied after cache lookup
+  and are not cache-key inputs, the ID change, which facts are always
+  computed versus capabilities, and metric absence semantics.
+- **`tree-hugger/docs/cache-design.md`:** the post-lookup prefix and why the
+  naming context and scan root are not cache-key inputs.
 - **`docs/dependencies.md` and area dependency docs:** update only if dependency
   declarations change.
 

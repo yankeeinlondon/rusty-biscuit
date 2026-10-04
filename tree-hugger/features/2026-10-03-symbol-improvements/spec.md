@@ -41,38 +41,40 @@ related:
   - 2026-10-03-symbol-filters-and-reports
 human_review: false
 message_to_agent: |-
-  Phase 1 (baseline, rulings, fixtures) is done; read the "## Phase 1" section of
-  implementation-log.md first. Points that affect Phase 2 and later:
+  Phases 1 and 2 are done; read the "## Phase 2" section of
+  implementation-log.md before starting Phase 3. Points that affect later
+  phases:
 
-  - A new L1 golden test, `golden::plain_symbols_over_multi_match_the_golden`
-    (tree-hugger-cli `symbols` test binary), pins today's `hug --plain symbols`
-    output over `lib/tests/fixtures/symbols/multi/`. Phase 2 should not change
-    plain output; if a record change does alter it, regenerate with
-    `HUG_UPDATE_GOLDEN=1`, review the diff, and log each difference.
-  - Every primary per-language fixture now ends with a "Declaration boundaries"
-    section (names `boundary*`/`Boundary*`, Java/C# class `DeclarationBoundaries`)
-    for the keyword and signature_text matrices. Two cells are not applicable,
-    and the matrices should say so explicitly: C# cannot put an attribute between
-    modifiers (syntax error in tree-sitter-c-sharp), and tree-sitter-zsh rejects
-    a function body brace on the line after the header, so Zsh has no multi-line
-    header case. Perl has no in-node annotation case.
-  - Rulings 1-7 are accepted (log has the details). Ruling 2's concrete
-    selector list is in the log. Ruling 4: no synthetic marker exists, so add
-    `provenance.synthetic: bool` (serialized only when true) inside the 4.0 bump.
-    Ruling 5: `TriState::Unknown` already exists; no new type is needed.
-  - Recon: the CLI parses every file and reruns diagnostics even on a warm cache
-    hit (`analyze_tree_file` -> `hydrate_diagnostics`), and `parse_pass` always
-    calls `try_diagnostics()`. `identity.module_path` readers are listed in the
-    log; confirm which are the record field before renaming.
-  - The baseline timings were taken on a heavily loaded host (load average
-    about 40 on 16 cores) and are noisy. Peak RSS (3.48 GB, whole repo) is
-    reliable. For Phase 6, rebuild the pre-change binary from commit 60e3b841e
-    and time it back-to-back with the new one.
-  - Shell gotcha: `cd` is a zoxide alias in this environment and can jump to a
-    different checkout (/Volumes/coding/personal/rusty-biscuit). Use absolute
-    paths.
-  - The Windows cross-check rig (build-win-native) was unreachable during
-    Phase 1. The Linux cross-check passed.
+  - Records are schema 4.0 (`SchemaVersion::V4_0`), `EXTRACTOR_REVISION` is
+    "5". The next revision bump must add a `StaleRevision` case for revision 5
+    in `cli/tests/symbols/cache_upgrade.rs` (revision 4's case exists).
+  - `identity.keyword` and `source.signature_text` are computed in
+    `TreeFile::symbol_records()` from the same `declaration` node as
+    `declaration_text`, via `file/extract/header/` (`declaration_keyword`,
+    `signature_text`). They are the "cheap metadata" the spec's SymbolQuery
+    table requires for basic functions/types/symbols queries, so Phase 3's
+    lazy metadata and kind push-down must keep computing them for selected
+    kinds (once per winning capture, after de-duplication).
+  - Ruling 4 is revised: records already have `visibility.is_synthetic`; use
+    it for Phase 5's synthetic prelude records. No `provenance.synthetic`
+    field was added.
+  - All timestamps are gone, including `SymbolSnapshot::created_at_epoch_ms`
+    (the cache entry) and the public `now_epoch_ms()`. Phase 4's entry format
+    starts from a timestamp-free snapshot.
+  - `cache_robustness` now has twelve columns (added `identity.keyword` and
+    `source.signature_text`, same outcome row as `declaration_text`); extend
+    it in Phase 4 rather than duplicating it. Its timestamp-normalizing helper
+    was deleted: cached and uncached JSON are compared byte for byte.
+  - `identity.qualified_name` is still populated as `container::name` by the
+    v1->v2 adapter (pre-existing); it was deliberately left alone.
+  - Phase 2 changed no plain output; the plain golden was not regenerated.
+  - Shell gotcha (still true): `cd` is a zoxide alias here and can jump to
+    /Volumes/coding/personal/rusty-biscuit. Use absolute paths.
+  - Cross-checks: Linux passed for the new tests. The Windows rig
+    (build-win-native) is reachable now but its build volume is below the
+    50 GiB storage preflight (16.4 GiB free, sweep freed nothing), so Windows
+    could not be checked locally; someone needs to free space there (see the
+    `storage-strategy` skill) before relying on it.
 ---
 
 # Fast, deterministic symbol reports on v2 records

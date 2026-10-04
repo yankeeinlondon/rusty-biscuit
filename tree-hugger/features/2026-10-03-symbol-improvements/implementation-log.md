@@ -45,6 +45,45 @@ docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1:
   - .claude/skills/tree-hugger/SKILL.md
+source_files_during_phase_2:
+  - tree-hugger/lib/src/shared/schema_v2/types.rs
+  - tree-hugger/lib/src/shared/schema_v2/facets.rs
+  - tree-hugger/lib/src/shared/schema_v2/mod.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/tests.rs
+  - tree-hugger/lib/src/cache/mod.rs
+  - tree-hugger/lib/src/god_files/analysis.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/extract/mod.rs
+  - tree-hugger/lib/src/file/extract/header/mod.rs
+  - tree-hugger/lib/src/file/extract/header/keyword.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/symbols_header.rs
+  - tree-hugger/lib/tests/l1/symbols_coverage.rs
+  - tree-hugger/lib/tests/l1/cache_tests.rs
+  - tree-hugger/lib/tests/l1/symbols_adapter.rs
+  - tree-hugger/lib/tests/l1/symbols_declarator_wrappers.rs
+  - tree-hugger/lib/tests/l1/symbols_export.rs
+  - tree-hugger/lib/tests/l1/symbols_field_lists.rs
+  - tree-hugger/lib/tests/l1/symbols_fixtures.rs
+  - tree-hugger/lib/tests/l1/symbols_kinds.rs
+  - tree-hugger/lib/tests/l1/tree_file.rs
+  - tree-hugger/cli/tests/symbols/cache_robustness.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/symbols/golden.rs
+  - tree-hugger/cli/tests/symbols/wiring.rs
+docs_updated_during_phase_2:
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/lib/README.md
+  - tree-hugger/cli/README.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
 packages:
   - tree-hugger
   - tree-hugger-cli
@@ -281,3 +320,208 @@ change).
   ran there (read-only clippy; nothing written). Lint was rerun in the
   worktree with absolute paths. Every other command was verified to have run
   in the worktree.
+
+## Phase 2
+
+Record foundation: schema 4.0, `identity.keyword`, `source.signature_text`.
+Implemented by claude/opus on 2026-10-04.
+
+### Wave 1: schema 4.0
+
+- `SchemaVersion::V4_0` added and emitted on records, file indexes, the CLI
+  envelope and the CLI's analyzer fingerprint; `V3_0` stays as a documented,
+  no-longer-emitted constant.
+- `ProvenanceFacet` lost `created_at_epoch_ms` / `updated_at_epoch_ms`; the
+  three `updated_at` stamps in `analysis/mod.rs` and the adapter's `now` are
+  gone. **Also removed `SymbolSnapshot::created_at_epoch_ms`** (the cache
+  entry's own timestamp) and the then-unused public `now_epoch_ms()`: the
+  plan's success criterion is "no timestamps anywhere" and spec A9 wants
+  identical cache entries across runs. No caller outside tree-hugger used
+  either (grepped the monorepo; `schematic`'s `module_path` is unrelated).
+- `identity.module_path` → `identity.container_name` (doc comment added).
+  Real record-field readers renamed: `analysis/mod.rs` (bind pass),
+  `tree_file.rs` (ordinal key), `god_files/analysis.rs` (top-level filter and
+  its comments), both adapters, tests. `builtins.rs` (`module_path` is a Rust
+  macro name) and `tree_package.rs` (a local variable) were not the field and
+  are untouched.
+- `identity.keyword: Option<String>` with
+  `skip_serializing_if = "Option::is_none"`, matching the neighboring
+  optional identity fields (no `#[serde(default)]`; serde already reads an
+  absent `Option` as `None`).
+- `EXTRACTOR_REVISION` 4 → 5. Cache-upgrade rule from the skill: the existing
+  literal-key and revision 1–3 cases are unchanged; added
+  `cache_upgrade::entry_from_extractor_revision_four_is_not_served_after_the_repairs`
+  (schema-3.0 key at revision 4; probe = `module_function`'s keyword, `def`
+  repaired vs. absent stale; control proves the stale payload is servable
+  under the current key).
+- **Ruling 4 revised:** records already have `visibility.is_synthetic: bool`
+  (`facets.rs`, `VisibilityFacet`), which Phase 1's recon missed. A second
+  marker (`provenance.synthetic`) would duplicate it, so none was added;
+  Phase 5's synthetic prelude records should set `visibility.is_synthetic`.
+- **Not changed:** `identity.qualified_name` is already populated today by
+  `From<SymbolInfo> for SymbolRecord` as `container::name` (216 occurrences in
+  the Phase 1 baseline JSON). The spec forbids *newly* populating it here; the
+  existing value is left as is for `2026-10-03-symbol-filters-and-reports`
+  to own.
+
+### Wave 2: keyword and signature text (all 16 languages)
+
+**Departure from the plan's wave shape:** the plan split Wave 2 into four
+parallel per-language-group subagents behind a shared stub helper. Dumping
+the declaration nodes of every fixture record first (a throwaway in-crate
+test, since removed) showed that the signature boundaries are the same few
+node-level rules in every grammar (body / `value`-like fields, the first
+`=`/`:=` in declarator children, terminator, leading annotations), with only
+the keyword placement varying. One shared engine plus one per-language table
+was smaller and consistent where four copies would have drifted, so it was
+implemented directly rather than delegated.
+
+New module `lib/src/file/extract/header/`:
+
+- `keyword.rs`: `declaration_keyword(declaration, language)`, a
+  `(language, declaration node kind) → KeywordSite` table. Sites: a direct
+  anonymous child from a token list; the token inside a named wrapper child
+  (Perl `scope`, Swift `value_binding_pattern`); the token inside a wrapper
+  under a field (Swift protocol property name pattern); a field token
+  (JS/TS `lexical_declaration.kind`, Swift `declaration_kind`); a marker node
+  (PHP `var_modifier` is a named leaf with no token → `var`); or a token of the
+  wrapping statement (Go `const_spec`/`var_spec`/`type_spec`, Lua
+  `local` assignment, shell `declaration_command`). Only anonymous tokens are
+  read, and the token's *kind* is reported (PHP keywords are
+  case-insensitive in source).
+- `mod.rs`: `signature_text(declaration, name_bytes, language, source)`.
+  Start = first child that is not a comment or a leading annotation (inside a
+  `modifiers` list, only annotations before the first modifier are skipped).
+  End = earliest of: the first child with a cut field (`body`, `value`,
+  `accessors`, `computed_value`, `default_value`) or cut kind
+  (`protocol_property_requirements`, `arrow_expression_clause`), moved back
+  over a preceding `=`/`=>`/`:`/`:=` token; `body_node_for_declaration`; the
+  first `=`/`:=` in the declaration or its declarator children; a Go struct
+  field list / interface brace; a final `;` (Lua `end`). `None` for a C/C++
+  type with an inline body, a grouped Go `type (…)`, or when the declaration
+  contains the name but the header does not (`int a = 1, b = 2;` for `b`).
+- Wired into `TreeFile::symbol_records()` next to `declaration_text`, from the
+  same `declaration` node in the same loop.
+
+Decisions taken while implementing (all within the spec's wording):
+
+| Decision | Choice | Why |
+|---|---|---|
+| Keyword is one token or a phrase | One token: Scala `case class` → `class`, C++ `enum class` → `enum`, Swift `class func` → `func`, Lua `local function` → `function` | The token that names the construct; a fixed shape is easier to filter on |
+| Keyword of a Go spec / Lua or shell `local` | Reported from the wrapping statement | It is the declaring keyword in the grammar; `declaration_text` does not include it, which the docs state |
+| Type-alias header | Excludes the aliased type (`pub type Alias`, `using SizeAlias`, `type ExportedAlias`); a C `typedef` keeps its full text (name is last) | The aliased type is the alias's initializer and already lives in `kind_data` |
+| Macro header | `#define NAME` / `#define NAME(x)` | The replacement text is the macro's initializer |
+| JS/TS arrow function | `(value: number): number`, keyword `None` | The declaration node is the `arrow_function` (fixed by the prerequisite fix); its header has no name and no keyword |
+| Keyword table scope | Only declaration kinds the extractor captures | Probing found generators, class/function expressions, Scala `package`/`type`/`given`/enum cases, Swift `init`/`deinit`/`subscript`/`typealias`, C++ `concept`/variadic/default type params, Java `@interface`/`module`, C# `delegate`, PHP enum `case`/`namespace`, Python `type`, TS `namespace` produce no record today; their entries were removed rather than kept untested |
+
+### Wave 3: matrices and guards
+
+New `lib/tests/l1/symbols_header.rs` (declared in `tests/l1/main.rs`):
+
+- `KEYWORD_MATRIX` (125 rows, every language; includes locals: Rust `let`,
+  JS/TS `const`, Swift `let`, Perl `my`/`state`, Lua/Bash/Zsh `local`, and
+  `None` rows) → `keyword_matrix_holds_for_every_language`.
+- `SIGNATURE_MATRIX`: every language × every `Shape` (`FunctionHeader`,
+  `Initializer`, `MultiLineHeader`, `LeadingAnnotation`,
+  `AnnotationBetweenModifiers`, `BodyIntroducer`, `Terminator`) is either a
+  fixture record with its exact header or an explicit `NotApplicable(reason)`
+  / `Unsupported(reason)`. Zsh `MultiLineHeader` is the one `Unsupported`
+  cell (grammar rejects the next-line brace); C# `AnnotationBetweenModifiers`
+  is `NotApplicable` (attributes must precede modifiers).
+  → `signature_matrix_holds_for_every_language`.
+- `symbols_coverage::every_language_has_matrix_rows` now also fails on a
+  language with no keyword row or with a `Shape` missing from the signature
+  matrix.
+- Passive corpus: `every_fixture_signature_is_a_contiguous_part_of_its_declaration_text`
+  (all 21 fixtures, >500 records: non-empty, trimmed, substring of
+  `declaration_text`, no trailing `;`/`=`).
+- `headers_that_cannot_be_isolated_are_none` (C typedef/struct-with-body,
+  C/Java/TS/Swift multi-declarators, Python chained assignment, grouped Go
+  types; plus the positive `int first` control).
+- `a_keyword_inside_a_comment_never_becomes_the_keyword` (comments *inside*
+  the declaration node naming other keywords, in Rust, Go, C, TS, PHP, Bash);
+  the fixtures' "comment naming declaration keywords" lines are covered by
+  the `BOUNDARY_TABLE` / `boundaryTable` keyword rows.
+- `the_documented_comparison_rows_hold`: the spec's six comparison rows (plus
+  the C# property) as complete sources, asserting all three fields.
+- `less_common_declarations_report_their_keyword`: 13 inline constructs not in
+  fixtures (`macro_rules!`, Swift `actor`, TS `let` and overload signature,
+  C# `event`, C++ `typename` parameter, function-like `#define`, grouped Go
+  `var`/`type`, Lua multi-name `local`, Bash `declare`/`export`, Zsh
+  `typeset`).
+
+Mutation checks (each reverted, verified with `cmp`): emptying the
+initializer-token list failed 11 `Initializer` rows; dropping direct-child
+annotation skipping failed the JS, PHP, C, C++, C# and Scala
+`LeadingAnnotation` rows.
+
+### CLI and cache tests
+
+- `wiring::json_records_carry_keyword_signature_text_and_container_name`:
+  real `hug --json symbols` over the TypeScript fixture; keyword, header,
+  `container_name`, `declaration_text` keeping the initializer; output
+  contains no `"module_path"`, `created_at_epoch_ms`, `updated_at_epoch_ms`.
+- `wiring::json_symbols_carry_visibility_and_schema_4_0` (renamed from
+  `…_3_0`): envelope and index carry `{4, 0}`.
+- `golden::json_symbols_over_multi_are_identical_across_runs`: two
+  `hug --json symbols --no-cache` runs over a scratch copy of `multi/` are
+  byte-identical (checkpoint 2's determinism item; the per-record
+  timestamps made this impossible before).
+- `golden::plain_symbols_over_multi_match_the_golden` still passes unchanged:
+  **Phase 2 changes no plain output**, so the golden was not regenerated.
+- `cache_robustness`: two new columns, `identity.keyword` and
+  `source.signature_text`, with the same outcome row as `declaration_text`
+  (absent/`null`/`""` served as no value / empty; every other malformed shape
+  recomputed). Its timestamp-stripping `normalized()` helper was deleted:
+  records have no timestamps, so cached and uncached output are now compared
+  byte for byte (a stronger check). `docs/cache-design.md`'s table gained the
+  two rows ("twelve fields").
+
+Input Robustness Matrix: applies only through the persisted cache snapshot,
+the one reader of the new fields. Both new fields are `Option<String>` with no
+`#[serde(default)]`; their full row (absent, null, wrong type, one/every wrong
+element, empty, duplicate key, trailing garbage) is walked by
+`cache_robustness` from a real entry written by `hug`, with the control cell
+proving the unedited entry is served. Absent and null both read as `None`
+here by the same schema rule `declaration_text` already follows; the plan's
+Phase 4 matrix (coverage fields) is where absent-vs-null must differ.
+
+### Requirement → test mapping (Phase 2)
+
+| Requirement | Test(s) |
+|---|---|
+| Schema 4.0 on records, indexes, envelope | `tree_file::emits_symbol_records_v2`, `tree_file::emits_symbol_index_v2_with_completed_passes`, `symbols_adapter::serialized_record_round_trips_the_new_fields`, `wiring::json_symbols_carry_visibility_and_schema_4_0` |
+| No timestamps; deterministic records | `golden::json_symbols_over_multi_are_identical_across_runs`, `wiring::json_records_carry_keyword_signature_text_and_container_name`, `cache_robustness` (byte-equal cached vs. uncached) |
+| `module_path` → `container_name`; v1 adapters keep working | every `symbols_*` matrix (they look records up by `container_name`), `symbols_adapter::*`, wiring test |
+| Revision-4 entries rejected, not migrated | `cache_upgrade::entry_from_extractor_revision_four_is_not_served_after_the_repairs` |
+| Keyword from the node, `None` where none, all 16 languages | `symbols_header::keyword_matrix_holds_for_every_language`, `…less_common_declarations_report_their_keyword` |
+| Keyword in a comment never used | `symbols_header::a_keyword_inside_a_comment_never_becomes_the_keyword`, keyword-comment rows in the matrix |
+| Signature contracts per shape, N/A explicit, unsupported labeled | `symbols_header::signature_matrix_holds_for_every_language` + coverage guard |
+| Contiguous sub-range of `declaration_text` | `symbols_header::every_fixture_signature_is_a_contiguous_part_of_its_declaration_text`, `…the_documented_comparison_rows_hold` |
+| Unisolable → `None`, never the body | `symbols_header::headers_that_cannot_be_isolated_are_none` |
+| Coverage guard fails on a missing matrix row | `symbols_coverage::every_language_has_matrix_rows` |
+| New fields robust in the persisted cache | `cache_robustness::persisted_symbol_fields_are_served_or_recomputed_per_shape` |
+| Plain output unchanged | `golden::plain_symbols_over_multi_match_the_golden` |
+
+### Gates run
+
+- `just test` (tree-hugger + tree-hugger-cli L1): **736/736 passed** (726 at
+  Phase 1 close + 7 `symbols_header` + 3 CLI: `cache_upgrade` revision 4,
+  `wiring` keyword/schema, `golden` determinism).
+- `just lint`: clean (two `type_complexity` findings in the new tests fixed by
+  replacing tuples with the `Inline` / `Documented` structs; one
+  `needless_return` fixed with the `WrappedInField` keyword site).
+- `just check-tier-coverage tree-hugger`: 0 stranded.
+- `just cross-check tree-hugger --os linux symbols_header`: pass (7/7).
+- `just cross-check tree-hugger-cli --os linux wiring`: pass (24/24).
+- `just cross-check tree-hugger --os windows symbols_header`: **not run to
+  completion.** The rig was reachable this time, but its Cargo storage
+  preflight refused: volume `B:` had 16.4 GiB free of 299.9 GiB against the
+  required 50 GiB, and the automatic sweep freed 0 GiB. The guard was not
+  overridden and nothing was deleted on the shared host. Phase 2 adds no path,
+  process or OS-specific code, so the exposure is low; Windows CI on `main`
+  runs these tests.
+- Line endings: the repo's `.gitattributes` forces `eol=lf`, so the
+  multi-line `\n` expectations hold on a Windows checkout.
+- `just test-l2` not run: Phase 2 adds no L2 test and does not touch the
+  `god-files` terminal path the L2 test exercises.

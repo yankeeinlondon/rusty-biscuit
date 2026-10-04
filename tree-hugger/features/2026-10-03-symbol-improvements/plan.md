@@ -4,7 +4,7 @@ feature: symbol-improvements
 spec: spec.md
 total_phases: 6
 created: 2026-10-04
-phase: 1
+phase: 2
 agent: claude/sonnet
 yolo: true
 source_files_during_phase_1:
@@ -49,6 +49,45 @@ docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1:
   - .claude/skills/tree-hugger/SKILL.md
+source_files_during_phase_2:
+  - tree-hugger/lib/src/shared/schema_v2/types.rs
+  - tree-hugger/lib/src/shared/schema_v2/facets.rs
+  - tree-hugger/lib/src/shared/schema_v2/mod.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/tests.rs
+  - tree-hugger/lib/src/cache/mod.rs
+  - tree-hugger/lib/src/god_files/analysis.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/extract/mod.rs
+  - tree-hugger/lib/src/file/extract/header/mod.rs
+  - tree-hugger/lib/src/file/extract/header/keyword.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/symbols_header.rs
+  - tree-hugger/lib/tests/l1/symbols_coverage.rs
+  - tree-hugger/lib/tests/l1/cache_tests.rs
+  - tree-hugger/lib/tests/l1/symbols_adapter.rs
+  - tree-hugger/lib/tests/l1/symbols_declarator_wrappers.rs
+  - tree-hugger/lib/tests/l1/symbols_export.rs
+  - tree-hugger/lib/tests/l1/symbols_field_lists.rs
+  - tree-hugger/lib/tests/l1/symbols_fixtures.rs
+  - tree-hugger/lib/tests/l1/symbols_kinds.rs
+  - tree-hugger/lib/tests/l1/tree_file.rs
+  - tree-hugger/cli/tests/symbols/cache_robustness.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/symbols/golden.rs
+  - tree-hugger/cli/tests/symbols/wiring.rs
+docs_updated_during_phase_2:
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/lib/README.md
+  - tree-hugger/cli/README.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
 packages:
   - tree-hugger
   - tree-hugger-cli
@@ -217,7 +256,7 @@ schema 4.0. Depends on Phase 1 fixtures.
 
 ### Wave 1 (sequential: shared schema surface)
 
-- [ ] **Schema 4.0 bump**
+- [x] **Schema 4.0 bump**
     - Add `SchemaVersion::V4_0`; move records, file indexes, CLI envelope
       constants and analyzer fingerprints to it.
     - Remove `created_at_epoch_ms` / `updated_at_epoch_ms` from provenance
@@ -242,10 +281,10 @@ fills **both** `keyword` and `signature_text` from the declaration node in the
 same extraction pass (`signature_text` a contiguous sub-range of
 `declaration_text`), and adds the per-language matrix rows.
 
-- [ ] **Keyword + signature: Rust, Go, Swift, Scala**
-- [ ] **Keyword + signature: TypeScript, JavaScript, Java, C#**
-- [ ] **Keyword + signature: C, C++, PHP, Python**
-- [ ] **Keyword + signature: Perl, Lua, Bash, Zsh**
+- [x] **Keyword + signature: Rust, Go, Swift, Scala**
+- [x] **Keyword + signature: TypeScript, JavaScript, Java, C#**
+- [x] **Keyword + signature: C, C++, PHP, Python**
+- [x] **Keyword + signature: Perl, Lua, Bash, Zsh**
 
 Common requirements for each group:
 
@@ -265,21 +304,21 @@ Common requirements for each group:
 
 ### Wave 3 (after Wave 2)
 
-- [ ] **Matrix tests and coverage guard**
+- [x] **Matrix tests and coverage guard**
     - Table-driven `keyword` and `signature_text` matrices, one row per
       language, naming the language on failure.
     - Extend the coverage guard to fail on a missing row in each matrix.
     - "Cache correctness" matrix row is added in Phase 4.
-- [ ] **Locals-capture and keyword-in-comment cases**: a keyword inside a
+- [x] **Locals-capture and keyword-in-comment cases**: a keyword inside a
       comment never yields a label.
 
 ### Validation checkpoint 2
 
-- [ ] `just test` and `just lint` green; `hug --json symbols` shows no
+- [x] `just test` and `just lint` green; `hug --json symbols` shows no
       timestamps, `container_name`, `keyword`, `signature_text`.
-- [ ] Two consecutive runs of `hug --json symbols --no-cache` over `multi/` are
+- [x] Two consecutive runs of `hug --json symbols --no-cache` over `multi/` are
       byte-identical (determinism of records alone).
-- [ ] `docs/symbol-kinds-and-visibility.md` and `docs/symbol-schema-design.md`
+- [x] `docs/symbol-kinds-and-visibility.md` and `docs/symbol-schema-design.md`
       updated for the contracts and the 4.0 bump (drift rule: same change).
 
 ---
@@ -292,7 +331,7 @@ completeness contract defined here.
 
 ### Wave 1 (sequential: defines the contract the rest consume)
 
-- [ ] **Pass planner and `AnalysisPass::Diagnostics`**
+- [x] **Pass planner and `AnalysisPass::Diagnostics`**
     - Split diagnostics out of `parse_pass` into `AnalysisPass::Diagnostics`.
     - Planner dedupes and orders prerequisites: parse → bind → semantic;
       parse → docs; diagnostics request their own dependencies.
@@ -303,7 +342,7 @@ completeness contract defined here.
     - Add a test-visible pass counter (atomics, not thread-locals) for
       diagnostics-pass executions, parser constructions, and
       definition-capture extractions.
-- [ ] **`Capability`, `SymbolQuery`, result type**
+- [x] **`Capability`, `SymbolQuery`, result type**
     - `SymbolQuery::new().kinds(..).capabilities(..)`; library default selects
       all kinds. Capabilities: declarations, containment, references,
       semantics, structured docs, diagnostics.
@@ -314,21 +353,21 @@ completeness contract defined here.
 
 ### Wave 2 (parallel: disjoint files)
 
-- [ ] **`SourceFile`**
+- [x] **`SourceFile`**
     - `SourceFile::read(path)` / `.parse()` / `.query(&q)`; owns bytes,
       detected-or-forced language and source identity; shares the planning path
       with `TreeFile::query`. Existing constructors become wrappers and keep
       the existing error contract. Never reread between hash and parse.
-- [ ] **Single definition-capture per file**
+- [x] **Single definition-capture per file**
     - Capture definitions once; derive records, locals and exports from it;
       native semantic diagnostics reuse the same captures instead of calling
       `symbols()` / `exported_symbols()` again.
-- [ ] **Lazy metadata after de-duplication**
+- [x] **Lazy metadata after de-duplication**
     - Keep today's duplicate rule and winner; extract `signature`,
       `type_metadata`, `doc_comment` from the winner, falling back to later
       duplicates in existing order only for missing fields. Edit vendored
       queries only where dedup requires it, updating provenance notes.
-- [ ] **Indexed binding**
+- [x] **Indexed binding**
     - `HashMap<&str, Vec<usize>>` per file for `find_reference_target`; same
       candidate choice as before. `push_unique_ref` uses a per-owner set
       (resolved: by ID; unresolved: by name+qualifier).
@@ -338,7 +377,7 @@ completeness contract defined here.
 
 ### Wave 3 (after Wave 2)
 
-- [ ] **Kind push-down**
+- [x] **Kind push-down**
     - Excluded kinds skip metadata extraction (and binding when safe) but keep
       identity, span and container data (they can shadow or own selected
       symbols). Selecting only methods must not change reference resolution or
