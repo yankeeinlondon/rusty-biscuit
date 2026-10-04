@@ -29,11 +29,13 @@ implemented: false
 human_review: true
 human_review_items:
   - |-
-    **`git worktree repair` fixes more than the worktree you name. Decide before Phase 4 (the repair engine). Phases 2 and 3 are not affected.**
+    **`git worktree repair` fixes more than the worktree you name. This is still open; Phase 6 will document whichever behavior you choose, so please decide before it runs.**
 
-    The spec says `wt remove` runs a *targeted* `git worktree repair <path>` when a worktree folder still exists but its `.git` link file is gone. A test on Git 2.56 showed that this command, run from the main checkout, also recreates the `.git` link of **every other** worktree whose link is missing, not just the named one. It also exited with an error code even though it succeeded. Nothing is deleted, but `wt remove foo` could quietly re-link `bar`, which the user did not ask about.
+    When a worktree folder still exists but its `.git` link file is gone, `wt remove` now runs `git worktree repair <path>` to make the files checkable before asking anything. A test on Git 2.56 showed that this command, run from the main checkout, also recreates the `.git` link of **every other** worktree whose link is missing, not only the named one. It also exits with an error code even when it succeeded. Nothing is deleted, but `wt remove foo` can quietly re-link `bar`.
 
-    - **A. Accept Git's behavior and say so (recommended).** Verify only the target, and make the messages and docs say repair "may have changed Git metadata for this or other worktrees".
+    Phases 4 and 5 shipped option A below. After a successful repair `wt remove` prints "git worktree repair may also have restored other worktrees' links". When the repair can't be verified it refuses and says "The repair attempt may have changed Git metadata for this or other worktrees". Switching to B or C changes one guard in the library and a few message strings.
+
+    - **A. Accept Git's behavior and say so (recommended; current behavior).** Verify only the target, and say in messages and docs that repair may have affected other worktrees.
       Pros: uses Git's own supported tool; repair only restores links Git already knows about and never removes anything; least code.
       Cons: a side effect on unrelated worktrees, though it is the same repair the user would run by hand.
     - **B. Only auto-repair when the target is the only worktree with a missing link; otherwise refuse and explain.**
@@ -43,15 +45,23 @@ human_review_items:
       Pros: truly targeted; no misleading exit code.
       Cons: reimplements a Git file format (including Git's relative-path worktree option) and departs from the spec's explicit choice of Git's repair command.
 
-    I recommend **A**. The extra effect is a non-destructive restoration that Git itself considers correct, and the spec already warns that repair may change metadata. Widening that wording is cheaper and safer than B's refusals or C's reimplementation.
+    I recommend **A**. The extra effect is a non-destructive restoration that Git itself considers correct, and the messages already say so. B's refusals and C's reimplementation would cost more for little safety gain.
 message_to_agent: |-
-  Phases 1-3 are done; read the "Phase 1" and "Phase 3" sections of implementation-log.md first.
-  (1) R9 (git worktree repair also re-links OTHER unlinked worktrees) still awaits the author; it is in human_review_items and gates the Phase 4 repair engine. If unanswered, use its recorded default (option A) and say "may have changed Git metadata for this or other worktrees".
-  (2) `wt list` notes (cli/src/commands/list_table.rs, `unavailable_note`) already PROMISE Phase 5 behavior: Missing -> "wt remove <arg> checks whether its remaining Git record can be removed safely"; Unlinked -> "wt remove <arg> attempts to restore the link before checking its files". Keep that wording true, or change the note and its snapshots (`unavailable_notes`, `unavailable_note_quoting`) in the same change.
-  (3) Reuse, don't copy: `list_table::shell_word` (one spelling valid in bash/zsh/fish/PowerShell, or None) and `remove_argument` (R6 via resolve_worktree) are private to the CLI's list_table module; if Phase 5 refusal text needs quoted commands, move `shell_word` to a shared CLI module rather than writing a second quoter.
-  (4) `--ff` now refuses a prunable holder with `FfRefusal::UnavailableHolder(path)` (lib/src/fast_forward.rs), only when a move is needed. Do not add repair there.
-  (5) The legend's new entries are on a second Worktree line (a recorded departure: one line was 126 columns). docs/cli/list.md (Phase 6) should describe that layout.
-  (6) Baseline after Phase 3: `just test` 989 passed / 32 skipped; `just lint` clean. `just cross-check` passes its args to a shell unquoted, so use plain test-name filters, never `-E '…(…)'`.
+  Phases 1-5 are done; read the "Phase 4" and "Phase 5" sections of implementation-log.md first.
+  (1) R9 is still open (human_review_items). The shipped behavior is option A. Docs must say a repair "may have changed Git metadata for this or other worktrees" (on refusal), and that after a successful repair Git "may also have restored other worktrees' links".
+  (2) Behavior to document in docs/cli/remove.md, README.md, and the skills, exactly as built:
+      - preparation runs after the main-checkout and inside-without-wrapper guards;
+      - Missing: the surviving index is compared with the recorded HEAD; staged differences need the ordinary discard consent (--force-worktree without a terminal); an unprovable index refuses (exit 3) whatever the flags; only `git worktree remove <path>` runs (no prune, no --force); the report says "Its directory is already gone" and the success line is "Removed the record of worktree X (its directory at P was already gone)"; no handoff;
+      - Unlinked: repair, then "Restored the link for X so its files could be checked.", then the ordinary flow; refusals and cancellation say the restored link was left in place;
+      - an unverified repair refuses with the spec's three sentences plus "Not verified:" and "Repair output:" lines;
+      - Other (a file or link at the path, an uninspectable path, a present but broken .git) refuses with exit 3 and the observed condition;
+      - the handoff state is format v4 and binds `git_dir` (where the target's .git leads); the second run never repairs, and refuses with exit 3 if the link broke or changed;
+      - bare Git errors gain "could not check the files of worktree X at P" or similar, and keep their exit code (usually 1).
+  (3) Known limitation to document honestly: from a shell standing INSIDE an unlinked worktree that is not nested in another checkout of the same repository, wt cannot find the repository (bare "fatal: not a git repository" from find_worktree, before preparation). Running wt remove from any other directory works. This predates this fix and was not changed.
+  (4) A locked worktree whose directory is gone is never `prunable` in Git. It fails with context (exit 1) and keeps everything. Document it in the refusal and recovery examples.
+  (5) Phase 6 symbol-comment pass: the `//!` module doc of lib/src/remove/mod.rs lists inventory/safety/remote/handoff but not admin_entry/repair/missing; fix that drift.
+  (6) Windows: the local windows-gnu `cargo check --tests` compiles, and build-win-native compiled the MSVC test archive. The Phase 4 "1 warning" is only the MSVC linker's "Creating library" notice. Native Windows test runs are still blocked by the host's storage preflight (17.6 GiB free of 50 GiB required); retry `just cross-check worktree-cli --os windows remove a_missing_directory staged_work_left a_worktree_replaced_by a_status_failure a_link_broken a_repaired_worktree_hands_off a_locked_worktree` once there is room. Two new CLI tests are Unix-only (read-only directory, symlink). Linux passed every new test.
+  (7) Baseline after Phase 5: `just test` 1033 passed / 32 skipped; `just test-l2` 34 passed; `just lint` clean.
 ---
 
 # Worktrees Git can no longer read: honest listing and safe removal

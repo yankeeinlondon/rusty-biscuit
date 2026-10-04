@@ -1,7 +1,7 @@
 ---
 total_phases: 6
 created: 2026-10-03
-phase: 3
+phase: 5
 agent: claude/sonnet
 yolo: true
 source_files_during_phase_1: []
@@ -36,6 +36,31 @@ docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
   - .claude/skills/worktree/list.md
+source_files_during_phase_4:
+  - worktree/lib/src/remove/admin_entry.rs
+  - worktree/lib/src/remove/repair.rs
+  - worktree/lib/src/remove/missing.rs
+  - worktree/lib/src/remove/mod.rs
+  - worktree/lib/src/remove/inventory.rs
+  - worktree/lib/src/copy_record.rs
+  - worktree/lib/src/git.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/worktree/remove.md
+source_files_during_phase_5:
+  - worktree/cli/src/commands/remove/mod.rs
+  - worktree/cli/src/commands/remove/report.rs
+  - worktree/cli/src/commands/list_table.rs
+  - worktree/cli/src/exit.rs
+  - worktree/cli/tests/remove.rs
+  - worktree/cli/tests/level2_remove.rs
+  - worktree/lib/src/remove/handoff.rs
+  - worktree/lib/src/error.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/worktree/remove.md
 packages:
   - worktree
   - worktree-cli
@@ -74,11 +99,11 @@ with a bare Git error. The work has four parts:
 
 Done when every acceptance bullet of the spec holds:
 
-- [ ] a fixture matching `lhg-before` renders `✕` with an accurate note, never `○`; no live checkout is touched
-- [ ] no row claims checked-clean after a status failure; merge-comparison `clean` is unchanged
-- [ ] unlinked removal verifies repair by postconditions and then follows ordinary protections; failed verification refuses (exit 3) with no deletion and reports possible metadata changes
-- [ ] an unknown inventory never permits deleting an existing directory, with any force flags
-- [ ] missing removal targets only that entry, follows the staged-index ruling and existing branch rules, and refuses if the target reappears
+- [x] a fixture matching `lhg-before` renders `✕` with an accurate note, never `○`; no live checkout is touched
+- [x] no row claims checked-clean after a status failure; merge-comparison `clean` is unchanged
+- [x] unlinked removal verifies repair by postconditions and then follows ordinary protections; failed verification refuses (exit 3) with no deletion and reports possible metadata changes
+- [x] an unknown inventory never permits deleting an existing directory, with any force flags
+- [x] missing removal targets only that entry, follows the staged-index ruling and existing branch rules, and refuses if the target reappears
 - [ ] `just test`, `just test-l2`, `just lint` pass in `worktree/` (nextest, focus-free helpers); evidence states the environments actually exercised
 - [ ] docs listed in the spec updated, describing current behavior without naming this fix
 - [ ] the agent stops at "implementation complete, ready for review": no `just complete`, no move to `_completed`, no commit unless asked, no `cargo fmt`
@@ -312,15 +337,15 @@ Wave 3, concurrent with Phase 3 (disjoint files under `lib/src/remove/`).
 
 ### Repair engine (Unlinked)
 
-- [ ] **Associate before repair.** Implement `admin_entry_for(base, path)` per R4:
+- [x] **Associate before repair.** Implement `admin_entry_for(base, path)` per R4:
   exactly one `<common-dir>/worktrees/*/gitdir` back-reference equal to
   `<path>/.git`; ambiguous or unreadable → typed refusal. Record the admin
   directory identity before repair.
-- [ ] **Targeted repair.** Run `git -C <base> worktree repair <path>` through the
+- [x] **Targeted repair.** Run `git -C <base> worktree repair <path>` through the
   existing Git helpers from the base checkout (so Windows does not see the target
   held open), noninteractive, no network. Capture stdout/stderr and the spawn
   error, if any.
-- [ ] **Verify by postconditions, ignoring exit status.** All must hold:
+- [x] **Verify by postconditions, ignoring exit status.** All must hold:
   - target `.git` resolves to the identified admin directory and its common
     directory is this repository's;
   - the admin `gitdir` back-reference resolves to the target's `.git`;
@@ -330,29 +355,29 @@ Wave 3, concurrent with Phase 3 (disjoint files under `lib/src/remove/`).
     detached HEAD and no `prunable`.
   Return `Verified` or a typed `RepairFailed { diagnostics, spawn_error }`; a
   spawn failure is named, and "repaired" is never claimed without verification.
-- [ ] **Injectable runner.** Repair and verification go through a seam so tests
+- [x] **Injectable runner.** Repair and verification go through a seam so tests
   can inject: nonzero exit with valid postconditions (success), zero exit
   without them (refuse), no change, a wrong admin entry in the same repository,
   a foreign repository, parent-repository discovery, and identity change.
 
 ### Missing-directory engine
 
-- [ ] **Missing state.** A `CheckoutState { Healthy, Missing, Repaired }`-style
+- [x] **Missing state.** A `CheckoutState { Healthy, Missing, Repaired }`-style
   value carried in `Facts`; an empty `Inventory` for Missing means "no directory
   to inspect", never "checked clean" (distinct type/flag, not an empty vec).
-- [ ] **Branch and tip.** Resolve from this repository's refs, or the recorded
+- [x] **Branch and tip.** Resolve from this repository's refs, or the recorded
   HEAD for a detached entry (no checkout reads).
-- [ ] **Surviving index inspection** per R1/R2: metadata-only check using the
+- [x] **Surviving index inspection** per R1/R2: metadata-only check using the
   admin index; differing paths are reported as staged paths needing ordinary
   discard consent; inspection failure → refusal.
-- [ ] **Record removal.** Immediately before execution re-resolve the listing and
+- [x] **Record removal.** Immediately before execution re-resolve the listing and
   confirm the target is the same entry and still absent (`symlink_metadata`
   `NotFound`); reappearance of a directory or link → exit 3 asking for a rerun.
   Use only `git -C <base> worktree remove <path>`; no `prune`, no admin-directory
   deletion, no second `--force` (Git's lock protections stand). On Windows skip
   the rename-based lock probe (`check_not_in_use`) only for confirmed absence;
   keep it for existing directories.
-- [ ] **Order of effects.** Record removal → copy-record cleanup → approved
+- [x] **Order of effects.** Record removal → copy-record cleanup → approved
   local/remote branch steps. If Git removal fails, no branch deletion and no
   completion claim. Report "directory was already gone, record removed".
 
@@ -365,38 +390,38 @@ records, and branches intact even with every force flag.
 Wave 4 — three tasks in separate files; the wiring task lands first, the other
 two may proceed concurrently.
 
-- [ ] **Prepare before inventory.** In `cli/src/commands/remove/mod.rs`, after
+- [x] **Prepare before inventory.** In `cli/src/commands/remove/mod.rs`, after
   `find_worktree` and the main-checkout / shell-wrapper guards and the move to
   base, refresh the entry, classify, and branch (healthy → unchanged;
   Missing → missing flow; Unlinked → repair then ordinary `Facts::local`;
   Other → exit 3 with the observed condition). `Facts::local` (line 73) must not
   call `collect_inventory` for Missing.
-- [ ] **Repair precedes consent.** Report `restored the link for <name> so its
+- [x] **Repair precedes consent.** Report `restored the link for <name> so its
   files could be checked` only after verification. Inventory must succeed before
   any deletion even with all force flags. When the user declines or a later
   check refuses, leave repaired links in place and say so (no rollback).
-- [ ] **Handoff second run.** In `run_handoff` (~714) never auto-repair; re-verify
+- [x] **Handoff second run.** In `run_handoff` (~714) never auto-repair; re-verify
   the repaired checkout's identity and apply content/index/rules/baseline/branch/
   remote checks. A link changed or broken between runs invalidates approval and
   refuses with exit 3. The fingerprint (`fingerprint`, ~620) must incorporate
   checkout state so a Missing target that reappears cannot reuse approval.
-- [ ] **Refusal messages.** Failure text for the confirmed missing-`.git` case
+- [x] **Refusal messages.** Failure text for the confirmed missing-`.git` case
   follows the spec's wording (target, "No working files, branches, or worktree
   records were removed. The repair attempt may have changed Git metadata.",
   inspect and retry steps, no `git worktree prune` advice). Include captured
   repair diagnostics and name any spawn failure. Render via Prose markup and
   escape dynamic text.
-- [ ] **Error context.** Add target name, path, and operation to otherwise bare
+- [x] **Error context.** Add target name, path, and operation to otherwise bare
   Git failures in the remove flow (including the `collect_inventory` failure that
   produced `fatal: not a git repository`), preserving the underlying
   `WorktreeError` category and exit code; keep partial-success reporting when a
   later branch operation fails; never downgrade an environment error to exit 1.
-- [ ] **Exit-code contract.** Update the `WorktreeError::RefusedToLoseWork` and
+- [x] **Exit-code contract.** Update the `WorktreeError::RefusedToLoseWork` and
   `BlockedByEnvironment` doc comments in `lib/src/error.rs` and the `exit_code`
   mapping comment in `cli/src/exit.rs`: exit 3 means "nothing removed", not
   "nothing changed"; cancellation stays exit 0; environment/in-use stays exit 4.
   Never print "nothing was changed" after a repair attempt.
-- [ ] **Handoff/L2 tests.** Normal approval checks after repair; breaking or
+- [x] **Handoff/L2 tests.** Normal approval checks after repair; breaking or
   redirecting the link between runs refuses without another repair. Use the
   existing windowless terminal helpers (`cli/tests/level2_remove.rs`,
   `level2_powershell_remove.rs`) so no window gains focus.

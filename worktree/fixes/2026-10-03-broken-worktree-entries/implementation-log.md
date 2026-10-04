@@ -35,6 +35,31 @@ docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
   - .claude/skills/worktree/list.md
+source_files_during_phase_4:
+  - worktree/lib/src/remove/admin_entry.rs
+  - worktree/lib/src/remove/repair.rs
+  - worktree/lib/src/remove/missing.rs
+  - worktree/lib/src/remove/mod.rs
+  - worktree/lib/src/remove/inventory.rs
+  - worktree/lib/src/copy_record.rs
+  - worktree/lib/src/git.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/worktree/remove.md
+source_files_during_phase_5:
+  - worktree/cli/src/commands/remove/mod.rs
+  - worktree/cli/src/commands/remove/report.rs
+  - worktree/cli/src/commands/list_table.rs
+  - worktree/cli/src/exit.rs
+  - worktree/cli/tests/remove.rs
+  - worktree/cli/tests/level2_remove.rs
+  - worktree/lib/src/remove/handoff.rs
+  - worktree/lib/src/error.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/worktree/remove.md
 packages:
   - worktree
   - worktree-cli
@@ -439,3 +464,332 @@ Input robustness: no new parser. `holder_of` now reuses
 
 - `just test` (worktree/): **989 passed, 32 skipped** (Phase 2: 970/32; +19).
 - `just lint` (worktree/): clean.
+
+## Phase 4
+
+Library engines for removal: association, repair with verification, and the
+missing-directory record removal. Library only; `wt remove` wiring is
+Phase 5. Host: macOS (Darwin 27.2, Git 2.56).
+
+### Rulings applied
+
+- **R9 still awaits the author.** The recorded default (option A) is in
+  place. `repair_unlinked` verifies only the target, and its module and
+  `RepairRefusal` docs say an attempt "may have changed Git metadata for this
+  or other worktrees". Options B and C would change only the guard before
+  `git.repair(..)`, so Phase 5 is not blocked either way.
+- **R1/R2** are implemented as recorded. The index must exist as a regular
+  file (Git reads an absent index as empty). It is diffed against the
+  recorded HEAD. Unreadable means refuse.
+- **R2's "absent admin directory = bare record, disposable"** cannot occur:
+  Git builds the porcelain listing from those admin directories, so a listed
+  entry always has one. A record with no match refuses (`AssociationError::NotFound`)
+  and is never treated as disposable.
+
+### What changed
+
+- **`remove/admin_entry.rs`**:
+  - `common_git_dir(base)` uses `rev-parse --path-format=absolute --git-common-dir`.
+  - `admin_entry_for(base, target)` and `admin_entry_in(common, target)` return
+    `AdminEntry { dir }` (with `index()`) or `AssociationError { CommonDirUnknown,
+    Unlistable, Unreadable, NotFound, Ambiguous }`.
+  - Every directory under `worktrees/` is read. A plain file is skipped, as Git
+    skips it. A linked or unreadable record refuses.
+  - `same_location` is the shared comparator.
+  - **Departure from R4's wording:** R4 compared back-references to
+    `<path>/.git`. The code compares the checkout directories instead
+    (`back-reference.parent()` against the target). The reader already proves
+    the last component is `.git`. Found by test: another record whose checkout
+    was replaced by a *file* made `canonicalize(<file>/.git)` fail with ENOTDIR,
+    which blocked association, and so removal, for every other worktree. The
+    `.git` form compared the same location and failed on an unrelated record.
+- **`copy_record::canonical_worktree_path`** is now `pub(crate)` (a doc was
+  added) and is reused, not copied. It canonicalizes the longest existing
+  ancestor and re-appends the missing tail, so a Missing target still compares
+  equal across `/private` aliases and Windows short names. No missing path is
+  ever canonicalized into something else.
+- **`remove/repair.rs` (new)**:
+  - `RepairGit` is the seam. It has three calls: `repair`, `rev_parse_path`,
+    and `worktree_list`. The real implementation is `Git`.
+  - `repair_unlinked(base, entry, git)` refuses without running anything
+    unless the entry is still `Unlinked` and exactly one record is associated.
+    Otherwise it runs `git -C <base> worktree repair <path>` from the base and
+    collects every failed `Postcondition { GitDir, CommonDir, Unresolvable,
+    BackReference, TopLevel, Listing }`.
+  - The exit code, stdout, stderr, and spawn error are kept in `RepairAttempt`
+    (with `diagnostics()` for display) and never decide the result.
+    `RepairRefusal::repair_attempted()` tells Phase 5 when to say metadata may
+    have changed.
+- **`remove/missing.rs` (new)**:
+  - `recorded_head` gives the branch tip from refs, or the recorded HEAD when
+    detached.
+  - `inspect_missing` returns `MissingCheckout { admin, head, staged }`, or
+    `MissingRefusal`.
+  - `remove_missing_record` re-lists, checks identity and confirmed absence,
+    runs plain `git worktree remove <path>` (no `--force`, no `check_not_in_use`),
+    then calls `copy_record::delete_for` only on success, returning its warning.
+- **`remove/mod.rs`**: `CheckoutState { Healthy, Missing(MissingCheckout),
+  Repaired(RepairReport) }` and `prepare(base, entry, git)`. `prepare`
+  classifies afresh and dispatches, with `PrepareRefusal { Unavailable,
+  Missing, Repair }`.
+  - **Departure:** the plan places `CheckoutState` "in `Facts`". `Facts` is the
+    CLI's (`cli/src/commands/remove/mod.rs`), and Phase 4 is library-only, so
+    the type and `prepare` are delivered here and Phase 5 stores the state in
+    `Facts`. `MissingCheckout` is a distinct type, not an empty `Inventory`.
+  - **Order of effects:** record removal, then copy-record cleanup, happens in
+    `remove_missing_record`. The branch steps run afterward in the CLI's
+    existing `execute` (Phase 5). A failed record removal returns `Err` before
+    any cleanup (tested).
+- **`git.rs`**:
+  - `git_from_bytes_with_env`: the `env` slice was threaded through the private
+    `git_from_bytes_status`, used here for `GIT_INDEX_FILE`.
+  - `git_from_output`: OS-string arguments, the whole `Output` returned whatever
+    the exit status, stdin closed, `GIT_TERMINAL_PROMPT=0`. The recorder logs
+    its arguments lossily.
+  - Paths therefore reach Git byte-exact, never as a lossy `String`. The
+    existing `remove_worktree` still uses `display().to_string()` (untouched,
+    Rule 3).
+- **`remove/inventory.rs`**: `path_from_git` is now `pub(crate)` and reused
+  for `diff-index -z` paths.
+
+### Requirement-to-test mapping
+
+All are `#[cfg(test)]` unit tests in the `worktree` lib (L1). They use real
+Git in disposable `TestRepo`s, and no network.
+
+| Requirement | Test |
+| ----------- | ---- |
+| Association: control row, plain file skipped, another record's checkout replaced by a file, duplicate back-reference → `Ambiguous` (matrix "duplicate" cell left from Phase 2), empty and missing `gitdir` in another record → refuse, relative back-reference, non-matching → `NotFound` | `admin_entry::tests::association_requires_exactly_one_readable_record` |
+| Missing target associates by Git's spelling | `a_missing_checkout_is_associated_by_its_spelling` |
+| Common dir from Git when base `.git` is a file (`--separate-git-dir`) | `the_common_directory_comes_from_git_not_from_the_base_layout` |
+| Real repair (attached, with a tracked edit kept), verified by postconditions | `repair::tests::git_repair_of_an_unlinked_branch_is_verified_by_its_postconditions` |
+| Real repair of a detached entry; same HEAD | `git_repair_of_an_unlinked_detached_worktree_is_verified` |
+| Nonzero exit + valid postconditions → success; diagnostics kept | `a_nonzero_exit_with_valid_postconditions_is_success` |
+| Zero exit + no change → refuse; files, record, branch intact | `a_zero_exit_without_a_change_refuses_and_touches_nothing` |
+| Spawn failure named, never "repaired" | `a_spawn_failure_is_named_and_never_claimed_as_repaired` |
+| Wrong admin entry in the same repository | `a_link_to_another_record_in_the_same_repository_refuses` |
+| Foreign repository (`GitDir` + `CommonDir`) | `a_link_into_a_foreign_repository_refuses` |
+| Parent-repository discovery (nested in base, real Git) | `discovering_the_parent_repository_is_not_success` |
+| Top-level check alone is load-bearing | `a_wrong_top_level_alone_refuses` |
+| Identity change during repair | `a_changed_identity_refuses` |
+| No repair unless Unlinked (healthy, missing) | `no_repair_runs_unless_the_target_is_unlinked` |
+| Ambiguous association refuses before repair | `an_ambiguous_record_refuses_before_repair` |
+| Disposable missing record removed alone: no `status`/`prune`/`--force`, one `worktree remove`, other worktree and branch intact, copy record cleaned after | `missing::tests::a_disposable_record_is_removed_alone_without_inspecting_a_checkout` |
+| Staged work in the surviving index (`M `, `A `; unstaged file not reported) | `staged_work_in_the_surviving_index_is_reported` |
+| Detached: compared with recorded HEAD even after its branch is deleted | `a_detached_record_is_compared_with_its_recorded_head` |
+| Garbage, absent, and directory index → refuse | `an_index_that_cannot_prove_staged_work_disposable_refuses` |
+| Only a confirmed-absent directory is inspected | `only_a_confirmed_absent_directory_is_inspected` |
+| Reappeared directory (with new work) and reappeared link (Unix) refuse | `a_directory_that_reappears_is_never_removed`, `a_link_that_appears_is_never_followed_or_removed` |
+| Changed identity at the path refuses | `a_changed_entry_at_the_path_refuses` |
+| Record-removal failure (a lock; one plain call) keeps record and copy record | `a_failed_record_removal_keeps_the_record_and_its_copy_record` |
+| `--name-status -z` parser strictness | `name_status_output_is_parsed_strictly` |
+| `prepare` dispatch: Healthy / Missing / Unlinked→Repaired / file at path→`Unavailable(NotADirectory)` | `remove::tests::preparation_follows_the_checkout_state` |
+
+Regression proof for the association fix:
+`preparation_follows_the_checkout_state` failed with
+`Unreadable { dir: …/worktrees/d, error: "Not a directory (os error 20)" }`
+under the `.git` comparison and passes with the checkout comparison. The
+association matrix now pins that cell.
+
+Input robustness: the only new parser is the `diff-index --name-status -z`
+reader. It rejects a status without a path and a multi-letter status, and
+never skips a record. The `gitdir` matrix's last open cell (two records
+naming one target) is now covered. Code-smell grep over `admin_entry.rs`,
+`repair.rs`, and `missing.rs`: no `unwrap_or_default()`, `.ok()`, or
+`filter_map` on a load-bearing read.
+
+Tier placement: two tests first named `real_repair_…` were renamed
+`git_repair_…` before the first run (the `real_` marker would strand them).
+No test name or module carries a tier marker.
+
+### Gates
+
+- **macOS** `just test` (worktree/): **1015 passed, 32 skipped** (Phase 3:
+  989/32; +26 new).
+  - Two earlier full runs each stopped fail-fast on one timing-held test in
+    `worktree-cli::list_prs`. The first was a timeout whose name was not
+    captured. The second was
+    `a_failed_assertion_while_a_live_head_check_is_held_still_frees_both_locks`.
+  - `list_prs` alone passed 34/34, and the next full run was fully green.
+  - This phase changed no CLI code and nothing on the list path, so the two
+    stops are recorded as load-related flakes, like Phase 2's.
+- **macOS** `just lint`: clean. Clippy's `type_complexity` on the test seam
+  was fixed with two type aliases.
+- **Linux** (`just cross-check worktree --os linux remove::`, build-linux):
+  90/90 `remove::` tests passed.
+- **Windows native** (`just cross-check worktree --os windows remove::`):
+  - The archive **compiled**, but the test run was **blocked by the host's
+    storage preflight**: 22.3 GiB free against the 50 GiB required, and the
+    automatic sweep freed 0. I did not override it or delete anything on the
+    shared host.
+  - That build reported `worktree (lib test) generated 1 warning`, and the
+    log did not capture its text.
+  - A local `cargo check -p worktree --tests --target x86_64-pc-windows-gnu`
+    (all `cfg(windows)` paths) is warning-free, so the warning's source is
+    unidentified. It may predate this phase.
+  - Windows evidence for these tests is therefore still owed: by CI on push
+    to `main`, or by a cross-check once the host has headroom (`just windows-sweep`).
+- WSL2 was not exercised. CI's nightly run covers it.
+
+## Phase 5
+
+Wiring `wt remove`. Host: macOS (Darwin 27.2, Git 2.56). R9 still has the
+recorded default (option A); every post-repair message says repair "may have
+changed Git metadata for this or other worktrees" (refusal) or "may also have
+restored other worktrees' links" (success).
+
+### What changed
+
+- **`cli/src/commands/remove/mod.rs`**:
+  - `run` calls `remove::prepare(base, &entry, &repair::Git)` after the
+    main-checkout guard, the inside-without-wrapper guard, and
+    `set_current_dir(base)`, and before `Facts::local`. Every
+    `PrepareRefusal` becomes `RefusedToLoseWork` (exit 3) through
+    `prepare_refusal_markup`. That markup uses the spec's wording for an
+    unverified repair, says each failed postcondition once (identical
+    `Unresolvable` messages are merged), and lists the captured repair output,
+    including a named spawn failure. It never advises `git worktree prune`.
+  - `Facts` gains `checkout: CheckoutState`. `Facts::local(base, entry,
+    checkout)` skips `collect_inventory`, include discovery, and the head
+    lookup for `Missing`, taking `MissingCheckout.head` instead. `inventory`
+    is left empty and documented as never meaning "checked clean".
+    `situation()`, the report, the discard question, and `refusal_markup`
+    branch on `facts.missing()`.
+  - `Repaired` prints `Restored the link for <name> so its files could be
+    checked.` before the report. Refusals, the unprovable-remote refusal, and
+    cancellation then append `kept_link_note`, and a failed inventory after a
+    repair says the link was left in place.
+  - A Missing target never hands off. `execute` runs `remove_missing_record`
+    (no `--force`, no Windows rename probe), prints `Removed the record of
+    worktree <name> (its directory at <path> was already gone)`, and only then
+    runs branch steps. `missing_record_error` maps `Reappeared` to exit 3 with
+    "run again", `RecordRemoval` to its own category with context ("no branch
+    was deleted"), and the rest to exit 3.
+  - `in_context(error, operation)` prefixes target, path, and operation onto
+    `GitCommand`, `GitParse`, `IncludeSetDiscovery`, and `Io`, and returns
+    every other variant unchanged, so exit codes never move. It is applied to
+    `Facts::local`, `remove_worktree`, branch deletion (partial success:
+    "removed worktree X, but could not delete branch B"), and reading the
+    handoff link.
+  - `run_handoff` never calls `prepare`. It refuses with exit 3 unless
+    `availability::classify` is `Healthy`, then binds `checkout_git_dir`
+    into the fresh state.
+- **`lib/src/remove/handoff.rs`**: `HandoffState.git_dir` and
+  `checkout_git_dir(base, target)` (`rev-parse --path-format=absolute
+  --git-dir` run from the base, canonical). `verify` names a mismatch
+  "worktree link". `HANDOFF_FORMAT_VERSION` is now 4, so a v3 record from an
+  older `wt` is `Missing` (exit 4, start over).
+  - **Departure:** the plan says the inventory *fingerprint* should
+    incorporate checkout state. It is a separate bound field instead: the
+    fingerprint describes file contents, and a redirected `.git` changes
+    neither the contents nor the records' back-references. Only the forward
+    link shows it.
+  - A Missing target cannot reach a handoff record at all (it never hands
+    off), so "a Missing target that reappears cannot reuse approval" holds by
+    construction. `remove_missing_record`'s reappearance check covers the
+    single-run case.
+- **`cli/src/commands/remove/report.rs`**: `ReportInput.missing` and
+  `missing_markup`. When the index matches HEAD, it says so. Otherwise it
+  lists the staged paths (a count above 10).
+- **`cli/src/commands/list_table.rs`**: `shell_word` is now `pub(crate)`,
+  and `observed_condition` was extracted from `unavailable_note`. The remove
+  refusals reuse both, not copies. The rendered note text is byte-identical
+  (the list snapshots are unchanged).
+- **Exit-code contract:** the `RefusedToLoseWork` and `BlockedByEnvironment`
+  docs in `lib/src/error.rs` and the `cli/src/exit.rs` module doc now say
+  "nothing removed", not "nothing changed", and name the repair exception. The
+  mapping itself is unchanged: cancel 0, refusal 3, environment/in-use 4.
+
+### Findings
+
+- **A shell standing in an unlinked worktree can't reach the repository**
+  unless the worktree is nested in another checkout of it. `find_worktree`
+  runs Git in the caller's directory and fails with a bare `fatal: not a git
+  repository` before `prepare` runs. This was found by the first handoff test
+  (`wts/` is a sibling of the repository). It predates this fix, and it is
+  outside the plan: resolving the repository from somewhere other than the
+  caller's directory is a base-discovery change. Removal from any other
+  directory works. The handoff-after-repair tests nest the worktree in the
+  base checkout (`.nested/`), the only layout where this path is reachable.
+  Recorded in the skill as a trap.
+- **A locked worktree whose directory is gone is not `prunable`** (Phase 1
+  fact), so it takes the ordinary path and fails in `collect_inventory`. It
+  now exits 1 with target/path/operation context, and everything is kept.
+  Pinned by a test.
+- No comment drift was found in the touched symbols beyond the
+  error/exit-code promises the plan named, which were rewritten.
+
+### Requirement-to-test mapping
+
+L1 through the real binary (`cli/tests/remove.rs`, autotests; no tier
+marker in any name) unless noted.
+
+| Requirement | Test |
+| ----------- | ---- |
+| Missing: only that record removed, safe branch deleted, other worktree intact, nothing recreated, no "checked clean" claim | `a_missing_directory_has_only_its_record_removed_and_its_safe_branch_deleted` |
+| Missing: staged index → consent (exit 3 without a terminal, record + branch kept); `--force-worktree` removes | `staged_work_left_in_a_missing_directory_record_needs_consent` |
+| Missing: detached | `a_missing_detached_directory_has_its_record_removed` |
+| Missing: unsafe branch kept with a warning | `a_missing_directory_keeps_an_unsafe_branch_without_a_terminal` |
+| Missing: unprovable index refuses with every force flag; no `prune` advice | `a_missing_directory_whose_index_is_gone_refuses_even_with_every_force_flag` |
+| Missing: reappearance, record-removal failure, cleanup only after success | lib `missing::tests` (Phase 4; a race can't be staged through the binary) |
+| Unlinked, `lhg-before`-shaped (detached, `.git` gone, working file kept): repaired, ordinary inventory, exit 3 without a terminal, link left in place and said so, never "not a git repository"; `--force-worktree` then removes | `an_unlinked_worktree_is_repaired_then_its_files_are_protected` |
+| Unlinked clean: repaired, removed, safe branch deleted | `a_clean_unlinked_worktree_is_repaired_and_removed_with_its_safe_branch` |
+| Failed repair (real Git, read-only directory; Unix): exit 3 with every force flag, the spec's three sentences, postconditions said once, repair output, no "Restored", no `prune`, no "Nothing was changed"; files, record, and branch intact | `a_repair_that_is_not_verified_refuses_even_with_every_force_flag` |
+| Injected failed/incorrect repairs (no change, wrong record, foreign repository, parent discovery, identity change) and exit status either way | lib `repair::tests` (Phase 4) |
+| Other: a file at the path refuses with every force flag; the file is intact | `a_worktree_replaced_by_a_file_refuses_even_with_every_force_flag` |
+| Other: a link at the path is never followed or repaired through (Unix) | `a_worktree_replaced_by_a_link_is_never_followed` |
+| Error context: status failure names target and operation, keeps exit 1 and Git's reason, removes nothing | `a_status_failure_names_the_target_and_operation_and_removes_nothing` |
+| Error context: locked + missing | `a_locked_worktree_whose_directory_is_gone_fails_with_context_and_keeps_everything` |
+| Context never changes an exit code (all categories, incl. 3/4/0) | unit `commands::remove::tests::context_never_changes_an_exit_code` |
+| Handoff after repair: ordinary checks, removed by the second run | `a_repaired_worktree_hands_off_and_finishes_with_the_ordinary_checks` |
+| Handoff: link broken between runs → exit 3, no second repair | `a_link_broken_between_the_runs_refuses_without_another_repair` |
+| Handoff: link redirected to another record (after a repair, and on a healthy worktree) → exit 3 "worktree link" | `a_link_redirected_between_the_runs_refuses_with_nothing_removed` |
+| `git_dir` follows the forward link (redirect, broken) | lib `handoff::tests::the_checkout_git_dir_follows_the_link_not_the_record`; `every_changed_field_refuses` (new "worktree link" row); round-trip test covers the new field |
+| Cancellation after a repair keeps the link and says so (real terminal) | L2 `level2_remove::level2_declining_after_a_repair_keeps_the_restored_link_and_the_files` |
+| Repair, then a move-first removal through the bash wrapper (real terminal) | L2 `level2_a_repaired_worktree_moves_first_through_the_wrapper` |
+
+Regression proof:
+- With `prepare` replaced by `Ok(CheckoutState::Healthy)`, 13 of the 14 new
+  binary tests fail. The two that pass are the error-context tests, which
+  don't depend on `prepare`.
+- With `in_context` removed from `Facts::local`, exactly those two fail.
+- The file was restored after each check.
+
+Input robustness: no new parser. `checkout_git_dir` trusts Git's answer, and
+any failure is a refusal (second run) or a contextual error (first run).
+Code-smell grep over the added CLI lines: no `unwrap_or_default()`,
+`.ok()`, or `filter_map`.
+
+### Gates
+
+- **macOS** `just test` (worktree/): **1033 passed, 32 skipped** (Phase 4:
+  1015/32; +18).
+- **macOS** `just lint`: clean.
+- **macOS** `just test-l2`: **34 passed** (2 new). The recipe's harness
+  broker pre-spawns its Apple Terminal window as it always does. The new
+  scenes run in a detached tmux pane, which never takes focus.
+- **Windows**:
+  - A local `cargo check -p worktree -p worktree-cli --tests --target
+    x86_64-pc-windows-gnu` compiles. Its only warning is the existing unused
+    `seed_fresh_answers` in `cli/tests/list_remote_head.rs`, which this phase
+    did not touch.
+  - `just cross-check worktree-cli --os windows …` on build-win-native
+    **compiled and archived the MSVC test binaries**, but the run was
+    **blocked by the host's storage preflight**: 17.6 GiB free against the
+    50 GiB required. I did not override it or delete anything on the shared
+    host.
+  - The build log identifies Phase 4's unexplained "1 warning": it is the
+    MSVC linker's `Creating library … .lib` stdout notice, which is harmless.
+  - Native Windows test evidence is still owed (CI on push to `main`, or a
+    cross-check once the host has room).
+- **Linux** (build-linux):
+  - `just cross-check worktree --os linux remove`: 92/92 lib `remove` tests.
+  - `just cross-check worktree-cli --os linux …`: every new binary test passed
+    (the read-only-directory test ran; it did not skip), as did the CLI
+    `remove` unit tests (60 + 12 runs across two filters).
+  - The first CLI attempt failed to *link* two untouched test binaries
+    (`level2_list_verbose` among them) on the remote. An identical rerun
+    linked and passed, so it is recorded as a transient remote link failure.
+    The plain `remove` filter matches test names, not the binary, so the
+    remaining new tests were run by name.
+- WSL2 was not exercised; CI's nightly run covers it.
