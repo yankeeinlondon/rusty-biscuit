@@ -27,12 +27,16 @@
 //! an adopted one, whatever environment that worker inherited) and the first
 //! new PR publication it saw, read in the same atomic write as the id, so no
 //! receipt is needed for it. A PR success known only from a receipt has
-//! unknown credentials. A relaunch (for either half) also runs the other half
-//! again, so each half's result from an earlier launch is retained: a
-//! finished head check, and a PR result the earlier receipt reported. The
-//! replacement's own result supersedes it; a replacement that cannot start,
-//! stops, times out, or exits without a receipt leaves it standing. The core ([`wait`]) is pure over [`WaitEnv`], so tests
-//! script the stores, the receipt, the locks, and the clock.
+//! unknown credentials.
+//!
+//! A relaunch (for either half) also runs the other half again, so each
+//! half's result from an earlier launch is retained: a finished head check,
+//! and a PR result the earlier receipt reported. The replacement's own result
+//! supersedes it; a replacement that cannot start, stops, times out, or exits
+//! without a receipt leaves it standing.
+//!
+//! The core ([`wait`]) is pure over [`WaitEnv`], so tests script the stores,
+//! the receipt, the locks, and the clock.
 
 use std::path::{Path, PathBuf};
 use std::process::Child;

@@ -130,6 +130,7 @@ The comparison is `is N commits behind`, `is N commits ahead of`, `is in sync wi
 | Still checking at 3 s | `main is 3 commits behind origin/main (origin hasn't answered yet; still checking in the background; last checked with origin 2 h ago)` |
 | Still fetching at 3 s | `main is 3 commits behind local origin/main (origin differed when checked just now; pulling remote updates in the background)` |
 | Check failed | `main is 3 commits behind origin/main (couldn't check origin; last checked with origin 2 h ago)` |
+| `origin` replaced or removed during the wait | `main is 3 commits behind origin/main (couldn't check origin; tracking ref last changed 5 min ago)`; see [PR badges](#pr-badges) |
 | Branch absent on `origin`, tracking ref still present | `main is in sync with origin/main (main was absent on origin when checked just now; origin/main is a local tracking ref)` |
 
 - **Reasons.** A failed check reads `origin didn't answer within 10 s`, `origin didn't accept Git's credentials`, or `couldn't check origin`; a failed fetch reads `fetch didn't finish within 60 s` or `fetch failed`. Other failures never claim that the host was unreachable or the machine offline, and Git's own error text, remote URLs, and credentials are never shown.
@@ -171,7 +172,7 @@ When `origin` is a supported provider and this run's API request failed for a co
 
 The PR request counts too, in every listing, not only under `-r`: a rejected key or a rate limit on it prints the same line. When both requests failed for a confirmed reason, the `origin` check's line wins, and the PR item's `(couldn't refresh)` does not repeat the reason.
 
-No warning is printed when no key was set and `ls-remote` answered (the closing notice below covers that). A 404 on its own is ambiguous and produces no line. Only failures this listing observed count; a background refresh that fails after the listing rendered never adds a line to it.
+No warning is printed when no key was set and `ls-remote` answered (the closing notice below covers that). A 404 on its own is ambiguous and produces no line. Only failures this listing observed count; a background refresh that fails after the listing rendered never adds a line to it, and neither does a failure for an `origin` replaced or removed during the wait (see [PR badges](#pr-badges)).
 
 #### Keyless notice
 
@@ -242,7 +243,11 @@ What the listing shows depends on how this run's PR half ended:
 
 For example, a refresh that fails right after a good answer from 10 s ago keeps that answer's badges and reads `- PRs as of less than 1 min ago (couldn't refresh)`. A local-path or unsupported `origin` is not a failure: it simply has no provider to ask, and its head check still runs through Git.
 
-If `origin` changes or disappears during the wait, the old `origin`'s badges and its PR failure reasons are dropped from this listing, and no second refresh starts.
+If `origin` is replaced or removed during the wait, this listing says nothing about the requests made for the old `origin`. Every request notice is dropped: the PR badges, the PR item and its failure reason, the credentials warning from the `origin` check or the PR request, the keyless notice, and the closing fallback notice. The caption reads as a check that could not be made, since the check it ran was for another repository; its date comes from the tracking ref's reflog, not from the old `origin`'s stored answer. No second refresh starts.
+
+```text
+main is 3 commits behind origin/main (couldn't check origin; tracking ref last changed less than 1 min ago)
+```
 
 ### Git Graph
 
@@ -307,7 +312,7 @@ After a blank line, the output can end with up to three kinds of note, in this o
     - Set GITHUB_TOKEN or GH_TOKEN to let wt try the provider API, or use --ignore-api to use Git directly for this repository.
     ```
 
-    A rate-limit fallback never produces it.
+    A rate-limit fallback never produces it, and neither does a check made for an `origin` that was replaced or removed during the wait.
 
 ## Flags
 

@@ -20,7 +20,8 @@
 //! until the test releases it: the parent returns while its worker is
 //! blocked, concurrent workers make one request, a killed worker releases its
 //! lock, and a failed or misbound answer is never stored. A listing during
-//! whose wait `origin` changes shows no badges at all.
+//! whose wait `origin` is replaced or removed shows no badges and no notice
+//! about the old origin's requests, the head check's included.
 //!
 //! The live head is never asked in the foreground: `wt list` waits at most
 //! 3 s for its worker, and returns while the worker's `ls-remote` is still
@@ -32,6 +33,8 @@ mod perf_support;
 
 use std::fs;
 use std::process::{Command, Output};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use perf_support::{
@@ -1009,4 +1012,141 @@ fn stored_anonymous_evidence_from_an_earlier_listing_never_gives_the_notice() {
         assert_eq!(keyless_lines(&stderr), 0, "{stderr}");
         assert_eq!((gitea.requests(), gitea.branch_requests()), requests, "no API request");
     }
+}
+
+// A changed `origin` drops every notice about the old one's requests, the
+// head check's included: the PR reply is held until this listing's own head
+// attempt has finished, and only then is `origin` replaced or removed, so the
+// head evidence the listing reads is complete and current-attempt.
+
+/// What happens to `origin` at [`change_origin_at_checkpoint`].
+#[derive(Clone, Copy, Debug)]
+enum OriginChange {
+    Unchanged,
+    Replaced,
+    Removed,
+}
+
+const REPLACEMENT_ORIGIN: &str = "http://gitea.example.invalid/o/other.git";
+
+/// How long the checkpoint waits for the head outcome: the listing's own
+/// wait, after which nothing the worker does can reach this listing.
+const CHECKPOINT_WAIT: Duration = Duration::from_secs(3);
+
+/// Holds `gitea`'s next PR reply until the head attempt of the listing about
+/// to run (an attempt ID other than the one stored now) has an outcome, then
+/// applies `change` before the reply goes out. The flag reports whether the
+/// checkpoint was reached; a checkpoint missed leaves `origin` unchanged.
+fn change_origin_at_checkpoint(fixture: &MixedFixture, gitea: &FakeGitea, change: OriginChange) -> Arc<AtomicBool> {
+    let head_store = fixture.remote_head_store();
+    let previous = read_store(&head_store).attempt.map(|attempt| attempt.id);
+    let main = fixture.main().to_path_buf();
+    let reached = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&reached);
+    gitea.before_reply(move || {
+        let deadline = Instant::now() + CHECKPOINT_WAIT;
+        let finished = || {
+            read_store(&head_store)
+                .attempt
+                .is_some_and(|attempt| Some(&attempt.id) != previous.as_ref() && attempt.outcome.is_some())
+        };
+        while !finished() {
+            if Instant::now() >= deadline {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let args: &[&str] = match change {
+            OriginChange::Unchanged => &[],
+            OriginChange::Replaced => &["remote", "set-url", "origin", REPLACEMENT_ORIGIN],
+            OriginChange::Removed => &["remote", "remove", "origin"],
+        };
+        if !args.is_empty() {
+            let status = Command::new("git").current_dir(&main).args(args).status().expect("git");
+            assert!(status.success(), "{change:?}");
+        }
+        flag.store(true, Ordering::SeqCst);
+    });
+    reached
+}
+
+/// One listing through `command` with `change` applied at the checkpoint;
+/// its worker is waited for. Fails unless the checkpoint was reached inside
+/// the listing's wait.
+fn listing_with_origin_change(fixture: &MixedFixture, gitea: &FakeGitea, command: Command, change: OriginChange) -> String {
+    let reached = change_origin_at_checkpoint(fixture, gitea, change);
+    let stderr = keyless_listing(fixture, command);
+    gitea.before_reply(|| {});
+    assert!(reached.load(Ordering::SeqCst), "{change:?}: the head attempt never finished:\n{stderr}");
+    assert!(!collapsed(&stderr).contains("running this command again"), "{change:?}: the wait saw both halves:\n{stderr}");
+    stderr
+}
+
+#[test]
+#[serial]
+fn a_changed_origin_drops_the_old_head_checks_credentials_warning() {
+    const WARNING: &str = "Gitea didn't accept GITEA_TOKEN";
+    let fixture = MixedFixture::new().with_gitea_origin();
+    let gitea = FakeGitea::new(GiteaReply::Open(Vec::new()));
+    gitea.answer_branch_heads_with(401);
+    let _reaper = WorkerReaper::new(&fixture, &gitea);
+    let command = || {
+        let mut command = fixture.wt_command_via_gitea(&gitea);
+        command.env("GITEA_TOKEN", "secret-token-value");
+        command
+    };
+
+    // Control: the same checkpoint with `origin` unchanged shows the warning.
+    let stderr = listing_with_origin_change(&fixture, &gitea, command(), OriginChange::Unchanged);
+    assert!(collapsed(&stderr).contains(WARNING), "{stderr}");
+
+    for change in [OriginChange::Replaced, OriginChange::Removed] {
+        let branch_requests = gitea.branch_requests();
+        let stderr = listing_with_origin_change(&fixture, &gitea, command(), change);
+        assert!(gitea.branch_requests() > branch_requests, "{change:?}: this listing checked the head again");
+        let text = collapsed(&stderr);
+        assert!(!text.contains(WARNING), "{change:?}: the old origin's warning is shown:\n{stderr}");
+        assert!(!text.contains("rate limited") && !text.contains("answered without"), "{change:?}:\n{stderr}");
+        if let OriginChange::Replaced = change {
+            run_git_in(fixture.main(), &["remote", "set-url", "origin", FakeGitea::ORIGIN]);
+        }
+    }
+}
+
+#[test]
+#[serial]
+fn a_changed_origin_drops_the_old_head_checks_fallback_notice_and_caption() {
+    const FALLBACK: &str = "Git checked origin using `ls-remote`";
+    let fixture = MixedFixture::new().with_gitea_origin();
+    let gitea = FakeGitea::new(GiteaReply::Open(Vec::new()));
+    gitea.answer_branch_heads_with(401);
+    let _reaper = WorkerReaper::new(&fixture, &gitea);
+    fixture.serve_gitea_origin_one_commit_ahead(&gitea);
+
+    // Control: an anonymous 401 whose `ls-remote` answered gives the closing
+    // notice, and the caption reports the fetch it led to.
+    let stderr =
+        listing_with_origin_change(&fixture, &gitea, fixture.wt_command_via_gitea_git(&gitea), OriginChange::Unchanged);
+    let text = collapsed(&stderr);
+    assert!(text.contains(FALLBACK), "{stderr}");
+    assert!(text.contains("(updated from origin just now)"), "{stderr}");
+
+    for change in [OriginChange::Replaced, OriginChange::Removed] {
+        let git_requests = gitea.git_requests();
+        let stderr = listing_with_origin_change(&fixture, &gitea, fixture.wt_command_via_gitea_git(&gitea), change);
+        assert!(gitea.git_requests() > git_requests, "{change:?}: this listing's ls-remote answered again");
+        let text = collapsed(&stderr);
+        assert!(!text.contains(FALLBACK), "{change:?}: the old origin's fallback notice is shown:\n{stderr}");
+        assert!(!text.contains("answered without"), "{change:?}:\n{stderr}");
+        assert!(!text.contains("origin just now"), "{change:?}: the caption reports the old check:\n{stderr}");
+        assert!(text.contains("couldn't check origin;"), "{change:?}: the caption reads as a check not made:\n{stderr}");
+        if let OriginChange::Replaced = change {
+            run_git_in(fixture.main(), &["remote", "set-url", "origin", FakeGitea::ORIGIN]);
+        }
+    }
+}
+
+fn run_git_in(repo: &std::path::Path, args: &[&str]) {
+    let status = Command::new("git").current_dir(repo).args(args).status().expect("git");
+    assert!(status.success(), "git {args:?}");
 }

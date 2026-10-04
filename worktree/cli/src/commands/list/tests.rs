@@ -656,20 +656,21 @@ mod gather {
         unix_now,
     };
     use worktree::remote_head::{
-        Attempt, CredentialEvidence, HeadStatus, Outcome, PrFailure, PrStatus, Receipt, begin_attempt, finish_attempt,
-        receipt_path_beside, write_receipt,
+        ApiCondition, ApiNote, Attempt, CheckFailure, CredentialEvidence, HeadStatus, Outcome, PrFailure, PrStatus, Receipt, begin_attempt,
+        finish_attempt, receipt_path_beside, set_credentials, write_receipt,
     };
 
-    use super::super::list_table::PrOutcome;
+    use super::super::list_table::{CredentialCondition, LastKnown, PrOutcome, RemoteStatus};
     use super::super::wait::{HeadEnd, PrEnd};
     use super::super::{
-        LaunchArgs, ListFlags, ListSeams, RemoteAnswers, Stores, WorkerHandle, gather_remote, observed_pr_failure,
-        pr_outcome,
+        LaunchArgs, ListFlags, ListSeams, RemoteAnswers, RequestNotices, Stores, WorkerHandle, caption_status,
+        gather_remote, observed_pr_failure, request_notices,
     };
     use super::{recorder, run_git, temp_repo};
 
     const ORIGIN: &str = "https://prs.example.invalid/owner/repo.git";
     const ELSEWHERE: &str = "https://prs.example.invalid/other/repo.git";
+    const LAST: LastKnown = LastKnown::Never;
     /// Long enough for any stub; a silent worker is waited for this long.
     const BUDGET: Duration = Duration::from_millis(300);
 
@@ -687,8 +688,22 @@ mod gather {
         publishes: Option<Option<u64>>,
         /// The PR half's status in the receipt.
         prs: PrStatus,
-        /// `origin` is set to this after publishing, as if changed meanwhile.
-        moves_origin_to: Option<&'static str>,
+        /// What happens to `origin` after publishing, as if changed meanwhile.
+        changes_origin: Option<OriginChange>,
+        /// The `origin` the worker was launched for, which its attempt,
+        /// receipt, and publication are bound to.
+        origin: String,
+        /// How the head attempt ends: its outcome, its API note, and the
+        /// credentials its check was sent with.
+        head: (Outcome, Option<ApiNote>, CredentialEvidence),
+        /// The credentials the published PR answer records.
+        pr_credentials: CredentialEvidence,
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum OriginChange {
+        Replaced(&'static str),
+        Removed,
     }
 
     fn record(main: &Path) {
@@ -709,22 +724,24 @@ mod gather {
         }]
     }
 
-    /// Answers PR `number`, or no PRs for `None`, with unknown credentials.
-    struct Seed(Option<u64>);
+    /// Answers PR `number`, or no PRs for `None`, with the given credentials.
+    struct Seed(Option<u64>, CredentialEvidence);
 
     impl OpenPrSource for Seed {
         fn source_repo(&self) -> Option<String> {
             Some("owner/repo".into())
         }
         fn fetch(&self) -> Result<FetchedPrs, PrRequestError> {
-            Ok(FetchedPrs { pull_requests: self.0.map(open_pr).unwrap_or_default(), credentials: CredentialEvidence::Unknown })
+            Ok(FetchedPrs { pull_requests: self.0.map(open_pr).unwrap_or_default(), credentials: self.1.clone() })
         }
     }
 
     /// Publishes `answer` through the worker's own writer, stamped `age`
     /// seconds ago.
-    fn publish(store: &Path, repo: &Path, age: u64, answer: Option<u64>) {
-        let outcome = refresh(store, repo, || unix_now() - age, |_| Box::new(Seed(answer)) as Box<dyn OpenPrSource>);
+    fn publish(store: &Path, repo: &Path, age: u64, answer: Option<u64>, credentials: CredentialEvidence) {
+        let outcome = refresh(store, repo, || unix_now() - age, move |_| {
+            Box::new(Seed(answer, credentials.clone())) as Box<dyn OpenPrSource>
+        });
         assert_eq!(outcome, RefreshOutcome::Refreshed);
     }
 
@@ -734,17 +751,21 @@ mod gather {
         record(main);
         let worker = WORKER.lock().unwrap_or_else(|e| e.into_inner()).clone().expect("fixture");
         if let Some(answer) = worker.publishes {
-            publish(&worker.pr_store, &worker.repo, 0, answer);
+            publish(&worker.pr_store, &worker.repo, 0, answer, worker.pr_credentials.clone());
         }
-        if let Some(origin) = worker.moves_origin_to {
-            run_git(&worker.repo, &["remote", "set-url", "origin", origin]);
+        match worker.changes_origin {
+            Some(OriginChange::Replaced(origin)) => run_git(&worker.repo, &["remote", "set-url", "origin", origin]),
+            Some(OriginChange::Removed) => run_git(&worker.repo, &["remote", "remove", "origin"]),
+            None => {}
         }
-        let attempt = Attempt::begin(args.attempt.clone(), origin_digest(ORIGIN), "main".into(), unix_now());
+        let attempt = Attempt::begin(args.attempt.clone(), origin_digest(&worker.origin), "main".into(), unix_now());
         begin_attempt(&worker.head_store, &attempt).expect("attempt");
-        finish_attempt(&worker.head_store, &args.attempt, Outcome::InSync, None).expect("outcome");
+        let (outcome, api, credentials) = worker.head;
+        set_credentials(&worker.head_store, &args.attempt, credentials).expect("credentials");
+        finish_attempt(&worker.head_store, &args.attempt, outcome, api).expect("outcome");
         let receipt = Receipt {
             attempt_id: args.attempt.clone(),
-            origin_digest: origin_digest(ORIGIN),
+            origin_digest: origin_digest(&worker.origin),
             branch: "main".into(),
             finished_at: unix_now(),
             head: HeadStatus::Ok,
@@ -786,7 +807,10 @@ mod gather {
                 repo: repo.path().to_path_buf(),
                 publishes: None,
                 prs: PrStatus::Ok,
-                moves_origin_to: None,
+                changes_origin: None,
+                origin: ORIGIN.into(),
+                head: (Outcome::InSync, None, CredentialEvidence::Unknown),
+                pr_credentials: CredentialEvidence::Unknown,
             });
             Self { repo, cache, store, head_store }
         }
@@ -804,7 +828,7 @@ mod gather {
         /// Stores PR `number` (or no PRs) for the current origin, fetched
         /// `age` seconds ago.
         fn seed(&self, age: u64, number: Option<u64>) {
-            publish(&self.store, self.main(), age, number);
+            publish(&self.store, self.main(), age, number, CredentialEvidence::Unknown);
         }
 
         fn gather_with(&self, launch: super::super::WorkerLaunch, flags: ListFlags) -> RemoteAnswers {
@@ -839,6 +863,12 @@ mod gather {
         &answers.waited.as_ref().expect("launched").prs
     }
 
+    /// The PR failure the credentials line would read, behind the identity
+    /// guard.
+    fn pr_failure(answers: &RemoteAnswers) -> Option<&PrFailure> {
+        answers.observed().and_then(|observed| observed_pr_failure(&observed))
+    }
+
     fn in_sync(answers: &RemoteAnswers) -> bool {
         matches!(head(answers), HeadEnd::Finished(attempt) if attempt.outcome == Some(Outcome::InSync))
     }
@@ -864,7 +894,7 @@ mod gather {
         assert!(in_sync(&answers), "the head outcome was waited for");
         assert_eq!(prs(&answers), &PrEnd::Published, "and the receipt");
         assert!(!answers.waited.as_ref().unwrap().timed_out);
-        assert_eq!(pr_outcome(&answers), Some(PrOutcome::Published));
+        assert_eq!(request_notices(&answers).pr_outcome, Some(PrOutcome::Published));
         assert_eq!(numbers(&answers.prs), [99]);
         assert!(fixture.receipts_left().is_empty(), "the receipt is discarded: {:?}", fixture.receipts_left());
     }
@@ -880,7 +910,7 @@ mod gather {
 
         assert_eq!(numbers(&answers.prs), [8]);
         assert!(!answers.prs.is_stale_at(unix_now()));
-        assert_eq!(pr_outcome(&answers), Some(PrOutcome::Published));
+        assert_eq!(request_notices(&answers).pr_outcome, Some(PrOutcome::Published));
     }
 
     #[test]
@@ -894,7 +924,7 @@ mod gather {
 
         assert!(answers.prs.pull_requests.is_empty(), "{:?}", answers.prs);
         assert!(answers.prs.fetched_at.is_some(), "an empty answer is an answer");
-        assert_eq!(pr_outcome(&answers), Some(PrOutcome::Published));
+        assert_eq!(request_notices(&answers).pr_outcome, Some(PrOutcome::Published));
     }
 
     #[test]
@@ -912,8 +942,8 @@ mod gather {
 
             let answers = fixture.gather();
 
-            assert_eq!(pr_outcome(&answers), Some(PrOutcome::Failed), "{seeded:?}");
-            assert_eq!(observed_pr_failure(&answers), Some(&rejected), "kept for the credentials line");
+            assert_eq!(request_notices(&answers).pr_outcome, Some(PrOutcome::Failed), "{seeded:?}");
+            assert_eq!(pr_failure(&answers), Some(&rejected), "kept for the credentials line");
             assert_eq!(numbers(&answers.prs), seeded.flatten().into_iter().collect::<Vec<_>>(), "{seeded:?}");
             assert_eq!(answers.prs.fetched_at.is_some(), seeded.is_some(), "an empty answer is still an answer");
             assert_eq!(std::fs::read(&fixture.store).ok(), stored, "the parent writes nothing");
@@ -933,8 +963,8 @@ mod gather {
             let answers = fixture.gather();
 
             assert_eq!(launches().len(), 1, "the worker is launched and decides: {status:?}");
-            assert_eq!(pr_outcome(&answers), Some(expected), "{status:?}");
-            assert_eq!(observed_pr_failure(&answers), None, "{status:?} is not a failure");
+            assert_eq!(request_notices(&answers).pr_outcome, Some(expected), "{status:?}");
+            assert_eq!(pr_failure(&answers), None, "{status:?} is not a failure");
             assert!(in_sync(&answers), "the head half still answers: {status:?}");
             assert!(!answers.waited.as_ref().unwrap().timed_out, "{status:?}");
         }
@@ -961,16 +991,143 @@ mod gather {
         fixture.worker(|worker| {
             worker.publishes = Some(Some(8));
             worker.prs = PrStatus::Failed { failure: PrFailure::CredentialsRejected { key: None } };
-            worker.moves_origin_to = Some(ELSEWHERE);
+            worker.changes_origin = Some(OriginChange::Replaced(ELSEWHERE));
         });
 
         let answers = fixture.gather();
 
         assert!(answers.origin_changed);
         assert_eq!(answers.prs, PrListing::default(), "the old origin's answer is not shown");
-        assert_eq!(pr_outcome(&answers), None, "nor its PR item");
-        assert_eq!(observed_pr_failure(&answers), None, "nor its credentials line");
+        assert_eq!(request_notices(&answers).pr_outcome, None, "nor its PR item");
+        assert_eq!(pr_failure(&answers), None, "nor its credentials line");
         assert_eq!(launches().len(), 1, "no second refresh for the new origin");
+    }
+
+    type Shape = Box<dyn Fn(&mut StubWorker)>;
+    type Shows = Box<dyn Fn(&RemoteAnswers) -> bool>;
+
+    /// One worker shape per projection of request evidence, with the check
+    /// that the projection shows that evidence.
+    fn projections() -> Vec<(&'static str, Shape, Shows)> {
+        let line_is = |expected: CredentialCondition| {
+            Box::new(move |answers: &RemoteAnswers| {
+                request_notices(answers).credential_line.is_some_and(|line| line.condition == expected)
+            }) as Shows
+        };
+        let head_note = |outcome: Outcome, condition: ApiCondition, key: Option<&'static str>| {
+            Box::new(move |worker: &mut StubWorker| {
+                let note = ApiNote { condition, key: key.map(str::to_string), fallback_answered: false };
+                worker.head = (outcome, Some(note), CredentialEvidence::Unknown);
+            }) as Shape
+        };
+        let answered = Outcome::InSync;
+        let failed = Outcome::CheckFailed { reason: CheckFailure::Other };
+        vec![
+            (
+                "caption head status",
+                Box::new(|worker| worker.head = (Outcome::Fetched, None, CredentialEvidence::Unknown)),
+                Box::new(|answers| caption_status(answers, || LAST) == Some(RemoteStatus::Fetched)),
+            ),
+            (
+                "head warning: rejected key",
+                head_note(answered, ApiCondition::CredentialsRejected, Some("GITHUB_TOKEN")),
+                line_is(CredentialCondition::Rejected),
+            ),
+            (
+                "head warning: insufficient key",
+                head_note(answered, ApiCondition::CredentialsInsufficient, Some("GITHUB_TOKEN")),
+                line_is(CredentialCondition::Insufficient),
+            ),
+            (
+                "head warning: keyed rate limit",
+                head_note(answered, ApiCondition::RateLimited { authenticated: true }, Some("GITHUB_TOKEN")),
+                line_is(CredentialCondition::RateLimited { authenticated: true }),
+            ),
+            (
+                "head warning: anonymous rate limit",
+                head_note(answered, ApiCondition::RateLimited { authenticated: false }, None),
+                line_is(CredentialCondition::RateLimited { authenticated: false }),
+            ),
+            (
+                "head warning: repository not visible",
+                head_note(failed, ApiCondition::CredentialsRequired, None),
+                line_is(CredentialCondition::NotVisible),
+            ),
+            (
+                "PR warning",
+                Box::new(|worker| {
+                    worker.prs = PrStatus::Failed { failure: PrFailure::CredentialsRejected { key: None } };
+                }),
+                line_is(CredentialCondition::Rejected),
+            ),
+            (
+                "PR item and badges",
+                Box::new(|worker| worker.publishes = Some(Some(8))),
+                Box::new(|answers| {
+                    request_notices(answers).pr_outcome == Some(PrOutcome::Published) && numbers(&answers.prs) == [8]
+                }),
+            ),
+            (
+                "keyless notice: head",
+                Box::new(|worker| worker.head = (Outcome::InSync, None, CredentialEvidence::Anonymous)),
+                line_is(CredentialCondition::AnsweredWithoutKey { higher_limits: true }),
+            ),
+            (
+                "keyless notice: PR",
+                Box::new(|worker| {
+                    worker.publishes = Some(None);
+                    worker.pr_credentials = CredentialEvidence::Anonymous;
+                }),
+                line_is(CredentialCondition::AnsweredWithoutKey { higher_limits: true }),
+            ),
+            (
+                "closing fallback notice",
+                Box::new(|worker| {
+                    let note = ApiNote { condition: ApiCondition::CredentialsRequired, key: None, fallback_answered: true };
+                    worker.head = (Outcome::InSync, Some(note), CredentialEvidence::Unknown);
+                }),
+                Box::new(|answers| request_notices(answers).fallback_notice.is_some()),
+            ),
+        ]
+    }
+
+    /// Every projection of request evidence goes through the one identity
+    /// guard: each shows its evidence while `origin` is unchanged, and none
+    /// does once `origin` was replaced or removed during the wait. The
+    /// caption then reads as a check that could not be made.
+    #[test]
+    #[serial_test::serial]
+    fn a_replaced_or_removed_origin_suppresses_every_request_notice() {
+        const PROVIDER_ORIGIN: &str = "https://github.com/owner/repo.git";
+        for (projection, shape, shows) in projections() {
+            for change in [None, Some(OriginChange::Replaced(ELSEWHERE)), Some(OriginChange::Removed)] {
+                let fixture = Fixture::new();
+                run_git(fixture.main(), &["remote", "set-url", "origin", PROVIDER_ORIGIN]);
+                fixture.worker(|worker| {
+                    worker.origin = PROVIDER_ORIGIN.into();
+                    worker.changes_origin = change;
+                    shape(worker);
+                });
+
+                let answers = fixture.gather();
+
+                assert!(answers.waited.is_some(), "{projection}, {change:?}: launched and waited for");
+                if change.is_none() {
+                    assert!(!answers.origin_changed, "{projection}");
+                    assert!(shows(&answers), "{projection}: the control shows its evidence");
+                    continue;
+                }
+                assert!(answers.origin_changed, "{projection}, {change:?}");
+                assert!(!shows(&answers), "{projection}, {change:?}");
+                assert_eq!(request_notices(&answers), RequestNotices::default(), "{projection}, {change:?}");
+                assert_eq!(answers.prs, PrListing::default(), "{projection}, {change:?}: no badges");
+                assert_eq!(
+                    caption_status(&answers, || LAST),
+                    Some(RemoteStatus::CheckFailed { reason: CheckFailure::Other, last: LAST }),
+                    "{projection}, {change:?}: the caption says nothing the old check found"
+                );
+            }
+        }
     }
 
     #[test]
@@ -986,7 +1143,7 @@ mod gather {
         assert_eq!(prs(&answers), &PrEnd::Failed(PrFailure::Other));
         assert!(started.elapsed() < BUDGET, "{:?}", started.elapsed());
         assert_eq!(numbers(&answers.prs), [99], "stored answers stay shown");
-        assert_eq!(pr_outcome(&answers), Some(PrOutcome::Failed));
+        assert_eq!(request_notices(&answers).pr_outcome, Some(PrOutcome::Failed));
     }
 
     #[test]
@@ -1003,7 +1160,7 @@ mod gather {
             let waited = answers.waited.as_ref().expect("launched");
             assert_eq!((&waited.head, &waited.prs, waited.timed_out), (&HeadEnd::Running { last: None }, &PrEnd::Pending, true));
             assert!(elapsed >= BUDGET && elapsed < BUDGET * 4, "{elapsed:?}");
-            assert_eq!(pr_outcome(&answers), Some(PrOutcome::Pending));
+            assert_eq!(request_notices(&answers).pr_outcome, Some(PrOutcome::Pending));
             assert_eq!(numbers(&answers.prs), [99], "the stored answer as of the timeout");
         }
     }
@@ -1020,7 +1177,7 @@ mod gather {
         assert_eq!(answers.prs, PrListing::default());
         assert!(answers.origin.is_none());
         assert!(answers.waited.is_none());
-        assert_eq!(pr_outcome(&answers), None);
+        assert_eq!(request_notices(&answers).pr_outcome, None);
         assert!(launches().is_empty(), "no launch: {:?}", launches());
     }
 }
@@ -1224,7 +1381,7 @@ mod observations {
 
         use super::super::super::list_table::{CredentialCondition, CredentialLine};
         use super::super::super::wait::{HeadEnd, PrEnd, WaitEnd};
-        use super::super::super::{RemoteAnswers, credential_line, followed_attempt, observed_keyless, observed_pr_failure};
+        use super::super::super::{RemoteAnswers, request_notices};
         use super::{GITHUB, attempt, note};
 
         const GITEA: &str = "http://gitea.test/o/r.git";
@@ -1245,13 +1402,13 @@ mod observations {
             }
         }
 
-        /// The one credentials line `run_pipeline` would print for `remote`.
-        fn line_for(origin: &str, remote: &RemoteAnswers) -> Option<CredentialLine> {
-            let attempt = followed_attempt(&remote.waited.as_ref()?.head);
-            credential_line(origin, attempt, observed_pr_failure(remote), observed_keyless(remote, attempt))
+        /// The one credentials line `run_pipeline` would print for `remote`
+        /// with `origin` as its origin.
+        fn line_for(origin: &str, remote: RemoteAnswers) -> Option<CredentialLine> {
+            request_notices(&RemoteAnswers { origin: Some(origin.into()), ..remote }).credential_line
         }
 
-        fn condition(remote: &RemoteAnswers) -> Option<CredentialCondition> {
+        fn condition(remote: RemoteAnswers) -> Option<CredentialCondition> {
             line_for(GITHUB, remote).map(|line| line.condition)
         }
 
@@ -1262,57 +1419,57 @@ mod observations {
         fn either_half_alone_or_both_give_one_notice() {
             let published = || PrEnd::Published;
             // Head only (the PR half failed generically, or answered keyed).
-            assert_eq!(condition(&answers(head(Anonymous), PrEnd::Failed(PrFailure::Other), Unknown)), NOTICE);
-            assert_eq!(condition(&answers(head(Anonymous), published(), keyed())), NOTICE, "a keyed PR answer hides nothing");
+            assert_eq!(condition(answers(head(Anonymous), PrEnd::Failed(PrFailure::Other), Unknown)), NOTICE);
+            assert_eq!(condition(answers(head(Anonymous), published(), keyed())), NOTICE, "a keyed PR answer hides nothing");
             // PR only, an empty answer included (the head check failed generically).
             let failed = HeadEnd::Finished(attempt(Phase::Checking, Some(Outcome::CheckFailed { reason: CheckFailure::Other }), None));
-            assert_eq!(condition(&answers(failed, published(), Anonymous)), NOTICE);
-            assert_eq!(condition(&answers(head(keyed()), published(), Anonymous)), NOTICE, "a keyed head answer hides nothing");
-            assert_eq!(condition(&answers(HeadEnd::Unavailable, published(), Anonymous)), NOTICE);
+            assert_eq!(condition(answers(failed, published(), Anonymous)), NOTICE);
+            assert_eq!(condition(answers(head(keyed()), published(), Anonymous)), NOTICE, "a keyed head answer hides nothing");
+            assert_eq!(condition(answers(HeadEnd::Unavailable, published(), Anonymous)), NOTICE);
             // Both.
-            assert_eq!(condition(&answers(head(Anonymous), published(), Anonymous)), NOTICE);
+            assert_eq!(condition(answers(head(Anonymous), published(), Anonymous)), NOTICE);
             // Neither.
-            assert_eq!(condition(&answers(head(keyed()), published(), keyed())), None);
+            assert_eq!(condition(answers(head(keyed()), published(), keyed())), None);
         }
 
         #[test]
         fn unknown_cached_or_receipt_only_evidence_never_gives_the_notice() {
-            assert_eq!(condition(&answers(head(Unknown), PrEnd::Published, Unknown)), None, "a success known only from a receipt");
-            assert_eq!(condition(&answers(head(Unknown), PrEnd::Pending, Anonymous)), None, "credentials of no accepted publication");
-            assert_eq!(condition(&answers(head(Unknown), PrEnd::Failed(PrFailure::Other), Unknown)), None);
+            assert_eq!(condition(answers(head(Unknown), PrEnd::Published, Unknown)), None, "a success known only from a receipt");
+            assert_eq!(condition(answers(head(Unknown), PrEnd::Pending, Anonymous)), None, "credentials of no accepted publication");
+            assert_eq!(condition(answers(head(Unknown), PrEnd::Failed(PrFailure::Other), Unknown)), None);
             // No wait at all: only cached answers.
             let cached = RemoteAnswers { origin: Some(GITHUB.into()), ..RemoteAnswers::default() };
-            assert!(!observed_keyless(&cached, None));
+            assert_eq!(request_notices(&cached).credential_line, None);
             // An anonymous API failure alone adds no line.
             let no_key = attempt(Phase::Checking, Some(Outcome::InSync), note(ApiCondition::CredentialsRequired, None, true));
-            assert_eq!(condition(&answers(HeadEnd::Finished(no_key), PrEnd::Failed(PrFailure::CredentialsRequired), Unknown)), None);
+            assert_eq!(condition(answers(HeadEnd::Finished(no_key), PrEnd::Failed(PrFailure::CredentialsRequired), Unknown)), None);
         }
 
         #[test]
         fn an_answer_still_fetching_or_from_an_adopted_attempt_counts() {
             let fetching = worktree::remote_head::Attempt { credentials: Anonymous, ..attempt(Phase::Fetching, None, None) };
-            assert_eq!(condition(&answers(HeadEnd::Running { last: Some(fetching) }, PrEnd::Pending, Unknown)), NOTICE);
+            assert_eq!(condition(answers(HeadEnd::Running { last: Some(fetching) }, PrEnd::Pending, Unknown)), NOTICE);
             // Another run's attempt, sent from that worker's environment.
             let adopted = worktree::remote_head::Attempt {
                 id: "f".repeat(32),
                 credentials: Anonymous,
                 ..attempt(Phase::Checking, Some(Outcome::Fetched), None)
             };
-            assert_eq!(condition(&answers(HeadEnd::Finished(adopted), PrEnd::Pending, Unknown)), NOTICE);
+            assert_eq!(condition(answers(HeadEnd::Finished(adopted), PrEnd::Pending, Unknown)), NOTICE);
         }
 
         #[test]
         fn ignored_changed_origin_unsupported_and_local_path_remotes_never_give_the_notice() {
             let both = || answers(head(Anonymous), PrEnd::Published, Anonymous);
-            assert_eq!(condition(&RemoteAnswers { ignored: true, ..both() }), None);
-            assert_eq!(condition(&RemoteAnswers { origin_changed: true, ..both() }), None);
+            assert_eq!(condition(RemoteAnswers { ignored: true, ..both() }), None);
+            assert_eq!(condition(RemoteAnswers { origin_changed: true, ..both() }), None);
             let unavailable = worktree::remote_head::Attempt {
                 credentials: Anonymous,
                 ..attempt(Phase::Checking, Some(Outcome::Unavailable { reason: UnavailableReason::OriginChanged }), None)
             };
-            assert_eq!(condition(&answers(HeadEnd::Finished(unavailable), PrEnd::Pending, Unknown)), None, "the worker saw origin change");
+            assert_eq!(condition(answers(HeadEnd::Finished(unavailable), PrEnd::Pending, Unknown)), None, "the worker saw origin change");
             for origin in ["/srv/git/repo.git", "https://git.internal.example/o/r.git"] {
-                assert_eq!(line_for(origin, &both()), None, "{origin}");
+                assert_eq!(line_for(origin, both()), None, "{origin}");
             }
         }
 
@@ -1320,11 +1477,11 @@ mod observations {
         fn a_confirmed_warning_outranks_the_notice() {
             let rejected = note(ApiCondition::CredentialsRejected, Some("GITHUB_TOKEN"), true);
             let warned = HeadEnd::Finished(attempt(Phase::Checking, Some(Outcome::InSync), rejected));
-            assert_eq!(condition(&answers(warned, PrEnd::Published, Anonymous)), Some(CredentialCondition::Rejected));
+            assert_eq!(condition(answers(warned, PrEnd::Published, Anonymous)), Some(CredentialCondition::Rejected));
 
             let limited = PrFailure::RateLimited { authenticated: false, key: None };
             assert_eq!(
-                condition(&answers(head(Anonymous), PrEnd::Failed(limited), Unknown)),
+                condition(answers(head(Anonymous), PrEnd::Failed(limited), Unknown)),
                 Some(CredentialCondition::RateLimited { authenticated: false })
             );
         }
@@ -1339,7 +1496,7 @@ mod observations {
                 (GITEA, "Gitea", "GITEA_TOKEN or FORGEJO_TOKEN or CODEBERG_TOKEN", false),
                 ("https://codeberg.org/o/r.git", "Forgejo", "GITEA_TOKEN or FORGEJO_TOKEN or CODEBERG_TOKEN", false),
             ] {
-                let line = line_for(origin, &both()).unwrap_or_else(|| panic!("{origin}: a line"));
+                let line = line_for(origin, both()).unwrap_or_else(|| panic!("{origin}: a line"));
                 assert_eq!(
                     (line.provider.as_str(), line.key.as_str(), line.condition),
                     (provider, variables, CredentialCondition::AnsweredWithoutKey { higher_limits }),

@@ -1075,7 +1075,7 @@ mod tests {
         let bytes = String::from_utf8(fs::read(&store).unwrap()).unwrap();
         assert!(!bytes.contains("hunter2") && !bytes.contains("example.invalid"), "{bytes}");
         assert!(bytes.contains(&origin_digest(secret)));
-        assert!(!bytes.contains("writer"), "format 5 has no writer: {bytes}");
+        assert!(!bytes.contains("writer"), "the store has no writer: {bytes}");
     }
 
     #[test]

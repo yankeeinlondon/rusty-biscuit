@@ -84,7 +84,8 @@ struct RemoteAnswers {
     /// The repository is in `~/.wt.json`: no provider request, no badges.
     ignored: bool,
     /// `origin` changed or disappeared during the wait: the PR answer and
-    /// this run's PR result belong to the old one and are not shown.
+    /// both halves' results belong to the old one and are not shown
+    /// ([`RemoteAnswers::observed`]).
     origin_changed: bool,
     /// `None` without an `origin`: nothing was launched.
     waited: Option<WaitEnd>,
@@ -101,7 +102,8 @@ struct RemotePlan {
     origin: Option<String>,
     /// The repository is in `~/.wt.json`.
     ignored: bool,
-    /// The origin lookup: the `pr gather` perf stage.
+    /// The origin lookup, `--ignore-api` record, and preference read: the
+    /// `pr gather` perf stage.
     pr_gather: Duration,
 }
 
@@ -218,31 +220,90 @@ fn followed_attempt(head: &HeadEnd) -> Option<&Attempt> {
     }
 }
 
+/// This listing's own results from both halves, for the repository `origin`
+/// still names.
+///
+/// Only [`RemoteAnswers::observed`] makes one, and every projection of
+/// request evidence reads through it: the caption's head status
+/// ([`caption_status`]) and the PR item, credentials line, keyless notice,
+/// and closing fallback notice ([`request_notices`]). So none of them can
+/// describe an `origin` that was replaced or removed during the wait.
+struct Observed<'a> {
+    origin: &'a str,
+    waited: &'a WaitEnd,
+    ignored: bool,
+}
+
+impl RemoteAnswers {
+    /// The repository-identity guard: `None` without a wait, and when
+    /// `origin` changed or disappeared during it.
+    fn observed(&self) -> Option<Observed<'_>> {
+        if self.origin_changed {
+            return None;
+        }
+        Some(Observed { origin: self.origin.as_deref()?, waited: self.waited.as_ref()?, ignored: self.ignored })
+    }
+}
+
+/// The caption's head status: the followed attempt
+/// ([`remote_status`]), or, for an `origin` replaced or removed during the
+/// wait, the row a worker that noticed the change itself gives
+/// (`couldn't check origin`). `None` when nothing was launched.
+fn caption_status(remote: &RemoteAnswers, last: impl Fn() -> LastKnown) -> Option<RemoteStatus> {
+    remote.waited.as_ref()?;
+    Some(match remote.observed() {
+        Some(observed) => remote_status(&observed.waited.head, last),
+        None => RemoteStatus::CheckFailed { reason: CheckFailure::Other, last: last() },
+    })
+}
+
+/// What the status list and the notes say about this listing's requests.
+#[derive(Debug, Default, PartialEq)]
+struct RequestNotices {
+    pr_outcome: Option<PrOutcome>,
+    credential_line: Option<CredentialLine>,
+    fallback_notice: Option<Vec<String>>,
+}
+
+/// Every request notice for `remote`, all behind the one
+/// [`RemoteAnswers::observed`] guard: nothing without a wait or after
+/// `origin` changed.
+fn request_notices(remote: &RemoteAnswers) -> RequestNotices {
+    let Some(observed) = remote.observed() else {
+        return RequestNotices::default();
+    };
+    let attempt = followed_attempt(&observed.waited.head);
+    RequestNotices {
+        pr_outcome: Some(pr_outcome(&observed)),
+        credential_line: credential_line(
+            observed.origin,
+            attempt,
+            observed_pr_failure(&observed),
+            observed_keyless(&observed),
+        ),
+        fallback_notice: fallback_notice(observed.origin, attempt),
+    }
+}
+
 /// This run's PR half as the status list and badges present it (§5). An
-/// ignored repository is ignored whatever the wait saw, and a changed
-/// `origin` leaves nothing to say about the old one.
-fn pr_outcome(remote: &RemoteAnswers) -> Option<PrOutcome> {
-    let end = remote.waited.as_ref()?;
-    if remote.origin_changed {
-        return None;
+/// ignored repository is ignored whatever the wait saw.
+fn pr_outcome(observed: &Observed<'_>) -> PrOutcome {
+    if observed.ignored {
+        return PrOutcome::Ignored;
     }
-    if remote.ignored {
-        return Some(PrOutcome::Ignored);
-    }
-    Some(match end.prs {
+    match observed.waited.prs {
         PrEnd::Published => PrOutcome::Published,
         PrEnd::Ignored => PrOutcome::Ignored,
         PrEnd::Unsupported => PrOutcome::Unsupported,
         PrEnd::Failed(_) => PrOutcome::Failed,
         PrEnd::Pending => PrOutcome::Pending,
-    })
+    }
 }
 
-/// This run's PR failure, from its receipt, unless it was about an `origin`
-/// replaced during the wait.
-fn observed_pr_failure(remote: &RemoteAnswers) -> Option<&PrFailure> {
-    match &remote.waited.as_ref()?.prs {
-        PrEnd::Failed(failure) if !remote.origin_changed => Some(failure),
+/// This run's PR failure, from its receipt.
+fn observed_pr_failure<'a>(observed: &Observed<'a>) -> Option<&'a PrFailure> {
+    match &observed.waited.prs {
+        PrEnd::Failed(failure) => Some(failure),
         _ => None,
     }
 }
@@ -252,17 +313,15 @@ fn observed_pr_failure(remote: &RemoteAnswers) -> Option<&PrFailure> {
 /// the wait accepted.
 ///
 /// Only evidence recorded by the worker for those exact results counts; a
-/// cached answer, unknown credentials, an ignored repository, and anything
-/// about an `origin` that changed (here, or under the head worker) never do.
-/// Evidence published after the wait returned was never read.
-fn observed_keyless(remote: &RemoteAnswers, attempt: Option<&Attempt>) -> bool {
-    let Some(waited) = remote.waited.as_ref() else {
-        return false;
-    };
-    if remote.ignored || remote.origin_changed {
+/// cached answer, unknown credentials, an ignored repository, and a check
+/// whose worker saw `origin` change never do. Evidence published after the
+/// wait returned was never read.
+fn observed_keyless(observed: &Observed<'_>) -> bool {
+    if observed.ignored {
         return false;
     }
-    let head = attempt.is_some_and(|attempt| {
+    let waited = observed.waited;
+    let head = followed_attempt(&waited.head).is_some_and(|attempt| {
         attempt.credentials == CredentialEvidence::Anonymous
             && !matches!(attempt.outcome, Some(Outcome::Unavailable { .. }))
     });
@@ -407,7 +466,8 @@ type History = ((Option<git_graph::GraphFacts>, Option<git_graph::VerboseData>),
 /// gather is accepted only when both reads succeeded with equal tips;
 /// otherwise the ref-dependent facts, graph, and verbose data are gathered
 /// once more from the final read. Dirtiness is kept, except that a checkout
-/// `--ff` moved is measured again. Persistent effects happen once, in
+/// `--ff` moved is measured again. The gathers' persistent effects (cache
+/// save, fork-record and copy-record pruning) happen once, in
 /// [`WorktreeList::commit`] of the accepted results.
 ///
 /// Scoped tasks never write to the terminal; only the wait's spinner, on this
@@ -569,9 +629,17 @@ fn run_pipeline(
         .as_ref()
         .map(|caption| caption.tracking_sha.clone())
         .or_else(|| list.refs().remote(&tracking_ref).map(str::to_string));
-    let status = match (&remote.origin, &remote.waited, &head_store, &main_checkout) {
-        (Some(origin), Some(waited), Some(head_store), Some(main)) => Some(remote_status(&waited.head, || {
-            match select_cached_head(head_store, Some(origin), Some(&default_branch), now) {
+    let status = match (&remote.origin, &head_store, &main_checkout) {
+        (Some(origin), Some(head_store), Some(main)) => caption_status(&remote, || {
+            // The stored answer is bound to the `origin` this listing
+            // launched for; after it changed, only the reflog still dates
+            // anything true of this repository.
+            let stored = if remote.origin_changed {
+                CachedRemoteHead::Miss
+            } else {
+                select_cached_head(head_store, Some(origin), Some(&default_branch), now)
+            };
+            match stored {
                 CachedRemoteHead::Fresh(head) | CachedRemoteHead::Stale(head) => {
                     LastKnown::Answer { checked_at: head.checked_at }
                 }
@@ -581,7 +649,7 @@ fn run_pipeline(
                     None => LastKnown::Never,
                 },
             }
-        })),
+        }),
         _ => None,
     };
     let remote_facts = status.map(|status| RemoteFacts {
@@ -590,14 +658,11 @@ fn run_pipeline(
         status,
     });
     let mut facts = TableFacts::from_list(&list, &remote.prs, remote_facts);
-    facts.pr_outcome = pr_outcome(&remote);
-    if let (Some(origin), Some(waited)) = (&remote.origin, &remote.waited) {
-        let attempt = followed_attempt(&waited.head);
-        facts.credential_line =
-            credential_line(origin, attempt, observed_pr_failure(&remote), observed_keyless(&remote, attempt));
-        facts.fallback_notice = fallback_notice(origin, attempt);
-        facts.timed_out = waited.timed_out;
-    }
+    let notices = request_notices(&remote);
+    facts.pr_outcome = notices.pr_outcome;
+    facts.credential_line = notices.credential_line;
+    facts.fallback_notice = notices.fallback_notice;
+    facts.timed_out = remote.waited.as_ref().is_some_and(|waited| waited.timed_out);
     facts.ff_notice = ff.as_ref().and_then(ff_notice);
     // §9: a failed check or fetch still leaves `--ff` a local tracking ref to
     // move to, and the caption keeps the reason. Only a render while the
