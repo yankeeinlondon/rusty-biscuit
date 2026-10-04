@@ -226,6 +226,7 @@ impl Facts {
                 branch: self.branch(),
                 inventory: &self.inventory,
                 missing: self.missing(),
+                relinked: matches!(self.checkout, CheckoutState::Repaired(_)),
                 safety: self.safety.as_ref(),
                 has_origin: self.has_origin,
                 remote: self.remote.as_ref(),
@@ -309,17 +310,6 @@ pub fn run(name: &str, flags: Flags) -> Result<(), WorktreeError> {
     // could not go ahead anyway.
     let checkout = prepare(&base, &entry, &repair::Git)
         .map_err(|refusal| WorktreeError::RefusedToLoseWork(prepare_refusal_markup(&refusal, name, &entry)))?;
-    if let CheckoutState::Repaired(_) = checkout {
-        print(
-            &terminal,
-            format!(
-                "\n<green>Restored the link</green> for <blue>{}</blue> so its files could be checked.\n  \
-                <dim>git worktree repair may also have restored other worktrees' links.</dim>",
-                esc(&display)
-            ),
-        );
-    }
-
     let mut facts = Facts::local(&base, entry, checkout)?;
     if facts.missing().is_none() && (inside || facts.inventory.needs_consent()) {
         facts.reported = Some(fingerprint(&facts)?);

@@ -2694,7 +2694,7 @@ fn an_unlinked_worktree_is_repaired_then_its_files_are_protected() {
     let output = fixture.wt(&fixture.repo()).args(["remove", "lhg-before"]).output().unwrap();
     let stderr = stderr_of(&output);
     assert_eq!(output.status.code(), Some(3), "{stderr}");
-    assert!(stderr.contains("Restored the link for lhg-before so its files could be checked"), "{stderr}");
+    assert!(stderr.contains("Its .git file was missing"), "{stderr}");
     assert!(stderr.contains("Uncommitted files (1)"), "{stderr}");
     assert!(stderr.contains("Nothing was removed"), "{stderr}");
     assert!(stderr.contains("The .git link restored for lhg-before was left in place"), "{stderr}");
@@ -2720,7 +2720,7 @@ fn a_clean_unlinked_worktree_is_repaired_and_removed_with_its_safe_branch() {
         .args(["remove", "feat-x"])
         .assert()
         .code(0)
-        .stderr(predicate::str::contains("Restored the link for feat-x"))
+        .stderr(predicate::str::contains("Its .git file was missing"))
         .stderr(predicate::str::contains("No uncommitted or ignored files"))
         .stderr(predicate::str::contains("Removed worktree feat-x"))
         .stderr(predicate::str::contains("Deleted branch feat/x"));
@@ -2767,7 +2767,7 @@ fn a_repair_that_is_not_verified_refuses_even_with_every_force_flag() {
     assert!(stderr.contains("retry wt remove feat-x"), "{stderr}");
     assert_eq!(stderr.matches("Not verified: Git couldn't resolve").count(), 1, "said once: {stderr}");
     assert!(stderr.contains("Repair output:"), "{stderr}");
-    assert!(!stderr.contains("Restored the link"), "never claimed: {stderr}");
+    assert!(!stderr.contains("wt restored it to check"), "never claimed: {stderr}");
     assert!(!stderr.contains("prune"), "{stderr}");
     assert!(!stderr.contains("Nothing was changed"), "{stderr}");
     assert_eq!(fs::read_to_string(wt.join("notes.txt")).unwrap(), "keep me\n");
@@ -2864,7 +2864,7 @@ fn a_repaired_worktree_hands_off_and_finishes_with_the_ordinary_checks() {
         .args(["remove", "feat-x"])
         .assert()
         .code(0)
-        .stderr(predicate::str::contains("Restored the link for feat-x"))
+        .stderr(predicate::str::contains("Its .git file was missing"))
         .get_output()
         .stdout
         .clone();
@@ -3072,7 +3072,7 @@ fn a_checkout_replaced_by_a_link_after_repair_refuses() {
     let stderr = stderr_of(&output);
     assert!(stderr.contains("Git couldn't restore a verified link"), "{stderr}");
     assert!(stderr.contains("is now a link"), "{stderr}");
-    assert!(!stderr.contains("Restored the link"), "never claimed: {stderr}");
+    assert!(!stderr.contains("wt restored it to check"), "never claimed: {stderr}");
     assert_link_refusal_kept_everything(&fixture, &wt, &saved, &output);
 }
 
