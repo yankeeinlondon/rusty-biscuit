@@ -1334,6 +1334,8 @@ class ShippedWave2PlanTests(unittest.TestCase):
     rulings R3, R4, R5, R10, R14, and R19.
     """
 
+    # Keyed by the frozen capture's package names, which predate the
+    # 2026-10-03 renames (`consolidation.RENAMED`).
     EXPECTED = {
         "tree-hugger": ({"l1": []}, {}),
         "claudine": ({"l1": []}, {}),
@@ -1342,8 +1344,8 @@ class ShippedWave2PlanTests(unittest.TestCase):
         "schematic-gen": ({"l1": [], "level2": ["terminal-tests"]}, {}),
         "biscuit-terminal-cli": ({"l1": [], "level2": ["terminal-tests"]}, {"level2_prose_cells": "prose_cells", "level2_diagrams": "diagrams"}),
         "claudine-gen": ({"l1": [], "level2": ["terminal-tests"]}, {}),
-        "darkmatter-lsp": ({"l1": [], "level2": ["terminal-tests"]}, {}),
-        "sniff-detection-cli": ({"l1": [], "level2": ["test-fixtures"]}, {}),
+        "dmls": ({"l1": [], "level2": ["terminal-tests"]}, {}),
+        "sniff-cli": ({"l1": [], "level2": ["test-fixtures"]}, {}),
         "biscuit-tui-cli": ({"l1": [], "level2": ["terminal-tests"], "level3": ["terminal-tests"]}, {"real_terminal_render": "terminal_render"}),
     }
 

@@ -110,6 +110,16 @@ PACKAGE_FEATURE_SETS: dict[str, tuple[tuple[str, ...], ...]] = {
 }
 WAVE_2_PACKAGES = PACKAGES[4:]
 
+#: Packages renamed after the wave-2 self-proof was frozen (2026-10-03). The
+#: frozen captures and inventory keep the old names; every table here keys on
+#: the current one, so lookups go through [`current_name`].
+RENAMED = {"dmls": "darkmatter-lsp", "sniff-cli": "sniff-detection-cli", "worktree-cli": "git-wt-cli"}
+
+
+def current_name(package: str) -> str:
+    return RENAMED.get(package, package)
+
+
 #: Old targets whose consolidated target a ruling decides, overriding the
 #: tier-by-name default (`2026-09-22-consolidated-test-binaries-wave-2`
 #: rulings). `None` rules the target a helper of another module rather than a
@@ -635,7 +645,7 @@ def name_marker(package: str, name: str) -> str | None:
     for marker, _tier in MARKER_TIERS:
         if name.startswith(marker):
             return marker
-    for marker in PACKAGE_MARKERS.get(package, ()):
+    for marker in PACKAGE_MARKERS.get(current_name(package), ()):
         if name.startswith(marker):
             return marker
     return None
@@ -941,7 +951,7 @@ def plan_package(
                 tests_by_binary[binary_id].update(suite["tests"])
 
     features_by_capture = {feature_set: set(capture["features"]) for (_h, p, feature_set), capture in captures.items() if p == package}
-    ruled = RULED_TARGETS.get(package, {})
+    ruled = RULED_TARGETS.get(current_name(package), {})
     contracts: dict[tuple, list[dict[str, Any]]] = defaultdict(list)
     assigned: list[tuple[dict[str, Any], str, str]] = []
     dropped: list[dict[str, Any]] = []
@@ -1170,7 +1180,7 @@ def capture_package(
     log: Callable[[str], None] = lambda line: print(line, file=sys.stderr),
 ) -> list[Path]:
     """List every selector for every feature set; write one capture per set."""
-    sets = tuple(feature_sets) if feature_sets is not None else PACKAGE_FEATURE_SETS.get(package)
+    sets = tuple(feature_sets) if feature_sets is not None else PACKAGE_FEATURE_SETS.get(current_name(package))
     if sets is None:
         raise ToolError(f"no feature sets are known for {package}; pass --feature-set")
     metadata = cargo_metadata(repo)
