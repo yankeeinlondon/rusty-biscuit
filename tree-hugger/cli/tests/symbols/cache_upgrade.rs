@@ -1,6 +1,6 @@
 //! Test 8: a persistent cache entry written under an earlier extractor
 //! fingerprint (the schema-2 literal key, or a schema-3 key at extractor
-//! revision 1 or 2) is not served after the upgrade, and the entry written by the
+//! revisions 1 to 4) is not served after the upgrade, and the entry written by the
 //! upgraded run is served on the next run. Works on the cache files directly,
 //! with `TMPDIR` (`TMP`/`TEMP` on Windows) pointed at a test-owned directory.
 //!
@@ -439,6 +439,42 @@ fn entry_from_extractor_revision_three_is_not_served_after_the_repairs() {
                 .max_by_key(|record| record["source"]["declaration_span"]["start_byte"].as_u64())
                 .expect("snapshot has a `trailing_differs` record");
             definition["visibility"]["level"] = Value::from("ModulePrivate");
+        },
+    });
+}
+
+/// The `identity.keyword` of the `module_function` record in a `hug --json`
+/// report (`null` when absent).
+fn module_function_keyword(json: &Value) -> Value {
+    let records: Vec<&Value> = json["symbol_indexes"]
+        .as_array()
+        .expect("symbol_indexes")
+        .iter()
+        .flat_map(|index| index["symbols"].as_array().expect("index symbols"))
+        .filter(|record| record["identity"]["name"] == "module_function")
+        .collect();
+    assert_eq!(records.len(), 1, "expected one `module_function` record");
+    records[0]["identity"].get("keyword").cloned().unwrap_or(Value::Null)
+}
+
+/// Revision 4 (schema 3.0) records carried no declaring keyword or display
+/// header; revision 5 (schema 4.0) adds both.
+#[test]
+fn entry_from_extractor_revision_four_is_not_served_after_the_repairs() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "4",
+        file: "python.py",
+        language: "python",
+        source: PYTHON_FIXTURE.to_string(),
+        sentinel: "MODULE_CONSTANT",
+        probe: module_function_keyword,
+        repaired: Value::from("def"),
+        stale: Value::Null,
+        revert: |snapshot| {
+            let identity = record_named(snapshot, "module_function")["identity"]
+                .as_object_mut()
+                .expect("record identity");
+            identity.remove("keyword");
         },
     });
 }

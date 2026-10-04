@@ -22,6 +22,7 @@ mod symbols_export;
 mod symbols_field_lists;
 mod symbols_fixtures;
 mod symbols_function_locals;
+mod symbols_header;
 mod symbols_kinds;
 mod symbols_member_wrappers;
 mod symbols_signatures;

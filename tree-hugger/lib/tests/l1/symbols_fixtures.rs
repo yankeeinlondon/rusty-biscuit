@@ -110,7 +110,7 @@ impl Extracted {
             .records
             .iter()
             .filter(|record| {
-                record.identity.name == name && record.identity.module_path.as_deref() == container
+                record.identity.name == name && record.identity.container_name.as_deref() == container
             })
             .collect();
         assert_eq!(

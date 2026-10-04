@@ -172,7 +172,7 @@ fn row_failures(extracted: &Extracted, extension: &str, row: &Row) -> Vec<String
     let records: Vec<_> = extracted
         .records
         .iter()
-        .filter(|record| record.identity.name == name && record.identity.module_path.as_deref() == container)
+        .filter(|record| record.identity.name == name && record.identity.container_name.as_deref() == container)
         .collect();
     match records.as_slice() {
         [record] => {

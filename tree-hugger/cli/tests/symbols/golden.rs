@@ -69,3 +69,15 @@ fn plain_symbols_over_multi_match_the_golden() {
         );
     }
 }
+
+/// Records carry no wall-clock data, so two uncached runs over the same tree
+/// print the same bytes.
+#[test]
+fn json_symbols_over_multi_are_identical_across_runs() {
+    let scratch = Scratch::new(MULTI_FIXTURES);
+    let args = ["--json", "symbols", "--no-cache"];
+    let first = scratch.stdout(&args);
+    let second = scratch.stdout(&args);
+    assert!(first.contains("\"signature_text\""), "the report must carry records");
+    assert!(first == second, "two `hug --json symbols --no-cache` runs over multi/ differ");
+}

@@ -711,11 +711,11 @@ fn index_records(json: &Value) -> &Vec<Value> {
 }
 
 #[test]
-fn json_symbols_carry_visibility_and_schema_3_0() {
+fn json_symbols_carry_visibility_and_schema_4_0() {
     let scratch = Scratch::new(&[("typescript.ts", TYPESCRIPT_FIXTURE)]);
     let json = json_of(&scratch.stdout(&["--json", "symbols", "typescript.ts"]));
 
-    let schema = serde_json::json!({ "major": 3, "minor": 0 });
+    let schema = serde_json::json!({ "major": 4, "minor": 0 });
     assert_eq!(json["schema_version"], schema, "TypeScript: envelope schema_version");
     assert_eq!(
         json["symbol_indexes"][0]["schema_version"], schema,
@@ -744,6 +744,42 @@ fn json_symbols_carry_visibility_and_schema_3_0() {
         symbol("localValue").get("visibility").is_none(),
         "TypeScript `localValue`: Unknown access must omit `visibility`"
     );
+}
+
+/// Schema 4.0 records carry the declaring keyword, the display header and
+/// `identity.container_name`, and no wall-clock timestamps or `module_path`.
+#[test]
+fn json_records_carry_keyword_signature_text_and_container_name() {
+    let scratch = Scratch::new(&[("typescript.ts", TYPESCRIPT_FIXTURE)]);
+    let stdout = scratch.stdout(&["--json", "symbols", "typescript.ts"]);
+    let json = json_of(&stdout);
+    let record = |name: &str| {
+        index_records(&json)
+            .iter()
+            .find(|record| record["identity"]["name"] == name)
+            .unwrap_or_else(|| panic!("TypeScript `{name}`: missing from symbol_indexes"))
+            .clone()
+    };
+
+    let method = record("privateStaticMethod");
+    assert_eq!(method["identity"]["container_name"], "ExportedWidget", "`privateStaticMethod` container_name");
+    assert!(method["identity"].get("keyword").is_none(), "a TypeScript method has no keyword");
+    assert_eq!(
+        method["source"]["signature_text"], "private static privateStaticMethod(): void",
+        "`privateStaticMethod` signature_text"
+    );
+
+    let table = record("BOUNDARY_TABLE");
+    assert_eq!(table["identity"]["keyword"], "const", "`BOUNDARY_TABLE` keyword");
+    assert_eq!(table["source"]["signature_text"], "const BOUNDARY_TABLE", "`BOUNDARY_TABLE` signature_text");
+    assert!(
+        table["source"]["declaration_text"].as_str().is_some_and(|text| text.contains("first: 1")),
+        "`BOUNDARY_TABLE` declaration_text keeps the initializer"
+    );
+
+    for removed in ["\"module_path\"", "created_at_epoch_ms", "updated_at_epoch_ms"] {
+        assert!(!stdout.contains(removed), "schema 4.0 JSON must not contain {removed}");
+    }
 }
 
 /// C and C++ JSON signatures carry the named function's own parameters: a

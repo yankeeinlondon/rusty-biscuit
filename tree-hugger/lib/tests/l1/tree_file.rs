@@ -334,7 +334,7 @@ fn emits_symbol_records_v2() -> Result<(), TreeHuggerError> {
     assert!(
         records
             .iter()
-            .all(|record| record.schema_version.major == 3)
+            .all(|record| record.schema_version.major == 4)
     );
 
     Ok(())
@@ -345,7 +345,7 @@ fn emits_symbol_index_v2_with_completed_passes() -> Result<(), TreeHuggerError> 
     let tree_file = TreeFile::new(fixture_path("sample.rs"))?;
     let index = tree_file.symbol_index_v2()?;
 
-    assert_eq!(index.schema_version.major, 3);
+    assert_eq!(index.schema_version.major, 4);
     assert!(
         index
             .completed_passes

@@ -106,7 +106,7 @@ pub fn assert_field_lists(extracted: &Extracted, rows: &[TypeRow]) {
             "{label}: `{type_name}` standalone Field/Property/Constant members"
         );
         for record in extracted.records.iter().filter(|record| {
-            record.identity.module_path.as_deref() == Some(type_name)
+            record.identity.container_name.as_deref() == Some(type_name)
                 && is_member_kind(SymbolKind::from(record.kind))
         }) {
             assert!(
@@ -634,7 +634,7 @@ fn every_fixture_member_is_in_its_type_field_list() {
             .expect("index")
             .symbols;
         for member in records.iter().filter(|record| is_member_kind(SymbolKind::from(record.kind))) {
-            let Some(container) = member.identity.module_path.as_deref() else {
+            let Some(container) = member.identity.container_name.as_deref() else {
                 continue;
             };
             let span = &member.source.declaration_span;

@@ -1,120 +1,231 @@
+//! The staged per-file analysis behind [`TreeFile::query`] and
+//! [`TreeFile::symbol_index_with_passes`]: one plan, built from the
+//! requested capabilities, runs each needed pass once, after its
+//! prerequisites.
+
 use std::collections::{HashMap, HashSet};
 
 use crate::error::TreeHuggerError;
-use crate::file::tree_file::TreeFile;
+use crate::file::query::{Capability, SymbolQuery, SymbolQueryResult};
+use crate::file::tree_file::{MetadataSelection, TreeFile};
 use crate::shared::{
-    AnalysisPass, CommentAttachment, Diagnostic, DocsFacet, ExportRecord, FileSymbolIndex,
-    ImportRecord, ParsedDocs, SemanticFacet, SymbolKindV2, SymbolRef, TriState, now_epoch_ms,
+    AnalysisPass, CommentAttachment, DocsFacet, ExportRecord, FileSymbolIndex, ImportRecord,
+    ImportSymbol, ParsedDocs, ReferencedSymbol, SemanticFacet, SymbolId, SymbolKindV2,
+    SymbolRecord, SymbolRef, TriState,
 };
 
-/// Runs the staged analysis pipeline for a file.
+pub mod counters;
+
+/// Runs the requested passes, after their prerequisites, over every kind.
 pub fn analyze_file(
     tree_file: &TreeFile,
     requested_passes: &[AnalysisPass],
 ) -> Result<FileSymbolIndex, TreeHuggerError> {
-    let mut index = parse_pass(tree_file)?;
+    Ok(run_query(tree_file, &SymbolQuery::for_passes(requested_passes))?.index)
+}
 
-    for pass in requested_passes {
-        match pass {
-            AnalysisPass::Parse => {
-                complete_pass(&mut index, AnalysisPass::Parse);
-            }
-            AnalysisPass::Bind => bind_pass(tree_file, &mut index)?,
-            AnalysisPass::Semantic => semantic_pass(&mut index),
-            AnalysisPass::Docs => docs_pass(&mut index),
+/// The work a query needs, in execution order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PassPlan {
+    /// Parent and member links only, without the reference query.
+    containment: bool,
+    /// The full bind pass (containment, references, export targets).
+    bind: bool,
+    semantic: bool,
+    docs: bool,
+    diagnostics: bool,
+}
+
+impl PassPlan {
+    fn for_query(query: &SymbolQuery) -> Self {
+        Self {
+            containment: query.requires(Capability::Containment),
+            bind: query.requires(Capability::References),
+            semantic: query.requires(Capability::Semantics),
+            docs: query.requires(Capability::StructuredDocs),
+            diagnostics: query.requires(Capability::Diagnostics),
         }
     }
 
-    Ok(index)
+    /// The passes this plan runs, in canonical order.
+    fn passes(self) -> Vec<AnalysisPass> {
+        [
+            (true, AnalysisPass::Parse),
+            (self.bind, AnalysisPass::Bind),
+            (self.semantic, AnalysisPass::Semantic),
+            (self.docs, AnalysisPass::Docs),
+            (self.diagnostics, AnalysisPass::Diagnostics),
+        ]
+        .into_iter()
+        .filter_map(|(runs, pass)| runs.then_some(pass))
+        .collect()
+    }
 }
 
-/// Parse pass: builds the baseline `FileSymbolIndex` with v2 symbol records.
-fn parse_pass(tree_file: &TreeFile) -> Result<FileSymbolIndex, TreeHuggerError> {
-    let symbols = tree_file.symbol_records()?;
-    let imports = tree_file
-        .imported_symbols()?
-        .into_iter()
-        .map(|import| ImportRecord {
-            name: import.name.clone(),
-            alias: import.alias,
-            source: import.source,
-            span: crate::shared::TextSpan {
-                start: crate::shared::TextPoint {
-                    line: import.range.start_line as u32,
-                    column: import.range.start_column as u32,
-                },
-                end: crate::shared::TextPoint {
-                    line: import.range.end_line as u32,
-                    column: import.range.end_column as u32,
-                },
-                start_byte: import.range.start_byte as u32,
-                end_byte: import.range.end_byte as u32,
-            },
-            statement_span: import
-                .statement_range
-                .as_ref()
-                .map(|range| crate::shared::TextSpan {
-                    start: crate::shared::TextPoint {
-                        line: range.start_line as u32,
-                        column: range.start_column as u32,
-                    },
-                    end: crate::shared::TextPoint {
-                        line: range.end_line as u32,
-                        column: range.end_column as u32,
-                    },
-                    start_byte: range.start_byte as u32,
-                    end_byte: range.end_byte as u32,
-                }),
-            symbol: SymbolRef {
-                id: None,
-                name: import.name,
-                qualified_name: import.original_name,
-            },
-        })
-        .collect::<Vec<_>>();
+/// Runs `query` over `tree_file`: the definition query runs once and its
+/// result feeds the records, the references and the diagnostics.
+pub(crate) fn run_query(
+    tree_file: &TreeFile,
+    query: &SymbolQuery,
+) -> Result<SymbolQueryResult, TreeHuggerError> {
+    let plan = PassPlan::for_query(query);
+    let selection = MetadataSelection::for_kinds(query.selected_kinds());
 
+    let definitions = tree_file.definitions(&selection)?;
+    let imports = tree_file.imported_symbols()?;
+    let references = if plan.bind || plan.diagnostics {
+        Some(tree_file.references_from(&definitions, &imports)?)
+    } else {
+        None
+    };
+    let diagnostics = match &references {
+        Some(references) if plan.diagnostics => {
+            tree_file.diagnostics_from(&definitions, &imports, references)?
+        }
+        _ => Vec::new(),
+    };
     let exports = tree_file
-        .exported_symbols()?
-        .into_iter()
-        .map(|export| ExportRecord {
-            name: export.name.clone(),
-            span: crate::shared::TextSpan {
-                start: crate::shared::TextPoint {
-                    line: export.range.start_line as u32,
-                    column: export.range.start_column as u32,
-                },
-                end: crate::shared::TextPoint {
-                    line: export.range.end_line as u32,
-                    column: export.range.end_column as u32,
-                },
-                start_byte: export.range.start_byte as u32,
-                end_byte: export.range.end_byte as u32,
-            },
-            symbol: SymbolRef {
-                id: None,
-                name: export.name,
-                qualified_name: None,
-            },
-        })
-        .collect::<Vec<_>>();
+        .exports_from(&definitions)
+        .map(export_record)
+        .collect();
+    let symbols = tree_file.records_from(definitions, &selection);
 
-    let diagnostics: Vec<Diagnostic> = tree_file.try_diagnostics()?;
-
-    Ok(FileSymbolIndex {
-        schema_version: crate::shared::SchemaVersion::V3_0,
+    let mut index = FileSymbolIndex {
+        schema_version: crate::shared::SchemaVersion::V4_0,
         file: tree_file.file.clone(),
         language: tree_file.language,
         file_hash: tree_file.hash.clone(),
-        completed_passes: vec![AnalysisPass::Parse],
+        completed_passes: plan.passes(),
         symbols,
-        imports,
+        imports: imports.into_iter().map(import_record).collect(),
         exports,
         diagnostics,
+    };
+
+    let names = NameIndex::new(&index.symbols);
+    if plan.containment {
+        link_containers(&mut index.symbols, &names);
+    }
+    if plan.bind {
+        bind_references(&mut index, &names, references.as_deref().unwrap_or_default());
+    }
+
+    // Unselected records were needed only as owners, containers and
+    // reference targets.
+    index.symbols.retain(|symbol| query.selects(symbol.kind));
+
+    if plan.semantic {
+        semantic_pass(&mut index);
+    }
+    if plan.docs {
+        docs_pass(&mut index);
+    }
+
+    Ok(SymbolQueryResult {
+        index,
+        completed_capabilities: query.required_capabilities(),
     })
 }
 
-/// Bind pass: fills basic relation edges and resolves IDs by name.
-fn bind_pass(tree_file: &TreeFile, index: &mut FileSymbolIndex) -> Result<(), TreeHuggerError> {
+fn text_span(range: &crate::shared::CodeRange) -> crate::shared::TextSpan {
+    crate::shared::TextSpan {
+        start: crate::shared::TextPoint {
+            line: range.start_line as u32,
+            column: range.start_column as u32,
+        },
+        end: crate::shared::TextPoint {
+            line: range.end_line as u32,
+            column: range.end_column as u32,
+        },
+        start_byte: range.start_byte as u32,
+        end_byte: range.end_byte as u32,
+    }
+}
+
+fn import_record(import: ImportSymbol) -> ImportRecord {
+    ImportRecord {
+        name: import.name.clone(),
+        alias: import.alias,
+        source: import.source,
+        span: text_span(&import.range),
+        statement_span: import.statement_range.as_ref().map(text_span),
+        symbol: SymbolRef {
+            id: None,
+            name: import.name,
+            qualified_name: import.original_name,
+        },
+    }
+}
+
+fn export_record(export: &crate::shared::SymbolInfo) -> ExportRecord {
+    ExportRecord {
+        name: export.name.clone(),
+        span: text_span(&export.range),
+        symbol: SymbolRef {
+            id: None,
+            name: export.name.clone(),
+            qualified_name: None,
+        },
+    }
+}
+
+/// Record indexes by name, each bucket in record order, built once per file
+/// so a name lookup is not a scan of every record.
+struct NameIndex {
+    by_name: HashMap<String, Vec<usize>>,
+}
+
+impl NameIndex {
+    fn new(symbols: &[SymbolRecord]) -> Self {
+        let mut by_name: HashMap<String, Vec<usize>> = HashMap::new();
+        for (idx, symbol) in symbols.iter().enumerate() {
+            by_name
+                .entry(symbol.identity.name.clone())
+                .or_default()
+                .push(idx);
+        }
+        Self { by_name }
+    }
+
+    /// The indexes of the records called `name`, in record order.
+    fn named(&self, name: &str) -> &[usize] {
+        self.by_name.get(name).map_or(&[], Vec::as_slice)
+    }
+}
+
+/// Containment: each record's parent and container, and each container's
+/// members.
+fn link_containers(symbols: &mut [SymbolRecord], names: &NameIndex) {
+    let mut parent_links: Vec<Option<SymbolRef>> = vec![None; symbols.len()];
+    let mut members_by_parent: HashMap<SymbolId, Vec<SymbolRef>> = HashMap::new();
+
+    for (child_idx, symbol) in symbols.iter().enumerate() {
+        let Some(container_name) = symbol.identity.container_name.as_deref() else {
+            continue;
+        };
+
+        let Some(parent_idx) = find_container_symbol(symbols, names, child_idx, container_name)
+        else {
+            continue;
+        };
+
+        parent_links[child_idx] = Some(symbol_ref(&symbols[parent_idx]));
+        members_by_parent
+            .entry(symbols[parent_idx].id.clone())
+            .or_default()
+            .push(symbol_ref(symbol));
+    }
+
+    for (symbol, parent) in symbols.iter_mut().zip(parent_links) {
+        symbol.relations.container = parent.clone();
+        symbol.relations.parent = parent;
+        symbol.relations.members = members_by_parent.remove(&symbol.id).unwrap_or_default();
+    }
+}
+
+/// The rest of the bind pass, after [`link_containers`]: reference,
+/// dependency and referenced-by edges by name, and export targets.
+fn bind_references(index: &mut FileSymbolIndex, names: &NameIndex, references: &[ReferencedSymbol]) {
     let import_refs_by_name: HashMap<_, _> = index
         .imports
         .iter()
@@ -130,33 +241,12 @@ fn bind_pass(tree_file: &TreeFile, index: &mut FileSymbolIndex) -> Result<(), Tr
         })
         .collect();
 
-    let mut parent_links: Vec<Option<SymbolRef>> = vec![None; index.symbols.len()];
-    let mut members_by_parent: HashMap<crate::shared::SymbolId, Vec<SymbolRef>> = HashMap::new();
-
-    for (child_idx, symbol) in index.symbols.iter().enumerate() {
-        let Some(container_name) = symbol.identity.module_path.as_deref() else {
-            continue;
-        };
-
-        let Some((parent_id, parent_ref)) =
-            find_container_symbol(&index.symbols, child_idx, container_name)
-        else {
-            continue;
-        };
-
-        parent_links[child_idx] = Some(parent_ref.clone());
-        members_by_parent
-            .entry(parent_id)
-            .or_default()
-            .push(symbol_ref(symbol));
-    }
-
-    let mut references_by_owner: Vec<Vec<SymbolRef>> = vec![Vec::new(); index.symbols.len()];
-    let mut dependencies_by_owner: Vec<Vec<SymbolRef>> = vec![Vec::new(); index.symbols.len()];
-    let mut referenced_by_target: HashMap<crate::shared::SymbolId, Vec<SymbolRef>> = HashMap::new();
+    let mut references_by_owner: Vec<RefSet> = vec![RefSet::default(); index.symbols.len()];
+    let mut dependencies_by_owner: Vec<RefSet> = vec![RefSet::default(); index.symbols.len()];
+    let mut referenced_by_target: HashMap<SymbolId, RefSet> = HashMap::new();
     let owner_index = OwnerSymbolIndex::new(&index.symbols);
 
-    for reference in tree_file.referenced_symbols()? {
+    for reference in references {
         let Some(owner_idx) = owner_index.find(
             reference.range.start_byte as u32,
             reference.range.end_byte as u32,
@@ -165,47 +255,48 @@ fn bind_pass(tree_file: &TreeFile, index: &mut FileSymbolIndex) -> Result<(), Tr
         };
 
         let owner_ref = symbol_ref(&index.symbols[owner_idx]);
-        let target_symbol = find_reference_target(&index.symbols, reference.name.as_str());
 
-        if let Some(target) = target_symbol {
-            push_unique_ref(&mut references_by_owner[owner_idx], symbol_ref(target));
-            push_unique_ref(
-                referenced_by_target.entry(target.id.clone()).or_default(),
-                owner_ref,
-            );
+        if let Some(&target_idx) = names.named(&reference.name).first() {
+            let target = &index.symbols[target_idx];
+            references_by_owner[owner_idx].push(symbol_ref(target));
+            referenced_by_target
+                .entry(target.id.clone())
+                .or_default()
+                .push(owner_ref);
             continue;
         }
 
         if let Some(import_ref) = import_refs_by_name.get(&reference.name) {
-            push_unique_ref(&mut references_by_owner[owner_idx], import_ref.clone());
-            push_unique_ref(&mut dependencies_by_owner[owner_idx], import_ref.clone());
+            references_by_owner[owner_idx].push(import_ref.clone());
+            dependencies_by_owner[owner_idx].push(import_ref.clone());
         }
     }
 
     let mut exported_ids = HashSet::new();
     for export in &mut index.exports {
-        if let Some(symbol) = find_export_target(&index.symbols, export) {
+        if let Some(idx) = find_export_target(&index.symbols, names, export) {
+            let symbol = &index.symbols[idx];
             export.symbol.id = Some(symbol.id.clone());
             export.symbol.qualified_name = symbol.identity.qualified_name.clone();
             exported_ids.insert(symbol.id.clone());
         }
     }
 
-    for (idx, symbol) in index.symbols.iter_mut().enumerate() {
-        symbol.relations.references = references_by_owner[idx].clone();
-        symbol.relations.dependencies = dependencies_by_owner[idx].clone();
-        symbol.relations.parent = parent_links[idx].clone();
-        symbol.relations.container = parent_links[idx].clone();
-        symbol.relations.members = members_by_parent.remove(&symbol.id).unwrap_or_default();
-        symbol.relations.referenced_by =
-            referenced_by_target.remove(&symbol.id).unwrap_or_default();
+    for ((symbol, references), dependencies) in index
+        .symbols
+        .iter_mut()
+        .zip(references_by_owner)
+        .zip(dependencies_by_owner)
+    {
+        symbol.relations.references = references.refs;
+        symbol.relations.dependencies = dependencies.refs;
+        symbol.relations.referenced_by = referenced_by_target
+            .remove(&symbol.id)
+            .map(|set| set.refs)
+            .unwrap_or_default();
         symbol.visibility.is_exported = exported_ids.contains(&symbol.id);
         symbol.provenance.parse_pass = AnalysisPass::Bind.as_str().to_string();
-        symbol.provenance.updated_at_epoch_ms = now_epoch_ms();
     }
-
-    complete_pass(index, AnalysisPass::Bind);
-    Ok(())
 }
 
 /// Semantic pass: fills initial low-risk semantic flags.
@@ -216,17 +307,9 @@ fn semantic_pass(index: &mut FileSymbolIndex) {
         }
 
         let mut semantics = SemanticFacet::default();
-        let is_recursive = symbol
-            .relations
-            .references
-            .iter()
-            .any(|reference| reference.name == symbol.identity.name);
-
-        semantics.is_recursive = Some(if is_recursive {
-            TriState::Yes
-        } else {
-            TriState::No
-        });
+        // Name-only binding can neither prove that a same-named call targets
+        // this function nor that none does.
+        semantics.is_recursive = Some(TriState::Unknown);
 
         let panics = symbol
             .relations
@@ -245,10 +328,7 @@ fn semantic_pass(index: &mut FileSymbolIndex) {
 
         symbol.semantics = semantics;
         symbol.provenance.parse_pass = AnalysisPass::Semantic.as_str().to_string();
-        symbol.provenance.updated_at_epoch_ms = now_epoch_ms();
     }
-
-    complete_pass(index, AnalysisPass::Semantic);
 }
 
 /// Docs pass: parses raw docs into structured `ParsedDocs`.
@@ -256,13 +336,10 @@ fn docs_pass(index: &mut FileSymbolIndex) {
     for symbol in &mut index.symbols {
         symbol.docs = parse_docs_facet(symbol.docs.clone());
         symbol.provenance.parse_pass = AnalysisPass::Docs.as_str().to_string();
-        symbol.provenance.updated_at_epoch_ms = now_epoch_ms();
     }
-
-    complete_pass(index, AnalysisPass::Docs);
 }
 
-fn symbol_ref(symbol: &crate::shared::SymbolRecord) -> SymbolRef {
+fn symbol_ref(symbol: &SymbolRecord) -> SymbolRef {
     SymbolRef {
         id: Some(symbol.id.clone()),
         name: symbol.identity.name.clone(),
@@ -270,14 +347,31 @@ fn symbol_ref(symbol: &crate::shared::SymbolRecord) -> SymbolRef {
     }
 }
 
-fn push_unique_ref(targets: &mut Vec<SymbolRef>, candidate: SymbolRef) {
-    let exists = targets.iter().any(|existing| {
-        existing.id == candidate.id
-            || (existing.name == candidate.name
-                && existing.qualified_name == candidate.qualified_name)
-    });
-    if !exists {
-        targets.push(candidate);
+/// An owner's references in first-seen order, without repeats: a resolved
+/// reference repeats one with the same ID, an unresolved one (no ID) repeats
+/// one with the same name and qualified name. Two missing IDs never make two
+/// references equal.
+#[derive(Debug, Clone, Default)]
+struct RefSet {
+    refs: Vec<SymbolRef>,
+    seen: HashSet<RefKey>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum RefKey {
+    Resolved(SymbolId),
+    Unresolved(String, Option<String>),
+}
+
+impl RefSet {
+    fn push(&mut self, candidate: SymbolRef) {
+        let key = match &candidate.id {
+            Some(id) => RefKey::Resolved(id.clone()),
+            None => RefKey::Unresolved(candidate.name.clone(), candidate.qualified_name.clone()),
+        };
+        if self.seen.insert(key) {
+            self.refs.push(candidate);
+        }
     }
 }
 
@@ -304,7 +398,7 @@ struct OwnerSymbolIndex {
 }
 
 impl OwnerSymbolIndex {
-    fn new(symbols: &[crate::shared::SymbolRecord]) -> Self {
+    fn new(symbols: &[SymbolRecord]) -> Self {
         let entries = symbols
             .iter()
             .enumerate()
@@ -408,65 +502,51 @@ impl OwnerSymbolNode {
     }
 }
 
-fn find_reference_target<'a>(
-    symbols: &'a [crate::shared::SymbolRecord],
-    name: &str,
-) -> Option<&'a crate::shared::SymbolRecord> {
-    symbols.iter().find(|symbol| symbol.identity.name == name)
-}
-
 /// Finds the record a child's container names: the smallest same-named
-/// declaration enclosing the child, else (for members declared outside their
-/// type, such as Rust `impl` members) the same-named declaration of the
-/// recorded container kind.
+/// declaration enclosing the child (the first of equal size), else (for
+/// members declared outside their type, such as Rust `impl` members) the
+/// first same-named declaration of the recorded container kind.
 fn find_container_symbol(
-    symbols: &[crate::shared::SymbolRecord],
+    symbols: &[SymbolRecord],
+    names: &NameIndex,
     child_idx: usize,
     container_name: &str,
-) -> Option<(crate::shared::SymbolId, SymbolRef)> {
+) -> Option<usize> {
     let child = &symbols[child_idx];
-    let enclosing = symbols
+    let candidates = names
+        .named(container_name)
         .iter()
-        .enumerate()
-        .filter(|(idx, candidate)| {
-            *idx != child_idx
-                && candidate.identity.name == container_name
-                && candidate.source.declaration_span.start_byte
-                    <= child.source.declaration_span.start_byte
-                && candidate.source.declaration_span.end_byte
-                    >= child.source.declaration_span.end_byte
+        .copied()
+        .filter(|&idx| idx != child_idx);
+    let enclosing = candidates
+        .clone()
+        .filter(|&idx| {
+            let span = &symbols[idx].source.declaration_span;
+            span.start_byte <= child.source.declaration_span.start_byte
+                && span.end_byte >= child.source.declaration_span.end_byte
         })
-        .min_by_key(|(_, candidate)| {
-            candidate
-                .source
-                .declaration_span
-                .end_byte
-                .saturating_sub(candidate.source.declaration_span.start_byte)
-        })
-        .map(|(_, candidate)| candidate);
+        .min_by_key(|&idx| {
+            let span = &symbols[idx].source.declaration_span;
+            span.end_byte.saturating_sub(span.start_byte)
+        });
 
-    enclosing
-        .or_else(|| {
-            let container_kind = child.identity.container_kind?;
-            symbols.iter().enumerate().find_map(|(idx, candidate)| {
-                (idx != child_idx
-                    && candidate.identity.name == container_name
-                    && candidate.kind == container_kind)
-                    .then_some(candidate)
-            })
-        })
-        .map(|candidate| (candidate.id.clone(), symbol_ref(candidate)))
+    enclosing.or_else(|| {
+        let container_kind = child.identity.container_kind?;
+        candidates
+            .into_iter()
+            .find(|&idx| symbols[idx].kind == container_kind)
+    })
 }
 
-fn find_export_target<'a>(
-    symbols: &'a [crate::shared::SymbolRecord],
+fn find_export_target(
+    symbols: &[SymbolRecord],
+    names: &NameIndex,
     export: &ExportRecord,
-) -> Option<&'a crate::shared::SymbolRecord> {
-    symbols.iter().find(|symbol| {
-        symbol.identity.name == export.name
-            && symbol.source.name_span.as_ref().is_some_and(|span| {
-                span.start_byte == export.span.start_byte && span.end_byte == export.span.end_byte
-            })
+) -> Option<usize> {
+    names.named(&export.name).iter().copied().find(|&idx| {
+        symbols[idx].source.name_span.as_ref().is_some_and(|span| {
+            span.start_byte == export.span.start_byte && span.end_byte == export.span.end_byte
+        })
     })
 }
 
@@ -545,12 +625,6 @@ fn parse_docs_facet(mut docs: DocsFacet) -> DocsFacet {
     }
 
     docs
-}
-
-fn complete_pass(index: &mut FileSymbolIndex, pass: AnalysisPass) {
-    if !index.completed_passes.contains(&pass) {
-        index.completed_passes.push(pass);
-    }
 }
 
 #[cfg(test)]

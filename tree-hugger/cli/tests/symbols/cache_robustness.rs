@@ -181,6 +181,42 @@ fn columns() -> Vec<Column> {
             ],
         },
         Column {
+            name: "identity.keyword",
+            record: METHOD,
+            path: &["identity", "keyword"],
+            control: None,
+            public: |out| record(out, METHOD)["identity"]["keyword"].clone(),
+            outcomes: [
+                S(json!("def")),
+                S(unknown.clone()),
+                S(unknown.clone()),
+                R,
+                R,
+                R,
+                S(json!("")),
+                R,
+                R,
+            ],
+        },
+        Column {
+            name: "source.signature_text",
+            record: METHOD,
+            path: &["source", "signature_text"],
+            control: None,
+            public: |out| record(out, METHOD)["source"]["signature_text"].clone(),
+            outcomes: [
+                S(json!("def instance_method(self) -> int")),
+                S(unknown.clone()),
+                S(unknown.clone()),
+                R,
+                R,
+                R,
+                S(json!("")),
+                R,
+                R,
+            ],
+        },
+        Column {
             name: "relations.implements",
             record: METHOD,
             path: &["relations", "implements"],
@@ -265,24 +301,6 @@ fn columns() -> Vec<Column> {
             outcomes: [S(json!(true)), R, R, R, R, R, R, R, R],
         },
     ]
-}
-
-/// Removes the per-run provenance timestamps, the only fields that differ
-/// between two computations of the same file.
-fn normalized(mut value: Value) -> Value {
-    fn strip(value: &mut Value) {
-        match value {
-            Value::Object(map) => {
-                map.remove("created_at_epoch_ms");
-                map.remove("updated_at_epoch_ms");
-                map.values_mut().for_each(strip);
-            }
-            Value::Array(items) => items.iter_mut().for_each(strip),
-            _ => {}
-        }
-    }
-    strip(&mut value);
-    value
 }
 
 fn record_mut<'a>(snapshot: &'a mut Value, name: &str) -> &'a mut Value {
@@ -387,9 +405,9 @@ fn has_sentinel(output: &Value) -> bool {
 #[test]
 fn persisted_symbol_fields_are_served_or_recomputed_per_shape() {
     let scratch = Scratch::new(&[(FILE, PYTHON_FIXTURE)]);
-    let uncached = normalized(json_of(&scratch.stdout(&UNCACHED_ARGS)));
+    let uncached = json_of(&scratch.stdout(&UNCACHED_ARGS));
     assert_eq!(
-        normalized(json_of(&scratch.stdout(&CACHED_ARGS))),
+        json_of(&scratch.stdout(&CACHED_ARGS)),
         uncached,
         "the cache-writing run must match an uncached run"
     );
@@ -462,7 +480,7 @@ fn check_column(
             Outcome::Rejected => {
                 if has_sentinel(&output) {
                     failures.push(format!("{cell}: expected rejected, entry was served"));
-                } else if normalized(output) != *uncached {
+                } else if output != *uncached {
                     failures.push(format!(
                         "{cell}: rejected, but output differs from an uncached run"
                     ));

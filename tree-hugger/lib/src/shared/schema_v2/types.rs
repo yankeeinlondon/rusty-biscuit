@@ -19,9 +19,13 @@ impl SchemaVersion {
     /// Shape before symbol kinds, declaration visibility, static markers and
     /// container kinds were preserved; no longer emitted.
     pub const V2_0: Self = Self { major: 2, minor: 0 };
-    /// Current shape, emitted on records, file indexes, CLI envelopes and
-    /// analyzer fingerprints.
+    /// Shape with record timestamps and the container named
+    /// `identity.module_path`; no longer emitted.
     pub const V3_0: Self = Self { major: 3, minor: 0 };
+    /// Current shape, emitted on records, file indexes, CLI envelopes and
+    /// analyzer fingerprints: no timestamps, `identity.container_name`,
+    /// `identity.keyword` and a filled `source.signature_text`.
+    pub const V4_0: Self = Self { major: 4, minor: 0 };
 }
 
 /// 1-based text location.
@@ -41,12 +45,19 @@ pub struct TextSpan {
 }
 
 /// Pipeline stage for symbol analysis.
+///
+/// Prerequisites run first: parse before bind, bind before semantic, parse
+/// before docs and diagnostics. A pass appears in an index's
+/// `completed_passes` only when it ran, so a missing `Diagnostics` is never
+/// evidence that a file is clean.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum AnalysisPass {
     Parse,
     Bind,
     Semantic,
     Docs,
+    /// Lint (pattern and semantic) and syntax diagnostics.
+    Diagnostics,
 }
 
 impl AnalysisPass {
@@ -57,6 +68,7 @@ impl AnalysisPass {
             Self::Bind => "bind",
             Self::Semantic => "semantic",
             Self::Docs => "docs",
+            Self::Diagnostics => "diagnostics",
         }
     }
 }

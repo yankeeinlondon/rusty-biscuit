@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use super::facets::{Attribute, SymbolRef, VisibilityLevel};
 
 /// Symbol kind taxonomy for schema v2.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum SymbolKindV2 {
     Function,
     Method,

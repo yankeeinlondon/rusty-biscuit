@@ -711,8 +711,8 @@ fn is_container_kind(kind: SymbolKindV2) -> bool {
 /// Collect the records with no owning symbol — the file's top-level symbols.
 ///
 /// A symbol is top-level only when it has neither a recorded container name
-/// (`module_path`) nor a declaration span enclosed by another symbol. Relying
-/// on `module_path` alone over-reports: the parse pass does not consistently
+/// (`container_name`) nor a declaration span enclosed by another symbol. Relying
+/// on `container_name` alone over-reports: the parse pass does not consistently
 /// populate it for locals and parameters, so those would masquerade as
 /// file-scope symbols. Span containment is the authoritative corrective signal
 /// — a parameter or local always sits inside its owning function's declaration
@@ -723,7 +723,7 @@ fn collect_top_level(records: &[SymbolRecord]) -> Vec<&SymbolRecord> {
     records
         .iter()
         .enumerate()
-        .filter(|(i, r)| r.identity.module_path.is_none() && !enclosed[*i])
+        .filter(|(i, r)| r.identity.container_name.is_none() && !enclosed[*i])
         .map(|(_, r)| r)
         .collect()
 }
@@ -1698,7 +1698,7 @@ class BigClass:
     fn top_level_excludes_locals_and_parameters() {
         // Public-boundary reproduction: ten top-level functions, each with one
         // parameter and many local assignments. The locals and parameters have
-        // no recorded container, so the old `module_path.is_none()` test
+        // no recorded container, so the old `container_name.is_none()` test
         // counted all of them as top-level (hundreds of phantom Variables and
         // Parameters) and emitted a wildly inflated ManyUnrelatedTopLevel hint.
         let dir = TempDir::new().unwrap();
@@ -2270,7 +2270,7 @@ x = 1
             SourceFacet, SymbolId, SymbolKindData, TextPoint, TextSpan, TypeFacet, VisibilityFacet,
         };
         SymbolRecord {
-            schema_version: SchemaVersion::V3_0,
+            schema_version: SchemaVersion::V4_0,
             id: SymbolId(String::new()),
             language: ProgrammingLanguage::Rust,
             kind: SymbolKindV2::Function,
@@ -2278,7 +2278,8 @@ x = 1
                 name: String::new(),
                 display_name: String::new(),
                 qualified_name: None,
-                module_path: None,
+                container_name: None,
+                keyword: None,
                 container_kind: None,
                 stable_key: String::new(),
             },
@@ -2302,8 +2303,6 @@ x = 1
                 extractor: String::new(),
                 extractor_version: String::new(),
                 parse_pass: AnalysisPass::Parse.as_str().to_string(),
-                created_at_epoch_ms: 0,
-                updated_at_epoch_ms: 0,
             },
             kind_data: SymbolKindData::Unknown,
             extensions: Default::default(),

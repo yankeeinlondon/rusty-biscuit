@@ -433,7 +433,7 @@ fn rust_trait_impl_members_record_the_implemented_trait() {
         .iter()
         .find(|record| {
             record.identity.name == "formatter"
-                && record.identity.module_path.as_deref() == Some("PublicStruct")
+                && record.identity.container_name.as_deref() == Some("PublicStruct")
         })
         .expect("formatter parameter");
     assert!(self_in_fmt.relations.implements.is_empty());
@@ -496,7 +496,7 @@ fn symbols_and_records_agree_for_every_fixture_symbol() {
                 symbol.name
             );
             assert_eq!(
-                record.identity.module_path, symbol.container_name,
+                record.identity.container_name, symbol.container_name,
                 "{label}: `{}` container",
                 symbol.name
             );

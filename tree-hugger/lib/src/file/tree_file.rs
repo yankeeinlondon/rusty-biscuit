@@ -1,11 +1,13 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use biscuit_hash::xx_hash;
-use tree_sitter::{Node, Parser, QueryCursor, StreamingIterator};
+use tree_sitter::{Node, QueryCursor, StreamingIterator};
 
+use crate::analysis::counters::count_diagnostics_run;
 use crate::error::TreeHuggerError;
 use crate::file::extract::*;
+use crate::file::query::{SymbolQuery, SymbolQueryResult};
+use crate::file::source_file::SourceFile;
 use crate::queries::{GrammarRef, QueryKind, format_rule_message, query_for, severity_for_rule};
 use crate::rule_registry::{RuleRegistry, diagnostic_metadata_from_rule};
 use crate::shared::{
@@ -14,6 +16,10 @@ use crate::shared::{
     SymbolKind, SymbolKindData, SymbolKindV2, SymbolRecord, SymbolRef, SyntaxDiagnostic,
     stable_symbol_key, symbol_id_from_stable_key,
 };
+
+mod definitions;
+
+pub(crate) use definitions::{ExtractedSymbol, MetadataSelection};
 
 /// Represents a parsed source file backed by tree-sitter.
 #[derive(Debug, Clone)]
@@ -57,40 +63,29 @@ impl TreeFile {
         path: P,
         language: Option<ProgrammingLanguage>,
     ) -> Result<Self, TreeHuggerError> {
-        let file = path.as_ref().to_path_buf();
-        let source = std::fs::read_to_string(&file).map_err(|source| TreeHuggerError::Io {
-            path: file.clone(),
-            source,
-        })?;
+        SourceFile::read_with_language(path, language)?.parse()
+    }
 
-        let detected_language = match language {
-            Some(language) => language,
-            None => ProgrammingLanguage::from_path(&file)
-                .ok_or_else(|| TreeHuggerError::UnsupportedLanguage { path: file.clone() })?,
-        };
-        let (tree_language, grammar_id) = detected_language.grammar_for_path(&file);
-
-        let mut parser = Parser::new();
-        parser
-            .set_language(&tree_language)
-            .map_err(|_| TreeHuggerError::UnsupportedLanguage { path: file.clone() })?;
-
-        let tree = parser
-            .parse(&source, None)
-            .ok_or_else(|| TreeHuggerError::ParseFailed { path: file.clone() })?;
-
-        let hash = format!("{:x}", xx_hash(&source));
-
-        Ok(Self {
+    /// Assembles a parsed file from [`SourceFile::parse`]'s parts.
+    pub(crate) fn from_parts(
+        file: PathBuf,
+        language: ProgrammingLanguage,
+        hash: String,
+        source: String,
+        tree: tree_sitter::Tree,
+        grammar: tree_sitter::Language,
+        grammar_id: &'static str,
+    ) -> Self {
+        Self {
             file,
-            language: detected_language,
+            language,
             hash,
             source,
             tree,
-            grammar: tree_language,
+            grammar,
             grammar_id,
             experimental_semantics: false,
-        })
+        }
     }
 
     /// Returns the source text of the parsed file.
@@ -244,6 +239,18 @@ impl TreeFile {
     /// ## Errors
     /// Returns an error if query compilation fails.
     pub fn referenced_symbols(&self) -> Result<Vec<ReferencedSymbol>, TreeHuggerError> {
+        let definitions = self.definitions(&MetadataSelection::ALL)?;
+        let imports = self.imported_symbols()?;
+        self.references_from(&definitions, &imports)
+    }
+
+    /// The identifier usages of this file that are not one of `definitions`'
+    /// or `imports`' own names.
+    pub(crate) fn references_from(
+        &self,
+        definitions: &[ExtractedSymbol<'_>],
+        imports: &[ImportSymbol],
+    ) -> Result<Vec<ReferencedSymbol>, TreeHuggerError> {
         let query = query_for(self.grammar_ref(), QueryKind::References)?;
 
         // Empty query means no reference rules defined for this language
@@ -258,11 +265,12 @@ impl TreeFile {
         let mut seen_ranges = HashSet::new();
         let mut definition_ranges = HashSet::new();
 
-        for symbol in self.symbols()? {
-            definition_ranges.insert((symbol.range.start_byte, symbol.range.end_byte));
+        for extracted in definitions {
+            let range = &extracted.symbol.range;
+            definition_ranges.insert((range.start_byte, range.end_byte));
         }
 
-        for import in self.imported_symbols()? {
+        for import in imports {
             definition_ranges.insert((import.range.start_byte, import.range.end_byte));
         }
 
@@ -974,14 +982,26 @@ impl TreeFile {
     /// ## Errors
     /// Returns an error if query compilation fails.
     pub fn exported_symbols(&self) -> Result<Vec<SymbolInfo>, TreeHuggerError> {
-        let symbols = self.symbol_nodes()?;
         let root = self.tree.root_node();
 
-        Ok(symbols
+        Ok(self
+            .definitions(&MetadataSelection::ALL)?
             .into_iter()
             .filter(|extracted| is_exported_definition(&extracted.symbol, extracted.anchor, root))
             .map(|extracted| extracted.symbol)
             .collect())
+    }
+
+    /// The exported subset of `definitions`, in order.
+    pub(crate) fn exports_from<'a>(
+        &self,
+        definitions: &'a [ExtractedSymbol<'_>],
+    ) -> impl Iterator<Item = &'a SymbolInfo> {
+        let root = self.tree.root_node();
+        definitions
+            .iter()
+            .filter(move |extracted| is_exported_definition(&extracted.symbol, extracted.anchor, root))
+            .map(|extracted| &extracted.symbol)
     }
 
     /// Provides the list of symbols re-exported by this file.
@@ -1003,10 +1023,10 @@ impl TreeFile {
     /// ## Errors
     /// Returns an error if query compilation fails.
     pub fn local_symbols(&self) -> Result<Vec<SymbolInfo>, TreeHuggerError> {
-        let symbols = self.symbol_nodes()?;
         let root = self.tree.root_node();
 
-        Ok(symbols
+        Ok(self
+            .definitions(&MetadataSelection::ALL)?
             .into_iter()
             .filter(|extracted| !is_exported_definition(&extracted.symbol, extracted.anchor, root))
             .map(|extracted| extracted.symbol)
@@ -1036,9 +1056,15 @@ impl TreeFile {
     ///
     /// [`try_lint_diagnostics`]: Self::try_lint_diagnostics
     pub fn lint_diagnostics(&self) -> Vec<LintDiagnostic> {
+        count_diagnostics_run();
         let mut diagnostics = Vec::new();
         diagnostics.extend(self.run_pattern_diagnostics().unwrap_or_default());
-        diagnostics.extend(self.run_semantic_diagnostics().unwrap_or_default());
+        let semantic = self.definitions(&MetadataSelection::ALL).and_then(|definitions| {
+            let imports = self.imported_symbols()?;
+            let references = self.references_from(&definitions, &imports)?;
+            Ok(self.run_semantic_diagnostics(&definitions, &imports, &references))
+        });
+        diagnostics.extend(semantic.unwrap_or_default());
         self.apply_ignore_directives(diagnostics)
     }
 
@@ -1053,9 +1079,23 @@ impl TreeFile {
     /// extraction fails. An empty list means the file is clean, never that the
     /// analyzer failed to run.
     pub fn try_lint_diagnostics(&self) -> Result<Vec<LintDiagnostic>, TreeHuggerError> {
-        let mut diagnostics = Vec::new();
-        diagnostics.extend(self.run_pattern_diagnostics()?);
-        diagnostics.extend(self.run_semantic_diagnostics()?);
+        let definitions = self.definitions(&MetadataSelection::ALL)?;
+        let imports = self.imported_symbols()?;
+        let references = self.references_from(&definitions, &imports)?;
+        self.lint_diagnostics_from(&definitions, &imports, &references)
+    }
+
+    /// Lint diagnostics from already extracted definitions, imports and
+    /// references, filtered by ignore directives.
+    pub(crate) fn lint_diagnostics_from(
+        &self,
+        definitions: &[ExtractedSymbol<'_>],
+        imports: &[ImportSymbol],
+        references: &[ReferencedSymbol],
+    ) -> Result<Vec<LintDiagnostic>, TreeHuggerError> {
+        count_diagnostics_run();
+        let mut diagnostics = self.run_pattern_diagnostics()?;
+        diagnostics.extend(self.run_semantic_diagnostics(definitions, imports, references));
         Ok(self.apply_ignore_directives(diagnostics))
     }
 
@@ -1121,29 +1161,32 @@ impl TreeFile {
     }
 
     /// Runs semantic lint checks for undefined/unused symbols.
-    fn run_semantic_diagnostics(&self) -> Result<Vec<LintDiagnostic>, TreeHuggerError> {
+    fn run_semantic_diagnostics(
+        &self,
+        definitions: &[ExtractedSymbol<'_>],
+        imports: &[ImportSymbol],
+        references: &[ReferencedSymbol],
+    ) -> Vec<LintDiagnostic> {
         let mut diagnostics = Vec::new();
 
-        // Gather all necessary data for semantic analysis
-        let definitions = self.symbols()?;
-        let imports = self.imported_symbols()?;
-        let exports = self.exported_symbols()?;
-        let references = self.referenced_symbols()?;
-
         // Build lookup sets
-        let defined_names: std::collections::HashSet<&str> =
-            definitions.iter().map(|s| s.name.as_str()).collect();
+        let defined_names: std::collections::HashSet<&str> = definitions
+            .iter()
+            .map(|extracted| extracted.symbol.name.as_str())
+            .collect();
         let imported_names: std::collections::HashSet<&str> =
             imports.iter().map(|i| i.name.as_str()).collect();
-        let exported_names: std::collections::HashSet<&str> =
-            exports.iter().map(|e| e.name.as_str()).collect();
+        let exported_names: std::collections::HashSet<&str> = self
+            .exports_from(definitions)
+            .map(|symbol| symbol.name.as_str())
+            .collect();
         let referenced_names: std::collections::HashSet<&str> =
             references.iter().map(|r| r.name.as_str()).collect();
 
         // Check for undefined symbols (experimental)
         if self.experimental_semantics {
             diagnostics.extend(self.check_undefined_symbols(
-                &references,
+                references,
                 &defined_names,
                 &imported_names,
             ));
@@ -1152,19 +1195,19 @@ impl TreeFile {
         // Check for unused symbols (experimental)
         if self.experimental_semantics {
             diagnostics.extend(self.check_unused_symbols(
-                &definitions,
+                definitions.iter().map(|extracted| &extracted.symbol),
                 &exported_names,
                 &referenced_names,
             ));
         }
 
         // Check for unused imports (stable)
-        diagnostics.extend(self.check_unused_imports(&imports, &referenced_names));
+        diagnostics.extend(self.check_unused_imports(imports, &referenced_names));
 
         // Check for qualified references with undefined qualifiers (experimental)
         if self.experimental_semantics {
             diagnostics.extend(self.check_qualified_references(
-                &references,
+                references,
                 &defined_names,
                 &imported_names,
             ));
@@ -1173,7 +1216,7 @@ impl TreeFile {
         // Check for dead code
         diagnostics.extend(self.check_dead_code());
 
-        Ok(diagnostics)
+        diagnostics
     }
 
     /// Checks for code that follows unconditional exit statements.
@@ -1316,9 +1359,9 @@ impl TreeFile {
     }
 
     /// Checks for definitions that are neither exported nor referenced.
-    fn check_unused_symbols(
+    fn check_unused_symbols<'a>(
         &self,
-        definitions: &[SymbolInfo],
+        definitions: impl Iterator<Item = &'a SymbolInfo>,
         exported_names: &std::collections::HashSet<&str>,
         referenced_names: &std::collections::HashSet<&str>,
     ) -> Vec<LintDiagnostic> {
@@ -1607,18 +1650,26 @@ impl TreeFile {
     /// extraction fails. An empty list means the file is clean, never that the
     /// analyzer failed to run.
     pub fn try_diagnostics(&self) -> Result<Vec<Diagnostic>, TreeHuggerError> {
-        let mut diagnostics = Vec::new();
+        let definitions = self.definitions(&MetadataSelection::ALL)?;
+        let imports = self.imported_symbols()?;
+        let references = self.references_from(&definitions, &imports)?;
+        self.diagnostics_from(&definitions, &imports, &references)
+    }
 
-        // Collect lint diagnostics (includes both pattern-based and semantic)
-        for lint in self.try_lint_diagnostics()? {
-            diagnostics.push(Diagnostic::from_lint(lint));
-        }
-
-        // Collect syntax diagnostics
-        for syntax in self.syntax_diagnostics() {
-            diagnostics.push(Diagnostic::from_syntax(syntax));
-        }
-
+    /// Lint and syntax diagnostics from already extracted definitions,
+    /// imports and references.
+    pub(crate) fn diagnostics_from(
+        &self,
+        definitions: &[ExtractedSymbol<'_>],
+        imports: &[ImportSymbol],
+        references: &[ReferencedSymbol],
+    ) -> Result<Vec<Diagnostic>, TreeHuggerError> {
+        let mut diagnostics: Vec<Diagnostic> = self
+            .lint_diagnostics_from(definitions, imports, references)?
+            .into_iter()
+            .map(Diagnostic::from_lint)
+            .collect();
+        diagnostics.extend(self.syntax_diagnostics().into_iter().map(Diagnostic::from_syntax));
         Ok(diagnostics)
     }
 
@@ -1653,7 +1704,7 @@ impl TreeFile {
     /// Returns an error if query compilation fails.
     pub fn symbols(&self) -> Result<Vec<SymbolInfo>, TreeHuggerError> {
         Ok(self
-            .symbol_nodes()?
+            .definitions(&MetadataSelection::ALL)?
             .into_iter()
             .map(|extracted| extracted.symbol)
             .collect())
@@ -1667,6 +1718,20 @@ impl TreeFile {
     /// ## Errors
     /// Returns an error if symbol extraction or query compilation fails.
     pub fn symbol_records(&self) -> Result<Vec<SymbolRecord>, TreeHuggerError> {
+        let selection = MetadataSelection::ALL;
+        Ok(self.records_from(self.definitions(&selection)?, &selection))
+    }
+
+    /// Converts definitions to parse-pass records, in the same order.
+    ///
+    /// Every definition yields a record with its identity, ID, spans and
+    /// container; the header texts, keyword, type-alias target and
+    /// implemented trait are filled only for kinds `selection` wants.
+    pub(crate) fn records_from(
+        &self,
+        definitions: Vec<ExtractedSymbol<'_>>,
+        selection: &MetadataSelection,
+    ) -> Vec<SymbolRecord> {
         let root = self.tree.root_node();
         let mut ordinals: HashMap<(SymbolKindV2, Option<String>, String), u32> = HashMap::new();
         let mut records = Vec::new();
@@ -1675,9 +1740,11 @@ impl TreeFile {
             symbol,
             anchor,
             declaration,
-        } in self.symbol_nodes()?
+        } in definitions
         {
+            let wanted = selection.wants(symbol.kind);
             let name_span = text_span_from_code_range(&symbol.range);
+            let name_bytes = symbol.range.start_byte..symbol.range.end_byte;
             let is_exported = is_exported_definition(&symbol, anchor, root);
             let mut record: SymbolRecord = symbol.into();
 
@@ -1688,7 +1755,7 @@ impl TreeFile {
                 .unwrap_or_else(|| record.identity.name.clone());
             let ordinal_key = (
                 record.kind,
-                record.identity.module_path.clone(),
+                record.identity.container_name.clone(),
                 record.identity.name.clone(),
             );
             let ordinal_slot = ordinals.entry(ordinal_key).or_insert(0);
@@ -1698,7 +1765,6 @@ impl TreeFile {
             record.source.declaration_span = text_span_for_node(anchor);
             record.source.name_span = Some(name_span);
             record.source.body_span = body_span_for_declaration(anchor);
-            record.source.declaration_text = declaration_text(declaration, &self.source);
             record.visibility.is_exported = is_exported;
             record.identity.stable_key = stable_symbol_key(
                 record.language,
@@ -1709,16 +1775,22 @@ impl TreeFile {
             );
             record.id = symbol_id_from_stable_key(&record.identity.stable_key);
 
-            if record.kind == SymbolKindV2::TypeAlias {
-                record.kind_data = SymbolKindData::TypeAlias(TypeAliasData {
-                    aliased_type_text: extract_type_alias_target(declaration, &self.source),
-                    aliased_type_ast: None,
-                    is_recursive: false,
-                });
+            if wanted {
+                record.source.declaration_text = declaration_text(declaration, &self.source);
+                record.source.signature_text =
+                    signature_text(declaration, name_bytes, self.language, &self.source);
+                record.identity.keyword = declaration_keyword(declaration, self.language);
+                if record.kind == SymbolKindV2::TypeAlias {
+                    record.kind_data = SymbolKindData::TypeAlias(TypeAliasData {
+                        aliased_type_text: extract_type_alias_target(declaration, &self.source),
+                        aliased_type_ast: None,
+                        is_recursive: false,
+                    });
+                }
             }
 
             implemented_traits.push(
-                (self.language == ProgrammingLanguage::Rust)
+                (wanted && self.language == ProgrammingLanguage::Rust)
                     .then(|| impl_of_member(declaration))
                     .flatten()
                     .and_then(|impl_item| impl_trait_name(impl_item, &self.source)),
@@ -1746,12 +1818,13 @@ impl TreeFile {
             });
         }
 
-        Ok(records)
+        records
     }
 
     /// Runs the full v2 analysis pipeline and returns a per-file symbol index.
     ///
-    /// This executes parse, bind, semantic, and docs passes in order.
+    /// This executes the parse, bind, semantic, docs and diagnostics passes:
+    /// [`SymbolQuery::complete_index`] over every kind.
     ///
     /// ## Returns
     /// Returns the staged `FileSymbolIndex` output for the file.
@@ -1759,18 +1832,16 @@ impl TreeFile {
     /// ## Errors
     /// Returns an error if any extraction pass fails.
     pub fn symbol_index_v2(&self) -> Result<FileSymbolIndex, TreeHuggerError> {
-        self.symbol_index_with_passes(&[
-            AnalysisPass::Parse,
-            AnalysisPass::Bind,
-            AnalysisPass::Semantic,
-            AnalysisPass::Docs,
-        ])
+        Ok(self.query(&SymbolQuery::complete_index())?.index)
     }
 
-    /// Runs selected analysis passes and returns a v2 symbol index.
+    /// Runs selected analysis passes, after their prerequisites, and returns
+    /// a v2 symbol index of every kind.
     ///
     /// ## Returns
     /// Returns `FileSymbolIndex` populated through the requested pass level.
+    /// Diagnostics are included only when [`AnalysisPass::Diagnostics`] is
+    /// requested.
     ///
     /// ## Errors
     /// Returns an error if any selected pass fails.
@@ -1781,334 +1852,12 @@ impl TreeFile {
         crate::analysis::analyze_file(self, passes)
     }
 
-    fn symbol_nodes(&self) -> Result<Vec<ExtractedSymbol<'_>>, TreeHuggerError> {
-        let query = query_for(self.grammar_ref(), QueryKind::Locals)?;
-        let mut cursor = QueryCursor::new();
-        let root = self.tree.root_node();
-        let capture_names = query.capture_names();
-        let mut deduped: HashMap<(usize, usize, String), PendingSymbol<'_>> = HashMap::new();
-        let is_ecma_module = matches!(
-            self.language,
-            ProgrammingLanguage::JavaScript | ProgrammingLanguage::TypeScript
-        ) && is_ecma_module_file(&self.file, root, &self.source);
-
-        let mut matches = cursor.matches(query.as_ref(), root, self.source.as_bytes());
-        matches.advance();
-
-        while let Some(query_match) = matches.get() {
-            // First pass: collect context nodes for this match
-            let mut context_node: Option<Node<'_>> = None;
-            for capture in query_match.captures {
-                let capture_name = capture_names
-                    .get(capture.index as usize)
-                    .copied()
-                    .unwrap_or_default();
-
-                if capture_name.ends_with(".context") {
-                    context_node = Some(capture.node);
-                    break;
-                }
-            }
-
-            // Second pass: process symbol definitions
-            for capture in query_match.captures {
-                let capture_name = capture_names
-                    .get(capture.index as usize)
-                    .copied()
-                    .unwrap_or_default();
-
-                if capture_name == "local.definition.import" {
-                    continue;
-                }
-
-                let base_kind = match symbol_kind_from_capture(capture_name) {
-                    Some(kind) => kind,
-                    None => continue,
-                };
-                let declaration = context_node.map_or_else(
-                    || resolve_declaration_node(capture.node),
-                    declaration_for_context,
-                );
-                let kind = refine_symbol_kind(
-                    base_kind,
-                    capture.node,
-                    declaration,
-                    self.language,
-                    &self.source,
-                );
-                let context_node = context_node.or_else(|| {
-                    implied_c_function_context(self.language, kind, capture.node, declaration)
-                });
-                let anchor = context_node.unwrap_or(capture.node);
-                let container = find_symbol_container(declaration, self.language, &self.source);
-
-                let name = capture
-                    .node
-                    .utf8_text(self.source.as_bytes())
-                    .map(str::to_string)
-                    .unwrap_or_default();
-
-                let declaration_context = DeclarationContext {
-                    language: self.language,
-                    source: &self.source,
-                    name: capture.node,
-                    root,
-                    is_ecma_module,
-                    kind,
-                    is_local: is_local_declaration(declaration, self.language),
-                };
-                let visibility = extract_visibility(declaration, &declaration_context);
-                let is_static = extract_is_static(declaration, &declaration_context);
-                let is_static_storage =
-                    extract_is_static_storage(declaration, &declaration_context);
-                let signature = kind.is_function().then(|| {
-                    extract_signature(declaration, capture.node, self.language, &self.source, is_static)
-                });
-                let (type_metadata, doc_comment) = if let Some(ctx) = context_node {
-                    let type_meta = if kind.is_type() || kind == SymbolKind::Class {
-                        extract_type_metadata(ctx, self.language, &self.source)
-                    } else {
-                        None
-                    };
-                    let doc = extract_doc_comment(ctx, self.language, &self.source);
-                    (type_meta, doc)
-                } else if is_c_typedef_name(self.language, kind, declaration) {
-                    // A typedef name behind a declarator (`typedef struct s *P;`)
-                    // has no context capture; its doc comment precedes the
-                    // typedef, but the aliased struct's fields are not its own.
-                    (None, extract_doc_comment(declaration, self.language, &self.source))
-                } else {
-                    (None, None)
-                };
-
-                let symbol = SymbolInfo {
-                    name: name.clone(),
-                    kind,
-                    range: range_for_node(capture.node),
-                    language: self.language,
-                    file: self.file.clone(),
-                    container_name: container.as_ref().map(|container| container.name.clone()),
-                    // Resolved below, once every symbol's kind is known.
-                    container_kind: None,
-                    doc_comment,
-                    visibility,
-                    is_static,
-                    is_static_storage,
-                    signature,
-                    type_metadata,
-                };
-
-                let key = (symbol.range.start_byte, symbol.range.end_byte, name);
-                let priority = symbol_kind_priority(symbol.kind);
-                let pending = PendingSymbol {
-                    extracted: ExtractedSymbol {
-                        symbol,
-                        anchor,
-                        declaration,
-                    },
-                    container,
-                    priority,
-                };
-
-                if let Some(existing) = deduped.get_mut(&key) {
-                    if priority > existing.priority {
-                        *existing = pending;
-                    } else if priority == existing.priority {
-                        let existing_symbol = &mut existing.extracted.symbol;
-                        let symbol = pending.extracted.symbol;
-                        if existing_symbol.signature.is_none() {
-                            existing_symbol.signature = symbol.signature;
-                            existing_symbol.visibility = symbol.visibility;
-                            existing_symbol.is_static = symbol.is_static;
-                            existing_symbol.is_static_storage = symbol.is_static_storage;
-                        }
-                        if existing_symbol.type_metadata.is_none() {
-                            existing_symbol.type_metadata = symbol.type_metadata;
-                        }
-                        if existing_symbol.doc_comment.is_none() {
-                            existing_symbol.doc_comment = symbol.doc_comment;
-                        }
-                    }
-                } else {
-                    deduped.insert(key, pending);
-                }
-            }
-
-            matches.advance();
-        }
-
-        let mut pending: Vec<PendingSymbol<'_>> = deduped.into_values().collect();
-        pending.sort_by_key(|entry| {
-            (
-                entry.extracted.symbol.range.start_byte,
-                entry.extracted.symbol.range.end_byte,
-            )
-        });
-
-        align_field_metadata(&mut pending);
-
-        let mut kinds_by_node: HashMap<usize, SymbolKind> = HashMap::new();
-        for entry in &pending {
-            for node in [entry.extracted.declaration, entry.extracted.anchor] {
-                kinds_by_node
-                    .entry(node.id())
-                    .or_insert(entry.extracted.symbol.kind);
-            }
-        }
-        let container_kinds: Vec<Option<SymbolKind>> = pending
-            .iter()
-            .map(|entry| {
-                resolve_container_kind(entry.container.as_ref(), &kinds_by_node, &pending)
-            })
-            .collect();
-
-        Ok(pending
-            .into_iter()
-            .zip(container_kinds)
-            .map(|(entry, container_kind)| {
-                let mut extracted = entry.extracted;
-                extracted.symbol.container_kind = container_kind;
-                extracted
-            })
-            .collect())
-    }
-}
-
-/// A symbol with the nodes it was extracted from.
-struct ExtractedSymbol<'tree> {
-    symbol: SymbolInfo,
-    /// The query's context capture (for a C/C++ function captured without
-    /// one, [`implied_c_function_context`]), else the name: the record's
-    /// declaration span.
-    anchor: Node<'tree>,
-    /// The declaration the name belongs to: the source of visibility, static
-    /// flags, signature and declaration text.
-    declaration: Node<'tree>,
-}
-
-struct PendingSymbol<'tree> {
-    extracted: ExtractedSymbol<'tree>,
-    container: Option<ContainerRef<'tree>>,
-    priority: u8,
-}
-
-/// A type's metadata field list is completed from, and agrees with, the
-/// standalone `Field`, `Property` and `Constant` symbols the type directly
-/// contains, so `hug classes` (metadata) and `hug symbols` (standalone
-/// symbols) list the same members with the same flags:
-///
-/// - an entry with a standalone symbol of the same name copies its access and
-///   member `static` (the k-th entry of a name pairs with the k-th symbol of
-///   that name);
-/// - a standalone member no metadata reader listed is added, with its doc
-///   comment and no type annotation;
-/// - entries with no standalone symbol (record components, Rust tuple
-///   positions, Go fields, Scala class parameters) keep what the reader read.
-///
-/// The result is in source order: an entry without a standalone symbol stays
-/// after the entry the reader listed before it. Enum owners are not
-/// completed: they list variants, and a Rust struct-variant field names the
-/// enum as its container.
-fn align_field_metadata(pending: &mut [PendingSymbol<'_>]) {
-    struct Member {
-        owner: usize,
-        start: usize,
-        name: String,
-        visibility: Option<Visibility>,
-        is_static: bool,
-        doc_comment: Option<String>,
-    }
-
-    let members: Vec<Member> = pending
-        .iter()
-        .filter_map(|entry| {
-            let ContainerLookup::Node { node, .. } = entry.container.as_ref()?.lookup else {
-                return None;
-            };
-            let symbol = &entry.extracted.symbol;
-            matches!(
-                symbol.kind,
-                SymbolKind::Field | SymbolKind::Property | SymbolKind::Constant
-            )
-            .then(|| Member {
-                owner: node.id(),
-                start: symbol.range.start_byte,
-                name: symbol.name.clone(),
-                visibility: symbol.visibility,
-                is_static: symbol.is_static,
-                doc_comment: symbol.doc_comment.clone(),
-            })
-        })
-        .collect();
-
-    for entry in pending.iter_mut() {
-        let symbol = &mut entry.extracted.symbol;
-        if !(symbol.kind.is_type() || symbol.kind == SymbolKind::Class)
-            || symbol.kind == SymbolKind::Enum
-        {
-            continue;
-        }
-        let owners = [entry.extracted.declaration.id(), entry.extracted.anchor.id()];
-        let own: Vec<&Member> = members
-            .iter()
-            .filter(|member| owners.contains(&member.owner))
-            .collect();
-        if own.is_empty() {
-            continue;
-        }
-        let metadata = symbol.type_metadata.get_or_insert_with(TypeMetadata::new);
-
-        let mut paired = vec![false; own.len()];
-        let mut positioned: Vec<(usize, FieldInfo)> = Vec::new();
-        let mut last_start = 0;
-        for mut field in metadata.fields.drain(..) {
-            if let Some(index) = (0..own.len()).find(|&index| !paired[index] && own[index].name == field.name) {
-                paired[index] = true;
-                field.visibility = own[index].visibility;
-                field.is_static = own[index].is_static;
-                last_start = own[index].start;
-            }
-            positioned.push((last_start, field));
-        }
-        for (member, _) in own.iter().zip(&paired).filter(|(_, paired)| !**paired) {
-            positioned.push((
-                member.start,
-                FieldInfo {
-                    name: member.name.clone(),
-                    type_annotation: None,
-                    doc_comment: member.doc_comment.clone(),
-                    visibility: member.visibility,
-                    is_static: member.is_static,
-                },
-            ));
-        }
-        positioned.sort_by_key(|(start, _)| *start);
-        metadata.fields = positioned.into_iter().map(|(_, field)| field).collect();
-    }
-}
-
-/// The container's kind is the kind extracted for the container's own
-/// declaration, so a container and its standalone symbol never disagree.
-fn resolve_container_kind(
-    container: Option<&ContainerRef<'_>>,
-    kinds_by_node: &HashMap<usize, SymbolKind>,
-    symbols: &[PendingSymbol<'_>],
-) -> Option<SymbolKind> {
-    let container = container?;
-    match container.lookup {
-        ContainerLookup::Node { node, fallback } => {
-            Some(kinds_by_node.get(&node.id()).copied().unwrap_or(fallback))
-        }
-        // Absent when the type is declared elsewhere, or when same-named
-        // declarations in this file disagree on kind.
-        ContainerLookup::SameFileType => {
-            let mut kinds = symbols
-                .iter()
-                .map(|entry| &entry.extracted.symbol)
-                .filter(|symbol| symbol.kind.is_type() && symbol.name == container.name)
-                .map(|symbol| symbol.kind);
-            let first = kinds.next()?;
-            kinds.all(|kind| kind == first).then_some(first)
-        }
+    /// Runs `query`: plans the passes its capabilities need and returns the
+    /// selected records with what was computed.
+    ///
+    /// ## Errors
+    /// Returns an error if any planned pass fails.
+    pub fn query(&self, query: &SymbolQuery) -> Result<SymbolQueryResult, TreeHuggerError> {
+        crate::analysis::run_query(self, query)
     }
 }

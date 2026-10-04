@@ -23,7 +23,7 @@ fn assert_exported(language: ProgrammingLanguage, name: &str, container: Option<
         let record = records
             .iter()
             .find(|record| {
-                record.identity.name == name && record.identity.module_path.as_deref() == container
+                record.identity.name == name && record.identity.container_name.as_deref() == container
             })
             .unwrap_or_else(|| panic!("{}: no `{name}` in {path}", language.name()));
         assert_eq!(

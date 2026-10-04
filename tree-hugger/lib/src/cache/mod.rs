@@ -362,7 +362,7 @@ impl InProcessCache {
                         stats.symbol_misses += 1;
                     }
                 }
-                AnalysisPass::Semantic | AnalysisPass::Docs => {
+                AnalysisPass::Semantic | AnalysisPass::Docs | AnalysisPass::Diagnostics => {
                     if info.hit {
                         stats.diagnostic_hits += 1;
                     } else {
@@ -486,12 +486,10 @@ pub struct SymbolSnapshot {
     pub imports: Vec<ImportRecord>,
     pub exports: Vec<ExportRecord>,
     pub diagnostics: Vec<Diagnostic>,
-    pub created_at_epoch_ms: u64,
 }
 
 impl From<FileSymbolIndex> for SymbolSnapshot {
     fn from(index: FileSymbolIndex) -> Self {
-        let now = crate::shared::now_epoch_ms();
         Self {
             key: FileCacheKey {
                 file_path: index.file,
@@ -510,7 +508,6 @@ impl From<FileSymbolIndex> for SymbolSnapshot {
             imports: index.imports,
             exports: index.exports,
             diagnostics: index.diagnostics,
-            created_at_epoch_ms: now,
         }
     }
 }
@@ -635,7 +632,7 @@ mod tests {
 
     fn sample_fingerprint() -> AnalyzerFingerprint {
         AnalyzerFingerprint {
-            schema_version: SchemaVersion::V3_0,
+            schema_version: SchemaVersion::V4_0,
             tree_hugger_version: "0.1.0".to_string(),
             grammar_fingerprint: "g1".to_string(),
             query_fingerprint: "q1".to_string(),
@@ -682,7 +679,6 @@ mod tests {
             imports: Vec::new(),
             exports: Vec::new(),
             diagnostics: Vec::new(),
-            created_at_epoch_ms: 0,
         };
         cache.put(snapshot);
 
@@ -695,7 +691,7 @@ mod tests {
     #[test]
     fn pass_fingerprint_digest_is_deterministic() {
         let fp = PassFingerprint {
-            schema_version: SchemaVersion::V3_0,
+            schema_version: SchemaVersion::V4_0,
             tree_hugger_version: "0.1.0".to_string(),
             grammar_version: "0.24.0".to_string(),
             grammar_id: "rust".to_string(),
@@ -713,7 +709,7 @@ mod tests {
     #[test]
     fn pass_fingerprint_changes_with_tool_version() {
         let base = PassFingerprint {
-            schema_version: SchemaVersion::V3_0,
+            schema_version: SchemaVersion::V4_0,
             tree_hugger_version: "0.1.0".to_string(),
             grammar_version: "0.24.0".to_string(),
             grammar_id: "rust".to_string(),

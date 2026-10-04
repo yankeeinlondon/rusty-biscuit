@@ -1155,7 +1155,7 @@ fn main() -> Result<(), TreeHuggerError> {
                 .unwrap_or(ProgrammingLanguage::Rust);
 
             let output = JsonOutput {
-                schema_version: SchemaVersion::V3_0,
+                schema_version: SchemaVersion::V4_0,
                 root_dir,
                 language: package_language,
                 files: summaries.clone(),
@@ -1644,7 +1644,7 @@ fn analyze_tree_file(
         language: tree_file.language,
         file_hash: tree_file.hash.clone(),
         analyzer_fingerprint: AnalyzerFingerprint {
-            schema_version: SchemaVersion::V3_0,
+            schema_version: SchemaVersion::V4_0,
             tree_hugger_version: env!("CARGO_PKG_VERSION").to_string(),
             grammar_fingerprint: tree_file.language.query_name().to_string(),
             // Moves with every extraction change, so a warm cache never serves

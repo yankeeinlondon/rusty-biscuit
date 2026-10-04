@@ -1,13 +1,14 @@
-//! Test 1 of `2026-10-03-visibility-and-kind`: every supported language is
-//! covered by a primary symbol fixture and by rows in the kind and visibility
-//! matrices (and the static matrix, where it has static members), and every
-//! symbol fixture is valid input.
+//! Every supported language is covered by a primary symbol fixture and by
+//! rows in the kind, visibility, keyword and signature-text matrices (and the
+//! static matrix, where it has static members), and every symbol fixture is
+//! valid input.
 
 use tree_hugger::{ProgrammingLanguage, SymbolKind, TreeFile};
 
 use crate::symbols_fixtures::{
     all_fixtures, display_name, multi_fixture_dir, multi_fixtures, primary_fixture,
 };
+use crate::symbols_header::{KEYWORD_MATRIX, SHAPES, SIGNATURE_MATRIX};
 use crate::symbols_kinds::KIND_MATRIX;
 use crate::symbols_static::{STATIC_LANGUAGES, STATIC_MATRIX};
 use crate::symbols_visibility::VISIBILITY_MATRIX;
@@ -110,6 +111,18 @@ fn every_language_has_matrix_rows() {
             "{} has no visibility-matrix row",
             language.name()
         );
+        assert!(
+            KEYWORD_MATRIX.iter().any(|row| row.0 == language),
+            "{} has no keyword-matrix row",
+            language.name()
+        );
+        for shape in SHAPES {
+            assert!(
+                SIGNATURE_MATRIX.iter().any(|row| row.0 == language && row.1 == *shape),
+                "{} has no signature-matrix row for {shape:?} (add a case, NotApplicable or Unsupported)",
+                language.name()
+            );
+        }
     }
     for language in STATIC_LANGUAGES {
         assert!(

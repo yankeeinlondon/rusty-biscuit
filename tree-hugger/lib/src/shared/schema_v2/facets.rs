@@ -12,12 +12,20 @@ pub struct IdentityFacet {
     pub display_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub qualified_name: Option<String>,
+    /// Name of the declaration that directly contains this one (a type,
+    /// module, namespace or function); absent at file level.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub module_path: Option<String>,
-    /// Kind of the container named by `module_path`; absent when there is
+    pub container_name: Option<String>,
+    /// Kind of the container named by `container_name`; absent when there is
     /// no container or its kind cannot be determined from the file.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub container_kind: Option<SymbolKindV2>,
+    /// The keyword token that introduces the declaration (`fn`, `struct`,
+    /// `def`, `const`, `my`, ...), read from the syntax tree, never from
+    /// source text; absent when the construct has none (a Java method, a C
+    /// variable).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub keyword: Option<String>,
     pub stable_key: String,
 }
 
@@ -34,8 +42,13 @@ pub struct SourceFacet {
     pub doc_span: Option<TextSpan>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_text: Option<String>,
+    /// Evidence: the declaration node's text up to its body, including
+    /// initializers and the annotations the grammar parses inside the node.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub declaration_text: Option<String>,
+    /// Display header: a contiguous sub-range of `declaration_text` without
+    /// leading in-node annotations, initializers, a terminator or a trailing
+    /// `=`, `=>` or `:`; absent when the header cannot be isolated.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signature_text: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -317,6 +330,4 @@ pub struct ProvenanceFacet {
     pub extractor: String,
     pub extractor_version: String,
     pub parse_pass: String,
-    pub created_at_epoch_ms: u64,
-    pub updated_at_epoch_ms: u64,
 }

@@ -205,7 +205,7 @@ fn container_kind_survives_both_conversions() {
         input.container_kind = Some(v1);
         let (record, back) = round_trip(input);
         assert_eq!(record.identity.container_kind, Some(v2), "container {v1:?} -> record");
-        assert_eq!(record.identity.module_path.as_deref(), Some("Box"));
+        assert_eq!(record.identity.container_name.as_deref(), Some("Box"));
         assert_eq!(back.container_kind, Some(v1), "container {v2:?} -> v1");
         assert_eq!(back.container_name.as_deref(), Some("Box"));
     }
@@ -274,7 +274,7 @@ fn serialized_record_round_trips_the_new_fields() {
     input.visibility = Some(Visibility::ProtectedInternal);
     input.is_static_storage = true;
     let record = SymbolRecord::from(input);
-    assert_eq!(record.schema_version, SchemaVersion::V3_0);
+    assert_eq!(record.schema_version, SchemaVersion::V4_0);
 
     let first = serde_json::to_string(&record).expect("serialize");
     let parsed: SymbolRecord = serde_json::from_str(&first).expect("deserialize");
@@ -283,7 +283,7 @@ fn serialized_record_round_trips_the_new_fields() {
     let reparsed: SymbolRecord = serde_json::from_str(&second).expect("re-deserialize");
 
     for record in [&parsed, &reparsed] {
-        assert_eq!(record.schema_version, SchemaVersion::V3_0);
+        assert_eq!(record.schema_version, SchemaVersion::V4_0);
         assert_eq!(record.kind, SymbolKindV2::Constructor);
         assert_eq!(record.identity.container_kind, Some(SymbolKindV2::Class));
         assert_eq!(record.visibility.level, VisibilityLevel::ProtectedInternal);

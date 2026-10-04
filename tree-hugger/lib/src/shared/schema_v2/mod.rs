@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use biscuit_hash::blake3_hash;
 use serde::{Deserialize, Serialize};
@@ -107,14 +106,6 @@ pub fn stable_symbol_key(
 /// Converts a stable symbol key to a deterministic `SymbolId`.
 pub fn symbol_id_from_stable_key(stable_key: &str) -> SymbolId {
     SymbolId(blake3_hash(stable_key))
-}
-
-/// Returns current unix timestamp in milliseconds.
-pub fn now_epoch_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis() as u64)
-        .unwrap_or(0)
 }
 
 // Every conversion below is a wildcard-free `match`, so a variant added on
@@ -375,8 +366,6 @@ impl From<SymbolInfo> for SymbolRecord {
             qualified_name.as_deref().unwrap_or(&value.name),
             0,
         );
-        let now = now_epoch_ms();
-
         let level = VisibilityLevel::from(value.visibility);
 
         let mut comments = Vec::new();
@@ -424,7 +413,7 @@ impl From<SymbolInfo> for SymbolRecord {
         let modifiers = modifiers_from_symbol(&value);
 
         Self {
-            schema_version: SchemaVersion::V3_0,
+            schema_version: SchemaVersion::V4_0,
             id: symbol_id_from_stable_key(&stable_key),
             language: value.language,
             kind,
@@ -432,8 +421,9 @@ impl From<SymbolInfo> for SymbolRecord {
                 name: value.name.clone(),
                 display_name: value.name,
                 qualified_name,
-                module_path: value.container_name,
+                container_name: value.container_name,
                 container_kind: value.container_kind.map(SymbolKindV2::from),
+                keyword: None,
                 stable_key,
             },
             source: SourceFacet {
@@ -479,8 +469,6 @@ impl From<SymbolInfo> for SymbolRecord {
                     crate::file::EXTRACTOR_REVISION
                 ),
                 parse_pass: AnalysisPass::Parse.as_str().to_string(),
-                created_at_epoch_ms: now,
-                updated_at_epoch_ms: now,
             },
             kind_data,
             extensions: BTreeMap::new(),
@@ -590,7 +578,7 @@ impl TryFrom<SymbolRecord> for SymbolInfo {
             range: code_range_from_span(&value.source.declaration_span),
             language: value.language,
             file: value.source.file_path,
-            container_name: value.identity.module_path,
+            container_name: value.identity.container_name,
             container_kind: value.identity.container_kind.map(SymbolKind::from),
             doc_comment: value.docs.raw_doc,
             visibility: value.visibility.level.into(),
@@ -681,7 +669,7 @@ mod tests {
         let record: SymbolRecord = symbol.into();
         let json = serde_json::to_string(&record).expect("serialize");
         let parsed: SymbolRecord = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(parsed.schema_version, SchemaVersion::V3_0);
+        assert_eq!(parsed.schema_version, SchemaVersion::V4_0);
         assert_eq!(parsed.identity.name, "hello");
     }
 }

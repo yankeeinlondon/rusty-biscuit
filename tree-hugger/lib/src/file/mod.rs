@@ -1,5 +1,9 @@
 /// Stateless tree-sitter node extraction helpers used by `tree_file`.
 pub(crate) mod extract;
+/// Selective symbol queries (`SymbolQuery`, `Capability`).
+pub mod query;
+/// A source file read but not yet parsed (`SourceFile`).
+pub mod source_file;
 /// Tree-sitter-backed file parsing utilities.
 pub mod tree_file;
 
@@ -11,4 +15,4 @@ pub mod tree_file;
 /// earlier commit would otherwise keep serving the old records), `.scm` query
 /// edits and grammar crate upgrades: the CLI key holds no query hash or
 /// grammar version, so this constant is the only component that moves.
-pub const EXTRACTOR_REVISION: &str = "4";
+pub const EXTRACTOR_REVISION: &str = "6";
