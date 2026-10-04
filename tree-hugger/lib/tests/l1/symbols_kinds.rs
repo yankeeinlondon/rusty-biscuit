@@ -9,6 +9,7 @@ use tree_hugger::{ProgrammingLanguage, SymbolKind, SymbolKindV2, TreeFile};
 use ProgrammingLanguage as L;
 use SymbolKind as K;
 
+use crate::symbols_function_locals::assert_named_kind;
 use crate::symbols_fixtures::{
     all_fixtures, display_name, extract_inline, extract_path, extract_primary,
 };
@@ -753,4 +754,43 @@ fn function_like_symbols_carry_extracted_signatures() {
             .and_then(|signature| signature.return_type.as_deref()),
         Some("IShape")
     );
+}
+
+/// A function declarator nested in a parameter list declares a parameter of
+/// function type, never a function: C and C++ function-typed, pointer and
+/// reference parameters, with or without names inside them, are Parameters
+/// like `int a`. The other languages with function-typed parameters already
+/// report them as Parameters.
+#[test]
+fn function_typed_parameters_are_parameters() {
+    let c_source = "int f(void cbProbe(int), void (*ptrProbe)(int), int (*outerProbe)(int (*innerProbe)(long)));\n\
+                    int g(void namedProbe(int valueProbe)) { return 0; }\n";
+    let cpp_source = format!(
+        "{c_source}int r(void (&refProbe)(int), void defaultProbe(int) = nullptr);\n"
+    );
+    let c = extract_inline(c_source, "c");
+    let cpp = extract_inline(&cpp_source, "cpp");
+    let names = ["cbProbe", "ptrProbe", "outerProbe", "innerProbe", "namedProbe", "valueProbe"];
+    for name in names {
+        assert_named_kind(&c, name, K::Parameter);
+        assert_named_kind(&cpp, name, K::Parameter);
+    }
+    for name in ["refProbe", "defaultProbe"] {
+        assert_named_kind(&cpp, name, K::Parameter);
+    }
+    for (extracted, name) in [(&c, "f"), (&c, "g"), (&cpp, "f"), (&cpp, "g"), (&cpp, "r")] {
+        assert_named_kind(extracted, name, K::Function);
+    }
+
+    let others = [
+        ("package p\nfunc F(cbProbe func(x int) int) {}\n", "go"),
+        ("export function f(cbProbe: (x: number) => void) {}\n", "ts"),
+        ("func f(cbProbe: (Int) -> Void) {}\n", "swift"),
+        ("pub fn f(cbProbe: fn(i32) -> i32) {}\n", "rs"),
+        ("object O { def f(cbProbe: Int => Int): Unit = () }\n", "scala"),
+        ("class C { void M(System.Func<int, int> cbProbe) {} }\n", "cs"),
+    ];
+    for (source, extension) in others {
+        assert_named_kind(&extract_inline(source, extension), "cbProbe", K::Parameter);
+    }
 }

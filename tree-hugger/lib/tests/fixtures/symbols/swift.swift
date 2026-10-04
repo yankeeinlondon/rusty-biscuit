@@ -86,3 +86,5 @@ public protocol PublicDrawable {
 protocol PlainDrawable {
     func plainDraw()
 }
+
+struct BindingFieldForms { static var first = 1, second = 2 }

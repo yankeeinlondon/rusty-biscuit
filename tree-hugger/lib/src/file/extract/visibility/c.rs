@@ -97,15 +97,15 @@ fn in_unnamed_namespace(declaration: Node<'_>) -> bool {
     false
 }
 
-/// Whether the object `name` declares is itself `const`: `constexpr`, or the
-/// top-level `const` of the object, not of what a pointer points to
-/// (`char* const p` is const, `const char* p` is not). A reference is never a
-/// const object.
+/// Whether the object `name` declares is itself `const`. Its own type is the
+/// declarator layer nearest the name, walking through parentheses (see
+/// [`declarator_layers`]): `char **const p` and `int (*const p)(int)` are
+/// const pointers, `char *const *p` and `const int (*p)[2]` are mutable
+/// pointers. An array takes its element's constness (`char **const p[2]`).
+/// With no pointer or array layer the declaration's own `const` decides.
+/// A reference is never a const object, even `constexpr`; any other
+/// `constexpr` object is const.
 fn is_const_object(declaration: Node<'_>, name: Node<'_>, source: &str) -> bool {
-    if has_specifier(declaration, "type_qualifier", "constexpr", source) {
-        return true;
-    }
-
     let Some(mut declarator) = child_on_path(declaration, name) else {
         return false;
     };
@@ -114,10 +114,18 @@ fn is_const_object(declaration: Node<'_>, name: Node<'_>, source: &str) -> bool 
     {
         declarator = inner;
     }
-    match declarator.kind() {
-        "pointer_declarator" => has_specifier(declarator, "type_qualifier", "const", source),
-        "reference_declarator" => false,
-        _ => has_specifier(declaration, "type_qualifier", "const", source),
+    let layers = declarator_layers(Some(declarator), Some(name), source);
+    let own_type = layers.iter().find(|layer| !matches!(layer, Declarator::Array(_)));
+    if matches!(own_type, Some(Declarator::Reference(_))) {
+        return false;
+    }
+    if has_specifier(declaration, "type_qualifier", "constexpr", source) {
+        return true;
+    }
+    match own_type {
+        None => has_specifier(declaration, "type_qualifier", "const", source),
+        Some(Declarator::Pointer(qualifiers)) => qualifiers.contains(&"const"),
+        Some(_) => false,
     }
 }
 
@@ -135,41 +143,42 @@ fn child_on_path<'tree>(ancestor: Node<'tree>, descendant: Node<'tree>) -> Optio
 
 /// Whether an earlier declaration of the same function in this file is
 /// `static`. In C the name alone identifies the function; in C++ the
-/// enclosing namespace and the whitespace-free parameter-type text must match
-/// as well, so a differently spelled parameter type falls back to the
-/// declaration's own rule.
+/// namespace, the parameter types and, for a function template, the rest of
+/// its signature must match as well (see [`FunctionIdentity`] and
+/// [`TemplateSignature`]). Every
+/// declarator of both declarations counts: `static int a(int), b(int);`
+/// covers `b` too.
+///
+/// Each condition is one a redeclaration has to meet, so whatever the scan
+/// cannot establish (a typedef'd spelling, a qualifier naming no namespace in
+/// this file) makes it miss a `static`, never attach one to another function.
 fn has_earlier_static_declaration(
     declaration: Node<'_>,
     ctx: &DeclarationContext<'_>,
     cpp: bool,
 ) -> bool {
     let source = ctx.source;
-    let Ok(name) = ctx.name.utf8_text(source.as_bytes()) else {
+    let Some(own_function) = declared_function_named(declaration, ctx.name) else {
         return false;
     };
-    let identity = |candidate: Node<'_>| {
-        cpp.then(|| {
-            (
-                namespace_path(candidate, source),
-                function_declarator(candidate).map(|function| parameter_types(function, source)),
-            )
-        })
+    let namespaces = if cpp { declared_namespaces(ctx.root, source) } else { Vec::new() };
+    let Some(own) = FunctionIdentity::of(declaration, &own_function, source, &namespaces) else {
+        return false;
     };
-    let own_identity = identity(declaration);
 
     let mut earlier = Vec::new();
     collect_scope_declarations(ctx.root, declaration.start_byte(), &mut earlier);
     earlier.into_iter().any(|candidate| {
         has_specifier(candidate, "storage_class_specifier", "static", source)
-            && function_declarator(candidate)
-                .and_then(|function| function.child_by_field_name("declarator"))
-                .and_then(|declarator| declarator.utf8_text(source.as_bytes()).ok())
-                == Some(name)
-            && identity(candidate) == own_identity
+            && declared_functions(candidate).iter().any(|function| {
+                FunctionIdentity::of(candidate, function, source, &namespaces)
+                    .is_some_and(|earlier| own.redeclares(&earlier, cpp))
+            })
     })
 }
 
-/// Namespace-scope declarations and definitions that end before `before`.
+/// Namespace-scope declarations and definitions that end before `before`,
+/// including those under a template header.
 fn collect_scope_declarations<'tree>(node: Node<'tree>, before: usize, found: &mut Vec<Node<'tree>>) {
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
@@ -179,81 +188,442 @@ fn collect_scope_declarations<'tree>(node: Node<'tree>, before: usize, found: &m
         match child.kind() {
             "declaration" | "function_definition" => found.push(child),
             "namespace_definition" | "linkage_specification" | "declaration_list"
-            | "preproc_if" | "preproc_ifdef" | "preproc_else" | "preproc_elif"
-            | "preproc_elifdef" => collect_scope_declarations(child, before, found),
+            | "template_declaration" | "preproc_if" | "preproc_ifdef" | "preproc_else"
+            | "preproc_elif" | "preproc_elifdef" => collect_scope_declarations(child, before, found),
             _ => {}
         }
     }
 }
 
-/// The `function_declarator` a declaration or definition declares, looking
-/// through pointer and reference return-type declarators.
-fn function_declarator(declaration: Node<'_>) -> Option<Node<'_>> {
-    let mut declarator = declaration.child_by_field_name("declarator")?;
-    loop {
-        match declarator.kind() {
-            "function_declarator" => return Some(declarator),
-            kind if kind.ends_with("_declarator") => {
-                declarator = declarator.child_by_field_name("declarator")?;
+/// What makes two C++ declarations name the same function, read from the
+/// syntax tree so that spelling which changes neither the namespace nor the
+/// parameter types is ignored: parameter names at any nesting level,
+/// comments, default arguments, parentheses around a name, and
+/// `namespace a::b {}` versus `namespace a { namespace b {} }`. Type names
+/// are compared as written, so a typedef and its target, or `long` and
+/// `long int`, differ.
+struct FunctionIdentity<'src> {
+    name: &'src str,
+    /// The one namespace the declared name belongs to, as flat segments.
+    namespace: Vec<&'src str>,
+    parameters: Vec<ParameterType<'src>>,
+    /// Present only for a function template, whose signature goes beyond
+    /// its parameters: a template and a non-template function with the same
+    /// parameters are different functions.
+    template: Option<TemplateSignature<'src>>,
+}
+
+/// The parts of a function template's signature besides its name,
+/// namespace and parameter types ([temp.over.link]): the template header,
+/// the return type in both its leading and trailing spelling, and the
+/// `requires` clauses after the header and after the parameter list. Each
+/// is compared as written, so `requires A<T>` placed after the header and
+/// after the parameters differ, as do `auto f() -> int` and `int f()`; the
+/// exception specification is not part of it.
+#[derive(Debug, PartialEq)]
+struct TemplateSignature<'src> {
+    /// The `template<…>` parameter tokens, or `None` for an abbreviated
+    /// template (one with an `auto` parameter and no header).
+    header: Option<Vec<&'src str>>,
+    header_constraint: Option<Vec<&'src str>>,
+    /// The specifiers and the declarators wrapped around the function.
+    return_type: ParameterType<'src>,
+    trailing_return: Option<ParameterType<'src>>,
+    trailing_constraint: Option<Vec<&'src str>>,
+}
+
+impl<'src> FunctionIdentity<'src> {
+    /// The identity of `function`, or `None` when its namespace cannot be
+    /// established from this file. An unqualified name belongs to exactly its
+    /// enclosing namespace. A qualified `b::f` inside `namespace a` belongs to
+    /// `a::b` when this file declares `a::b` before it, else to `b` when this
+    /// file declares `b`, as the compiler looks the first qualifier up from
+    /// the nearest enclosing namespace outward.
+    fn of(
+        declaration: Node<'_>,
+        function: &DeclaredFunction<'_>,
+        source: &'src str,
+        namespaces: &[(usize, Vec<&'src str>)],
+    ) -> Option<Self> {
+        let mut scope = Vec::new();
+        let mut absolute = false;
+        let mut name = function.name;
+        while name.kind() == "qualified_identifier" {
+            match name.child_by_field_name("scope") {
+                Some(segment) => scope.push(node_text(segment, source)),
+                None => absolute = true,
             }
-            _ => return None,
+            name = name.child_by_field_name("name")?;
         }
+
+        let enclosing = enclosing_namespaces(declaration, source);
+        let namespace = match scope.first() {
+            _ if absolute => scope,
+            None => enclosing,
+            Some(first) => (0..=enclosing.len()).rev().find_map(|depth| {
+                let looked_up = [&enclosing[..depth], &[*first]].concat();
+                namespaces
+                    .iter()
+                    .any(|(start, path)| *start < declaration.start_byte() && *path == looked_up)
+                    .then(|| [&enclosing[..depth], scope.as_slice()].concat())
+            })?,
+        };
+        let parameters = function
+            .function
+            .child_by_field_name("parameters")
+            .map(|parameters| parameter_types(parameters, source))
+            .unwrap_or_default();
+        let template = TemplateSignature::of(declaration, function.function, source);
+        Some(Self { name: node_text(name, source), namespace, parameters, template })
+    }
+
+    /// Whether `earlier` declares this same function.
+    fn redeclares(&self, earlier: &Self, cpp: bool) -> bool {
+        self.name == earlier.name
+            && (!cpp
+                || (self.namespace == earlier.namespace
+                    && self.parameters == earlier.parameters
+                    && self.template == earlier.template))
     }
 }
 
-fn namespace_path(declaration: Node<'_>, source: &str) -> Vec<String> {
-    let mut path = Vec::new();
+impl<'src> TemplateSignature<'src> {
+    /// The template signature of `function` in `declaration`, or `None`
+    /// when it is not a function template: it neither sits under a
+    /// `template<…>` header nor has a parameter whose type is a placeholder
+    /// (`auto`, `Concept auto`), which makes it an abbreviated template.
+    fn of(declaration: Node<'_>, function: Node<'_>, source: &'src str) -> Option<Self> {
+        let header = declaration
+            .parent()
+            .filter(|parent| parent.kind() == "template_declaration");
+        if header.is_none() && !has_placeholder_parameter(function) {
+            return None;
+        }
+        let header_tokens = header.map(|header| {
+            let mut tokens = Vec::new();
+            if let Some(parameters) = header.child_by_field_name("parameters") {
+                leaf_tokens(parameters, source, &mut tokens);
+            }
+            tokens
+        });
+        let trailing_return = child_of_kind(function, "trailing_return_type")
+            .and_then(first_named_child)
+            .map(|descriptor| parameter_type(descriptor, source));
+        Some(Self {
+            header: header_tokens,
+            header_constraint: header.and_then(|header| constraint_tokens(header, source)),
+            return_type: return_type(declaration, function, source),
+            trailing_return,
+            trailing_constraint: constraint_tokens(function, source),
+        })
+    }
+}
+
+/// Whether one of `function`'s own parameters has a placeholder type.
+fn has_placeholder_parameter(function: Node<'_>) -> bool {
+    let Some(parameters) = function.child_by_field_name("parameters") else {
+        return false;
+    };
+    let mut cursor = parameters.walk();
+    parameters.named_children(&mut cursor).any(|parameter| {
+        parameter
+            .child_by_field_name("type")
+            .is_some_and(|parameter_type| parameter_type.kind() == "placeholder_type_specifier")
+    })
+}
+
+/// The tokens of `node`'s own `requires` clause, `requires` included.
+fn constraint_tokens<'src>(node: Node<'_>, source: &'src str) -> Option<Vec<&'src str>> {
+    child_of_kind(node, "requires_clause").map(|clause| {
+        let mut tokens = Vec::new();
+        leaf_tokens(clause, source, &mut tokens);
+        tokens
+    })
+}
+
+fn child_of_kind<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tree>> {
+    let mut cursor = node.walk();
+    node.named_children(&mut cursor).find(|child| child.kind() == kind)
+}
+
+/// The leading return type of `function` in `declaration`: the `const`/`volatile`
+/// qualifiers and type among the declaration's specifiers, and the
+/// declarators wrapped around `function` (`int (*f(int))(long)` returns a
+/// pointer to a function taking `long`).
+fn return_type<'src>(declaration: Node<'_>, function: Node<'_>, source: &'src str) -> ParameterType<'src> {
+    let mut qualifiers = Vec::new();
+    let mut cursor = declaration.walk();
+    for child in declaration.children(&mut cursor) {
+        if child.kind() == "type_qualifier"
+            && let text @ ("const" | "volatile") = node_text(child, source)
+        {
+            qualifiers.push(text);
+        }
+    }
+    qualifiers.sort_unstable();
+    let mut specifiers = Vec::new();
+    if let Some(type_node) = declaration.child_by_field_name("type") {
+        leaf_tokens(type_node, source, &mut specifiers);
+    }
+    let declarators = declarator_layers(child_on_path(declaration, function), Some(function), source);
+    ParameterType { qualifiers, specifiers, declarators }
+}
+
+/// The namespace segments enclosing `declaration`, outermost first. An
+/// unnamed namespace contributes an empty segment.
+fn enclosing_namespaces<'src>(declaration: Node<'_>, source: &'src str) -> Vec<&'src str> {
+    let mut blocks = Vec::new();
     let mut current = declaration.parent();
     while let Some(node) = current {
         if node.kind() == "namespace_definition" {
-            path.push(
-                node.child_by_field_name("name")
-                    .and_then(|name| name.utf8_text(source.as_bytes()).ok())
-                    .unwrap_or_default()
-                    .to_string(),
-            );
+            blocks.push(own_namespace_segments(node, source));
         }
         current = node.parent();
     }
-    path
+    blocks.into_iter().rev().flatten().collect()
 }
 
-/// Each parameter's text without its name and without whitespace, so
-/// `(int)` and `(int value)` compare equal.
-fn parameter_types(function: Node<'_>, source: &str) -> Vec<String> {
-    let Some(parameters) = function.child_by_field_name("parameters") else {
-        return Vec::new();
-    };
-    let mut cursor = parameters.walk();
-    parameters
-        .named_children(&mut cursor)
-        .filter(|parameter| parameter.kind() != "comment")
-        .map(|parameter| {
-            let mut text = source
-                .get(parameter.byte_range())
-                .unwrap_or_default()
-                .to_string();
-            if let Some(name) = parameter_name(parameter) {
-                let start = name.start_byte() - parameter.start_byte();
-                let end = name.end_byte() - parameter.start_byte();
-                text.replace_range(start..end, "");
-            }
-            text.chars().filter(|c| !c.is_whitespace()).collect()
-        })
-        .collect()
-}
-
-fn parameter_name(parameter: Node<'_>) -> Option<Node<'_>> {
-    let mut declarator = parameter.child_by_field_name("declarator")?;
-    loop {
-        if declarator.kind() == "identifier" {
-            return Some(declarator);
-        }
-        declarator = declarator
-            .child_by_field_name("declarator")
-            .or_else(|| {
-                let last = u32::try_from(declarator.named_child_count().checked_sub(1)?).ok()?;
-                declarator.named_child(last)
-            })?;
+fn own_namespace_segments<'src>(namespace: Node<'_>, source: &'src str) -> Vec<&'src str> {
+    let mut segments = Vec::new();
+    match namespace.child_by_field_name("name") {
+        Some(name) => namespace_segments(name, source, &mut segments),
+        None => segments.push(""),
     }
+    segments
+}
+
+/// Every namespace the file declares, with the start of the declaring
+/// `namespace` block: `namespace a::b {}` declares both `a` and `a::b`.
+fn declared_namespaces<'src>(root: Node<'_>, source: &'src str) -> Vec<(usize, Vec<&'src str>)> {
+    let mut found = Vec::new();
+    let mut pending = vec![root];
+    while let Some(node) = pending.pop() {
+        let mut cursor = node.walk();
+        for child in node.named_children(&mut cursor) {
+            match child.kind() {
+                "namespace_definition" => {
+                    let outer = enclosing_namespaces(child, source);
+                    let own = own_namespace_segments(child, source);
+                    for depth in 1..=own.len() {
+                        found.push((child.start_byte(), [outer.as_slice(), &own[..depth]].concat()));
+                    }
+                    pending.push(child);
+                }
+                "linkage_specification" | "declaration_list" | "template_declaration"
+                | "preproc_if" | "preproc_ifdef" | "preproc_else" | "preproc_elif"
+                | "preproc_elifdef" => pending.push(child),
+                _ => {}
+            }
+        }
+    }
+    found
+}
+
+/// The identifiers of a namespace name, so `a::inline b` yields `a`, `b`.
+fn namespace_segments<'src>(name: Node<'_>, source: &'src str, segments: &mut Vec<&'src str>) {
+    if name.kind() == "namespace_identifier" {
+        segments.push(node_text(name, source));
+        return;
+    }
+    let mut cursor = name.walk();
+    for child in name.named_children(&mut cursor) {
+        namespace_segments(child, source, segments);
+    }
+}
+
+/// One parameter's type as C++ compares it.
+#[derive(Debug, PartialEq)]
+struct ParameterType<'src> {
+    /// `const`/`volatile` written among the specifiers, in sorted order so
+    /// `const int` and `int const` agree.
+    qualifiers: Vec<&'src str>,
+    /// The other specifier tokens: the type name, `struct`, and so on.
+    specifiers: Vec<&'src str>,
+    /// Type constructors from the one nearest the (possibly absent) name
+    /// outward, so the first is the parameter's top-level type.
+    declarators: Vec<Declarator<'src>>,
+}
+
+#[derive(Debug, PartialEq)]
+enum Declarator<'src> {
+    Pointer(Vec<&'src str>),
+    Reference(&'src str),
+    Array(Vec<&'src str>),
+    /// Parameter types and the tokens after them (`noexcept`, `const`, …).
+    Function(Vec<ParameterType<'src>>, Vec<&'src str>),
+    Pack,
+    /// A declarator form not modeled above, compared by kind and tokens.
+    Other(&'static str, Vec<&'src str>),
+}
+
+/// The parameter types of a `parameter_list`, adjusted as C++ adjusts them
+/// before comparing functions: a top-level `const`/`volatile` is dropped, an
+/// array becomes a pointer, a function becomes a pointer to it, and `(void)`
+/// is an empty list. A C-style `...` tail counts as a parameter.
+fn parameter_types<'src>(parameters: Node<'_>, source: &'src str) -> Vec<ParameterType<'src>> {
+    let mut cursor = parameters.walk();
+    let types: Vec<_> = parameters
+        .children(&mut cursor)
+        .filter_map(|child| match child.kind() {
+            "(" | ")" | "," | "comment" => None,
+            "..." => Some(ParameterType {
+                qualifiers: Vec::new(),
+                specifiers: vec!["..."],
+                declarators: Vec::new(),
+            }),
+            _ => Some(parameter_type(child, source)),
+        })
+        .collect();
+    let declares_nothing = matches!(
+        types.as_slice(),
+        [only] if only.qualifiers.is_empty() && only.declarators.is_empty() && only.specifiers == ["void"]
+    );
+    if declares_nothing {
+        return Vec::new();
+    }
+    types.into_iter().map(ParameterType::adjusted).collect()
+}
+
+fn parameter_type<'src>(parameter: Node<'_>, source: &'src str) -> ParameterType<'src> {
+    let declarator = parameter.child_by_field_name("declarator");
+    let default_value = parameter.child_by_field_name("default_value");
+    let mut qualifiers = Vec::new();
+    let mut specifiers = Vec::new();
+    let mut cursor = parameter.walk();
+    for child in parameter.children(&mut cursor) {
+        if Some(child) == declarator || Some(child) == default_value {
+            continue;
+        }
+        match child.kind() {
+            "comment" | "=" => {}
+            "type_qualifier" => qualifiers.push(node_text(child, source)),
+            _ => leaf_tokens(child, source, &mut specifiers),
+        }
+    }
+    qualifiers.sort_unstable();
+
+    let declarators = declarator_layers(declarator, None, source);
+
+    ParameterType { qualifiers, specifiers, declarators }
+}
+
+/// The type constructors from `start` down to the declared name (a plain or
+/// qualified identifier, or `stop`), nearest the name first, so the first is
+/// the top-level type. Parentheses and attributes add no layer.
+fn declarator_layers<'src>(
+    start: Option<Node<'_>>,
+    stop: Option<Node<'_>>,
+    source: &'src str,
+) -> Vec<Declarator<'src>> {
+    let mut declarators = Vec::new();
+    let mut next = start;
+    while let Some(node) = next {
+        next = None;
+        if Some(node) == stop {
+            break;
+        }
+        match node.kind() {
+            // The declared name: nothing of the type is left inside it.
+            "identifier" | "qualified_identifier" => {}
+            "parenthesized_declarator" | "abstract_parenthesized_declarator"
+            | "attributed_declarator" => {
+                next = first_named_child(node);
+            }
+            "pointer_declarator" | "abstract_pointer_declarator" => {
+                next = node.child_by_field_name("declarator");
+                let mut pointer_qualifiers = tokens_except(node, next, source);
+                pointer_qualifiers.retain(|token| *token != "*");
+                pointer_qualifiers.sort_unstable();
+                declarators.push(Declarator::Pointer(pointer_qualifiers));
+            }
+            "reference_declarator" | "abstract_reference_declarator" => {
+                next = first_named_child(node);
+                let operator = node.child(0).map_or("&", |token| node_text(token, source));
+                declarators.push(Declarator::Reference(operator));
+            }
+            "array_declarator" | "abstract_array_declarator" => {
+                next = node.child_by_field_name("declarator");
+                declarators.push(Declarator::Array(tokens_except(node, next, source)));
+            }
+            "function_declarator" | "abstract_function_declarator" => {
+                next = node.child_by_field_name("declarator");
+                let parameters = node.child_by_field_name("parameters");
+                let mut trailing = Vec::new();
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    if Some(child) != next && Some(child) != parameters {
+                        leaf_tokens(child, source, &mut trailing);
+                    }
+                }
+                let parameters = parameters
+                    .map(|parameters| parameter_types(parameters, source))
+                    .unwrap_or_default();
+                declarators.push(Declarator::Function(parameters, trailing));
+            }
+            "variadic_declarator" => {
+                next = first_named_child(node);
+                declarators.push(Declarator::Pack);
+            }
+            kind => {
+                let mut tokens = Vec::new();
+                leaf_tokens(node, source, &mut tokens);
+                declarators.push(Declarator::Other(kind, tokens));
+            }
+        }
+    }
+    declarators.reverse();
+    declarators
+}
+
+impl ParameterType<'_> {
+    fn adjusted(mut self) -> Self {
+        let is_cv = |token: &&str| matches!(*token, "const" | "volatile");
+        match self.declarators.first_mut() {
+            None => self.qualifiers.retain(|token| !is_cv(token)),
+            Some(Declarator::Pointer(qualifiers)) => qualifiers.retain(|token| !is_cv(token)),
+            Some(top @ Declarator::Array(_)) => *top = Declarator::Pointer(Vec::new()),
+            Some(Declarator::Function(..)) => self.declarators.insert(0, Declarator::Pointer(Vec::new())),
+            Some(_) => {}
+        }
+        self
+    }
+}
+
+fn first_named_child(node: Node<'_>) -> Option<Node<'_>> {
+    let mut cursor = node.walk();
+    node.named_children(&mut cursor).find(|child| child.kind() != "comment")
+}
+
+/// The tokens of `node` outside its child `skip`, without comments.
+fn tokens_except<'src>(node: Node<'_>, skip: Option<Node<'_>>, source: &'src str) -> Vec<&'src str> {
+    let mut tokens = Vec::new();
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if Some(child) != skip {
+            leaf_tokens(child, source, &mut tokens);
+        }
+    }
+    tokens
+}
+
+/// Every leaf token under `node` in source order, skipping comments.
+fn leaf_tokens<'src>(node: Node<'_>, source: &'src str, tokens: &mut Vec<&'src str>) {
+    if node.kind() == "comment" {
+        return;
+    }
+    if node.child_count() == 0 {
+        let text = node_text(node, source);
+        if !text.is_empty() {
+            tokens.push(text);
+        }
+        return;
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        leaf_tokens(child, source, tokens);
+    }
+}
+
+fn node_text<'src>(node: Node<'_>, source: &'src str) -> &'src str {
+    source.get(node.byte_range()).unwrap_or_default()
 }

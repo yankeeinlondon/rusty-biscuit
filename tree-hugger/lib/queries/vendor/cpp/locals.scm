@@ -14,6 +14,12 @@
 (reference_declarator
   (identifier) @local.definition.var)
 
+(reference_declarator
+  (field_identifier) @local.definition.field)
+
+(reference_declarator
+  (type_identifier) @local.definition.type_alias)
+
 (variadic_declarator
   (identifier) @local.definition.var)
 
@@ -64,19 +70,25 @@
   declarator: (qualified_identifier
     name: (identifier) @local.definition.function)) @local.scope @local.definition.function.context
 
-(field_declaration
-  declarator: (function_declarator
-    (field_identifier) @local.definition.method)) @local.definition.method.context
+; The same qualified name behind an attribute or parentheses:
+; `int S::f [[deprecated]] (int) {…}`.
+(function_declarator
+  declarator: [
+    (attributed_declarator
+      (qualified_identifier
+        name: (identifier) @local.definition.function))
+    (parenthesized_declarator
+      (qualified_identifier
+        name: (identifier) @local.definition.function))
+  ]) @local.scope @local.definition.function.context
 
-; Methods defined in the class body, also behind a pointer or reference return
-(function_definition
-  declarator: (function_declarator
-    declarator: (field_identifier) @local.definition.method)) @local.definition.method.context
-
-(function_definition
-  declarator: (_
-    (function_declarator
-      declarator: (field_identifier) @local.definition.method))) @local.definition.method.context
+; Member functions, declared or defined in the class body, under any return
+; declarator (`int *m(int);`, `int (*m(int))(long) {…}`): a field name is the
+; function's own declarator only for a member function, never for a
+; function-pointer field (`int (*p)(int)` puts the name under a pointer).
+; Tree Hugger supplies the method's declaration as its context.
+(function_declarator
+  declarator: (field_identifier) @local.definition.method)
 
 (lambda_expression) @local.scope
 

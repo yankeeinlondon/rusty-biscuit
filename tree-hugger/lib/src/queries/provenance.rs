@@ -139,20 +139,25 @@ fn vendored_locals_changes(language: ProgrammingLanguage) -> &'static [&'static 
             "added protocol function and property requirement patterns",
         ],
         ProgrammingLanguage::C => &[
-            "added `union_specifier` and pointer field-declarator patterns",
+            "added `union_specifier` and field-name patterns under any pointer, array or parenthesized declarator (`**p`, `a[3]`, `(*callback)(int)`), replacing the field-level pointer pattern",
             "typedefs captured as `@local.definition.type_alias`",
+            "added name patterns under an attributed declarator (`int x [[maybe_unused]];`) and variable names under a parenthesized declarator; a name whose declarator declares a function (`int f [[deprecated]] (int);`, `int (f)(int);`) is reclassified as a function",
+            "added typedef-name patterns under pointer, array, function, parenthesized and attributed declarators (`typedef int *P;`, `typedef int (*Fn)(int);`)",
         ],
         ProgrammingLanguage::Cpp => &[
             "classes captured as `@local.definition.class`; `using` aliases as `@local.definition.type_alias`",
-            "added patterns for methods defined in a class body",
+            "replaced the class-body method patterns with one member-function pattern under any return declarator (`int *m(int);`, `int (*m(int))(long) {}`), its context supplied by Tree Hugger; added a qualified function-name pattern behind an attribute or parentheses (`int S::f [[deprecated]] (int) {}`)",
+            "added reference-declarator field and typedef-name patterns (`int &ref;`, `typedef int &Ref;`)",
         ],
         ProgrammingLanguage::CSharp => &[
             "properties captured as `@local.definition.property`",
             "added block-scoped and file-scoped namespace patterns",
         ],
+        ProgrammingLanguage::Php => &[
+            "added a `const_declaration` pattern (class, interface, trait, enum and top-level constants) in the inherited `php_only` query",
+        ],
         ProgrammingLanguage::TypeScript
         | ProgrammingLanguage::Go
-        | ProgrammingLanguage::Php
         | ProgrammingLanguage::Scala
         | ProgrammingLanguage::Lua
         | ProgrammingLanguage::Perl
@@ -273,6 +278,7 @@ mod tests {
             ProgrammingLanguage::C,
             ProgrammingLanguage::Cpp,
             ProgrammingLanguage::CSharp,
+            ProgrammingLanguage::Php,
         ] {
             let prov = vendor_query_provenance(language, QueryKind::Locals).expect("provenance");
             assert_eq!(

@@ -41,7 +41,34 @@ pub(crate) fn symbol_kind_priority(kind: SymbolKind) -> u8 {
 /// Rules keyed on the declaration node outrank the query capture. Only the
 /// path from the name up to its declaration is inspected, never enclosing
 /// bodies: a local is not a field because its function sits in a class.
+///
+/// A member kind, from a query capture or from a rule here, is kept only for
+/// a declaration that belongs to a type; one in a function body is demoted
+/// (see [`is_function_local_member`]).
 pub(crate) fn refine_symbol_kind(
+    kind: SymbolKind,
+    name: Node<'_>,
+    declaration: Node<'_>,
+    language: ProgrammingLanguage,
+    source: &str,
+) -> SymbolKind {
+    let refined = classify_symbol_kind(kind, name, declaration, language, source);
+    match refined {
+        SymbolKind::Method | SymbolKind::Constructor
+            if is_function_local_member(name, declaration, language) =>
+        {
+            SymbolKind::Function
+        }
+        SymbolKind::Field | SymbolKind::Property
+            if is_function_local_member(name, declaration, language) =>
+        {
+            SymbolKind::Variable
+        }
+        _ => refined,
+    }
+}
+
+fn classify_symbol_kind(
     kind: SymbolKind,
     name: Node<'_>,
     declaration: Node<'_>,
@@ -53,24 +80,67 @@ pub(crate) fn refine_symbol_kind(
             return SymbolKind::TypeAlias;
         }
         (ProgrammingLanguage::Rust, "enum_variant") => return SymbolKind::EnumVariant,
+        // A function-typed C/C++ parameter (`void cb(int)`) is captured by the
+        // function pattern.
+        (
+            ProgrammingLanguage::C | ProgrammingLanguage::Cpp,
+            "parameter_declaration" | "optional_parameter_declaration",
+        ) => return SymbolKind::Parameter,
         (ProgrammingLanguage::Rust, "mod_item") => return SymbolKind::Module,
         // A Rust `static` is a variable with static storage, not a constant.
         (ProgrammingLanguage::Rust, "static_item") => return SymbolKind::Variable,
+        // A later target of a chained class-body assignment (`second` in
+        // `first = second = 0`) is captured only by the generic assignment
+        // pattern; its declaration is the class-body statement.
+        (ProgrammingLanguage::Python, "assignment")
+            if kind == SymbolKind::Variable && is_python_class_attribute_statement(declaration) =>
+        {
+            return SymbolKind::Field;
+        }
         (_, "public_field_definition" | "property_definition" | "property_signature")
         | (ProgrammingLanguage::JavaScript, "field_definition") => {
             return SymbolKind::Property;
         }
-        (_, "method_definition") if node_text(name, source) == Some("constructor") => {
+        // An object literal's `constructor()` is an ordinary method.
+        (_, "method_definition")
+            if node_text(name, source) == Some("constructor")
+                && declaration
+                    .parent()
+                    .is_some_and(|parent| parent.kind() == "class_body") =>
+        {
             return SymbolKind::Constructor;
         }
         _ => {}
     }
+
+    // The C/C++ queries capture a name behind an attribute or parentheses
+    // (`int f [[deprecated]] (int)`, `int (f)(int)`) by its immediate parent,
+    // which cannot tell a function from a variable or field.
+    let kind = if matches!(language, ProgrammingLanguage::C | ProgrammingLanguage::Cpp)
+        && matches!(kind, SymbolKind::Variable | SymbolKind::Field)
+        && declared_function_named(declaration, name).is_some()
+    {
+        SymbolKind::Function
+    } else {
+        kind
+    };
 
     match kind {
         SymbolKind::Function if is_direct_member(declaration) => SymbolKind::Method,
         SymbolKind::Variable => refine_variable_kind(name, declaration, language),
         _ => kind,
     }
+}
+
+/// Whether a Python assignment is a statement directly in a class body.
+fn is_python_class_attribute_statement(assignment: Node<'_>) -> bool {
+    assignment
+        .parent()
+        .filter(|statement| statement.kind() == "expression_statement")
+        .and_then(|statement| statement.parent())
+        .filter(|block| block.kind() == "block")
+        .and_then(|block| block.parent())
+        .is_some_and(|owner| owner.kind() == "class_definition")
 }
 
 fn node_text<'src>(node: Node<'_>, source: &'src str) -> Option<&'src str> {
@@ -105,6 +175,7 @@ fn refine_variable_kind(
                 return SymbolKind::Variable;
             }
             "field_declaration"
+            | "event_field_declaration"
             | "property_declaration"
             | "field_definition"
             | "property_initializer" => return SymbolKind::Field,
@@ -116,6 +187,16 @@ fn refine_variable_kind(
             break;
         }
         current = cursor.parent();
+    }
+
+    // A C++ variable template member (`template<class T> static T x;`) parses
+    // as a plain `declaration` under its template header, not a
+    // `field_declaration`.
+    if language == ProgrammingLanguage::Cpp
+        && declaration.kind() == "declaration"
+        && is_direct_member(declaration)
+    {
+        return SymbolKind::Field;
     }
 
     // PHP `simple_parameter`, Java `catch_formal_parameter` and the like, or
@@ -169,6 +250,11 @@ fn is_member_container_kind(kind: &str) -> bool {
             | "trait_declaration"
             | "trait_definition"
             | "object_definition"
+            // Scala `new T { … }`: an anonymous class.
+            | "instance_expression"
+            | "enum_definition"
+            // Scala `given … with` instance body: an anonymous class.
+            | "with_template_body"
             | "struct_item"
             | "enum_item"
             | "union_item"
@@ -177,24 +263,56 @@ fn is_member_container_kind(kind: &str) -> bool {
     )
 }
 
-/// Body and wrapper nodes between a member and its container.
+/// Body nodes between a member and its container.
 fn is_member_body_kind(kind: &str) -> bool {
     kind.ends_with("_body")
         || matches!(
             kind,
-            "block"
-                | "declaration_list"
-                | "field_declaration_list"
-                | "template_body"
-                | "decorated_definition"
+            "block" | "declaration_list" | "field_declaration_list" | "template_body"
         )
+}
+
+/// Nodes that wrap a declaration without opening a scope of their own: a
+/// C++ template header, a C, C++ or C# preprocessor conditional (the grammars
+/// share these node kinds), a Python decorator
+/// list, a Scala `extension` block (its methods belong to the type around
+/// it, or to no type at top level). A member keeps its membership through any number of them, and so
+/// does a namespace-scope or local declaration keep its own scope.
+pub(crate) fn is_transparent_wrapper_kind(kind: &str) -> bool {
+    matches!(
+        kind,
+        "template_declaration"
+            | "decorated_definition"
+            | "extension_definition"
+            | "preproc_if"
+            | "preproc_ifdef"
+            | "preproc_else"
+            | "preproc_elif"
+            | "preproc_elifdef"
+    )
+}
+
+/// The node that occupies `declaration`'s place in its enclosing body or
+/// scope: the declaration itself, or the outermost transparent wrapper
+/// around it (see [`is_transparent_wrapper_kind`]).
+///
+/// Every "is this a member, and of what" decision starts from this node, so
+/// kind, member `static`, storage `static` and access agree.
+pub(crate) fn member_slot(declaration: Node<'_>) -> Node<'_> {
+    let mut slot = declaration;
+    while let Some(parent) = slot.parent()
+        && is_transparent_wrapper_kind(parent.kind())
+    {
+        slot = parent;
+    }
+    slot
 }
 
 /// Whether `declaration` is declared directly in a class, struct, enum,
 /// trait, interface, protocol, object, `impl` or extension body, rather than
 /// inside a function.
 pub(crate) fn is_direct_member(declaration: Node<'_>) -> bool {
-    let mut current = declaration.parent();
+    let mut current = member_slot(declaration).parent();
     while let Some(parent) = current {
         if is_member_container_kind(parent.kind()) {
             return true;
@@ -203,6 +321,62 @@ pub(crate) fn is_direct_member(declaration: Node<'_>) -> bool {
             return false;
         }
         current = parent.parent();
+    }
+    false
+}
+
+/// Nodes that own the members declared in them without being one of
+/// [`is_member_container_kind`]'s declarations: type bodies (also of an
+/// anonymous class), a class expression and an object literal.
+pub(crate) fn is_member_owner_kind(kind: &str) -> bool {
+    is_member_container_kind(kind)
+        || matches!(
+            kind,
+            "class_body"
+                | "enum_body"
+                | "enum_class_body"
+                | "interface_body"
+                | "protocol_body"
+                | "template_body"
+                | "declaration_list"
+                | "field_declaration_list"
+                | "class"
+                | "object"
+        )
+}
+
+/// Whether a declaration given a member kind actually sits in a function
+/// body, such as a C# local function, which some queries capture as a
+/// method. The nearest enclosing function or member owner decides, so a
+/// member of a class declared inside a function stays a member.
+///
+/// A Lua `function M:m()` or `function M.f()` names its table itself, so it
+/// keeps its kind wherever it is written.
+fn is_function_local_member(
+    name: Node<'_>,
+    declaration: Node<'_>,
+    language: ProgrammingLanguage,
+) -> bool {
+    if language == ProgrammingLanguage::Lua
+        && name.parent().is_some_and(|parent| {
+            matches!(
+                parent.kind(),
+                "method_index_expression" | "dot_index_expression"
+            )
+        })
+    {
+        return false;
+    }
+
+    let mut current = member_slot(declaration).parent();
+    while let Some(node) = current {
+        if is_member_owner_kind(node.kind()) {
+            return false;
+        }
+        if is_function_node_kind(node.kind()) {
+            return true;
+        }
+        current = node.parent();
     }
     false
 }
@@ -261,6 +435,9 @@ pub(crate) fn find_symbol_container<'tree>(
             });
         }
 
+        if is_unnamed_type_owner(parent) {
+            return None;
+        }
         if let Some(container) = ancestor_container(parent, language, source) {
             return Some(container);
         }
@@ -269,6 +446,51 @@ pub(crate) fn find_symbol_container<'tree>(
     }
 
     None
+}
+
+/// A type that owns the declarations in it but has no name to report: an
+/// anonymous class (Java, also an enum constant's body; PHP; Scala
+/// `new T { … }`, also a `given … with` instance), a JavaScript/TypeScript
+/// class expression or object literal, a C# anonymous object, and a C/C++ `struct`/`class`/`union`
+/// without a tag. A declaration inside one has no container rather than the
+/// named type around it.
+///
+/// A tagless C/C++ `struct`/`union` that declares no member of its own
+/// (`union { int a; float b; };`) is an anonymous member: its fields are
+/// members of the enclosing type, so it is not a boundary.
+fn is_unnamed_type_owner(node: Node<'_>) -> bool {
+    match node.kind() {
+        "class" | "object" | "anonymous_class" | "anonymous_object_creation_expression" => true,
+        "class_body" => node.parent().is_some_and(|parent| {
+            matches!(parent.kind(), "object_creation_expression" | "enum_constant")
+        }),
+        "template_body" => node
+            .parent()
+            .is_some_and(|parent| parent.kind() == "instance_expression"),
+        // A Scala `given` is not an extracted symbol, so its instance body
+        // names no container.
+        "with_template_body" => true,
+        "struct_specifier" | "class_specifier" | "union_specifier" => {
+            node.child_by_field_name("name").is_none()
+                && anonymous_member_declaration(node).is_none()
+        }
+        _ => false,
+    }
+}
+
+/// For a C/C++ anonymous member (`union { int a; float b; };`, a tagless
+/// `struct`/`union` that declares no name of its own), the
+/// `field_declaration` that places it in the enclosing type. Its members are
+/// members of that type, with that declaration's access.
+pub(crate) fn anonymous_member_declaration(specifier: Node<'_>) -> Option<Node<'_>> {
+    if !matches!(specifier.kind(), "struct_specifier" | "class_specifier" | "union_specifier")
+        || specifier.child_by_field_name("name").is_some()
+    {
+        return None;
+    }
+    specifier.parent().filter(|parent| {
+        parent.kind() == "field_declaration" && parent.child_by_field_name("declarator").is_none()
+    })
 }
 
 fn ancestor_container<'tree>(
@@ -316,6 +538,7 @@ fn ancestor_container<'tree>(
             ("trait_declaration", SymbolKind::Trait),
             ("trait_definition", SymbolKind::Trait),
             ("object_definition", SymbolKind::Module),
+            ("enum_definition", SymbolKind::Enum),
             ("record_declaration", SymbolKind::Type),
             ("namespace_declaration", SymbolKind::Namespace),
             ("namespace_definition", SymbolKind::Namespace),

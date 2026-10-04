@@ -39,7 +39,9 @@ pub(crate) fn extract_csharp_visibility(node: Node<'_>, source: &str) -> Option<
 /// reference. An explicit interface implementation is Private; any member of
 /// an interface (default-implemented, static and nested types included) is
 /// Public; a class, struct or record member is Private; a top-level type is
-/// Internal. Namespaces have no access level.
+/// Internal. Namespaces have no access level. The owner is read from the
+/// [`member_slot`], so `#if`/`#elif`/`#else` around a declaration never hide
+/// it.
 pub(super) fn extract_csharp_declaration_visibility(
     declaration: Node<'_>,
     ctx: &DeclarationContext<'_>,
@@ -57,7 +59,7 @@ pub(super) fn extract_csharp_declaration_visibility(
         return Some(Visibility::Private);
     }
 
-    let parent = declaration.parent()?;
+    let parent = member_slot(declaration).parent()?;
     let owner = match parent.kind() {
         "compilation_unit" => return Some(Visibility::Internal),
         "declaration_list" => parent.parent()?,

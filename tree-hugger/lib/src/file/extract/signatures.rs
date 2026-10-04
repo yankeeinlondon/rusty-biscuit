@@ -7,24 +7,33 @@ use super::*;
 /// Extracts function signature from a function/method node.
 ///
 /// Always returns a signature, with an empty parameter list when there are
-/// none, so a parameterless function renders as `tick()`. `is_static` is the
-/// symbol's shared flag; the signature only carries a copy of it.
+/// none, so a parameterless function renders as `tick()`. `name` is the
+/// captured name of the function, which selects the function a C/C++
+/// declaration declares. `is_static` is the symbol's shared flag; the
+/// signature only carries a copy of it.
 pub(crate) fn extract_signature(
     node: Node<'_>,
+    name: Node<'_>,
     language: ProgrammingLanguage,
     source: &str,
     is_static: bool,
 ) -> FunctionSignature {
     FunctionSignature {
-        parameters: extract_parameters(node, language, source),
+        parameters: extract_parameters(node, name, language, source),
         return_type: extract_return_type(node, language, source),
         is_static,
     }
 }
 
 /// Extracts parameters from a function node.
+///
+/// For C/C++ the parameters are those of the function `name` declares (see
+/// [`declared_function_named`]), never those of a function type wrapped
+/// around it: `int (*f(int a))(long b)` has the parameter `a`. A
+/// declaration that declares no function named `name` has none.
 pub(crate) fn extract_parameters(
     node: Node<'_>,
+    name: Node<'_>,
     language: ProgrammingLanguage,
     source: &str,
 ) -> Vec<ParameterInfo> {
@@ -43,28 +52,13 @@ pub(crate) fn extract_parameters(
         _ => return Vec::new(),
     };
 
-    // For Go, methods have TWO parameter_list nodes:
-    // 1. receiver (g *Greeter)
-    // 2. actual parameters (name string)
-    // We need to find the SECOND parameter_list for methods.
-    //
-    // For C/C++, parameters are inside function_declarator. The context node
-    // may be either function_definition or function_declarator:
-    // - If function_definition: look in function_declarator child
-    // - If function_declarator: look directly for parameter_list
+    // A Go method has two parameter lists, the receiver first.
     let params_node = if language == ProgrammingLanguage::Go && node.kind() == "method_declaration"
     {
         find_nth_child_by_kind(node, params_node_kind, 1) // 0-indexed, so 1 = second
     } else if matches!(language, ProgrammingLanguage::C | ProgrammingLanguage::Cpp) {
-        // C/C++: Context may be function_declarator or function_definition
-        if node.kind() == "function_declarator" {
-            // Already at function_declarator, look for parameter_list directly
-            find_child_by_kind(node, params_node_kind)
-        } else {
-            // At function_definition, look inside function_declarator
-            find_child_by_kind(node, "function_declarator")
-                .and_then(|fd| find_child_by_kind(fd, params_node_kind))
-        }
+        declared_function_named(node, name)
+            .and_then(|declared| declared.function.child_by_field_name("parameters"))
     } else {
         find_child_by_kind(node, params_node_kind)
     };
@@ -725,21 +719,16 @@ pub(crate) fn extract_java_return_type(node: Node<'_>, source: &str) -> Option<S
 // C/C++ extraction functions
 // =============================================================================
 
-/// Extracts a C/C++ parameter from a parameter_declaration node.
+/// Extracts one C/C++ parameter from a child of a `parameter_list`.
 ///
-/// C/C++ AST structure:
-/// ```text
-/// parameter_declaration
-///   primitive_type (int/char/etc.)
-///   identifier or pointer_declarator
-/// ```
+/// A `parameter_declaration`, a C++ `optional_parameter_declaration` (with
+/// its default value) and a C++ pack (`Ts... values`, variadic) are named by
+/// their own declarator (see [`declarator_name`]); an unnamed one is
+/// skipped. A C `variadic_parameter` and the C++ `...` token are the
+/// variadic tail, named `...`.
 pub(crate) fn extract_c_parameter(node: Node<'_>, source: &str) -> Option<ParameterInfo> {
-    if node.kind() != "parameter_declaration" && node.kind() != "variadic_parameter" {
-        return None;
-    }
-
-    let is_variadic = node.kind() == "variadic_parameter";
-    if is_variadic {
+    let kind = node.kind();
+    if matches!(kind, "variadic_parameter" | "...") {
         return Some(ParameterInfo {
             name: "...".to_string(),
             type_annotation: None,
@@ -747,53 +736,37 @@ pub(crate) fn extract_c_parameter(node: Node<'_>, source: &str) -> Option<Parame
             is_variadic: true,
         });
     }
+    if !matches!(
+        kind,
+        "parameter_declaration" | "optional_parameter_declaration" | "variadic_parameter_declaration"
+    ) {
+        return None;
+    }
 
-    // Find the identifier - could be direct child or inside pointer_declarator/reference_declarator
     let name = find_c_param_name(node, source)?;
-
-    // Find the type annotation
     let type_annotation = find_c_type_node(node)
         .and_then(|n| n.utf8_text(source.as_bytes()).ok())
         .map(|s| s.to_string());
+    let default_value = node
+        .child_by_field_name("default_value")
+        .and_then(|value| value.utf8_text(source.as_bytes()).ok())
+        .map(str::to_string);
 
     Some(ParameterInfo {
         name,
         type_annotation,
-        default_value: None,
-        is_variadic: false,
+        default_value,
+        is_variadic: kind == "variadic_parameter_declaration",
     })
 }
 
-/// Finds the parameter name in a C/C++ parameter_declaration.
+/// The name a C/C++ parameter declares, read from its own declarator.
 pub(crate) fn find_c_param_name(node: Node<'_>, source: &str) -> Option<String> {
-    let mut cursor = node.walk();
-
-    for child in node.children(&mut cursor) {
-        let kind = child.kind();
-
-        if kind == "identifier" {
-            return child
-                .utf8_text(source.as_bytes())
-                .ok()
-                .map(|s| s.to_string());
-        }
-
-        // Handle pointer declarator: *name
-        if kind == "pointer_declarator"
-            && let Some(id) = find_child_by_kind(child, "identifier")
-        {
-            return id.utf8_text(source.as_bytes()).ok().map(|s| s.to_string());
-        }
-
-        // Handle reference declarator: &name
-        if kind == "reference_declarator"
-            && let Some(id) = find_child_by_kind(child, "identifier")
-        {
-            return id.utf8_text(source.as_bytes()).ok().map(|s| s.to_string());
-        }
-    }
-
-    None
+    node.child_by_field_name("declarator")
+        .and_then(declarator_name)
+        .filter(|name| name.kind() == "identifier")
+        .and_then(|name| name.utf8_text(source.as_bytes()).ok())
+        .map(str::to_string)
 }
 
 /// Extracts return type from C/C++ function_definition.

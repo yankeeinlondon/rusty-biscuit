@@ -6,6 +6,7 @@
 //! responsibility; all are re-exported here so each submodule can reach the
 //! others via `use super::*`.
 
+pub(crate) mod c_declarators;
 pub(crate) mod classify;
 pub(crate) mod declaration;
 pub(crate) mod doc_comments;
@@ -16,6 +17,7 @@ pub(crate) mod static_flags;
 pub(crate) mod type_metadata;
 pub(crate) mod visibility;
 
+pub(crate) use c_declarators::*;
 pub(crate) use classify::*;
 pub(crate) use declaration::*;
 pub(crate) use doc_comments::*;

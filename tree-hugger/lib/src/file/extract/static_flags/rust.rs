@@ -1,8 +1,9 @@
 use super::*;
 
-/// Checks if a Rust function is an associated function: declared directly in
-/// an `impl` or trait body, with no `self` receiver.
-pub(crate) fn extract_rust_is_static(node: Node<'_>, source: &str) -> bool {
+/// Checks if a Rust item is a static member: declared directly in an `impl`
+/// or trait body, and either an associated `const` (always used through the
+/// type) or a function with no `self` receiver.
+pub(crate) fn extract_rust_is_static(node: Node<'_>) -> bool {
     let is_associated = node
         .parent()
         .filter(|list| list.kind() == "declaration_list")
@@ -10,6 +11,9 @@ pub(crate) fn extract_rust_is_static(node: Node<'_>, source: &str) -> bool {
         .is_some_and(|parent| matches!(parent.kind(), "impl_item" | "trait_item"));
     if !is_associated {
         return false;
+    }
+    if node.kind() == "const_item" {
+        return true;
     }
 
     // Look for parameters node
@@ -20,11 +24,12 @@ pub(crate) fn extract_rust_is_static(node: Node<'_>, source: &str) -> bool {
             if child.kind() == "self_parameter" {
                 return false;
             }
-            // Check for `self` in the first parameter
+            // A typed receiver (`self: Box<Self>`) is a `parameter` whose
+            // pattern is the `self` keyword node, not an identifier.
             if child.kind() == "parameter"
-                && let Some(pattern) = find_child_by_kind(child, "identifier")
-                && let Ok(text) = pattern.utf8_text(source.as_bytes())
-                && text == "self"
+                && child
+                    .child_by_field_name("pattern")
+                    .is_some_and(|pattern| pattern.kind() == "self")
             {
                 return false;
             }

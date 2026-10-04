@@ -166,3 +166,8 @@ impl<T> Wrapper<T> {
 impl PrivateTrait for String {
     fn private_trait_method(&self) {}
 }
+
+union UnionFieldForms {
+    number: i32,
+    bytes: [u8; 4],
+}

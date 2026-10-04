@@ -94,3 +94,10 @@ enum UnmarkedEnum
 {
     OnlyMember,
 }
+
+class PropertyFieldForms { public static int Count { get; private set; } }
+record RecordFieldForms { public int value; }
+
+class ConstantForms { public const int ClassConstant = 1; }
+struct ConstantStruct { const int StructConstant = 2; }
+interface IConstantForms { const int InterfaceConstant = 3; }

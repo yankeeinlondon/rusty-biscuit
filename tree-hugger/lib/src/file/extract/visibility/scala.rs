@@ -20,11 +20,10 @@ pub(super) fn extract_scala_visibility(
         return Some(Visibility::Public);
     };
 
-    let text = access.utf8_text(source.as_bytes()).ok()?;
-    let unqualified = if text.trim_start().starts_with("private") {
-        Visibility::Private
-    } else {
-        Visibility::Protected
+    let unqualified = match access.child(0)?.kind() {
+        "private" => Visibility::Private,
+        "protected" => Visibility::Protected,
+        _ => return None,
     };
     let Some(qualifier) = find_child_by_kind(access, "access_qualifier") else {
         return Some(unqualified);

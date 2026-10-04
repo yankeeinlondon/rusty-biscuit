@@ -24,10 +24,24 @@
 
 (interface_body
   (property_signature
-    name: (property_identifier) @local.definition.property) @local.definition.property.context)
+    name: [
+      (property_identifier)
+      (number)
+    ] @local.definition.property) @local.definition.property.context)
+
+; A quoted name is reported without its quotes.
+(interface_body
+  (property_signature
+    name: (string
+      (string_fragment) @local.definition.property)) @local.definition.property.context)
 
 (public_field_definition
   name: [
     (property_identifier)
     (private_property_identifier)
+    (number)
   ] @local.definition.field) @local.definition.field.context
+
+(public_field_definition
+  name: (string
+    (string_fragment) @local.definition.field)) @local.definition.field.context

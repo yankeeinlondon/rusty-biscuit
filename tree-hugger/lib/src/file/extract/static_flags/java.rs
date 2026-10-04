@@ -1,7 +1,8 @@
 use super::*;
 
 /// Checks if a Java or C# member is static: it has the `static` modifier, or
-/// it is a Java interface constant, which is implicitly `public static final`.
+/// the language makes it static without one: a Java interface constant
+/// (implicitly `public static final`) or a C# `const` field.
 pub(crate) fn extract_java_csharp_is_static(node: Node<'_>, source: &str) -> bool {
     if node.kind() == "constant_declaration" {
         return true;
@@ -24,7 +25,7 @@ pub(crate) fn extract_java_csharp_is_static(node: Node<'_>, source: &str) -> boo
     for child in node.children(&mut cursor) {
         if child.kind() == "modifier"
             && let Ok(text) = child.utf8_text(source.as_bytes())
-            && text == "static"
+            && matches!(text, "static" | "const")
         {
             return true;
         }

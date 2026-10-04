@@ -58,6 +58,10 @@
     (variable_name
       (name) @local.definition.field)))
 
+(const_declaration
+  (const_element
+    (name) @local.definition.constant))
+
 ; Imports (use statements)
 (namespace_use_clause
   (qualified_name

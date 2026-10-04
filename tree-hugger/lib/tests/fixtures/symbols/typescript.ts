@@ -87,3 +87,7 @@ class ModuleWidget {
 export namespace ExportedNamespace {
   export function namespaceFunction(): void {}
 }
+
+abstract class AbstractFieldForms { static count = 0; }
+class PrivateFieldForms { static #count = 0; }
+interface QuotedFieldForms { "label": string; }

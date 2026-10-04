@@ -94,3 +94,10 @@ int functionWithLocalStatic() {
     static int localStaticCounter = 0;
     return ++localStaticCounter;
 }
+
+struct DeclaratorFieldForms {
+    int values[3];
+    int **pointer;
+    int (*callback)(int);
+    template<class T> static T cache[3];
+};

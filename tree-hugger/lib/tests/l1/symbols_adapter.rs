@@ -10,7 +10,7 @@ use tree_hugger::{
     VisibilityLevel,
 };
 
-use crate::symbols_fixtures::{Extracted, all_fixtures, display_name, extract_primary};
+use crate::symbols_fixtures::{Extracted, all_fixtures, display_name, extract_inline, extract_primary};
 use crate::symbols_kinds::{KIND_MATRIX, rows_by_language};
 use crate::symbols_static::STATIC_MATRIX;
 use crate::symbols_visibility::VISIBILITY_MATRIX;
@@ -515,6 +515,34 @@ fn fixture_signatures_survive_both_conversions() {
             .unwrap_or_else(|| panic!("{label}: SymbolInfo -> record -> SymbolInfo lost the signature"));
         let names: Vec<&str> = signature.parameters.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, *parameters, "{label}: parameters after SymbolInfo -> record");
+    }
+}
+
+/// A C++ function returning a function pointer keeps its own parameters,
+/// with their types, default and variadic tail, through both conversions.
+#[test]
+fn returned_callback_signature_survives_both_conversions() {
+    let extracted = extract_inline(
+        "int (*callback_result(char **argv, int count = 2, ...))(long returned) { return 0; }\n",
+        "cpp",
+    );
+    let label = "inline .cpp: `callback_result`";
+    let expected = extracted
+        .symbol("callback_result", None)
+        .signature
+        .clone()
+        .unwrap_or_else(|| panic!("{label}: no signature"));
+    let names: Vec<&str> = expected.parameters.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(names, ["argv", "count", "..."], "{label}: extracted parameters");
+
+    let (info, record) = converted(&extracted, "callback_result", None);
+    let back = SymbolInfo::try_from(record).expect("convert back");
+    for (path, symbol) in [("record -> SymbolInfo", info), ("SymbolInfo -> record -> SymbolInfo", back)] {
+        assert_eq!(
+            serde_json::to_value(symbol.signature.as_ref().map(|s| &s.parameters)).expect("serialize"),
+            serde_json::to_value(Some(&expected.parameters)).expect("serialize"),
+            "{label}: parameters after {path}"
+        );
     }
 }
 

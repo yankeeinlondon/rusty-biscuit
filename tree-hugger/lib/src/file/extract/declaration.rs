@@ -82,7 +82,7 @@ const EXACT_DECLARATION_KINDS: &[&str] = &[
     "package_statement",
 ];
 
-fn is_function_node_kind(kind: &str) -> bool {
+pub(crate) fn is_function_node_kind(kind: &str) -> bool {
     FUNCTION_NODE_KINDS.contains(&kind)
 }
 
@@ -155,6 +155,8 @@ pub(crate) fn resolve_declaration_node(name: Node<'_>) -> Node<'_> {
 /// The declaration a query's context capture stands for. C and C++ function
 /// patterns capture the `function_declarator`, but storage class, return type
 /// and the access section belong to the enclosing definition or declaration.
+/// A `function_declarator` inside a parameter list stands for that parameter
+/// (`void cb(int)` declares a parameter of function type).
 pub(crate) fn declaration_for_context(context: Node<'_>) -> Node<'_> {
     if context.kind() != "function_declarator" {
         return context;
@@ -164,7 +166,11 @@ pub(crate) fn declaration_for_context(context: Node<'_>) -> Node<'_> {
     while let Some(parent) = current.parent() {
         match parent.kind() {
             kind if kind.ends_with("_declarator") => current = parent,
-            "function_definition" | "declaration" | "field_declaration" => return parent,
+            "function_definition"
+            | "declaration"
+            | "field_declaration"
+            | "parameter_declaration"
+            | "optional_parameter_declaration" => return parent,
             _ => break,
         }
     }
@@ -172,8 +178,20 @@ pub(crate) fn declaration_for_context(context: Node<'_>) -> Node<'_> {
 }
 
 /// C# keeps access and storage modifiers on the statement that wraps a
-/// `variable_declaration`, so that statement is the declaration.
+/// `variable_declaration`, so that statement is the declaration. Every target
+/// of a Python chained assignment (`first = second = 0`) is declared by the
+/// outermost assignment, the statement.
 fn climb_declaration_wrapper(node: Node<'_>) -> Node<'_> {
+    if node.kind() == "assignment" {
+        let mut outermost = node;
+        while let Some(parent) = outermost
+            .parent()
+            .filter(|parent| parent.kind() == "assignment")
+        {
+            outermost = parent;
+        }
+        return outermost;
+    }
     if node.kind() == "variable_declaration"
         && let Some(parent) = node.parent()
         && matches!(
@@ -186,17 +204,49 @@ fn climb_declaration_wrapper(node: Node<'_>) -> Node<'_> {
     node
 }
 
-/// Whether `declaration` sits inside a function-like construct, where member
-/// and module access do not apply.
-pub(crate) fn is_local_declaration(declaration: Node<'_>) -> bool {
-    let mut current = declaration.parent();
+/// Whether `declaration` sits inside a function-like construct or a
+/// block-valued initializer or accessor, where member and module access do
+/// not apply. The nearest function, local scope or type owner decides, so a
+/// member of a class declared in a function (a Java local or anonymous class)
+/// keeps its access.
+pub(crate) fn is_local_declaration(declaration: Node<'_>, language: ProgrammingLanguage) -> bool {
+    let mut current = member_slot(declaration).parent();
     while let Some(node) = current {
-        if is_function_node_kind(node.kind()) {
+        if is_member_owner_kind(node.kind()) {
+            return false;
+        }
+        if is_function_node_kind(node.kind()) || is_local_scope_kind(node.kind(), language) {
             return true;
         }
         current = node.parent();
     }
     false
+}
+
+/// Bodies that are not functions but whose declarations are still local: a
+/// Scala block expression (a `val`, `var` or alias `given` initializer, a
+/// `match` arm), a Rust block expression (a `const` or `static`
+/// initializer), a Java initializer block, and a Swift computed property,
+/// accessor or observer body.
+///
+/// Python, Lua, Perl and the shells reuse `block` for class bodies or for
+/// statements whose definitions stay global, so they have no entry here.
+fn is_local_scope_kind(kind: &str, language: ProgrammingLanguage) -> bool {
+    match language {
+        ProgrammingLanguage::Scala => {
+            matches!(kind, "block" | "indented_block" | "case_block")
+        }
+        ProgrammingLanguage::Rust | ProgrammingLanguage::Java => kind == "block",
+        ProgrammingLanguage::Swift => matches!(
+            kind,
+            "computed_property"
+                | "computed_getter"
+                | "computed_setter"
+                | "computed_modify"
+                | "willset_didset_block"
+        ),
+        _ => false,
+    }
 }
 
 /// The declaration's source text from its start up to, but not including, its
@@ -212,4 +262,32 @@ pub(crate) fn declaration_text(declaration: Node<'_>, source: &str) -> Option<St
         .unwrap_or_else(|| declaration.end_byte());
     let text = source.get(declaration.start_byte()..end)?.trim_end();
     (!text.is_empty()).then(|| text.to_string())
+}
+
+/// The context a C/C++ function or method pattern captures, for a function
+/// name the query reached by a pattern that captures none (a name behind an
+/// attribute or parentheses, a member function behind return declarators):
+/// a member function's declaration, as the class-body patterns capture, or a
+/// free function's own `function_declarator`, as the function pattern does.
+pub(crate) fn implied_c_function_context<'tree>(
+    language: ProgrammingLanguage,
+    kind: SymbolKind,
+    name: Node<'tree>,
+    declaration: Node<'tree>,
+) -> Option<Node<'tree>> {
+    if !matches!(language, ProgrammingLanguage::C | ProgrammingLanguage::Cpp) {
+        return None;
+    }
+    match kind {
+        SymbolKind::Method | SymbolKind::Constructor => Some(declaration),
+        SymbolKind::Function => declared_function_named(declaration, name).map(|function| function.function),
+        _ => None,
+    }
+}
+
+/// Whether a C/C++ symbol is a `typedef` name.
+pub(crate) fn is_c_typedef_name(language: ProgrammingLanguage, kind: SymbolKind, declaration: Node<'_>) -> bool {
+    matches!(language, ProgrammingLanguage::C | ProgrammingLanguage::Cpp)
+        && kind == SymbolKind::TypeAlias
+        && declaration.kind() == "type_definition"
 }

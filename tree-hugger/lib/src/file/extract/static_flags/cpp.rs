@@ -14,9 +14,10 @@ pub(crate) fn extract_cpp_is_static(node: Node<'_>, source: &str) -> bool {
     false
 }
 
-/// Whether a C++ declaration sits directly in a class, struct or union body.
+/// Whether a C++ declaration sits directly in a class, struct or union body,
+/// looking through template headers and preprocessor conditionals.
 pub(super) fn is_class_member(declaration: Node<'_>) -> bool {
-    declaration
+    member_slot(declaration)
         .parent()
         .is_some_and(|parent| parent.kind() == "field_declaration_list")
 }

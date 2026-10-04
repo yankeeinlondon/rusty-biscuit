@@ -174,6 +174,7 @@ fn populate_locals_captures(inventory: &mut LanguageInventory, _language: Progra
         ("local.definition.parameter", "parameter definitions"),
         ("local.definition.import", "import definitions"),
         ("local.definition.macro", "macro definitions"),
+        ("local.definition.constant", "constant definitions"),
         ("local.definition.namespace", "namespace and package definitions"),
         ("local.reference", "identifier references"),
         ("local.scope", "scope boundaries"),

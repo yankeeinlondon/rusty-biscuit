@@ -46,7 +46,8 @@ pub(crate) fn extract_type_metadata(
 
     match language {
         ProgrammingLanguage::Rust => extract_rust_type_metadata(node, node_kind, source),
-        ProgrammingLanguage::TypeScript => {
+        // The JavaScript grammar's class nodes are a subset of TypeScript's.
+        ProgrammingLanguage::TypeScript | ProgrammingLanguage::JavaScript => {
             extract_typescript_type_metadata(node, node_kind, source)
         }
         ProgrammingLanguage::Go => extract_go_type_metadata(node, node_kind, source),
@@ -62,7 +63,7 @@ pub(crate) fn extract_type_metadata(
     }
 }
 
-/// Extracts type metadata from Rust struct_item or enum_item nodes.
+/// Extracts type metadata from Rust struct_item, union_item, enum_item or trait_item nodes.
 pub(crate) fn extract_rust_type_metadata(
     node: Node<'_>,
     node_kind: &str,
@@ -80,7 +81,7 @@ pub(crate) fn extract_rust_type_metadata(
     }
 
     match node_kind {
-        "struct_item" => {
+        "struct_item" | "union_item" => {
             // Check for field_declaration_list (normal struct) or ordered_field_declaration_list (tuple struct)
             if let Some(field_list) = find_child_by_kind(node, "field_declaration_list") {
                 metadata.fields = extract_rust_struct_fields(field_list, source);
@@ -94,6 +95,12 @@ pub(crate) fn extract_rust_type_metadata(
         "enum_item" => {
             if let Some(variant_list) = find_child_by_kind(node, "enum_variant_list") {
                 metadata.variants = extract_rust_enum_variants(variant_list, source);
+            }
+        }
+        // A trait's associated constants; its methods are standalone.
+        "trait_item" => {
+            if let Some(body) = node.child_by_field_name("body") {
+                metadata.fields = extract_rust_trait_constants(body, source);
             }
         }
         _ => {}
@@ -187,6 +194,30 @@ pub(crate) fn extract_rust_struct_fields(node: Node<'_>, source: &str) -> Vec<Fi
     }
 
     fields
+}
+
+/// Extracts the associated constants of a Rust trait's declaration_list.
+fn extract_rust_trait_constants(body: Node<'_>, source: &str) -> Vec<FieldInfo> {
+    let mut cursor = body.walk();
+    body.named_children(&mut cursor)
+        .filter(|item| item.kind() == "const_item")
+        .filter_map(|item| {
+            let name = item
+                .child_by_field_name("name")?
+                .utf8_text(source.as_bytes())
+                .ok()?;
+            Some(FieldInfo {
+                name: name.to_string(),
+                type_annotation: item
+                    .child_by_field_name("type")
+                    .and_then(|type_node| type_node.utf8_text(source.as_bytes()).ok())
+                    .map(str::to_string),
+                doc_comment: extract_doc_comment(item, ProgrammingLanguage::Rust, source),
+                visibility: None,
+                is_static: true,
+            })
+        })
+        .collect()
 }
 
 /// Extracts fields from a Rust tuple struct (ordered_field_declaration_list).
@@ -291,7 +322,8 @@ pub(crate) fn extract_rust_variant_tuple_fields(node: Node<'_>, source: &str) ->
     fields
 }
 
-/// Extracts type metadata from TypeScript interface or type_alias_declaration.
+/// Extracts type metadata from a TypeScript or JavaScript class (also
+/// abstract), interface, object type alias or enum.
 pub(crate) fn extract_typescript_type_metadata(
     node: Node<'_>,
     node_kind: &str,
@@ -318,7 +350,7 @@ pub(crate) fn extract_typescript_type_metadata(
                 metadata.fields = extract_typescript_interface_fields(object_type, source);
             }
         }
-        "class_declaration" => {
+        "class_declaration" | "abstract_class_declaration" => {
             if let Some(body) = find_child_by_kind(node, "class_body") {
                 metadata.fields = extract_typescript_class_fields(body, source);
             }
@@ -366,9 +398,7 @@ pub(crate) fn extract_typescript_interface_fields(node: Node<'_>, source: &str) 
             continue;
         }
 
-        let name = find_child_by_kind(child, "property_identifier")
-            .and_then(|n| n.utf8_text(source.as_bytes()).ok())
-            .map(|s| s.to_string());
+        let name = ecma_member_name(child, source);
 
         let type_annotation = find_child_by_kind(child, "type_annotation")
             .and_then(|ta| ta.child(1)) // Skip the colon
@@ -396,13 +426,15 @@ pub(crate) fn extract_typescript_class_fields(node: Node<'_>, source: &str) -> V
 
     for child in node.children(&mut cursor) {
         let kind = child.kind();
-        if kind != "public_field_definition" && kind != "property_definition" {
+        // `field_definition` is the JavaScript grammar's class field.
+        if !matches!(
+            kind,
+            "public_field_definition" | "property_definition" | "field_definition"
+        ) {
             continue;
         }
 
-        let name = find_child_by_kind(child, "property_identifier")
-            .and_then(|n| n.utf8_text(source.as_bytes()).ok())
-            .map(|s| s.to_string());
+        let name = ecma_member_name(child, source);
 
         let type_annotation = find_child_by_kind(child, "type_annotation")
             .and_then(|ta| ta.child(1))
@@ -425,6 +457,22 @@ pub(crate) fn extract_typescript_class_fields(node: Node<'_>, source: &str) -> V
     }
 
     fields
+}
+
+/// The declared name of a JS/TS class field or property signature, as the
+/// locals query captures it: an identifier, a `#private` name, the contents
+/// of a quoted name (`"label": string` is `label`) or a numeric name. A
+/// computed name (`[key]`) declares nothing nameable.
+fn ecma_member_name(member: Node<'_>, source: &str) -> Option<String> {
+    let name = member
+        .child_by_field_name("name")
+        .or_else(|| member.child_by_field_name("property"))?;
+    let name = match name.kind() {
+        "property_identifier" | "private_property_identifier" | "number" => name,
+        "string" => find_child_by_kind(name, "string_fragment")?,
+        _ => return None,
+    };
+    name.utf8_text(source.as_bytes()).ok().map(str::to_string)
 }
 
 /// Extracts variants from TypeScript enum_body.
@@ -611,7 +659,10 @@ pub(crate) fn extract_python_type_metadata(
     }
 }
 
-/// Extracts fields from Python class body.
+/// Extracts fields from Python class body: every target of a class-body
+/// assignment, through chains (`first = second = 0`) and one level of
+/// tuple or list pattern (`a, b = …`, `(c, d) = …`, `[e, f] = …`), as the
+/// locals query reports them.
 pub(crate) fn extract_python_class_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
     let mut fields = Vec::new();
     let mut cursor = node.walk();
@@ -622,30 +673,52 @@ pub(crate) fn extract_python_class_fields(node: Node<'_>, source: &str) -> Vec<F
         }
         // `x: T`, `x: T = v`, `x: ClassVar[T]` and `x = v`; the standalone
         // field symbols come from the same class-body assignments.
-        let Some(assignment) = find_child_by_kind(child, "assignment") else {
+        let Some(statement) = find_child_by_kind(child, "assignment") else {
             continue;
         };
-        let Some(name) = assignment
-            .child_by_field_name("left")
-            .filter(|left| left.kind() == "identifier")
-            .and_then(|left| left.utf8_text(source.as_bytes()).ok())
-        else {
-            continue;
-        };
-
-        fields.push(FieldInfo {
-            name: name.to_string(),
-            type_annotation: assignment
+        let is_static = is_python_class_attribute(statement, source);
+        let mut assignment = Some(statement);
+        while let Some(current) = assignment {
+            let type_annotation = current
                 .child_by_field_name("type")
                 .and_then(|type_node| type_node.utf8_text(source.as_bytes()).ok())
-                .map(str::to_string),
-            doc_comment: None,
-            visibility: None,
-            is_static: is_python_class_attribute(assignment, source),
-        });
+                .map(str::to_string);
+            for target in python_assignment_targets(current) {
+                if let Ok(name) = target.utf8_text(source.as_bytes()) {
+                    fields.push(FieldInfo {
+                        name: name.to_string(),
+                        type_annotation: type_annotation.clone(),
+                        doc_comment: None,
+                        visibility: None,
+                        is_static,
+                    });
+                }
+            }
+            assignment = current
+                .child_by_field_name("right")
+                .filter(|right| right.kind() == "assignment");
+        }
     }
 
     fields
+}
+
+/// The names an assignment's left side binds: a name, or the names directly
+/// in a tuple or list pattern.
+fn python_assignment_targets(assignment: Node<'_>) -> Vec<Node<'_>> {
+    let Some(left) = assignment.child_by_field_name("left") else {
+        return Vec::new();
+    };
+    match left.kind() {
+        "identifier" => vec![left],
+        "pattern_list" | "tuple_pattern" | "list_pattern" => {
+            let mut cursor = left.walk();
+            left.named_children(&mut cursor)
+                .filter(|item| item.kind() == "identifier")
+                .collect()
+        }
+        _ => Vec::new(),
+    }
 }
 
 // ============================================================================
@@ -676,10 +749,13 @@ pub(crate) fn extract_java_type_metadata(
                 metadata.variants = extract_java_enum_variants(body, source);
             }
         }
+        // Record components, then the fields declared in the body.
         "record_declaration" => {
-            // Record components are in formal_parameters
             if let Some(params) = find_child_by_kind(node, "formal_parameters") {
                 metadata.fields = extract_java_record_components(params, source);
+            }
+            if let Some(body) = find_child_by_kind(node, "class_body") {
+                metadata.fields.extend(extract_java_class_fields(body, source));
             }
         }
         "interface_declaration" => {
@@ -863,7 +939,7 @@ pub(crate) fn extract_java_interface_constants(node: Node<'_>, source: &str) -> 
 // C type metadata extraction
 // ============================================================================
 
-/// Extracts type metadata from C struct or enum declarations.
+/// Extracts type metadata from C struct, union, enum or typedef declarations.
 pub(crate) fn extract_c_type_metadata(
     node: Node<'_>,
     node_kind: &str,
@@ -872,7 +948,7 @@ pub(crate) fn extract_c_type_metadata(
     let mut metadata = TypeMetadata::new();
 
     match node_kind {
-        "struct_specifier" => {
+        "struct_specifier" | "union_specifier" => {
             if let Some(field_list) = find_child_by_kind(node, "field_declaration_list") {
                 metadata.fields = extract_c_struct_fields(field_list, source);
             }
@@ -883,9 +959,11 @@ pub(crate) fn extract_c_type_metadata(
             }
         }
         "type_definition" => {
-            // For typedef struct { ... } Name; we look for struct_specifier inside
-            if let Some(struct_spec) = find_child_by_kind(node, "struct_specifier")
-                && let Some(field_list) = find_child_by_kind(struct_spec, "field_declaration_list")
+            // `typedef struct { ... } Name;` and `typedef union { ... } Name;`
+            if let Some(field_list) = node
+                .child_by_field_name("type")
+                .filter(|specifier| matches!(specifier.kind(), "struct_specifier" | "union_specifier"))
+                .and_then(|specifier| find_child_by_kind(specifier, "field_declaration_list"))
             {
                 metadata.fields = extract_c_struct_fields(field_list, source);
             }
@@ -903,10 +981,13 @@ pub(crate) fn extract_c_type_metadata(
 /// Extracts fields from C field_declaration_list.
 pub(crate) fn extract_c_struct_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
     let mut fields = Vec::new();
-    let mut cursor = node.walk();
 
-    for child in node.children(&mut cursor) {
+    for child in flattened_members(node) {
         if child.kind() != "field_declaration" {
+            continue;
+        }
+        if let Some(promoted) = anonymous_member_list(child) {
+            fields.extend(extract_c_struct_fields(promoted, source));
             continue;
         }
 
@@ -915,9 +996,8 @@ pub(crate) fn extract_c_struct_fields(node: Node<'_>, source: &str) -> Vec<Field
             .and_then(|n| n.utf8_text(source.as_bytes()).ok())
             .map(|s| s.to_string());
 
-        // Get field identifiers
         let mut inner_cursor = child.walk();
-        for inner in child.children(&mut inner_cursor) {
+        for inner in child.children_by_field_name("declarator", &mut inner_cursor) {
             if let Some(name_node) = c_field_name(inner)
                 && let Ok(name) = name_node.utf8_text(source.as_bytes())
             {
@@ -935,14 +1015,45 @@ pub(crate) fn extract_c_struct_fields(node: Node<'_>, source: &str) -> Vec<Field
     fields
 }
 
-/// The field name a C/C++ field declarator introduces, looking through
-/// pointer declarators (`char *name;`).
+/// The field name a C/C++ field declarator introduces, under any chain of
+/// pointer, array, reference, parenthesized, attributed and initializer
+/// declarators (`char **name`, `int values [[maybe_unused]] [3]`,
+/// `int (*callback)(int)`; a C++ variable template member parses as a plain
+/// `declaration`). A declarator that declares a function (see
+/// [`declared_function`]) is a method, not a field.
 fn c_field_name(declarator: Node<'_>) -> Option<Node<'_>> {
-    match declarator.kind() {
-        "field_identifier" => Some(declarator),
-        "pointer_declarator" => c_field_name(declarator.child_by_field_name("declarator")?),
-        _ => None,
+    if declared_function(declarator).is_some() {
+        return None;
     }
+    declarator_name(declarator).filter(|name| matches!(name.kind(), "field_identifier" | "identifier"))
+}
+
+/// The member list of an anonymous `struct`/`union` member
+/// (`union { int a; float b; };`), whose members belong to the enclosing
+/// type. A tagless member with a declarator (`struct { … } named;`) is an
+/// ordinary field.
+fn anonymous_member_list(field_declaration: Node<'_>) -> Option<Node<'_>> {
+    let specifier = field_declaration.child_by_field_name("type")?;
+    anonymous_member_declaration(specifier)?;
+    specifier.child_by_field_name("body")
+}
+
+/// The members of a type body (C/C++ `field_declaration_list` and
+/// `enumerator_list`, C# `declaration_list` and
+/// `enum_member_declaration_list`) in source order, with transparent wrappers
+/// (template headers, preprocessor conditionals, nested or not) replaced by
+/// their contents, so a wrapped member is listed like any other.
+fn flattened_members(list: Node<'_>) -> Vec<Node<'_>> {
+    let mut members = Vec::new();
+    let mut cursor = list.walk();
+    for child in list.named_children(&mut cursor) {
+        if is_transparent_wrapper_kind(child.kind()) {
+            members.extend(flattened_members(child));
+        } else {
+            members.push(child);
+        }
+    }
+    members
 }
 
 /// Finds a type node in a C declaration.
@@ -968,9 +1079,8 @@ const C_TYPE_KINDS: &[&str] = &[
 /// Extracts variants from C enumerator_list.
 pub(crate) fn extract_c_enum_variants(node: Node<'_>, source: &str) -> Vec<VariantInfo> {
     let mut variants = Vec::new();
-    let mut cursor = node.walk();
 
-    for child in node.children(&mut cursor) {
+    for child in flattened_members(node) {
         if child.kind() != "enumerator" {
             continue;
         }
@@ -989,7 +1099,7 @@ pub(crate) fn extract_c_enum_variants(node: Node<'_>, source: &str) -> Vec<Varia
 // C++ type metadata extraction
 // ============================================================================
 
-/// Extracts type metadata from C++ class, struct, or enum declarations.
+/// Extracts type metadata from C++ class, struct, union, or enum declarations.
 pub(crate) fn extract_cpp_type_metadata(
     node: Node<'_>,
     node_kind: &str,
@@ -998,9 +1108,17 @@ pub(crate) fn extract_cpp_type_metadata(
     let mut metadata = TypeMetadata::new();
 
     match node_kind {
-        "class_specifier" | "struct_specifier" => {
+        "class_specifier" | "struct_specifier" | "union_specifier" => {
             if let Some(field_list) = find_child_by_kind(node, "field_declaration_list") {
-                metadata.fields = extract_cpp_class_fields(field_list, source);
+                // `class` members default to private; `struct` and `union`
+                // members to public.
+                let default_visibility = if node_kind == "class_specifier" {
+                    Visibility::Private
+                } else {
+                    Visibility::Public
+                };
+                metadata.fields =
+                    extract_cpp_class_fields(field_list, source, Some(default_visibility));
             }
         }
         "enum_specifier" => {
@@ -1018,15 +1136,19 @@ pub(crate) fn extract_cpp_type_metadata(
     }
 }
 
-/// Extracts fields from C++ field_declaration_list.
-pub(crate) fn extract_cpp_class_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
+/// Extracts fields from C++ field_declaration_list; `visibility` is the
+/// access in effect before the first access specifier.
+pub(crate) fn extract_cpp_class_fields(
+    node: Node<'_>,
+    source: &str,
+    visibility: Option<Visibility>,
+) -> Vec<FieldInfo> {
     let mut fields = Vec::new();
-    let mut cursor = node.walk();
 
     // Track current visibility section (C++ uses access specifiers at section level)
-    let mut current_visibility: Option<Visibility> = None;
+    let mut current_visibility = visibility;
 
-    for child in node.children(&mut cursor) {
+    for child in flattened_members(node) {
         // Update visibility for access specifiers
         if child.kind() == "access_specifier" {
             if let Ok(text) = child.utf8_text(source.as_bytes()) {
@@ -1040,12 +1162,14 @@ pub(crate) fn extract_cpp_class_fields(node: Node<'_>, source: &str) -> Vec<Fiel
             continue;
         }
 
-        if child.kind() != "field_declaration" {
+        // A variable template member is a `declaration` under its template header.
+        if !matches!(child.kind(), "field_declaration" | "declaration") {
             continue;
         }
-
-        // Skip method declarations (they have function_declarator)
-        if find_child_by_kind(child, "function_declarator").is_some() {
+        // An anonymous union's members are the enclosing type's, in its
+        // current access section.
+        if let Some(promoted) = anonymous_member_list(child) {
+            fields.extend(extract_cpp_class_fields(promoted, source, current_visibility));
             continue;
         }
 
@@ -1057,9 +1181,8 @@ pub(crate) fn extract_cpp_class_fields(node: Node<'_>, source: &str) -> Vec<Fiel
         // Check for static specifier
         let is_static = extract_cpp_is_static(child, source);
 
-        // Get field identifiers
         let mut inner_cursor = child.walk();
-        for inner in child.children(&mut inner_cursor) {
+        for inner in child.children_by_field_name("declarator", &mut inner_cursor) {
             if let Some(name_node) = c_field_name(inner)
                 && let Ok(name) = name_node.utf8_text(source.as_bytes())
             {
@@ -1100,6 +1223,15 @@ pub(crate) fn extract_csharp_type_metadata(
                 metadata.fields = extract_csharp_class_fields(body, source);
             }
         }
+        // Positional parameters, then the members declared in the body.
+        "record_declaration" => {
+            if let Some(params) = find_child_by_kind(node, "parameter_list") {
+                metadata.fields = extract_csharp_record_parameters(params, source);
+            }
+            if let Some(body) = find_child_by_kind(node, "declaration_list") {
+                metadata.fields.extend(extract_csharp_class_fields(body, source));
+            }
+        }
         "enum_declaration" => {
             if let Some(body) = find_child_by_kind(node, "enum_member_declaration_list") {
                 metadata.variants = extract_csharp_enum_variants(body, source);
@@ -1108,12 +1240,6 @@ pub(crate) fn extract_csharp_type_metadata(
         "interface_declaration" => {
             if let Some(body) = find_child_by_kind(node, "declaration_list") {
                 metadata.fields = extract_csharp_interface_properties(body, source);
-            }
-        }
-        "record_declaration" => {
-            // Record parameters are in parameter_list
-            if let Some(params) = find_child_by_kind(node, "parameter_list") {
-                metadata.fields = extract_csharp_record_parameters(params, source);
             }
         }
         _ => {}
@@ -1143,13 +1269,19 @@ pub(crate) fn extract_csharp_type_parameters(node: Node<'_>, source: &str) -> Ve
     params
 }
 
-/// Extracts fields from C# declaration_list (class/struct body).
+/// Extracts the fields and properties of a C# declaration_list (class,
+/// struct or record body), including members inside preprocessor
+/// conditionals.
 pub(crate) fn extract_csharp_class_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
     let mut fields = Vec::new();
-    let mut cursor = node.walk();
 
-    for child in node.children(&mut cursor) {
-        if child.kind() != "field_declaration" {
+    for child in flattened_members(node) {
+        if child.kind() == "property_declaration" {
+            fields.extend(csharp_property(child, source, None));
+            continue;
+        }
+        // `event Action Changed;` is a field of delegate type.
+        if !matches!(child.kind(), "field_declaration" | "event_field_declaration") {
             continue;
         }
 
@@ -1204,12 +1336,12 @@ const CSHARP_TYPE_KINDS: &[&str] = &[
     "tuple_type",
 ];
 
-/// Extracts variants from C# enum_member_declaration_list.
+/// Extracts variants from C# enum_member_declaration_list, including members
+/// inside preprocessor conditionals.
 pub(crate) fn extract_csharp_enum_variants(node: Node<'_>, source: &str) -> Vec<VariantInfo> {
     let mut variants = Vec::new();
-    let mut cursor = node.walk();
 
-    for child in node.children(&mut cursor) {
+    for child in flattened_members(node) {
         if child.kind() != "enum_member_declaration" {
             continue;
         }
@@ -1224,37 +1356,45 @@ pub(crate) fn extract_csharp_enum_variants(node: Node<'_>, source: &str) -> Vec<
     variants
 }
 
-/// Extracts the properties of a C# interface's declaration_list. Its methods
-/// are reported as standalone methods, not as fields.
+/// Extracts the properties of a C# interface's declaration_list, including
+/// properties inside preprocessor conditionals. Its methods are reported as
+/// standalone methods, not as fields.
 pub(crate) fn extract_csharp_interface_properties(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
     let mut fields = Vec::new();
-    let mut cursor = node.walk();
 
-    for child in node.children(&mut cursor) {
+    for child in flattened_members(node) {
         if child.kind() != "property_declaration" {
             continue;
         }
-
-        if let Some(name_node) = child.child_by_field_name("name")
-            && let Ok(name) = name_node.utf8_text(source.as_bytes())
-        {
-            let type_annotation = child
-                .child_by_field_name("type")
-                .and_then(|type_node| type_node.utf8_text(source.as_bytes()).ok())
-                .map(str::to_string);
-
-            fields.push(FieldInfo {
-                name: name.to_string(),
-                type_annotation,
-                doc_comment: None,
-                // Interface members are implicitly public.
-                visibility: extract_csharp_visibility(child, source).or(Some(Visibility::Public)),
-                is_static: extract_java_csharp_is_static(child, source),
-            });
-        }
+        // Interface members are implicitly public.
+        fields.extend(csharp_property(child, source, Some(Visibility::Public)));
     }
 
     fields
+}
+
+/// A C# `property_declaration` as a field entry; `default_visibility`
+/// applies when no access modifier is written. An accessor-level modifier
+/// (`{ get; private set; }`) does not change the property's access.
+fn csharp_property(
+    property: Node<'_>,
+    source: &str,
+    default_visibility: Option<Visibility>,
+) -> Option<FieldInfo> {
+    let name = property
+        .child_by_field_name("name")?
+        .utf8_text(source.as_bytes())
+        .ok()?;
+    Some(FieldInfo {
+        name: name.to_string(),
+        type_annotation: property
+            .child_by_field_name("type")
+            .and_then(|type_node| type_node.utf8_text(source.as_bytes()).ok())
+            .map(str::to_string),
+        doc_comment: None,
+        visibility: extract_csharp_visibility(property, source).or(default_visibility),
+        is_static: extract_java_csharp_is_static(property, source),
+    })
 }
 
 /// Extracts parameters from C# record parameter_list.
@@ -1354,7 +1494,8 @@ pub(crate) fn extract_swift_type_parameters(node: Node<'_>, source: &str) -> Vec
     params
 }
 
-/// Extracts fields from Swift class_body.
+/// Extracts fields from Swift class_body: every binding of a property
+/// declaration (`var first = 1, second = 2`), each with its own annotation.
 pub(crate) fn extract_swift_class_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
     let mut fields = Vec::new();
     let mut cursor = node.walk();
@@ -1364,32 +1505,51 @@ pub(crate) fn extract_swift_class_fields(node: Node<'_>, source: &str) -> Vec<Fi
             continue;
         }
 
-        // Get pattern (contains the name)
-        if let Some(pattern) = find_child_by_kind(child, "pattern")
-            && let Some(ident) = find_child_by_kind(pattern, "simple_identifier")
-            && let Ok(name) = ident.utf8_text(source.as_bytes())
-        {
-            // Get type annotation
-            let type_annotation = find_child_by_kind(child, "type_annotation")
-                .and_then(|ta| ta.child(1)) // Skip colon
-                .and_then(|n| n.utf8_text(source.as_bytes()).ok())
-                .map(|s| s.to_string());
+        let visibility = extract_swift_visibility(child, source);
+        let is_static = extract_swift_is_static(child, source);
 
-            // Extract visibility and static modifier
-            let visibility = extract_swift_visibility(child, source);
-            let is_static = extract_swift_is_static(child, source);
-
-            fields.push(FieldInfo {
-                name: name.to_string(),
-                type_annotation,
-                doc_comment: None,
-                visibility,
-                is_static,
-            });
+        // Each `name:` pattern is followed by its own optional annotation.
+        let mut pending: Option<String> = None;
+        let mut type_annotation = None;
+        let mut inner_cursor = child.walk();
+        for (index, inner) in child.children(&mut inner_cursor).enumerate() {
+            if child.field_name_for_child(index as u32) == Some("name") {
+                if let Some(name) = pending.take() {
+                    fields.push(swift_field(name, type_annotation.take(), visibility, is_static));
+                }
+                pending = inner
+                    .child_by_field_name("bound_identifier")
+                    .and_then(|ident| ident.utf8_text(source.as_bytes()).ok())
+                    .map(str::to_string);
+                type_annotation = None;
+            } else if inner.kind() == "type_annotation" {
+                type_annotation = inner
+                    .child(1) // Skip colon
+                    .and_then(|n| n.utf8_text(source.as_bytes()).ok())
+                    .map(str::to_string);
+            }
+        }
+        if let Some(name) = pending {
+            fields.push(swift_field(name, type_annotation, visibility, is_static));
         }
     }
 
     fields
+}
+
+fn swift_field(
+    name: String,
+    type_annotation: Option<String>,
+    visibility: Option<Visibility>,
+    is_static: bool,
+) -> FieldInfo {
+    FieldInfo {
+        name,
+        type_annotation,
+        doc_comment: None,
+        visibility,
+        is_static,
+    }
 }
 
 /// Extracts enum cases from Swift class_body (for enums).

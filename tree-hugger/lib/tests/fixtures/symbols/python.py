@@ -47,3 +47,8 @@ class PlainWidget:
 
 def free_function_assigning_attribute(target_object: PlainWidget) -> None:
     target_object.assigned_from_outside = 5
+
+
+class AssignmentFieldForms:
+    first = second = 0
+    a, b = (1, 2)

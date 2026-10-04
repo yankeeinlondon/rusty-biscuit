@@ -71,3 +71,9 @@ enum Suit
         return "suit";
     }
 }
+
+class ConstantForms { const CLASS_CONSTANT = 1; }
+interface ConstantContract { const INTERFACE_CONSTANT = 2; }
+trait ConstantTrait { const TRAIT_CONSTANT = 3; }
+enum ConstantEnum { case Only; const ENUM_CONSTANT = 4; }
+const TOP_CONSTANT = 5;

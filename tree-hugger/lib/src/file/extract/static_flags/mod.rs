@@ -63,7 +63,8 @@ pub(crate) fn extract_is_static(declaration: Node<'_>, ctx: &DeclarationContext<
             cpp::is_class_member(declaration) && cpp::extract_cpp_is_static(declaration, source)
         }
         ProgrammingLanguage::Rust => {
-            ctx.kind.is_function() && rust::extract_rust_is_static(declaration, source)
+            (ctx.kind.is_function() || ctx.kind == SymbolKind::Constant)
+                && rust::extract_rust_is_static(declaration)
         }
         ProgrammingLanguage::C
         | ProgrammingLanguage::Go

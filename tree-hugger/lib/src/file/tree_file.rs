@@ -1825,7 +1825,6 @@ impl TreeFile {
                     Some(kind) => kind,
                     None => continue,
                 };
-                let anchor = context_node.unwrap_or(capture.node);
                 let declaration = context_node.map_or_else(
                     || resolve_declaration_node(capture.node),
                     declaration_for_context,
@@ -1837,6 +1836,10 @@ impl TreeFile {
                     self.language,
                     &self.source,
                 );
+                let context_node = context_node.or_else(|| {
+                    implied_c_function_context(self.language, kind, capture.node, declaration)
+                });
+                let anchor = context_node.unwrap_or(capture.node);
                 let container = find_symbol_container(declaration, self.language, &self.source);
 
                 let name = capture
@@ -1852,14 +1855,14 @@ impl TreeFile {
                     root,
                     is_ecma_module,
                     kind,
-                    is_local: is_local_declaration(declaration),
+                    is_local: is_local_declaration(declaration, self.language),
                 };
                 let visibility = extract_visibility(declaration, &declaration_context);
                 let is_static = extract_is_static(declaration, &declaration_context);
                 let is_static_storage =
                     extract_is_static_storage(declaration, &declaration_context);
                 let signature = kind.is_function().then(|| {
-                    extract_signature(declaration, self.language, &self.source, is_static)
+                    extract_signature(declaration, capture.node, self.language, &self.source, is_static)
                 });
                 let (type_metadata, doc_comment) = if let Some(ctx) = context_node {
                     let type_meta = if kind.is_type() || kind == SymbolKind::Class {
@@ -1869,6 +1872,11 @@ impl TreeFile {
                     };
                     let doc = extract_doc_comment(ctx, self.language, &self.source);
                     (type_meta, doc)
+                } else if is_c_typedef_name(self.language, kind, declaration) {
+                    // A typedef name behind a declarator (`typedef struct s *P;`)
+                    // has no context capture; its doc comment precedes the
+                    // typedef, but the aliased struct's fields are not its own.
+                    (None, extract_doc_comment(declaration, self.language, &self.source))
                 } else {
                     (None, None)
                 };
@@ -1969,8 +1977,9 @@ impl TreeFile {
 /// A symbol with the nodes it was extracted from.
 struct ExtractedSymbol<'tree> {
     symbol: SymbolInfo,
-    /// The query's context capture, else the name: the record's declaration
-    /// span.
+    /// The query's context capture (for a C/C++ function captured without
+    /// one, [`implied_c_function_context`]), else the name: the record's
+    /// declaration span.
     anchor: Node<'tree>,
     /// The declaration the name belongs to: the source of visibility, static
     /// flags, signature and declaration text.
@@ -1983,13 +1992,34 @@ struct PendingSymbol<'tree> {
     priority: u8,
 }
 
-/// A `FieldInfo` entry in a type's metadata copies the access and member
-/// `static` of the standalone field or property it describes, so the type
-/// metadata (`hug classes`) and the standalone symbols (`hug symbols`) never
-/// disagree. Entries with no standalone symbol keep what metadata extraction
-/// read.
+/// A type's metadata field list is completed from, and agrees with, the
+/// standalone `Field`, `Property` and `Constant` symbols the type directly
+/// contains, so `hug classes` (metadata) and `hug symbols` (standalone
+/// symbols) list the same members with the same flags:
+///
+/// - an entry with a standalone symbol of the same name copies its access and
+///   member `static` (the k-th entry of a name pairs with the k-th symbol of
+///   that name);
+/// - a standalone member no metadata reader listed is added, with its doc
+///   comment and no type annotation;
+/// - entries with no standalone symbol (record components, Rust tuple
+///   positions, Go fields, Scala class parameters) keep what the reader read.
+///
+/// The result is in source order: an entry without a standalone symbol stays
+/// after the entry the reader listed before it. Enum owners are not
+/// completed: they list variants, and a Rust struct-variant field names the
+/// enum as its container.
 fn align_field_metadata(pending: &mut [PendingSymbol<'_>]) {
-    let members: Vec<(usize, String, Option<Visibility>, bool)> = pending
+    struct Member {
+        owner: usize,
+        start: usize,
+        name: String,
+        visibility: Option<Visibility>,
+        is_static: bool,
+        doc_comment: Option<String>,
+    }
+
+    let members: Vec<Member> = pending
         .iter()
         .filter_map(|entry| {
             let ContainerLookup::Node { node, .. } = entry.container.as_ref()?.lookup else {
@@ -2000,24 +2030,60 @@ fn align_field_metadata(pending: &mut [PendingSymbol<'_>]) {
                 symbol.kind,
                 SymbolKind::Field | SymbolKind::Property | SymbolKind::Constant
             )
-            .then(|| (node.id(), symbol.name.clone(), symbol.visibility, symbol.is_static))
+            .then(|| Member {
+                owner: node.id(),
+                start: symbol.range.start_byte,
+                name: symbol.name.clone(),
+                visibility: symbol.visibility,
+                is_static: symbol.is_static,
+                doc_comment: symbol.doc_comment.clone(),
+            })
         })
         .collect();
 
     for entry in pending.iter_mut() {
-        let owners = [entry.extracted.declaration.id(), entry.extracted.anchor.id()];
-        let Some(metadata) = entry.extracted.symbol.type_metadata.as_mut() else {
+        let symbol = &mut entry.extracted.symbol;
+        if !(symbol.kind.is_type() || symbol.kind == SymbolKind::Class)
+            || symbol.kind == SymbolKind::Enum
+        {
             continue;
-        };
-        for field in &mut metadata.fields {
-            if let Some((_, _, visibility, is_static)) = members
-                .iter()
-                .find(|(owner, name, ..)| owners.contains(owner) && *name == field.name)
-            {
-                field.visibility = *visibility;
-                field.is_static = *is_static;
-            }
         }
+        let owners = [entry.extracted.declaration.id(), entry.extracted.anchor.id()];
+        let own: Vec<&Member> = members
+            .iter()
+            .filter(|member| owners.contains(&member.owner))
+            .collect();
+        if own.is_empty() {
+            continue;
+        }
+        let metadata = symbol.type_metadata.get_or_insert_with(TypeMetadata::new);
+
+        let mut paired = vec![false; own.len()];
+        let mut positioned: Vec<(usize, FieldInfo)> = Vec::new();
+        let mut last_start = 0;
+        for mut field in metadata.fields.drain(..) {
+            if let Some(index) = (0..own.len()).find(|&index| !paired[index] && own[index].name == field.name) {
+                paired[index] = true;
+                field.visibility = own[index].visibility;
+                field.is_static = own[index].is_static;
+                last_start = own[index].start;
+            }
+            positioned.push((last_start, field));
+        }
+        for (member, _) in own.iter().zip(&paired).filter(|(_, paired)| !**paired) {
+            positioned.push((
+                member.start,
+                FieldInfo {
+                    name: member.name.clone(),
+                    type_annotation: None,
+                    doc_comment: member.doc_comment.clone(),
+                    visibility: member.visibility,
+                    is_static: member.is_static,
+                },
+            ));
+        }
+        positioned.sort_by_key(|(start, _)| *start);
+        metadata.fields = positioned.into_iter().map(|(_, field)| field).collect();
     }
 }
 
