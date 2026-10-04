@@ -120,7 +120,14 @@ When modifying queries or symbol extraction:
 1. Every language with type constructs must have type distinction tests
 2. All typed languages need `types.*` fixture files
 3. Bug fixes require regression tests
-4. Run `cargo test -p tree-hugger-lib` to verify
+4. Kind, visibility and static expectations live against the per-language
+   fixtures in `lib/tests/fixtures/symbols/<query_name>.<ext>` (one primary
+   file per language, plus JS/TS script, CommonJS and module-by-extension
+   extras), read through `lib/tests/l1/symbols_fixtures.rs`;
+   `symbols_coverage` fails when a language has no primary fixture or a
+   fixture stops parsing cleanly
+5. Run `just test` in `tree-hugger/` to verify (the library package is
+   `tree-hugger`, not `tree-hugger-lib`)
 
 The CLI's real-terminal `god-files` test is behind the internal
 `terminal-tests` feature. Ordinary local L1 omits its harness and target;
