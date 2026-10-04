@@ -92,6 +92,66 @@ skills_files_updated_during_phase_3:
   - .claude/skills/tree-hugger/SKILL.md
   - .claude/skills/tree-hugger/api-reference.md
   - .claude/skills/tree-hugger/query-system.md
+source_files_during_phase_4:
+  - tree-hugger/lib/queries/typescript/locals.scm
+  - tree-hugger/lib/queries/vendor/c/locals.scm
+  - tree-hugger/lib/queries/vendor/c_sharp/locals.scm
+  - tree-hugger/lib/queries/vendor/cpp/locals.scm
+  - tree-hugger/lib/queries/vendor/java/locals.scm
+  - tree-hugger/lib/queries/vendor/javascript/locals.scm
+  - tree-hugger/lib/queries/vendor/perl/locals.scm
+  - tree-hugger/lib/queries/vendor/python/locals.scm
+  - tree-hugger/lib/queries/vendor/rust/locals.scm
+  - tree-hugger/lib/queries/vendor/swift/locals.scm
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/extract/classify.rs
+  - tree-hugger/lib/src/file/extract/declaration.rs
+  - tree-hugger/lib/src/file/extract/navigation.rs
+  - tree-hugger/lib/src/file/extract/type_metadata.rs
+  - tree-hugger/lib/src/file/extract/static_flags/java.rs
+  - tree-hugger/lib/src/file/extract/static_flags/mod.rs
+  - tree-hugger/lib/src/file/extract/static_flags/python.rs
+  - tree-hugger/lib/src/file/extract/static_flags/rust.rs
+  - tree-hugger/lib/src/file/extract/static_flags/swift.rs
+  - tree-hugger/lib/src/file/extract/visibility/c.rs
+  - tree-hugger/lib/src/file/extract/visibility/cpp.rs
+  - tree-hugger/lib/src/file/extract/visibility/csharp.rs
+  - tree-hugger/lib/src/file/extract/visibility/ecma.rs
+  - tree-hugger/lib/src/file/extract/visibility/go.rs
+  - tree-hugger/lib/src/file/extract/visibility/java.rs
+  - tree-hugger/lib/src/file/extract/visibility/lua.rs
+  - tree-hugger/lib/src/file/extract/visibility/mod.rs
+  - tree-hugger/lib/src/file/extract/visibility/php.rs
+  - tree-hugger/lib/src/file/extract/visibility/rust.rs
+  - tree-hugger/lib/src/file/extract/visibility/scala.rs
+  - tree-hugger/lib/src/file/extract/visibility/swift.rs
+  - tree-hugger/lib/src/queries/inventory.rs
+  - tree-hugger/lib/src/queries/provenance.rs
+  - tree-hugger/lib/tests/l1/phase6_neovim_query_reuse.rs
+  - tree-hugger/lib/tests/l1/symbols_coverage.rs
+  - tree-hugger/lib/tests/l1/symbols_kinds.rs
+  - tree-hugger/lib/tests/l1/symbols_static.rs
+  - tree-hugger/lib/tests/l1/symbols_visibility.rs
+  - tree-hugger/lib/tests/l1/tree_file.rs
+docs_updated_during_phase_4:
+  - tree-hugger/README.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/tree-hugger/SKILL.md
+source_files_during_phase_5:
+  - Cargo.lock
+  - tree-hugger/cli/Cargo.toml
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/tests/symbols/main.rs
+  - tree-hugger/cli/tests/symbols/wiring.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+docs_updated_during_phase_5:
+  - tree-hugger/README.md
+  - tree-hugger/docs/cache-design.md
+  - docs/dependencies.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/tree-hugger/SKILL.md
 packages:
   - tree-hugger
   - tree-hugger-cli
@@ -632,3 +692,252 @@ against the current working tree instead:
 - `just check-tier-coverage tree-hugger`: 0 stranded.
 - Every test named in the requirement-to-test mapping above exists, and its
   module is declared in `lib/tests/l1/main.rs` (or it is an in-crate unit test).
+
+## Phase 4
+
+Implemented sequentially by one agent rather than one subagent per language
+group: every group touched the shared `DeclarationContext`, the dispatchers,
+`type_metadata.rs` and the same test tables, and parallel agents compiling one
+worktree would have seen each other's half-finished edits.
+
+### Shared changes
+
+- **`DeclarationContext`** gained `name` (the captured name node: one
+  declaration can name several things, `int a, *b;` or Swift `case east,
+  west`), `root` (same-file lookups) and `is_ecma_module` (computed once per
+  JS/TS file by `is_ecma_module_file`, not per symbol).
+- **`FieldInfo` follows the standalone member.** `align_field_metadata`
+  (`tree_file.rs`) copies `visibility` and `is_static` from the standalone
+  `Field`/`Property`/`Constant` with the same name and container into the
+  owning type's metadata. One rule instead of sixteen metadata readers, and
+  `hug classes` can no longer disagree with `hug symbols`. Entries with no
+  standalone symbol keep what the metadata reader found.
+- **Type metadata lists only fields and properties** (spec section 3). Java
+  interface metadata now lists constants (static, Public), C# interface
+  metadata properties, Swift protocol metadata property requirements; PHP
+  interface, Scala trait and Scala object metadata no longer list methods.
+  The spec names only C# and Swift; the other three listed methods the same
+  way and their methods are standalone `Method`s, so the rule was applied to
+  them too. Go interface method elements stay (Go fields are `FEAT`).
+- Removed the dead `is_inside_interface` and Rust `is_inside_impl_block`
+  helpers; every reader now looks only at the direct parent body.
+
+### Per language
+
+| Group | Queries | Rules |
+|---|---|---|
+| Rust | `function_signature_item`, `static_item`, `union_item`, `type_item`, `associated_type`; variants `enum_variant`; `mod_item` `module` + context | `pub` Public, `pub(crate/super/in)` Crate, `pub(self)` Private, unmarked Private; variants and variant fields inherit the enum; trait items inherit the trait; trait-impl items take a same-file trait's level (all same-named traits must agree) else Unknown; `macro_rules!` Unknown. Associated fns without `self` are static in traits as well as impls. |
+| TS/JS | TS overlay: `abstract_class_declaration`, `#private` methods, `abstract_method_signature`, interface `method_signature`/`property_signature` (only inside `interface_body`, so type-literal members stay unreported); JS vendor: `this.x = …` pattern removed | class members: keyword, `#name` Private, else Public; interface members Public; top level: exported Public, else ModulePrivate in a module file, Unknown in a script. JS `field_definition` → Property. |
+| Java | `class` → class, `interface_declaration`, dotted `package`, `constant_declaration` | keyword, else Public directly in an interface body, else Package; `package` Unknown; interface constants static. |
+| C# | `property_declaration` → property; block and file-scoped namespaces | compound levels, `file` ModulePrivate; explicit interface implementation Private; interface members Public; class/struct/record members Private; top-level types Internal; accessor modifiers never read. |
+| C/C++ | C: `union_specifier`, pointer field declarators, typedef → `type_alias`; C++: `class` → class, in-class `function_definition` methods (also behind a pointer/reference return), `using` → `type_alias` | shared linkage reader (`visibility/c.rs`): `static`, unnamed namespace, C++ top-level-const object without `extern`/`inline` (incl. `constexpr`; pointer constness read from the outermost `pointer_declarator`), earlier same-file `static` declaration (C: name; C++: namespace path + name + whitespace-free parameter types with names removed). C++ members: nearest access section, else `class` Private / `struct`/`union` Public. Types, members (C), enumerators, macros Unknown. |
+| Swift | enum cases → `enum_variant`; protocol function and property requirements | keywords (setter-only `x(set)` ignored); cases and requirements inherit their container's level; other members: nearest enclosing type/extension with an explicit keyword (private/fileprivate → ModulePrivate, extension → its level, else Internal), else Internal. `class func` is static (bare `class` token on the function). |
+| Python | class → class; attribute-assignment catch-all removed | class-body `x: ClassVar[T]` / unannotated `x = v` static, `x: T` / `x: T = v` instance (`is_python_class_attribute`, shared with `extract_python_class_fields`, which now lists unannotated attributes too). |
+| PHP | — | keyword, else Public (members, `var` properties, top-level functions and types); namespaces Unknown. |
+| Scala | — | `private`/`protected`, `[this]` keeps the unqualified level, a qualifier naming a `package` clause segment Package, any other qualifier Unknown; unmarked Public. |
+| Lua | — | chunk-level `local` ModulePrivate, nested-block `local` Unknown, global Public, table fields (`M.f`, `M:m`, `M.x =`) Unknown. |
+| Go | — | Unicode-uppercase initial Public, else Package; package clause Unknown. Go struct `FieldInfo` uses the same rule (`go_identifier_visibility`). |
+| Perl | new `queries/vendor/perl/locals.scm`: named subs, `package_statement` (both forms) as module, `my`/`our`/`state` (incl. each list name) via `#any-of?` on the scope keyword | Unknown. A Perl `package` is never contained by another package (names are absolute); a block-form package after a statement-form one was otherwise attributed to it. |
+
+### Provenance and inventory
+
+- `vendor_query_provenance` records changes per language through an
+  exhaustive `vendored_locals_changes` match: Rust, Java, Python, JavaScript,
+  Swift, C, C++ and C# are `MultipleChanges` with one note per change; the
+  rest stay `CapturesRenamed`.
+- Perl's query is an `Original` by `tree-hugger`, license `AGPL-3.0-only`
+  (the license most of the repository's crates declare), so drift checks skip it.
+- The capture inventory gained `type_alias`, `enum_variant`, `property`,
+  `module` and `associated` (Lua's existing capture, never inventoried).
+
+### `ok` → `FIX` discoveries
+
+- **C Field**: a pointer field (`char *tag_name_field;`) produced no symbol
+  and was missing from the struct's metadata. Fixed in the C query (inherited
+  by C++) and in both metadata readers.
+
+### Out-of-matrix observations (for the author)
+
+- C++ `typedef` and `using` now report `TypeAlias` (a `FEAT` cell): C++
+  inherits the C query, whose typedef capture had to become `type_alias`, and
+  `using` was aligned with it rather than left as the one alias reporting
+  `Type`.
+- The overlay-query provenance (`overlay_query_provenance`) still claims
+  `MIT`, while the area's crates declare `AGPL-3.0-only` and the root README
+  says `AGPL-3.0-or-later`. Left alone; the author should pick one.
+- A Swift top-level `private` declaration reports Private (its keyword); only
+  the default of its members uses the "behaves as `fileprivate`" rule.
+- Constructors in C++, Java, C#, PHP and Swift are still `Method` or absent
+  (`FEAT`).
+
+### Tests
+
+The matrices are table-driven `pub const`s so the coverage guard can read
+them: `KIND_MATRIX` (`symbols_kinds.rs`), `VISIBILITY_MATRIX`
+(`symbols_visibility.rs`), `STATIC_MATRIX` + `STATIC_LANGUAGES`
+(`symbols_static.rs`). They replace the Phase 3 smoke tests
+`rust_kind_rows_hold_through_both_paths`,
+`declaration_keywords_apply_to_every_kind`,
+`member_static_reaches_methods_and_fields` and
+`storage_static_is_kept_apart_from_member_static`, whose rows they contain.
+All new tests sit in already-registered L1 modules with no tier marker.
+
+| Requirement | Test |
+|---|---|
+| test 1: every language has kind and visibility rows; static languages have static rows | `symbols_coverage::every_language_has_matrix_rows` |
+| test 2: kind matrix (all committed cells, 16 languages, both paths) | `symbols_kinds::kind_matrix_holds_through_both_paths` |
+| test 6: no `Unknown` kind in any fixture (allow-list empty) | `symbols_kinds::no_fixture_symbol_reports_an_unknown_kind` |
+| C typedef tag + alias once each, anonymous struct, `typedef struct S {…} S` | `symbols_kinds::c_typedefs_report_tag_and_alias_once_each` |
+| JS `this.w`, Python `self.y`/`obj.attr`, Perl `local` produce no symbol; class attribute reported once | `symbols_kinds::assignments_and_local_overrides_declare_no_symbol` |
+| Perl keyword in declaration text, both list names | `symbols_kinds::perl_declaration_text_keeps_the_declaring_keyword` |
+| test 3: visibility matrix, every mapped level, 16 languages, both paths | `symbols_visibility::visibility_matrix_holds_through_both_paths` |
+| earlier `static` prototype (C, C++), C++ overload stays Public | `symbols_visibility::earlier_static_prototypes_reach_later_declarations` |
+| JS/TS script vs CommonJS vs `.mjs`/`.cts` | `symbols_visibility::script_and_module_files_decide_top_level_access` |
+| CommonJS evidence anywhere (lazy `require`, conditional `exports.x`, `module.exports`) plus a no-evidence control | `symbols_visibility::commonjs_evidence_counts_anywhere_in_the_file` |
+| restricted Rust `pub(...)` and Scala class qualifier keep their text | `symbols_visibility::unmappable_access_keeps_its_source_text` |
+| `FieldInfo` agrees with the standalone field in every language; C# compound levels in metadata | `symbols_visibility::field_metadata_agrees_with_the_standalone_fields` |
+| test 4: static matrix incl. storage `static` | `symbols_static::static_matrix_holds_through_both_paths` |
+| Python standalone fields and `extract_python_class_fields` agree | `symbols_static::python_class_fields_agree_with_the_standalone_fields` |
+| Perl provenance, changed-language provenance | `queries::provenance::tests::perl_locals_are_a_tree_hugger_original`, `changed_vendor_queries_record_their_changes` |
+| every `@local.definition.*` capture inventoried; Perl query uses only native predicates | `phase6_neovim_query_reuse::every_locals_definition_capture_is_inventoried`, `perl_locals_query_is_an_original` |
+
+Superseded tests rewritten: `tree_file::distinguishes_java_types` (class →
+Class, interface → Interface), `distinguishes_c_types` (typedef → TypeAlias),
+`distinguishes_cpp_types` (class → Class), and the interface/protocol/trait
+assertions of `extracts_{csharp,swift,scala,php}_type_metadata` (methods are
+members, not fields; shared helper `assert_method_is_a_member_not_a_field`);
+`phase6_neovim_query_reuse::bulk_drift_check_covers_all_vendored` (Perl is no
+longer vendored).
+
+Every new row was checked against a dump of the pre-change extraction: each
+`FIX` row failed before this phase (missing symbol, wrong kind, or Unknown
+level). Input Robustness Matrix: not applicable (ruling 9); no `serde`
+attribute added, no `unwrap_or_default`/`.ok()` on a load-bearing parse
+(`unwrap_or_default` appears only on node text for name comparison).
+
+### Gates
+
+- `just test` (tree-hugger): 641 passed, 0 skipped, 0 failed.
+- `just lint` (tree-hugger): clean; `cargo clippy -p tree-hugger -p
+  tree-hugger-cli --all-targets --all-features -- -D warnings` clean.
+- `just check-tier-coverage tree-hugger`: 0 stranded.
+- `hug classes` on the C++ and Rust fixtures (scratch git repo, `--no-cache`)
+  lists in-class C++ methods with access, `staticMemberField` as a static
+  field without the member-local `static`, and Rust inherent and trait-impl
+  methods under `PublicStruct` with associated functions under Static Methods.
+- Cross-OS: not run. The phase changes in-memory tree walking and query text;
+  the one path read (`Path::extension` for `.mjs`/`.cjs`/`.mts`/`.cts`) is
+  portable, and fixtures are LF on every OS (`.gitattributes`).
+- No `cargo fmt` run. Two throwaway examples used to dump symbols and parse
+  trees were deleted before the gates.
+
+## Phase 5
+
+Implemented by one agent: both Wave 5.1 tasks touch only `cli/src/main.rs`.
+
+### CLI rendering (`cli/src/main.rs`)
+
+Most of the wave was already in place from earlier phases: the renderer read
+`symbol.visibility` (Phase 2), omitted the prefix for Unknown, printed the
+widened labels through `Visibility`'s `Display`, `functions`/`types` filtered
+on `is_function()`/`is_type()` (which include `Constructor` and `TypeAlias`),
+and JSON emitted `files[].symbols[].visibility` (omitted for Unknown) and
+schema 3.0. What this phase changed:
+
+- **`[in …]` suffix** now also follows `Constructor`, `Property`,
+  `EnumVariant` and `Constant` (before: Method/Function/Field/Parameter only),
+  so `public constructor constructor(…) [in class ExportedWidget]`,
+  `public enum variant UnitVariant [in enum PublicEnum]` and
+  `public const INHERENT_ASSOCIATED_CONSTANT [in type PublicStruct]` render.
+  Type aliases (including Rust associated types) are type kinds and still
+  print without a container; no spec row asks for one.
+- **`impl ` container special case removed** (it could no longer match).
+- **`hug classes` partitions on `SymbolInfo::is_static`**, not
+  `signature.is_static` (a copy of the same flag, so output is unchanged).
+- **`hug classes` also summarizes `Interface` and `Trait` records**, which
+  Phase 4 flagged as the blocker for the Java interface constant:
+  `PublicShape` now lists `SIDES` under *Static Fields* and `unit()` under
+  *Static Methods*; Rust traits list their methods. Enums, modules and Scala
+  objects are still not summarized (no spec row; left as is).
+- No new rendering was built, so no biscuit-terminal component was
+  introduced; the existing owo-colors path only gained text.
+
+### Cache fingerprint
+
+Already wired in Phase 3 (`locals+imports+references;extractor-revision=1`
+with schema 3.0, crate version, grammar name and options kept). Phase 5 adds
+the test that proves the upgrade (test 8) and corrects
+`tree-hugger/docs/cache-design.md`, which claimed the fingerprint hashed the
+query sources.
+
+### Tests (all L1, binary `tree-hugger-cli::symbols`, auto-discovered)
+
+`cli/tests/symbols/main.rs` holds `Scratch`: a `git init` scratch repo with
+fixtures written from `include_str!` of
+`lib/tests/fixtures/symbols/*` (CI test-input visible), plus test-owned
+`HOME`/`USERPROFILE`/`XDG_CONFIG_HOME`/`APPDATA`/`LOCALAPPDATA` and
+`TMPDIR`/`TMP`/`TEMP`. No terminal is spawned.
+
+| Requirement (spec test 7/8) | Test |
+|---|---|
+| plain `symbols` prints known visibility for every kind (TS function/class/interface/alias/const/constructor/method/property/interface member; Rust crate, alias, enum variant, impl members, associated const; Java package; C# protected internal / private protected); no `[in impl` | `wiring::plain_symbols_print_known_visibility_for_every_kind` |
+| Unknown access omits the prefix (Bash, TS local) | `wiring::plain_symbols_omit_the_visibility_prefix_for_unknown_access` |
+| `functions` includes constructors; `types` includes aliases | `wiring::plain_functions_include_constructors_and_types_include_aliases` |
+| pretty output uses the same data and labels (CLICOLOR_FORCE output with SGR/OSC 8 stripped equals plain) | `wiring::pretty_symbols_use_the_same_labels_as_plain` |
+| TS `classes`: static methods/fields vs instance | `wiring::plain_classes_partition_typescript_static_members` |
+| C++ `classes`: static data member listed, member-function-local `static` not | `wiring::plain_classes_list_cpp_static_members_but_not_function_local_statics` |
+| Java `classes`: interface constant under *Static Fields* | `wiring::plain_classes_list_a_java_interface_constant_as_a_static_field` |
+| Rust `classes`: inherent and trait-impl methods under the struct, associated fn under *Static Methods* | `wiring::plain_classes_group_rust_impl_members_under_their_struct` |
+| JSON `visibility` populated / omitted for Unknown, schema 3.0 on envelope and index, visibility off the signature | `wiring::json_symbols_carry_visibility_and_schema_3_0` |
+| legacy `files[]` and `symbol_indexes` agree on kind, access, static, container kind for every symbol (TS, Rust, C++, Java, Bash) | `wiring::json_legacy_symbols_match_the_symbol_indexes` |
+| test 8: seeded old-format entry (historical key hard-coded with `biscuit-hash`) is not served; run 1 equals an uncached run; run 2 serves an edited new entry with run 1's facts | `cache_upgrade::warm_entry_from_the_previous_extractor_is_not_served_after_the_upgrade` |
+
+Test 8 details: a discovery run in a separate temp directory learns the
+path spelling `hug` keys on (canonical, `/private/var/...` on macOS,
+OS-specific elsewhere) and the project directory; the key formula itself is
+hard-coded. A control run places the stale payload under the *current* key
+and shows `hug` serves it, so run 1's miss is attributable to the key and not
+to an unreadable seed.
+
+Failure messages name the language, the declaration and the differing field.
+
+**Regression proof (mutation check):** with the four Phase 5 changes reverted
+in a scratch copy of `main.rs` (old fingerprint + schema 2.0, no `Interface`
+in `classes`, no `Constructor` suffix), the Java-interface, every-kind,
+functions/types and cache-upgrade tests failed; the cache test failed with
+"run 1 served the seeded old-format entry". Restored afterwards; the
+`is_static` source swap is behavior-neutral and has no distinguishing test.
+
+### Departure: new dev-dependency
+
+`tree-hugger-cli` gained `biscuit-hash` (`blake3`) as a **dev-dependency** so
+test 8 can hard-code the historical key without calling the code under test.
+The spec lists new crate dependencies as needing the author; this one is an
+existing workspace crate already in the graph (through `tree-hugger`, same
+feature), the lockfile gains one edge and no package, and it is recorded in
+`docs/dependencies.md`. Easy to revert if the author objects (the test could
+instead call `tree_hugger::FileCacheKey`, at the cost of not hard-coding the
+formula).
+
+### Superseded tests
+
+None left: `[in impl Greeter]` was rewritten in Phase 3, and no other CLI
+test asserted signature visibility or schema 2.0.
+
+### Gates
+
+- `just test` (tree-hugger): 652 passed, 0 skipped, 0 failed (641 + 11 new).
+- `just test-l2`: 3 passed.
+- `just lint`: clean; `cargo clippy -p tree-hugger -p tree-hugger-cli
+  --all-targets --all-features -- -D warnings`: clean.
+- `just check-tier-coverage tree-hugger`: 0 stranded.
+- Cross-OS: `cargo check --bin hug --tests --target x86_64-pc-windows-gnu`
+  clean. `just cross-check tree-hugger-cli --os windows` built and archived on
+  build-win-native but the test step was refused by the host's storage
+  preflight (30.1 GiB free, 50 GiB required; automatic reclaim freed 0). The
+  MSVC build reported one warning in bin `hug` that the gnu check does not
+  reproduce; not investigated further. `--os linux` failed with an SSH banner
+  timeout to build-linux. Pull-request CI (Linux, macOS) and push-to-main
+  (Windows) are the remaining OS evidence; test 8's OS-sensitive parts (path
+  spelling, temp directory) are discovered at run time rather than assumed.
+- No `cargo fmt` run.

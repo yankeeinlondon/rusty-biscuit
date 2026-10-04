@@ -5,7 +5,7 @@ spec: 2026-10-03-visibility-and-kind
 area: tree-hugger
 total_phases: 7
 created: 2026-10-03
-phase: 3
+phase: 5
 agent: claude/sonnet
 yolo: true
 source_files_during_phase_1:
@@ -97,6 +97,66 @@ skills_files_updated_during_phase_3:
   - .claude/skills/tree-hugger/SKILL.md
   - .claude/skills/tree-hugger/api-reference.md
   - .claude/skills/tree-hugger/query-system.md
+source_files_during_phase_4:
+  - tree-hugger/lib/queries/typescript/locals.scm
+  - tree-hugger/lib/queries/vendor/c/locals.scm
+  - tree-hugger/lib/queries/vendor/c_sharp/locals.scm
+  - tree-hugger/lib/queries/vendor/cpp/locals.scm
+  - tree-hugger/lib/queries/vendor/java/locals.scm
+  - tree-hugger/lib/queries/vendor/javascript/locals.scm
+  - tree-hugger/lib/queries/vendor/perl/locals.scm
+  - tree-hugger/lib/queries/vendor/python/locals.scm
+  - tree-hugger/lib/queries/vendor/rust/locals.scm
+  - tree-hugger/lib/queries/vendor/swift/locals.scm
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/extract/classify.rs
+  - tree-hugger/lib/src/file/extract/declaration.rs
+  - tree-hugger/lib/src/file/extract/navigation.rs
+  - tree-hugger/lib/src/file/extract/type_metadata.rs
+  - tree-hugger/lib/src/file/extract/static_flags/java.rs
+  - tree-hugger/lib/src/file/extract/static_flags/mod.rs
+  - tree-hugger/lib/src/file/extract/static_flags/python.rs
+  - tree-hugger/lib/src/file/extract/static_flags/rust.rs
+  - tree-hugger/lib/src/file/extract/static_flags/swift.rs
+  - tree-hugger/lib/src/file/extract/visibility/c.rs
+  - tree-hugger/lib/src/file/extract/visibility/cpp.rs
+  - tree-hugger/lib/src/file/extract/visibility/csharp.rs
+  - tree-hugger/lib/src/file/extract/visibility/ecma.rs
+  - tree-hugger/lib/src/file/extract/visibility/go.rs
+  - tree-hugger/lib/src/file/extract/visibility/java.rs
+  - tree-hugger/lib/src/file/extract/visibility/lua.rs
+  - tree-hugger/lib/src/file/extract/visibility/mod.rs
+  - tree-hugger/lib/src/file/extract/visibility/php.rs
+  - tree-hugger/lib/src/file/extract/visibility/rust.rs
+  - tree-hugger/lib/src/file/extract/visibility/scala.rs
+  - tree-hugger/lib/src/file/extract/visibility/swift.rs
+  - tree-hugger/lib/src/queries/inventory.rs
+  - tree-hugger/lib/src/queries/provenance.rs
+  - tree-hugger/lib/tests/l1/phase6_neovim_query_reuse.rs
+  - tree-hugger/lib/tests/l1/symbols_coverage.rs
+  - tree-hugger/lib/tests/l1/symbols_kinds.rs
+  - tree-hugger/lib/tests/l1/symbols_static.rs
+  - tree-hugger/lib/tests/l1/symbols_visibility.rs
+  - tree-hugger/lib/tests/l1/tree_file.rs
+docs_updated_during_phase_4:
+  - tree-hugger/README.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/tree-hugger/SKILL.md
+source_files_during_phase_5:
+  - Cargo.lock
+  - tree-hugger/cli/Cargo.toml
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/tests/symbols/main.rs
+  - tree-hugger/cli/tests/symbols/wiring.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+docs_updated_during_phase_5:
+  - tree-hugger/README.md
+  - tree-hugger/docs/cache-design.md
+  - docs/dependencies.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/tree-hugger/SKILL.md
 packages:
   - tree-hugger
   - tree-hugger-cli
@@ -146,7 +206,7 @@ The work falls into five layers, built in dependency order:
 - [ ] Adapter round-trip preserves kind, visibility, `is_static`,
       `is_static_storage`, container kind, and signature presence for every
       fixture symbol.
-- [ ] A warm old-format cache entry is invalidated and the next run re-hits the
+- [x] A warm old-format cache entry is invalidated and the next run re-hits the
       new entry (test 8).
 - [ ] Every primary-fixture symbol has non-empty `declaration_text`; exports do
       not follow access (test 10).
@@ -376,21 +436,21 @@ registration.
 
 ### Wave 4.1 (parallel, one subagent per group)
 
-- [ ] **Rust.** Queries: `type_item`, `static_item`, `union_item`,
+- [x] **Rust.** Queries: `type_item`, `static_item`, `union_item`,
       `function_signature_item`, variants as `EnumVariant`, `mod_item` as
       `Module` with context capture (no self-container). Visibility: `pub` /
       `pub(crate|super|in)` → Crate / `pub(self)` → Private, default Private,
       trait items and variants inherit, trait-impl items via same-file trait
       else Unknown; keep `pub(...)` text in declaration_text; `static` →
       StaticStorage; associated fns without `self` → Method + static.
-- [ ] **TypeScript + JavaScript.** TS: `abstract_class_declaration`,
+- [x] **TypeScript + JavaScript.** TS: `abstract_class_declaration`,
       `#private` methods, abstract/interface method signatures, interface
       property signatures (Public), type alias, constructor/property kinds,
       static, parameter-property sanity. JS: remove `this.x =` pattern, class-body
       fields as `Property`, constructor. Shared module-file detection
       (extension, import/export, `require`, `module.exports`/`exports.`
       anywhere) → ModulePrivate vs Unknown for unexported top level.
-- [ ] **Java + C#.** Java: `interface_declaration`, `package_declaration`
+- [x] **Java + C#.** Java: `interface_declaration`, `package_declaration`
       (scoped_identifier), interface constants (static Field, Public), class →
       `Class`, default Package / interface Public. C#: file-scoped namespace,
       `property_declaration` → `Property`, `protected internal` /
@@ -399,7 +459,7 @@ registration.
       Private, setter-only accessor modifier ignored, interface/protocol
       methods removed from `FieldInfo` metadata, expression-bodied method
       signatures, compound levels in field metadata.
-- [ ] **C + C++.** C: `union_specifier`, typedef alias → `TypeAlias` (`Tag` Type
+- [x] **C + C++.** C: `union_specifier`, typedef alias → `TypeAlias` (`Tag` Type
       + `Alias` TypeAlias once each; anonymous typedef struct; `typedef struct S
       {…} S`), static linkage → ModulePrivate. C++: `union_specifier`, class →
       `Class`, in-class `function_definition` methods, class container over
@@ -408,26 +468,26 @@ registration.
       `constexpr`, top-level-const-of-object rule, earlier same-file `static`
       declaration with normalized param text), `StaticStorage` for file-scope and
       function-local statics, `Static` for class members only.
-- [ ] **Swift.** Enum cases → `EnumVariant`; member functions → `Method`
+- [x] **Swift.** Enum cases → `EnumVariant`; member functions → `Method`
       (classes/structs/enums/extensions/protocols); protocol function and
       property requirements (Field); function-local `let/var` → `Variable`;
       `open`/`public`/`package`/`internal`/`fileprivate`/`private`; setter-only
       modifiers; nearest-container default (private/fileprivate type →
       ModulePrivate, explicit extension level, else Internal; requirements and
       cases inherit); `class`/`static` members static.
-- [ ] **Python.** Class → `Class`; `@staticmethod`/`@classmethod` → Method +
+- [x] **Python.** Class → `Class`; `@staticmethod`/`@classmethod` → Method +
       static; remove attribute-assignment catch-all; class-body fields with
       ClassVar/unannotated → static, annotated → instance; align
       `extract_python_class_fields` with the standalone path (same fields, same
       flag); visibility Unknown.
-- [ ] **PHP, Scala, Lua, Go.** PHP trait method container; Scala trait/object/
+- [x] **PHP, Scala, Lua, Go.** PHP trait method container; Scala trait/object/
       class members as `Method` with container, `private[this]` / `protected
       [this]` / package-segment qualifier / other qualifier (Unknown +
       declaration_text), object members static; Lua chunk-level `local` →
       ModulePrivate, block-local Unknown, global Public, table fields Unknown,
       signatures; Go uppercase → Public else Package (locals/params/package
       clause Unknown), `type A = B` stays unreported (documented).
-- [ ] **Perl + shells.** New `queries/vendor/perl/locals.scm`: named `sub` →
+- [x] **Perl + shells.** New `queries/vendor/perl/locals.scm`: named `sub` →
       Function, `package` (statement and block) → Module, `my/our/state` names
       (each list name) → Variable, `local` excluded; container = enclosing sub
       else package (sibling-scoped); Unknown visibility. Bash/Zsh: signatures
@@ -435,18 +495,18 @@ registration.
 
 ### Wave 4.2 (sequential; after 4.1)
 
-- [ ] **Provenance + inventory.** Update `QueryProvenance` helper per changed
+- [x] **Provenance + inventory.** Update `QueryProvenance` helper per changed
       language (`MultipleChanges` where patterns were added; Perl `Original`,
       tree-hugger authorship and repo license, not nvim-treesitter), capture
       inventory expectations, `query_compile` tests and `phase6_neovim_query_reuse`
       tests together.
-- [ ] **Fill matrix tests.** Reconcile per-language matrix rows into the
+- [x] **Fill matrix tests.** Reconcile per-language matrix rows into the
       table-driven tests 2–4 and the language-coverage guard (test 1); no
       `Unknown` kinds (test 6).
 
 ### Validation checkpoint 4
 
-- [ ] `just test` in `tree-hugger/`: kind/visibility/static matrices green for all
+- [x] `just test` in `tree-hugger/`: kind/visibility/static matrices green for all
       16 languages; query-compile and provenance tests green.
 
 ## Phase 5: CLI and cache
@@ -455,14 +515,14 @@ Goal: render the corrected data and ensure warm caches cannot hide the fix.
 
 ### Wave 5.1 (parallel)
 
-- [ ] **CLI rendering.** `cli/src/main.rs`: read `symbol.visibility`; omit prefix
+- [x] **CLI rendering.** `cli/src/main.rs`: read `symbol.visibility`; omit prefix
       for Unknown; labels `package`, `crate`, `module-private`,
       `protected internal`, `private protected`; remove the `impl ` container
       special case; `[in class Box]` kind suffix; `hug classes` partitions on
       shared `is_static`; constructors in `functions`, aliases in `types`; JSON
       `files[].symbols[].visibility` (omitted for Unknown); schema 3.0 in
       envelopes. Use biscuit-terminal components for any rendering change.
-- [ ] **Cache fingerprint.** Replace the literal `"locals+imports+references"`
+- [x] **Cache fingerprint.** Replace the literal `"locals+imports+references"`
       with a value containing `EXTRACTOR_REVISION`; keep schema, grammar,
       language, crate version, options components.
       - No dependency on the rendering task other than the same file, so one
@@ -470,18 +530,18 @@ Goal: render the corrected data and ensure warm caches cannot hide the fix.
 
 ### Wave 5.2 (sequential)
 
-- [ ] **CLI tests** (test 7 and 8): scratch git repo, isolated HOME/config/TMPDIR
+- [x] **CLI tests** (test 7 and 8): scratch git repo, isolated HOME/config/TMPDIR
       (`TMP`/`TEMP` on Windows), seeded old-format cache entry using the
       historical key formula hard-coded in the test; run 1 misses, run 2 hits
       after an edit to the new snapshot. Cover TS, Rust, C++, Java,
       Unknown-access language; failure messages name language, declaration,
       field. No terminal windows or focus changes.
-- [ ] **Superseded tests.** Rewrite `[in impl Greeter]` and other pre-authorized
+- [x] **Superseded tests.** Rewrite `[in impl Greeter]` and other pre-authorized
       expectations.
 
 ### Validation checkpoint 5
 
-- [ ] `just test` green; run `just test-l2` (should be unaffected) and
+- [x] `just test` green; run `just test-l2` (should be unaffected) and
       `just lint`.
 
 ## Phase 6: Remaining verification tests

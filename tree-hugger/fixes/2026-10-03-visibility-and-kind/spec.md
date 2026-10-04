@@ -65,6 +65,19 @@ message_to_agent: |-
   - The direct-member rule (`is_direct_member`) turns a Function into a Method when its declaration's first non-wrapper ancestor is a type-like node; a C++ in-class `function_definition` will become Method automatically once captured.
   - DEPARTURE: the CLI `query_fingerprint` already contains `EXTRACTOR_REVISION` (wired in Phase 3, because a warm cache was hiding the extraction change from the CLI test suite). Phase 5 still owns test 8, the `impl ` renderer special case (now dead), and rendering `[in …]` for Constructor/Property/EnumVariant (the plain renderer only suffixes Method/Function/Field/Parameter).
   - Bump `EXTRACTOR_REVISION` only if a later phase lands after a release; within this fix "1" is the first value.
+  Phase 4 notes for later phases:
+  - All 16 languages extract kinds, visibility and static per the matrices. The matrices are `pub const` tables in lib tests: `KIND_MATRIX` (symbols_kinds.rs), `VISIBILITY_MATRIX` (symbols_visibility.rs), `STATIC_MATRIX`/`STATIC_LANGUAGES` (symbols_static.rs); `symbols_coverage::every_language_has_matrix_rows` guards them. Phase 6 adds rows/assertions next to them rather than new tables.
+  - Phase 5 / test 7 BLOCKER TO KNOW: `hug classes` (`extract_class_summaries` in cli/src/main.rs) only iterates `Class | Type` records, so the Java interface constant (`SIDES` in `PublicShape`, an `Interface`) can never appear under Static Fields until the CLI also summarizes `Interface` (and probably `Trait`/`Module`) containers. The library side is done: `PublicShape` metadata lists `SIDES` as a static, Public field.
+  - `FieldInfo` visibility/is_static are overwritten from the standalone member by `align_field_metadata` (tree_file.rs). Type metadata lists only fields/properties: interface/protocol/trait/object methods are standalone `Method`s (Java, C#, Swift, PHP, Scala), never `FieldInfo`.
+  - `hug` refuses fixture paths under `lib/tests/fixtures/` inside the repo (`NoSourceFiles`); copy fixtures into a scratch git repo for CLI checks, as test 7/8 require anyway.
+  - `DeclarationContext` now carries `name`, `root` and `is_ecma_module`. Perl's locals query is a tree-hugger `Original` (provenance) and Perl symbol names keep their sigil (`$name`).
+  - C++ `typedef`/`using` now report `TypeAlias` (a FEAT cell, side effect of C++ inheriting the C typedef capture); constructors outside TS/JS are still `Method` or absent (FEAT).
+  Phase 5 notes for later phases:
+  - CLI work is done: `[in …]` now follows Constructor/Property/EnumVariant/Constant too, the `impl ` special case is gone, `hug classes` partitions on `SymbolInfo::is_static` and also summarizes `Interface` and `Trait` records (Java `SIDES` under Static Fields). Enums, modules and Scala objects are still not summarized by `hug classes`.
+  - Tests 7 and 8 live in the auto-discovered CLI binary `cli/tests/symbols/` (`wiring.rs`, `cache_upgrade.rs`); `Scratch` in its `main.rs` builds the scratch git repo with isolated HOME/config/TMPDIR/TMP/TEMP. Reuse it for any new CLI check rather than writing another harness.
+  - `tree-hugger-cli` gained `biscuit-hash` (blake3) as a dev-dependency for the hard-coded historical cache key (existing workspace crate, one lockfile edge, recorded in `docs/dependencies.md` and the implementation log as a departure the author may veto).
+  - `tree-hugger/docs/cache-design.md` now describes the real `query_fingerprint` (literal + `EXTRACTOR_REVISION`); Phase 7's docs work should keep it consistent.
+  - Cross-OS: build-win-native refused the test run (storage preflight, 30 GiB free < 50) and build-linux timed out on SSH; only a windows-gnu `cargo check` and macOS runs exist for Phase 5.
 ---
 
 # Preserve symbol kinds, declaration visibility, and static members across all supported languages
