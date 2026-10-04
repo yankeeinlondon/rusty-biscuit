@@ -251,13 +251,22 @@ fn the_base_view_gives_every_worktree_branch_a_line() {
     // `--is-ancestor` per candidate tried before the one holding the boundary
     // (a full window adds one `log` for the boundary). Here: three lanes, so
     // three of each.
-    assert_eq!(count(&calls, "merge-base") - count_merge_bases(&calls), 5 + 3, "got {calls:?}");
+    //
+    // A branch not merged directly into those lanes then asks one more
+    // `--is-ancestor` per other drawn branch (not its parent) whose question
+    // is not already answered, for a merge into that lane: feature-a and
+    // feature-b ask about each other and feature-c; feature-c asks about
+    // feature-a and chore/merged, whose tip is main's but was asked with a
+    // different candidate list. Six.
+    assert_eq!(count(&calls, "merge-base") - count_merge_bases(&calls), 5 + 3 + 6, "got {calls:?}");
     assert_eq!(count_merge_bases(&calls), 3, "one per branch with a lane, got {calls:?}");
     assert_eq!(count(&calls, "log"), 4, "the default lane and one per branch lane, got {calls:?}");
     // chore/merged's contained tip needs its first-parent chain, which is
     // empty for a fast-forward; no line reached its window. Each boundary is
     // on its candidate's first-parent chain, so it needs no `--ancestry-path`.
-    assert_eq!(count(&calls, "rev-list"), 1 + 3, "got {calls:?}");
+    // feature-b's tip is on feature-c's line (it forked there), so asking
+    // whether feature-c merged it walks that chain once and finds no merge.
+    assert_eq!(count(&calls, "rev-list"), 1 + 3 + 1, "got {calls:?}");
     assert!(!graph.incomplete);
 }
 
@@ -815,9 +824,7 @@ fn a_child_merged_into_the_default_branch_forks_from_its_parent_in_the_base_view
 /// wall-clock dates, a fast host gives several tips the same second and the
 /// hidden lane changes from host to host.
 fn commit_on(path: &Path, tree: &str, parents: &[&str], message: &str) -> String {
-    static SEQUENCE: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("clock").as_secs() as i64;
-    let date = format!("{} +0000", now + SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+    let date = format!("{} +0000", next_commit_time());
     let mut args = vec!["commit-tree", "-m", message];
     for parent in parents {
         args.extend(["-p", *parent]);
@@ -832,6 +839,84 @@ fn commit_on(path: &Path, tree: &str, parents: &[&str], message: &str) -> String
         .expect("git should be installed");
     assert!(output.status.success(), "git {args:?} failed in {path:?}");
     String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
+/// The next fixture commit time: one second after the previous one (see
+/// [`commit_on`]).
+fn next_commit_time() -> i64 {
+    static SEQUENCE: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("clock").as_secs() as i64;
+    now + SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// [`commit_on`] and [`chain_on`] for fixtures with hundreds of commits: one
+/// `git fast-import` writes them all instead of a `commit-tree` process per
+/// commit. Every commit keeps its first parent's tree and is dated by
+/// [`next_commit_time`]; `get-mark` returns each SHA as it is made. Objects
+/// are readable by other Git commands only after [`BulkCommits::finish`].
+struct BulkCommits {
+    path: PathBuf,
+    child: std::process::Child,
+    stdin: std::process::ChildStdin,
+    stdout: std::io::BufReader<std::process::ChildStdout>,
+    marks: std::collections::HashMap<String, usize>,
+}
+
+impl BulkCommits {
+    fn new(path: &Path) -> Self {
+        let mut child = Command::new("git")
+            .current_dir(path)
+            .args(["fast-import", "--quiet", "--done"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("git should be installed");
+        let stdin = child.stdin.take().expect("stdin");
+        let stdout = std::io::BufReader::new(child.stdout.take().expect("stdout"));
+        Self { path: path.to_path_buf(), child, stdin, stdout, marks: Default::default() }
+    }
+
+    fn commit(&mut self, parents: &[&str], message: &str) -> String {
+        use std::io::{BufRead, Write};
+        let mark = self.marks.len() + 1;
+        // A commit made in this session is named by its mark.
+        let name = |sha: &str| self.marks.get(sha).map_or_else(|| sha.to_string(), |mark| format!(":{mark}"));
+        let mut command = format!(
+            "commit refs/fixture/bulk\nmark :{mark}\ncommitter Test User <test@example.com> {} +0000\ndata {}\n{message}\n",
+            next_commit_time(),
+            message.len()
+        );
+        for (index, parent) in parents.iter().enumerate() {
+            command.push_str(&format!("{} {}\n", if index == 0 { "from" } else { "merge" }, name(parent)));
+        }
+        command.push_str(&format!("\nget-mark :{mark}\n"));
+        self.stdin.write_all(command.as_bytes()).expect("write to git fast-import");
+        self.stdin.flush().expect("flush git fast-import");
+        let mut sha = String::new();
+        self.stdout.read_line(&mut sha).expect("read a mark from git fast-import");
+        let sha = sha.trim().to_string();
+        assert_eq!(sha.len(), 40, "git fast-import gave {sha:?} for {message}");
+        self.marks.insert(sha.clone(), mark);
+        sha
+    }
+
+    fn chain(&mut self, from: &str, prefix: &str, count: usize) -> Vec<String> {
+        let mut chain: Vec<String> = Vec::with_capacity(count);
+        for n in 1..=count {
+            let parent = chain.last().map_or(from, String::as_str).to_string();
+            chain.push(self.commit(&[&parent], &format!("{prefix}{n}")));
+        }
+        chain
+    }
+
+    /// Ends the session, writing its objects, and drops its scratch ref.
+    fn finish(mut self) {
+        use std::io::Write;
+        self.stdin.write_all(b"done\n").expect("finish git fast-import");
+        drop(self.stdin);
+        assert!(self.child.wait().expect("git fast-import").success(), "git fast-import failed in {:?}", self.path);
+        run_git(&self.path, &["update-ref", "-d", "refs/fixture/bulk"]);
+    }
 }
 
 /// `count` commits after `from`, oldest first.
@@ -898,22 +983,24 @@ fn observed_sparse_lanes() -> ObservedSparseLanes {
     let path = dir.path().to_path_buf();
     init_repo(&path);
     let r = commit(&path, "r");
-    let tree = git_output(&path, &["rev-parse", "HEAD^{tree}"]);
 
+    // Over 200 commits: one `git fast-import`, not a process per commit.
+    let mut bulk = BulkCommits::new(&path);
     let mut d = vec![r.clone()];
-    d.extend(chain_on(&path, &tree, &r, "d", 12));
-    let schema = chain_on(&path, &tree, &d[2], "s", SPARSE_SCHEMA_COMMITS);
-    let mut wt_ux = chain_on(&path, &tree, &d[5], "w", SPARSE_WT_UX_BEFORE_MERGE);
+    d.extend(bulk.chain(&r, "d", 12));
+    let schema = bulk.chain(&d[2], "s", SPARSE_SCHEMA_COMMITS);
+    let mut wt_ux = bulk.chain(&d[5], "w", SPARSE_WT_UX_BEFORE_MERGE);
     let w1 = wt_ux.last().unwrap().clone();
-    let m103 = commit_on(&path, &tree, &[&d[12], &w1], "Merge pull request #103 from fix/wt-ux");
-    let sniff = chain_on(&path, &tree, &w1, "n", SPARSE_SNIFF_COMMITS);
-    let continued = chain_on(&path, &tree, &w1, "w", SPARSE_WT_UX_AFTER_MERGE);
+    let m103 = bulk.commit(&[&d[12], &w1], "Merge pull request #103 from fix/wt-ux");
+    let sniff = bulk.chain(&w1, "n", SPARSE_SNIFF_COMMITS);
+    let continued = bulk.chain(&w1, "w", SPARSE_WT_UX_AFTER_MERGE);
     wt_ux.extend(continued);
-    d.push(commit_on(&path, &tree, &[&m103], "d13"));
-    let m104 = commit_on(&path, &tree, &[&d[13], sniff.last().unwrap()], "Merge pull request #104 from fix/sniff");
-    let b1 = commit_on(&path, &tree, &[wt_ux.last().unwrap(), &m104], "Merge branch 'main' into fix/wt-ux");
-    let synced = chain_on(&path, &tree, &b1, "x", SPARSE_WT_UX_AFTER_SYNC);
+    d.push(bulk.commit(&[&m103], "d13"));
+    let m104 = bulk.commit(&[&d[13], sniff.last().unwrap()], "Merge pull request #104 from fix/sniff");
+    let b1 = bulk.commit(&[wt_ux.last().unwrap(), &m104], "Merge branch 'main' into fix/wt-ux");
+    let synced = bulk.chain(&b1, "x", SPARSE_WT_UX_AFTER_SYNC);
     wt_ux.extend(synced);
+    bulk.finish();
 
     for (branch, tip) in [
         ("main", &m104),
@@ -2948,11 +3035,13 @@ fn assert_laid_out(name: &str, facts: &GraphFacts, prs: &PrListing, expected: &E
     report
 }
 
+// Gathered graphs lay out with exact merges and no overlapping tags. One
+// test per fixture, so nextest builds the fixtures and runs them in parallel.
+
 #[test]
 #[serial_test::serial]
-fn gathered_graphs_lay_out_with_exact_merges_and_no_overlapping_tags() {
+fn gathered_graph_lays_out_observation_1() {
     let mut report = Vec::new();
-
     let repo = merged_via_merge_commit();
     {
         let _guard = DirGuard::enter(&repo.path);
@@ -2968,7 +3057,14 @@ fn gathered_graphs_lay_out_with_exact_merges_and_no_overlapping_tags() {
             report.extend(assert_laid_out(view, &graph.expect("a graph"), &PrListing::default(), &expected));
         }
     }
+    // Recorded in the implementation log.
+    eprintln!("{}", report.join("\n"));
+}
 
+#[test]
+#[serial_test::serial]
+fn gathered_graph_lays_out_observation_2() {
+    let mut report = Vec::new();
     let repo = nested_parent_merged_into_default();
     {
         let _guard = DirGuard::enter(&repo.path);
@@ -2987,7 +3083,14 @@ fn gathered_graphs_lay_out_with_exact_merges_and_no_overlapping_tags() {
             },
         ));
     }
+    // Recorded in the implementation log.
+    eprintln!("{}", report.join("\n"));
+}
 
+#[test]
+#[serial_test::serial]
+fn gathered_graph_lays_out_long_labels() {
+    let mut report = Vec::new();
     let repo = long_labels();
     {
         let _guard = DirGuard::enter(&repo.path);
@@ -3010,7 +3113,14 @@ fn gathered_graphs_lay_out_with_exact_merges_and_no_overlapping_tags() {
             },
         ));
     }
+    // Recorded in the implementation log.
+    eprintln!("{}", report.join("\n"));
+}
 
+#[test]
+#[serial_test::serial]
+fn gathered_graph_lays_out_sparse_lanes() {
+    let mut report = Vec::new();
     // Every connection is drawn: `fix/wt-ux` merges into `M103` from `W1`,
     // where `fix/sniff` forks. At 40 rows the height cap leaves out the least
     // active lane, `feat/schema-enhancement` (its tip is the oldest; see
@@ -3032,11 +3142,34 @@ fn gathered_graphs_lay_out_with_exact_merges_and_no_overlapping_tags() {
             },
         ));
     }
+    // Recorded in the implementation log.
+    eprintln!("{}", report.join("\n"));
+}
 
-    // PR #105's shape: `B` merged into `C`, then `N`; `fix/sniff-pr` is a
-    // label at `B`. With `main` behind, `C` is on the default lane; diverged,
-    // on the `origin/main` line.
-    for local_main in [LocalMain::AtMerge, LocalMain::Behind, LocalMain::Diverged] {
+#[test]
+#[serial_test::serial]
+fn gathered_graph_lays_out_continued_after_merge_at_merge() {
+    assert_continued_after_merge_lays_out(LocalMain::AtMerge);
+}
+
+#[test]
+#[serial_test::serial]
+fn gathered_graph_lays_out_continued_after_merge_behind() {
+    assert_continued_after_merge_lays_out(LocalMain::Behind);
+}
+
+#[test]
+#[serial_test::serial]
+fn gathered_graph_lays_out_continued_after_merge_diverged() {
+    assert_continued_after_merge_lays_out(LocalMain::Diverged);
+}
+
+/// PR #105's shape: `B` merged into `C`, then `N`; `fix/sniff-pr` is a label
+/// at `B`. With `main` behind, `C` is on the default lane; diverged, on the
+/// `origin/main` line.
+fn assert_continued_after_merge_lays_out(local_main: LocalMain) {
+    let mut report = Vec::new();
+    {
         let repo = continued_after_merge(local_main);
         let _guard = DirGuard::enter(&repo.path);
         let main_tip = match local_main {
@@ -3072,7 +3205,14 @@ fn gathered_graphs_lay_out_with_exact_merges_and_no_overlapping_tags() {
             ));
         }
     }
+    // Recorded in the implementation log.
+    eprintln!("{}", report.join("\n"));
+}
 
+#[test]
+#[serial_test::serial]
+fn gathered_graph_lays_out_merged_twice() {
+    let mut report = Vec::new();
     let repo = merged_twice_and_continued();
     {
         let _guard = DirGuard::enter(&repo.path);
@@ -3090,7 +3230,14 @@ fn gathered_graphs_lay_out_with_exact_merges_and_no_overlapping_tags() {
             },
         ));
     }
+    // Recorded in the implementation log.
+    eprintln!("{}", report.join("\n"));
+}
 
+#[test]
+#[serial_test::serial]
+fn gathered_graph_lays_out_new_branch_at_merged_tip() {
+    let mut report = Vec::new();
     // With its record, `new` does not claim `C`: its fork `b1` is undrawn, so
     // the plan has the notice. Without it, the topology gives the merge.
     let repo = new_branch_at_merged_tip();

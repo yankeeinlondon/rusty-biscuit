@@ -254,3 +254,20 @@ Other L1 facts:
 - `GraphFacts::to_git_graph` tags each `MergedElsewhere` tip `in <into>`
   (`with_ref`), only when that tip is one of the branch line's drawn
   entries: an undrawn ref would come back as a `GraphOmission::Tag` note.
+
+## Merges into lanes other than parent or default
+
+- `place` classifies against parent, default, and origin only. When that
+  gives `Unmerged` or `IntegratedOtherwise`, `direct_merge_elsewhere` tries
+  every other selected branch (not the parent) and accepts only
+  `MergedDirectly` (tip is the merge's second parent). It overrides only
+  `merge`: the fork and stop stay from the first classification. Measuring
+  the fork against the merging lane hung a merged-into-child branch from
+  the child.
+- Cost: one `--is-ancestor` per (branch, other lane) pair not already in
+  `Classifications`, pinned in
+  `the_base_view_gives_every_worktree_branch_a_line`.
+- `GitGraph`'s emitter used to drop a merge whose destination lane is
+  emitted before the source lane (depth-first order). `EmitState::awaiting`
+  now parks a lane before such a destination; emitting the source resumes
+  it, and the final loop drops only waits that can never end.

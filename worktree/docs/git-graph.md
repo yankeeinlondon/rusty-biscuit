@@ -68,6 +68,8 @@ Each selected branch `B` with tip `T` is compared against the lanes that could c
 2. the default lane;
 3. the diverged `origin/<default>` lane, when there is one.
 
+When none of these merged `T` directly, the other drawn lanes are tried too (the branch's own parent excluded), and only a **direct** merge there counts: a commit on that lane whose second parent is `T`. So a branch merged into a child or a sibling, such as `feat/schema-enhancement` merged into `fix/path-spelling`, is drawn merging there. Its fork and its line stay what the three lanes above gave it; measuring the fork from the merging lane would hang the branch from it. A tip that is merely on another lane's line (a child forked there) is no merge. Merges of the default branch into a branch are not drawn: the default lane is not classified.
+
 For each lane `X` whose tip contains `T` (`merge-base --is-ancestor`), `C` is the oldest commit on `X`'s first-parent chain that descends from `T`. It is found as the leading run of `rev-list --first-parent --parents T..X` whose commits are also in `rev-list --ancestry-path T..X`. What `C` says about `T` gives that lane's class.
 
 The lanes are tried in order, but not every answer ends the search:
@@ -217,7 +219,7 @@ The default lane is drawn down to its oldest anchor plus that anchor's first par
 
 - A lane whose fork commit is not drawn, or whose fork is unknown, is drawn **unconnected**, not hung from the start of another lane.
 - A tag whose commit is not drawn is left out, and counted.
-- A merge whose source or destination is not drawn, or whose destination would be emitted before its source, is not drawn, and counted.
+- A merge whose source or destination is not drawn, or whose destination would still be emitted before its source, is not drawn, and counted. (A lane that reaches a merge destination before its source is drawn waits there, so this is rare.)
 - A branch with no commits of its own is labeled at its own tip (`GraphLine::with_tip`), never at its fork commit.
 
 Each thing counted this way is a `GraphOmission` in `GitGraphPlan::omissions` (and sets `GitGraphPlan::incomplete`). `wt list` draws the graph with `GitGraph::render_without_notes` and writes one closing note per omission, naming the branch and commits, after the note counting the lanes the height cap left out (those lanes are counted by that note, not here):
