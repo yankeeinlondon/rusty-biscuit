@@ -1,7 +1,9 @@
 //! `hug` checks for `2026-10-03-visibility-and-kind`: representative CLI wiring
 //! of kinds, visibility and static members (test 7), and the warm-cache
-//! upgrade across an extractor revision change (test 8).
+//! upgrade across a schema and an extractor revision change (test 8), and the
+//! persistent-cache reader contract for malformed symbol fields.
 
+mod cache_robustness;
 mod cache_upgrade;
 mod wiring;
 
@@ -18,6 +20,7 @@ pub const RUST_FIXTURE: &str = include_str!("../../../lib/tests/fixtures/symbols
 pub const CPP_FIXTURE: &str = include_str!("../../../lib/tests/fixtures/symbols/cpp.cpp");
 pub const JAVA_FIXTURE: &str = include_str!("../../../lib/tests/fixtures/symbols/java.java");
 pub const CSHARP_FIXTURE: &str = include_str!("../../../lib/tests/fixtures/symbols/c_sharp.cs");
+pub const PYTHON_FIXTURE: &str = include_str!("../../../lib/tests/fixtures/symbols/python.py");
 pub const BASH_FIXTURE: &str = include_str!("../../../lib/tests/fixtures/symbols/bash.sh");
 
 /// A scratch Git repository plus test-owned home, config and temp

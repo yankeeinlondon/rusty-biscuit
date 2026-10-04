@@ -1,5 +1,6 @@
-//! Test 8: a persistent cache entry written under the previous extractor
-//! fingerprint is not served after the upgrade, and the entry written by the
+//! Test 8: a persistent cache entry written under an earlier extractor
+//! fingerprint (the schema-2 literal key, or a schema-3 key at extractor
+//! revision 1 or 2) is not served after the upgrade, and the entry written by the
 //! upgraded run is served on the next run. Works on the cache files directly,
 //! with `TMPDIR` (`TMP`/`TEMP` on Windows) pointed at a test-owned directory.
 //!
@@ -12,7 +13,7 @@ use biscuit_hash::{blake3_hash, xx_hash};
 use serde_json::Value;
 use tempfile::TempDir;
 
-use crate::{Scratch, TYPESCRIPT_FIXTURE, cache_entries, json_of, stdout_of};
+use crate::{PYTHON_FIXTURE, Scratch, TYPESCRIPT_FIXTURE, cache_entries, json_of, stdout_of};
 
 const FILE: &str = "typescript.ts";
 const ARGS: [&str; 3] = ["--json", "symbols", FILE];
@@ -42,7 +43,7 @@ fn entry_path(project_dir: &Path, key: &str) -> PathBuf {
     project_dir.join(&key[..2]).join(format!("{key}.json"))
 }
 
-fn read_json(path: &Path) -> Value {
+pub(crate) fn read_json(path: &Path) -> Value {
     serde_json::from_slice(&std::fs::read(path).expect("read cache entry")).expect("cache JSON")
 }
 
@@ -52,7 +53,7 @@ fn write_json(path: &Path, value: &Value) {
 }
 
 /// Renames the record called `from` (name and display name) in a snapshot.
-fn rename_record(snapshot: &mut Value, from: &str, to: &str) {
+pub(crate) fn rename_record(snapshot: &mut Value, from: &str, to: &str) {
     let record = snapshot["symbols"]
         .as_array_mut()
         .expect("snapshot symbols")
@@ -106,7 +107,7 @@ fn names(json: &Value) -> Vec<String> {
 }
 
 /// The single entry a run left under `temp`.
-fn only_entry(temp: &Path) -> PathBuf {
+pub(crate) fn only_entry(temp: &Path) -> PathBuf {
     let entries = cache_entries(temp);
     assert_eq!(entries.len(), 1, "expected one cache entry, found {entries:#?}");
     entries.into_iter().next().expect("one entry")
@@ -206,4 +207,238 @@ fn warm_entry_from_the_previous_extractor_is_not_served_after_the_upgrade() {
         unchanged(&run1),
         "TypeScript: records served from the warm entry must keep run 1's kind, visibility, is_static and container_kind"
     );
+}
+
+/// One earlier extractor revision whose entry must not be served: a file,
+/// the value a repair changed (`probe` reads it from `hug --json` output),
+/// and how that revision's snapshot differs from the current one.
+struct StaleRevision {
+    revision: &'static str,
+    file: &'static str,
+    language: &'static str,
+    source: String,
+    /// A record renamed in the current-key entry to prove run 2 read it.
+    sentinel: &'static str,
+    probe: fn(&Value) -> Value,
+    repaired: Value,
+    stale: Value,
+    revert: fn(&mut Value),
+}
+
+/// The persistent-cache key `hug` used at an earlier extractor `revision`
+/// (schema `3.0`), hard-coded rather than computed from the current revision:
+/// the same `FileCacheKey::stable_key` formula as [`historical_key`] with a
+/// `query_fingerprint` of `locals+imports+references;extractor-revision=<N>`.
+fn revision_key(revision: &str, file_path: &str, source: &str, language: &str) -> String {
+    let options = "experimental_semantics=false;deny=;warn=;allow=;strict=false;external_adapters=false";
+    let analyzer = blake3_hash(&format!(
+        "3.0|{}|{language}|locals+imports+references;extractor-revision={revision}|{options}",
+        env!("CARGO_PKG_VERSION")
+    ));
+    let file_hash = format!("{:x}", xx_hash(source));
+    blake3_hash(&format!(
+        "{}|{language}|{file_hash}|{analyzer}",
+        file_path.replace('\\', "/")
+    ))
+}
+
+/// The record called `name` in a snapshot; panics unless there is exactly one.
+fn record_named<'a>(snapshot: &'a mut Value, name: &str) -> &'a mut Value {
+    let mut matches: Vec<_> = snapshot["symbols"]
+        .as_array_mut()
+        .expect("snapshot symbols")
+        .iter_mut()
+        .filter(|record| record["identity"]["name"] == name)
+        .collect();
+    assert_eq!(matches.len(), 1, "snapshot must hold one `{name}` record");
+    matches.pop().expect("one record")
+}
+
+/// Seeds `case`'s pre-repair snapshot under its revision's key and asserts it
+/// is not served, while the same payload under the current key is (so the
+/// miss is due to the key) and the entry run 1 writes is served on run 2.
+fn assert_stale_revision_is_not_served(case: &StaleRevision) {
+    let args = ["--json", "symbols", case.file];
+    let label = format!("revision {} `{}`", case.revision, case.file);
+    let scratch = Scratch::new(&[(case.file, case.source.as_str())]);
+
+    let discovery = TempDir::new().expect("discovery temp");
+    let fresh = json_of(&stdout_of(scratch.hug_with_temp(discovery.path(), &args), &args));
+    assert_eq!((case.probe)(&fresh), case.repaired, "{label}: an uncached run reports the repaired value");
+    let discovered_entry = only_entry(discovery.path());
+    let current_snapshot = read_json(&discovered_entry);
+    let file_path = current_snapshot["key"]["file_path"]
+        .as_str()
+        .expect("snapshot key file_path")
+        .to_string();
+    let relative_project = discovered_entry
+        .parent()
+        .and_then(Path::parent)
+        .and_then(|dir| dir.strip_prefix(discovery.path()).ok())
+        .expect("entry under <temp>/tree-hugger/cache/<project_id>/<shard>/")
+        .to_path_buf();
+    let current_key = discovered_entry
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .expect("entry key")
+        .to_string();
+    let old_key = revision_key(case.revision, &file_path, &case.source, case.language);
+    assert_ne!(old_key, current_key, "{label}: the revision must differ from the current one");
+
+    let mut stale = current_snapshot.clone();
+    (case.revert)(&mut stale);
+
+    // Control: the stale payload is servable; under the current key the
+    // pre-repair value reaches the output.
+    let control = TempDir::new().expect("control temp");
+    write_json(&entry_path(&control.path().join(&relative_project), &current_key), &stale);
+    let served = json_of(&stdout_of(scratch.hug_with_temp(control.path(), &args), &args));
+    assert_eq!((case.probe)(&served), case.stale, "control: {label} payload under the current key must be served");
+
+    let project_dir = scratch.temp.path().join(&relative_project);
+    write_json(&entry_path(&project_dir, &old_key), &stale);
+
+    // Run 1 misses the stale entry and reports the repaired value.
+    let run1 = json_of(&scratch.stdout(&args));
+    assert_eq!((case.probe)(&run1), case.repaired, "{label}: run 1 served the stale entry");
+    assert_eq!(
+        symbol_facts(&run1),
+        symbol_facts(&fresh),
+        "{label}: run 1 must match an uncached run (kind, visibility, is_static, container_kind)"
+    );
+    let new_entry = entry_path(&project_dir, &current_key);
+    assert!(new_entry.is_file(), "{label}: run 1 must write the entry under the current key");
+
+    // Run 2 hits the entry run 1 wrote: a renamed record proves it was read.
+    let mut written = read_json(&new_entry);
+    rename_record(&mut written, case.sentinel, RENAMED_NAME);
+    write_json(&new_entry, &written);
+    let run2 = json_of(&scratch.stdout(&args));
+    let run2_names = names(&run2);
+    assert!(
+        run2_names.iter().any(|name| name == RENAMED_NAME)
+            && !run2_names.iter().any(|name| name == case.sentinel),
+        "{label}: run 2 did not read the current-key entry (names: {run2_names:?})"
+    );
+    assert_eq!((case.probe)(&run2), case.repaired, "{label}: the warm entry keeps run 1's value");
+}
+
+const DECOY_METHOD: &str = "decoy_decorated_method";
+
+/// The public `is_static` of the single symbol called `DECOY_METHOD`.
+fn decoy_is_static(json: &Value) -> Value {
+    let facts: Vec<_> = symbol_facts(json)
+        .into_iter()
+        .filter(|fact| fact.0 == DECOY_METHOD)
+        .collect();
+    assert_eq!(facts.len(), 1, "expected one `{DECOY_METHOD}` symbol, found {facts:?}");
+    facts[0].4.clone()
+}
+
+/// Revision 1 reported a method whose decorator only resembles
+/// `staticmethod` as static; the repaired reader does not.
+#[test]
+fn entry_from_extractor_revision_one_is_not_served_after_the_repairs() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "1",
+        file: "python.py",
+        language: "python",
+        source: format!(
+            "{PYTHON_FIXTURE}\n\nclass DecoratorDecoy:\n    @notstaticmethod\n    def {DECOY_METHOD}(self) -> None:\n        pass\n"
+        ),
+        sentinel: "module_function",
+        probe: decoy_is_static,
+        repaired: Value::Bool(false),
+        stale: Value::Bool(true),
+        revert: |snapshot| {
+            record_named(snapshot, DECOY_METHOD)["modifiers"] = serde_json::json!([{ "type": "Static" }]);
+        },
+    });
+}
+
+const SCOPE_LEAK_SOURCE: &str = "static int scope_leak(int);\n\
+                                 namespace unrelated { int scope_leak(int x) { return x; } }\n\
+                                 int sentinel_function(int value) { return value; }\n";
+
+/// The public visibility of `scope_leak` in `namespace unrelated`.
+fn nested_scope_leak_visibility(json: &Value) -> Value {
+    let facts: Vec<_> = symbol_facts(json)
+        .into_iter()
+        .filter(|fact| fact.0 == "scope_leak" && fact.5 == "Namespace")
+        .collect();
+    assert_eq!(facts.len(), 1, "expected one nested `scope_leak` symbol, found {facts:?}");
+    facts[0].3.clone()
+}
+
+/// Revision 2 attached the file-scope `static` prototype to the same-named
+/// function in `namespace unrelated`, reporting it module-private.
+#[test]
+fn entry_from_extractor_revision_two_is_not_served_after_the_repairs() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "2",
+        file: "linkage.cpp",
+        language: "cpp",
+        source: SCOPE_LEAK_SOURCE.to_string(),
+        sentinel: "sentinel_function",
+        probe: nested_scope_leak_visibility,
+        repaired: Value::from("Public"),
+        stale: Value::from("ModulePrivate"),
+        revert: |snapshot| {
+            let nested = snapshot["symbols"]
+                .as_array_mut()
+                .expect("snapshot symbols")
+                .iter_mut()
+                .find(|record| {
+                    record["identity"]["name"] == "scope_leak"
+                        && record["source"]["declaration_span"]["start"]["line"] == 2
+                })
+                .expect("snapshot has the nested `scope_leak` record");
+            nested["visibility"]["level"] = Value::from("ModulePrivate");
+        },
+    });
+}
+
+const TRAILING_RETURN_SOURCE: &str = "template<class T> static auto trailing_differs(T) -> int;\n\
+                                      template<class T> auto trailing_differs(T value) -> long { return 0; }\n\
+                                      int sentinel_function(int value) { return value; }\n";
+
+/// The public visibility of the later `trailing_differs` template.
+fn trailing_differs_definition_visibility(json: &Value) -> Value {
+    let facts: Vec<_> = symbol_facts(json)
+        .into_iter()
+        .filter(|fact| fact.0 == "trailing_differs")
+        .collect();
+    assert_eq!(facts.len(), 2, "expected two `trailing_differs` symbols, found {facts:?}");
+    facts
+        .into_iter()
+        .max_by_key(|fact| fact.1.as_u64())
+        .map(|fact| fact.3)
+        .expect("one later declaration")
+}
+
+/// Revision 3 left a template's trailing return type out of its identity,
+/// attaching the `static` prototype returning `int` to the different template
+/// returning `long` and reporting it module-private.
+#[test]
+fn entry_from_extractor_revision_three_is_not_served_after_the_repairs() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "3",
+        file: "templates.cpp",
+        language: "cpp",
+        source: TRAILING_RETURN_SOURCE.to_string(),
+        sentinel: "sentinel_function",
+        probe: trailing_differs_definition_visibility,
+        repaired: Value::from("Public"),
+        stale: Value::from("ModulePrivate"),
+        revert: |snapshot| {
+            let definition = snapshot["symbols"]
+                .as_array_mut()
+                .expect("snapshot symbols")
+                .iter_mut()
+                .filter(|record| record["identity"]["name"] == "trailing_differs")
+                .max_by_key(|record| record["source"]["declaration_span"]["start_byte"].as_u64())
+                .expect("snapshot has a `trailing_differs` record");
+            definition["visibility"]["level"] = Value::from("ModulePrivate");
+        },
+    });
 }
