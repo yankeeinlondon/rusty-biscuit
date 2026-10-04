@@ -22,7 +22,7 @@ banned from this review unless you can pair each user-facing requirement with a 
   bare Ctrl?" Required for any UX requirement of the form "when the user holds/presses key X, Y
   happens." Currently env-gated behind `RUN_LEVEL3=1` because focus stability is platform-specific.
 
-A feature MAY be marked production-ready only when each user-observable requirement has at minimum
+A feature MAY be marked production-ready only when each user-observable requirement of the spec has at minimum
 the level of verification appropriate for it. Reviewers MUST list any requirement whose strongest
 test is at the wrong level under "Findings" with severity at least "high".
 
