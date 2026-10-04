@@ -152,9 +152,113 @@ docs_updated_during_phase_5:
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
   - .claude/skills/tree-hugger/SKILL.md
+source_files_during_phase_6:
+  - tree-hugger/lib/tests/l1/symbols_adapter.rs
+  - tree-hugger/lib/tests/l1/symbols_decl_text.rs
+  - tree-hugger/lib/tests/l1/symbols_export.rs
+  - tree-hugger/lib/tests/l1/symbols_kinds.rs
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - .claude/skills/tree-hugger/SKILL.md
+source_files_during_phase_7:
+  - tree-hugger/lib/src/shared/symbol.rs
+docs_updated_during_phase_7:
+  - tree-hugger/README.md
+  - tree-hugger/lib/README.md
+  - tree-hugger/cli/README.md
+  - tree-hugger/docs/symbol-schema-design.md
+docs_created_during_phase_7:
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+skills_files_updated_during_phase_7:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
 packages:
   - tree-hugger
   - tree-hugger-cli
+source_code:
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/symbols_fixtures.rs
+  - tree-hugger/lib/tests/l1/symbols_coverage.rs
+  - tree-hugger/lib/tests/l1/symbols_kinds.rs
+  - tree-hugger/lib/tests/l1/symbols_visibility.rs
+  - tree-hugger/lib/tests/l1/symbols_static.rs
+  - tree-hugger/lib/tests/l1/symbols_adapter.rs
+  - tree-hugger/lib/tests/l1/symbols_decl_text.rs
+  - tree-hugger/lib/tests/l1/symbols_export.rs
+  - tree-hugger/cli/tests/symbols/main.rs
+  - tree-hugger/cli/tests/symbols/wiring.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/lib/tests/fixtures/symbols/
+  - tree-hugger/lib/src/shared/symbol.rs
+  - tree-hugger/lib/src/shared/schema_v2/mod.rs
+  - tree-hugger/lib/src/shared/schema_v2/facets.rs
+  - tree-hugger/lib/src/shared/schema_v2/types.rs
+  - tree-hugger/lib/src/file/extract/signatures.rs
+  - tree-hugger/lib/src/file/extract/classify.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/tests.rs
+  - tree-hugger/lib/src/cache/mod.rs
+  - tree-hugger/lib/src/god_files/analysis.rs
+  - tree-hugger/lib/tests/l1/tree_file.rs
+  - tree-hugger/lib/tests/l1/cache_tests.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/src/prelude.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/src/lib.rs
+  - tree-hugger/lib/src/file/extract/mod.rs
+  - tree-hugger/lib/src/file/extract/declaration.rs
+  - tree-hugger/lib/src/file/extract/rust_impl.rs
+  - tree-hugger/lib/src/file/extract/visibility/mod.rs
+  - tree-hugger/lib/src/file/extract/visibility/c.rs
+  - tree-hugger/lib/src/file/extract/visibility/cpp.rs
+  - tree-hugger/lib/src/file/extract/visibility/csharp.rs
+  - tree-hugger/lib/src/file/extract/visibility/ecma.rs
+  - tree-hugger/lib/src/file/extract/visibility/go.rs
+  - tree-hugger/lib/src/file/extract/visibility/java.rs
+  - tree-hugger/lib/src/file/extract/visibility/lua.rs
+  - tree-hugger/lib/src/file/extract/visibility/php.rs
+  - tree-hugger/lib/src/file/extract/visibility/rust.rs
+  - tree-hugger/lib/src/file/extract/visibility/scala.rs
+  - tree-hugger/lib/src/file/extract/visibility/swift.rs
+  - tree-hugger/lib/src/file/extract/static_flags/mod.rs
+  - tree-hugger/lib/src/file/extract/static_flags/cpp.rs
+  - tree-hugger/lib/src/file/extract/static_flags/ecma.rs
+  - tree-hugger/lib/src/file/extract/static_flags/java.rs
+  - tree-hugger/lib/src/file/extract/static_flags/php.rs
+  - tree-hugger/lib/src/file/extract/static_flags/python.rs
+  - tree-hugger/lib/src/file/extract/static_flags/rust.rs
+  - tree-hugger/lib/src/file/extract/static_flags/scala.rs
+  - tree-hugger/lib/src/file/extract/static_flags/swift.rs
+  - tree-hugger/cli/tests/cli.rs
+  - tree-hugger/lib/queries/typescript/locals.scm
+  - tree-hugger/lib/queries/vendor/c/locals.scm
+  - tree-hugger/lib/queries/vendor/c_sharp/locals.scm
+  - tree-hugger/lib/queries/vendor/cpp/locals.scm
+  - tree-hugger/lib/queries/vendor/java/locals.scm
+  - tree-hugger/lib/queries/vendor/javascript/locals.scm
+  - tree-hugger/lib/queries/vendor/perl/locals.scm
+  - tree-hugger/lib/queries/vendor/python/locals.scm
+  - tree-hugger/lib/queries/vendor/rust/locals.scm
+  - tree-hugger/lib/queries/vendor/swift/locals.scm
+  - tree-hugger/lib/src/file/extract/navigation.rs
+  - tree-hugger/lib/src/file/extract/type_metadata.rs
+  - tree-hugger/lib/src/queries/inventory.rs
+  - tree-hugger/lib/src/queries/provenance.rs
+  - tree-hugger/lib/tests/l1/phase6_neovim_query_reuse.rs
+  - Cargo.lock
+  - tree-hugger/cli/Cargo.toml
+documentation:
+  - tree-hugger/README.md
+  - tree-hugger/docs/cache-design.md
+  - docs/dependencies.md
+  - tree-hugger/lib/README.md
+  - tree-hugger/cli/README.md
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+completed_phase: 7
+implemented: true
 ---
 
 # Implementation Log for 2026-10-03-visibility-and-kind (7 phases)
@@ -941,3 +1045,148 @@ test asserted signature visibility or schema 2.0.
   (Windows) are the remaining OS evidence; test 8's OS-sensitive parts (path
   spelling, temp directory) are discovered at run time rather than assumed.
 - No `cargo fmt` run.
+
+## Phase 6
+
+Implemented by one agent. Earlier phases had already landed most of the ten
+test groups (the kind, visibility and static matrices, test 6, tests 7–8, and
+skeletons of tests 5, 9 and 10). Phase 6 filled the remaining gaps, all in
+L1 test modules of the consolidated `tests/l1` binary (`autotests = false`;
+every module was already declared in `main.rs`). No production code changed.
+
+### Requirement-to-test mapping
+
+| Requirement | Test |
+|---|---|
+| test 5: kind and container kind for every kind-matrix row, record → `SymbolInfo` and `SymbolInfo` → record, plus signature presence | `symbols_adapter::kind_matrix_survives_both_conversions` (new) |
+| test 5: visibility for every visibility-matrix row, both directions | `symbols_adapter::visibility_matrix_survives_both_conversions` (new) |
+| test 5: `is_static` / `is_static_storage` for every static-matrix row, both directions | `symbols_adapter::static_matrix_survives_both_conversions` (new) |
+| test 5: parameterless constructors/methods/functions (TS and JS `ModuleWidget` constructor, JS `instanceMethod`, TS `exportedFunction`, Rust `public_function`) keep a present, empty signature; JS `constructor(initialValue)` keeps its parameter | `symbols_adapter::fixture_signatures_survive_both_conversions` (new) |
+| test 5: signature and type-metadata regression coverage on every fixture symbol (`SymbolInfo` → record → `SymbolInfo`) | `symbols_adapter::every_fixture_symbol_round_trips_through_the_record` (new) |
+| test 5: record and converted info agree for every fixture symbol | `symbols_adapter::adapter_agrees_with_extraction_for_every_fixture_symbol` (Phase 2; doc comment updated) |
+| test 9: non-empty text for every record in `symbol_records()` **and** `symbol_index_v2()` | `symbols_decl_text::every_fixture_record_has_declaration_text` (widened from `symbol_records()` only) |
+| test 9: exact text for the bodyless Rust trait method `fn required_trait_method(&self) -> u32;` and both Perl names of `my ($first_name, $last_name)` | `symbols_decl_text::declaration_text_keeps_unmappable_syntax_and_stops_at_the_body` (rows added; `pub(in …)`, Swift, C#, Scala and Java rows existed) |
+| test 10: `From<SymbolInfo>` of every Public fixture symbol (over 100) yields `is_exported: false`, including TS `exportedFunction` and Rust `public_function` | `symbols_export::converting_a_public_symbol_never_marks_it_exported` (new) |
+| test 10: index export for Java class, TS method (false), TS `export function`, Rust `pub fn` (true) | `symbols_export::export_follows_export_syntax_not_access` (existing) |
+| test 4: Python class-body forms, Scala object vs class, Java interface constant, storage `static` | `symbols_static::static_matrix_holds_through_both_paths` (existing rows; verified, no change) |
+| Python `self.y` / `obj.attr`, JS `this.w`, Perl `local` declare no symbol | `symbols_kinds::assignments_and_local_overrides_declare_no_symbol` (existing; strengthened) |
+| JS `x = 1`, `static y`, `#z` are `Property` (`unmarkedProperty`, `uninitializedStaticProperty`, `#hashPrivateProperty`) | `KIND_MATRIX` rows plus `STATIC_MATRIX` (existing) |
+
+Strengthening of `assignments_and_local_overrides_declare_no_symbol`: JS
+`unmarkedProperty`, also assigned through `this.` in the constructor, is
+reported exactly once, as a `Property` of its class; and no Perl record of
+any name has declaration text starting with `local` (before, only `$_` was
+checked by name).
+
+**Mutation check:** adding `"local"` to the Perl `#any-of?` scope list in
+`queries/vendor/perl/locals.scm` made the strengthened test fail; the query
+was restored (no diff under `lib/queries`).
+
+### Finding: two known adapter losses (not fixed; pinned)
+
+The new full round trip (`SymbolInfo` → `SymbolRecord` → `SymbolInfo`) over
+every fixture symbol found two type-metadata losses. Neither is among the
+fields test 5 promises (kind, visibility, static flags, container kind,
+signature presence), and the spec says test 5 does not claim every facet fits
+both models, so this phase pins them instead of changing the adapter:
+
+- `TypeMetadata::type_parameters` are always dropped: `TypeData` has no slot
+  for them (`type_parameters: Vec::new()` in `type_metadata_from_kind_data`).
+  This is unchanged from `main`. Fixture case: Rust `Wrapper<T>`.
+- A `TypeAlias`'s field metadata is dropped: `From<SymbolInfo>` gives every
+  alias `TypeAliasData`, which carries only the aliased type. Fixture cases:
+  C `TagAlias`, `AnonymousStructAlias`, `SameName` (`typedef struct {…}
+  Alias`). This became visible when Phase 4 made C typedefs `TypeAlias`.
+  For an anonymous `typedef struct { … } Alias` the fields exist only on
+  the v1 symbol. For a tagged one the tag's `Type` record still has them.
+
+`metadata_after_round_trip` in `symbols_adapter.rs` encodes both losses, and
+the test asserts the exact list of lossy aliases, so either fix flips the
+test. The skill's adapter note now states both.
+
+### `ok` → `FIX` discoveries and allow-listed `Unknown`
+
+None in this phase. The Phase 4 table above is still the complete list, and
+the test-6 allow-list is still empty.
+
+### Gates
+
+- `just test` (tree-hugger): 658 passed, 0 skipped, 0 failed (652 + 6 new).
+- `just lint`: clean (one `clippy::type_complexity` on a test table, fixed
+  with a `SignatureCase` alias).
+- `just check-tier-coverage tree-hugger`: 0 stranded. All new tests are L1
+  (no tier markers) and appear in `cargo nextest list`.
+- Cross-OS: not run. The phase adds only in-process library tests that read
+  fixtures through the existing `manifest_dir!()` helper; there are no
+  paths, processes or temp directories that vary by OS.
+- No `cargo fmt` run.
+
+## Phase 7
+
+Implemented by one agent. Documentation and closure only. One source file
+changed, and the change is to doc comments.
+
+### What was written
+
+| Plan item | Result |
+|---|---|
+| New docs page | `tree-hugger/docs/symbol-kinds-and-visibility.md` (new). It covers every bullet of the spec's documentation section: per-language kinds; Module vs Namespace (not unified); Perl `my`/`our`/`state`/`local`; Rust `impl` containers and `relations.implements`; Java/Swift/TypeScript interface and protocol members; `declaration_text`; visibility levels and the unmarked default per language; C# compound levels and interface members; Swift type and extension defaults; Rust trait-impl Unknown; the C/C++ linkage rule with the earlier-`static` scan; JS/TS module detection; the two meanings of `static`; Python class attributes; JS/TS/C# `Property`; Scala qualifiers and setter-only modifiers; current limitations. Mermaid diagrams cover the extraction pipeline and the visibility decision. The page names no spec. |
+| READMEs | `lib/README.md`: full `SymbolKind` list, mapping table with a TypeAlias column, `SymbolInfo` with `visibility`/`is_static`/`is_static_storage`/container fields, `Visibility` (all nine levels), `FunctionSignature` without `visibility`, `FieldInfo` copy rule, schema-record facts (`Modifier::StaticStorage`, `container_kind`, `declaration_text`, `implements`, export separation), new known limitations. `cli/README.md`: visibility labels and the Unknown omission, `[in <kind> <name>]` containers including Rust `impl` grouping as `[in type Point]`, constructors and type aliases in `functions`/`types`, schema 3.0 JSON shape (top-level `visibility`, `is_static`, `is_static_storage`, `container_kind`), color table, `classes` coverage with a real Rust example. `tree-hugger/README.md`: a link from the JSON `visibility` note to the new page. |
+| Skill | `SKILL.md`: link to the new page; Swift limitation reworded as an extractor limit (the spec says the grammar exposes `declaration_kind`); new Constructors limitation; Perl limitation now says "narrow coverage". `api-reference.md`: `Module`/`Namespace` comments corrected to the per-language rule; `Package`/`Crate`/`ModulePrivate` comment examples completed; link to the page. |
+| Schema design | `docs/symbol-schema-design.md`: status (3.0 shipped, `v2` module name kept), `IdentityFacet.container_kind` with a JSON example, `module_path` → `container_name` marked **planned** (4.0), `declaration_text` contract, `signature_text`/`body_text` **planned**, `ProtectedInternal`/`PrivateProtected`, visibility ownership, export separation, the implemented `Modifier` enum with `Static` vs `StaticStorage` (other modifiers **planned**), Rust `relations.implements` (other languages **planned**), version history 2.0 → 3.0 → 4.0 (**planned**), v1 ↔ v2 field mapping and known adapter losses. |
+| Feature-spec sync | Already done before this phase: the working tree of `2026-10-03-symbol-improvements` says "3.0 is taken by `2026-10-03-visibility-and-kind`", moves 3.0 → 4.0, names `identity.module_path` → `identity.container_name` and `container_kind`, and lists the Phase 5 `classes` kind set. `2026-10-03-symbol-filters-and-reports` refers to schema 4.0. No edit needed. Those uncommitted edits were already in the tree at the start of this phase and were left alone. |
+| Comment drift | `FieldInfo::visibility` / `is_static` docs (`lib/src/shared/symbol.rs`) said "(public, protected, private)" and "static field"; they now state the copy-from-standalone rule `align_field_metadata` applies. The `Visibility::Internal` "default in Java" drift the spec names had already been corrected in Phase 2 (`Package` now carries the Java example). No other `///`/`//` contradicting the levels was found (`grep` over `lib/src` and `cli/src` for `signature.visibility`, `impl ` special case, removed helpers, schema 2.0). `docs/dependencies.md` unaffected: no crate added in this phase. |
+
+### Facts checked against the code while writing (corrections to the spec's wording)
+
+The docs state what the code does. Where it differs from what the spec
+text implies, the docs follow the code:
+
+- The `ModulePrivate` label is `module-private` (hyphenated, `Visibility`'s
+  `Display`), not "module private".
+- A Lua `function M:m()` reports **Method**. The spec's kind matrix marks Lua
+  Method as `FEAT`. `M.f` is a Function.
+- TypeScript `namespace` and PHP `namespace` produce **no symbol at all**,
+  rather than a Namespace symbol with a deferred kind.
+- `relations.implements[].id` is set only when **exactly one** trait of that
+  name is declared in the file (`tree_file.rs`).
+- Rust export inference marks any item with a `pub…` modifier (including
+  `pub(crate)`) as exported. Members are never exported. The docs describe this
+  as "a Rust item with a `pub…` modifier".
+- `hug` shows a source keyword instead of the kind name on some lines
+  (`struct`, `union`, `const`, `static`, `let`). The CLI README says so. Changing
+  that is out of scope (it belongs to `2026-10-03-symbol-improvements`).
+
+### Process incident (recovered)
+
+While writing the plan/log frontmatter, a helper script opened `plan.md` for
+writing before an expression it was writing failed, which truncated the file.
+It was rebuilt from `HEAD` plus the working-tree content printed earlier in
+the session: the full frontmatter and the changed body regions. The rebuilt
+file has the same 613 lines and every heading at the same offset (HEAD + 9
+frontmatter lines). Its diff against `HEAD` equals the earlier 35-line Phase 6
+diff plus this phase's 6 checkbox flips. `implementation-log.md` was not
+affected (verified at 1027 lines and an unchanged diff before the Phase 7
+append). The reviewer may want to glance at `git diff -- plan.md` once.
+
+### Requirement-to-test mapping
+
+No behavior changed in this phase, so there are no new tests. The only
+source edit is two doc comments on `FieldInfo`. The documented behavior is
+already pinned by the Phase 4–6 suites (`KIND_MATRIX`, `VISIBILITY_MATRIX`,
+`STATIC_MATRIX`, `symbols_adapter`, `symbols_decl_text`, `symbols_export`,
+CLI `symbols` binary). Every example in the docs was checked against
+`hug --plain`/`--json` output over a scratch-repo copy of the fixtures
+(`--no-cache`), or against those tests.
+
+### Gates
+
+- `just test` (tree-hugger): 658 passed, 0 skipped, 0 failed.
+- `just lint`: clean (exit 0).
+- `just test-l2`: 3 passed (the `god-files` terminal tests), 113 skipped (L1).
+- `just check-tier-coverage tree-hugger`: 0 stranded.
+- Cross-OS: not run. This phase has docs plus one doc-comment edit, with no
+  compiled behavior change.
+- No `cargo fmt` run. No commit, nothing staged, spec not moved.
+
+Implementation complete, ready for review.

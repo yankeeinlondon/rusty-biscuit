@@ -37,12 +37,15 @@ packages:
   - tree-hugger-cli
 related:
   - 2026-10-03-symbol-improvements
+  - 2026-10-03-symbol-filters-and-reports
 references:
   spike/baseline.md: The 2026-10-03 baseline spike report. It records, per language, which committed matrix cells hold at rev 21debbcc5 and which defects and surprises the new fixtures exposed.
   spike/fixtures/: One fixture per supported language, plus JavaScript/TypeScript script and CommonJS files. They are the seed for `lib/tests/fixtures/symbols/`.
   spike/raw/: The `hug --json symbols` output (`<stem>.json`) and plain `symbols`/`classes`/`functions`/`types` output (`plain/<stem>.txt`) for every fixture, as captured by the spike.
   spike/summarize.py: Prints the v1 `files[].symbols` and v2 `symbol_indexes` record for each symbol side by side. Every table in the baseline report was produced with it.
 human_review: false
+implemented: true
+implemented_by: claude/opus
 message_to_agent: |-
   Phase 1 notes for later phases:
   - The library package is `tree-hugger` (not `tree-hugger-lib`): use `cargo check -p tree-hugger -p tree-hugger-cli`.
@@ -77,7 +80,15 @@ message_to_agent: |-
   - Tests 7 and 8 live in the auto-discovered CLI binary `cli/tests/symbols/` (`wiring.rs`, `cache_upgrade.rs`); `Scratch` in its `main.rs` builds the scratch git repo with isolated HOME/config/TMPDIR/TMP/TEMP. Reuse it for any new CLI check rather than writing another harness.
   - `tree-hugger-cli` gained `biscuit-hash` (blake3) as a dev-dependency for the hard-coded historical cache key (existing workspace crate, one lockfile edge, recorded in `docs/dependencies.md` and the implementation log as a departure the author may veto).
   - `tree-hugger/docs/cache-design.md` now describes the real `query_fingerprint` (literal + `EXTRACTOR_REVISION`); Phase 7's docs work should keep it consistent.
+  Phase 7 notes (final phase; for the reviewer):
+  - Docs are done: new `tree-hugger/docs/symbol-kinds-and-visibility.md`, plus lib/cli/area READMEs, `docs/symbol-schema-design.md` and the skill. The docs follow the code where it differs from the spec's wording: the label is `module-private`; Lua `M:m` is already a Method; TS/PHP namespaces produce no symbol; `implements[].id` needs exactly one same-named trait in the file.
+  - `plan.md` was accidentally truncated by a frontmatter script and rebuilt from HEAD plus the content printed earlier in the session (same line count and heading offsets; see the Phase 7 log). Worth one look at `git diff -- plan.md`.
+  - No behavior changed in Phase 7. The only source edit is two `FieldInfo` doc comments in `lib/src/shared/symbol.rs`.
   - Cross-OS: build-win-native refused the test run (storage preflight, 30 GiB free < 50) and build-linux timed out on SSH; only a windows-gnu `cargo check` and macOS runs exist for Phase 5.
+  Phase 6 notes for later phases:
+  - No production code changed in Phase 6; it only added or strengthened L1 tests (`symbols_adapter`, `symbols_decl_text`, `symbols_export`, `symbols_kinds`). All ten test groups are green.
+  - FINDING TO DOCUMENT in Phase 7 (schema design / API docs): the v1<->v2 adapter has two known type-metadata losses, pinned by `symbols_adapter::every_fixture_symbol_round_trips_through_the_record`. (1) `TypeMetadata::type_parameters` are always dropped, because `TypeData` has no slot for them (unchanged from `main`). (2) A `TypeAlias` loses its field metadata, because `From<SymbolInfo>` builds `TypeAliasData`, which holds only the aliased type. This affects C `typedef struct { ... } Alias` (fixtures `TagAlias`, `AnonymousStructAlias`, `SameName`). The skill already states both; the docs should too, worded as current behavior.
+  - Cross-OS evidence for Phases 5-6 is still only macOS plus a windows-gnu `cargo check` (see Phase 5 notes). The final gate may want a `just cross-check tree-hugger --os linux` if build-linux is reachable.
 ---
 
 # Preserve symbol kinds, declaration visibility, and static members across all supported languages
@@ -760,8 +771,9 @@ default and omission when absent. Populate it from
 that finds the nearest containing declaration. The adapter restores it into
 `SymbolInfo::container_kind`, so the renderer's existing `"{kind} {name}"`
 path prints `[in class Box]`. The misnamed `module_path` field, which holds
-the container name, is left alone here; the feature spec replaces it with real
-qualified names.
+the container name, is left alone here; `2026-10-03-symbol-improvements`
+renames it to `container_name`, and `2026-10-03-symbol-filters-and-reports`
+adds real qualified names.
 
 Container kinds use the same classifier as standalone declarations; for
 example, a Swift class currently classified as `Type` must not become `Class`
@@ -918,7 +930,7 @@ the first value and invalidates entries keyed by the old literal as well as
 entries from earlier revisions. Keep schema, grammar, language, and crate
 version components of the analyzer fingerprint. Use the same revision in the
 record's extractor provenance so cached output can be traced to its rules.
-The feature spec replaces this with a computed fingerprint.
+`2026-10-03-symbol-improvements` replaces this with a computed fingerprint.
 
 ### 9. Every record carries its declaration text
 
@@ -966,8 +978,8 @@ states:
   This does not mean the grammar lacks the information; Swift already exposes
   `declaration_kind`. A future precision change updates the expectation and
   documentation together.
-- `FEAT`: a precision upgrade deferred to `2026-10-03-symbol-improvements`;
-  not asserted here.
+- `FEAT`: a precision upgrade deferred to
+  `2026-10-03-symbol-filters-and-reports`; not asserted here.
 - `—`: the language has no such construct.
 
 ### Kinds
@@ -1148,7 +1160,7 @@ does not need synthetic field coverage.
   Patching the CLI would leave `TreeFile::symbols()` and the JSON
   `symbol_indexes` disagreeing with the rendered output.
 - **Don't move the CLI to v2 here.** Rendering `SymbolRecord` directly is the
-  durable answer and is the first item of the feature spec. This fix keeps the
+  durable answer and is the first item of `2026-10-03-symbol-improvements`. This fix keeps the
   adapter because the adapter is what every current consumer, including the
   JSON `files[]` block, goes through today.
 - **`pub(super)` and `pub(in path)` map to `Crate`.** These items are only
@@ -1405,8 +1417,9 @@ pausing for approval:
   - schema 2.0 assertions moving to 3.0
   - removal of the post-conversion kind override
 - **Skill and feature-spec text.** Edit files under `.claude/skills/tree-hugger/`,
-  and keep the text of `2026-10-03-symbol-improvements` in step with what is
-  implemented here, such as schema version numbers and field names.
+  and keep the text of `2026-10-03-symbol-improvements` and
+  `2026-10-03-symbol-filters-and-reports` in step with what is implemented
+  here, such as schema version numbers and field names.
 - **CLI test environments.** Have CLI tests create scratch Git repositories,
   isolated home and config directories, an isolated temp directory (which holds
   the persistent cache), seeded old-format cache entries, and edits to cache
@@ -1414,7 +1427,7 @@ pausing for approval:
 
 Anything outside this list still needs the author, including new crate
 dependencies and changes outside the `tree-hugger` area other than the skill
-and the feature spec named above.
+and the feature specs named above.
 
 ## Verification
 
@@ -1640,8 +1653,8 @@ Run `just lint` in `tree-hugger/` before marking the work ready for review.
   explicitly. This is a separate fix.
 - **The rendered label.** Showing `struct`, `union`, `const`, `static` or
   `let` instead of the kind name, and removing the CLI's source-text label
-  guessing (`symbol_presentation`, `binding_token_for_symbol`), belong to the
-  feature spec. The guessing produces labels like `=`, `for` and `:=`.
+  guessing (`symbol_presentation`, `binding_token_for_symbol`), belong to
+  `2026-10-03-symbol-improvements`. The guessing produces labels like `=`, `for` and `:=`.
 - **Unifying Module and Namespace.** Each language keeps its current
   Module/Namespace split, apart from the matrix's Rust `mod` correction; the
   per-language rule is documented instead.
@@ -1665,4 +1678,6 @@ Run `just lint` in `tree-hugger/` before marking the work ready for review.
   methods/fields are excluded today. Do not infer exports from `Public`
   alone. Full re-export, CommonJS, and cross-file resolution remain deferred.
 - **Performance, filtering and reporting changes.** See
-  `2026-10-03-symbol-improvements`.
+  `2026-10-03-symbol-improvements` (performance and the report foundation)
+  and `2026-10-03-symbol-filters-and-reports` (filters and new report
+  formats).

@@ -5,7 +5,7 @@ spec: 2026-10-03-visibility-and-kind
 area: tree-hugger
 total_phases: 7
 created: 2026-10-03
-phase: 5
+phase: 7
 agent: claude/sonnet
 yolo: true
 source_files_during_phase_1:
@@ -157,9 +157,113 @@ docs_updated_during_phase_5:
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
   - .claude/skills/tree-hugger/SKILL.md
+source_files_during_phase_6:
+  - tree-hugger/lib/tests/l1/symbols_adapter.rs
+  - tree-hugger/lib/tests/l1/symbols_decl_text.rs
+  - tree-hugger/lib/tests/l1/symbols_export.rs
+  - tree-hugger/lib/tests/l1/symbols_kinds.rs
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - .claude/skills/tree-hugger/SKILL.md
+source_files_during_phase_7:
+  - tree-hugger/lib/src/shared/symbol.rs
+docs_updated_during_phase_7:
+  - tree-hugger/README.md
+  - tree-hugger/lib/README.md
+  - tree-hugger/cli/README.md
+  - tree-hugger/docs/symbol-schema-design.md
+docs_created_during_phase_7:
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+skills_files_updated_during_phase_7:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
 packages:
   - tree-hugger
   - tree-hugger-cli
+source_code:
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/symbols_fixtures.rs
+  - tree-hugger/lib/tests/l1/symbols_coverage.rs
+  - tree-hugger/lib/tests/l1/symbols_kinds.rs
+  - tree-hugger/lib/tests/l1/symbols_visibility.rs
+  - tree-hugger/lib/tests/l1/symbols_static.rs
+  - tree-hugger/lib/tests/l1/symbols_adapter.rs
+  - tree-hugger/lib/tests/l1/symbols_decl_text.rs
+  - tree-hugger/lib/tests/l1/symbols_export.rs
+  - tree-hugger/cli/tests/symbols/main.rs
+  - tree-hugger/cli/tests/symbols/wiring.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/lib/tests/fixtures/symbols/
+  - tree-hugger/lib/src/shared/symbol.rs
+  - tree-hugger/lib/src/shared/schema_v2/mod.rs
+  - tree-hugger/lib/src/shared/schema_v2/facets.rs
+  - tree-hugger/lib/src/shared/schema_v2/types.rs
+  - tree-hugger/lib/src/file/extract/signatures.rs
+  - tree-hugger/lib/src/file/extract/classify.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/tests.rs
+  - tree-hugger/lib/src/cache/mod.rs
+  - tree-hugger/lib/src/god_files/analysis.rs
+  - tree-hugger/lib/tests/l1/tree_file.rs
+  - tree-hugger/lib/tests/l1/cache_tests.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/src/prelude.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/src/lib.rs
+  - tree-hugger/lib/src/file/extract/mod.rs
+  - tree-hugger/lib/src/file/extract/declaration.rs
+  - tree-hugger/lib/src/file/extract/rust_impl.rs
+  - tree-hugger/lib/src/file/extract/visibility/mod.rs
+  - tree-hugger/lib/src/file/extract/visibility/c.rs
+  - tree-hugger/lib/src/file/extract/visibility/cpp.rs
+  - tree-hugger/lib/src/file/extract/visibility/csharp.rs
+  - tree-hugger/lib/src/file/extract/visibility/ecma.rs
+  - tree-hugger/lib/src/file/extract/visibility/go.rs
+  - tree-hugger/lib/src/file/extract/visibility/java.rs
+  - tree-hugger/lib/src/file/extract/visibility/lua.rs
+  - tree-hugger/lib/src/file/extract/visibility/php.rs
+  - tree-hugger/lib/src/file/extract/visibility/rust.rs
+  - tree-hugger/lib/src/file/extract/visibility/scala.rs
+  - tree-hugger/lib/src/file/extract/visibility/swift.rs
+  - tree-hugger/lib/src/file/extract/static_flags/mod.rs
+  - tree-hugger/lib/src/file/extract/static_flags/cpp.rs
+  - tree-hugger/lib/src/file/extract/static_flags/ecma.rs
+  - tree-hugger/lib/src/file/extract/static_flags/java.rs
+  - tree-hugger/lib/src/file/extract/static_flags/php.rs
+  - tree-hugger/lib/src/file/extract/static_flags/python.rs
+  - tree-hugger/lib/src/file/extract/static_flags/rust.rs
+  - tree-hugger/lib/src/file/extract/static_flags/scala.rs
+  - tree-hugger/lib/src/file/extract/static_flags/swift.rs
+  - tree-hugger/cli/tests/cli.rs
+  - tree-hugger/lib/queries/typescript/locals.scm
+  - tree-hugger/lib/queries/vendor/c/locals.scm
+  - tree-hugger/lib/queries/vendor/c_sharp/locals.scm
+  - tree-hugger/lib/queries/vendor/cpp/locals.scm
+  - tree-hugger/lib/queries/vendor/java/locals.scm
+  - tree-hugger/lib/queries/vendor/javascript/locals.scm
+  - tree-hugger/lib/queries/vendor/perl/locals.scm
+  - tree-hugger/lib/queries/vendor/python/locals.scm
+  - tree-hugger/lib/queries/vendor/rust/locals.scm
+  - tree-hugger/lib/queries/vendor/swift/locals.scm
+  - tree-hugger/lib/src/file/extract/navigation.rs
+  - tree-hugger/lib/src/file/extract/type_metadata.rs
+  - tree-hugger/lib/src/queries/inventory.rs
+  - tree-hugger/lib/src/queries/provenance.rs
+  - tree-hugger/lib/tests/l1/phase6_neovim_query_reuse.rs
+  - Cargo.lock
+  - tree-hugger/cli/Cargo.toml
+documentation:
+  - tree-hugger/README.md
+  - tree-hugger/docs/cache-design.md
+  - docs/dependencies.md
+  - tree-hugger/lib/README.md
+  - tree-hugger/cli/README.md
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+completed_phase: 7
+implemented: true
 ---
 
 # Plan: preserve symbol kinds, declaration visibility, and static members
@@ -196,23 +300,23 @@ The work falls into five layers, built in dependency order:
 
 ### Definition of success
 
-- [ ] Every committed `ok`, `FIX` and `LIM` cell in the spec's kind matrix passes
+- [x] Every committed `ok`, `FIX` and `LIM` cell in the spec's kind matrix passes
       through both `TreeFile::symbols()` and `symbol_index_v2()`; no `Unknown`
       kind in any primary fixture (except allow-listed with a reason).
-- [ ] The visibility matrix passes for all 16 languages on both
+- [x] The visibility matrix passes for all 16 languages on both
       `SymbolInfo::visibility` and `SymbolRecord.visibility.level`.
-- [ ] The static matrix and storage-`static` cases pass; `hug classes` partitions
+- [x] The static matrix and storage-`static` cases pass; `hug classes` partitions
       methods and fields correctly (TS, Java, C++, Rust representative tests).
-- [ ] Adapter round-trip preserves kind, visibility, `is_static`,
+- [x] Adapter round-trip preserves kind, visibility, `is_static`,
       `is_static_storage`, container kind, and signature presence for every
       fixture symbol.
 - [x] A warm old-format cache entry is invalidated and the next run re-hits the
       new entry (test 8).
-- [ ] Every primary-fixture symbol has non-empty `declaration_text`; exports do
+- [x] Every primary-fixture symbol has non-empty `declaration_text`; exports do
       not follow access (test 10).
-- [ ] `just test` and `just lint` pass in `tree-hugger/`; docs and skill updated;
+- [x] `just test` and `just lint` pass in `tree-hugger/`; docs and skill updated;
       implementation log records any `ok`→`FIX` discoveries.
-- [ ] Agent terminal state: "implementation complete, ready for review"
+- [x] Agent terminal state: "implementation complete, ready for review"
       (no move to `_completed`, no commit unless asked).
 
 ## Phase 1: Baseline, rulings, and fixture seeding
@@ -550,55 +654,55 @@ Goal: finish the ten test groups from the spec.
 
 ### Wave 6.1 (parallel; separate test modules)
 
-- [ ] **Test 5 (adapter) over every fixture symbol** with explicit expected values
+- [x] **Test 5 (adapter) over every fixture symbol** with explicit expected values
       and both conversion directions; retain signature/type-metadata regression
       coverage.
-- [ ] **Test 9 (declaration text)**: non-empty for every fixture symbol; exact
+- [x] **Test 9 (declaration text)**: non-empty for every fixture symbol; exact
       text for `pub(in crate::a) fn f()`, bodyless trait method, Swift
       `public private(set) var count = 0`, C# `{ get; private set; }`, Scala
       `private[Shape] def secret() =`, Perl `my ($a, $b)` (both names), Java
       annotated class.
-- [ ] **Test 10 (export vs access)**: `From<SymbolInfo>` Public → `is_exported:
+- [x] **Test 10 (export vs access)**: `From<SymbolInfo>` Public → `is_exported:
       false`; Java class and TS class method false; TS `export function` and Rust
       `pub fn` true.
-- [ ] **Static matrix and storage `static`** (test 4) including Python four
+- [x] **Static matrix and storage `static`** (test 4) including Python four
       class-body forms and `self.y`/`obj.attr` producing no symbol; Scala
       object vs class; Java interface constant.
-- [ ] **Perl/JS specifics from the fixture notes**: `local` produces no symbol;
+- [x] **Perl/JS specifics from the fixture notes**: `local` produces no symbol;
       `this.w = …` produces no symbol; JS fields `x`, `y`, `#z` as `Property`.
 
 ### Validation checkpoint 6
 
-- [ ] All ten test groups green, `just test` and `just lint` pass.
-- [ ] Implementation log lists every `ok`→`FIX` discovery and any allow-listed
+- [x] All ten test groups green, `just test` and `just lint` pass.
+- [x] Implementation log lists every `ok`→`FIX` discovery and any allow-listed
       `Unknown`.
 
 ## Phase 7: Documentation and closure
 
 ### Wave 7.1 (parallel; disjoint files)
 
-- [ ] **New page** `tree-hugger/docs/symbol-kinds-and-visibility.md` covering every
+- [x] **New page** `tree-hugger/docs/symbol-kinds-and-visibility.md` covering every
       bullet in the spec's documentation section (audience: developer new to the
       repo; compact example per rule; Mermaid diagrams for the pipeline and the
       visibility decision flow; never name a spec).
-- [ ] **READMEs**: `tree-hugger/lib/README.md` and `tree-hugger/cli/README.md`.
-- [ ] **Skill**: `.claude/skills/tree-hugger/SKILL.md` + `api-reference.md`
+- [x] **READMEs**: `tree-hugger/lib/README.md` and `tree-hugger/cli/README.md`.
+- [x] **Skill**: `.claude/skills/tree-hugger/SKILL.md` + `api-reference.md`
       (SymbolKind list, Known Limitations incl. Perl, Python `self.x`, JS `this.x`).
-- [ ] **Schema design**: `tree-hugger/docs/symbol-schema-design.md` (3.0, container
+- [x] **Schema design**: `tree-hugger/docs/symbol-schema-design.md` (3.0, container
       kind, visibility ownership, export separation, declaration_text,
       `relations.implements`; planned items marked **planned**).
-- [ ] **Feature-spec sync**: update `2026-10-03-symbol-improvements` text for schema
+- [x] **Feature-spec sync**: update `2026-10-03-symbol-improvements` text for schema
       version numbers (3.0 → 4.0) and field names.
-- [ ] **Comment drift pass**: any `///`/`//` contradicting new levels; also
+- [x] **Comment drift pass**: any `///`/`//` contradicting new levels; also
       `docs/dependencies.md` unaffected (no new crates).
 
 ### Wave 7.2 (sequential)
 
-- [ ] **Final gate.** `just test`, `just lint` in `tree-hugger/`; `just test-l2`
+- [x] **Final gate.** `just test`, `just lint` in `tree-hugger/`; `just test-l2`
       once; confirm no `cargo fmt` run; write implementation log; mark
       "implementation complete, ready for review". Do not commit unless asked and
       do not move the spec to `_completed`.
 
 ### Validation checkpoint 7
 
-- [ ] All success criteria above checked; docs reviewed against behavior.
+- [x] All success criteria above checked; docs reviewed against behavior.
