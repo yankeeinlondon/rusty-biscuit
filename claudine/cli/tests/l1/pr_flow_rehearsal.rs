@@ -18,6 +18,7 @@
 
 use crate::common;
 
+use common::prompt_staging::{stage_shipped_prompts, workspace_root};
 use common::{CliProcessFixture, write};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -29,19 +30,17 @@ use biscuit_file::serde_yaml_ng::{Mapping, Value};
 /// `--exact` matches nothing, so the harness ignores it.
 const HELPER_ARG: &str = "pr-flow-stub=";
 
-/// The shipped prompts a PR run can reach, staged into each repository.
-const PROMPTS: &[(&str, &str)] = &[
-    ("prompts/pr.md", include_str!("../../../../prompts/pr.md")),
-    ("prompts/commit.md", include_str!("../../../../prompts/commit.md")),
-    ("prompts/_pr/dirty.md", include_str!("../../../../prompts/_pr/dirty.md")),
-    ("prompts/_pr/push.md", include_str!("../../../../prompts/_pr/push.md")),
-    ("prompts/_pr/_facts.md", include_str!("../../../../prompts/_pr/_facts.md")),
-    ("prompts/_pr/diagnose.md", include_str!("../../../../prompts/_pr/diagnose.md")),
-    ("prompts/_pr/_diagnosis.md", include_str!("../../../../prompts/_pr/_diagnosis.md")),
-    ("prompts/_pr/triage.md", include_str!("../../../../prompts/_pr/triage.md")),
-    ("prompts/_pr/fix.md", include_str!("../../../../prompts/_pr/fix.md")),
-    ("prompts/_pr/open.md", include_str!("../../../../prompts/_pr/open.md")),
-    ("prompts/_pr/_report.md", include_str!("../../../../prompts/_pr/_report.md")),
+/// The shipped prompts a PR run routes to, staged into each repository with
+/// everything they transclude.
+const PROMPTS: &[&str] = &[
+    "pr.md",
+    "commit.md",
+    "_pr/dirty.md",
+    "_pr/push.md",
+    "_pr/diagnose.md",
+    "_pr/triage.md",
+    "_pr/fix.md",
+    "_pr/open.md",
 ];
 
 /// What the stub does at each stage of one route.
@@ -264,9 +263,7 @@ impl Rehearsal {
         git_in(&repo, &["remote", "add", "origin", origin]);
         git_in(&repo, &["config", &format!("url.{}.insteadOf", portable(&bare)), origin]);
 
-        for (path, content) in PROMPTS {
-            write(&repo.join(path), content);
-        }
+        stage_shipped_prompts(&workspace_root().join("prompts"), &repo.join("prompts"), PROMPTS);
         write(&repo.join(".claudine/memory/commits.md"), "# Commit lessons\n");
         write(&repo.join(".gitignore"), ".claudine/tmp/\n");
         write(&repo.join(".darkmatter-shell-whitelist"), "prefix git\nprefix just\n");

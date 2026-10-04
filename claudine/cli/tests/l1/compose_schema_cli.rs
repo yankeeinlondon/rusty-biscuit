@@ -1180,18 +1180,17 @@ fn compose_eager_spec_setter_anchors_before_plan_expression_from_root_and_area()
     let fixture = CliProcessFixture::named("compose-schema-cli");
     fixture.initialize_repository();
     let root = fixture.cwd().to_path_buf();
-    for relative in [
-        "prompts/plan.md",
-        "prompts/_input-robustness.md",
-        "claudine/cli/tests/fixtures/shipped_plan_route/spec.md",
-    ] {
-        let source = checkout.join(relative);
-        common::write(
-            &root.join(relative),
-            &std::fs::read_to_string(&source)
-                .unwrap_or_else(|error| panic!("shipped artifact {relative}: {error}")),
-        );
-    }
+    common::prompt_staging::stage_shipped_prompts(
+        &common::prompt_staging::workspace_root().join("prompts"),
+        &root.join("prompts"),
+        &["plan.md"],
+    );
+    let relative = "claudine/cli/tests/fixtures/shipped_plan_route/spec.md";
+    common::write(
+        &root.join(relative),
+        &std::fs::read_to_string(checkout.join(relative))
+            .unwrap_or_else(|error| panic!("shipped artifact {relative}: {error}")),
+    );
     // `--dry-run` never reaches the provider, but discovery still has to find
     // one; the stub keeps that off the host's installed `claude`, and it fails
     // loudly if the dry run ever does launch it.

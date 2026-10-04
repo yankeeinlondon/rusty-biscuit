@@ -154,6 +154,7 @@ pub(crate) mod incomplete_subagents;
 #[cfg(unix)]
 pub(crate) mod launch_recorder;
 pub(crate) mod owned_value_options;
+pub(crate) mod prompt_staging;
 #[cfg(unix)]
 pub(crate) mod pty;
 pub(crate) mod review_router;

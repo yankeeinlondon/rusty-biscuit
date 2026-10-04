@@ -121,6 +121,8 @@ Your task is to implement phase {{phase}} of the plan found in '@{{area}}/{{plan
 
 ::file ../_test-tiers.md
 
+::file "../_headless-orchestration.md"
+
 ## Logging
 
 You will log your implementation progress to: {{log}}

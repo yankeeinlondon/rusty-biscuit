@@ -86,6 +86,7 @@
 //! missing backend into a hard failure. Run via `just test-l2`.
 
 use crate::common;
+use common::prompt_staging::{stage_shipped_prompts, workspace_root};
 use common::wrap::seed_minimal_config;
 use common::{augmented_path, init_git_repo, write_executable};
 
@@ -4933,35 +4934,18 @@ fn stage_shipped_implement_route(entry: &str, total_phases: usize) -> Staged {
     write_phase_recording_goose(&bin_dir, &events_log);
 
     let manifest = biscuit_test_harness::manifest_dir!();
-    let repo_root = manifest
-        .ancestors()
-        .nth(2)
-        .expect("repository root is two levels above claudine/cli");
-    fs::copy(
-        repo_root.join("prompts/implement.md"),
-        root.join("implement.md"),
-    )
-    .expect("copy the shipped router");
+    // The snippets the target transcludes are prose only, so the shipped bytes
+    // serve as-is; only the target itself is the side-effect-free fixture.
+    stage_shipped_prompts(
+        &workspace_root().join("prompts"),
+        &root,
+        &["implement.md", "_implement/implement-plan.md"],
+    );
     fs::copy(
         manifest.join("tests/fixtures/shipped_implement_route/_implement/implement-plan.md"),
         root.join("_implement/implement-plan.md"),
     )
     .expect("copy the drift-guarded implement-plan fixture");
-    // The target transcludes these shipped snippets from its parent
-    // directory; they are prose only, so the shipped bytes serve as-is.
-    for snippet in [
-        "_no_formatting.md",
-        "_os.md",
-        "_set_spec_schema.md",
-        "_test-tiers.md",
-        "_input-robustness.md",
-    ] {
-        fs::copy(
-            repo_root.join("prompts").join(snippet),
-            root.join(snippet),
-        )
-        .expect("copy a snippet the implement-plan fixture transcludes");
-    }
 
     // The router branches on `frontmatter(spec, 'implemented')`; an unimplemented
     // spec is the branch that reaches `implement-plan.md`.
@@ -5061,35 +5045,15 @@ exit 0
         ),
     );
 
-    let manifest = biscuit_test_harness::manifest_dir!();
-    let repo_root = manifest
-        .ancestors()
-        .nth(2)
-        .expect("repository root is two levels above claudine/cli");
-    // Staged in the shipped layout: the prompt transcludes `../_no_formatting.md`,
-    // `../_os.md`, `../_set_spec_schema.md`, `../_test-tiers.md`, and
-    // `../_input-robustness.md`, so it lives one directory down and the
-    // snippets sit beside that directory, inside the workspace.
-    fs::create_dir_all(root.join("_implement")).unwrap();
+    // Staged in the shipped layout: the prompt transcludes `../` snippets, so
+    // it lives one directory down and the snippets sit beside that directory,
+    // inside the workspace.
+    stage_shipped_prompts(
+        &workspace_root().join("prompts"),
+        &root,
+        &["_implement/implement-plan.md"],
+    );
     let md_file = root.join("_implement/implement-plan.md");
-    fs::copy(
-        repo_root.join("prompts/_implement/implement-plan.md"),
-        &md_file,
-    )
-    .expect("copy the shipped implement-plan prompt");
-    for snippet in [
-        "_no_formatting.md",
-        "_os.md",
-        "_set_spec_schema.md",
-        "_test-tiers.md",
-        "_input-robustness.md",
-    ] {
-        fs::copy(
-            repo_root.join("prompts").join(snippet),
-            root.join(snippet),
-        )
-        .expect("copy a snippet the shipped implement-plan prompt transcludes");
-    }
     fs::write(
         root.join("feature/plan.md"),
         "---\ntotal_phases: 1\nstart_phase: 1\n---\n\n# Plan\n",

@@ -455,3 +455,40 @@ fn shipped_implement_router_reads_absent_optional_inputs_unguarded() {
     assert!(!launched.exists(), "no provider may start:\n{rendered}");
     assert!(!fixture.audio_spool().exists(), "no audio may be published");
 }
+
+/// Staging follows `::file` directives through every spelling the shipped
+/// prompts use, so a fragment added to a prompt reaches each test that stages
+/// it without a hand-kept snippet list.
+#[test]
+fn staging_a_prompt_brings_every_file_it_transcludes() {
+    let shipped = tempfile::tempdir().expect("temp dir");
+    let staged = tempfile::tempdir().expect("temp dir");
+    for (path, content) in [
+        (
+            "_implement/entry.md",
+            "::file \"../_quoted.md\"\n    ::file ../_bare.md\n::file {{dynamic}}\n::filed not-a-directive.md\n",
+        ),
+        ("_quoted.md", "::file ./_nested/leaf.md actor={{actor}}\n"),
+        ("_bare.md", "bare\n"),
+        ("_nested/leaf.md", "leaf\n"),
+        ("_unreached.md", "unreached\n"),
+    ] {
+        write(&shipped.path().join(path), content);
+    }
+
+    let paths = common::prompt_staging::stage_shipped_prompts(
+        shipped.path(),
+        staged.path(),
+        &["_implement/entry.md"],
+    );
+
+    assert_eq!(
+        paths,
+        ["_bare.md", "_implement/entry.md", "_nested/leaf.md", "_quoted.md"]
+    );
+    assert_eq!(
+        std::fs::read_to_string(staged.path().join("_nested/leaf.md")).unwrap(),
+        "leaf\n"
+    );
+    assert!(!staged.path().join("_unreached.md").exists());
+}
