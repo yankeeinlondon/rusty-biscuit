@@ -1381,6 +1381,7 @@ dependencies = [
  "fs4",
  "inquire",
  "owo-colors",
+ "renderable",
  "sniff",
  "strum 0.28.0",
  "sysinfo",
