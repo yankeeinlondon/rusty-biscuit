@@ -15,7 +15,7 @@ Outputs all package names in the monorepo in a configurable format. Designed for
 Outputs a single line of comma-separated package names:
 
 ```
-sniff-cli, sniff, research-cli, research, homelab-cli, homelab, homelab-server
+sniff-detection-cli, sniff, research-cli, research, homelab-cli, homelab, homelab-server
 ```
 
 ## Arguments and Flags
@@ -57,8 +57,8 @@ Multiple filters apply OR logic (a package is included if any filter matches).
 `-p/--package <PKG>` restricts output to a single package by exact (case-insensitive) name match:
 
 ```bash
-sniff repo packages -p sniff-cli
-# sniff-cli
+sniff repo packages -p sniff-detection-cli
+# sniff-detection-cli
 ```
 
 `--package-area <AREA>` restricts output to packages whose area starts with the supplied prefix (case-insensitive). It composes with positional filters:
@@ -128,7 +128,7 @@ sniff --json repo packages
 Returns a JSON array of package name strings:
 
 ```json
-["sniff-cli", "sniff", "research-cli", "research"]
+["sniff-detection-cli", "sniff", "research-cli", "research"]
 ```
 
 `--json` is authoritative over `--md`/`--list`/`--verbose`: output is always a string array of names.

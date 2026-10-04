@@ -16,7 +16,7 @@ Lists package names that have files staged in the git index (ready to commit). E
 Outputs a comma-separated list of package names:
 
 ```
-sniff-cli, sniff
+sniff-detection-cli, sniff
 ```
 
 A package is included if any file within its directory tree is currently staged.
@@ -49,7 +49,7 @@ sniff repo staged-packages !vendor      # Staged packages excluding vendor
 `-p/--package` matches `Package.name` exactly (case-insensitive); `--package-area` matches `Package.package_area` as a case-insensitive prefix. Either can be combined with the positional filter (AND).
 
 ```bash
-sniff repo staged-packages -p sniff-cli            # Just sniff-cli, when staged
+sniff repo staged-packages -p sniff-detection-cli            # Just sniff-detection-cli, when staged
 sniff repo staged-packages --package-area homelab  # Staged packages in homelab/*
 ```
 
@@ -69,7 +69,7 @@ is `"packages"`, and `names` is an array of package name strings
 {
   "scope": "staged",
   "kind": "packages",
-  "names": ["sniff-cli", "sniff"]
+  "names": ["sniff-detection-cli", "sniff"]
 }
 ```
 

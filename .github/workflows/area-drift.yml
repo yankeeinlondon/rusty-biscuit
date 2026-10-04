@@ -49,7 +49,7 @@ jobs:
       - uses: actions/checkout@v5
       - name: Set up the pinned Rust toolchain
         run: rustup show
-      # No `just _ensure-native-libs` step: nothing in sniff-cli's build
+      # No `just _ensure-native-libs` step: nothing in sniff-detection-cli's build
       # closure declares `[package.metadata.ci.native]`, and `ci.yml`'s build
       # owner compiles every package on this runner from that same union.
       - uses: Swatinem/rust-cache@v2
@@ -57,7 +57,7 @@ jobs:
           workspaces: ". -> target"
           shared-key: area-drift
       - name: Build the area authority
-        run: cargo build -p sniff-cli --release
+        run: cargo build -p sniff-detection-cli --release
       # The class holds the three sniff contracts plus the four pure-planner
       # area fixtures; running the class rather than the file keeps this job's
       # red confined to area derivation.

@@ -16,7 +16,7 @@ Lists package names that have uncommitted changes (staged, unstaged, or untracke
 Outputs a comma-separated list of package names:
 
 ```
-sniff-cli, sniff
+sniff-detection-cli, sniff
 ```
 
 A package is considered dirty if any file within its directory tree has:
@@ -56,7 +56,7 @@ Filters apply to the full package set before checking dirty status. Use [`sniff 
 `-p/--package` matches `Package.name` exactly (case-insensitive); `--package-area` matches `Package.package_area` as a case-insensitive prefix. Either can be combined with the positional filter (AND).
 
 ```bash
-sniff repo dirty-packages -p sniff-cli           # Just sniff-cli, when dirty
+sniff repo dirty-packages -p sniff-detection-cli           # Just sniff-detection-cli, when dirty
 sniff repo dirty-packages --package-area homelab # All dirty homelab/* packages
 ```
 
@@ -78,7 +78,7 @@ never see a prose error string):
 {
   "scope": "dirty",
   "kind": "packages",
-  "names": ["sniff-cli", "sniff"]
+  "names": ["sniff-detection-cli", "sniff"]
 }
 ```
 

@@ -363,7 +363,7 @@ has spawned, so a pane tagged with the broker's pid is "dead-owner" from the
 first test on, and any reaper on the host — a second L2 run in another
 worktree, say — killed the shared session under the tests. The symptom was
 `tmux send-keys failed` on the first send of a run that passes when rerun
-alone (2026-09-18, sniff-cli). The env-var guard on the shared session name
+alone (2026-09-18, sniff-detection-cli). The env-var guard on the shared session name
 still applies inside the run; the owner pid is what protects it from
 everyone else.
 

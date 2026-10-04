@@ -272,7 +272,7 @@ DOT identifiers can't contain hyphens unquoted. The library generates synthetic 
 
 ```dot
 n0 [label="biscuit-terminal"];
-n1 [label="sniff-cli"];
+n1 [label="sniff-detection-cli"];
 n0 -> n1;
 ```
 

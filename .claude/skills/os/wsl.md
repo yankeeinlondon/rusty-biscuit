@@ -163,7 +163,7 @@ The other way a guest leg dies with no report: GitHub's annotation reads "The
 hosted runner lost communication with the server", the job is killed about
 45 minutes after it started, and no log is retained. Every occurrence so far
 was inside guest provisioning, before any repository code ran: three on
-2026-08-27/28 and one on 2026-09-18 (`sniff-cli`, run 35308326156, while the
+2026-08-27/28 and one on 2026-09-18 (`sniff-detection-cli`, run 35308326156, while the
 `sniff` and `biscuit-terminal` legs of the same run provisioned from the same
 cached image within seconds of it). Over the twelve runs with WSL2 legs
 between 2026-09-12 and 2026-09-18 that is 1 loss in 62 legs. Other projects

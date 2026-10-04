@@ -496,7 +496,7 @@ jobs:
           # `tmux -V` needs no server, no display, and no pane, so it takes no
           # focus. CI must never steal focus.
           tmux -V
-      # `neovim` runner tool: dmls's L2 suite runs a real Neovim (headless and
+      # `neovim` runner tool: darkmatter-lsp's L2 suite runs a real Neovim (headless and
       # inside tmux). Without the binary every gate skips, and backend-proof
       # then rightly fails the tier for producing no tmux evidence.
       - name: Provision neovim

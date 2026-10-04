@@ -1,4 +1,4 @@
-//! Deterministic process fixtures and bounded terminal capture for `sniff-cli` tests.
+//! Deterministic process fixtures and bounded terminal capture for `sniff-detection-cli` tests.
 //!
 //! The default command runs from a disposable directory outside the checkout,
 //! redirects home/config/cache/install roots into the fixture, removes Git
@@ -95,7 +95,7 @@ pub struct SniffCliFixture {
 
 impl SniffCliFixture {
     pub fn new() -> Self {
-        Self::named("sniff-cli-fixture")
+        Self::named("sniff-detection-cli-fixture")
     }
 
     pub fn named(prefix: &str) -> Self {

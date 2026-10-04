@@ -27,7 +27,7 @@ Lists source code files that are staged in the git index. Same as `dirty-source-
 
 ```bash
 sniff repo staged-source-code
-sniff repo staged-source-code --package sniff-cli --plain
+sniff repo staged-source-code --package sniff-detection-cli --plain
 ```
 
 ## JSON Output

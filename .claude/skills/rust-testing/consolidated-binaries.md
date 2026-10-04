@@ -7,7 +7,7 @@ builds **one test binary per execution contract**: `claudine-cli`,
 `darkmatter`, `darkmatter-cli`, and `biscuit-terminal`
 (`2026-09-21-consolidated-test-binaries`), then `tree-hugger`, `claudine`,
 `sniff`, `biscuit-file`, `schematic-gen`, `biscuit-terminal-cli`,
-`claudine-gen`, `dmls`, `sniff-cli`, and `biscuit-tui-cli`
+`claudine-gen`, `dmls`, `sniff-detection-cli`, and `biscuit-tui-cli`
 (`2026-09-22-consolidated-test-binaries-wave-2`). A package's `Cargo.toml`
 says which shape it has: `autotests = false` means consolidated. The rest
 still use Cargo's per-file discovery.

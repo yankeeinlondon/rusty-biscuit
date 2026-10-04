@@ -39,9 +39,9 @@ Only tracks modifications to already-versioned files. Untracked (new) files are 
 `-p/--package` scopes the listing to files within a single package's directory. `--package-area` scopes to all packages whose area starts with the supplied prefix. Passing both narrows to the intersection (and errors if the package is not inside the area).
 
 ```bash
-sniff repo unstaged-files -p sniff-cli                    # Unstaged files in sniff/cli/
+sniff repo unstaged-files -p sniff-detection-cli                    # Unstaged files in sniff/cli/
 sniff repo unstaged-files --package-area homelab          # Unstaged files in homelab/* (homelab, homelab/server, …)
-sniff repo unstaged-files -p sniff-cli --package-area sniff   # Intersection (here: just sniff/cli/)
+sniff repo unstaged-files -p sniff-detection-cli --package-area sniff   # Intersection (here: just sniff/cli/)
 ```
 
 > Breaking change vs. previous releases: passing a **package-area name** (e.g., `homelab`) to `-p/--package` is now an error. Use `--package-area homelab` instead.

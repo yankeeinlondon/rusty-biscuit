@@ -832,11 +832,11 @@ The sniff area contracts (`scripts/ci/test_resolved_plan.py`, class
 `AreaGroupingTests`) are enforced **on the merge path**, by `ci.yml`'s own
 `area-drift` job:
 `ci-gate` folds `needs.area-drift.result` like every other blocking job. The
-job builds `sniff-cli` once behind a `rust-cache` entry, puts it on `PATH`, and
+job builds `sniff-detection-cli` once behind a `rust-cache` entry, puts it on `PATH`, and
 sets `BISCUIT_REQUIRE_SNIFF=1` so an absent sniff **fails** rather than skips.
 
 It is a job of its own rather than a companion suite because a release
-`sniff-cli` measures 264.6s cold / 99.5s warm, and because a sniff compile
+`sniff-detection-cli` measures 264.6s cold / 99.5s warm, and because a sniff compile
 error would then redden a package's ordinary test cell rather than the check
 that exists to report it. What makes the cost acceptable is scope. A
 second planner flag, `area_drift`, schedules the job, and it is true for

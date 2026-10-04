@@ -77,7 +77,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 PACKAGES = (
     "claudine-cli", "darkmatter", "darkmatter-cli", "biscuit-terminal",
     "tree-hugger", "claudine", "sniff", "biscuit-file", "schematic-gen",
-    "biscuit-terminal-cli", "claudine-gen", "dmls", "sniff-cli", "biscuit-tui-cli",
+    "biscuit-terminal-cli", "claudine-gen", "darkmatter-lsp", "sniff-detection-cli", "biscuit-tui-cli",
 )
 
 #: Every `--features` value a package's canonical recipes pass, plus the CI
@@ -100,12 +100,12 @@ PACKAGE_FEATURE_SETS: dict[str, tuple[tuple[str, ...], ...]] = {
     "claudine": ((),),
     # `remote` implies `network`, but `test-real` builds `network` alone.
     "sniff": ((), ("remote",), ("network",)),
-    "sniff-cli": ((), ("test-fixtures",)),
+    "sniff-detection-cli": ((), ("test-fixtures",)),
     "biscuit-file": ((), ("fetch",)),
     "schematic-gen": ((), ("terminal-tests",)),
     "biscuit-terminal-cli": ((), ("terminal-tests",)),
     "claudine-gen": ((), ("terminal-tests",)),
-    "dmls": ((), ("effects-instrumentation",), ("terminal-tests",), ("terminal-tests", "effects-instrumentation")),
+    "darkmatter-lsp": ((), ("effects-instrumentation",), ("terminal-tests",), ("terminal-tests", "effects-instrumentation")),
     "biscuit-tui-cli": ((), ("terminal-tests",)),
 }
 WAVE_2_PACKAGES = PACKAGES[4:]
@@ -121,7 +121,7 @@ RULED_TARGETS: dict[str, dict[str, tuple[str | None, str]]] = {
         "real_terminal_render": ("level2", "R4/R5: its tests are level2_; as `real` its target would be stranded (F4)"),
         "windows_captured_stdout": ("level2", "R4: an L1 test requiring terminal-tests joins that feature's target (F5)"),
     },
-    "sniff-cli": {"level2_recent_commits_rendering": ("level2", "R14: #![cfg(feature = \"test-fixtures\")] gates every item")},
+    "sniff-detection-cli": {"level2_recent_commits_rendering": ("level2", "R14: #![cfg(feature = \"test-fixtures\")] gates every item")},
     "sniff": {"fixtures": (None, "R19: a child module of integration with no test of its own")},
 }
 
@@ -133,8 +133,8 @@ INCLUDE_SLOW_SELECTOR = "L1-include-slow"
 #: Tier markers as `_tier_filter` anchors them. Used to name targets and
 #: derive aliases, never to select tests.
 MARKER_TIERS = (("level2_", "L2"), ("level3_", "L3"), ("browser_", "browser"), ("real_", "real"), ("slow_", "L1"))
-#: `_tier_filter` adds `perf_` to the L1 exclusion for worktree-cli only.
-PACKAGE_MARKERS = {"worktree-cli": ("perf_",)}
+#: `_tier_filter` adds `perf_` to the L1 exclusion for git-wt-cli only.
+PACKAGE_MARKERS = {"git-wt-cli": ("perf_",)}
 TIER_TARGET_NAMES = {"L1": "l1", "L2": "level2", "L3": "level3", "browser": "browser", "real": "real"}
 #: Keys Cargo honors on a `[[test]]` entry. Any key other than name/path is a
 #: target-wide setting (R3).

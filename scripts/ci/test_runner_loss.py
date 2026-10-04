@@ -708,12 +708,12 @@ class BuildOwnerAttributionTests(unittest.TestCase):
     never-scheduled leg gets.
     """
 
-    ARTIFACT = "build-sniff-cli-ubuntu-latest-abc0123456789def"
+    ARTIFACT = "build-sniff-detection-cli-ubuntu-latest-abc0123456789def"
 
     BUILDS = [
         {
             "key": "abc0123456789def",
-            "package": "sniff-cli",
+            "package": "sniff-detection-cli",
             "producer": "ubuntu-latest",
             "artifact": ARTIFACT,
             "consumers": [
@@ -745,7 +745,7 @@ class BuildOwnerAttributionTests(unittest.TestCase):
             document = json.loads(
                 (
                     artifacts
-                    / "build-status-sniff-cli-ubuntu-latest-abc0123456789def"
+                    / "build-status-sniff-detection-cli-ubuntu-latest-abc0123456789def"
                     / "build-status.json"
                 ).read_text()
             )
@@ -779,7 +779,7 @@ class BuildOwnerAttributionTests(unittest.TestCase):
     def test_the_owners_own_account_always_wins(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             artifacts = Path(temporary)
-            directory = artifacts / "build-status-sniff-cli-ubuntu-latest-abc0123456789def"
+            directory = artifacts / "build-status-sniff-detection-cli-ubuntu-latest-abc0123456789def"
             directory.mkdir(parents=True)
             (directory / "build-status.json").write_text('{"result": "success"}')
             self.assertEqual(
@@ -825,7 +825,7 @@ class BuildOwnerAttributionTests(unittest.TestCase):
             self.assertEqual(
                 [],
                 synthesize_build_status(
-                    self.lost("area-ci (sniff) / sniff-cli / test (ubuntu-latest)"),
+                    self.lost("area-ci (sniff) / sniff-detection-cli / test (ubuntu-latest)"),
                     artifacts,
                     self.BUILDS,
                 ),

@@ -40,7 +40,7 @@ superseded (see [Prioritization](#prioritization)). Only when several packages
 in scope use *different* runners is the answer a list:
 
 ```
-cargo-nextest (sniff package), vitest (sniff-cli package)
+cargo-nextest (sniff package), vitest (sniff-detection-cli package)
 ```
 
 When no runner is declared for the context, nothing is written to STDOUT (a dim
@@ -60,7 +60,7 @@ In a multi-runner list, `-v` also names the attributing package:
 
 ```
 cargo-nextest (configuration located at: .config/nextest.toml, sniff package),
-vitest (configuration located at: sniff-cli/vitest.config.ts, sniff-cli package)
+vitest (configuration located at: sniff-detection-cli/vitest.config.ts, sniff-detection-cli package)
 ```
 
 A runner shared by many packages through one workspace-root config names no
@@ -138,7 +138,7 @@ mutually exclusive. The default (no format flag) is a CSV.
 
   ```
   cargo-nextest (configuration located at: .config/nextest.toml)
-  vitest (declared as dependency: vitest, sniff-cli package)
+  vitest (declared as dependency: vitest, sniff-detection-cli package)
   ```
 
 Add `--plain` to strip styling for scripting; the config link then degrades to a
@@ -198,7 +198,7 @@ shape). Each entry carries the runner identity, the literal **run command**
         "path": ".config/nextest.toml",
         "href": "file:///abs/path/.config/nextest.toml"
       },
-      "packages": ["sniff-lib", "sniff-cli"]
+      "packages": ["sniff-lib", "sniff-detection-cli"]
     }
   ]
 }

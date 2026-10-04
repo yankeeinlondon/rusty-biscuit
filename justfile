@@ -308,7 +308,7 @@ _toolchain-latest-stable:
 
 # run the latest debug build of the `sniff` CLI
 sniff *args="":
-    @cargo run -p sniff-cli -- {{ args }}
+    @cargo run -p sniff-detection-cli -- {{ args }}
 
 # show workspace package dependencies
 repo-deps:

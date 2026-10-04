@@ -49,7 +49,7 @@ sniff repo unstaged-package-areas !biscuit     # Unstaged areas excluding biscui
 `-p/--package` reduces the result to the area containing the resolved package; `--package-area` applies a case-insensitive prefix filter on the area name. Both can be combined with the positional filter (AND).
 
 ```bash
-sniff repo unstaged-package-areas -p sniff-cli            # The area sniff-cli lives in (when unstaged)
+sniff repo unstaged-package-areas -p sniff-detection-cli            # The area sniff-detection-cli lives in (when unstaged)
 sniff repo unstaged-package-areas --package-area homelab  # Unstaged homelab/* areas
 ```
 

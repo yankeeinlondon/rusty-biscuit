@@ -84,7 +84,7 @@ fn every_flag_maps_to_its_library_option() {
         "--branch",
         "origin/feature",
         "--package",
-        "sniff-cli",
+        "sniff-detection-cli",
         "--package-area",
         "sniff",
         "--source-code",
@@ -103,7 +103,7 @@ fn every_flag_maps_to_its_library_option() {
         .scope("cli")
         .author("ada@example.com")
         .branch("origin/feature")
-        .package("sniff-cli")
+        .package("sniff-detection-cli")
         .package_area("sniff")
         .has_file_type(ChangeCategory::SourceCode)
         .has_file_type(ChangeCategory::WebAssets)

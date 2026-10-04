@@ -30,7 +30,7 @@ from `rg`/Grep (use `--no-ignore`). Copy a fixture into a temporary directory
 before detecting it: in place, the enclosing monorepo's `.git` and workspaces
 take over.
 
-Level 1 `sniff-cli` integration tests obtain the binary through
+Level 1 `sniff-detection-cli` integration tests obtain the binary through
 `cli/tests/common::SniffCliFixture`. Its default command pins disposable
 cwd/home/config/cache/install roots and a bounded PATH; use the named
 `host_path` and `fake_only_path` PATH escapes with a call-site `//` comment

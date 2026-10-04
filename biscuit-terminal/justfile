@@ -61,7 +61,7 @@ install *args="":
 # `default` feature set, and `image` gates 137 of its 3004 tests (the resvg
 # rasterization path plus the mermaid / graph-expression / horizontal-rule
 # parity suites). Every consumer that renders artifacts enables it —
-# biscuit-terminal-cli, darkmatter, worktree-cli, sniff-cli — so the
+# biscuit-terminal-cli, darkmatter, git-wt-cli, sniff-detection-cli — so the
 # no-feature build is a configuration nobody ships.
 #
 # NOT `--all-features`: the `serde` feature's test module does not compile

@@ -93,7 +93,7 @@ Two flags layer on top of the positional filter:
 | `--package-area <AREA>` | Case-insensitive prefix match on `Package.package_area` |
 
 ```bash
-sniff repo package-dependencies -p sniff-cli                # Focus on a single package
+sniff repo package-dependencies -p sniff-detection-cli                # Focus on a single package
 sniff repo package-dependencies --package-area homelab      # All homelab/* packages
 ```
 
@@ -117,7 +117,7 @@ public `package-dependencies --json` contract:
     {
       "name": "sniff-lib",
       "depends_on": [],
-      "used_by": ["sniff-cli"],
+      "used_by": ["sniff-detection-cli"],
       "dependencies": [
         { "name": "serde", "targeted_version": "1.0", "actual_version": "1.0.210" }
       ],
@@ -126,7 +126,7 @@ public `package-dependencies --json` contract:
       ]
     },
     {
-      "name": "sniff-cli",
+      "name": "sniff-detection-cli",
       "depends_on": ["sniff-lib"],
       "used_by": [],
       "dependencies": [

@@ -1326,7 +1326,7 @@ mod tests {
         fn matches_correct_nested_package() {
             let packages = vec![
                 ("sniff".to_string(), PathBuf::from("sniff/lib")),
-                ("sniff-cli".to_string(), PathBuf::from("sniff/cli")),
+                ("sniff-detection-cli".to_string(), PathBuf::from("sniff/cli")),
             ];
             let path = Path::new("sniff/lib/docs/design.md");
             assert_eq!(
@@ -1385,7 +1385,7 @@ mod tests {
             // A file at sniff/README.md doesn't belong to sniff/lib or sniff/cli
             let packages = vec![
                 ("sniff".to_string(), PathBuf::from("sniff/lib")),
-                ("sniff-cli".to_string(), PathBuf::from("sniff/cli")),
+                ("sniff-detection-cli".to_string(), PathBuf::from("sniff/cli")),
             ];
             let path = Path::new("sniff/README.md");
             assert_eq!(determine_package(path, &packages), None);

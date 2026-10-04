@@ -1624,7 +1624,7 @@ mod tests {
     /// The receipt matrix's cells for a receipt whose PR half failed with
     /// `failure`: each edit, and the PR half the receipt then reports, `None`
     /// for a missing receipt. The same table is walked through `wt list`'s
-    /// wait in `worktree-cli` (`commands::list::wait::tests`).
+    /// wait in `git-wt-cli` (`commands::list::wait::tests`).
     fn receipt_cells(failure: &PrFailure) -> Vec<(JsonEdit, Option<PrStatus>)> {
         use serde_json::{Value, json};
         use JsonEdit::*;

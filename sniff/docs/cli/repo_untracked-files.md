@@ -39,7 +39,7 @@ Only includes files that git considers untracked (not ignored). Ignored files (m
 `-p/--package` scopes the listing to a single package; `--package-area` scopes to all packages whose area starts with the supplied prefix. Passing both narrows to the intersection (and errors if the package is not inside the area).
 
 ```bash
-sniff repo untracked-files -p sniff-cli                  # New files in sniff/cli/
+sniff repo untracked-files -p sniff-detection-cli                  # New files in sniff/cli/
 sniff repo untracked-files --package-area sniff          # New files in sniff/* (sniff/cli, sniff/lib, …)
 sniff repo untracked-files --package-area research       # New files in research/* areas
 ```

@@ -136,7 +136,7 @@
   `expectrl` 0.8 is a unix-only development dependency for
   `kache_init_contracts`, which answers `_ensure-kache`'s below-floor `[y/N]`
   prompt through a PTY (the prompt appears only when stdin is a terminal).
-  `claudine-cli`, `sniff-cli`, `biscuit-tui-cli`, and `biscuit-terminal`
+  `claudine-cli`, `sniff-detection-cli`, `biscuit-tui-cli`, and `biscuit-terminal`
   already build the same version.
 - `biscuit-speaks-cli` uses `fs4` and `sysinfo` as development dependencies
   to wait for detached audio test ownership and terminate only fixture-owned
@@ -287,7 +287,7 @@
 - `darkmatter/lib` takes a direct `base64` dependency (already in the tree) for
   the payload of the `{{!data:v1:…}}` literal token, which stores one
   frontmatter string as data (unpadded URL-safe alphabet).
-- `darkmatter/dmls` (`dmls`) is the Darkmatter Language Server. Protocol
+- `darkmatter/dmls` (`darkmatter-lsp`) is the Darkmatter Language Server. Protocol
   stack: `lsp-server` (stdio framing, in-memory test connections) +
   `lsp-types` (LSP 3.17 types) + `crossbeam-channel` (the channel family
   `lsp-server` exposes; worker pool later). `line-index` (rust-analyzer's
@@ -330,7 +330,7 @@ This is a Rust workspace with the following modules:
 - `claudine/cli/Cargo.toml` - Hook manager CLI (`claudine`)
 - `darkmatter/lib/Cargo.toml` - Markdown parsing, rendering, syntax highlighting
 - `darkmatter/cli/Cargo.toml` - Markdown renderer CLI (`md`)
-- `darkmatter/dmls/Cargo.toml` - Darkmatter Language Server (`dmls`) (lsp-server, lsp-types, line-index, rlsp-yaml-parser, ignore, globset, unicode-normalization, biscuit-hash)
+- `darkmatter/dmls/Cargo.toml` - Darkmatter Language Server (`darkmatter-lsp`) (lsp-server, lsp-types, line-index, rlsp-yaml-parser, ignore, globset, unicode-normalization, biscuit-hash)
 - `darkmatter/dmls/zed-dmls-cli/Cargo.toml` - Stable Zed extension staging and diagnostics (`zed-dmls`) (sniff, dirs, biscuit-terminal, clap, toml)
 - `homelab/lib/Cargo.toml` - Homelab device control library
 - `homelab/cli/Cargo.toml` - Homelab CLI (`homey`)
@@ -463,7 +463,7 @@ This is a Rust workspace with the following modules:
 
     _Tags: workspace, cli, markdown_
 
-- [dmls](./darkmatter/dmls) _v0.1.0_
+- [darkmatter-lsp](./darkmatter/dmls) _v0.1.0_
 
     _Darkmatter Language Server: LSP 3.17 over stdio for Markdown, Darkmatter DSL, and SimplifiedSchema frontmatter._
 
@@ -571,7 +571,7 @@ This is a Rust workspace with the following modules:
 
     _Tags: workspace, library, system, detection_
 
-- [sniff-cli](./sniff/cli) _v0.1.0_
+- [sniff-detection-cli](./sniff/cli) _v0.1.0_
 
     _System discovery CLI._
 

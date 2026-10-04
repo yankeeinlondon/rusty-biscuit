@@ -16,7 +16,7 @@ Lists package names that have modified files in the working tree (not yet staged
 Outputs a comma-separated list of package names:
 
 ```
-sniff-cli, sniff
+sniff-detection-cli, sniff
 ```
 
 A package is included if any file within its directory tree is modified but not staged. Untracked (new) files are not included — use [`dirty-packages`](./repo_dirty-packages.md) to catch those as well.
@@ -49,7 +49,7 @@ sniff repo unstaged-packages !test        # Unstaged packages excluding test
 `-p/--package` matches `Package.name` exactly (case-insensitive); `--package-area` matches `Package.package_area` as a case-insensitive prefix. Either can be combined with the positional filter (AND).
 
 ```bash
-sniff repo unstaged-packages -p sniff-cli              # Just sniff-cli, when unstaged
+sniff repo unstaged-packages -p sniff-detection-cli              # Just sniff-detection-cli, when unstaged
 sniff repo unstaged-packages --package-area homelab    # Unstaged packages in homelab/*
 ```
 
@@ -69,7 +69,7 @@ Returns a `{ scope, kind, names }` object. `scope` is `"unstaged"`,
 {
   "scope": "unstaged",
   "kind": "packages",
-  "names": ["sniff-cli", "sniff"]
+  "names": ["sniff-detection-cli", "sniff"]
 }
 ```
 

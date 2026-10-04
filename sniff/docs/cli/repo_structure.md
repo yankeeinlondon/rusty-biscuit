@@ -60,7 +60,7 @@ Packages are grouped by **package area** (top-level directory), displayed in hie
 Repository (cargo / 35 packages)
 
   sniff
-    sniff-cli v0.1.0 (sniff/cli) [Rust]
+    sniff-detection-cli v0.1.0 (sniff/cli) [Rust]
     sniff v0.1.0 (sniff/lib) [Rust]
   biscuit-hash
     biscuit-hash-cli v0.1.0 (biscuit-hash/cli) [Rust]
@@ -108,7 +108,7 @@ status.
 Adding `-v` expands each package to show additional details:
 
 ```
-sniff-cli v0.1.0 (sniff/cli) [Rust]
+sniff-detection-cli v0.1.0 (sniff/cli) [Rust]
   depends on: sniff
   updates: 3 updates, 1 major
 ```
@@ -118,7 +118,7 @@ sniff-cli v0.1.0 (sniff/cli) [Rust]
 At verbosity level 2+:
 
 ```
-sniff-cli v0.1.0 (sniff/cli) [Rust]
+sniff-detection-cli v0.1.0 (sniff/cli) [Rust]
   depends on: sniff
   used by: homelab-cli
   langs: Rust, TOML
@@ -154,9 +154,9 @@ Two flags layer on top of the positional filter:
 | `--package-area <AREA>` | Case-insensitive prefix match on `Package.package_area` (so `--package-area homelab` matches `homelab` and `homelab/server`) |
 
 ```bash
-sniff repo structure -p sniff-cli                      # Only the sniff-cli package
+sniff repo structure -p sniff-detection-cli                      # Only the sniff-detection-cli package
 sniff repo structure --package-area homelab            # All homelab/* packages
-sniff repo structure -p sniff-cli --package-area sniff # Intersection
+sniff repo structure -p sniff-detection-cli --package-area sniff # Intersection
 ```
 
 Passing both flags requires the resolved package to live inside the resolved area; otherwise the command fails with an error like `error: Package 'sniff-lib' is in area 'sniff', not 'homelab'`. Unknown values for either flag fail with an error listing the valid names.
@@ -223,7 +223,7 @@ Returns a `RepoInfo` object:
       "path": "/absolute/path/to/sniff/cli",
       "relative": "sniff/cli",
       "package_area": "sniff",
-      "name": "sniff-cli",
+      "name": "sniff-detection-cli",
       "ecosystem": "cargo",
       "standard": "cargo-workspace",
       "provenance": "globbed",
