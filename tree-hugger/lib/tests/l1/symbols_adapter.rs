@@ -6,10 +6,14 @@ use std::path::PathBuf;
 
 use tree_hugger::{
     CodeRange, FunctionSignature, Modifier, ParameterInfo, ProgrammingLanguage, SchemaVersion,
-    SymbolInfo, SymbolKind, SymbolKindV2, SymbolRecord, TreeFile, Visibility, VisibilityLevel,
+    SymbolInfo, SymbolKind, SymbolKindV2, SymbolRecord, TreeFile, TypeMetadata, Visibility,
+    VisibilityLevel,
 };
 
-use crate::symbols_fixtures::{all_fixtures, display_name};
+use crate::symbols_fixtures::{Extracted, all_fixtures, display_name, extract_primary};
+use crate::symbols_kinds::{KIND_MATRIX, rows_by_language};
+use crate::symbols_static::STATIC_MATRIX;
+use crate::symbols_visibility::VISIBILITY_MATRIX;
 
 /// Every v1 kind and the v2 kind it must map to, both ways.
 const KIND_PAIRS: [(SymbolKind, SymbolKindV2); 19] = [
@@ -321,8 +325,8 @@ fn symbol_info_json_defaults_and_omissions() {
     assert!(parsed.is_static);
 }
 
-/// Both directions agree on every symbol extracted from every fixture.
-/// Per-symbol expected values land with each language's matrix rows.
+/// Both directions agree on every symbol extracted from every fixture; the
+/// matrix tests below pin the expected values.
 #[test]
 fn adapter_agrees_with_extraction_for_every_fixture_symbol() {
     let mut checked = 0usize;
@@ -400,4 +404,173 @@ fn records_stamp_the_extractor_revision() {
             assert_eq!(record.provenance.extractor_version, expected, "{}", display_name(&path));
         }
     }
+}
+
+/// Converts the extracted record through the adapter and the extracted symbol
+/// back into a record, so a matrix row is checked on both conversions.
+fn converted(extracted: &Extracted, name: &str, container: Option<&str>) -> (SymbolInfo, SymbolRecord) {
+    let info = SymbolInfo::try_from(extracted.record(name, container).clone())
+        .unwrap_or_else(|error| panic!("{}: `{name}` record -> SymbolInfo: {error:?}", extracted.label));
+    let record = SymbolRecord::from(extracted.symbol(name, container).clone());
+    (info, record)
+}
+
+/// Test 5 with explicit expected values: every kind-matrix row survives
+/// `SymbolRecord -> SymbolInfo` and `SymbolInfo -> SymbolRecord`.
+#[test]
+fn kind_matrix_survives_both_conversions() {
+    for (language, rows) in rows_by_language(KIND_MATRIX, |row| row.0) {
+        let extracted = extract_primary(language);
+        for (_, name, container, kind, container_kind) in rows {
+            let label = format!("{}: `{name}`", extracted.label);
+            let (info, record) = converted(&extracted, name, *container);
+            assert_eq!(info.kind, *kind, "{label}: kind after record -> SymbolInfo");
+            assert_eq!(info.container_kind, *container_kind, "{label}: container kind after record -> SymbolInfo");
+            assert_eq!(info.container_name.as_deref(), *container, "{label}: container after record -> SymbolInfo");
+            assert_eq!(record.kind, SymbolKindV2::from(*kind), "{label}: kind after SymbolInfo -> record");
+            assert_eq!(
+                record.identity.container_kind,
+                container_kind.map(SymbolKindV2::from),
+                "{label}: container kind after SymbolInfo -> record"
+            );
+            assert_eq!(
+                info.signature.is_some(),
+                kind.is_function(),
+                "{label}: signature presence after record -> SymbolInfo"
+            );
+        }
+    }
+}
+
+/// Test 5: every visibility-matrix row survives both conversions.
+#[test]
+fn visibility_matrix_survives_both_conversions() {
+    for (language, rows) in rows_by_language(VISIBILITY_MATRIX, |row| row.0) {
+        let extracted = extract_primary(language);
+        for (_, name, container, visibility) in rows {
+            let label = format!("{}: `{name}`", extracted.label);
+            let (info, record) = converted(&extracted, name, *container);
+            assert_eq!(info.visibility, *visibility, "{label}: visibility after record -> SymbolInfo");
+            assert_eq!(
+                record.visibility.level,
+                VisibilityLevel::from(*visibility),
+                "{label}: visibility after SymbolInfo -> record"
+            );
+        }
+    }
+}
+
+/// Test 5: every static-matrix row survives both conversions.
+#[test]
+fn static_matrix_survives_both_conversions() {
+    for (language, rows) in rows_by_language(STATIC_MATRIX, |row| row.0) {
+        let extracted = extract_primary(language);
+        for (_, name, container, is_static, is_static_storage) in rows {
+            let label = format!("{}: `{name}`", extracted.label);
+            let (info, record) = converted(&extracted, name, *container);
+            assert_eq!(info.is_static, *is_static, "{label}: is_static after record -> SymbolInfo");
+            assert_eq!(
+                info.is_static_storage, *is_static_storage,
+                "{label}: is_static_storage after record -> SymbolInfo"
+            );
+            assert_eq!(has_static(&record), *is_static, "{label}: Modifier::Static after SymbolInfo -> record");
+            assert_eq!(
+                has_static_storage(&record),
+                *is_static_storage,
+                "{label}: Modifier::StaticStorage after SymbolInfo -> record"
+            );
+        }
+    }
+}
+
+/// `(language, name, container, kind, parameter names)` in a primary fixture.
+type SignatureCase = (ProgrammingLanguage, &'static str, Option<&'static str>, SymbolKind, &'static [&'static str]);
+
+/// Test 5: parameterless constructors, methods and functions keep a present,
+/// empty signature through both conversions; parameters are not dropped.
+#[test]
+fn fixture_signatures_survive_both_conversions() {
+    let cases: &[SignatureCase] = &[
+        (ProgrammingLanguage::TypeScript, "constructor", Some("ModuleWidget"), SymbolKind::Constructor, &[]),
+        (ProgrammingLanguage::JavaScript, "constructor", Some("ModuleWidget"), SymbolKind::Constructor, &[]),
+        (ProgrammingLanguage::JavaScript, "instanceMethod", Some("ModuleWidget"), SymbolKind::Method, &[]),
+        (ProgrammingLanguage::JavaScript, "constructor", Some("ExportedWidget"), SymbolKind::Constructor, &["initialValue"]),
+        (ProgrammingLanguage::TypeScript, "exportedFunction", None, SymbolKind::Function, &[]),
+        (ProgrammingLanguage::Rust, "public_function", None, SymbolKind::Function, &[]),
+    ];
+    for (language, name, container, kind, parameters) in cases {
+        let extracted = extract_primary(*language);
+        let label = format!("{}: `{name}`", extracted.label);
+        let (info, record) = converted(&extracted, name, *container);
+        assert_eq!(info.kind, *kind, "{label}: kind");
+        let signature = info
+            .signature
+            .unwrap_or_else(|| panic!("{label}: record -> SymbolInfo lost the signature"));
+        let names: Vec<&str> = signature.parameters.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, *parameters, "{label}: parameters after record -> SymbolInfo");
+
+        let back = SymbolInfo::try_from(record).expect("convert back");
+        let signature = back
+            .signature
+            .unwrap_or_else(|| panic!("{label}: SymbolInfo -> record -> SymbolInfo lost the signature"));
+        let names: Vec<&str> = signature.parameters.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, *parameters, "{label}: parameters after SymbolInfo -> record");
+    }
+}
+
+/// The type metadata a `SymbolInfo -> SymbolRecord -> SymbolInfo` round trip
+/// can return. Two losses are known and pinned here so a fix flips the test:
+/// `TypeData` has no slot for type parameters, and `TypeAliasData` holds only
+/// the aliased type, so a C `typedef struct {…} Alias` loses its fields.
+fn metadata_after_round_trip(symbol: &SymbolInfo) -> Option<TypeMetadata> {
+    if symbol.kind == SymbolKind::TypeAlias {
+        return None;
+    }
+    symbol.type_metadata.clone().map(|mut metadata| {
+        metadata.type_parameters.clear();
+        metadata
+    })
+}
+
+/// Every fixture symbol survives `SymbolInfo -> SymbolRecord -> SymbolInfo`
+/// unchanged in the fields this fix promises, its signature and its type
+/// metadata (compared in their serialized form).
+#[test]
+fn every_fixture_symbol_round_trips_through_the_record() {
+    let mut with_metadata = 0usize;
+    let mut lossy_aliases = Vec::new();
+    for path in all_fixtures() {
+        let name = display_name(&path);
+        for symbol in TreeFile::new(&path).expect("load fixture").symbols().expect("symbols") {
+            let label = format!("{name}: {} ({:?})", symbol.name, symbol.kind);
+            let back = SymbolInfo::try_from(SymbolRecord::from(symbol.clone()))
+                .unwrap_or_else(|error| panic!("{label}: {error:?}"));
+            assert_eq!(back.kind, symbol.kind, "{label}: kind");
+            assert_eq!(back.visibility, symbol.visibility, "{label}: visibility");
+            assert_eq!(back.is_static, symbol.is_static, "{label}: is_static");
+            assert_eq!(back.is_static_storage, symbol.is_static_storage, "{label}: is_static_storage");
+            assert_eq!(back.container_name, symbol.container_name, "{label}: container");
+            assert_eq!(back.container_kind, symbol.container_kind, "{label}: container kind");
+            assert_eq!(
+                serde_json::to_value(&back.signature).expect("serialize"),
+                serde_json::to_value(&symbol.signature).expect("serialize"),
+                "{label}: signature"
+            );
+            assert_eq!(
+                serde_json::to_value(&back.type_metadata).expect("serialize"),
+                serde_json::to_value(metadata_after_round_trip(&symbol)).expect("serialize"),
+                "{label}: type metadata"
+            );
+            with_metadata += usize::from(symbol.type_metadata.is_some());
+            if symbol.kind == SymbolKind::TypeAlias && symbol.type_metadata.is_some() {
+                lossy_aliases.push(format!("{name}: {}", symbol.name));
+            }
+        }
+    }
+    assert!(with_metadata > 20, "only {with_metadata} symbols carried type metadata");
+    assert_eq!(
+        lossy_aliases,
+        ["c.c: TagAlias", "c.c: AnonymousStructAlias", "c.c: SameName"],
+        "aliases whose v1 field metadata the record cannot carry"
+    );
 }

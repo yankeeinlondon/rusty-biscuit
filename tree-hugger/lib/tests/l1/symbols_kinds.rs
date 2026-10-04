@@ -348,6 +348,27 @@ fn assignments_and_local_overrides_declare_no_symbol() {
         .filter(|symbol| symbol.name == "unannotated_static_field")
         .count();
     assert_eq!(declarations, 1);
+
+    // The same holds for a JavaScript class field the constructor reassigns.
+    let javascript = extract_primary(ProgrammingLanguage::JavaScript);
+    javascript.assert_kind(
+        "unmarkedProperty",
+        Some("ExportedWidget"),
+        SymbolKind::Property,
+        Some(SymbolKind::Class),
+    );
+
+    // No Perl record, by any name, comes from a `local` override.
+    let perl = extract_primary(ProgrammingLanguage::Perl);
+    for record in &perl.records {
+        let text = record.source.declaration_text.as_deref().unwrap_or_default();
+        assert!(
+            !text.trim_start().starts_with("local"),
+            "{}: `{}` was declared by `{text}`",
+            perl.label,
+            record.identity.name
+        );
+    }
 }
 
 /// Perl variables record their declaring keyword in the declaration text, and

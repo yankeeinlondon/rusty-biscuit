@@ -6,29 +6,32 @@ use tree_hugger::{ProgrammingLanguage, TreeFile};
 
 use crate::symbols_fixtures::{all_fixtures, display_name, extract_primary};
 
-/// Every record of every fixture carries non-empty declaration text.
+/// Every record of every fixture carries non-empty declaration text, in the
+/// parse-pass records and in the full index that later passes rebuild.
 #[test]
 fn every_fixture_record_has_declaration_text() {
     let mut checked = 0;
     for path in all_fixtures() {
-        let records = TreeFile::new(&path)
-            .expect("parse fixture")
-            .symbol_records()
-            .expect("records");
-        for record in records {
-            let text = record.source.declaration_text.as_deref().unwrap_or_default();
-            assert!(
-                !text.trim().is_empty(),
-                "{}: `{}` ({:?}) has no declaration text",
-                display_name(&path),
-                record.identity.name,
-                record.kind
-            );
-            assert_eq!(text, text.trim_end(), "trailing whitespace is trimmed");
-            checked += 1;
+        let tree_file = TreeFile::new(&path).expect("parse fixture");
+        for (pass, records) in [
+            ("symbol_records()", tree_file.symbol_records().expect("records")),
+            ("symbol_index_v2()", tree_file.symbol_index_v2().expect("index").symbols),
+        ] {
+            for record in records {
+                let text = record.source.declaration_text.as_deref().unwrap_or_default();
+                assert!(
+                    !text.trim().is_empty(),
+                    "{} {pass}: `{}` ({:?}) has no declaration text",
+                    display_name(&path),
+                    record.identity.name,
+                    record.kind
+                );
+                assert_eq!(text, text.trim_end(), "trailing whitespace is trimmed");
+                checked += 1;
+            }
         }
     }
-    assert!(checked > 400, "only {checked} records checked");
+    assert!(checked > 800, "only {checked} records checked");
 }
 
 /// The text keeps syntax a visibility level cannot carry and stops at the body.
@@ -48,6 +51,12 @@ fn declaration_text_keeps_unmappable_syntax_and_stops_at_the_body() {
             "pub(crate) crate_field: u32",
         ),
         (
+            ProgrammingLanguage::Rust,
+            "required_trait_method",
+            Some("PublicTrait"),
+            "fn required_trait_method(&self) -> u32;",
+        ),
+        (
             ProgrammingLanguage::Swift,
             "count",
             Some("PublicApi"),
@@ -64,6 +73,19 @@ fn declaration_text_keeps_unmappable_syntax_and_stops_at_the_body() {
             "secret",
             Some("Shape"),
             "private[Shape] def secret() =",
+        ),
+        // each name of a list declaration shares the declaration's text
+        (
+            ProgrammingLanguage::Perl,
+            "$first_name",
+            Some("greet"),
+            "my ($first_name, $last_name)",
+        ),
+        (
+            ProgrammingLanguage::Perl,
+            "$last_name",
+            Some("greet"),
+            "my ($first_name, $last_name)",
         ),
         (
             ProgrammingLanguage::Java,
