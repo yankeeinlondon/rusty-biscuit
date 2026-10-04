@@ -247,6 +247,15 @@ runs nextest with `-j 1`, and tears the panes down in a trap. Tests use
 `<Backend>Harness::shared_or_spawn()` to attach to that pane and fall
 back to per-process spawning when the env var is missing.
 
+**The Apple Terminal window is spawned only on request.** Terminal.app has
+no background mode, so its shared window sits visibly on the developer's
+desktop for the whole run. `_test_l2` spawns it only when the package's
+`[package.metadata.ci.tests] l2-backends` lists `apple-terminal` (today:
+`biscuit-terminal-cli`). Before 2026-10-04 every package's L2 run, including
+every pre-push `ci-local` L2 cell, opened one, which developers saw as "tests
+popping up Terminal windows". A package that adds an Apple Terminal test must
+declare the backend, or each test self-spawns its own window.
+
 **Parallel self-spawn mode (`BISCUIT_L2_THREADS`).** The shared-pane +
 `-j 1` model serializes the *entire* tier for the sake of whichever tests
 attach to the shared pane. An area whose L2 suite is dominated by

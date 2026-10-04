@@ -103,10 +103,12 @@ Pure over `TableFacts`; snapshot tests in `cli/tests/list_table.rs`.
 - `list_table::assemble` order: table, graph, status, verbose, blank line,
   notes.
 - `Table::with_min_width` is the widest legend line, so a short table is never
-  narrower than its legend. `legend_markup(facts)` adds a second Worktree line
-  (`✕ git can't read this worktree`, `? couldn't check`) only when a table row
-  shows that glyph. Those entries sit on their own line because appending them
-  to the first line made it 126 columns wide.
+  narrower than its legend. `legend_markup(facts)` appends `✕ git can't read
+  worktree` and `? couldn't check` to the Worktree line only when a table row
+  shows that glyph. They used to sit on a second line to keep the legend
+  narrow; Ken chose one line per legend (2026-10-04) even though the line is
+  121 columns with both entries, so a short table widens to match and a
+  120-column terminal wraps it.
 - **Worktree glyph:** `worktree_marker` gives `✕` for any unavailable
   `availability`, whatever `dirty` says, and otherwise `dirty_dot` (`?` for
   `DirtyStatus::Unknown`). `TableFacts::row_statuses` is the one "rows in
@@ -168,9 +170,33 @@ Pure over `TableFacts`; snapshot tests in `cli/tests/list_table.rs`.
   `list_table::PrOutcome` via `pr_status_markup`, then §6 when the wait timed
   out. Every row is the `list_table::pr_presentation_snapshot_every_row`
   snapshot.
-- `render_notes`: `--ff` refusal or §9 suggestion, then §8, then one dim
-  `unavailable_note` per unavailable row in table order (a `?` row gets no
-  note). Notes name a command only when it can be typed:
+- `render_notes`: `--ff` refusal or §9 suggestion, then the §5
+  `credential_markup` line (it used to sit under the caption; every note is
+  now one undimmed list item, unavailable ones included), then §8, then
+  `TableFacts::graph_omissions` (lanes left out; then incomplete history,
+  worded for `shallow` with a `git fetch --unshallow` badge or as a plain
+  statement otherwise; then one line per `merged_elsewhere` branch),
+  then one `unavailable_note` per unavailable row in table order (a `?`
+  row gets no note).
+  - The graph is drawn with `GitGraph::render_without_notes`, so the
+    component's own "N more worktrees not shown" and "Some history is not
+    shown" lines never print under the image; `run` copies the returned
+    plan's `hidden_lanes` and `incomplete`, and the facts' `shallow` and
+    `merged_elsewhere`, into `graph_omissions`. Each
+    `GitGraphPlan::omissions` entry becomes its own note (`omission_markup`);
+    an `UnconnectedLane` whose branch has a `GraphFacts::forked_off_line`
+    entry names the merge that brought its fork in. There is no generic
+    "something is missing" note: it raised a concern nobody could act on.
+  - The base view's height is `list_table::graph_row_budget`, passed as
+    `GitGraph::with_max_rows`: terminal rows less every other section's
+    lines, the blank before the notes, and `GRAPH_ROW_RESERVE` (4: the
+    graph's own notes and the prompt), at least `GRAPH_MIN_ROWS` (12). So
+    `run` renders status, verbose, and a graph-less notes pass before the
+    graph. Width never changes the lane count. `GraphFacts::shallow` is set
+    only from a verified `--is-shallow-repository` read, so a failed read
+    never claims a shallow clone. The L2
+    Kitty test reads the hidden-lane count from that note, not from the row
+    under the image. Notes name a command only when it can be typed:
   - `remove_argument` tries the branch, then the basename. It keeps a
     candidate only if `resolve_worktree` maps it to this entry's path;
     otherwise it says which entry the name selects instead.
@@ -182,10 +208,11 @@ Pure over `TableFacts`; snapshot tests in `cli/tests/list_table.rs`.
     - `\\`, or a final `\` (fish escapes inside single quotes).
 
     A refused name or path drops the command, and the note says why.
-  - Only `Unlinked` claims `.git` is missing. Snapshots are
-    `unavailable_notes` and `unavailable_note_quoting`. Put a Windows spelling
-    on the base path in tests, because `file_name` of `C:\x\y` differs
-    between hosts.
+  - Only `Unlinked` claims `.git` is missing; its note only points at
+    `wt remove`, never at `git worktree repair`. Snapshots are
+    `unavailable_notes` and `unavailable_note_quoting`. Never put a Windows
+    spelling in a target path in tests, because `file_name` of `C:\x\y`
+    differs between hosts.
   - Notes and status items are `Note`s: typed segments of markup (fixed
     wording, or external text through `Prose::escape_text`) and raw
     copyable text. Add every path or command a note shows with
@@ -282,3 +309,13 @@ Pure over `TableFacts`; snapshot tests in `cli/tests/list_table.rs`.
 
 See [testing.md](testing.md#wt-list) and `worktree/docs/performance-testing.md`
 (measurements and the `git status` findings).
+- **Caption own-line note.** `Caption::behind_on_line` (`listing::line_steps`,
+  one `rev-list --first-parent --parents`) is read in `gather_ref_facts` only
+  when strictly behind, through `line_steps_cached`: it rides on the caption
+  comparison's cache entry (`CacheValue::line`, optional, so older files
+  load). **Trap:** an uncached call breaks
+  `one_cache_serves_the_caption_and_both_target_columns`, which pins a warm
+  listing at zero `rev-list` calls. `own_line_markup` puts an italic aside
+  after the count (`45 commits (1 merge) behind`, or `(3 on main's line)`)
+  only when it is fewer than `behind`; it reconciles the caption's count with the graph's
+  first-parent default lane.

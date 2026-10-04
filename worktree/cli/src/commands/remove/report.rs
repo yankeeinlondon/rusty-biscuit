@@ -38,6 +38,8 @@ pub struct ReportInput<'a> {
     /// `Some` when the directory is gone: [`missing_markup`] replaces the
     /// files block, since `inventory` then holds nothing that was checked.
     pub missing: Option<&'a MissingCheckout>,
+    /// The `.git` file was missing and `wt` restored it to check the files.
+    pub relinked: bool,
     /// `None` for a detached worktree.
     pub safety: Option<&'a BranchSafety>,
     pub has_origin: bool,
@@ -50,7 +52,11 @@ pub struct ReportInput<'a> {
 pub fn render(terminal: &Terminal, input: &ReportInput<'_>) -> String {
     // The markup builders lay their text out one line per `\n`.
     let lines = |markup: String| Prose::new(markup).with_line_breaks(LineBreaks::Hard).render(terminal);
-    let mut blocks = vec![lines(heading_markup(input))];
+    let mut heading = heading_markup(input);
+    if input.relinked {
+        heading.push_str(&format!("\n{RELINKED_MARKUP}"));
+    }
+    let mut blocks = vec![lines(heading)];
     let files = match input.missing {
         Some(missing) => missing_markup(missing),
         None => files_markup(input.inventory),
@@ -94,6 +100,12 @@ pub fn heading_markup(input: &ReportInput<'_>) -> String {
         esc(&input.path.display().to_string())
     )
 }
+
+/// The line under the heading for a worktree whose `.git` file was missing.
+/// `git worktree repair` also restores other worktrees' broken links, so the
+/// line does not claim to have touched only this one.
+pub const RELINKED_MARKUP: &str = "<yellow>Its .git file was missing</yellow><dim>; wt restored it to check the \
+    files (Git may restore other worktrees' broken links too).</dim>";
 
 /// Dirty and protected included files, then disposable ignored names.
 pub fn files_markup(inventory: &Inventory) -> String {
@@ -587,6 +599,7 @@ mod tests {
             branch: Some("feat/x"),
             inventory: &inventory,
             missing: None,
+            relinked: true,
             safety: Some(&facts),
             has_origin: false,
             remote: None,
@@ -595,5 +608,6 @@ mod tests {
         assert!(!text.ends_with('\n'), "{text:?}");
         assert!(text.contains("Uncommitted files"));
         assert!(text.contains("Not safe"));
+        assert!(text.contains("Its .git file was missing"), "{text}");
     }
 }

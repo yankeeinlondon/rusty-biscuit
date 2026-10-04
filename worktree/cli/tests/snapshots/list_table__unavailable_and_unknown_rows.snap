@@ -3,21 +3,20 @@ source: worktree/cli/tests/list_table.rs
 expression: "Unavailable::new().table()"
 ---
 
-┌────────────────┬────────────────────┬─────────────┬─────────────────────────────────────┐
-│ Worktree       │ Branch             │ ->  main    │ -> parent                           │
-├────────────────┼────────────────────┼─────────────┼─────────────────────────────────────┤
-│ ○ base repo    │  main              │ —           │ —                                   │
-│ ○ feat-ok      │ feat/ok            │ clean +2 -1 │ —                                   │
-│ ✕ feat-gone    │ feat/gone          │ clean +2 -1 │ —                                   │
-│ ✕ feat-link    │ feat/link          │ clean +2 -1 │ —                                   │
-│ ✕ feat-file    │ feat/file          │ clean +2 -1 │ —                                   │
-│ ✕ feat-locked  │ feat/locked        │ clean +2 -1 │ —                                   │
-│ ✕ feat-gitdir  │ feat/gitdir        │ clean +2 -1 │ —                                   │
-│ ✕ feat-broken  │ feat/broken        │ clean +2 -1 │ —                                   │
-│ ? feat-unknown │ feat/unknown       │ clean +2 -1 │ —                                   │
-│ ✕ lhg-before   │ detached @ a1b2c3d │ —           │ —                                   │
-└────────────────┴────────────────────┴─────────────┴─────────────────────────────────────┘
+┌────────────────┬────────────────────┬─────────────┬──────────────────────────────────────────────────────────────────┐
+│ Worktree       │ Branch             │ ->  main    │ -> parent                                                        │
+├────────────────┼────────────────────┼─────────────┼──────────────────────────────────────────────────────────────────┤
+│ ○ base repo    │  main              │ —           │ —                                                                │
+│ ○ feat-ok      │ feat/ok            │ clean +2 -1 │ —                                                                │
+│ ✕ feat-gone    │ feat/gone          │ clean +2 -1 │ —                                                                │
+│ ✕ feat-link    │ feat/link          │ clean +2 -1 │ —                                                                │
+│ ✕ feat-file    │ feat/file          │ clean +2 -1 │ —                                                                │
+│ ✕ feat-locked  │ feat/locked        │ clean +2 -1 │ —                                                                │
+│ ✕ feat-gitdir  │ feat/gitdir        │ clean +2 -1 │ —                                                                │
+│ ✕ feat-broken  │ feat/broken        │ clean +2 -1 │ —                                                                │
+│ ? feat-unknown │ feat/unknown       │ clean +2 -1 │ —                                                                │
+│ ✕ lhg-before   │ detached @ a1b2c3d │ —           │ —                                                                │
+└────────────────┴────────────────────┴─────────────┴──────────────────────────────────────────────────────────────────┘
 
- Worktree   ○ clean    ● uncommitted files    ● uncommitted source files
-            ✕ git can't read this worktree    ? couldn't check
- Branch     └─ merges cleanly into parent     └─ conflicts with parent    └┄ parent deleted
+ Worktree   ○ clean    ● uncommitted files    ● uncommitted source files    ✕ git can't read worktree    ? couldn't check
+ Branch     └─ merges cleanly into parent     └─ conflicts with parent      └┄ parent deleted

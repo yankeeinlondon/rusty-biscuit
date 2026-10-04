@@ -32,7 +32,7 @@ start:
         🗳️  starting **git commits** in {{ ctx.repo }} -> **{{ctx.branch}}** (_<dim>using </dim>{{agent}}/{{model}}_). {{ ctx.is_monorepo ? 'Packages impacted:\n\n' + as_unordered_list(ctx.dirty_packages) : '' }}
 success:
     message: |-
-        🗳️  staged files in {{ctx.area || ctx.repo }}'s **{{ctx.branch}}** branch, have been **committed to git** (_but not pushed_)
+        🗳️  staged files in {{ctx.area || ctx.repo }}'s **{{ctx.branch}}** branch, have been **committed to git**
 failure:
     message: |-
         💥  the staged files in {{ctx.area || ctx.repo }}'s **{{ctx.branch}} branch failed to commit as requested! The error was:

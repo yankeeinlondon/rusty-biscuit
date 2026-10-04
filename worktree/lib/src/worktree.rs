@@ -8,7 +8,7 @@ use crate::default_target::{DefaultTarget, choose_default_target};
 use crate::error::WorktreeError;
 use crate::fork_origin::ForkOriginStore;
 use crate::listing::{
-    BranchComparisons, Caption, ParentComparison, RefSnapshot, RefTips, TreeRow, build_tree, compare_cached,
+    BranchComparisons, Caption, ParentComparison, RefSnapshot, RefTips, TreeRow, build_tree, compare_cached, line_steps_cached,
 };
 use crate::availability::{self, Availability};
 use crate::git::{git_command, git_command_in, git_from, repo_info};
@@ -431,6 +431,11 @@ impl WorktreeList {
                 tracking_sha: remote.to_string(),
                 ahead: comparison.ahead,
                 behind: comparison.behind,
+                // Only a strictly-behind caption explains its count: then the
+                // remote tip descends from the local one.
+                behind_on_line: (comparison.behind > 0 && comparison.ahead == 0)
+                    .then(|| line_steps_cached(cache, remote, local))
+                    .flatten(),
             })
         });
         let target = choose_default_target(default_branch, local_tip, remote_tip, |ancestor, descendant| {
