@@ -18,7 +18,7 @@ log: {{ dirname(spec) + '/log.md' }}
 ready: "{{ review && file_exists(review) ? frontmatter(review, 'ready') : null }}"
 
 design: "{{ file_exists(dirname(review) + '/design.md') ? dirname(review) + '/design.md' : null }}"
-
+yolo: true
 feature_or_fix: "{{ contains(spec, 'fixes') ? 'fix' : 'feature' }}"
 
 initialize:

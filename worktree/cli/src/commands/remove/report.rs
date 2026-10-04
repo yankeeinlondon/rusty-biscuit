@@ -9,6 +9,7 @@ use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable as _;
 use biscuit_terminal::terminal::Terminal;
 use worktree::remove::Inventory;
+use worktree::remove::missing::MissingCheckout;
 use worktree::remove::remote::{Reinterpretation, RemoteOnly, RemoteState};
 use worktree::remove::safety::{BranchSafety, Commit, Evidence, PrLookup, Tier};
 
@@ -34,6 +35,9 @@ pub struct ReportInput<'a> {
     pub path: &'a Path,
     pub branch: Option<&'a str>,
     pub inventory: &'a Inventory,
+    /// `Some` when the directory is gone: [`missing_markup`] replaces the
+    /// files block, since `inventory` then holds nothing that was checked.
+    pub missing: Option<&'a MissingCheckout>,
     /// `None` for a detached worktree.
     pub safety: Option<&'a BranchSafety>,
     pub has_origin: bool,
@@ -47,7 +51,11 @@ pub fn render(terminal: &Terminal, input: &ReportInput<'_>) -> String {
     // The markup builders lay their text out one line per `\n`.
     let lines = |markup: String| Prose::new(markup).with_line_breaks(LineBreaks::Hard).render(terminal);
     let mut blocks = vec![lines(heading_markup(input))];
-    blocks.push(lines(files_markup(input.inventory)));
+    let files = match input.missing {
+        Some(missing) => missing_markup(missing),
+        None => files_markup(input.inventory),
+    };
+    blocks.push(lines(files));
     match (input.branch, input.safety) {
         (Some(branch), Some(safety)) => {
             let mut block = Prose::new(format!("<b>Branch</b> <blue>{}</blue>", esc(branch)))
@@ -119,6 +127,28 @@ pub fn files_markup(inventory: &Inventory) -> String {
     for warning in &inventory.included.warnings {
         if !out.is_empty() { out.push('\n'); }
         out.push_str(&format!("<yellow>Warning:</yellow> {}", esc(warning)));
+    }
+    out.trim_end().to_string()
+}
+
+/// The files block for a worktree whose directory is gone: there were no
+/// files to check, only the index its Git record kept.
+pub fn missing_markup(missing: &MissingCheckout) -> String {
+    let staged = missing.staged.len();
+    if staged == 0 {
+        return "<dim>Its directory is already gone. The index Git kept for it matches its last \
+            commit, so removing its record loses no staged changes.</dim>"
+            .to_string();
+    }
+    let mut out = "<b>Its directory is already gone</b>, but the index Git kept for it holds \
+        staged changes that removing its record discards"
+        .to_string();
+    if staged > LIST_LIMIT {
+        out.push_str(&format!(": <red><b>{staged} staged files</b></red>"));
+    } else {
+        out.push_str(&format!(" ({staged}):\n"));
+        let paths: Vec<PathBuf> = missing.staged.iter().map(|e| e.path.clone()).collect();
+        out.push_str(&dirty_tree::render_markup(&paths));
     }
     out.trim_end().to_string()
 }
@@ -556,6 +586,7 @@ mod tests {
             path: Path::new("/tmp/feat-x"),
             branch: Some("feat/x"),
             inventory: &inventory,
+            missing: None,
             safety: Some(&facts),
             has_origin: false,
             remote: None,

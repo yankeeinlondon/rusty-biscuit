@@ -1,8 +1,10 @@
 //! Process exit codes shared by every `wt` command.
 //!
 //! 0, 1, and 2 mean the same everywhere (2 is clap's invalid-arguments code).
-//! 3 and 4 are refusals that changed nothing, split because the remedy
-//! differs: 3 needs a `--force-*` flag, 4 needs a different environment.
+//! 3 and 4 are refusals that removed nothing, split because the remedy
+//! differs: 3 needs a `--force-*` flag, a fix to the worktree, or a fresh run;
+//! 4 needs a different environment. Exit 3 does not promise that nothing
+//! changed: `wt remove` may have repaired a worktree's link before refusing.
 
 use worktree::WorktreeError;
 
@@ -17,7 +19,7 @@ pub const BLOCKED_BY_ENVIRONMENT: i32 = 4;
 pub fn exit_code(error: &WorktreeError) -> i32 {
     match error {
         WorktreeError::Cancelled => SUCCESS,
-        WorktreeError::RefusedToLoseWork(_) => REFUSED_TO_LOSE_WORK,
+        WorktreeError::RefusedToLoseWork(_) | WorktreeError::NotARealDirectory(_) => REFUSED_TO_LOSE_WORK,
         WorktreeError::BlockedByEnvironment(_) | WorktreeError::DirectoryInUse(_) => {
             BLOCKED_BY_ENVIRONMENT
         }
@@ -36,6 +38,7 @@ mod tests {
             exit_code(&WorktreeError::RefusedToLoseWork("dirty".into())),
             3
         );
+        assert_eq!(exit_code(&WorktreeError::NotARealDirectory("/wt/feat-x".into())), 3);
         assert_eq!(
             exit_code(&WorktreeError::BlockedByEnvironment("no wrapper".into())),
             4

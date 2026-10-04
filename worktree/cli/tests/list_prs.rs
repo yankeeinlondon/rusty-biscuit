@@ -20,7 +20,8 @@
 //! until the test releases it: the parent returns while its worker is
 //! blocked, concurrent workers make one request, a killed worker releases its
 //! lock, and a failed or misbound answer is never stored. A listing during
-//! whose wait `origin` changes shows no badges at all.
+//! whose wait `origin` is replaced or removed shows no badges and no notice
+//! about the old origin's requests, the head check's included.
 //!
 //! The live head is never asked in the foreground: `wt list` waits at most
 //! 3 s for its worker, and returns while the worker's `ls-remote` is still
@@ -32,11 +33,13 @@ mod perf_support;
 
 use std::fs;
 use std::process::{Command, Output};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use perf_support::{
     FakeGitea, GiteaReply, HoldingOrigin, KillOnDrop, MANUFACTURED_FAILURE, MixedFixture, ProxyStub, WorkerReaper,
-    assert_manufactured_failure, process_running, refresh_workers, wait_for_refresh_workers,
+    assert_manufactured_failure, process_running, refresh_workers, stage_from_perf, wait_for_refresh_workers,
 };
 use serial_test::serial;
 use worktree::pull_requests::{CachedPrs, RefreshOutcome, pr_lock_path, select_cached, unix_now};
@@ -169,7 +172,7 @@ fn a_stale_store_shows_its_badges_and_its_workers_failed_request_stores_nothing(
     assert!(stderr.contains("PRs as of 12 min ago"), "{stderr}");
     // A foreground request would be a third connection. Its duration is
     // `perf_pr_request.rs`'s to bound: parallel L1 load on Windows pushes
-    // even a no-request `pr gather` past that file's 300 ms stage bound.
+    // even no-request PR store reads past that file's 300 ms stage bound.
     assert_eq!(proxy.connections(), 2, "one worker, one request per half, none in the foreground");
     assert_eq!(fs::read(fixture.pr_store()).expect("store"), stored, "a failed refresh is never stored");
 }
@@ -519,12 +522,12 @@ fn a_held_live_head_check_holds_the_listing_only_until_its_deadline() {
 
     // `.output()` returns only once every holder of stdout and stderr has
     // exited, so it returning while `origin` still holds the worker's
-    // request proves `wt list` neither waited past its 3 s nor joined it.
-    let started = Instant::now();
+    // request proves `wt list` did not join it. The budget limits only the
+    // wait, not the local gather overlapping it, so the bound reads the wait.
     let (_, stderr) = list_with(fixture.wt_command_direct());
-    let elapsed = started.elapsed();
+    let waited = stage_from_perf(&stderr, "remote wait").expect("remote wait stage");
 
-    assert!(elapsed < Duration::from_secs(5), "{elapsed:?}");
+    assert!(waited < Duration::from_secs(5), "{waited:?}");
     assert!(origin.wait_for_requests(1, WORKER_WAIT), "the worker never asked origin");
     assert!(fixture.head_lock_held(), "the request is still held");
     assert_eq!(refresh_workers(fixture.main()).len(), 1, "one worker");
@@ -599,12 +602,12 @@ fn a_held_pr_request_with_nothing_stored_ends_at_the_budget_with_only_the_hint()
     gitea.hold();
     let _reaper = WorkerReaper::new(&fixture, &gitea);
 
-    let started = Instant::now();
     let (_, stderr) = list_with(fixture.wt_command_via_gitea(&gitea));
-    let elapsed = started.elapsed();
+    // The budget limits only the wait, not the local gather overlapping it.
+    let waited = stage_from_perf(&stderr, "remote wait").expect("remote wait stage");
 
     assert!(gitea.wait_for_waiting(1, Duration::ZERO), "the PR request is still held");
-    assert!(elapsed >= Duration::from_secs(3) && elapsed < Duration::from_secs(5), "{elapsed:?}");
+    assert!(waited >= Duration::from_secs(3) && waited < Duration::from_secs(5), "{waited:?}");
     let text = collapsed(&stderr);
     assert!(text.contains("running this command again"), "the wait timed out:\n{stderr}");
     for item in ["PRs as of", "couldn't refresh", "couldn't get open PRs"] {
@@ -862,3 +865,288 @@ fn a_failed_assertion_kills_a_test_owned_worker_and_frees_its_lock() {
     assert!(!fixture.head_lock_held(), "the live-head lock is free");
 }
 
+
+// The keyless notice through the shipped binary: one dim line beneath the
+// caption whenever this listing saw an API answer sent without a key, in
+// either half, and a generic failure in the other half never hides it.
+
+const GITEA_KEYLESS: &str = "Gitea answered without an API key; set GITEA_TOKEN or FORGEJO_TOKEN or CODEBERG_TOKEN to authenticate API requests.";
+
+/// A listing through `command` whose worker is waited for, so the stores it
+/// leaves are final.
+fn keyless_listing(fixture: &MixedFixture, command: Command) -> String {
+    let (_, stderr) = list_with(command);
+    assert!(wait_for_refresh_workers(fixture.main(), 0, WORKER_WAIT).is_empty(), "the worker finished");
+    stderr
+}
+
+fn keyless_lines(stderr: &str) -> usize {
+    collapsed(stderr).matches("answered without an API key").count()
+}
+
+#[test]
+#[serial]
+fn an_anonymous_pr_answer_with_a_failed_head_check_shows_the_keyless_notice() {
+    let fixture = MixedFixture::new().with_gitea_origin();
+    let gitea = FakeGitea::new(GiteaReply::Open(Vec::new()));
+    gitea.answer_branch_heads_with(500);
+    let _reaper = WorkerReaper::new(&fixture, &gitea);
+
+    let stderr = keyless_listing(&fixture, fixture.wt_command_via_gitea(&gitea));
+
+    assert_eq!((gitea.requests(), gitea.branch_requests()), (1, 1), "no extra request");
+    assert!(collapsed(&stderr).contains(GITEA_KEYLESS), "{stderr}");
+    assert_eq!(keyless_lines(&stderr), 1, "{stderr}");
+}
+
+#[test]
+#[serial]
+fn an_anonymous_head_answer_with_a_failed_pr_request_shows_the_keyless_notice_through_the_fetch() {
+    let fixture = MixedFixture::new().with_gitea_origin();
+    let gitea = FakeGitea::new(GiteaReply::Status(500));
+    let _reaper = WorkerReaper::new(&fixture, &gitea);
+    let pushed = fixture.serve_gitea_origin_one_commit_ahead(&gitea);
+    gitea.answer_branch_heads_at(&pushed);
+
+    let stderr = keyless_listing(&fixture, fixture.wt_command_via_gitea_git(&gitea));
+
+    assert_eq!((gitea.requests(), gitea.branch_requests()), (1, 1), "no extra request");
+    assert!(collapsed(&stderr).contains(GITEA_KEYLESS), "{stderr}");
+    assert_eq!(keyless_lines(&stderr), 1, "{stderr}");
+    let attempt = read_store(&fixture.remote_head_store()).attempt.expect("the attempt");
+    assert_eq!(attempt.phase, Phase::Fetching, "the API answer moved on to the fetch");
+    assert_eq!(attempt.credentials, worktree::remote_head::CredentialEvidence::Anonymous);
+}
+
+#[test]
+#[serial]
+fn two_anonymous_answers_show_exactly_one_keyless_line_and_a_key_shows_none() {
+    const SECRET: &str = "gitea-secret-token-value";
+    let fixture = MixedFixture::new().with_gitea_origin();
+    let gitea = FakeGitea::new(GiteaReply::Open(Vec::new()));
+    let _reaper = WorkerReaper::new(&fixture, &gitea);
+    let pushed = fixture.serve_gitea_origin_one_commit_ahead(&gitea);
+    gitea.answer_branch_heads_at(&pushed);
+
+    let stderr = keyless_listing(&fixture, fixture.wt_command_via_gitea_git(&gitea));
+
+    assert_eq!((gitea.requests(), gitea.branch_requests()), (1, 1), "no extra request");
+    assert_eq!(keyless_lines(&stderr), 1, "{stderr}");
+    let lines: Vec<&str> = stderr.lines().collect();
+    let caption = lines.iter().position(|line| line.contains("origin/main")).expect("the caption");
+    assert!(lines[caption + 1].trim_start().starts_with("Gitea answered without"), "directly beneath the caption:\n{stderr}");
+
+    // The same answers sent with a key: no notice, and the key's value is
+    // in neither store nor the output.
+    let mut command = fixture.wt_command_via_gitea_git(&gitea);
+    command.env("GITEA_TOKEN", SECRET);
+    let stderr = keyless_listing(&fixture, command);
+    assert_eq!(keyless_lines(&stderr), 0, "{stderr}");
+    assert!(!stderr.contains(SECRET), "{stderr}");
+    for store in [fixture.pr_store(), fixture.remote_head_store()] {
+        let text = fs::read_to_string(&store).expect("store");
+        assert!(!text.contains(SECRET), "{}: {text}", store.display());
+        assert!(text.contains("GITEA_TOKEN"), "the variable's name is recorded: {text}");
+    }
+}
+
+/// A keyless head check that fell back to an answering `ls-remote` keeps its
+/// closing notice, and the anonymous PR answer adds the keyless line.
+#[test]
+#[serial]
+fn the_keyless_notice_coexists_with_the_closing_fallback_notice() {
+    let fixture = MixedFixture::new().with_gitea_origin();
+    let gitea = FakeGitea::new(GiteaReply::Open(Vec::new()));
+    gitea.answer_branch_heads_with(401);
+    let _reaper = WorkerReaper::new(&fixture, &gitea);
+    fixture.serve_gitea_origin_one_commit_ahead(&gitea);
+
+    let stderr = keyless_listing(&fixture, fixture.wt_command_via_gitea_git(&gitea));
+
+    let text = collapsed(&stderr);
+    assert!(text.contains(GITEA_KEYLESS), "{stderr}");
+    assert!(text.contains("Git checked origin using `ls-remote`"), "{stderr}");
+    assert_eq!(keyless_lines(&stderr), 1, "{stderr}");
+}
+
+/// Anonymous evidence an earlier listing stored is never this listing's: a
+/// later listing whose own requests fail shows no notice while the store
+/// still holds the earlier anonymous publication, and an ignored repository
+/// shows none either.
+#[test]
+#[serial]
+fn stored_anonymous_evidence_from_an_earlier_listing_never_gives_the_notice() {
+    let fixture = MixedFixture::new().with_gitea_origin();
+    let gitea = FakeGitea::new(GiteaReply::Open(Vec::new()));
+    let _reaper = WorkerReaper::new(&fixture, &gitea);
+    let pushed = fixture.serve_gitea_origin_one_commit_ahead(&gitea);
+    gitea.answer_branch_heads_at(&pushed);
+
+    // Control: this listing's own anonymous answers give the notice.
+    let stderr = keyless_listing(&fixture, fixture.wt_command_via_gitea_git(&gitea));
+    assert_eq!(keyless_lines(&stderr), 1, "{stderr}");
+
+    // Both halves fail now; only the earlier listing's evidence is anonymous.
+    gitea.release(GiteaReply::Status(500));
+    gitea.answer_branch_heads_with(500);
+    let requests = (gitea.requests(), gitea.branch_requests());
+    let stderr = keyless_listing(&fixture, fixture.wt_command_via_gitea_git(&gitea));
+    assert_eq!(keyless_lines(&stderr), 0, "{stderr}");
+    assert!(
+        gitea.requests() > requests.0 && gitea.branch_requests() > requests.1,
+        "this listing asked both halves again: {requests:?}"
+    );
+    let stored: serde_json::Value =
+        serde_json::from_slice(&fs::read(fixture.pr_store()).expect("PR store")).expect("json");
+    assert_eq!(stored["credentials"]["state"], "anonymous", "the earlier publication is still stored: {stored}");
+
+    #[cfg(unix)]
+    {
+        // Ignored: nothing is asked and the stored evidence stays unread.
+        gitea.release(GiteaReply::Open(Vec::new()));
+        gitea.answer_branch_heads_at(&pushed);
+        let requests = (gitea.requests(), gitea.branch_requests());
+        let mut command = fixture.wt_command_via_gitea_git(&gitea);
+        command.arg("--ignore-api");
+        let stderr = keyless_listing(&fixture, command);
+        assert_eq!(keyless_lines(&stderr), 0, "{stderr}");
+        assert_eq!((gitea.requests(), gitea.branch_requests()), requests, "no API request");
+    }
+}
+
+// A changed `origin` drops every notice about the old one's requests, the
+// head check's included: the PR reply is held until this listing's own head
+// attempt has finished, and only then is `origin` replaced or removed, so the
+// head evidence the listing reads is complete and current-attempt.
+
+/// What happens to `origin` at [`change_origin_at_checkpoint`].
+#[derive(Clone, Copy, Debug)]
+enum OriginChange {
+    Unchanged,
+    Replaced,
+    Removed,
+}
+
+const REPLACEMENT_ORIGIN: &str = "http://gitea.example.invalid/o/other.git";
+
+/// How long the checkpoint waits for the head outcome: the listing's own
+/// wait, after which nothing the worker does can reach this listing.
+const CHECKPOINT_WAIT: Duration = Duration::from_secs(3);
+
+/// Holds `gitea`'s next PR reply until the head attempt of the listing about
+/// to run (an attempt ID other than the one stored now) has an outcome, then
+/// applies `change` before the reply goes out. The flag reports whether the
+/// checkpoint was reached; a checkpoint missed leaves `origin` unchanged.
+fn change_origin_at_checkpoint(fixture: &MixedFixture, gitea: &FakeGitea, change: OriginChange) -> Arc<AtomicBool> {
+    let head_store = fixture.remote_head_store();
+    let previous = read_store(&head_store).attempt.map(|attempt| attempt.id);
+    let main = fixture.main().to_path_buf();
+    let reached = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&reached);
+    gitea.before_reply(move || {
+        let deadline = Instant::now() + CHECKPOINT_WAIT;
+        let finished = || {
+            read_store(&head_store)
+                .attempt
+                .is_some_and(|attempt| Some(&attempt.id) != previous.as_ref() && attempt.outcome.is_some())
+        };
+        while !finished() {
+            if Instant::now() >= deadline {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let args: &[&str] = match change {
+            OriginChange::Unchanged => &[],
+            OriginChange::Replaced => &["remote", "set-url", "origin", REPLACEMENT_ORIGIN],
+            OriginChange::Removed => &["remote", "remove", "origin"],
+        };
+        if !args.is_empty() {
+            let status = Command::new("git").current_dir(&main).args(args).status().expect("git");
+            assert!(status.success(), "{change:?}");
+        }
+        flag.store(true, Ordering::SeqCst);
+    });
+    reached
+}
+
+/// One listing through `command` with `change` applied at the checkpoint;
+/// its worker is waited for. Fails unless the checkpoint was reached inside
+/// the listing's wait.
+fn listing_with_origin_change(fixture: &MixedFixture, gitea: &FakeGitea, command: Command, change: OriginChange) -> String {
+    let reached = change_origin_at_checkpoint(fixture, gitea, change);
+    let stderr = keyless_listing(fixture, command);
+    gitea.before_reply(|| {});
+    assert!(reached.load(Ordering::SeqCst), "{change:?}: the head attempt never finished:\n{stderr}");
+    assert!(!collapsed(&stderr).contains("running this command again"), "{change:?}: the wait saw both halves:\n{stderr}");
+    stderr
+}
+
+#[test]
+#[serial]
+fn a_changed_origin_drops_the_old_head_checks_credentials_warning() {
+    const WARNING: &str = "Gitea didn't accept GITEA_TOKEN";
+    let fixture = MixedFixture::new().with_gitea_origin();
+    let gitea = FakeGitea::new(GiteaReply::Open(Vec::new()));
+    gitea.answer_branch_heads_with(401);
+    let _reaper = WorkerReaper::new(&fixture, &gitea);
+    let command = || {
+        let mut command = fixture.wt_command_via_gitea(&gitea);
+        command.env("GITEA_TOKEN", "secret-token-value");
+        command
+    };
+
+    // Control: the same checkpoint with `origin` unchanged shows the warning.
+    let stderr = listing_with_origin_change(&fixture, &gitea, command(), OriginChange::Unchanged);
+    assert!(collapsed(&stderr).contains(WARNING), "{stderr}");
+
+    for change in [OriginChange::Replaced, OriginChange::Removed] {
+        let branch_requests = gitea.branch_requests();
+        let stderr = listing_with_origin_change(&fixture, &gitea, command(), change);
+        assert!(gitea.branch_requests() > branch_requests, "{change:?}: this listing checked the head again");
+        let text = collapsed(&stderr);
+        assert!(!text.contains(WARNING), "{change:?}: the old origin's warning is shown:\n{stderr}");
+        assert!(!text.contains("rate limited") && !text.contains("answered without"), "{change:?}:\n{stderr}");
+        if let OriginChange::Replaced = change {
+            run_git_in(fixture.main(), &["remote", "set-url", "origin", FakeGitea::ORIGIN]);
+        }
+    }
+}
+
+#[test]
+#[serial]
+fn a_changed_origin_drops_the_old_head_checks_fallback_notice_and_caption() {
+    const FALLBACK: &str = "Git checked origin using `ls-remote`";
+    let fixture = MixedFixture::new().with_gitea_origin();
+    let gitea = FakeGitea::new(GiteaReply::Open(Vec::new()));
+    gitea.answer_branch_heads_with(401);
+    let _reaper = WorkerReaper::new(&fixture, &gitea);
+    fixture.serve_gitea_origin_one_commit_ahead(&gitea);
+
+    // Control: an anonymous 401 whose `ls-remote` answered gives the closing
+    // notice, and the caption reports the fetch it led to.
+    let stderr =
+        listing_with_origin_change(&fixture, &gitea, fixture.wt_command_via_gitea_git(&gitea), OriginChange::Unchanged);
+    let text = collapsed(&stderr);
+    assert!(text.contains(FALLBACK), "{stderr}");
+    assert!(text.contains("(updated from origin just now)"), "{stderr}");
+
+    for change in [OriginChange::Replaced, OriginChange::Removed] {
+        let git_requests = gitea.git_requests();
+        let stderr = listing_with_origin_change(&fixture, &gitea, fixture.wt_command_via_gitea_git(&gitea), change);
+        assert!(gitea.git_requests() > git_requests, "{change:?}: this listing's ls-remote answered again");
+        let text = collapsed(&stderr);
+        assert!(!text.contains(FALLBACK), "{change:?}: the old origin's fallback notice is shown:\n{stderr}");
+        assert!(!text.contains("answered without"), "{change:?}:\n{stderr}");
+        assert!(!text.contains("origin just now"), "{change:?}: the caption reports the old check:\n{stderr}");
+        assert!(text.contains("couldn't check origin;"), "{change:?}: the caption reads as a check not made:\n{stderr}");
+        if let OriginChange::Replaced = change {
+            run_git_in(fixture.main(), &["remote", "set-url", "origin", FakeGitea::ORIGIN]);
+        }
+    }
+}
+
+fn run_git_in(repo: &std::path::Path, args: &[&str]) {
+    let status = Command::new("git").current_dir(repo).args(args).status().expect("git");
+    assert!(status.success(), "git {args:?}");
+}

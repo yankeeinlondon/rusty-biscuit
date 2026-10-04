@@ -201,7 +201,13 @@ pub struct UploadPackGate {
 
 impl UploadPackGate {
     pub fn install(fixture: &Fixture, hold_from: usize) -> Self {
-        Self::with_action(fixture, hold_from, "while [ ! -f \"$dir/release\" ]; do sleep 0.05; done")
+        // Ending once the fixture directory is gone keeps a test killed
+        // before `Drop` from orphaning this loop forever.
+        Self::with_action(
+            fixture,
+            hold_from,
+            "while [ ! -f \"$dir/release\" ] && [ -d \"$dir\" ]; do sleep 0.05; done",
+        )
     }
 
     /// Fails every `upload-pack` from its `fail_from`-th run on, so the

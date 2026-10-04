@@ -18,15 +18,15 @@ pub fn run(name: &str) -> Result<(), WorktreeError> {
     };
 
     let terminal = Terminal::default();
-    let relative_display = relative.to_string_lossy();
-    let repo = &info.name;
+    let relative_display = Prose::escape_text(&relative.to_string_lossy());
+    let repo = Prose::escape_text(&info.name);
 
     // Already in the target worktree — nothing to do.
     if entry.is_current {
         let kind = if entry.is_main {
             "<blue-500>base</blue-500> <i>checkout</i>".to_string()
         } else {
-            let worktree_name = entry.branch.as_deref().unwrap_or(name);
+            let worktree_name = Prose::escape_text(entry.branch.as_deref().unwrap_or(name));
             format!("<blue-500>{worktree_name}</blue-500> <i>worktree</i>")
         };
         let msg = format!("Already in the {kind} of <yellow>{repo}</yellow>.");
@@ -53,7 +53,7 @@ pub fn run(name: &str) -> Result<(), WorktreeError> {
             )
         }
     } else {
-        let worktree_name = entry.branch.as_deref().unwrap_or(name);
+        let worktree_name = Prose::escape_text(entry.branch.as_deref().unwrap_or(name));
         if path_adjusted {
             format!(
                 "You've been moved into the <blue-500>{worktree_name}</blue-500> <i>worktree</i> of <yellow>{repo}</yellow> <dim>(<b>{relative_display}</b> doesn't exist here — moved to <i>root</i>)</dim>"

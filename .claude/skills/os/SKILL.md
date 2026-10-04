@@ -5,159 +5,66 @@ description: |-
   rusty-biscuit: which hosts can produce macOS, Linux, native-Windows, and WSL2
   evidence and how to reach them; how the WSL2 CI leg runs (nextest archives)
   and how to reproduce its failures faithfully; Windows path-spelling,
-  handle-inheritance, cross-compile, and console traps; macOS symlinked temp
-  dirs, Docker-for-Linux, and host-diagnosis methods; hosted CI runner
-  sizes, per-leg timing profiles, and the cross-run comparison rules. Load
-  this before claiming "cannot test on X here", before tuning a CI thread cap
-  or comparing leg timings, before touching `#[cfg(windows)]` or path
-  comparison code, and whenever a test is red on exactly one CI environment.
+  handle-inheritance, console, and cross-compile traps; Linux directory-order,
+  locale, shallow-clone, and thread-count traps; macOS symlinked temp dirs,
+  Docker-for-Linux, and host-diagnosis methods; hosted CI runner sizes,
+  per-leg timing profiles, cross-run comparison rules, and per-OS evidence
+  reuse. Load this before claiming "cannot test on X here", before tuning a CI
+  thread cap or comparing leg timings, before touching `#[cfg(windows)]` or
+  path comparison code, and whenever a test is red on exactly one CI
+  environment.
 ---
 
 # OS Matters
 
 Every package must compile and behave on macOS, Linux, native Windows, and
 WSL2. This skill records what is *not* obvious about doing that from this
-repository: where each OS can actually be exercised, the traps that have
-already cost real time, and the recipes that resolved them. Generic Rust
-portability guidance lives in `prompts/cross-platform.md`; the `wsl` skill
-covers configuring WSL itself; the `rust-testing` skill owns test design.
+repository: where each OS can be exercised, the traps that have already cost
+real time, and the recipes that resolved them. Generic Rust portability
+guidance lives in `prompts/cross-platform.md`; the `wsl` skill covers
+configuring WSL itself; the `rust-testing` skill owns test design.
 
 ## Where each OS can be exercised
-
-| Need | Use | Detail |
-|---|---|---|
-| Real Linux run | The host in `$BUILD_LINUX` via `just cross-check <pkg> --os linux`, or Docker Desktop on a macOS host | [build-hosts.md](build-hosts.md), [macos.md](macos.md) |
-| Native Windows run | The host in `$BUILD_WIN` via `just cross-check <pkg> --os windows` | [build-hosts.md](build-hosts.md) |
-| WSL2 run, exactly as CI does it | The guest in `$BUILD_WSL` via `just cross-check <pkg> --os wsl` (nextest archive, builder target dir hidden) | [wsl.md](wsl.md) |
-| Another macOS | The host in `$BUILD_MACOS` (reserved; no recipe consumes it yet) | [build-hosts.md](build-hosts.md) |
 
 Build hosts are declared by environment variables (`BUILD_LINUX`, `BUILD_WIN`,
 `BUILD_WSL`, `BUILD_MACOS`), each an SSH destination. A set variable means the
 host is available from this machine; unset means it is not. Never hardcode an
 alias; check `env | grep '^BUILD_'` first and report which hosts you had.
-| Windows compile evidence only | `cargo check --target x86_64-pc-windows-gnu` (never msvc from macOS); an isolated probe crate for `#[cfg(windows)]` code | [windows.md](windows.md) |
+
+| Need | Use | Detail |
+|---|---|---|
+| Real Linux run | `$BUILD_LINUX` via `just cross-check <pkg> --os linux`, or Docker Desktop on a macOS host | [build-hosts.md](build-hosts.md), [macos.md](macos.md) |
+| Native Windows run | `$BUILD_WIN` via `just cross-check <pkg> --os windows` | [build-hosts.md](build-hosts.md) |
+| WSL2 run, exactly as CI does it | `$BUILD_WSL` via `just cross-check <pkg> --os wsl` (nextest archive, builder target dir hidden) | [wsl.md](wsl.md) |
+| Another macOS | `$BUILD_MACOS` (reserved; no recipe consumes it yet) | [build-hosts.md](build-hosts.md) |
+| Windows compile evidence only | `cargo check --target x86_64-pc-windows-gnu` (never msvc from macOS); an isolated probe crate for `#[cfg(windows)]` code | [windows.md](windows.md#compile-evidence-from-macos) |
 | Authoritative proof | Hosted CI (`ubuntu-latest`, `macos-latest`, `windows-latest`, `wsl2-ubuntu`) | [ci-runners.md](ci-runners.md), `.github/ci/README.md`, `.github/ci/environments.json` |
 
-CI is the final proof, not the discovery loop. A full-scope run takes hours
-and every push cancels the previous one, so surface an OS's exact failure on
-the matching host first, then push once.
+CI is the final proof, not the discovery loop. Surface an OS's exact failure
+on the matching host first, then push once. Before pushing, read
+[ci-evidence.md](ci-evidence.md) for which receipt satisfies which
+environment's cell and how to record an execution ban.
 
-Reuse qualifying passing evidence per required cell on every OS. If no
-qualifying passing evidence exists, execute the required tests. A request to
-avoid rerunning passed tests is not an environment ban. Only a separately
-explicit instruction (such as an environment unavailable during maintenance)
-creates an execution constraint; never infer a blanket WSL prohibition.
+## Red on one environment only: start here
 
-A separately explicit execution ban also constrains CI triggered by a push.
-Verify every requested exclusion before pushing; a successful macOS
-receipt alone does not suppress WSL. Evidence is now combined **per cell**
-across environments and across commits: `local_evidence.py verify --cells`
-reads every note on every `refs/notes/ci-local/<environment>` ref between the
-merge base and the outgoing head, so a macOS receipt from this push and a prior
-`cross-check` WSL receipt suppress their own cells together, and a WSL receipt
-that covered one package does not hide an earlier one that covered another.
-The JUnit reports behind a hook receipt stay on the
-host that produced it, at the receipt's `host.report_dir`
-(`$BISCUIT_CI_EVIDENCE_DIR/<head sha>/<environment>/`, root default
-`~/.rusty-biscuit/ci-evidence`), so investigating a reused cell means asking
-that host. Record the restriction rather than remembering it —
-`<home>/.rusty-biscuit/ci-constraints/<repository>/` (`BISCUIT_CI_CONSTRAINTS_DIR`
-overrides it; the home is Python's `Path.home()`, so `USERPROFILE` on native
-Windows) holds prohibition records that `just ci-local --plan` and the pre-push
-hook refuse on, and that CI deliberately never reads.
-If the plan still schedules a prohibited cell, explain the gap before
-triggering CI; do not treat automatic jobs as exempt.
-
-`scope-only` resolves and prints the plan — so a recorded constraint is still
-enforced and the run is still reviewable — but runs no gate, publishes no
-outcomes, and excludes no CI cells. It does publish the *scope* receipt on
-`refs/notes/ci-local/scope`, as every mode does, and CI takes it on an exact
-`{base, head, tree}` match. The hook reviews every pushed branch's COMMITTED
-plan (a temporary worktree unless the revision is the clean checkout) under that
-update's remote branch and remote, against the base of each run it triggers
-(the remote's `main` for a push to `main`; each open pull request's target tip
-on a GitHub remote, read through `gh`, plus the incoming revision when the same
-push updates that target too; otherwise a provisional plan against the
-remote's `main`), and publishes HEAD's; `just ci-local --plan`
-previews the working tree and differs exactly when the checkout is dirty. `off` is its deprecated alias. `git push
---no-verify` produces no new evidence and does not invalidate already-published
-matching receipts, which CI still verifies. See the `rust-devops` skill's
-[evidence and execution contract](../rust-devops/ci-cd.md) before selecting a
-push mode.
-
-## Read this first when a test is red on one environment only
-
-- **Hook fixtures red only on Ubuntu:** temporary repositories need local
-  `user.name` and `user.email` for later `git notes` writes under `env -i`;
-  command-scoped identity on the initial commit does not persist. Initialize
-  fixture bare remotes with `-b main` rather than inheriting the host's default
-  branch. A missing-tool test must use a controlled PATH: Ubuntu's `/usr/bin`
-  already contains `gh`, so adding it defeats a missing-`gh` fixture.
-- **L2 red only on Ubuntu, a timeout, passes on the macOS host:** CI's
-  checkouts are depth-1, and macOS L2 is satisfied by local evidence from a
-  full-history clone, so Ubuntu is where git-history code first meets a
-  shallow boundary. That commit diffs against the empty tree, so every file
-  is an addition. Reproduce in a `git clone --depth 1` (Docker, see
-  [macos.md](macos.md)). On 2026-09-22 sniff's rewrite tracker turned this into
-  a quadratic 30 s+ `claudine context --values`.
-- **Red only on `wsl2-ubuntu`:** the guest runs a nextest *archive* built on
-  `ubuntu-latest`. Anything resolved at compile time to a builder path
-  (`env!("CARGO_BIN_EXE_*")`, `CARGO_MANIFEST_DIR` fixtures outside the
-  archived paths, toolchain lookups) breaks there. Reproduce with the recipe in
-  [wsl.md](wsl.md); the fix for binaries is `biscuit_test_harness::bin_exe!`.
-- **Red only in an archive run (WSL2, or `just cross-check --os windows`),
-  "could not resolve `../../…`":** an extracted archive workspace has no
-  `.git`, so `build_resolution_context` finds no repository and the request
-  directory itself becomes the tree root. A test that builds its snapshot at
-  `messenger/lib` (or any package) then refuses a fixture's `..` climb out of
-  it. Anchor the snapshot at the run-time repository root
-  (`manifest_dir!()`'s ancestor), never at `env!("CARGO_MANIFEST_DIR")`.
-- **Red on Linux and WSL, green on macOS and Windows, only an order differs:**
-  `read_dir` order. APFS and NTFS return entries sorted by name; ext4 returns
-  hash order (`lib` before `app`). Sniff's leaf-marker layers (Bazel, Pants,
-  Buck2) list `MonorepoLayer::packages` in walk order, so a complete-JSON
-  assertion must sort those lists; `lockfile_provenance::normalized_any`
-  does so only for `provenance == "leaf-markers"` (2026-09-26).
-- **Red only on the `BUILD_LINUX` host, an ASCII `>` where the test expects
-  `▶` (or another glyph):** that host's shells run with `LANG=C`, and both
-  in-process terminal detection and `CliProcessFixture`'s children read it,
-  so `biscuit-terminal` selects its ASCII fallbacks. Hosted CI runs
-  `LANG=C.UTF-8`; `cross-check` now exports the same (2026-09-28), but an ad
-  hoc SSH session on that host does not. A test whose assertion needs a
-  Unicode glyph should pin `LC_ALL=C.UTF-8` on its spawned command
-  (`sequence_groups`).
-- **A substring count red on Linux, green on macOS, in rendered CLI output:**
-  the temp path in the message has a different length (`/tmp/<name>-<pid>-…`
-  vs `/var/folders/…`), so the terminal wraps at a different word and splits
-  the phrase being counted. Count in whitespace-collapsed output, never in the
-  wrapped text (`lifecycle_downgrade_outcome`, 2026-09-28).
-- **Red only on `windows-latest`:** GitHub's runner has an 8.3 short-name TEMP
-  (`RUNNER~1`) that no developer machine has, plus verbatim `\\?\` spellings
-  from `canonicalize`. Read the path-spelling traps in
-  [windows.md](windows.md) before reading the test.
-- **Red only on `windows-latest` with an elapsed time equal to some child's
-  timeout:** handle inheritance. Detached grandchildren keep the parent's pipe
-  ends open on Windows; see [windows.md](windows.md).
-- **Red only on `windows-latest` with an empty failure message:** the test
-  attached a console and redirected a std handle to `CONOUT$`, so the panic
-  message went to that console instead of nextest's pipe. See "Attaching a
-  console inside a nextest process" in [windows.md](windows.md).
-- **Green gates that did not test your worktree:** a Bash `cd <area>`
-  followed `CDPATH` into the main checkout. See [macos.md](macos.md).
-- **Red only on the macOS host, L2, with a shell prompt in the captured
-  frame:** a host shell-startup prompt swallowed the input; see
-  [macos.md](macos.md). Not a repo defect.
-- **Red in the WSL guest at provisioning with a 403:** anonymous GitHub API
-  rate limit from a shell-script installer; fixed once, recorded in
-  [wsl.md](wsl.md) so it is not re-diagnosed.
-- **Red in the WSL guest with "lost communication with the server", killed at
-  ~45 minutes, no log:** the runner agent died during provisioning. Open and
-  instrumented, not fixed; read "Lost runner during provisioning" in
-  [wsl.md](wsl.md) before deciding it is noise.
-- **Slow on one leg only, or a timing delta under 15%:** read the runner
-  sizes and per-leg profile in [ci-runners.md](ci-runners.md) before calling
-  it a regression. macOS has the fewest cores, Windows the slowest build,
-  WSL2 the slowest execution, and run-to-run noise is 5 to 15% per leg.
+| Symptom | Likely cause | Read |
+|---|---|---|
+| Hook fixture red only on Ubuntu | missing local git identity, inherited default branch, or `gh` already in `/usr/bin` | [linux.md](linux.md#hook-fixtures-red-only-on-ubuntu) |
+| L2 timeout only on Ubuntu, green on the macOS host | depth-1 CI checkout meets git-history code | [linux.md](linux.md#shallow-checkouts-l2-red-only-on-ubuntu-a-timeout) |
+| Linux and WSL red, macOS and Windows green, only an order differs | ext4 `read_dir` hash order | [linux.md](linux.md#read_dir-order-red-on-linux-and-wsl-green-on-macos-and-windows) |
+| ASCII `>` where `▶` was expected, only on `BUILD_LINUX` | `LANG=C` in that host's shells | [linux.md](linux.md#langc-on-the-build_linux-host-ascii-where-a-glyph-was-expected) |
+| A substring count in rendered output red on Linux | temp-path length changes where text wraps | [linux.md](linux.md#temp-path-length-changes-word-wrapping) |
+| A process count too high on Linux or WSL | `sysinfo` lists threads as processes | [linux.md](linux.md#sysinfo-lists-threads-as-processes) |
+| Red only on `wsl2-ubuntu` | the guest runs an archive built on `ubuntu-latest`; builder paths baked in at compile time (`env!("CARGO_BIN_EXE_*")`, `CARGO_MANIFEST_DIR` fixtures, toolchain lookups; fix binaries with `biscuit_test_harness::bin_exe!`) | [wsl.md](wsl.md) |
+| Red only in an archive run (WSL2, or `just cross-check --os windows`), "could not resolve `../../…`" | an extracted archive has no `.git`, so `build_resolution_context` makes the request directory the tree root and a snapshot built at a package refuses a fixture's `..` climb; anchor it at the run-time repository root (`manifest_dir!()`'s ancestor), never `env!("CARGO_MANIFEST_DIR")` | [wsl.md](wsl.md) |
+| WSL guest red at provisioning with a 403 | anonymous GitHub API rate limit (fixed; do not re-diagnose) | [wsl.md](wsl.md) |
+| WSL guest "lost communication with the server", killed at ~45 min, no log | runner agent died during provisioning (open, instrumented) | [wsl.md](wsl.md) |
+| Red only on `windows-latest`, a path in the message | 8.3 short-name TEMP (`RUNNER~1`) or verbatim `\\?\` spelling | [windows-paths.md](windows-paths.md) |
+| Red only on `windows-latest`, elapsed time equals some child's timeout | handle inheritance keeps pipes open | [windows.md](windows.md#environment-and-processes) |
+| Red only on `windows-latest` with an empty failure message | a std handle redirected to `CONOUT$` | [windows-console.md](windows-console.md#attaching-a-console-inside-a-nextest-process) |
+| Green gates that did not test your worktree | Bash `cd <area>` followed `CDPATH` into the main checkout | [macos.md](macos.md) |
+| macOS host L2 red with a shell prompt in the captured frame | a host shell-startup prompt swallowed the input; not a repo defect | [macos.md](macos.md) |
+| Slow on one leg only, or a timing delta under 15% | runner size and per-leg profile; noise is 5–15% per leg | [ci-runners.md](ci-runners.md) |
 
 ## Standing rules
 
@@ -178,36 +85,25 @@ push mode.
 - `#[cfg(unix)]` and `#[cfg(windows)]` test the **target**, not the build
   host. A `#![cfg(unix)]` inside a test file does not stop Cargo building that
   test's dev-dependencies for a Windows target; gate the dependency graph.
-- On Linux (and WSL2), `sysinfo`'s process table also lists every **thread**
-  of a process, each with the process's own argv. A test that counts processes
-  by argv over-counts as soon as the process spawns a thread, while macOS and
-  Windows count it once. Filter with `process.thread_kind().is_none()`
-  (`worktree/cli/tests/perf_support::refresh_workers`).
 - Never override `CARGO_TARGET_DIR` on the `BUILD_WIN` host; its checkout
-  pins the target dir to the `W:` volume for a reason ([build-hosts.md](build-hosts.md)).
+  pins the target dir to the `W:` volume for a reason
+  ([build-hosts.md](build-hosts.md)).
 
 ## Files
 
-- [build-hosts.md](build-hosts.md) — the `BUILD_*` declaration contract,
-  standing clones, storage rules, `just cross-check` usage and gotchas,
-  remote-process hygiene.
-- [wsl.md](wsl.md) — the archive-mode contract, faithful reproduction on the
-  `BUILD_WSL` guest, `bin_exe!`, the guest's GitHub API 403 history, its apt
-  set (`python3` for the in-guest completion check), the one dispatch row the
-  leg receives, and which red step means what.
-- [ci-runners.md](ci-runners.md) — hosted runner sizes (macOS is the
-  tightest), per-leg build and execution profiles, the anonymous API limit,
-  cache-quota and `main`-cancellation behavior, merge-gate bypass, and the
-  cross-run noise and comparison rules.
-- [windows.md](windows.md) — path spelling, home directory lookup, handle
-  inheritance, current-directory locks (deleting a directory a shell stands in), a windowless real console for L2 (ConPTY), batch-file argument rule, Ctrl+C status, console allocation and
-  `CONOUT$` redirection under nextest, cross-compile targets, Markdown
-  backslash escapes.
-- [macos.md](macos.md) — `/var` symlink, Docker for Linux evidence, L2
-  capture wedges, subprocess forks from terminal detection, perf triage,
-  lldb work counters, shell-init and `cd` traps, the kache hardened-runtime
-  `DYLD_*` link failure.
+| File | Covers |
+|---|---|
+| [build-hosts.md](build-hosts.md) | The `BUILD_*` contract, standing clones, storage rules, `just cross-check` usage and gotchas, compiler cache, remote-process hygiene |
+| [ci-evidence.md](ci-evidence.md) | Per-cell evidence reuse across environments and commits, execution bans, `scope-only`, what the pre-push hook reviews |
+| [ci-runners.md](ci-runners.md) | Hosted runner sizes (macOS is the tightest), per-leg build and execution profiles, the anonymous API limit, cache quota, `main` cancellation, merge-gate bypass, cross-run noise and comparison rules |
+| [linux.md](linux.md) | Ubuntu hook fixtures, shallow checkouts, `read_dir` order, `LANG=C`, wrap-dependent counts, `sysinfo` threads |
+| [wsl.md](wsl.md) | The archive-mode contract, faithful reproduction on `BUILD_WSL`, `bin_exe!`, the 403 history, the lost-runner investigation, the guest's apt set, Level 2 on WSL, which red step means what |
+| [windows.md](windows.md) | Environment and processes (handle inheritance, Job Objects, stack size, killing `git`, `python3` alias, batch arguments, Ctrl+C), current-directory locks, the `windows-latest` leg, compile evidence from macOS |
+| [windows-paths.md](windows-paths.md) | Verbatim `\\?\` paths, home and cache known folders, 8.3 short names, separators, `file://` URIs, Markdown escapes, junctions and reparse points |
+| [windows-console.md](windows-console.md) | WezTerm on `build-win`, PowerShell output streams and encoding, a windowless ConPTY console for L2, attaching a console under nextest |
+| [macos.md](macos.md) | `/var` symlink, Docker for Linux evidence, L2 capture wedges, terminal-detection forks, perf triage, lldb work counters, shell-init and `cd` traps, the kache `DYLD_*` link failure |
 
 When you learn a new OS-specific fact the hard way, add it to the matching
-file in the same change that fixes it. That is what keeps this skill portable
-across agents instead of living in one agent's memory.
+file in the same change that fixes it, and add a row to the symptom table
+when the symptom points somewhere non-obvious. Keep this file a router: facts
+belong on topic pages.
