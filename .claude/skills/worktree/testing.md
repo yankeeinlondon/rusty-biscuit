@@ -162,6 +162,12 @@ Measurements: `worktree/docs/performance-testing.md`.
   duration). Never substring-match a row: the group
   `remote wait ‖ local gather` contains its child's name. Give a new row a
   label no other row shares.
+- An L1 test that bounds how long a held worker keeps `wt list` waiting reads
+  the `remote wait` row, not the whole command's elapsed time. The local
+  gather overlaps the wait and may outlast it, so a whole-command bound fails
+  under suite load without a wait regression (`list_prs.rs` held-request
+  tests). Whether the command returned while the worker is still held, that is,
+  never joined it, is proven by `.output()` returning, not by a duration.
 - `perf_support`'s own unit tests sit under a `perf_`-prefixed module, so they
   run only in `just test-perf`; the L1 parser and report-shape tests are in
   `cli/tests/perf_flag.rs`.
