@@ -205,3 +205,81 @@ fn fork_store(home: &Path, main: &Path) -> PathBuf {
     }
     find(home).unwrap_or_else(|| worktree::fork_origin::fork_origin_path(main).expect("store path"))
 }
+
+/// The `lhg-before` shape (a detached linked worktree whose `.git` file is
+/// gone) and a worktree whose directory is gone, beside a healthy one, through
+/// the real binary: `✕`, never `○`, an accurate note for each, and nothing on
+/// disk or in Git's records changed by listing.
+#[test]
+fn worktrees_git_cannot_read_are_crossed_and_explained_without_repair() {
+    let repo = tempfile::tempdir().expect("create temp dir");
+    let main = repo.path().join("main");
+    fs::create_dir(&main).expect("create main repo dir");
+    init_repo(&main);
+    commit(&main, "file.txt", "1\n");
+    let unlinked = repo.path().join("lhg-before");
+    let missing = repo.path().join("feat-gone");
+    let healthy = repo.path().join("feat-ok");
+    run_git(&main, &["worktree", "add", "-q", "--detach", unlinked.to_str().unwrap(), "HEAD"]);
+    run_git(&main, &["worktree", "add", "-q", "-b", "feat/gone", missing.to_str().unwrap()]);
+    run_git(&main, &["worktree", "add", "-q", "-b", "feat/ok", healthy.to_str().unwrap()]);
+    fs::write(unlinked.join("kept.txt"), "work\n").expect("write");
+    fs::remove_file(unlinked.join(".git")).expect("unlink");
+    fs::remove_dir_all(&missing).expect("remove directory");
+    let porcelain = || {
+        let output = Command::new("git").current_dir(&main).args(["worktree", "list", "--porcelain"]).output().unwrap();
+        String::from_utf8(output.stdout).unwrap()
+    };
+    let records_before = porcelain();
+    assert_eq!(records_before.matches("prunable").count(), 2, "{records_before}");
+    // Git's own spelling of each path, which the notes show.
+    let recorded = |name: &str| {
+        records_before
+            .lines()
+            .filter_map(|line| line.strip_prefix("worktree "))
+            .find(|path| path.ends_with(name))
+            .unwrap_or_else(|| panic!("{name} in {records_before}"))
+            .to_string()
+    };
+    let base_path = records_before.lines().next().unwrap().strip_prefix("worktree ").unwrap().to_string();
+
+    let output = Home::new().wt(&main, &["list"]);
+
+    assert!(output.status.success(), "wt list should succeed: {output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let cell = |name: &str| {
+        let line = stderr.lines().find(|line| line.contains(&format!(" {name} "))).unwrap_or_else(|| panic!("{name}: {stderr}"));
+        line.split('│').nth(1).unwrap().trim().to_string()
+    };
+    assert_eq!(cell("lhg-before"), "✕ lhg-before", "{stderr}");
+    assert_eq!(cell("feat-gone"), "✕ feat-gone", "{stderr}");
+    assert_eq!(cell("feat-ok"), "○ feat-ok", "{stderr}");
+    assert!(stderr.contains("✕ git can't read this worktree"), "{stderr}");
+    assert!(!stderr.contains("couldn't check"), "no readable row is unknown: {stderr}");
+
+    // Notes wrap at the captured width, so compare their words.
+    let words: String = stderr.split_whitespace().collect::<Vec<_>>().join(" ");
+    // Paths may be single-quoted (a Windows short name's `~` needs it).
+    let squeezed: String = stderr.split_whitespace().collect::<String>().replace('\'', "");
+    assert!(
+        words.contains("lhg-before: its .git file is missing; wt remove lhg-before attempts to restore the link before checking its files."),
+        "{words}"
+    );
+    assert!(
+        squeezed.contains(&format!("run git-C{base_path}worktreerepair{}.", recorded("lhg-before")).replace(' ', "")),
+        "{stderr}"
+    );
+    assert!(
+        words.contains("feat-gone: its directory is gone; wt remove feat/gone checks whether its remaining Git record can be removed safely."),
+        "{words}"
+    );
+    let lhg = words.find("lhg-before: its").unwrap();
+    let gone = words.find("feat-gone: its").unwrap();
+    assert!(gone < lhg, "notes follow table row order: {stderr}");
+
+    // Listing repaired and removed nothing.
+    assert!(fs::symlink_metadata(unlinked.join(".git")).is_err(), "the link was not restored");
+    assert_eq!(fs::read_to_string(unlinked.join("kept.txt")).unwrap(), "work\n");
+    assert!(fs::symlink_metadata(&missing).is_err(), "nothing was recreated");
+    assert_eq!(porcelain(), records_before, "Git's records are unchanged");
+}

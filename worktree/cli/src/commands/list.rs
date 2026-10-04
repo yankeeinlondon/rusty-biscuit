@@ -405,6 +405,7 @@ fn ff_notice(result: &FfResult) -> Option<FfNotice> {
             FfNotice::Missing(reference.clone())
         }
         FfRefusal::Changed => FfNotice::Changed,
+        FfRefusal::UnavailableHolder(path) => FfNotice::UnavailableHolder(path.clone()),
         FfRefusal::Other => FfNotice::Failed,
     })
 }
