@@ -546,7 +546,7 @@ impl GraphRun {
 
     /// The image `wt` asked for and the rows it left for it, measured on the
     /// screen text and on the pixels Kitty drew. Returns the hidden-lane count
-    /// from the elision notice, if there is one; call it through
+    /// from the closing notes, if they have one; call it through
     /// [`graph_drawn_or_skip!`].
     fn assert_graph_drawn(&self) -> Result<Option<usize>, Unobserved> {
         let (cell_w, cell_h) = self.cell;
@@ -566,8 +566,9 @@ impl GraphRun {
         // must reserve the same number or text overlaps the image.
         assert_eq!(image.rows, image.png.height().div_ceil(cell_h), "reserved rows vs Kitty's rows");
 
-        // Screen text: the image hangs below the legend, and the next text is
-        // the notice (or the done marker), at most one blank row after it.
+        // Screen text: the image hangs below the legend, and the next text
+        // (the status list, the notes, or the done marker) is at most one
+        // blank row after it.
         let legend = self.screen_row("parent deleted");
         let next = (legend + 1..self.screen.len())
             .find(|&row| !self.screen[row].trim().is_empty())
@@ -582,12 +583,13 @@ impl GraphRun {
 
         self.assert_pixels_match(legend, next)?;
 
-        // "Some history is not shown" may follow the image instead.
-        Ok(self.screen[next]
-            .trim()
-            .strip_suffix(" not shown")
-            .and_then(|notice| notice.strip_suffix(" more worktrees").or_else(|| notice.strip_suffix(" more worktree")))
-            .map(|count| count.parse().expect("numeric hidden-lane count")))
+        Ok(self.screen[next..].iter().find_map(|row| {
+            let note = row.trim().strip_prefix("- ")?;
+            let (count, _) = note
+                .split_once(" worktrees aren't in the graph:")
+                .or_else(|| note.split_once(" worktree isn't in the graph:"))?;
+            Some(count.parse().expect("numeric hidden-lane count"))
+        }))
     }
 
     /// The drawn part of the transmitted PNG must appear exactly where the
@@ -712,7 +714,7 @@ fn level2_graph_height_cap_elides_lanes_in_a_short_kitty_window() {
     assert!(run.transmitted.rows <= run.lines / 2, "{} rows exceed half of {}", run.transmitted.rows, run.lines);
     run.assert_table_intact();
     let hidden = graph_drawn_or_skip!(run).unwrap_or_else(|| {
-        panic!("the capped graph should end with an elision notice:\n{}", run.screen.join("\n"))
+        panic!("the capped graph should note the lanes it left out:\n{}", run.screen.join("\n"))
     });
     assert!((1..BRANCHES.len()).contains(&hidden), "{hidden} hidden lanes of {}", BRANCHES.len());
 }
@@ -751,7 +753,7 @@ fn level2_graph_draws_a_merged_branch_in_kitty() {
         run.keep_evidence("merged");
         assert!(run.transmitted.rows <= run.lines / 2, "{} rows exceed half of {}", run.transmitted.rows, run.lines);
         let all = run.all.join("\n");
-        assert!(!all.contains("Some history is not shown"), "a merged branch is complete history:\n{all}");
+        assert!(!all.contains("at its own commit") && !all.contains("clone is shallow"), "a merged branch is complete history:\n{all}");
         run.assert_table_intact();
         assert_eq!(graph_drawn_or_skip!(run), None, "no lane is left out:\n{}", run.screen.join("\n"));
     }
@@ -774,8 +776,8 @@ fn level2_graph_restores_lane_density_in_kitty() {
     run.keep_evidence("sparse");
     assert!(run.transmitted.rows <= run.lines / 2, "{} rows exceed half of {}", run.transmitted.rows, run.lines);
     let all = run.all.join("\n");
-    assert!(!all.contains("Some history is not shown"), "every fork and merge is drawn:\n{all}");
-    assert!(!all.contains("more worktree"), "no lane is left out:\n{all}");
+    assert!(!all.contains("at its own commit") && !all.contains("clone is shallow"), "every fork and merge is drawn:\n{all}");
+    assert!(!all.contains("in the graph:"), "no lane is left out:\n{all}");
     run.assert_table_intact();
     assert_eq!(graph_drawn_or_skip!(run), None, "no lane is left out:\n{}", run.screen.join("\n"));
 }
@@ -796,8 +798,8 @@ fn level2_graph_draws_a_branch_continued_after_its_merge_in_kitty() {
     run.keep_evidence("continued");
     assert!(run.transmitted.rows <= run.lines / 2, "{} rows exceed half of {}", run.transmitted.rows, run.lines);
     let all = run.all.join("\n");
-    assert!(!all.contains("Some history is not shown"), "the continued branch is connected:\n{all}");
-    assert!(!all.contains("more worktree"), "no lane is left out:\n{all}");
+    assert!(!all.contains("at its own commit") && !all.contains("clone is shallow"), "the continued branch is connected:\n{all}");
+    assert!(!all.contains("in the graph:"), "no lane is left out:\n{all}");
     run.assert_table_intact();
     assert_eq!(graph_drawn_or_skip!(run), None, "no lane is left out:\n{}", run.screen.join("\n"));
 }

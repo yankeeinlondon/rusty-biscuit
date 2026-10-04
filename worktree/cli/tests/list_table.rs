@@ -21,7 +21,7 @@ use worktree::pull_requests::{OpenPullRequest, PrListing};
 use worktree::remote_head::{CheckFailure, FetchFailure};
 use worktree::worktree::{DirtyStatus, WorktreeEntry, WorktreeStatus};
 use worktree_cli::commands::list_table::{
-    self, CredentialCondition, CredentialLine, FfNotice, FfSuggestion, LastKnown, PrOutcome, RemoteFacts,
+    self, CredentialCondition, CredentialLine, FfNotice, FfSuggestion, GraphOmissions, LastKnown, MergedElsewhere, PrOutcome, RemoteFacts,
     RemoteStatus, Sections, TableFacts,
 };
 
@@ -201,6 +201,7 @@ impl Example {
             ff_suggestion: None,
             ff_notice: None,
             fallback_notice: None,
+            graph_omissions: GraphOmissions::default(),
         }
     }
 }
@@ -1116,6 +1117,46 @@ fn closing_notes_snapshot() {
         ),
         ("fallback notice".to_string(), notes(TableFacts { fallback_notice: keys(), ..example.facts() })),
         (
+            "graph omissions".to_string(),
+            notes(TableFacts {
+                graph_omissions: GraphOmissions {
+                    hidden_lanes: 3,
+                    incomplete: true,
+                    merged_elsewhere: vec![
+                        MergedElsewhere {
+                            branch: "feat/schema".into(),
+                            into: "origin/main".into(),
+                            through: Some("fix/skill".into()),
+                        },
+                        MergedElsewhere { branch: "feat/old".into(), into: "main".into(), through: None },
+                    ],
+                    ..GraphOmissions::default()
+                },
+                ..example.facts()
+            }),
+        ),
+        (
+            "one hidden lane".to_string(),
+            notes(TableFacts {
+                graph_omissions: GraphOmissions { hidden_lanes: 1, ..GraphOmissions::default() },
+                ..example.facts()
+            }),
+        ),
+        (
+            "incomplete in a shallow clone".to_string(),
+            notes(TableFacts {
+                graph_omissions: GraphOmissions { incomplete: true, shallow: true, ..GraphOmissions::default() },
+                ..example.facts()
+            }),
+        ),
+        (
+            "shallow but complete".to_string(),
+            notes(TableFacts {
+                graph_omissions: GraphOmissions { shallow: true, ..GraphOmissions::default() },
+                ..example.facts()
+            }),
+        ),
+        (
             "suggestion before the notice".to_string(),
             notes(TableFacts {
                 ff_suggestion: Some(FfSuggestion { behind: 3 }),
@@ -1280,6 +1321,7 @@ impl Unavailable {
             ff_suggestion: None,
             ff_notice: None,
             fallback_notice: None,
+            graph_omissions: GraphOmissions::default(),
         }
     }
 
@@ -1350,11 +1392,11 @@ fn legend_entries_appear_only_for_markers_in_the_table() {
     assert_eq!(legend(vec![base()]), format!("{healthy}\n{branch}"));
     assert_eq!(
         legend(vec![base(), unavailable("gone", Some("gone"), Availability::Missing, GIT_REASON)]),
-        format!("{healthy}\n            ✕ git can't read this worktree\n{branch}")
+        format!("{healthy}    ✕ git can't read worktree\n{branch}")
     );
     assert_eq!(
         legend(vec![base(), status("odd", Some("odd"), false, false, DirtyStatus::Unknown)]),
-        format!("{healthy}\n            ? couldn't check\n{branch}")
+        format!("{healthy}    ? couldn't check\n{branch}")
     );
     assert_eq!(
         legend(vec![
@@ -1362,7 +1404,7 @@ fn legend_entries_appear_only_for_markers_in_the_table() {
             status("odd", Some("odd"), false, false, DirtyStatus::Unknown),
             unavailable("gone", Some("gone"), Availability::Unlinked, GIT_REASON),
         ]),
-        format!("{healthy}\n            ✕ git can't read this worktree    ? couldn't check\n{branch}")
+        format!("{healthy}    ✕ git can't read worktree    ? couldn't check\n{branch}")
     );
 }
 
@@ -1378,7 +1420,8 @@ fn a_readable_replacement_link_is_unavailable_without_claiming_git_cant_read_it(
     let base = || status("repo", Some("main"), true, true, DirtyStatus::Clean);
     let legend_line = |statuses: Vec<WorktreeStatus>| {
         let rendered = Unavailable::with(statuses).table();
-        rendered.lines().find(|line| line.trim_start().starts_with('✕')).map(|line| line.trim().to_string())
+        let worktree = rendered.lines().find(|line| line.starts_with(" Worktree "))?;
+        worktree.find('✕').map(|at| worktree[at..].trim().to_string())
     };
 
     let table = Unavailable::with(vec![base(), replaced()]).table();
@@ -1386,7 +1429,7 @@ fn a_readable_replacement_link_is_unavailable_without_claiming_git_cant_read_it(
     assert_eq!(legend_line(vec![base(), replaced()]).as_deref(), Some("✕ its path is a link"));
     assert_eq!(
         legend_line(vec![base(), replaced(), unavailable("gone", Some("gone"), Availability::Missing, GIT_REASON)]).as_deref(),
-        Some("✕ git can't read this worktree, or its path is a link")
+        Some("✕ git can't read worktree, or its path is a link")
     );
     let note = note_for(replaced(), vec![]);
     let words = note.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -1500,13 +1543,6 @@ fn at(path: &str, branch: Option<&str>, availability: Availability, reason: &str
 #[test]
 fn notes_quote_names_and_paths_for_every_shell_or_suggest_no_command() {
     let unlinked = |path: &str, branch: Option<&str>| note_for(at(path, branch, Availability::Unlinked, GIT_REASON), vec![]);
-    // Windows spellings go on the base path, which is shown whole on every
-    // host; a target's basename would differ between hosts.
-    let unlinked_from_base = |base: &str| {
-        let mut main = status("repo", Some("main"), true, true, DirtyStatus::Clean);
-        main.entry.path = PathBuf::from(base);
-        Unavailable::with(vec![main, at("/code/wts/plain", None, Availability::Unlinked, GIT_REASON)]).notes()
-    };
     insta::assert_snapshot!(
         "unavailable_note_quoting",
         labeled(vec![
@@ -1516,9 +1552,6 @@ fn notes_quote_names_and_paths_for_every_shell_or_suggest_no_command() {
             ("a PowerShell quote in the path".into(), unlinked("/code/wts/it\u{2019}s", None)),
             ("shell metacharacters".into(), unlinked("/code/wts/$(rm -rf ~);x", None)),
             ("a leading dash".into(), unlinked("/code/wts/-n", None)),
-            ("a Windows base path".into(), unlinked_from_base("C:\\code\\wts\\repo")),
-            ("a UNC base path".into(), unlinked_from_base("\\\\server\\share\\repo")),
-            ("a base path ending in a backslash".into(), unlinked_from_base("C:\\repo\\")),
         ])
     );
 }
@@ -1582,8 +1615,8 @@ fn notes_keep_paths_and_commands_whole_at_a_narrow_width() {
     for copyable in [
         long("wt-moved"),
         long("holder-checkout"),
-        format!("git -C {} worktree repair {}", long("main-repo"), long("wt-unlinked")),
-        format!("git -C {} worktree repair /code/wts/feat-short-name", long("main-repo")),
+        "wt remove unlinked".to_string(),
+        "wt remove feat-short-name".to_string(),
         "wt remove feature/a-rather-long-branch-name".to_string(),
     ] {
         assert!(notes.contains(&copyable), "{copyable:?} whole in:\n{notes}");
@@ -1636,8 +1669,6 @@ fn projections(long_dir: &str, odd: &str) -> Vec<Projection> {
         fallback_notice: None,
         shown,
     };
-    let mut unlinked_base = base();
-    unlinked_base.entry.path = PathBuf::from(format!("{long_dir}/base{odd}"));
     let mut link = detached(format!("{long_dir}/link{odd}"), Availability::Other(OtherCondition::Link), "");
     link.entry.prunable = None;
     let mut competing = status("dup", Some("feat/dup"), false, false, DirtyStatus::Clean);
@@ -1657,17 +1688,11 @@ fn projections(long_dir: &str, odd: &str) -> Vec<Projection> {
             vec![detached(format!("/code/wts/target{odd}"), Availability::Missing, GIT_REASON)],
             vec![format!("- target{odd}:"), format!("wt remove 'target{odd}'")],
         ),
-        Projection {
-            example: Unavailable::with(vec![
-                unlinked_base,
-                detached(format!("{long_dir}/unlinked{odd}"), Availability::Unlinked, GIT_REASON),
-            ]),
-            ..projection(
-                "unlinked repair command target and base paths",
-                vec![],
-                vec![format!("git -C '{long_dir}/base{odd}' worktree repair '{long_dir}/unlinked{odd}'")],
-            )
-        },
+        projection(
+            "unlinked removal command and worktree label",
+            vec![detached(format!("{long_dir}/unlinked{odd}"), Availability::Unlinked, GIT_REASON)],
+            vec![format!("- unlinked{odd}:"), format!("wt remove 'unlinked{odd}'")],
+        ),
         projection("other-unavailable observed path", vec![link], vec![format!("{long_dir}/link{odd}")]),
         projection(
             "name-conflict competing path",
@@ -1762,4 +1787,18 @@ fn a_note_claims_a_missing_git_file_only_for_an_unlinked_row() {
     let claims: Vec<&str> = notes.lines().filter(|line| line.contains(".git file is missing")).collect();
     assert_eq!(claims.len(), 1, "{notes}");
     assert!(claims[0].contains("lhg-before"), "{notes}");
+}
+
+/// A command badge in a dim note is styled exactly like the `wt --ff` badge;
+/// only the note's prose is dim.
+#[test]
+fn a_badge_in_a_dim_note_is_not_dim() {
+    let example = Unavailable::with(vec![
+        status("repo", Some("main"), true, true, DirtyStatus::Clean),
+        at("/code/wts/plain", Some("feat/plain"), Availability::Unlinked, GIT_REASON),
+    ]);
+    let facts = TableFacts { ff_suggestion: Some(FfSuggestion { behind: 3 }), ..example.facts() };
+    let notes = list_table::render_notes(&facts, &terminal_at(400, true)).expect("notes");
+    assert!(notes.contains("\u{1b}[7m wt --ff \u{1b}[0m"), "{notes:?}");
+    assert!(notes.contains("\u{1b}[0m\u{1b}[7m wt remove feat/plain \u{1b}[0m\u{1b}[2m"), "{notes:?}");
 }

@@ -18,6 +18,24 @@ expression: labeled(cases)
  - Set GH_TOKEN or GITHUB_TOKEN to let wt try the provider API, or use  --ignore-api  to use Git directly for this repository.
 
 
+## graph omissions
+ - 3 worktrees aren't in the graph: it shows the most recently active ones that fit the terminal.
+ - The graph leaves out a fork, merge, or tag it couldn't draw at its own commit; the table above is unaffected.
+ - feat/schema's commits are all in origin/main (merged through fix/skill).
+ - feat/old's commits are all in main (merged through another branch).
+
+
+## one hidden lane
+ - 1 worktree isn't in the graph: it shows the most recently active ones that fit the terminal.
+
+
+## incomplete in a shallow clone
+ - This clone is shallow, so the graph can't connect some older history; run  git fetch --unshallow  to fill it in.
+
+
+## shallow but complete
+(none)
+
 ## suggestion before the notice
  - main is 3 commits behind origin/main; run  wt --ff  to fast-forward it.
  - Git checked origin using `ls-remote`; this can take longer than the provider API.

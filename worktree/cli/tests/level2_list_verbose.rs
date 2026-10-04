@@ -1449,9 +1449,9 @@ fn expected_second_legend(broken: &[Broken]) -> Option<String> {
     let link = false;
     let marked = broken.iter().any(|kind| kind.marked_prunable());
     let cross = match (marked, link) {
-        (true, false) => Some("✕ git can't read this worktree"),
+        (true, false) => Some("✕ git can't read worktree"),
         (false, true) => Some("✕ its path is a link"),
-        (true, true) => Some("✕ git can't read this worktree, or its path is a link"),
+        (true, true) => Some("✕ git can't read worktree, or its path is a link"),
         (false, false) => None,
     };
     let question = broken.contains(&Broken::StatusFails).then_some("? couldn't check");
@@ -1461,10 +1461,10 @@ fn expected_second_legend(broken: &[Broken]) -> Option<String> {
 
 /// The text a user copies from the note for a row of `kind`: its command or
 /// its path, never broken by a wrap.
-fn expected_copyable(kind: Broken, base: &str, path: &str) -> Option<String> {
+fn expected_copyable(kind: Broken, path: &str) -> Option<String> {
     Some(match kind {
         Broken::Missing => "wt remove gone".to_string(),
-        Broken::Unlinked => format!("git -C {base} worktree repair {path}"),
+        Broken::Unlinked => "wt remove unlinked".to_string(),
         #[cfg(unix)]
         Broken::Link => path.to_string(),
         Broken::StatusFails => return None,
@@ -1472,16 +1472,14 @@ fn expected_copyable(kind: Broken, base: &str, path: &str) -> Option<String> {
 }
 
 /// The note `wt` owes an unavailable row of `kind`, whose path Git records
-/// as `path` in the repository whose base checkout Git records as `base`.
-fn expected_note(kind: Broken, base: &str, path: &str) -> Option<String> {
+/// as `path`.
+fn expected_note(kind: Broken, path: &str) -> Option<String> {
     Some(match kind {
         Broken::Missing => {
             "wt-gone: its directory is gone; wt remove gone checks whether its remaining Git record can be removed safely."
                 .to_string()
         }
-        Broken::Unlinked => format!(
-            "wt-unlinked: its .git file is missing; wt remove unlinked attempts to restore the link before checking its files. To restore it without removing it, run git -C {base} worktree repair {path} ."
-        ),
+        Broken::Unlinked => "wt-unlinked: its .git file is missing; wt remove unlinked removes it.".to_string(),
         #[cfg(unix)]
         Broken::Link => format!("wt-moved: {path} is a link, which may have replaced the original checkout."),
         Broken::StatusFails => return None,
@@ -1628,7 +1626,6 @@ fn assert_unavailable_scene(fixture: &DesignFixture, broken: &[Broken], cols: Op
     }
     let item_text = |item: &[usize]| item.iter().map(|&row| screen.text(row)).collect::<Vec<_>>().join(" ");
     let paths = recorded_paths(&fixture.main);
-    let base = &paths[0];
     let unavailable: Vec<&str> = rows
         .iter()
         .filter(|(_, cell)| cell.starts_with('✕'))
@@ -1638,18 +1635,27 @@ fn assert_unavailable_scene(fixture: &DesignFixture, broken: &[Broken], cols: Op
     for (item, name) in items[1..].iter().zip(&unavailable) {
         let kind = *broken.iter().find(|kind| kind.dir() == *name).expect("a broken row");
         let path = paths.iter().find(|path| path.ends_with(name)).expect("Git's path for the row");
-        let expected = expected_note(kind, base, path).expect("a note for a ✕ row");
+        let expected = expected_note(kind, path).expect("a note for a ✕ row");
         let text = item_text(item);
         let text = text.strip_prefix(" - ").expect("an item");
         assert_eq!(squeezed(text), squeezed(&expected), "the {name} note, in row order\n{plain}");
-        let copyable = expected_copyable(kind, base, path).expect("a ✕ row's command or path");
+        let copyable = expected_copyable(kind, path).expect("a ✕ row's command or path");
         assert!(text.contains(&copyable), "the {name} note shows {copyable:?} whole\n{plain}");
+        // The prose is dim; a command badge leaves the dim, like `wt --ff`.
         for &row in item {
             assert!(
-                screen.rows[row].iter().skip(3).filter(|cell| cell.ch != ' ').all(|cell| cell.style.dim),
-                "the {name} note is dim: {:?}",
+                screen.rows[row]
+                    .iter()
+                    .skip(3)
+                    .filter(|cell| cell.ch != ' ')
+                    .all(|cell| cell.style.dim != cell.style.inverse),
+                "the {name} note is dim except its badge: {:?}",
                 screen.text(row)
             );
+        }
+        if matches!(kind, Broken::Missing | Broken::Unlinked) {
+            let badge = item.iter().flat_map(|&row| &screen.rows[row]).filter(|cell| cell.style.inverse);
+            assert_eq!(badge.map(|cell| cell.ch).collect::<String>().trim(), copyable, "the {name} badge");
         }
     }
 }

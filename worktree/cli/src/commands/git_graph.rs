@@ -105,6 +105,25 @@ pub struct GraphFacts {
     /// Local history could not establish something the graph would show (a
     /// shallow clone, a failed git command): the graph carries the notice.
     pub incomplete: bool,
+    /// The repository is verifiably a shallow clone, which is what usually
+    /// leaves a connection unestablished.
+    pub shallow: bool,
+    /// Branches whose tip reached another lane only through some other
+    /// branch's merge. Their lanes are drawn without a merge, and that is
+    /// complete history, not a gap.
+    pub merged_elsewhere: Vec<MergedElsewhere>,
+}
+
+/// A branch whose commits are all on `into`, brought there by another
+/// branch's merge rather than one of its own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MergedElsewhere {
+    pub branch: String,
+    /// The lane's name: a branch, the default branch, or `origin/<default>`.
+    pub into: String,
+    /// The drawn branch whose merge brought it in; `None` when no drawn
+    /// branch was merged at that commit.
+    pub through: Option<String>,
 }
 
 impl GraphFacts {
@@ -260,9 +279,10 @@ pub fn gather(input: &GatherInput, needs_graph: bool, needs_verbose: bool) -> (O
         return (None, None);
     };
     let gap = history_gap || tips_gap;
+    let shallow = history.is_shallow() && !history_gap;
 
     if input.is_base_view() {
-        let graph = needs_graph.then(|| base_view(input, &history, &tips, gap));
+        let graph = needs_graph.then(|| GraphFacts { shallow, ..base_view(input, &history, &tips, gap) });
         return (graph, None);
     }
 
@@ -279,7 +299,7 @@ pub fn gather(input: &GatherInput, needs_graph: bool, needs_verbose: bool) -> (O
         }),
         _ => None,
     };
-    let graph = needs_graph.then(|| focused_view(input, &history, &tips, gap, current, current_tip, base));
+    let graph = needs_graph.then(|| GraphFacts { shallow, ..focused_view(input, &history, &tips, gap, current, current_tip, base) });
     (graph, verbose)
 }
 
@@ -436,9 +456,22 @@ struct Placement {
     shape: Shape,
     /// Classification or the fork was unknown.
     gap: bool,
+    /// The other branch's merge that brought the tip into this lane, when
+    /// the tip was [`Integration::IntegratedOtherwise`].
+    merged_through: Option<(String, LaneId)>,
 }
 
 impl Placement {
+    /// Whether `merge` is one of this branch's own drawn merges.
+    fn merges_at(&self, merge: &str) -> bool {
+        match &self.shape {
+            Shape::Lane { earlier, merge: own, .. } => {
+                own.as_ref().is_some_and(|(sha, _)| sha == merge) || earlier.iter().any(|edge| edge.merge == merge)
+            }
+            Shape::Label(_) => false,
+        }
+    }
+
     /// The commits this branch needs drawn on other lanes.
     fn anchors(&self) -> Vec<(LaneId, String)> {
         match &self.shape {
@@ -524,11 +557,12 @@ fn place(history: &History, classifications: &Classifications, tips: &DefaultTip
                 parent: selected.parent.map(|(parent, _)| parent.to_string()),
                 shape: Shape::Label(candidates[*candidate].0.clone()),
                 gap: false,
+                merged_through: None,
             };
         }
         Ok(
             integration @ (Integration::MergedDirectly { candidate, first_parent, .. }
-            | Integration::IntegratedOtherwise { candidate, first_parent }),
+            | Integration::IntegratedOtherwise { candidate, first_parent, .. }),
         ) => {
             let into = &candidates[*candidate].0;
             // A tip that contains the branch is its own merge base with it,
@@ -543,8 +577,9 @@ fn place(history: &History, classifications: &Classifications, tips: &DefaultTip
                 Integration::MergedDirectly { merge, .. } => Some((merge.clone(), into.clone())),
                 _ => None,
             };
-            let indirect = merge.is_none();
-            (stop, Fork::Against(parent_elsewhere.unwrap_or(first_parent), into.clone()), merge, indirect)
+            // An indirect integration is a verified answer with no merge of
+            // its own to draw, not a gap; `merged_elsewhere` reports it.
+            (stop, Fork::Against(parent_elsewhere.unwrap_or(first_parent), into.clone()), merge, false)
         }
         classified @ (Ok(Integration::Unmerged) | Err(GatherGap)) => {
             let fork = match (&selected.default_base, parent_tip) {
@@ -573,12 +608,17 @@ fn place(history: &History, classifications: &Classifications, tips: &DefaultTip
         merge,
     };
     let gap = classified_gap || fork_gap || extension.gap;
+    let merged_through = match &classified {
+        Ok(Integration::IntegratedOtherwise { candidate, merge, .. }) => Some((merge.clone(), candidates[*candidate].0.clone())),
+        _ => None,
+    };
     Placement {
         branch: selected.branch.to_string(),
         tip: tip.to_string(),
         parent: selected.parent.map(|(parent, _)| parent.to_string()),
         shape,
         gap,
+        merged_through,
     }
 }
 
@@ -838,6 +878,18 @@ fn assemble(
         lines.push(line);
     }
 
+    let merged_elsewhere = placements
+        .iter()
+        .filter_map(|placement| {
+            let (merge, into) = placement.merged_through.as_ref()?;
+            Some(MergedElsewhere {
+                branch: placement.branch.clone(),
+                into: lane_name(input, tips, into),
+                through: placements.iter().find(|other| other.merges_at(merge)).map(|other| other.branch.clone()),
+            })
+        })
+        .collect();
+
     GraphFacts {
         default_branch: input.default_branch.clone(),
         default_entries: default_built.entries,
@@ -845,6 +897,20 @@ fn assemble(
         refs,
         current_branch: current_branch.to_string(),
         incomplete,
+        shallow: false,
+        merged_elsewhere,
+    }
+}
+
+/// The name a reader knows `lane` by: the default lane is the local default
+/// branch unless `origin/<default>` is ahead of it and so is its tip.
+fn lane_name(input: &GatherInput, tips: &DefaultTips, lane: &LaneId) -> String {
+    let origin = || format!("origin/{}", input.default_branch);
+    match lane {
+        LaneId::Branch(branch) => branch.clone(),
+        LaneId::Origin => origin(),
+        LaneId::Default if tips.local.as_deref() == Some(tips.lane_tip.as_str()) => input.default_branch.clone(),
+        LaneId::Default => origin(),
     }
 }
 

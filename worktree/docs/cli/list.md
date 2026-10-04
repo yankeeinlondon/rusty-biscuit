@@ -243,7 +243,7 @@ A linked worktree can lose its connection to the repository while Git still reco
 | What `wt` finds on disk | Called | Note |
 |---|---|---|
 | The recorded directory does not exist | missing | `its directory is gone; wt remove <name> checks whether its remaining Git record can be removed safely.` |
-| The directory exists but its `.git` file does not | unlinked | `its .git file is missing; wt remove <name> attempts to restore the link before checking its files. To restore it without removing it, run git -C <base> worktree repair <path>.` |
+| The directory exists but its `.git` file does not | unlinked | `its .git file is missing; wt remove <name> removes it.` |
 | Anything else: a file or a link at the path, a path or `.git` that can't be inspected, or a `.git` that exists but Git can't use | other | `Git can't read this worktree: <what was found>; Git reports: <Git's reason>.` |
 
 "Does not exist" means the operating system answered "not found". A permission or I/O error is never read as absence; it is the "other" case, with the system's message. See [`wt remove`](remove.md) for what removing each kind does.
@@ -299,9 +299,9 @@ Every line is its branch's first-parent history, so a merged branch's commits ne
 
 Each line shows its 5 newest commits; older ones fold into a `+N` square. Open PRs appear as `PR #n → target` tags. When `origin/<default>` has diverged from the local default branch it gets a line of its own.
 
-When local history cannot establish a connection (in a shallow clone, for instance), or something the graph should show cannot be drawn at its own commit, the graph shows what it could verify followed by a dim "Some history is not shown". It never fetches more history for this.
+When local history cannot establish a connection (in a shallow clone, for instance), or something the graph should show cannot be drawn at its own commit, the graph shows what it could verify, and the closing notes say so. In a shallow clone the note tells you how to fill in the history (`This clone is shallow, so the graph can't connect some older history; run git fetch --unshallow to fill it in.`); otherwise it says only `The graph leaves out a fork, merge, or tag it couldn't draw at its own commit; the table above is unaffected.` and there is nothing to run. `wt list` never fetches more history itself. A branch whose commits reached the default branch only through another branch's merge is not missing anything; a note says where they are, for example `feat/schema-enhancement's commits are all in origin/main (merged through fix/wt-skill).`
 
-There is no minimum terminal width: the graph is sized from its natural width and the terminal's cell size, trims commits into `+N` squares to fit, and shrinks only when even the trimmed graph is too wide. In the base view a graph taller than half the terminal keeps the most recently active lines and notes how many were left out. See [git-graph.md](../git-graph.md) for the design.
+There is no minimum terminal width: the graph is sized from its natural width and the terminal's cell size, trims commits into `+N` squares to fit, and shrinks only when even the trimmed graph is too wide. In the base view a graph taller than half the terminal keeps the most recently active lines, and the closing notes say how many were left out (`3 worktrees aren't in the graph: it shows the most recently active ones that fit the terminal.`). See [git-graph.md](../git-graph.md) for the design.
 
 `-w` / `--width` sets the graph's width directly (`70`, `70ch`, or `50%` of the terminal); the graph is then never trimmed to fit.
 
@@ -330,7 +330,7 @@ Commits are formatted as conventional commits when possible (e.g. `feat(scope): 
 
 ### Closing notes
 
-After a blank line, the output can end with up to four kinds of note, in this order. A command a note tells you to run (`wt --ff`, `--ignore-api`) is shown in reverse video, so it stands out as something to type. The examples below are plain text.
+After a blank line, the output can end with up to five kinds of note, in this order. A command a note tells you to run (`wt --ff`, `--ignore-api`) is shown in reverse video, so it stands out as something to type. The examples below are plain text.
 
 - **Fast-forward suggestion.** When the local default branch is strictly behind `origin/<default>` (not diverged):
 
@@ -347,23 +347,31 @@ After a blank line, the output can end with up to four kinds of note, in this or
     ```
 
     A rate-limit fallback never produces it, and neither does a check made for an `origin` that was replaced or removed during the wait.
+- **About the graph.** Shown only when a graph was drawn; the graph image itself carries no text. Lanes left out, then history it couldn't connect (one of the two notes below, the shallow one when the clone is shallow), then one note per branch merged through another branch:
+
+    ```text
+    - 3 worktrees aren't in the graph: it shows the most recently active ones that fit the terminal.
+    - This clone is shallow, so the graph can't connect some older history; run git fetch --unshallow to fill it in.
+    - The graph leaves out a fork, merge, or tag it couldn't draw at its own commit; the table above is unaffected.
+    - feat/schema-enhancement's commits are all in origin/main (merged through fix/wt-skill).
+    ```
+
+    The last names the lane by what you know it as (`origin/main` when it is ahead of `main`), and the carrying branch only when it is drawn; otherwise it says `merged through another branch`.
 - **Unavailable worktrees.** One dim note per `✕` row, in table order (a `?` row gets none), as described under [Worktrees Git can't read](#worktrees-git-cant-read):
 
     ```text
     - feat-gone: its directory is gone; wt remove feat/gone checks whether its remaining Git record can be removed safely.
-    - lhg-before: its .git file is missing; wt remove lhg-before attempts to restore the link before checking its files. To restore it without removing it, run git -C /code/wts/rusty-biscuit worktree repair /code/wts/lhg-before.
+    - lhg-before: its .git file is missing; wt remove lhg-before removes it.
     ```
 
-    The suggested name is one that `wt remove` resolves to exactly this worktree: its branch, else its directory name. When neither does (another worktree matches the same name, for example), the note says `wt remove` without a name and explains why: `No name selects it for wt remove: feat also matches /code/wts/other.` Names and paths that need it are single-quoted (`wt remove 'my work'`). A value that can't be spelled the same way in bash, zsh, fish, and PowerShell (a leading `-` or `~`, a single quote, two backslashes in a row or a trailing one, a control character) is never offered as something to type: the note names the command and the value separately instead, for example `run git worktree repair from the base checkout, naming /code/wts/it's.` Nothing in a note is ever executed. Names, paths, Git's reasons, and error messages are shown exactly as recorded, whatever characters they hold: text that looks like styling, such as `<red>`, is printed as is.
+    The suggested name is one that `wt remove` resolves to exactly this worktree: its branch, else its directory name. When neither does (another worktree matches the same name, for example), the note says `wt remove` without a name and explains why: `No name selects it for wt remove: feat also matches /code/wts/other.` Names and paths that need it are single-quoted (`wt remove 'my work'`). A value that can't be spelled the same way in bash, zsh, fish, and PowerShell (a leading `-` or `~`, a single quote, two backslashes in a row or a trailing one, a control character) is never offered as something to type: the note names the command without it and says why instead, for example `wt remove removes it. No name selects it for wt remove: it's can't be typed the same way in every shell.` Nothing in a note is ever executed. Names, paths, Git's reasons, and error messages are shown exactly as recorded, whatever characters they hold: text that looks like styling, such as `<red>`, is printed as is.
 
     A path or command in these notes, and the path in the `--ff` refusal for a worktree Git can't read, is never broken by the wrap, so what you copy is what `wt` means. It moves to the next line whole, and one too long for any line gets a line of its own that your terminal wraps, without an added `-`. In a 60-column terminal:
 
     ```text
-    - lhg-before: its .git file is missing;
-      wt remove lhg-before  attempts to restore the link
-      before checking its files. To restore it without
-      removing it, run
-      git -C /code/wts/rusty-biscuit worktree repair /code/wts/lhg-before .
+    - wt-gone: its directory is gone;
+      wt remove feature/a-rather-long-branch-name  checks
+      whether its remaining Git record can be removed safely.
     ```
 
 ## Flags

@@ -233,15 +233,6 @@ fn worktrees_git_cannot_read_are_crossed_and_explained_without_repair() {
     let records_before = porcelain();
     assert_eq!(records_before.matches("prunable").count(), 2, "{records_before}");
     // Git's own spelling of each path, which the notes show.
-    let recorded = |name: &str| {
-        records_before
-            .lines()
-            .filter_map(|line| line.strip_prefix("worktree "))
-            .find(|path| path.ends_with(name))
-            .unwrap_or_else(|| panic!("{name} in {records_before}"))
-            .to_string()
-    };
-    let base_path = records_before.lines().next().unwrap().strip_prefix("worktree ").unwrap().to_string();
 
     let output = Home::new().wt(&main, &["list"]);
 
@@ -254,20 +245,14 @@ fn worktrees_git_cannot_read_are_crossed_and_explained_without_repair() {
     assert_eq!(cell("lhg-before"), "✕ lhg-before", "{stderr}");
     assert_eq!(cell("feat-gone"), "✕ feat-gone", "{stderr}");
     assert_eq!(cell("feat-ok"), "○ feat-ok", "{stderr}");
-    assert!(stderr.contains("✕ git can't read this worktree"), "{stderr}");
+    assert!(stderr.contains("✕ git can't read worktree"), "{stderr}");
     assert!(!stderr.contains("couldn't check"), "no readable row is unknown: {stderr}");
 
     // Notes wrap at the captured width, so compare their words.
     let words: String = stderr.split_whitespace().collect::<Vec<_>>().join(" ");
-    // Paths may be single-quoted (a Windows short name's `~` needs it).
-    let squeezed: String = stderr.split_whitespace().collect::<String>().replace('\'', "");
     assert!(
-        words.contains("lhg-before: its .git file is missing; wt remove lhg-before attempts to restore the link before checking its files."),
+        words.contains("lhg-before: its .git file is missing; wt remove lhg-before removes it."),
         "{words}"
-    );
-    assert!(
-        squeezed.contains(&format!("run git-C{base_path}worktreerepair{}.", recorded("lhg-before")).replace(' ', "")),
-        "{stderr}"
     );
     assert!(
         words.contains("feat-gone: its directory is gone; wt remove feat/gone checks whether its remaining Git record can be removed safely."),

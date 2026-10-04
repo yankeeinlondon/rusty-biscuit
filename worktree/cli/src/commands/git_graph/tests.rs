@@ -1354,7 +1354,7 @@ fn a_branch_continued_after_its_merge_draws_its_earlier_merge() {
 /// `t` reached main only through `other`'s merge.
 #[test]
 #[serial_test::serial]
-fn an_indirectly_integrated_branch_gets_a_lane_without_a_merge_and_the_notice() {
+fn an_indirectly_integrated_branch_gets_a_lane_without_a_merge_and_no_notice() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().to_path_buf();
     init_repo(&path);
@@ -1376,7 +1376,12 @@ fn an_indirectly_integrated_branch_gets_a_lane_without_a_merge_and_the_notice() 
     assert_eq!(t.entries, commits(&[&t1]));
     assert_eq!(t.fork_sha.as_ref(), Some(&d1));
     assert_eq!(merge_destinations(t), Vec::<&String>::new());
-    assert!(graph.incomplete);
+    assert!(!graph.incomplete, "a verified indirect integration is complete history");
+    assert_eq!(
+        graph.merged_elsewhere,
+        vec![MergedElsewhere { branch: "t".into(), into: "main".into(), through: None }],
+        "other is not drawn, so it isn't named"
+    );
     assert_eq!(graph.default_entries.last(), Some(&LaneEntry::Commit(merge)));
     assert!(!mermaid(&graph).contains("merge "));
 }
@@ -2244,6 +2249,8 @@ fn an_ordinary_unmerged_branch_gathers_unchanged_facts() {
         refs: vec![("main".to_string(), repo.c3.clone())],
         current_branch: "main".to_string(),
         incomplete: false,
+        shallow: false,
+        merged_elsewhere: Vec::new(),
     };
     assert_eq!(graph, Some(expected));
 }
@@ -2417,6 +2424,7 @@ fn a_shallow_unknown_earlier_candidate_is_a_gap_even_beside_a_later_direct_merge
         history.classify(&f2, &[&outer, &p1]),
         Ok(topology::Integration::IntegratedOtherwise {
             candidate: 0,
+            merge: outer.clone(),
             first_parent: o1.clone(),
         }),
         "a gap after an indirect match keeps that match"
@@ -2571,6 +2579,7 @@ fn classify_names_every_integration_and_tries_candidates_in_order() {
         history.classify(&i1, &[&synced, &tip]),
         Ok(topology::Integration::IntegratedOtherwise {
             candidate: 0,
+            merge: synced.clone(),
             first_parent: y1.clone(),
         }),
         "with no stronger result, the first indirect match stands"
@@ -2594,6 +2603,7 @@ fn classify_names_every_integration_and_tries_candidates_in_order() {
         history.classify(&i1, &[&tip]),
         Ok(topology::Integration::IntegratedOtherwise {
             candidate: 0,
+            merge: tip.clone(),
             first_parent: merge.clone(),
         })
     );

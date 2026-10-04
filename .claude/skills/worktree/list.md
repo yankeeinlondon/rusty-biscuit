@@ -168,9 +168,21 @@ Pure over `TableFacts`; snapshot tests in `cli/tests/list_table.rs`.
   `list_table::PrOutcome` via `pr_status_markup`, then §6 when the wait timed
   out. Every row is the `list_table::pr_presentation_snapshot_every_row`
   snapshot.
-- `render_notes`: `--ff` refusal or §9 suggestion, then §8, then one dim
-  `unavailable_note` per unavailable row in table order (a `?` row gets no
-  note). Notes name a command only when it can be typed:
+- `render_notes`: `--ff` refusal or §9 suggestion, then §8, then
+  `TableFacts::graph_omissions` (lanes left out; then incomplete history,
+  worded for `shallow` with a `git fetch --unshallow` badge or as a plain
+  statement otherwise; then one line per `merged_elsewhere` branch),
+  then one dim `unavailable_note` per unavailable row in table order (a `?`
+  row gets no note).
+  - The graph is drawn with `GitGraph::render_without_notes`, so the
+    component's own "N more worktrees not shown" and "Some history is not
+    shown" lines never print under the image; `run` copies the returned
+    plan's `hidden_lanes` and `incomplete`, and the facts' `shallow` and
+    `merged_elsewhere`, into `graph_omissions`. `GraphFacts::shallow` is set
+    only from a verified `--is-shallow-repository` read, so a failed read
+    never claims a shallow clone. The L2
+    Kitty test reads the hidden-lane count from that note, not from the row
+    under the image. Notes name a command only when it can be typed:
   - `remove_argument` tries the branch, then the basename. It keeps a
     candidate only if `resolve_worktree` maps it to this entry's path;
     otherwise it says which entry the name selects instead.
@@ -182,10 +194,11 @@ Pure over `TableFacts`; snapshot tests in `cli/tests/list_table.rs`.
     - `\\`, or a final `\` (fish escapes inside single quotes).
 
     A refused name or path drops the command, and the note says why.
-  - Only `Unlinked` claims `.git` is missing. Snapshots are
-    `unavailable_notes` and `unavailable_note_quoting`. Put a Windows spelling
-    on the base path in tests, because `file_name` of `C:\x\y` differs
-    between hosts.
+  - Only `Unlinked` claims `.git` is missing; its note only points at
+    `wt remove`, never at `git worktree repair`. Snapshots are
+    `unavailable_notes` and `unavailable_note_quoting`. Never put a Windows
+    spelling in a target path in tests, because `file_name` of `C:\x\y`
+    differs between hosts.
   - Notes and status items are `Note`s: typed segments of markup (fixed
     wording, or external text through `Prose::escape_text`) and raw
     copyable text. Add every path or command a note shows with

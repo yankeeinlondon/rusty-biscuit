@@ -23,7 +23,7 @@ use worktree::worktree::{WorktreeList, parse_worktree_state};
 
 use super::git_graph;
 use super::list_table::{
-    self, CredentialCondition, CredentialLine, FfNotice, FfSuggestion, LastKnown, PrOutcome, RemoteFacts,
+    self, CredentialCondition, CredentialLine, FfNotice, FfSuggestion, GraphOmissions, LastKnown, PrOutcome, RemoteFacts,
     RemoteStatus, Sections, TableFacts,
 };
 use crate::perf;
@@ -680,13 +680,22 @@ fn run_pipeline(
     }
 
     let badges = facts.badges();
-    let graph = graph_facts.map(|graph_facts| {
+    let graph = graph_facts.and_then(|graph_facts| {
         let t0 = perf.then(Instant::now);
-        let graph = graph_facts.to_git_graph(badges, parsed_width.clone()).render(&image_terminal(terminal));
+        let graph = graph_facts.to_git_graph(badges, parsed_width.clone()).render_without_notes(&image_terminal(terminal));
         if let Some(start) = t0 {
             perf::record(&mut collector, "graph image render (biscuit-terminal)", start.elapsed());
         }
-        graph
+        graph.map(|graph| (graph, graph_facts))
+    });
+    let graph = graph.map(|((image, plan), graph_facts)| {
+        facts.graph_omissions = GraphOmissions {
+            hidden_lanes: plan.hidden_lanes,
+            incomplete: plan.incomplete,
+            shallow: graph_facts.shallow,
+            merged_elsewhere: graph_facts.merged_elsewhere,
+        };
+        image
     });
     let verbose_text = verbose_data.map(|data| {
         let t0 = perf.then(Instant::now);

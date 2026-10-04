@@ -35,9 +35,14 @@ pub(super) enum Integration {
     /// history of its own to draw.
     NoSeparateHistory { candidate: usize },
     /// `T` reached the candidate through another branch's merge, so no merge
-    /// of its own can be drawn. `first_parent` is the candidate lane's commit
-    /// before the first commit containing `T`.
-    IntegratedOtherwise { candidate: usize, first_parent: String },
+    /// of its own can be drawn. `merge` is the first commit on the candidate
+    /// lane containing `T` (that other branch's merge); `first_parent` is the
+    /// lane's commit before it.
+    IntegratedOtherwise {
+        candidate: usize,
+        merge: String,
+        first_parent: String,
+    },
 }
 
 /// Where a lane's history ends.
@@ -111,6 +116,12 @@ impl History {
             Ok("true") => (Self { shallow: true }, Ok(())),
             _ => (Self { shallow: true }, Err(GatherGap)),
         }
+    }
+
+    /// Whether the repository is shallow, as read (or assumed after a
+    /// failed read).
+    pub fn is_shallow(&self) -> bool {
+        self.shallow
     }
 
     /// History assumed complete, for gathering that makes no graph.
@@ -218,6 +229,7 @@ impl History {
         } else {
             Integration::IntegratedOtherwise {
                 candidate,
+                merge: merge.clone(),
                 first_parent: first_parent.clone(),
             }
         }))

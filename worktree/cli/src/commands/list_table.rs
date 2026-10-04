@@ -28,6 +28,8 @@ use biscuit_terminal::utils::block_constraint::visible_width;
 use biscuit_terminal::utils::color::{BasicColor, Color, RgbColor};
 use biscuit_terminal::utils::wrap_policy::WordWrap;
 use worktree::default_target::DefaultTarget;
+
+pub use crate::commands::git_graph::MergedElsewhere;
 use worktree::listing::{
     BranchComparisons, Caption, CaptionState, Comparison, MergeState, ParentComparison, TreeNode,
     TreeRow,
@@ -72,6 +74,23 @@ pub struct TableFacts<'a> {
     pub ff_notice: Option<FfNotice>,
     /// §8: the variables that would let `wt` use the provider API.
     pub fallback_notice: Option<Vec<String>>,
+    /// What the drawn graph left out; noted in the closing notes rather than
+    /// under the image.
+    pub graph_omissions: GraphOmissions,
+}
+
+/// What a drawn graph left out or drew without a merge, from its
+/// [`GitGraphPlan`](biscuit_terminal::components::git_graph::GitGraphPlan)
+/// and [`GraphFacts`](crate::commands::git_graph::GraphFacts).
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct GraphOmissions {
+    /// Worktree lanes the height cap left out.
+    pub hidden_lanes: usize,
+    /// A fork, merge, or tag the graph could not draw at its own commit.
+    pub incomplete: bool,
+    /// The clone is shallow, the usual reason for `incomplete`.
+    pub shallow: bool,
+    pub merged_elsewhere: Vec<MergedElsewhere>,
 }
 
 /// What this run's PR half came to, for the badges and the status list. The
@@ -197,6 +216,7 @@ impl<'a> TableFacts<'a> {
             ff_suggestion: None,
             ff_notice: None,
             fallback_notice: None,
+            graph_omissions: GraphOmissions::default(),
         }
     }
 }
@@ -270,7 +290,8 @@ pub fn render_status(facts: &TableFacts<'_>, terminal: &Terminal, now: u64) -> O
 }
 
 /// The closing notes: the `--ff` result or the §9 suggestion, then the §8
-/// notice, then one note per unavailable worktree, in table row order;
+/// notice, then what the graph left out, then one note per unavailable
+/// worktree, in table row order;
 /// `None` when there is nothing to say.
 pub fn render_notes(facts: &TableFacts<'_>, terminal: &Terminal) -> Option<String> {
     let local = Prose::escape_text(facts.default_branch);
@@ -312,6 +333,46 @@ pub fn render_notes(facts: &TableFacts<'_>, terminal: &Terminal) -> Option<Strin
                 "Set {} to let wt try the provider API, or use {} to use Git directly for this repository.",
                 Prose::escape_text(&keys.join(" or ")),
                 command_badge("--ignore-api")
+            )
+            .into(),
+        );
+    }
+    let omissions = &facts.graph_omissions;
+    if omissions.hidden_lanes > 0 {
+        let (count, verb) = match omissions.hidden_lanes {
+            1 => ("1 worktree".to_string(), "isn't"),
+            n => (format!("{n} worktrees"), "aren't"),
+        };
+        lines.push(
+            format!("{count} {verb} in the graph: it shows the most recently active ones that fit the terminal.")
+                .into(),
+        );
+    }
+    if omissions.incomplete && omissions.shallow {
+        lines.push(
+            format!(
+                "This clone is shallow, so the graph can't connect some older history; run {} to fill it in.",
+                command_badge("git fetch --unshallow")
+            )
+            .into(),
+        );
+    } else if omissions.incomplete {
+        lines.push(
+            "The graph leaves out a fork, merge, or tag it couldn't draw at its own commit; the table above \
+            is unaffected."
+                .into(),
+        );
+    }
+    for merged in &omissions.merged_elsewhere {
+        let through = match &merged.through {
+            Some(branch) => Prose::escape_text(branch),
+            None => "another branch".to_string(),
+        };
+        lines.push(
+            format!(
+                "{}'s commits are all in {} (merged through {through}).",
+                Prose::escape_text(&merged.branch),
+                Prose::escape_text(&merged.into)
             )
             .into(),
         );
@@ -643,38 +704,35 @@ pub fn age_text(seconds: u64) -> String {
 
 /// The legend lines: the Worktree column's glyphs, then the Branch column's.
 /// The `conflicts` sample sits in the column of the source-files dot above
-/// it. `✕` and `?` are explained only when a row of `facts` shows them, on a
-/// second Worktree line so the legend does not widen the table; `✕` is
-/// worded for the rows that show it (see [`Availability::Other`]).
+/// it. `✕` and `?` are explained only when a row of `facts` shows them, at
+/// the end of the Worktree line; `✕` is worded for the rows that show it
+/// (see [`Availability::Other`]).
 pub fn legend_markup(facts: &TableFacts<'_>) -> Vec<String> {
     let rows = facts.row_statuses();
-    let mut lines = vec![format!(
+    let mut worktree = vec![format!(
         "Worktree   {} <dim>clean</dim>    {} <dim>uncommitted files</dim>    {} <dim>uncommitted source files</dim>",
         dirty_dot(DirtyStatus::Clean),
         dirty_dot(DirtyStatus::DirtyNonSource),
         dirty_dot(DirtyStatus::DirtySource),
     )];
-    let mut unreadable = Vec::new();
     // Git does not mark a checkout it reads through a replacement link, so
     // such a row gets its own wording rather than a claim Git can't read it.
     let unavailable = |marked: bool| {
         rows.iter().any(|status| status.availability.is_unavailable() && status.entry.prunable.is_some() == marked)
     };
     let meaning = match (unavailable(true), unavailable(false)) {
-        (true, false) => Some("git can't read this worktree"),
+        (true, false) => Some("git can't read worktree"),
         (false, true) => Some("its path is a link"),
-        (true, true) => Some("git can't read this worktree, or its path is a link"),
+        (true, true) => Some("git can't read worktree, or its path is a link"),
         (false, false) => None,
     };
     if let Some(meaning) = meaning {
-        unreadable.push(format!("{UNAVAILABLE_MARK} <dim>{meaning}</dim>"));
+        worktree.push(format!("{UNAVAILABLE_MARK} <dim>{meaning}</dim>"));
     }
     if rows.iter().any(|status| !status.availability.is_unavailable() && status.dirty == DirtyStatus::Unknown) {
-        unreadable.push(format!("{} <dim>couldn't check</dim>", dirty_dot(DirtyStatus::Unknown)));
+        worktree.push(format!("{} <dim>couldn't check</dim>", dirty_dot(DirtyStatus::Unknown)));
     }
-    if !unreadable.is_empty() {
-        lines.push(format!("           {}", unreadable.join("    ")));
-    }
+    let mut lines = vec![worktree.join("    ")];
     lines.push(format!(
         "Branch     {} <dim>merges cleanly into parent</dim>     {} <dim>conflicts with parent</dim>    {} <dim>parent deleted</dim>",
         connector_markup("└─", Some(MergeState::Clean), false),
@@ -983,9 +1041,9 @@ fn dirty_dot(dirty: DirtyStatus) -> &'static str {
 }
 
 /// The dim note for an unavailable row, `None` for an available one.
-/// `statuses` is every listed worktree, for name resolution and the base
-/// checkout's path. Commands are shown only when [`shell_word`] can spell
-/// every argument; they are display text, never run.
+/// `statuses` is every listed worktree, for name resolution. Commands are
+/// shown only when [`shell_word`] can spell every argument; they are display
+/// text, never run.
 fn unavailable_note(status: &WorktreeStatus, statuses: &[WorktreeStatus]) -> Option<Note> {
     let entry = &status.entry;
     let label = Prose::escape_text(&display_name(entry));
@@ -1008,19 +1066,10 @@ fn unavailable_note(status: &WorktreeStatus, statuses: &[WorktreeStatus]) -> Opt
             .then(remove)
             .markup(" checks whether its remaining Git record can be removed safely.")
             .then(unnamed),
-        Availability::Unlinked => {
-            let base = statuses.iter().find(|status| status.entry.is_main).map(|status| &status.entry.path);
-            let repair = base
-                .and_then(|base| Some((shell_word(&base.to_string_lossy())?, shell_word(&entry.path.to_string_lossy())?)))
-                .map(|(base, target)| copyable_badge(format!("git -C {base} worktree repair {target}")))
-                .unwrap_or_else(|| Note::from("git worktree repair from the base checkout, naming ").then(path()));
-            Note::from(format!("{label}: its .git file is missing; "))
-                .then(remove)
-                .markup(" attempts to restore the link before checking its files. To restore it without removing it, run ")
-                .then(repair)
-                .markup(".")
-                .then(unnamed)
-        }
+        Availability::Unlinked => Note::from(format!("{label}: its .git file is missing; "))
+            .then(remove)
+            .markup(" removes it.")
+            .then(unnamed),
         Availability::Other(condition) => {
             Note::from(format!("{label}: ")).then(reason_note(entry, condition, path())).markup(".")
         }
@@ -1133,9 +1182,10 @@ fn command_badge(command: &str) -> String {
     format!("<inverse> {} </inverse>", Prose::escape_text(command))
 }
 
-/// [`command_badge`] whose command [`notes_list`] keeps whole.
+/// [`command_badge`] whose command [`notes_list`] keeps whole, for a dim
+/// note: the badge leaves the dim so it reads like every other command badge.
 fn copyable_badge(command: String) -> Note {
-    Note::from("<inverse> ").copyable(command).markup(" </inverse>")
+    Note::from("</dim><inverse> ").copyable(command).markup(" </inverse><dim>")
 }
 
 /// A remote-tracking branch badge.

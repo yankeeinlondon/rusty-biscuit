@@ -50,7 +50,7 @@ lane tip, then a diverged `origin/<default>` tip. Results:
 | unmerged | — | lane |
 | merged directly | strong | lane `T --not C^1`, `with_merge(T, C)` |
 | no separate history | strong | a label at `T`, never an empty lane |
-| integrated otherwise | weak | lane, no merge, incomplete |
+| integrated otherwise | weak | lane, no merge, `GraphFacts::merged_elsewhere` (not incomplete) |
 
 - A strong result wins at the first candidate that yields one. A weak result
   lets the walk continue; it is returned only when no later candidate is strong.
@@ -58,6 +58,13 @@ lane tip, then a diverged `origin/<default>` tip. Results:
   merge (`MergedDirectly { after_indirect: true }`).
 - A `GatherGap` before any weak result is the result; one after it returns the
   weak result.
+- Integrated otherwise is a **verified** answer, never a gap: `place` reports
+  it as `Placement::merged_through` (the carrying merge `C` and its lane), and
+  `assemble` turns it into `MergedElsewhere`, naming the carrying branch only
+  when a drawn placement's own merge (`merges_at`) is `C`. It used to set
+  `incomplete`, which produced a "history not shown" note nobody could act on
+  (observed 2026-10-04: a branch whose last commit reached `origin/main`
+  through another branch's PR).
 - A merged branch's fork is measured against `C^1`, or against its parent's tip
   only when the merge went elsewhere and was not found after an indirect match
   (the parent's tip contains `T` otherwise).
@@ -122,7 +129,8 @@ A lane's boundary (the first commit below it) is classified too, sharing one
 - Every gathered line passes its branch tip (`GraphLine::with_tip`). `GitGraph`
   labels a line without commits at that tip and never at its fork.
 - A tag, fork, or merge commit it cannot draw sets `GitGraphPlan::incomplete`
-  ("Some history is not shown") **instead of being substituted**.
+  **instead of being substituted**; `wt list` words it as a closing note
+  ([list.md](list.md)).
 - `GraphLine::with_merge(source, destination)` (a `LaneMerge`, appended oldest
   first) draws a `merge`. A source in the middle of a lane makes `GitGraph` emit
   that lane in segments: pause after the source and the lanes forked at it,
