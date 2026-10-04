@@ -612,21 +612,34 @@ impl GitGraph {
             .is_none_or(|current| current == self.default_branch)
     }
 
-    /// Whether the view draws `branch`: every branch in the base view; the
-    /// current branch, its non-default parent, and `origin/<default>` otherwise.
+    /// Whether the view draws `branch`: every branch in the base view;
+    /// otherwise `origin/<default>`, the current branch and its chain of
+    /// non-default parents, and any branch whose lane holds the fork commit
+    /// of a branch already in view (so that lane can hang from it).
     fn in_view(&self, branch: &str) -> bool {
-        if self.is_base_view() {
+        if self.is_base_view() || branch == format!("origin/{}", self.default_branch) {
             return true;
         }
-        let current = self.current_branch.as_deref();
-        let current_parent = current.and_then(|name| {
-            self.lines
-                .iter()
-                .find(|line| line.branch == name)
-                .and_then(|line| line.parent.as_deref())
-                .filter(|parent| *parent != self.default_branch)
-        });
-        Some(branch) == current || Some(branch) == current_parent || branch == format!("origin/{}", self.default_branch)
+        let line_of = |name: &str| self.lines.iter().find(|line| line.branch == name);
+        let mut view: Vec<&str> = Vec::new();
+        let mut cursor = self.current_branch.as_deref();
+        while let Some(name) = cursor.filter(|name| *name != self.default_branch && !view.contains(name)) {
+            view.push(name);
+            cursor = line_of(name).and_then(|line| line.parent.as_deref());
+        }
+        let mut next = 0;
+        while next < view.len() {
+            let fork = line_of(view[next]).and_then(|line| line.fork_sha.as_deref());
+            next += 1;
+            let Some(fork) = fork else { continue };
+            for (_, line) in self.distinct_lines() {
+                let holds = line.entries.iter().any(|entry| matches!(entry, LaneEntry::Commit(sha) if sha == fork));
+                if holds && !view.contains(&line.branch.as_str()) {
+                    view.push(&line.branch);
+                }
+            }
+        }
+        view.contains(&branch)
     }
 
     /// Indices of the first line per branch name, the default branch excluded.

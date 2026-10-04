@@ -52,7 +52,7 @@ print!("{}", graph.render(&Terminal::new()));
 | `GraphLine::with_merge(source, destination)` | Appends a `LaneMerge`: the commit `source` on this line was merged by the merge commit `destination` on another lane. The destination's lane is found by where that commit is drawn. Append oldest first; a line merged at its tip passes its tip as `source`. |
 | `with_ref(name, sha)` | A ref tip: local branch, remote branch, or tag. |
 | `GraphPullRequest` | An open PR: number, source branch, and target branch. |
-| `with_current_branch(name)` | The checked-out branch. Unset, or the default branch, is the **base view**. |
+| `with_current_branch(name)` | The checked-out branch. Unset, or the default branch, is the **base view**; otherwise a **focused view** draws `origin/<default>`, the current branch and its chain of non-default parents, and any lane whose drawn commits hold the fork of a lane already in view. |
 | `with_incomplete_history()` | The caller could not establish some of the history it passed; the graph shows the incomplete-history notice. |
 | `with_max_rows(u32)` | Caps the base view's height at this many rows instead of half the terminal's; lanes past it are left out as usual. |
 

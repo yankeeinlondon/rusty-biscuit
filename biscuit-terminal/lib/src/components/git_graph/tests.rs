@@ -1222,6 +1222,24 @@ fn a_focused_view_is_never_cut_by_the_height_cap() {
     assert_eq!(planned.mermaid, SPEC_EXAMPLE);
 }
 
+/// A focused view keeps the current branch's parent chain and any lane that
+/// holds the fork of a lane in view; an unrelated lane stays out.
+#[test]
+fn a_focused_view_keeps_the_lane_holding_a_fork() {
+    let graph = GitGraph::new("main", commits(&["1111111"]))
+        .with_line(GraphLine::new("holder").forked_at(sha("1111111")).with_entries(commits(&["5555555", "6666666"])))
+        .with_line(GraphLine::new("parent").forked_at(sha("5555555")).with_entries(commits(&["aaaaaaa"])))
+        .with_line(GraphLine::new("current").with_parent("parent").forked_at(sha("aaaaaaa")).with_entries(commits(&["bbbbbbb"])))
+        .with_line(line("other", None, "ccccccc", 1))
+        .with_current_branch("current");
+    let planned = plan(&graph, viewport(400, 200));
+    for drawn in ["branch holder", "branch parent", "branch current"] {
+        assert!(planned.mermaid.contains(drawn), "{drawn}: {}", planned.mermaid);
+    }
+    assert!(!planned.mermaid.contains("branch other"), "{}", planned.mermaid);
+    assert!(planned.omissions.is_empty(), "{:?}", planned.omissions);
+}
+
 #[test]
 fn a_failed_measurement_trims_nothing() {
     let planned = spec_example()
