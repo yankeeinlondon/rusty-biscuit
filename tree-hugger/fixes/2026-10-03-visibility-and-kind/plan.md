@@ -5,7 +5,7 @@ spec: 2026-10-03-visibility-and-kind
 area: tree-hugger
 total_phases: 7
 created: 2026-10-03
-phase: 1
+phase: 3
 agent: claude/sonnet
 yolo: true
 source_files_during_phase_1:
@@ -26,6 +26,77 @@ docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1:
   - .claude/skills/tree-hugger/SKILL.md
+source_files_during_phase_2:
+  - tree-hugger/lib/src/shared/symbol.rs
+  - tree-hugger/lib/src/shared/schema_v2/mod.rs
+  - tree-hugger/lib/src/shared/schema_v2/facets.rs
+  - tree-hugger/lib/src/shared/schema_v2/types.rs
+  - tree-hugger/lib/src/file/extract/signatures.rs
+  - tree-hugger/lib/src/file/extract/classify.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/tests.rs
+  - tree-hugger/lib/src/cache/mod.rs
+  - tree-hugger/lib/src/god_files/analysis.rs
+  - tree-hugger/lib/tests/l1/symbols_adapter.rs
+  - tree-hugger/lib/tests/l1/tree_file.rs
+  - tree-hugger/lib/tests/l1/cache_tests.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/src/prelude.rs
+docs_updated_during_phase_2:
+  - tree-hugger/README.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
+source_files_during_phase_3:
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/src/lib.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/extract/mod.rs
+  - tree-hugger/lib/src/file/extract/classify.rs
+  - tree-hugger/lib/src/file/extract/signatures.rs
+  - tree-hugger/lib/src/file/extract/declaration.rs
+  - tree-hugger/lib/src/file/extract/rust_impl.rs
+  - tree-hugger/lib/src/file/extract/visibility/mod.rs
+  - tree-hugger/lib/src/file/extract/visibility/c.rs
+  - tree-hugger/lib/src/file/extract/visibility/cpp.rs
+  - tree-hugger/lib/src/file/extract/visibility/csharp.rs
+  - tree-hugger/lib/src/file/extract/visibility/ecma.rs
+  - tree-hugger/lib/src/file/extract/visibility/go.rs
+  - tree-hugger/lib/src/file/extract/visibility/java.rs
+  - tree-hugger/lib/src/file/extract/visibility/lua.rs
+  - tree-hugger/lib/src/file/extract/visibility/php.rs
+  - tree-hugger/lib/src/file/extract/visibility/rust.rs
+  - tree-hugger/lib/src/file/extract/visibility/scala.rs
+  - tree-hugger/lib/src/file/extract/visibility/swift.rs
+  - tree-hugger/lib/src/file/extract/static_flags/mod.rs
+  - tree-hugger/lib/src/file/extract/static_flags/cpp.rs
+  - tree-hugger/lib/src/file/extract/static_flags/ecma.rs
+  - tree-hugger/lib/src/file/extract/static_flags/java.rs
+  - tree-hugger/lib/src/file/extract/static_flags/php.rs
+  - tree-hugger/lib/src/file/extract/static_flags/python.rs
+  - tree-hugger/lib/src/file/extract/static_flags/rust.rs
+  - tree-hugger/lib/src/file/extract/static_flags/scala.rs
+  - tree-hugger/lib/src/file/extract/static_flags/swift.rs
+  - tree-hugger/lib/src/shared/schema_v2/mod.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/tests/l1/symbols_fixtures.rs
+  - tree-hugger/lib/tests/l1/symbols_kinds.rs
+  - tree-hugger/lib/tests/l1/symbols_visibility.rs
+  - tree-hugger/lib/tests/l1/symbols_static.rs
+  - tree-hugger/lib/tests/l1/symbols_decl_text.rs
+  - tree-hugger/lib/tests/l1/symbols_export.rs
+  - tree-hugger/lib/tests/l1/symbols_adapter.rs
+  - tree-hugger/lib/tests/l1/tree_file.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/tests/cli.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
+  - .claude/skills/tree-hugger/query-system.md
 packages:
   - tree-hugger
   - tree-hugger-cli
@@ -190,7 +261,7 @@ exhaustiveness, before extraction changes. Existing consumers must compile.
 
 ### Wave 2.1 (parallel; disjoint files)
 
-- [ ] **v1 symbol types.** In `lib/src/shared/symbol.rs`: add `SymbolKind::{Constructor,
+- [x] **v1 symbol types.** In `lib/src/shared/symbol.rs`: add `SymbolKind::{Constructor,
       Property, TypeAlias, EnumVariant}` (`is_function` includes Constructor,
       `is_type` includes TypeAlias); `Visibility` gains `Package, Crate,
       ModulePrivate, ProtectedInternal, PrivateProtected` (mirror
@@ -199,7 +270,7 @@ exhaustiveness, before extraction changes. Existing consumers must compile.
       default false) and keeps `container_kind`; remove
       `FunctionSignature::visibility`. Fix the `Visibility::Internal` doc comment
       (Java default is Package).
-- [ ] **v2 kinds/facets.** In `schema_v2/kinds.rs` + `facets.rs`: add
+- [x] **v2 kinds/facets.** In `schema_v2/kinds.rs` + `facets.rs`: add
       `VisibilityLevel::{ProtectedInternal, PrivateProtected}`,
       `Modifier::StaticStorage`, `IdentityFacet::container_kind:
       Option<SymbolKindV2>` (serde default + skip when none),
@@ -208,7 +279,7 @@ exhaustiveness, before extraction changes. Existing consumers must compile.
 
 ### Wave 2.2 (sequential after 2.1; one file)
 
-- [ ] **Adapter rewrite** (`schema_v2/mod.rs`):
+- [x] **Adapter rewrite** (`schema_v2/mod.rs`):
       - `From<SymbolKindV2> for SymbolKind` and reverse: exhaustive, no wildcard.
       - `Option<Visibility>` ↔ `VisibilityLevel` exhaustive conversions.
       - `From<SymbolInfo> for SymbolRecord`: write visibility level,
@@ -220,17 +291,17 @@ exhaustiveness, before extraction changes. Existing consumers must compile.
         kind (empty params allowed); non-function kinds never get a signature.
       - Update every `SchemaVersion::V2_0` emit site (records, file indexes,
         analyzer fingerprint in `lib/src/cache/mod.rs`) to 3.0.
-- [ ] **Compile sweep.** Fix all non-wildcard match sites across lib and CLI
+- [x] **Compile sweep.** Fix all non-wildcard match sites across lib and CLI
       (compile errors drive the list); keep behavior otherwise unchanged.
-- [ ] **Adapter unit tests.** Round-trip test with explicit expected values for
+- [x] **Adapter unit tests.** Round-trip test with explicit expected values for
       every new field (test 5 skeleton), including parameterless methods and
       constructors.
 
 ### Validation checkpoint 2
 
-- [ ] `cargo check -p tree-hugger-lib -p tree-hugger-cli` clean; existing L1 passes
+- [x] `cargo check -p tree-hugger-lib -p tree-hugger-cli` clean; existing L1 passes
       except tests asserting schema `2.0` (rewrite per pre-authorization).
-- [ ] Adapter round-trip unit test green.
+- [x] Adapter round-trip unit test green.
 
 ## Phase 3: Extraction core
 
@@ -240,19 +311,19 @@ here and filled in Phase 4.
 
 ### Wave 3.1 (sequential; structural refactor to unlock parallel Phase 4)
 
-- [ ] **Module split.** Create `lib/src/file/extract/visibility/` with one file per
+- [x] **Module split.** Create `lib/src/file/extract/visibility/` with one file per
       language plus a dispatch `fn extract_visibility(node, lang, source, ctx)`
       accepting any declaration node (not just function nodes); move existing
       keyword readers (Java/C#/PHP/TS/Rust/C++/Swift) in, behavior-preserving.
       Same for static detection (`static_flags/<lang>`). Existing tests must stay
       green.
-- [ ] **`SymbolInfo` population.** `TreeFile::symbol_nodes` fills `visibility`,
+- [x] **`SymbolInfo` population.** `TreeFile::symbol_nodes` fills `visibility`,
       `is_static`, `is_static_storage` through the dispatcher; remove
       `FunctionSignature::visibility` uses.
 
 ### Wave 3.2 (parallel; disjoint files)
 
-- [ ] **Kind classification at extraction** (`classify.rs`): move constructor /
+- [x] **Kind classification at extraction** (`classify.rs`): move constructor /
       property / type-alias refinement from `symbol_kind_v2_for_node` into
       `refine_symbol_kind`; delete the post-conversion override; constructor
       outranks method capture and property outranks variable at equal spans;
@@ -261,7 +332,7 @@ here and filled in Phase 4.
       (constructor → `FunctionData`, property → `FieldData`, alias →
       `TypeAliasData` incl. Rust RHS, variants keep enum metadata, no signature
       on variants). Rust `static` → `Variable` + `is_static_storage`.
-- [ ] **Container + direct-member rule** (`classify.rs::find_symbol_container`):
+- [x] **Container + direct-member rule** (`classify.rs::find_symbol_container`):
       store container kind; a declaration is never its own container; add
       abstract TS class, Rust union, C/C++ union, C++ class, PHP trait, Scala
       trait/object to containment; C++ class beats enclosing namespace;
@@ -272,26 +343,26 @@ here and filled in Phase 4.
         kinds (same classifier); implement together to avoid divergence, i.e.
         one subagent owns `classify.rs`, a second owns the Rust `impl` logic in a
         new `rust_impl.rs`.
-- [ ] **Rust impl container + `relations.implements`**: container = last path
+- [x] **Rust impl container + `relations.implements`**: container = last path
       segment of the self type without generics; kind from same-file declaration
       (absent if disagreeing or missing); `symbol_records()` fills
       `RelationFacet::implements` (name = trait last segment; `id` when the trait
       is in the same file); bind pass untouched.
-- [ ] **Signatures for all function-like symbols** (`signatures.rs`): provide
+- [x] **Signatures for all function-like symbols** (`signatures.rs`): provide
       `FunctionData` for parameterless fns, every Lua function, every Bash/Zsh
       function, C# expression-bodied methods (any return type).
-- [ ] **Declaration text** (`symbol_records()`): start-of-declaration to
+- [x] **Declaration text** (`symbol_records()`): start-of-declaration to
       `body_span_for_declaration`, trailing whitespace trimmed, doc comments
       excluded; whole text when no body; Perl uses `variable_declaration`.
-- [ ] **`is_exported` decoupling**: `is_exported_definition` excludes
+- [x] **`is_exported` decoupling**: `is_exported_definition` excludes
       `Constructor`/`Property`/`EnumVariant`; verify `symbol_records()`/bind are
       the only export sources.
-- [ ] **`EXTRACTOR_REVISION`**: export from lib root, stamp into record extractor
+- [x] **`EXTRACTOR_REVISION`**: export from lib root, stamp into record extractor
       provenance, add to CLI fingerprint (CLI wiring in Phase 5).
 
 ### Validation checkpoint 3
 
-- [ ] Existing suites green with updated superseded tests; kind matrix test
+- [x] Existing suites green with updated superseded tests; kind matrix test
       skeleton runs for Rust (impl container, EnumVariant) as a smoke sample.
 
 ## Phase 4: Per-language queries and visibility/static readers
