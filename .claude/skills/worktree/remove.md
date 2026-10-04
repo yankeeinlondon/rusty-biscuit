@@ -99,6 +99,29 @@ code touches the network.
   sibling and back) first. A held directory is `WorktreeError::DirectoryInUse`
   (exit 4).
 
+## Git facts about broken worktree records
+
+Observed with Git 2.56 on macOS. These describe Git, not `wt`:
+
+- `prunable <reason>` appears only when the admin `gitdir` back-reference
+  points somewhere that no longer exists (the directory is gone, or its `.git`
+  file is). A **locked** entry whose directory is gone is never `prunable`, and
+  neither is a checkout whose `.git` file holds garbage. In both cases
+  `git status` fails on an entry the listing reports as normal.
+- The admin `index` outlives a deleted checkout. `git worktree remove` of a
+  missing directory exits 0 and silently discards staged work in that index.
+- `GIT_INDEX_FILE=<absent> git diff-index --cached` reads the missing file as an
+  empty index without error. Prove the index exists before trusting the diff.
+- `git -C <base> worktree repair <path>` can exit 1 even when it has fully
+  restored the link, and **it also repairs every other broken worktree link**,
+  not only `<path>`. Judge repair by postconditions, never by exit code, and
+  never describe it as touching only the target.
+- One `--force` does not remove a locked record (`remove -f -f` is required).
+- In a directory whose `.git` is gone, `git rev-parse --show-toplevel` finds
+  any enclosing repository (for example the base, when the worktree is nested
+  inside it). A Git command that succeeds there does not prove the worktree is
+  healthy.
+
 ## Move-first handoff
 
 Inside the target with `WT_SHELL_WRAPPER=1`:
