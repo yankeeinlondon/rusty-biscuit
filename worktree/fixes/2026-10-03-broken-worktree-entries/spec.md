@@ -26,6 +26,32 @@ reviewed_on: 2026-10-03
 review_iterations: 0
 clarified: true
 implemented: false
+human_review: true
+human_review_items:
+  - |-
+    **`git worktree repair` fixes more than the worktree you name. Decide before Phase 4 (the repair engine). Phases 2 and 3 are not affected.**
+
+    The spec says `wt remove` runs a *targeted* `git worktree repair <path>` when a worktree folder still exists but its `.git` link file is gone. A test on Git 2.56 showed that this command, run from the main checkout, also recreates the `.git` link of **every other** worktree whose link is missing, not just the named one. It also exited with an error code even though it succeeded. Nothing is deleted, but `wt remove foo` could quietly re-link `bar`, which the user did not ask about.
+
+    - **A. Accept Git's behavior and say so (recommended).** Verify only the target, and make the messages and docs say repair "may have changed Git metadata for this or other worktrees".
+      Pros: uses Git's own supported tool; repair only restores links Git already knows about and never removes anything; least code.
+      Cons: a side effect on unrelated worktrees, though it is the same repair the user would run by hand.
+    - **B. Only auto-repair when the target is the only worktree with a missing link; otherwise refuse and explain.**
+      Pros: side effects stay confined to the named worktree.
+      Cons: blocks removal exactly when several worktrees are broken (for example after a bulk folder copy); more checks; a race remains between the check and the repair.
+    - **C. Write the target's `.git` link file ourselves instead of calling `git worktree repair`, then verify it the same way.**
+      Pros: truly targeted; no misleading exit code.
+      Cons: reimplements a Git file format (including Git's relative-path worktree option) and departs from the spec's explicit choice of Git's repair command.
+
+    I recommend **A**. The extra effect is a non-destructive restoration that Git itself considers correct, and the spec already warns that repair may change metadata. Widening that wording is cheaper and safer than B's refusals or C's reimplementation.
+message_to_agent: |-
+  Read the "Phase 1" section of implementation-log.md before starting. Key facts from the Git 2.56 spike:
+  (1) Git always prints `prunable <reason>` with a non-empty reason, but still parse a bare `prunable` as Some("").
+  (2) A locked entry whose directory is gone is NOT prunable, and neither is a `.git` file holding garbage. Both reach the ordinary path and must become DirtyStatus::Unknown (`?`), not `✕`.
+  (3) `fast_forward::holder_of` (lib/src/fast_forward.rs:121) parses porcelain itself and ignores `prunable`; Phase 3 must handle it.
+  (4) WorktreeEntry struct literals to fix: lib/src/worktree.rs:145, :170, :1593; lib/src/listing.rs:505; cli/tests/list_table.rs:66.
+  (5) The baseline was green: 958 passed, 32 skipped, lint clean.
+  (6) For Phase 4: GIT_INDEX_FILE pointing at an absent index reads as empty without error, so check presence first. Path comparison should reuse remove::handoff::canonical / same_path (make same_path pub(crate)). R9 (repair is repo-wide) awaits the author; its default is in the log.
 ---
 
 # Worktrees Git can no longer read: honest listing and safe removal

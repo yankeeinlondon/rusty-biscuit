@@ -4,6 +4,13 @@ created: 2026-10-03
 phase: 1
 agent: claude/sonnet
 yolo: true
+source_files_during_phase_1: []
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1:
+  - .claude/skills/worktree/remove.md
+packages:
+  - worktree
 ---
 
 # Plan: Worktrees Git can no longer read
@@ -70,58 +77,65 @@ These are decisions the spec leaves open or ambiguous. Each needs an answer from
 the author before the task it gates; the proposed default lets work proceed
 (`yolo: true`) and must be recorded in the implementation log.
 
-- [ ] **R1 — staged-index policy for a Missing directory (gates P4 missing engine).**
+- [x] **R1 — staged-index policy for a Missing directory (gates P4 missing engine).**
   The spec itself blocks missing removal until this is decided and recommends:
   inspect the surviving administrative index, require ordinary discard consent
   when it differs from recorded HEAD, refuse if inspection fails. *Proposed
   default: adopt the recommendation.* Until the author confirms, the spec status
   stays `draft-spec`; the implementation refuses whenever staged state cannot be
   proved disposable.
-- [ ] **R2 — "index differs from HEAD" definition.** Proposed: compare the tree
+- [x] **R2 — "index differs from HEAD" definition.** Proposed: compare the tree
   written from the administrative index (`git read-tree`/`diff-index --cached`
   against that index via `GIT_INDEX_FILE`, no checkout needed) with the recorded
   HEAD tree; any difference, an unreadable index, or a missing index with a
   present admin dir counts as "cannot prove disposable". An absent admin
   directory *and* absent directory is a bare record: disposable.
-- [ ] **R3 — unlinked-state evidence.** "`.git` confirmed absent" means
+- [x] **R3 — unlinked-state evidence.** "`.git` confirmed absent" means
   `symlink_metadata(<path>/.git)` returned `NotFound` and the path itself is a
   real directory (`symlink_metadata`, not following links). Any other error
   (`PermissionDenied`, I/O) → Other unavailable. A target that is a symlink or
   Windows reparse point is Other unavailable even if the link target is a
   directory.
-- [ ] **R4 — administrative-entry association.** Proposed: enumerate
+- [x] **R4 — administrative-entry association.** Proposed: enumerate
   `<common-git-dir>/worktrees/*/gitdir`, read each back-reference, compare to
   `<recorded-path>/.git` with the repo's path-equality helpers; require exactly
   one match. Zero, several, or any unreadable entry → refuse. The common git
   dir comes from `git rev-parse --git-common-dir` run in the base, never from
   assuming base `.git` is a directory. Windows short names, verbatim prefixes and
   macOS `/private` aliases are covered by the helpers.
-- [ ] **R5 — where the "other unavailable" classification applies to `wt remove`
+- [x] **R5 — where the "other unavailable" classification applies to `wt remove`
   when the porcelain entry is not prunable but status fails.** Proposed: removal
   keeps today's flow for non-prunable entries, but `collect_inventory` failures
   are wrapped with target/path/operation context (spec "Error context") and still
   exit via the existing mapping; no repair is attempted for non-prunable entries.
-- [ ] **R6 — name suggestions in notes.** "Unambiguous command argument accepted
+- [x] **R6 — name suggestions in notes.** "Unambiguous command argument accepted
   by existing name resolution": proposed order is branch name, then directory
   basename, each only if `find_worktree` would resolve it to exactly this entry
   (reuse the resolver's candidate logic, not a copy); otherwise the note lists
   the conflicting names and suggests no command.
-- [ ] **R7 — wider measurement.** The spec rules out performance work. A listing
+- [x] **R7 — wider measurement.** The spec rules out performance work. A listing
   now skips `git status` for prunable entries and adds bounded local metadata
   checks; no spike and no benchmark. Recorded here so the author can widen it if
   wanted.
-- [ ] **R8 — Windows reparse-point test.** Creating a symlink/junction on Windows
+- [x] **R8 — Windows reparse-point test.** Creating a symlink/junction on Windows
   may need privilege. Proposed: Unix symlink tests run on macOS/Linux; the
   Windows reparse-point branch is covered by an injected metadata-inspector
   seam (`#[cfg(windows)]` unit test plus the injected-error cases) rather than a
   privileged fixture. The `os` skill records which hosts can produce Windows
   evidence.
 
+- [x] **R9 — repair is not targeted (found by Spike A; needs author input before
+  Phase 4).** `git -C <base> worktree repair <path>` also recreates `.git` for every
+  other unlinked worktree, not only `<path>`. *Proposed default:* accept Git's
+  behavior, verify only the target, and say that repair "may have changed Git
+  metadata for this or other worktrees". The options are in the spec's
+  `human_review_items`. Phases 2 and 3 are not affected.
+
 ### Spike (runs once, before Phase 2)
 
 One host (macOS, the current one), one scratch repository, no network:
 
-- [ ] **Spike A — real Git facts the plan depends on.** With a disposable repo
+- [x] **Spike A — real Git facts the plan depends on.** With a disposable repo
   create one Missing and one Unlinked worktree and record in the implementation
   log:
   - the exact `worktree list --porcelain` output including `prunable` with and
@@ -140,14 +154,14 @@ One host (macOS, the current one), one scratch repository, no network:
 
 ### Baseline
 
-- [ ] Run `just test` and `just lint` from `worktree/` and record failures that
+- [x] Run `just test` and `just lint` from `worktree/` and record failures that
   predate this work (the git status shows a heavily staged tree; do not attribute
   those to this fix).
-- [ ] `sniff repo`-style discovery is not needed; use the existing path helpers
+- [x] `sniff repo`-style discovery is not needed; use the existing path helpers
   in `lib/src/util.rs` / `lib/src/git.rs`. Locate them and list the exact helper
   names in the implementation log (comparing existing paths, Windows short names,
   verbatim prefixes).
-- [ ] Inventory every `match`/default over `DirtyStatus` and every use of
+- [x] Inventory every `match`/default over `DirtyStatus` and every use of
   `WorktreeEntry` construction (struct literals will break when `prunable` is
   added): `lib/src/worktree.rs`, `lib/src/listing.rs`, `cli/src/commands/list_table.rs`,
   `cli/src/commands/git_graph.rs`, `cli/src/commands/list.rs`, status refresh
