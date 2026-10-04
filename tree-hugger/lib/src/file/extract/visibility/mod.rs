@@ -21,7 +21,8 @@ mod scala;
 mod swift;
 
 pub(crate) use csharp::extract_csharp_visibility;
-pub(crate) use ecma::extract_ts_visibility;
+pub(crate) use go::go_identifier_visibility;
+pub(crate) use ecma::{extract_ts_visibility, is_ecma_module_file};
 pub(crate) use java::extract_java_visibility;
 pub(crate) use php::extract_php_visibility;
 pub(crate) use swift::extract_swift_visibility;
@@ -38,17 +39,16 @@ pub(crate) fn extract_visibility(
         return None;
     }
 
-    let source = ctx.source;
     match ctx.language {
         ProgrammingLanguage::TypeScript | ProgrammingLanguage::JavaScript => {
-            ecma::extract_ts_visibility(declaration, source)
+            ecma::extract_ecma_visibility(declaration, ctx)
         }
-        ProgrammingLanguage::Java => java::extract_java_visibility(declaration, source),
-        ProgrammingLanguage::CSharp => csharp::extract_csharp_visibility(declaration, source),
-        ProgrammingLanguage::Php => php::extract_php_visibility(declaration, source),
-        ProgrammingLanguage::Rust => rust::extract_rust_visibility(declaration, source),
-        ProgrammingLanguage::Cpp => cpp::extract_cpp_visibility(declaration, source),
-        ProgrammingLanguage::Swift => swift::extract_swift_visibility(declaration, source),
+        ProgrammingLanguage::Java => java::extract_java_declaration_visibility(declaration, ctx),
+        ProgrammingLanguage::CSharp => csharp::extract_csharp_declaration_visibility(declaration, ctx),
+        ProgrammingLanguage::Php => php::extract_php_declaration_visibility(declaration, ctx),
+        ProgrammingLanguage::Rust => rust::extract_rust_visibility(declaration, ctx),
+        ProgrammingLanguage::Cpp => cpp::extract_cpp_visibility(declaration, ctx),
+        ProgrammingLanguage::Swift => swift::extract_swift_declaration_visibility(declaration, ctx),
         ProgrammingLanguage::C => c::extract_c_visibility(declaration, ctx),
         ProgrammingLanguage::Go => go::extract_go_visibility(declaration, ctx),
         ProgrammingLanguage::Scala => scala::extract_scala_visibility(declaration, ctx),

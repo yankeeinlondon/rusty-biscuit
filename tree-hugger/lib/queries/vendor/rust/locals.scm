@@ -16,6 +16,10 @@
 (function_item
   name: (identifier) @local.definition.function) @local.definition.function.context
 
+; Bodyless trait method declarations; the direct-member rule makes them methods
+(function_signature_item
+  name: (identifier) @local.definition.function) @local.definition.function.context
+
 ; Methods (functions with self parameter)
 (function_item
   name: (identifier) @local.definition.method
@@ -31,6 +35,10 @@
 
 (const_item
   name: (identifier) @local.definition.var)
+
+; `static` items: variables with static storage, not constants
+(static_item
+  name: (identifier) @local.definition.var) @local.definition.var.context
 
 (tuple_pattern
   (identifier) @local.definition.var)
@@ -55,6 +63,16 @@
 (struct_item
   name: (type_identifier) @local.definition.type) @local.definition.type.context
 
+(union_item
+  name: (type_identifier) @local.definition.type) @local.definition.type.context
+
+; Type aliases, including associated types in traits and impls
+(type_item
+  name: (type_identifier) @local.definition.type_alias) @local.definition.type_alias.context
+
+(associated_type
+  name: (type_identifier) @local.definition.type_alias) @local.definition.type_alias.context
+
 ; Enums (separate from types for distinction)
 (enum_item
   name: (type_identifier) @local.definition.enum) @local.definition.enum.context
@@ -68,7 +86,7 @@
   name: (field_identifier) @local.definition.field)
 
 (enum_variant
-  name: (identifier) @local.definition.field)
+  name: (identifier) @local.definition.enum_variant)
 
 ; References
 (identifier) @local.reference
@@ -85,7 +103,7 @@
 
 ; Module
 (mod_item
-  name: (identifier) @local.definition.namespace)
+  name: (identifier) @local.definition.module) @local.definition.module.context
 
 ; Scopes
 [

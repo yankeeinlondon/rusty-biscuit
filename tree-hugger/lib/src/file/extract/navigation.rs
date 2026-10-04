@@ -46,18 +46,3 @@ pub(crate) fn find_nth_child_by_kind<'a>(node: Node<'a>, kind: &str, n: usize) -
         .nth(n)
 }
 
-/// Checks if a node is inside an interface declaration.
-///
-/// Walks up the parent chain to find `interface_declaration` ancestors.
-/// Used to infer implicit public visibility for interface members in
-/// languages like C# and Java.
-pub(crate) fn is_inside_interface(node: Node<'_>) -> bool {
-    let mut current = node.parent();
-    while let Some(parent) = current {
-        if parent.kind() == "interface_declaration" {
-            return true;
-        }
-        current = parent.parent();
-    }
-    false
-}

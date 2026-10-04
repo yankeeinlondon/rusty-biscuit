@@ -56,7 +56,8 @@ pub(crate) fn refine_symbol_kind(
         (ProgrammingLanguage::Rust, "mod_item") => return SymbolKind::Module,
         // A Rust `static` is a variable with static storage, not a constant.
         (ProgrammingLanguage::Rust, "static_item") => return SymbolKind::Variable,
-        (_, "public_field_definition" | "property_definition" | "property_signature") => {
+        (_, "public_field_definition" | "property_definition" | "property_signature")
+        | (ProgrammingLanguage::JavaScript, "field_definition") => {
             return SymbolKind::Property;
         }
         (_, "method_definition") if node_text(name, source) == Some("constructor") => {
@@ -239,6 +240,12 @@ pub(crate) fn find_symbol_container<'tree>(
     language: ProgrammingLanguage,
     source: &str,
 ) -> Option<ContainerRef<'tree>> {
+    // A Perl package name is absolute: `package B` inside or after
+    // `package A` is `B`, not a member of `A`.
+    if language == ProgrammingLanguage::Perl && declaration.kind() == "package_statement" {
+        return None;
+    }
+
     let mut child = declaration;
     while let Some(parent) = child.parent() {
         if !is_sibling_scoped_container(child, language)

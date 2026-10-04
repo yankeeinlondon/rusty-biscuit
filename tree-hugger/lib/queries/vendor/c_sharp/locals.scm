@@ -29,7 +29,20 @@
   name: (identifier) @local.definition.method) @local.definition.method.context
 
 (property_declaration
-  name: (identifier) @local.definition)
+  name: (identifier) @local.definition.property) @local.definition.property.context
+
+; Namespaces, block-scoped and file-scoped
+(namespace_declaration
+  name: [
+    (identifier)
+    (qualified_name)
+  ] @local.definition.namespace) @local.definition.namespace.context
+
+(file_scoped_namespace_declaration
+  name: [
+    (identifier)
+    (qualified_name)
+  ] @local.definition.namespace) @local.definition.namespace.context
 
 (type_parameter
   (identifier) @local.definition.type)

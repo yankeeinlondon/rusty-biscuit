@@ -1,10 +1,35 @@
 use super::*;
 
-/// Lua visibility. The chunk-scope rules are not implemented yet, so every
-/// declaration reports Unknown.
+/// Lua visibility: a chunk-level `local` is ModulePrivate, a `local` in a
+/// nested block is Unknown, and a global binding is Public. Table fields
+/// (`M.f`, `M:m`, `M.x = …`) have no enforced access and are Unknown.
 pub(super) fn extract_lua_visibility(
-    _declaration: Node<'_>,
-    _ctx: &DeclarationContext<'_>,
+    declaration: Node<'_>,
+    ctx: &DeclarationContext<'_>,
 ) -> Option<Visibility> {
-    None
+    if ctx.name.parent().is_some_and(|parent| {
+        matches!(
+            parent.kind(),
+            "dot_index_expression" | "method_index_expression"
+        )
+    }) {
+        return None;
+    }
+
+    let (statement, is_local) = match declaration.kind() {
+        "function_declaration" => (declaration, find_child_by_kind(declaration, "local").is_some()),
+        "assignment_statement" => match declaration.parent() {
+            Some(parent) if parent.kind() == "variable_declaration" => (parent, true),
+            _ => (declaration, false),
+        },
+        _ => return None,
+    };
+
+    if !is_local {
+        return Some(Visibility::Public);
+    }
+    statement
+        .parent()
+        .is_some_and(|parent| parent.kind() == "chunk")
+        .then_some(Visibility::ModulePrivate)
 }

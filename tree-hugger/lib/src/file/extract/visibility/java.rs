@@ -1,38 +1,39 @@
 use super::*;
 
-/// Extracts visibility from Java method_declaration.
-///
-/// Java AST structure has modifiers containing visibility:
-/// ```text
-/// method_declaration
-///   modifiers
-///     public/protected/private
-///   type_identifier
-///   identifier
-///   ...
-/// ```
-///
-/// In Java, interface members are implicitly public and cannot have explicit
-/// visibility modifiers. This function infers `Public` for members declared
-/// inside an interface.
+/// Extracts the `public` / `protected` / `private` keyword from a Java
+/// declaration's `modifiers`; `None` when it has none.
 pub(crate) fn extract_java_visibility(node: Node<'_>, source: &str) -> Option<Visibility> {
-    if let Some(modifiers) = find_child_by_kind(node, "modifiers") {
-        let mut cursor = modifiers.walk();
-        for child in modifiers.children(&mut cursor) {
-            let text = child.utf8_text(source.as_bytes()).ok()?;
-            match text {
-                "public" => return Some(Visibility::Public),
-                "protected" => return Some(Visibility::Protected),
-                "private" => return Some(Visibility::Private),
-                _ => continue,
-            }
-        }
-    }
+    let modifiers = find_child_by_kind(node, "modifiers")?;
+    let mut cursor = modifiers.walk();
+    modifiers
+        .children(&mut cursor)
+        .find_map(|child| match child.utf8_text(source.as_bytes()).ok()? {
+            "public" => Some(Visibility::Public),
+            "protected" => Some(Visibility::Protected),
+            "private" => Some(Visibility::Private),
+            _ => None,
+        })
+}
 
-    // Java interface members are implicitly public
-    if is_inside_interface(node) {
-        return Some(Visibility::Public);
+/// Java visibility: an access keyword, else Public for a member declared
+/// directly in an interface (methods, constants and nested types alike), else
+/// Package. The `package` clause itself has no access level.
+pub(super) fn extract_java_declaration_visibility(
+    declaration: Node<'_>,
+    ctx: &DeclarationContext<'_>,
+) -> Option<Visibility> {
+    if declaration.kind() == "package_declaration" {
+        return None;
     }
-
-    None
+    if let Some(level) = extract_java_visibility(declaration, ctx.source) {
+        return Some(level);
+    }
+    let in_interface_body = declaration.parent().is_some_and(|parent| {
+        matches!(parent.kind(), "interface_body" | "annotation_type_body")
+    });
+    Some(if in_interface_body {
+        Visibility::Public
+    } else {
+        Visibility::Package
+    })
 }

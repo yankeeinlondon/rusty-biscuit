@@ -1,29 +1,73 @@
 use super::*;
 
-/// Extracts visibility from C# method_declaration.
-///
-/// In C#, interface members are implicitly public and cannot have explicit
-/// visibility modifiers. This function infers `Public` for members declared
-/// inside an interface.
+/// Reads the C# access keywords on a declaration, combining
+/// `protected internal` and `private protected`; `file` is ModulePrivate.
+/// `None` when the declaration has none. Accessor-level modifiers
+/// (`{ get; private set; }`) are not children of the declaration, so they
+/// never set its level.
 pub(crate) fn extract_csharp_visibility(node: Node<'_>, source: &str) -> Option<Visibility> {
+    let (mut public, mut protected, mut private, mut internal, mut file) =
+        (false, false, false, false, false);
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        if child.kind() == "modifier" {
-            let text = child.utf8_text(source.as_bytes()).ok()?;
-            match text {
-                "public" => return Some(Visibility::Public),
-                "protected" => return Some(Visibility::Protected),
-                "private" => return Some(Visibility::Private),
-                "internal" => return Some(Visibility::Internal),
-                _ => continue,
-            }
+        if child.kind() != "modifier" {
+            continue;
+        }
+        match child.utf8_text(source.as_bytes()).ok()? {
+            "public" => public = true,
+            "protected" => protected = true,
+            "private" => private = true,
+            "internal" => internal = true,
+            "file" => file = true,
+            _ => {}
         }
     }
 
-    // C# interface members are implicitly public
-    if is_inside_interface(node) {
-        return Some(Visibility::Public);
+    match (public, protected, private, internal, file) {
+        (true, ..) => Some(Visibility::Public),
+        (_, true, _, true, _) => Some(Visibility::ProtectedInternal),
+        (_, true, true, ..) => Some(Visibility::PrivateProtected),
+        (_, true, ..) => Some(Visibility::Protected),
+        (_, _, true, ..) => Some(Visibility::Private),
+        (_, _, _, true, _) => Some(Visibility::Internal),
+        (.., true) => Some(Visibility::ModulePrivate),
+        _ => None,
+    }
+}
+
+/// C# visibility: access keywords first, then the defaults of the C#
+/// reference. An explicit interface implementation is Private; any member of
+/// an interface (default-implemented, static and nested types included) is
+/// Public; a class, struct or record member is Private; a top-level type is
+/// Internal. Namespaces have no access level.
+pub(super) fn extract_csharp_declaration_visibility(
+    declaration: Node<'_>,
+    ctx: &DeclarationContext<'_>,
+) -> Option<Visibility> {
+    if matches!(
+        declaration.kind(),
+        "namespace_declaration" | "file_scoped_namespace_declaration"
+    ) {
+        return None;
+    }
+    if let Some(level) = extract_csharp_visibility(declaration, ctx.source) {
+        return Some(level);
+    }
+    if find_child_by_kind(declaration, "explicit_interface_specifier").is_some() {
+        return Some(Visibility::Private);
     }
 
-    None
+    let parent = declaration.parent()?;
+    let owner = match parent.kind() {
+        "compilation_unit" => return Some(Visibility::Internal),
+        "declaration_list" => parent.parent()?,
+        _ => return None,
+    };
+    match owner.kind() {
+        "namespace_declaration" => Some(Visibility::Internal),
+        "interface_declaration" => Some(Visibility::Public),
+        "class_declaration" | "struct_declaration" | "record_declaration"
+        | "record_struct_declaration" => Some(Visibility::Private),
+        _ => None,
+    }
 }

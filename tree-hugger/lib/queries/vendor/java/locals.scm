@@ -51,12 +51,20 @@
 (method_declaration) @local.scope
 
 ; DEFINITIONS
+; A dotted package name is a `scoped_identifier`, not an `identifier`.
 (package_declaration
-  (identifier) @local.definition.namespace)
+  [
+    (identifier)
+    (scoped_identifier)
+  ] @local.definition.namespace)
 
 ; Classes - capture full node for context
 (class_declaration
-  name: (identifier) @local.definition.type) @local.definition.type.context
+  name: (identifier) @local.definition.class) @local.definition.class.context
+
+; Interfaces - capture full node for context
+(interface_declaration
+  name: (identifier) @local.definition.interface) @local.definition.interface.context
 
 ; Records - capture full node for context
 (record_declaration
@@ -95,6 +103,11 @@
   (#has-ancestor? @local.definition.import import_declaration))
 
 (field_declaration
+  declarator: (variable_declarator
+    name: (identifier) @local.definition.field))
+
+; Interface constants (implicitly public static final)
+(constant_declaration
   declarator: (variable_declarator
     name: (identifier) @local.definition.field))
 

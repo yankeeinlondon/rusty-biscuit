@@ -19,9 +19,17 @@
 (parameter
   name: (simple_identifier) @local.definition.parameter)
 
-; Enum cases
+; Enum cases; `case east, west` declares two names in one entry
 (enum_entry
-  name: (simple_identifier) @local.definition.field)
+  name: (simple_identifier) @local.definition.enum_variant)
+
+; Protocol requirements: functions are methods (direct-member rule), properties are fields
+(protocol_function_declaration
+  name: (simple_identifier) @local.definition.function) @local.definition.function.context
+
+(protocol_property_declaration
+  name: (pattern
+    bound_identifier: (simple_identifier) @local.definition.field))
 
 ; Property bindings (var/let declarations)
 (pattern

@@ -95,6 +95,53 @@ fn capture_parity_for_rust() {
     assert!(highlights.iter().any(|c| c.name == "type" && !c.reused));
 }
 
+/// Every definition capture a locals query uses is inventoried as reused, so
+/// the inventory changes together with the queries.
+#[test]
+fn every_locals_definition_capture_is_inventoried() {
+    let inventory = QueryInventory::new();
+    let mut checked = 0;
+    for language in ProgrammingLanguage::all() {
+        let grammar = language.tree_sitter_language();
+        let grammar_ref = GrammarRef {
+            language,
+            grammar: &grammar,
+            id: language.query_name(),
+        };
+        let query = query_for(grammar_ref, QueryKind::Locals).expect("locals query compiles");
+        let locals = inventory
+            .for_language(language)
+            .and_then(|entry| entry.suite_captures(NvimQuerySuite::Locals))
+            .expect("locals inventory");
+        for name in query.capture_names() {
+            if !name.starts_with("local.definition") || name.ends_with(".context") {
+                continue;
+            }
+            assert!(
+                locals.iter().any(|capture| capture.name == *name && capture.reused),
+                "{language}: @{name} is used by the locals query but not inventoried as reused"
+            );
+            checked += 1;
+        }
+    }
+    assert!(checked > 50, "only {checked} captures checked");
+}
+
+/// Perl's locals query is Tree Hugger's own work, compiles, and uses only
+/// natively supported predicates.
+#[test]
+fn perl_locals_query_is_an_original() {
+    let prov = query_provenance(ProgrammingLanguage::Perl, QueryKind::Locals)
+        .expect("perl locals provenance");
+    assert_eq!(prov.source_project, "tree-hugger");
+    assert_eq!(prov.translation_status, TranslationStatus::Original);
+    assert_ne!(prov.license, "Apache-2.0");
+
+    let source = include_str!("../../queries/vendor/perl/locals.scm");
+    assert!(find_unsupported_predicates(source).is_empty());
+    assert!(find_hook_predicates(source).is_empty());
+}
+
 #[test]
 fn capture_parity_for_javascript() {
     let inventory = QueryInventory::new();
@@ -339,16 +386,24 @@ fn original_queries_have_no_drift() {
     assert!(report.is_none());
 }
 
-/// Bulk drift check should cover all vendored queries.
+/// Bulk drift check should cover all vendored queries: every locals query
+/// except Perl's, which Tree Hugger wrote itself.
 #[test]
 fn bulk_drift_check_covers_all_vendored() {
     let reports = check_all_drift(Some("0.10.4"));
-    // Every language has a locals query vendored from nvim-treesitter
-    let expected_count = ProgrammingLanguage::all().len();
+    let vendored: Vec<ProgrammingLanguage> = ProgrammingLanguage::all()
+        .into_iter()
+        .filter(|language| {
+            query_provenance(*language, QueryKind::Locals)
+                .is_some_and(|prov| prov.translation_status != TranslationStatus::Original)
+        })
+        .collect();
+    assert_eq!(vendored.len(), ProgrammingLanguage::all().len() - 1);
+    assert!(!vendored.contains(&ProgrammingLanguage::Perl));
     assert_eq!(
         reports.len(),
-        expected_count,
-        "should check drift for every language's locals query"
+        vendored.len(),
+        "should check drift for every vendored locals query"
     );
 }
 

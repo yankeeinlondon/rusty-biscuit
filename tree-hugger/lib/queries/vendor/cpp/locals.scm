@@ -23,17 +23,17 @@
 
 ; Class definitions - capture full node for context
 (class_specifier
-  name: (type_identifier) @local.definition.type) @local.definition.type.context
+  name: (type_identifier) @local.definition.class) @local.definition.class.context
 
 (concept_definition
   name: (identifier) @local.definition.type) @local.definition.type.context
 
 (class_specifier
   name: (qualified_identifier
-    name: (type_identifier) @local.definition.type)) @local.definition.type.context
+    name: (type_identifier) @local.definition.class)) @local.definition.class.context
 
 (alias_declaration
-  name: (type_identifier) @local.definition.type)
+  name: (type_identifier) @local.definition.type_alias) @local.definition.type_alias.context
 
 ;template <typename T>
 (type_parameter_declaration
@@ -67,6 +67,16 @@
 (field_declaration
   declarator: (function_declarator
     (field_identifier) @local.definition.method)) @local.definition.method.context
+
+; Methods defined in the class body, also behind a pointer or reference return
+(function_definition
+  declarator: (function_declarator
+    declarator: (field_identifier) @local.definition.method)) @local.definition.method.context
+
+(function_definition
+  declarator: (_
+    (function_declarator
+      declarator: (field_identifier) @local.definition.method))) @local.definition.method.context
 
 (lambda_expression) @local.scope
 

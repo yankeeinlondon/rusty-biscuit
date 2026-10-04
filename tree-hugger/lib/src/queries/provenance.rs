@@ -56,7 +56,10 @@ impl std::fmt::Display for TranslationStatus {
 
 /// Returns the provenance record for a vendored `locals.scm` query.
 ///
-/// All vendor queries in Tree Hugger originate from nvim-treesitter.
+/// Every vendored query except Perl's originates from nvim-treesitter; its
+/// translation status and notes record Tree Hugger's changes per language.
+/// Perl's query lives under `vendor/` but was written by Tree Hugger, since
+/// nvim-treesitter has no Perl locals query.
 pub fn vendor_query_provenance(
     language: ProgrammingLanguage,
     kind: QueryKind,
@@ -70,18 +73,92 @@ pub fn vendor_query_provenance(
         _ => return None,
     };
 
+    if language == ProgrammingLanguage::Perl {
+        return Some(QueryProvenance {
+            source_project: "tree-hugger".to_string(),
+            upstream_revision: env!("CARGO_PKG_VERSION").to_string(),
+            upstream_path: local_path.clone(),
+            local_path,
+            license: REPOSITORY_LICENSE.to_string(),
+            translation_status: TranslationStatus::Original,
+            notes: vec![
+                "written for tree-sitter-perl 1.1.2; nvim-treesitter has no Perl locals query"
+                    .to_string(),
+            ],
+        });
+    }
+
+    let changes = vendored_locals_changes(language);
+    let mut notes = vec![
+        "@definition.* renamed to @local.definition.*".to_string(),
+        "@reference.* renamed to @local.reference.*".to_string(),
+    ];
+    notes.extend(changes.iter().map(|change| (*change).to_string()));
+
     Some(QueryProvenance {
         source_project: "nvim-treesitter".to_string(),
         upstream_revision: "0.10.4".to_string(),
         upstream_path,
         local_path,
         license: "Apache-2.0".to_string(),
-        translation_status: TranslationStatus::CapturesRenamed,
-        notes: vec![
-            "@definition.* renamed to @local.definition.*".to_string(),
-            "@reference.* renamed to @local.reference.*".to_string(),
-        ],
+        translation_status: if changes.is_empty() {
+            TranslationStatus::CapturesRenamed
+        } else {
+            TranslationStatus::MultipleChanges
+        },
+        notes,
     })
+}
+
+/// The license of queries Tree Hugger writes itself, which is the
+/// repository's license.
+const REPOSITORY_LICENSE: &str = "AGPL-3.0-only";
+
+/// Tree Hugger's changes to a vendored `locals.scm` beyond renaming captures:
+/// added or removed patterns and reclassified captures. Empty when renaming
+/// is the only change recorded.
+fn vendored_locals_changes(language: ProgrammingLanguage) -> &'static [&'static str] {
+    match language {
+        ProgrammingLanguage::Rust => &[
+            "added bodyless trait method (`function_signature_item`), `static`, `union`, `type` and associated `type` patterns",
+            "enum variants captured as `@local.definition.enum_variant`; `mod` items as `@local.definition.module` with a context capture",
+        ],
+        ProgrammingLanguage::Java => &[
+            "classes captured as `@local.definition.class`; added `interface_declaration` and interface-constant (`constant_declaration`) patterns",
+            "`package_declaration` also matches a dotted `scoped_identifier` name",
+        ],
+        ProgrammingLanguage::Python => &[
+            "classes captured as `@local.definition.class`",
+            "removed the attribute-assignment (`self.x = …`, `obj.attr = …`) field pattern",
+        ],
+        ProgrammingLanguage::JavaScript => &[
+            "removed the `this.x = …` assignment pattern",
+        ],
+        ProgrammingLanguage::Swift => &[
+            "enum cases captured as `@local.definition.enum_variant`",
+            "added protocol function and property requirement patterns",
+        ],
+        ProgrammingLanguage::C => &[
+            "added `union_specifier` and pointer field-declarator patterns",
+            "typedefs captured as `@local.definition.type_alias`",
+        ],
+        ProgrammingLanguage::Cpp => &[
+            "classes captured as `@local.definition.class`; `using` aliases as `@local.definition.type_alias`",
+            "added patterns for methods defined in a class body",
+        ],
+        ProgrammingLanguage::CSharp => &[
+            "properties captured as `@local.definition.property`",
+            "added block-scoped and file-scoped namespace patterns",
+        ],
+        ProgrammingLanguage::TypeScript
+        | ProgrammingLanguage::Go
+        | ProgrammingLanguage::Php
+        | ProgrammingLanguage::Scala
+        | ProgrammingLanguage::Lua
+        | ProgrammingLanguage::Perl
+        | ProgrammingLanguage::Bash
+        | ProgrammingLanguage::Zsh => &[],
+    }
 }
 
 /// Returns the provenance record for a local overlay query.
@@ -173,6 +250,43 @@ mod tests {
     fn all_provenance_includes_rust_locals() {
         let all = all_query_provenance();
         assert!(all.contains_key(&(ProgrammingLanguage::Rust, QueryKind::Locals)));
+    }
+
+    #[test]
+    fn perl_locals_are_a_tree_hugger_original() {
+        let prov = query_provenance(ProgrammingLanguage::Perl, QueryKind::Locals)
+            .expect("perl locals provenance");
+        assert_eq!(prov.source_project, "tree-hugger");
+        assert_eq!(prov.license, REPOSITORY_LICENSE);
+        assert_eq!(prov.translation_status, TranslationStatus::Original);
+        assert_eq!(prov.local_path, "queries/vendor/perl/locals.scm");
+    }
+
+    #[test]
+    fn changed_vendor_queries_record_their_changes() {
+        for language in [
+            ProgrammingLanguage::Rust,
+            ProgrammingLanguage::Java,
+            ProgrammingLanguage::Python,
+            ProgrammingLanguage::JavaScript,
+            ProgrammingLanguage::Swift,
+            ProgrammingLanguage::C,
+            ProgrammingLanguage::Cpp,
+            ProgrammingLanguage::CSharp,
+        ] {
+            let prov = vendor_query_provenance(language, QueryKind::Locals).expect("provenance");
+            assert_eq!(
+                prov.translation_status,
+                TranslationStatus::MultipleChanges,
+                "{language}"
+            );
+            assert!(prov.notes.len() > 2, "{language}: {:?}", prov.notes);
+        }
+
+        let unchanged = vendor_query_provenance(ProgrammingLanguage::Go, QueryKind::Locals)
+            .expect("go provenance");
+        assert_eq!(unchanged.translation_status, TranslationStatus::CapturesRenamed);
+        assert_eq!(unchanged.source_project, "nvim-treesitter");
     }
 
     #[test]

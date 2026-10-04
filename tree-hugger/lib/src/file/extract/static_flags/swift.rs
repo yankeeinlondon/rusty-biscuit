@@ -1,19 +1,20 @@
 use super::*;
 
-/// Checks if a Swift method has `static` or `class` modifier.
+/// Checks if a Swift member is `static` or `class`. For a property the keyword
+/// sits in `modifiers`; `class func` puts a bare `class` token on the function.
 pub(crate) fn extract_swift_is_static(node: Node<'_>, source: &str) -> bool {
     let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if child.kind() == "modifiers" {
+    node.children(&mut cursor).any(|child| match child.kind() {
+        "modifiers" => {
             let mut mod_cursor = child.walk();
-            for modifier in child.children(&mut mod_cursor) {
-                if let Ok(text) = modifier.utf8_text(source.as_bytes())
-                    && (text == "static" || text == "class")
-                {
-                    return true;
-                }
-            }
+            child.children(&mut mod_cursor).any(|modifier| {
+                matches!(
+                    modifier.utf8_text(source.as_bytes()),
+                    Ok("static" | "class")
+                )
+            })
         }
-    }
-    false
+        "class" => node.kind() == "function_declaration",
+        _ => false,
+    })
 }

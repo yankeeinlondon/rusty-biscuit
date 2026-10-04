@@ -6,9 +6,20 @@ use super::*;
 
 /// What visibility and static readers know about a declaration besides its node.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct DeclarationContext<'src> {
+pub(crate) struct DeclarationContext<'tree> {
     pub language: ProgrammingLanguage,
-    pub source: &'src str,
+    pub source: &'tree str,
+    /// The captured name. One declaration can introduce several names
+    /// (`int a, *b;`, Swift `case east, west`), so a rule that depends on
+    /// which name starts from here.
+    pub name: Node<'tree>,
+    /// The file's root node, for same-file lookups (a Rust trait's level, an
+    /// earlier C/C++ `static` prototype, a Scala `package` clause).
+    pub root: Node<'tree>,
+    /// JavaScript/TypeScript only: the file is a module, so an unexported
+    /// top-level declaration is ModulePrivate rather than a global. Computed
+    /// once per file by [`is_ecma_module_file`].
+    pub is_ecma_module: bool,
     /// The final kind, after classification.
     pub kind: SymbolKind,
     /// Inside a function body (a local variable, or a function nested in

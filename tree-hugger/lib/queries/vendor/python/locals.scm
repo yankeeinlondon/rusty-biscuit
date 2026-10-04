@@ -56,7 +56,7 @@
 
 ; Class defines type and scope - capture full node
 ((class_definition
-  name: (identifier) @local.definition.type) @local.scope @local.definition.type.context
+  name: (identifier) @local.definition.class) @local.scope @local.definition.class.context
   (#set! definition.type.scope "parent"))
 
 ; Methods - capture full node for signature extraction
@@ -110,10 +110,6 @@
   left: (tuple_pattern
     (identifier) @local.definition.var))
 
-(assignment
-  left: (attribute
-    (identifier)
-    (identifier) @local.definition.field))
 
 ; Walrus operator  x := 1
 (named_expression

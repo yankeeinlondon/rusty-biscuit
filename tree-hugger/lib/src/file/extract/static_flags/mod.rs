@@ -23,6 +23,7 @@ pub(crate) use cpp::extract_cpp_is_static;
 pub(crate) use ecma::extract_ts_is_static;
 pub(crate) use java::extract_java_csharp_is_static;
 pub(crate) use php::extract_php_is_static;
+pub(crate) use python::is_python_class_attribute;
 pub(crate) use swift::extract_swift_is_static;
 
 /// Whether `declaration` is a member reachable without an instance.

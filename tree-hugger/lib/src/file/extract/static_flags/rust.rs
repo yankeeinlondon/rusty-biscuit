@@ -1,10 +1,14 @@
 use super::*;
 
-/// Checks if a Rust method is an associated function (no self parameter).
+/// Checks if a Rust function is an associated function: declared directly in
+/// an `impl` or trait body, with no `self` receiver.
 pub(crate) fn extract_rust_is_static(node: Node<'_>, source: &str) -> bool {
-    // A Rust method is "static" (associated function) if it doesn't have self parameter
-    // Only applies to methods inside impl blocks
-    if !is_inside_impl_block(node) {
+    let is_associated = node
+        .parent()
+        .filter(|list| list.kind() == "declaration_list")
+        .and_then(|list| list.parent())
+        .is_some_and(|parent| matches!(parent.kind(), "impl_item" | "trait_item"));
+    if !is_associated {
         return false;
     }
 
@@ -33,14 +37,3 @@ pub(crate) fn extract_rust_is_static(node: Node<'_>, source: &str) -> bool {
     true
 }
 
-/// Checks if a Rust function is inside an impl block.
-pub(crate) fn is_inside_impl_block(node: Node<'_>) -> bool {
-    let mut current = node.parent();
-    while let Some(parent) = current {
-        if parent.kind() == "impl_item" {
-            return true;
-        }
-        current = parent.parent();
-    }
-    false
-}

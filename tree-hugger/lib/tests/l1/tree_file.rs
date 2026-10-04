@@ -1069,13 +1069,22 @@ fn distinguishes_java_types() -> Result<(), TreeHuggerError> {
     let tree_file = TreeFile::new(fixture_path("types.java"))?;
     let symbols = tree_file.symbols()?;
 
-    // Class should be Type (Java classes are the primary type mechanism)
+    // Class should be Class, so class filtering is consistent across languages
     let point = symbols.iter().find(|s| s.name == "Point");
     assert!(point.is_some(), "should find Point class");
     assert_eq!(
         point.unwrap().kind,
-        tree_hugger::SymbolKind::Type,
-        "Java class should be SymbolKind::Type"
+        tree_hugger::SymbolKind::Class,
+        "Java class should be SymbolKind::Class"
+    );
+
+    // Interface should be Interface
+    let service = symbols.iter().find(|s| s.name == "GreetingService");
+    assert!(service.is_some(), "should find GreetingService interface");
+    assert_eq!(
+        service.unwrap().kind,
+        tree_hugger::SymbolKind::Interface,
+        "Java interface should be SymbolKind::Interface"
     );
 
     // Enum should be Enum
@@ -1122,13 +1131,13 @@ fn distinguishes_c_types() -> Result<(), TreeHuggerError> {
         "C enum should be SymbolKind::Enum"
     );
 
-    // Typedef should be Type
+    // A typedef names another type: TypeAlias
     let alias = symbols.iter().find(|s| s.name == "PointAlias");
     assert!(alias.is_some(), "should find PointAlias typedef");
     assert_eq!(
         alias.unwrap().kind,
-        tree_hugger::SymbolKind::Type,
-        "C typedef should be SymbolKind::Type"
+        tree_hugger::SymbolKind::TypeAlias,
+        "C typedef should be SymbolKind::TypeAlias"
     );
 
     Ok(())
@@ -1148,13 +1157,13 @@ fn distinguishes_cpp_types() -> Result<(), TreeHuggerError> {
         "C++ struct should be SymbolKind::Type"
     );
 
-    // Class should be Type
+    // Class should be Class, as in every language with a class keyword
     let greeter = symbols.iter().find(|s| s.name == "Greeter");
     assert!(greeter.is_some(), "should find Greeter class");
     assert_eq!(
         greeter.unwrap().kind,
-        tree_hugger::SymbolKind::Type,
-        "C++ class should be SymbolKind::Type"
+        tree_hugger::SymbolKind::Class,
+        "C++ class should be SymbolKind::Class"
     );
 
     // Enum should be Enum
@@ -1616,19 +1625,8 @@ fn extracts_csharp_type_metadata() -> Result<(), TreeHuggerError> {
         "Status should have Success variant"
     );
 
-    // Interface should have method signatures
-    let service = symbols
-        .iter()
-        .find(|s| s.name == "IGreetingService")
-        .expect("should find IGreetingService interface");
-    let meta = service
-        .type_metadata
-        .as_ref()
-        .expect("IGreetingService should have type_metadata");
-    assert!(
-        meta.fields.iter().any(|f| f.name == "Greet"),
-        "IGreetingService should have Greet method"
-    );
+    // Type metadata lists only fields and properties.
+    assert_method_is_a_member_not_a_field(&symbols, "IGreetingService", "Greet");
 
     // Record should have fields
     let person = symbols
@@ -1689,19 +1687,8 @@ fn extracts_swift_type_metadata() -> Result<(), TreeHuggerError> {
         "Greeter should have field prefix"
     );
 
-    // Protocol should have method signatures
-    let service = symbols
-        .iter()
-        .find(|s| s.name == "GreetingService")
-        .expect("should find GreetingService protocol");
-    let meta = service
-        .type_metadata
-        .as_ref()
-        .expect("GreetingService should have type_metadata");
-    assert!(
-        meta.fields.iter().any(|f| f.name == "greet"),
-        "GreetingService should have greet method"
-    );
+    // Type metadata lists only fields and properties.
+    assert_method_is_a_member_not_a_field(&symbols, "GreetingService", "greet");
 
     Ok(())
 }
@@ -1730,19 +1717,8 @@ fn extracts_scala_type_metadata() -> Result<(), TreeHuggerError> {
         "Point should have parameter x"
     );
 
-    // Trait should have method signatures
-    let greeter = symbols
-        .iter()
-        .find(|s| s.name == "Greeter")
-        .expect("should find Greeter trait");
-    let meta = greeter
-        .type_metadata
-        .as_ref()
-        .expect("Greeter should have type_metadata");
-    assert!(
-        meta.fields.iter().any(|f| f.name == "greet"),
-        "Greeter should have greet method"
-    );
+    // Type metadata lists only fields and properties.
+    assert_method_is_a_member_not_a_field(&symbols, "Greeter", "greet");
 
     Ok(())
 }
@@ -1767,19 +1743,8 @@ fn extracts_php_type_metadata() -> Result<(), TreeHuggerError> {
         "Greeter should have field prefix"
     );
 
-    // Interface should have method signatures
-    let service = symbols
-        .iter()
-        .find(|s| s.name == "GreetingService")
-        .expect("should find GreetingService interface");
-    let meta = service
-        .type_metadata
-        .as_ref()
-        .expect("GreetingService should have type_metadata");
-    assert!(
-        meta.fields.iter().any(|f| f.name == "greet"),
-        "GreetingService should have greet method"
-    );
+    // Type metadata lists only fields and properties.
+    assert_method_is_a_member_not_a_field(&symbols, "GreetingService", "greet");
 
     // Enum should have variants
     let status = symbols
@@ -3034,4 +2999,30 @@ fn forced_typescript_preserves_tsx_grammar() {
         tree_file.syntax_diagnostics().is_empty(),
         "TSX grammar should parse JSX without syntax errors"
     );
+}
+
+/// Type metadata lists only fields and properties: a method declared in an
+/// interface, protocol or trait is a standalone method of that type, never a
+/// field entry in its metadata.
+fn assert_method_is_a_member_not_a_field(
+    symbols: &[tree_hugger::SymbolInfo],
+    type_name: &str,
+    method_name: &str,
+) {
+    let owner = symbols
+        .iter()
+        .find(|s| s.name == type_name)
+        .unwrap_or_else(|| panic!("should find {type_name}"));
+    assert!(
+        owner
+            .type_metadata
+            .as_ref()
+            .is_none_or(|meta| meta.fields.iter().all(|f| f.name != method_name)),
+        "{type_name} metadata should not list its {method_name} method as a field"
+    );
+    let method = symbols
+        .iter()
+        .find(|s| s.name == method_name && s.container_name.as_deref() == Some(type_name))
+        .unwrap_or_else(|| panic!("should find {method_name} in {type_name}"));
+    assert_eq!(method.kind, tree_hugger::SymbolKind::Method, "{type_name}::{method_name}");
 }

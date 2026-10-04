@@ -1,50 +1,377 @@
 //! Tests 2 and 6 of `2026-10-03-visibility-and-kind`: the kind matrix, asserted
 //! through `TreeFile::symbols()` and `symbol_index_v2()`, and the rule that no
-//! fixture symbol reports `SymbolKind::Unknown`. Rows land with the extraction
-//! changes that make them pass.
+//! fixture symbol reports `SymbolKind::Unknown`.
 
 use std::collections::HashMap;
 
 use tree_hugger::{ProgrammingLanguage, SymbolKind, SymbolKindV2, TreeFile};
 
+use ProgrammingLanguage as L;
+use SymbolKind as K;
+
 use crate::symbols_fixtures::{
     all_fixtures, display_name, extract_inline, extract_path, extract_primary,
 };
 
-/// Rust smoke sample of the kind matrix: enum variants, modules that are not
-/// their own container, and `impl` members contained by the implemented type.
-#[test]
-fn rust_kind_rows_hold_through_both_paths() {
-    use SymbolKind::*;
-    let rust = extract_primary(ProgrammingLanguage::Rust);
+/// One committed cell of the kind matrix: `(language, name, container, kind,
+/// container kind)`, asserted in the language's primary fixture.
+pub type KindRow = (
+    ProgrammingLanguage,
+    &'static str,
+    Option<&'static str>,
+    SymbolKind,
+    Option<SymbolKind>,
+);
 
-    let rows: &[(&str, Option<&str>, SymbolKind, Option<SymbolKind>)] = &[
-        ("UnitVariant", Some("PublicEnum"), EnumVariant, Some(Enum)),
-        ("TupleVariant", Some("PublicEnum"), EnumVariant, Some(Enum)),
-        ("StructVariant", Some("PublicEnum"), EnumVariant, Some(Enum)),
-        ("PrivateEnumVariant", Some("PrivateEnum"), EnumVariant, Some(Enum)),
-        ("outer_module", None, Module, None),
-        ("crate_inner_module", Some("outer_module"), Module, Some(Module)),
-        ("private_module", None, Module, None),
-        ("geo", None, Module, None),
-        // inherent impl, `self` method and associated functions
-        ("instance_method", Some("PublicStruct"), Method, Some(Type)),
-        ("new_associated_function", Some("PublicStruct"), Method, Some(Type)),
-        ("crate_associated_function", Some("PublicStruct"), Method, Some(Type)),
-        // trait impls, same-file and standard-library traits
-        ("required_trait_method", Some("PublicStruct"), Method, Some(Type)),
-        ("fmt", Some("PublicStruct"), Method, Some(Type)),
-        ("private_trait_method", Some("PrivateStruct"), Method, Some(Type)),
-        // `impl crate::geo::Coord`, `impl<T> Wrapper<T>`, a foreign type
-        ("coord_method", Some("Coord"), Method, Some(Type)),
-        ("wrapper_method", Some("Wrapper"), Method, Some(Type)),
-        ("private_trait_method", Some("String"), Method, None),
-        // union fields
-        ("union_int_field", Some("PublicUnion"), Field, Some(Type)),
-        ("union_float_field", Some("PublicUnion"), Field, Some(Type)),
-    ];
-    for (name, container, kind, container_kind) in rows {
-        rust.assert_kind(name, *container, *kind, *container_kind);
+/// The kind matrix: every committed `ok`, `FIX` and `LIM` cell, one row per
+/// fixture declaration. Deferred (`FEAT`) cells have no rows.
+pub const KIND_MATRIX: &[KindRow] = &[
+    // Rust
+    (L::Rust, "public_function", None, K::Function, None),
+    (L::Rust, "PUBLIC_CONSTANT", None, K::Constant, None),
+    (L::Rust, "PUBLIC_STATIC", None, K::Variable, None),
+    (L::Rust, "PRIVATE_STATIC_MUT", None, K::Variable, None),
+    (L::Rust, "LOCAL_STATIC", None, K::Variable, None),
+    (L::Rust, "PublicAlias", None, K::TypeAlias, None),
+    (L::Rust, "PrivateAlias", None, K::TypeAlias, None),
+    (L::Rust, "outer_module", None, K::Module, None),
+    (L::Rust, "crate_inner_module", Some("outer_module"), K::Module, Some(K::Module)),
+    (L::Rust, "private_module", None, K::Module, None),
+    (L::Rust, "geo", None, K::Module, None),
+    (L::Rust, "PublicStruct", None, K::Type, None),
+    (L::Rust, "PublicUnion", None, K::Type, None),
+    (L::Rust, "PublicEnum", None, K::Enum, None),
+    (L::Rust, "UnitVariant", Some("PublicEnum"), K::EnumVariant, Some(K::Enum)),
+    (L::Rust, "TupleVariant", Some("PublicEnum"), K::EnumVariant, Some(K::Enum)),
+    (L::Rust, "StructVariant", Some("PublicEnum"), K::EnumVariant, Some(K::Enum)),
+    (L::Rust, "PrivateEnumVariant", Some("PrivateEnum"), K::EnumVariant, Some(K::Enum)),
+    (L::Rust, "PublicTrait", None, K::Trait, None),
+    (L::Rust, "public_field", Some("PublicStruct"), K::Field, Some(K::Type)),
+    (L::Rust, "union_int_field", Some("PublicUnion"), K::Field, Some(K::Type)),
+    (L::Rust, "union_float_field", Some("PublicUnion"), K::Field, Some(K::Type)),
+    // trait declaration: bodyless and provided methods, associated items
+    (L::Rust, "required_trait_method", Some("PublicTrait"), K::Method, Some(K::Trait)),
+    (L::Rust, "provided_trait_method", Some("PublicTrait"), K::Method, Some(K::Trait)),
+    (L::Rust, "TRAIT_ASSOCIATED_CONSTANT", Some("PublicTrait"), K::Constant, Some(K::Trait)),
+    (L::Rust, "TraitAssociatedType", Some("PublicTrait"), K::TypeAlias, Some(K::Trait)),
+    // inherent impl: `self` method, associated functions and constant
+    (L::Rust, "instance_method", Some("PublicStruct"), K::Method, Some(K::Type)),
+    (L::Rust, "new_associated_function", Some("PublicStruct"), K::Method, Some(K::Type)),
+    (L::Rust, "crate_associated_function", Some("PublicStruct"), K::Method, Some(K::Type)),
+    (L::Rust, "INHERENT_ASSOCIATED_CONSTANT", Some("PublicStruct"), K::Constant, Some(K::Type)),
+    // trait impls, same-file and standard-library traits
+    (L::Rust, "required_trait_method", Some("PublicStruct"), K::Method, Some(K::Type)),
+    (L::Rust, "TRAIT_ASSOCIATED_CONSTANT", Some("PublicStruct"), K::Constant, Some(K::Type)),
+    (L::Rust, "TraitAssociatedType", Some("PublicStruct"), K::TypeAlias, Some(K::Type)),
+    (L::Rust, "fmt", Some("PublicStruct"), K::Method, Some(K::Type)),
+    (L::Rust, "private_trait_method", Some("PrivateStruct"), K::Method, Some(K::Type)),
+    // `impl crate::geo::Coord`, `impl<T> Wrapper<T>`, a foreign type
+    (L::Rust, "coord_method", Some("Coord"), K::Method, Some(K::Type)),
+    (L::Rust, "wrapper_method", Some("Wrapper"), K::Method, Some(K::Type)),
+    (L::Rust, "private_trait_method", Some("String"), K::Method, None),
+    // TypeScript
+    (L::TypeScript, "exportedFunction", None, K::Function, None),
+    (L::TypeScript, "ExportedWidget", None, K::Class, None),
+    (L::TypeScript, "ExportedAbstractBase", None, K::Class, None),
+    (L::TypeScript, "ModuleAbstractBase", None, K::Class, None),
+    (L::TypeScript, "ExportedInterface", None, K::Interface, None),
+    (L::TypeScript, "ExportedEnum", None, K::Enum, None),
+    (L::TypeScript, "ExportedAlias", None, K::TypeAlias, None),
+    (L::TypeScript, "ModuleAlias", None, K::TypeAlias, None),
+    (L::TypeScript, "constructor", Some("ExportedWidget"), K::Constructor, Some(K::Class)),
+    (L::TypeScript, "publicMethod", Some("ExportedWidget"), K::Method, Some(K::Class)),
+    (L::TypeScript, "#hashPrivateMethod", Some("ExportedWidget"), K::Method, Some(K::Class)),
+    (L::TypeScript, "abstractMethod", Some("ExportedAbstractBase"), K::Method, Some(K::Class)),
+    (L::TypeScript, "interfaceMethod", Some("ExportedInterface"), K::Method, Some(K::Interface)),
+    (L::TypeScript, "interfaceProperty", Some("ExportedInterface"), K::Property, Some(K::Interface)),
+    (L::TypeScript, "publicProperty", Some("ExportedWidget"), K::Property, Some(K::Class)),
+    (L::TypeScript, "staticProperty", Some("ExportedWidget"), K::Property, Some(K::Class)),
+    (L::TypeScript, "#hashPrivateProperty", Some("ExportedWidget"), K::Property, Some(K::Class)),
+    // JavaScript
+    (L::JavaScript, "exportedFunction", None, K::Function, None),
+    (L::JavaScript, "ExportedWidget", None, K::Class, None),
+    (L::JavaScript, "constructor", Some("ExportedWidget"), K::Constructor, Some(K::Class)),
+    (L::JavaScript, "unmarkedMethod", Some("ExportedWidget"), K::Method, Some(K::Class)),
+    (L::JavaScript, "unmarkedProperty", Some("ExportedWidget"), K::Property, Some(K::Class)),
+    (L::JavaScript, "uninitializedStaticProperty", Some("ExportedWidget"), K::Property, Some(K::Class)),
+    (L::JavaScript, "#hashPrivateProperty", Some("ExportedWidget"), K::Property, Some(K::Class)),
+    // Go: structs and interfaces are `Type` (LIM)
+    (L::Go, "ExportedFunction", None, K::Function, None),
+    (L::Go, "ExportedMethod", None, K::Method, None),
+    (L::Go, "ExportedStruct", None, K::Type, None),
+    (L::Go, "ExportedInterface", None, K::Type, None),
+    (L::Go, "symbols", None, K::Namespace, None),
+    // Python
+    (L::Python, "module_function", None, K::Function, None),
+    (L::Python, "PlainWidget", None, K::Class, None),
+    (L::Python, "instance_method", Some("PlainWidget"), K::Method, Some(K::Class)),
+    (L::Python, "static_method", Some("PlainWidget"), K::Method, Some(K::Class)),
+    (L::Python, "class_method", Some("PlainWidget"), K::Method, Some(K::Class)),
+    (L::Python, "annotated_instance_field", Some("PlainWidget"), K::Field, Some(K::Class)),
+    (L::Python, "unannotated_static_field", Some("PlainWidget"), K::Field, Some(K::Class)),
+    // Java
+    (L::Java, "com.example.symbols", None, K::Namespace, None),
+    (L::Java, "PublicWidget", None, K::Class, None),
+    (L::Java, "AnnotatedPackageWidget", None, K::Class, None),
+    (L::Java, "PublicShape", None, K::Interface, None),
+    (L::Java, "PackageShape", None, K::Interface, None),
+    (L::Java, "PublicColor", None, K::Enum, None),
+    (L::Java, "PublicPoint", None, K::Type, None),
+    (L::Java, "publicMethod", Some("PublicWidget"), K::Method, Some(K::Class)),
+    (L::Java, "area", Some("PublicShape"), K::Method, Some(K::Interface)),
+    (L::Java, "publicField", Some("PublicWidget"), K::Field, Some(K::Class)),
+    (L::Java, "SIDES", Some("PublicShape"), K::Field, Some(K::Interface)),
+    // C#
+    (L::CSharp, "Example.Symbols", None, K::Namespace, None),
+    (L::CSharp, "PublicWidget", Some("Example.Symbols"), K::Class, Some(K::Namespace)),
+    (L::CSharp, "IShape", Some("Example.Symbols"), K::Interface, Some(K::Namespace)),
+    (L::CSharp, "PublicColor", Some("Example.Symbols"), K::Enum, Some(K::Namespace)),
+    (L::CSharp, "PublicStruct", Some("Example.Symbols"), K::Type, Some(K::Namespace)),
+    (L::CSharp, "PublicMethod", Some("PublicWidget"), K::Method, Some(K::Class)),
+    (L::CSharp, "PublicField", Some("PublicWidget"), K::Field, Some(K::Class)),
+    (L::CSharp, "Count", Some("PublicWidget"), K::Property, Some(K::Class)),
+    (L::CSharp, "Total", Some("PublicWidget"), K::Property, Some(K::Class)),
+    // C
+    (L::C, "public_function", None, K::Function, None),
+    (L::C, "NamedColor", None, K::Enum, None),
+    (L::C, "NamedTag", None, K::Type, None),
+    (L::C, "AliasedTag", None, K::Type, None),
+    (L::C, "NamedUnion", None, K::Type, None),
+    (L::C, "TagAlias", None, K::TypeAlias, None),
+    (L::C, "AnonymousStructAlias", None, K::TypeAlias, None),
+    (L::C, "CountAlias", None, K::TypeAlias, None),
+    (L::C, "tag_field", Some("NamedTag"), K::Field, Some(K::Type)),
+    (L::C, "tag_name_field", Some("NamedTag"), K::Field, Some(K::Type)),
+    (L::C, "union_int_field", Some("NamedUnion"), K::Field, Some(K::Type)),
+    // C++
+    (L::Cpp, "namespaceFunction", Some("fixture_space"), K::Function, Some(K::Namespace)),
+    (L::Cpp, "AccessWidget", Some("fixture_space"), K::Class, Some(K::Namespace)),
+    (L::Cpp, "ScopedColor", Some("fixture_space"), K::Enum, Some(K::Namespace)),
+    (L::Cpp, "PlainStruct", Some("fixture_space"), K::Type, Some(K::Namespace)),
+    (L::Cpp, "PlainUnion", Some("fixture_space"), K::Type, Some(K::Namespace)),
+    // declared in the class body
+    (L::Cpp, "firstPublicMethod", Some("AccessWidget"), K::Method, Some(K::Class)),
+    (L::Cpp, "staticFactory", Some("AccessWidget"), K::Method, Some(K::Class)),
+    // defined in the class body
+    (L::Cpp, "secondPublicMethod", Some("AccessWidget"), K::Method, Some(K::Class)),
+    (L::Cpp, "instanceMethod", Some("AccessWidget"), K::Method, Some(K::Class)),
+    (L::Cpp, "countCalls", Some("AccessWidget"), K::Method, Some(K::Class)),
+    (L::Cpp, "protectedMethod", Some("AccessWidget"), K::Method, Some(K::Class)),
+    (L::Cpp, "structPublicMethod", Some("PlainStruct"), K::Method, Some(K::Type)),
+    (L::Cpp, "firstPublicField", Some("AccessWidget"), K::Field, Some(K::Class)),
+    (L::Cpp, "structPublicField", Some("PlainStruct"), K::Field, Some(K::Type)),
+    (L::Cpp, "unionIntField", Some("PlainUnion"), K::Field, Some(K::Type)),
+    // Swift: classes, structs and enums are `Type` (LIM)
+    (L::Swift, "publicFunction", None, K::Function, None),
+    (L::Swift, "localValue", None, K::Variable, None),
+    (L::Swift, "OpenWidget", None, K::Type, None),
+    (L::Swift, "PublicApi", None, K::Type, None),
+    (L::Swift, "PublicDirection", None, K::Type, None),
+    (L::Swift, "PublicDrawable", None, K::Interface, None),
+    (L::Swift, "instanceMethod", Some("OpenWidget"), K::Method, Some(K::Type)),
+    (L::Swift, "staticMethod", Some("OpenWidget"), K::Method, Some(K::Type)),
+    (L::Swift, "unmarkedMethodInPublicStruct", Some("PublicApi"), K::Method, Some(K::Type)),
+    (L::Swift, "unmarkedMethodInPublicExtension", Some("OpenWidget"), K::Method, Some(K::Type)),
+    (L::Swift, "north", Some("PublicDirection"), K::EnumVariant, Some(K::Type)),
+    (L::Swift, "south", Some("PublicDirection"), K::EnumVariant, Some(K::Type)),
+    (L::Swift, "east", Some("PlainDirection"), K::EnumVariant, Some(K::Type)),
+    (L::Swift, "west", Some("PlainDirection"), K::EnumVariant, Some(K::Type)),
+    (L::Swift, "draw", Some("PublicDrawable"), K::Method, Some(K::Interface)),
+    (L::Swift, "drawableName", Some("PublicDrawable"), K::Field, Some(K::Interface)),
+    (L::Swift, "publicProperty", Some("OpenWidget"), K::Field, Some(K::Type)),
+    // Scala
+    (L::Scala, "topLevelFunction", None, K::Function, None),
+    (L::Scala, "Shape", None, K::Class, None),
+    (L::Scala, "CasePoint", None, K::Class, None),
+    (L::Scala, "PlainTrait", None, K::Trait, None),
+    (L::Scala, "PlainColor", None, K::Enum, None),
+    (L::Scala, "StandaloneObject", None, K::Module, None),
+    (L::Scala, "publicMethod", Some("PlainWidget"), K::Method, Some(K::Class)),
+    (L::Scala, "sum", Some("CasePoint"), K::Method, Some(K::Class)),
+    (L::Scala, "abstractTraitMethod", Some("PlainTrait"), K::Method, Some(K::Trait)),
+    (L::Scala, "concreteTraitMethod", Some("PlainTrait"), K::Method, Some(K::Trait)),
+    (L::Scala, "objectMethod", Some("StandaloneObject"), K::Method, Some(K::Module)),
+    // PHP
+    (L::Php, "topLevelFunction", None, K::Function, None),
+    (L::Php, "PublicWidget", None, K::Class, None),
+    (L::Php, "Shape", None, K::Interface, None),
+    (L::Php, "Greets", None, K::Trait, None),
+    (L::Php, "Suit", None, K::Enum, None),
+    (L::Php, "area", Some("PublicWidget"), K::Method, Some(K::Class)),
+    (L::Php, "greet", Some("Greets"), K::Method, Some(K::Trait)),
+    (L::Php, "traitStaticMethod", Some("Greets"), K::Method, Some(K::Trait)),
+    (L::Php, "publicField", Some("PublicWidget"), K::Field, Some(K::Class)),
+    // Lua
+    (L::Lua, "globalFunction", None, K::Function, None),
+    (L::Lua, "chunkLocalFunction", None, K::Function, None),
+    // Perl: subs, both package forms, and `my` / `our` / `state` names
+    (L::Perl, "Fixture::Greeter", None, K::Module, None),
+    (L::Perl, "Fixture::Block", None, K::Module, None),
+    (L::Perl, "greet", Some("Fixture::Greeter"), K::Function, Some(K::Module)),
+    (L::Perl, "other_package_sub", Some("Fixture::Other"), K::Function, Some(K::Module)),
+    (L::Perl, "block_package_sub", Some("Fixture::Block"), K::Function, Some(K::Module)),
+    (L::Perl, "after_block_sub", Some("Fixture::Other"), K::Function, Some(K::Module)),
+    (L::Perl, "$package_level_our", Some("Fixture::Greeter"), K::Variable, Some(K::Module)),
+    (L::Perl, "$block_package_our", Some("Fixture::Block"), K::Variable, Some(K::Module)),
+    (L::Perl, "$joined_name", Some("greet"), K::Variable, Some(K::Function)),
+    (L::Perl, "$call_count", Some("greet"), K::Variable, Some(K::Function)),
+    (L::Perl, "$first_name", Some("greet"), K::Variable, Some(K::Function)),
+    (L::Perl, "$last_name", Some("greet"), K::Variable, Some(K::Function)),
+    (L::Perl, "$block_local", Some("block_package_sub"), K::Variable, Some(K::Function)),
+    // Bash and Zsh
+    (L::Bash, "keyword_function", None, K::Function, None),
+    (L::Bash, "function_keyword_function", None, K::Function, None),
+    (L::Zsh, "paren_function", None, K::Function, None),
+    (L::Zsh, "keyword_function", None, K::Function, None),
+];
+
+/// Tests 2 and 6: every kind-matrix row holds through `TreeFile::symbols()`
+/// and `symbol_index_v2()`.
+#[test]
+fn kind_matrix_holds_through_both_paths() {
+    for (language, rows) in rows_by_language(KIND_MATRIX, |row| row.0) {
+        let extracted = extract_primary(language);
+        for (_, name, container, kind, container_kind) in rows {
+            extracted.assert_kind(name, *container, *kind, *container_kind);
+        }
+    }
+}
+
+/// Test 6: no symbol of any fixture reports `SymbolKind::Unknown`. An entry
+/// here needs a reason; the list starts empty.
+#[test]
+fn no_fixture_symbol_reports_an_unknown_kind() {
+    const ALLOWED_UNKNOWN: &[(&str, &str, &str)] = &[];
+    let mut checked = 0;
+    for path in all_fixtures() {
+        let extracted = extract_path(&path);
+        for symbol in &extracted.symbols {
+            checked += 1;
+            if symbol.kind != SymbolKind::Unknown {
+                continue;
+            }
+            assert!(
+                ALLOWED_UNKNOWN
+                    .iter()
+                    .any(|(file, name, _reason)| *file == extracted.label && *name == symbol.name),
+                "{}: `{}` reports SymbolKind::Unknown",
+                extracted.label,
+                symbol.name
+            );
+        }
+        for record in &extracted.records {
+            assert_ne!(
+                record.kind,
+                SymbolKindV2::Unknown,
+                "{}: record `{}` reports Unknown",
+                extracted.label,
+                record.identity.name
+            );
+        }
+    }
+    assert!(checked > 400, "only {checked} symbols checked");
+}
+
+/// Groups matrix rows by language, keeping the table's language order.
+pub fn rows_by_language<T>(
+    rows: &[T],
+    language_of: impl Fn(&T) -> ProgrammingLanguage,
+) -> Vec<(ProgrammingLanguage, Vec<&T>)> {
+    let mut groups: Vec<(ProgrammingLanguage, Vec<&T>)> = Vec::new();
+    for row in rows {
+        let language = language_of(row);
+        match groups.iter_mut().find(|(existing, _)| *existing == language) {
+            Some((_, group)) => group.push(row),
+            None => groups.push((language, vec![row])),
+        }
+    }
+    groups
+}
+
+/// A C `typedef struct Tag {…} Alias;` reports the tag and the alias once
+/// each; an anonymous struct invents no tag; `typedef struct S {…} S;` keeps
+/// both same-named declarations.
+#[test]
+fn c_typedefs_report_tag_and_alias_once_each() {
+    let c = extract_primary(ProgrammingLanguage::C);
+    let kinds_of = |name: &str| {
+        let mut kinds: Vec<SymbolKind> = c
+            .symbols
+            .iter()
+            .filter(|symbol| symbol.name == name)
+            .map(|symbol| symbol.kind)
+            .collect();
+        kinds.sort();
+        kinds
+    };
+    assert_eq!(kinds_of("AliasedTag"), [SymbolKind::Type]);
+    assert_eq!(kinds_of("TagAlias"), [SymbolKind::TypeAlias]);
+    assert_eq!(kinds_of("AnonymousStructAlias"), [SymbolKind::TypeAlias]);
+    assert_eq!(kinds_of("SameName"), [SymbolKind::Type, SymbolKind::TypeAlias]);
+    assert!(
+        c.symbols
+            .iter()
+            .filter(|symbol| symbol.kind == SymbolKind::Type)
+            .all(|symbol| !symbol.name.is_empty()),
+        "an anonymous struct must not invent a tag"
+    );
+}
+
+/// Removed catch-all patterns: JavaScript `this.x = …` and Python attribute
+/// assignments declare nothing, and Perl `local` overrides rather than declares.
+#[test]
+fn assignments_and_local_overrides_declare_no_symbol() {
+    for (language, names) in [
+        (ProgrammingLanguage::JavaScript, &["assignedOnlyThroughThis"][..]),
+        (
+            ProgrammingLanguage::Python,
+            &["assigned_through_self", "assigned_from_outside"][..],
+        ),
+        (ProgrammingLanguage::Perl, &["$_"][..]),
+    ] {
+        let extracted = extract_primary(language);
+        for name in names {
+            assert!(
+                extracted.symbols.iter().all(|symbol| symbol.name != *name),
+                "{}: `{name}` must produce no symbol",
+                extracted.label
+            );
+        }
+    }
+
+    // Python reports a class attribute once, from the class body, even when
+    // a method assigns it through `self`.
+    let python = extract_primary(ProgrammingLanguage::Python);
+    let declarations = python
+        .symbols
+        .iter()
+        .filter(|symbol| symbol.name == "unannotated_static_field")
+        .count();
+    assert_eq!(declarations, 1);
+}
+
+/// Perl variables record their declaring keyword in the declaration text, and
+/// each name of a list form shares it.
+#[test]
+fn perl_declaration_text_keeps_the_declaring_keyword() {
+    let perl = extract_primary(ProgrammingLanguage::Perl);
+    for (name, container, keyword) in [
+        ("$package_level_our", "Fixture::Greeter", "our"),
+        ("$joined_name", "greet", "my"),
+        ("$call_count", "greet", "state"),
+        ("$first_name", "greet", "my"),
+        ("$last_name", "greet", "my"),
+    ] {
+        let text = perl
+            .record(name, Some(container))
+            .source
+            .declaration_text
+            .clone()
+            .unwrap_or_default();
+        assert!(
+            text.starts_with(keyword),
+            "{name}: declaration text {text:?} lacks `{keyword}`"
+        );
     }
 }
 

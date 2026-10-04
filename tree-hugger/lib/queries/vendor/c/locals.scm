@@ -36,12 +36,20 @@
 (field_declaration
   declarator: (field_identifier) @local.definition.field)
 
+(field_declaration
+  declarator: (pointer_declarator
+    declarator: (field_identifier) @local.definition.field))
+
 ; Type definitions - capture full node for context
 (type_definition
-  declarator: (type_identifier) @local.definition.type) @local.definition.type.context
+  declarator: (type_identifier) @local.definition.type_alias) @local.definition.type_alias.context
 
 ; Struct definitions - capture full node for context
 (struct_specifier
+  name: (type_identifier) @local.definition.type) @local.definition.type.context
+
+; Union definitions - capture full node for context
+(union_specifier
   name: (type_identifier) @local.definition.type) @local.definition.type.context
 
 ; goto
