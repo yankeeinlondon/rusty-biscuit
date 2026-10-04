@@ -1134,6 +1134,52 @@ mod repo_tests {
         assert!(cached(&repo, &repo.sha("origin/main"), &feature_tip), "and the final one's");
     }
 
+    /// The cache one listing shares between its gathers seeds the final one:
+    /// unchanged tips are not compared again. A comparison that fails is
+    /// left out of that cache and out of the file the commit saves.
+    #[test]
+    #[serial_test::serial]
+    fn the_shared_cache_seeds_the_final_gather_and_never_holds_a_failure() {
+        let repo = TestRepo::with_origin();
+        let _stores = stores(&repo);
+        let _guard = DirGuard::enter(&repo.path());
+        let feature = repo.add_worktree("fix/x", "fix-x", "main");
+        repo.commit_in(&feature, "fix.txt");
+        let missing = "0".repeat(40);
+        let compares = |calls: &[Vec<String>]| {
+            recorder::count_matching(calls, |args| {
+                matches!(args.first().map(String::as_str), Some("rev-list" | "merge-tree"))
+            })
+        };
+
+        let mut list = crate::worktree::parse_worktree_state().unwrap();
+        let initial = list.ref_snapshot().clone();
+        let mut broken = initial.tips().clone();
+        broken.local.insert("fix/x".into(), missing.clone());
+        let cache = list.load_comparison_cache();
+        let (dirty, first) = list.gather_local(initial.tips(), &cache);
+        assert!(comparisons_of(&first, "fix/x").target.is_some());
+
+        let failed = list.gather_ref_facts(&broken, &cache);
+        assert_eq!(comparisons_of(&failed, "fix/x").target, None, "an object the repository lacks");
+        let failed_key = CacheKey { target_tip_sha: repo.sha("main"), branch_tip_sha: missing.clone(), version: CACHE_FORMAT_VERSION };
+        assert!(cache.lock().unwrap().get(&failed_key).is_none(), "a failed comparison is not cached in memory");
+
+        recorder::start_recording();
+        let last = list.gather_ref_facts(initial.tips(), &cache);
+        let calls = recorder::finish_recording();
+        assert_eq!(compares(&calls), 0, "the final gather reuses the first one's comparisons: {calls:?}");
+        assert_eq!(comparisons_of(&last, "fix/x").target, comparisons_of(&first, "fix/x").target);
+
+        list.commit(initial, dirty, last, cache);
+        assert!(cached(&repo, &repo.sha("main"), &repo.sha("fix/x")), "the comparison is saved");
+        assert!(!cached(&repo, &repo.sha("main"), &missing), "and the failure is not");
+    }
+
+    fn comparisons_of<'a>(facts: &'a crate::worktree::RefFacts, branch: &str) -> &'a crate::listing::BranchComparisons {
+        facts.comparisons.get(branch).unwrap_or_else(|| panic!("no comparison for {branch}"))
+    }
+
     #[test]
     #[serial_test::serial]
     fn a_commit_after_a_failed_ref_read_never_prunes_fork_records() {

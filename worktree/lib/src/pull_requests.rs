@@ -669,6 +669,16 @@ mod tests {
             Some(StoredPublication { id: id.into(), credentials: CredentialEvidence::Unknown }),
             "a format-5 answer can never say it was anonymous"
         );
+        // A format-5 reader ignores unknown fields, so a stray format-6 field
+        // is ignored too; it never makes the answer anonymous.
+        let mut format_5_claiming = format_5.clone();
+        format_5_claiming["credentials"] = serde_json::json!({ "state": "anonymous" });
+        fs::write(&store, serde_json::to_vec(&format_5_claiming).unwrap()).unwrap();
+        assert_eq!(
+            stored_publication(&store, ORIGIN, NOW).map(|publication| publication.credentials),
+            Some(CredentialEvidence::Unknown),
+            "format 5 with a credentials field"
+        );
 
         let mut format_5_ill = format_5.clone();
         format_5_ill["publication"] = serde_json::json!("not-an-id");
