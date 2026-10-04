@@ -1453,6 +1453,38 @@ fn a_focused_view_draws_the_branch_that_holds_a_lanes_fork() {
     assert!(graph.forked_off_line.is_empty(), "{:?}", graph.forked_off_line);
 }
 
+/// `a`'s tip was merged directly into its sibling `b` (both forked from
+/// main): `a` keeps its fork on main and gains the merge into `b`'s lane,
+/// though `b` is neither its parent nor the default lane.
+#[test]
+#[serial_test::serial]
+fn a_tip_merged_into_another_drawn_lane_is_drawn_merging_there() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().to_path_buf();
+    init_repo(&path);
+    let _r = commit(&path, "r");
+    let d1 = commit(&path, "d1");
+    run_git(&path, &["checkout", "-q", "-b", "a"]);
+    let a1 = commit(&path, "a1");
+    run_git(&path, &["checkout", "-q", "-b", "b", &d1]);
+    commit(&path, "b1");
+    let merge = merge_no_ff(&path, "a");
+    commit(&path, "b2");
+    run_git(&path, &["checkout", "-q", "main"]);
+    let _guard = DirGuard::enter(&path);
+
+    let (graph, _) = gather(&input("main", &["main", "a", "b"], ForkOriginStore::default()), true, false);
+    let graph = graph.expect("base view");
+
+    let a = line(&graph, "a");
+    assert_eq!(a.fork_sha.as_ref(), Some(&d1), "the fork stays on main");
+    assert_eq!(a.entries, commits(&[&a1]));
+    assert_eq!(merge_destinations(a), vec![&merge]);
+    assert!(line(&graph, "b").entries.contains(&LaneEntry::Commit(merge.clone())), "b draws its merge commit");
+    assert!(has_merge(&mermaid(&graph), "a", &merge), "{}", mermaid(&graph));
+    assert!(!graph.incomplete);
+}
+
 /// Records `branch` as created from `parent` at `base_sha`, as `wt create`
 /// does.
 fn forked_at(store: &mut ForkOriginStore, branch: &str, parent: &str, base_sha: &str, created_at: u64) {

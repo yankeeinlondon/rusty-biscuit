@@ -597,7 +597,16 @@ struct Extension {
 
 /// Classifies one selected branch against its recorded parent's lane,
 /// the default lane, and a diverged `origin/<default>` line, in that order.
-fn place(history: &History, classifications: &Classifications, tips: &DefaultTips, selected: &Selected, record: Option<&str>) -> Placement {
+/// `others` is every selected branch and its tip, for merges into a lane
+/// other than the ones the branch is classified against.
+fn place(
+    history: &History,
+    classifications: &Classifications,
+    tips: &DefaultTips,
+    selected: &Selected,
+    record: Option<&str>,
+    others: &[(&str, &str)],
+) -> Placement {
     let tip = selected.tip;
     let mut candidates: Vec<(LaneId, &str)> = Vec::new();
     if let Some((parent, parent_tip)) = selected.parent {
@@ -670,6 +679,16 @@ fn place(history: &History, classifications: &Classifications, tips: &DefaultTip
         (None, Fork::Known(fork, gap)) => (fork, gap),
         (None, Fork::Against(against, lane)) => fork_of(against, tip, &lane),
     };
+    // Only the parent, default, and origin lanes are classified against. A
+    // tip merged directly into another drawn lane (a child or a sibling)
+    // still gets that merge, keeping the fork and line found above: measuring
+    // the fork from that lane would hang this one from it.
+    let merge = merge.or_else(|| match &classified {
+        Ok(Integration::Unmerged | Integration::IntegratedOtherwise { .. }) => {
+            direct_merge_elsewhere(history, classifications, selected, others)
+        }
+        _ => None,
+    });
     let shape = Shape::Lane {
         window: extension.window,
         fork,
@@ -689,6 +708,26 @@ fn place(history: &History, classifications: &Classifications, tips: &DefaultTip
         gap,
         merged_through,
     }
+}
+
+/// The first other selected branch (not this one, not its recorded parent)
+/// whose line merged `selected`'s tip directly, as its merge's second parent.
+/// A tip merely on that lane's line (`NoSeparateHistory`, as when a child
+/// forked at it) is no merge.
+fn direct_merge_elsewhere(
+    history: &History,
+    classifications: &Classifications,
+    selected: &Selected,
+    others: &[(&str, &str)],
+) -> Option<(String, LaneId)> {
+    let parent = selected.parent.map(|(parent, _)| parent);
+    others
+        .iter()
+        .filter(|(branch, _)| *branch != selected.branch && Some(*branch) != parent)
+        .find_map(|(branch, other_tip)| match classifications.classify(history, selected.tip, &[other_tip]) {
+            Ok(Integration::MergedDirectly { merge, .. }) => Some((merge, LaneId::Branch(branch.to_string()))),
+            _ => None,
+        })
 }
 
 /// Walks a lane's boundaries backward and extends it past each one that a
@@ -830,7 +869,9 @@ fn assemble(
 ) -> GraphFacts {
     let classifications = Classifications::default();
     let record = |branch: &str| input.forks.get(branch).map(|origin| origin.base_sha.as_str());
-    let placements: Vec<Placement> = parallel(selected, |selected| place(history, &classifications, tips, selected, record(selected.branch)))
+    let others: Vec<(&str, &str)> = selected.iter().map(|selected| (selected.branch, selected.tip)).collect();
+    let placements: Vec<Placement> =
+        parallel(selected, |selected| place(history, &classifications, tips, selected, record(selected.branch), &others))
         .into_iter()
         .filter_map(|placement| {
             incomplete |= placement.is_none();
