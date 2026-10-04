@@ -471,6 +471,59 @@ fn verbose_labels_follow_the_snapshot_and_keep_live_tags() {
     );
 }
 
+/// A gather reads history only through the snapshot's object IDs, so refs
+/// that advance, appear, or disappear after it was captured change nothing
+/// it returns, in the focused and the base view alike.
+#[test]
+#[serial_test::serial]
+fn refs_moved_after_the_snapshot_leave_the_gather_unchanged() {
+    let repo = branches();
+    let _guard = DirGuard::enter(&repo.path);
+    run_git(&repo.path, &["update-ref", "refs/remotes/origin/main", &repo.c2]);
+    let names = ["main", "feature-a", "feature-b"];
+    let focused = input("feature-a", &names, ForkOriginStore::default());
+    let base = input("main", &names, ForkOriginStore::default());
+    let verbose_shape = |verbose: Option<VerboseData>| {
+        let verbose = verbose.expect("verbose");
+        let detail = |commit: &CommitDetail| (commit.short_sha.clone(), commit.message.clone(), commit.refs.clone());
+        (verbose.merge_base.as_ref().map(detail), verbose.branch_commits.iter().map(detail).collect::<Vec<_>>())
+    };
+
+    let (focused_graph, focused_verbose) = gather(&focused, true, true);
+    let (base_graph, _) = gather(&base, true, false);
+    let (focused_verbose, focused_graph, base_graph) =
+        (verbose_shape(focused_verbose), focused_graph.expect("focused view"), base_graph.expect("base view"));
+
+    // Every kind of move: both branches of the focused view advance,
+    // origin/main is fetched forward, one branch is deleted, one created.
+    run_git(&repo.path, &["checkout", "-q", "feature-a"]);
+    commit(&repo.path, "a2");
+    run_git(&repo.path, &["checkout", "-q", "main"]);
+    let c4 = commit(&repo.path, "c4");
+    run_git(&repo.path, &["update-ref", "refs/remotes/origin/main", &c4]);
+    run_git(&repo.path, &["branch", "-q", "-D", "feature-b"]);
+    run_git(&repo.path, &["branch", "late", &repo.a1]);
+
+    recorder::start_recording();
+    let (moved_focused_graph, moved_focused_verbose) = gather(&focused, true, true);
+    let (moved_base_graph, _) = gather(&base, true, false);
+    let calls = recorder::finish_recording();
+
+    assert_eq!(moved_focused_graph.expect("focused view"), focused_graph);
+    assert_eq!(verbose_shape(moved_focused_verbose), focused_verbose);
+    assert_eq!(moved_base_graph.expect("base view"), base_graph);
+    let ref_names = ["HEAD", "main", "feature-a", "feature-b", "late", "origin/main", "origin/HEAD"];
+    let named: Vec<&Vec<String>> = calls
+        .iter()
+        .filter(|args| {
+            args.iter()
+                .flat_map(|arg| arg.split(".."))
+                .any(|part| ref_names.contains(&part.trim_start_matches('.')))
+        })
+        .collect();
+    assert!(!calls.is_empty() && named.is_empty(), "every revision is an object ID; named: {named:?}");
+}
+
 #[test]
 #[serial_test::serial]
 fn nothing_is_gathered_when_detached_or_not_needed() {

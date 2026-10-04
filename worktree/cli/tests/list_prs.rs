@@ -36,7 +36,7 @@ use std::time::{Duration, Instant};
 
 use perf_support::{
     FakeGitea, GiteaReply, HoldingOrigin, KillOnDrop, MANUFACTURED_FAILURE, MixedFixture, ProxyStub, WorkerReaper,
-    assert_manufactured_failure, process_running, refresh_workers, wait_for_refresh_workers,
+    assert_manufactured_failure, process_running, refresh_workers, stage_from_perf, wait_for_refresh_workers,
 };
 use serial_test::serial;
 use worktree::pull_requests::{CachedPrs, RefreshOutcome, pr_lock_path, select_cached, unix_now};
@@ -519,12 +519,12 @@ fn a_held_live_head_check_holds_the_listing_only_until_its_deadline() {
 
     // `.output()` returns only once every holder of stdout and stderr has
     // exited, so it returning while `origin` still holds the worker's
-    // request proves `wt list` neither waited past its 3 s nor joined it.
-    let started = Instant::now();
+    // request proves `wt list` did not join it. The budget limits only the
+    // wait, not the local gather overlapping it, so the bound reads the wait.
     let (_, stderr) = list_with(fixture.wt_command_direct());
-    let elapsed = started.elapsed();
+    let waited = stage_from_perf(&stderr, "remote wait").expect("remote wait stage");
 
-    assert!(elapsed < Duration::from_secs(5), "{elapsed:?}");
+    assert!(waited < Duration::from_secs(5), "{waited:?}");
     assert!(origin.wait_for_requests(1, WORKER_WAIT), "the worker never asked origin");
     assert!(fixture.head_lock_held(), "the request is still held");
     assert_eq!(refresh_workers(fixture.main()).len(), 1, "one worker");
@@ -599,12 +599,12 @@ fn a_held_pr_request_with_nothing_stored_ends_at_the_budget_with_only_the_hint()
     gitea.hold();
     let _reaper = WorkerReaper::new(&fixture, &gitea);
 
-    let started = Instant::now();
     let (_, stderr) = list_with(fixture.wt_command_via_gitea(&gitea));
-    let elapsed = started.elapsed();
+    // The budget limits only the wait, not the local gather overlapping it.
+    let waited = stage_from_perf(&stderr, "remote wait").expect("remote wait stage");
 
     assert!(gitea.wait_for_waiting(1, Duration::ZERO), "the PR request is still held");
-    assert!(elapsed >= Duration::from_secs(3) && elapsed < Duration::from_secs(5), "{elapsed:?}");
+    assert!(waited >= Duration::from_secs(3) && waited < Duration::from_secs(5), "{waited:?}");
     let text = collapsed(&stderr);
     assert!(text.contains("running this command again"), "the wait timed out:\n{stderr}");
     for item in ["PRs as of", "couldn't refresh", "couldn't get open PRs"] {

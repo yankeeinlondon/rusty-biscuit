@@ -464,6 +464,12 @@ pub(super) mod overlap {
             (events.list_saw_graph, events.graph_saw_list)
         }
 
+        /// `(list gather started, graph gather started)`.
+        pub(in crate::commands::list) fn started(&self) -> (bool, bool) {
+            let events = self.0.lock();
+            (events.list, events.graph)
+        }
+
         /// The list gather started only after the remote wait returned.
         pub(in crate::commands::list) fn list_started_after_the_wait(&self) -> bool {
             self.0.lock().list_saw_remote_done

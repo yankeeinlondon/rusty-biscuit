@@ -373,6 +373,76 @@ fn unchanged_tips_accept_the_first_gather_and_measure_everything_once() {
 
 #[test]
 #[serial_test::serial]
+fn without_an_origin_or_an_image_the_single_gather_is_accepted() {
+    // (label, removes origin, image support, top-level shape)
+    let no_origin = [("pr gather", vec![]), ("local gather", vec!["list gather", "graph gather"]), ("unattributed", vec![])];
+    let no_image = [
+        ("pr gather", vec![]),
+        ("remote wait ‖ local gather", vec!["remote wait", "pr reread", "list gather"]),
+        ("unattributed", vec![]),
+    ];
+    for (label, removes_origin, image, shape, ref_reads) in
+        [("no origin", true, ImageSupport::Kitty, no_origin, 1), ("no image", false, ImageSupport::None, no_image, 2)]
+    {
+        let repo = Repo::new();
+        if removes_origin {
+            run_git(&repo.main, &["remote", "remove", "origin"]);
+        }
+        let _dir = DirGuard::enter(&repo.main);
+
+        let run = run(Script::finishing(), ListFlags::default(), image.clone(), false, BUDGET);
+
+        let launched = OBSERVED.lock().unwrap_or_else(|e| e.into_inner()).is_some();
+        assert_eq!(launched, !removes_origin, "{label}: a worker is launched only with an origin");
+        assert_eq!(run.listing.remote.waited.is_some(), !removes_origin, "{label}");
+        let shape: Vec<(String, Vec<String>)> = shape
+            .into_iter()
+            .map(|(row, children)| (row.to_string(), children.into_iter().map(String::from).collect()))
+            .collect();
+        assert_eq!(perf_shape(&run.perf), shape, "{label}");
+        assert_perf_reconciles(&run.perf);
+        assert!(!run.regathered(), "{label}: {:?}", run.stages);
+        assert_eq!(run.ref_reads(), ref_reads, "{label}: no second read without a wait: {:?}", run.calls);
+        assert_eq!(run.status_walks(), 2, "{label}: {:?}", run.calls);
+        assert_eq!(run.listing.graph.is_some(), image != ImageSupport::None, "{label}");
+        // Removing `origin` removes its tracking refs, and with them the caption.
+        let caption = (!removes_origin).then_some(CaptionState::InSync);
+        assert_eq!(caption_state(&run), caption, "{label}");
+        assert_describes_the_final_state(&run, image, false, label);
+    }
+}
+
+#[test]
+#[serial_test::serial]
+fn a_failed_preference_write_starts_no_local_gather_and_launches_nothing() {
+    let repo = Repo::new();
+    repo.record_gone_branch();
+    run_git(&repo.main, &["remote", "set-url", "origin", "/srv/git/repo.git"]);
+    let _dir = DirGuard::enter(&repo.main);
+    let seam = overlap::Installed::with_mode(Mode::Observe);
+    *SCRIPT.lock().unwrap_or_else(|e| e.into_inner()) = Some(Script::finishing());
+    *OBSERVED.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    let seams = ListSeams { launch: scripted_launch, wait_budget: BUDGET, forced_budget: BUDGET };
+    let flags = ListFlags { ignore_api: true, ..ListFlags::default() };
+
+    let result = gather_listing(false, flags, ImageSupport::Kitty, seams, &mut None);
+
+    assert!(
+        matches!(result, Err(worktree::error::WorktreeError::NoRepositoryIdentity(_))),
+        "a local-path origin cannot be recorded: {:?}",
+        result.err()
+    );
+    assert!(OBSERVED.lock().unwrap_or_else(|e| e.into_inner()).is_none(), "no worker was launched");
+    assert_eq!(seam.started(), (false, false), "no speculative local gather started");
+    assert!(!cache_path(&repo.main).unwrap().exists(), "no comparison cache was saved");
+    assert!(
+        ForkOriginStore::load_from(&fork_origin_path(&repo.main).unwrap()).get("gone").is_some(),
+        "nothing was pruned"
+    );
+}
+
+#[test]
+#[serial_test::serial]
 fn a_ref_change_during_the_wait_is_regathered_from_the_final_tips() {
     type Moves = fn(&Repo) -> Vec<Vec<String>>;
     type Check = fn(&Run, &Repo);
