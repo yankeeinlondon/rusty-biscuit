@@ -11,8 +11,8 @@ use crate::rule_registry::{RuleRegistry, diagnostic_metadata_from_rule};
 use crate::shared::{
     AnalysisPass, CodeBlock, CodeRange, Diagnostic, DiagnosticSeverity, FileSymbolIndex,
     ImportSymbol, LintDiagnostic, ProgrammingLanguage, ReferencedSymbol, SourceContext, SymbolInfo,
-    SymbolKind, SymbolKindData, SymbolKindV2, SymbolRecord, SyntaxDiagnostic, stable_symbol_key,
-    symbol_id_from_stable_key,
+    SymbolKind, SymbolKindData, SymbolKindV2, SymbolRecord, SymbolRef, SyntaxDiagnostic,
+    stable_symbol_key, symbol_id_from_stable_key,
 };
 
 /// Represents a parsed source file backed by tree-sitter.
@@ -979,8 +979,8 @@ impl TreeFile {
 
         Ok(symbols
             .into_iter()
-            .filter(|(symbol, node)| is_exported_definition(symbol, *node, root))
-            .map(|(symbol, _)| symbol)
+            .filter(|extracted| is_exported_definition(&extracted.symbol, extracted.anchor, root))
+            .map(|extracted| extracted.symbol)
             .collect())
     }
 
@@ -1008,8 +1008,8 @@ impl TreeFile {
 
         Ok(symbols
             .into_iter()
-            .filter(|(symbol, node)| !is_exported_definition(symbol, *node, root))
-            .map(|(symbol, _)| symbol)
+            .filter(|extracted| !is_exported_definition(&extracted.symbol, extracted.anchor, root))
+            .map(|extracted| extracted.symbol)
             .collect())
     }
 
@@ -1655,7 +1655,7 @@ impl TreeFile {
         Ok(self
             .symbol_nodes()?
             .into_iter()
-            .map(|(symbol, _)| symbol)
+            .map(|extracted| extracted.symbol)
             .collect())
     }
 
@@ -1670,19 +1670,24 @@ impl TreeFile {
         let root = self.tree.root_node();
         let mut ordinals: HashMap<(SymbolKindV2, Option<String>, String), u32> = HashMap::new();
         let mut records = Vec::new();
-        for (symbol, declaration_node) in self.symbol_nodes()? {
+        let mut implemented_traits = Vec::new();
+        for ExtractedSymbol {
+            symbol,
+            anchor,
+            declaration,
+        } in self.symbol_nodes()?
+        {
             let name_span = text_span_from_code_range(&symbol.range);
-            let is_exported = is_exported_definition(&symbol, declaration_node, root);
+            let is_exported = is_exported_definition(&symbol, anchor, root);
             let mut record: SymbolRecord = symbol.into();
 
-            let v2_kind = symbol_kind_v2_for_node(&record, declaration_node, &self.source);
             let qualified_or_name = record
                 .identity
                 .qualified_name
                 .clone()
                 .unwrap_or_else(|| record.identity.name.clone());
             let ordinal_key = (
-                v2_kind,
+                record.kind,
                 record.identity.module_path.clone(),
                 record.identity.name.clone(),
             );
@@ -1690,10 +1695,10 @@ impl TreeFile {
             let sibling_ordinal = *ordinal_slot;
             *ordinal_slot += 1;
 
-            record.kind = v2_kind;
-            record.source.declaration_span = text_span_for_node(declaration_node);
+            record.source.declaration_span = text_span_for_node(anchor);
             record.source.name_span = Some(name_span);
-            record.source.body_span = body_span_for_declaration(declaration_node);
+            record.source.body_span = body_span_for_declaration(anchor);
+            record.source.declaration_text = declaration_text(declaration, &self.source);
             record.visibility.is_exported = is_exported;
             record.identity.stable_key = stable_symbol_key(
                 record.language,
@@ -1706,15 +1711,39 @@ impl TreeFile {
 
             if record.kind == SymbolKindV2::TypeAlias {
                 record.kind_data = SymbolKindData::TypeAlias(TypeAliasData {
-                    aliased_type_text: extract_typescript_type_alias_target(
-                        declaration_node,
-                        &self.source,
-                    ),
+                    aliased_type_text: extract_type_alias_target(declaration, &self.source),
                     aliased_type_ast: None,
                     is_recursive: false,
                 });
             }
+
+            implemented_traits.push(
+                (self.language == ProgrammingLanguage::Rust)
+                    .then(|| impl_of_member(declaration))
+                    .flatten()
+                    .and_then(|impl_item| impl_trait_name(impl_item, &self.source)),
+            );
             records.push(record);
+        }
+
+        // A member of `impl Trait for Type` records the trait; `id` only when
+        // exactly one trait of that name is declared in this file.
+        for (idx, trait_name) in implemented_traits.into_iter().enumerate() {
+            let Some(trait_name) = trait_name else {
+                continue;
+            };
+            let mut same_file_traits = records.iter().filter(|candidate| {
+                candidate.kind == SymbolKindV2::Trait && candidate.identity.name == trait_name
+            });
+            let id = match (same_file_traits.next(), same_file_traits.next()) {
+                (Some(trait_record), None) => Some(trait_record.id.clone()),
+                _ => None,
+            };
+            records[idx].relations.implements.push(SymbolRef {
+                id,
+                name: trait_name,
+                qualified_name: None,
+            });
         }
 
         Ok(records)
@@ -1752,13 +1781,12 @@ impl TreeFile {
         crate::analysis::analyze_file(self, passes)
     }
 
-    fn symbol_nodes(&self) -> Result<Vec<(SymbolInfo, Node<'_>)>, TreeHuggerError> {
+    fn symbol_nodes(&self) -> Result<Vec<ExtractedSymbol<'_>>, TreeHuggerError> {
         let query = query_for(self.grammar_ref(), QueryKind::Locals)?;
         let mut cursor = QueryCursor::new();
         let root = self.tree.root_node();
         let capture_names = query.capture_names();
-        let mut deduped: HashMap<(usize, usize, String), (SymbolInfo, Node<'_>, u8)> =
-            HashMap::new();
+        let mut deduped: HashMap<(usize, usize, String), PendingSymbol<'_>> = HashMap::new();
 
         let mut matches = cursor.matches(query.as_ref(), root, self.source.as_bytes());
         matches.advance();
@@ -1793,12 +1821,19 @@ impl TreeFile {
                     Some(kind) => kind,
                     None => continue,
                 };
-                let kind = refine_symbol_kind(base_kind, capture.node);
-                let declaration_node = context_node.unwrap_or(capture.node);
-                let (container_name, container_kind) =
-                    find_symbol_container(declaration_node, self.language, &self.source)
-                        .map(|(name, kind)| (Some(name), Some(kind)))
-                        .unwrap_or((None, None));
+                let anchor = context_node.unwrap_or(capture.node);
+                let declaration = context_node.map_or_else(
+                    || resolve_declaration_node(capture.node),
+                    declaration_for_context,
+                );
+                let kind = refine_symbol_kind(
+                    base_kind,
+                    capture.node,
+                    declaration,
+                    self.language,
+                    &self.source,
+                );
+                let container = find_symbol_container(declaration, self.language, &self.source);
 
                 let name = capture
                     .node
@@ -1806,22 +1841,29 @@ impl TreeFile {
                     .map(str::to_string)
                     .unwrap_or_default();
 
-                // Extract metadata based on symbol kind
-                let (signature, type_metadata, doc_comment) = if let Some(ctx) = context_node {
-                    let sig = if kind.is_function() {
-                        extract_signature(ctx, self.language, &self.source)
-                    } else {
-                        None
-                    };
+                let declaration_context = DeclarationContext {
+                    language: self.language,
+                    source: &self.source,
+                    kind,
+                    is_local: is_local_declaration(declaration),
+                };
+                let visibility = extract_visibility(declaration, &declaration_context);
+                let is_static = extract_is_static(declaration, &declaration_context);
+                let is_static_storage =
+                    extract_is_static_storage(declaration, &declaration_context);
+                let signature = kind.is_function().then(|| {
+                    extract_signature(declaration, self.language, &self.source, is_static)
+                });
+                let (type_metadata, doc_comment) = if let Some(ctx) = context_node {
                     let type_meta = if kind.is_type() || kind == SymbolKind::Class {
                         extract_type_metadata(ctx, self.language, &self.source)
                     } else {
                         None
                     };
                     let doc = extract_doc_comment(ctx, self.language, &self.source);
-                    (sig, type_meta, doc)
+                    (type_meta, doc)
                 } else {
-                    (None, None, None)
+                    (None, None)
                 };
 
                 let symbol = SymbolInfo {
@@ -1830,46 +1872,130 @@ impl TreeFile {
                     range: range_for_node(capture.node),
                     language: self.language,
                     file: self.file.clone(),
-                    container_name,
-                    container_kind,
+                    container_name: container.as_ref().map(|container| container.name.clone()),
+                    // Resolved below, once every symbol's kind is known.
+                    container_kind: None,
                     doc_comment,
+                    visibility,
+                    is_static,
+                    is_static_storage,
                     signature,
                     type_metadata,
                 };
 
                 let key = (symbol.range.start_byte, symbol.range.end_byte, name);
                 let priority = symbol_kind_priority(symbol.kind);
+                let pending = PendingSymbol {
+                    extracted: ExtractedSymbol {
+                        symbol,
+                        anchor,
+                        declaration,
+                    },
+                    container,
+                    priority,
+                };
 
-                if let Some((existing, existing_node, existing_priority)) = deduped.get_mut(&key) {
-                    if priority > *existing_priority {
-                        *existing = symbol;
-                        *existing_node = declaration_node;
-                        *existing_priority = priority;
-                    } else if priority == *existing_priority {
-                        if existing.signature.is_none() {
-                            existing.signature = symbol.signature;
+                if let Some(existing) = deduped.get_mut(&key) {
+                    if priority > existing.priority {
+                        *existing = pending;
+                    } else if priority == existing.priority {
+                        let existing_symbol = &mut existing.extracted.symbol;
+                        let symbol = pending.extracted.symbol;
+                        if existing_symbol.signature.is_none() {
+                            existing_symbol.signature = symbol.signature;
+                            existing_symbol.visibility = symbol.visibility;
+                            existing_symbol.is_static = symbol.is_static;
+                            existing_symbol.is_static_storage = symbol.is_static_storage;
                         }
-                        if existing.type_metadata.is_none() {
-                            existing.type_metadata = symbol.type_metadata;
+                        if existing_symbol.type_metadata.is_none() {
+                            existing_symbol.type_metadata = symbol.type_metadata;
                         }
-                        if existing.doc_comment.is_none() {
-                            existing.doc_comment = symbol.doc_comment;
+                        if existing_symbol.doc_comment.is_none() {
+                            existing_symbol.doc_comment = symbol.doc_comment;
                         }
                     }
                 } else {
-                    deduped.insert(key, (symbol, declaration_node, priority));
+                    deduped.insert(key, pending);
                 }
             }
 
             matches.advance();
         }
 
-        let mut symbols: Vec<(SymbolInfo, Node<'_>)> = deduped
-            .into_values()
-            .map(|(symbol, node, _)| (symbol, node))
-            .collect();
-        symbols.sort_by_key(|(symbol, _)| (symbol.range.start_byte, symbol.range.end_byte));
+        let mut pending: Vec<PendingSymbol<'_>> = deduped.into_values().collect();
+        pending.sort_by_key(|entry| {
+            (
+                entry.extracted.symbol.range.start_byte,
+                entry.extracted.symbol.range.end_byte,
+            )
+        });
 
-        Ok(symbols)
+        let mut kinds_by_node: HashMap<usize, SymbolKind> = HashMap::new();
+        for entry in &pending {
+            for node in [entry.extracted.declaration, entry.extracted.anchor] {
+                kinds_by_node
+                    .entry(node.id())
+                    .or_insert(entry.extracted.symbol.kind);
+            }
+        }
+        let container_kinds: Vec<Option<SymbolKind>> = pending
+            .iter()
+            .map(|entry| {
+                resolve_container_kind(entry.container.as_ref(), &kinds_by_node, &pending)
+            })
+            .collect();
+
+        Ok(pending
+            .into_iter()
+            .zip(container_kinds)
+            .map(|(entry, container_kind)| {
+                let mut extracted = entry.extracted;
+                extracted.symbol.container_kind = container_kind;
+                extracted
+            })
+            .collect())
+    }
+}
+
+/// A symbol with the nodes it was extracted from.
+struct ExtractedSymbol<'tree> {
+    symbol: SymbolInfo,
+    /// The query's context capture, else the name: the record's declaration
+    /// span.
+    anchor: Node<'tree>,
+    /// The declaration the name belongs to: the source of visibility, static
+    /// flags, signature and declaration text.
+    declaration: Node<'tree>,
+}
+
+struct PendingSymbol<'tree> {
+    extracted: ExtractedSymbol<'tree>,
+    container: Option<ContainerRef<'tree>>,
+    priority: u8,
+}
+
+/// The container's kind is the kind extracted for the container's own
+/// declaration, so a container and its standalone symbol never disagree.
+fn resolve_container_kind(
+    container: Option<&ContainerRef<'_>>,
+    kinds_by_node: &HashMap<usize, SymbolKind>,
+    symbols: &[PendingSymbol<'_>],
+) -> Option<SymbolKind> {
+    let container = container?;
+    match container.lookup {
+        ContainerLookup::Node { node, fallback } => {
+            Some(kinds_by_node.get(&node.id()).copied().unwrap_or(fallback))
+        }
+        // Absent when the type is declared elsewhere, or when same-named
+        // declarations in this file disagree on kind.
+        ContainerLookup::SameFileType => {
+            let mut kinds = symbols
+                .iter()
+                .map(|entry| &entry.extracted.symbol)
+                .filter(|symbol| symbol.kind.is_type() && symbol.name == container.name)
+                .map(|symbol| symbol.kind);
+            let first = kinds.next()?;
+            kinds.all(|kind| kind == first).then_some(first)
+        }
     }
 }

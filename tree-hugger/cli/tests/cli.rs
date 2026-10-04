@@ -133,7 +133,7 @@ fn test_symbols_include_container_context_for_methods() {
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "method greet(self, name: &str) -> String [in impl Greeter]",
+            "method greet(self, name: &str) -> String [in type Greeter]",
         ));
 }
 
@@ -147,7 +147,7 @@ fn test_rust_structs_render_as_struct_not_type() {
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains("- struct Greeter"))
+        .stdout(predicate::str::contains("- public struct Greeter"))
         .stdout(predicate::str::contains("- type Greeter").not());
 }
 

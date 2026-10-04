@@ -334,7 +334,7 @@ fn emits_symbol_records_v2() -> Result<(), TreeHuggerError> {
     assert!(
         records
             .iter()
-            .all(|record| record.schema_version.major == 2)
+            .all(|record| record.schema_version.major == 3)
     );
 
     Ok(())
@@ -345,7 +345,7 @@ fn emits_symbol_index_v2_with_completed_passes() -> Result<(), TreeHuggerError> 
     let tree_file = TreeFile::new(fixture_path("sample.rs"))?;
     let index = tree_file.symbol_index_v2()?;
 
-    assert_eq!(index.schema_version.major, 2);
+    assert_eq!(index.schema_version.major, 3);
     assert!(
         index
             .completed_passes
@@ -881,15 +881,15 @@ fn distinguishes_typescript_interface_from_enum() -> Result<(), TreeHuggerError>
         "GreetingService should be SymbolKind::Interface"
     );
 
-    // Check that GreetFn type alias is captured as Type
+    // Check that GreetFn type alias is captured as TypeAlias
     let greet_fn = symbols
         .iter()
         .find(|s| s.name == "GreetFn")
         .expect("should find GreetFn");
     assert_eq!(
         greet_fn.kind,
-        tree_hugger::SymbolKind::Type,
-        "GreetFn type alias should be SymbolKind::Type"
+        tree_hugger::SymbolKind::TypeAlias,
+        "GreetFn type alias should be SymbolKind::TypeAlias"
     );
 
     // Check that Status enum is captured as Enum, not Type
@@ -2125,12 +2125,9 @@ fn extracts_typescript_visibility_modifiers() -> Result<(), TreeHuggerError> {
         .find(|s| s.name == "greet" && s.kind == tree_hugger::SymbolKind::Method)
         .expect("should find public greet method");
 
-    let sig = public_greet
-        .signature
-        .as_ref()
-        .expect("should have signature");
+    assert!(public_greet.signature.is_some(), "should have signature");
     assert_eq!(
-        sig.visibility,
+        public_greet.visibility,
         Some(tree_hugger::Visibility::Public),
         "TypeScript public method should have Public visibility"
     );
@@ -2141,12 +2138,9 @@ fn extracts_typescript_visibility_modifiers() -> Result<(), TreeHuggerError> {
         .find(|s| s.name == "formatName")
         .expect("should find protected formatName method");
 
-    let sig = protected_method
-        .signature
-        .as_ref()
-        .expect("should have signature");
+    assert!(protected_method.signature.is_some(), "should have signature");
     assert_eq!(
-        sig.visibility,
+        protected_method.visibility,
         Some(tree_hugger::Visibility::Protected),
         "TypeScript protected method should have Protected visibility"
     );
@@ -2157,12 +2151,9 @@ fn extracts_typescript_visibility_modifiers() -> Result<(), TreeHuggerError> {
         .find(|s| s.name == "log")
         .expect("should find private log method");
 
-    let sig = private_method
-        .signature
-        .as_ref()
-        .expect("should have signature");
+    assert!(private_method.signature.is_some(), "should have signature");
     assert_eq!(
-        sig.visibility,
+        private_method.visibility,
         Some(tree_hugger::Visibility::Private),
         "TypeScript private method should have Private visibility"
     );
@@ -2186,12 +2177,9 @@ fn infers_csharp_interface_method_visibility() -> Result<(), TreeHuggerError> {
         })
         .expect("should find Greet method in interface");
 
-    let sig = interface_method
-        .signature
-        .as_ref()
-        .expect("interface method should have signature");
+    assert!(interface_method.signature.is_some(), "interface method should have signature");
     assert_eq!(
-        sig.visibility,
+        interface_method.visibility,
         Some(tree_hugger::Visibility::Public),
         "C# interface method should have inferred Public visibility"
     );
@@ -2215,12 +2203,9 @@ fn infers_java_interface_method_visibility() -> Result<(), TreeHuggerError> {
         })
         .expect("should find greet method in interface");
 
-    let sig = interface_method
-        .signature
-        .as_ref()
-        .expect("interface method should have signature");
+    assert!(interface_method.signature.is_some(), "interface method should have signature");
     assert_eq!(
-        sig.visibility,
+        interface_method.visibility,
         Some(tree_hugger::Visibility::Public),
         "Java interface method should have inferred Public visibility"
     );

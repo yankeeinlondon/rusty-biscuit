@@ -13,16 +13,20 @@ pub(crate) fn is_block_like_dead_code_container(kind: &str) -> bool {
 
 pub(crate) fn symbol_kind_priority(kind: SymbolKind) -> u8 {
     match kind {
+        SymbolKind::Constructor => 105,
         SymbolKind::Method => 100,
         SymbolKind::Function => 90,
         SymbolKind::Constant => 85,
+        SymbolKind::Property => 82,
         SymbolKind::Field => 80,
         SymbolKind::Parameter => 75,
         SymbolKind::Class
         | SymbolKind::Interface
         | SymbolKind::Enum
+        | SymbolKind::EnumVariant
         | SymbolKind::Trait
         | SymbolKind::Type
+        | SymbolKind::TypeAlias
         | SymbolKind::Module
         | SymbolKind::Namespace => 70,
         SymbolKind::Macro => 65,
@@ -31,12 +35,53 @@ pub(crate) fn symbol_kind_priority(kind: SymbolKind) -> u8 {
     }
 }
 
-pub(crate) fn refine_symbol_kind(mut kind: SymbolKind, node: Node<'_>) -> SymbolKind {
-    if kind != SymbolKind::Variable {
-        return kind;
+/// Decides a capture's final kind from its declaration node, language and
+/// name, so `symbols()`, `symbol_records()` and the CLI agree on every kind.
+///
+/// Rules keyed on the declaration node outrank the query capture. Only the
+/// path from the name up to its declaration is inspected, never enclosing
+/// bodies: a local is not a field because its function sits in a class.
+pub(crate) fn refine_symbol_kind(
+    kind: SymbolKind,
+    name: Node<'_>,
+    declaration: Node<'_>,
+    language: ProgrammingLanguage,
+    source: &str,
+) -> SymbolKind {
+    match (language, declaration.kind()) {
+        (_, "type_alias_declaration") | (ProgrammingLanguage::Rust, "type_item" | "associated_type") => {
+            return SymbolKind::TypeAlias;
+        }
+        (ProgrammingLanguage::Rust, "enum_variant") => return SymbolKind::EnumVariant,
+        (ProgrammingLanguage::Rust, "mod_item") => return SymbolKind::Module,
+        // A Rust `static` is a variable with static storage, not a constant.
+        (ProgrammingLanguage::Rust, "static_item") => return SymbolKind::Variable,
+        (_, "public_field_definition" | "property_definition" | "property_signature") => {
+            return SymbolKind::Property;
+        }
+        (_, "method_definition") if node_text(name, source) == Some("constructor") => {
+            return SymbolKind::Constructor;
+        }
+        _ => {}
     }
 
-    let mut current = Some(node);
+    match kind {
+        SymbolKind::Function if is_direct_member(declaration) => SymbolKind::Method,
+        SymbolKind::Variable => refine_variable_kind(name, declaration, language),
+        _ => kind,
+    }
+}
+
+fn node_text<'src>(node: Node<'_>, source: &'src str) -> Option<&'src str> {
+    node.utf8_text(source.as_bytes()).ok()
+}
+
+fn refine_variable_kind(
+    name: Node<'_>,
+    declaration: Node<'_>,
+    language: ProgrammingLanguage,
+) -> SymbolKind {
+    let mut current = Some(name);
     while let Some(cursor) = current {
         match cursor.kind() {
             "self_parameter"
@@ -50,102 +95,292 @@ pub(crate) fn refine_symbol_kind(mut kind: SymbolKind, node: Node<'_>) -> Symbol
             | "formal_parameter"
             | "formal_parameters"
             | "parameters"
-            | "parameter_list" => {
-                kind = SymbolKind::Parameter;
-                break;
+            | "parameter_list" => return SymbolKind::Parameter,
+            // tree-sitter-swift parses every `let`/`var` as a
+            // `property_declaration`; only one in a type body is a field.
+            "property_declaration"
+                if language == ProgrammingLanguage::Swift && !is_in_type_body(cursor) =>
+            {
+                return SymbolKind::Variable;
             }
             "field_declaration"
             | "property_declaration"
             | "field_definition"
-            | "property_initializer" => {
-                kind = SymbolKind::Field;
-                break;
-            }
-            "const_item" | "const_declaration" | "constant" => {
-                kind = SymbolKind::Constant;
-                break;
-            }
+            | "property_initializer" => return SymbolKind::Field,
+            "const_item" | "const_declaration" | "constant" => return SymbolKind::Constant,
             _ => {}
         }
 
+        if cursor == declaration {
+            break;
+        }
         current = cursor.parent();
     }
 
-    kind
+    // PHP `simple_parameter`, Java `catch_formal_parameter` and the like, or
+    // a bare name directly in a parameter list.
+    if declaration.kind().ends_with("_parameter")
+        || declaration.parent().is_some_and(|parent| {
+            matches!(
+                parent.kind(),
+                "parameters" | "formal_parameters" | "parameter_list"
+            )
+        })
+    {
+        return SymbolKind::Parameter;
+    }
+    // Go `const ( A = 1 )`: the keyword sits on the spec's parent.
+    if declaration
+        .parent()
+        .is_some_and(|parent| parent.kind() == "const_declaration")
+    {
+        return SymbolKind::Constant;
+    }
+
+    SymbolKind::Variable
 }
 
-pub(crate) fn find_symbol_container(
-    node: Node<'_>,
+fn is_in_type_body(declaration: Node<'_>) -> bool {
+    declaration.parent().is_some_and(|parent| {
+        matches!(
+            parent.kind(),
+            "class_body" | "enum_class_body" | "protocol_body"
+        )
+    })
+}
+
+/// Declaration nodes whose body makes a directly declared function a method.
+fn is_member_container_kind(kind: &str) -> bool {
+    matches!(
+        kind,
+        "class_declaration"
+            | "class_definition"
+            | "abstract_class_declaration"
+            | "class_specifier"
+            | "struct_specifier"
+            | "union_specifier"
+            | "struct_declaration"
+            | "record_declaration"
+            | "enum_declaration"
+            | "interface_declaration"
+            | "protocol_declaration"
+            | "extension_declaration"
+            | "trait_declaration"
+            | "trait_definition"
+            | "object_definition"
+            | "struct_item"
+            | "enum_item"
+            | "union_item"
+            | "trait_item"
+            | "impl_item"
+    )
+}
+
+/// Body and wrapper nodes between a member and its container.
+fn is_member_body_kind(kind: &str) -> bool {
+    kind.ends_with("_body")
+        || matches!(
+            kind,
+            "block"
+                | "declaration_list"
+                | "field_declaration_list"
+                | "template_body"
+                | "decorated_definition"
+        )
+}
+
+/// Whether `declaration` is declared directly in a class, struct, enum,
+/// trait, interface, protocol, object, `impl` or extension body, rather than
+/// inside a function.
+pub(crate) fn is_direct_member(declaration: Node<'_>) -> bool {
+    let mut current = declaration.parent();
+    while let Some(parent) = current {
+        if is_member_container_kind(parent.kind()) {
+            return true;
+        }
+        if !is_member_body_kind(parent.kind()) {
+            return false;
+        }
+        current = parent.parent();
+    }
+    false
+}
+
+/// How a symbol's container is identified.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum ContainerLookup<'tree> {
+    /// The container is this declaration node; its kind is the kind extracted
+    /// for that node, so containers and standalone symbols share one
+    /// classifier. `fallback` applies when no symbol is extracted there.
+    Node {
+        node: Node<'tree>,
+        fallback: SymbolKind,
+    },
+    /// A Rust `impl` member: the implemented type, found by name among the
+    /// file's type declarations.
+    SameFileType,
+}
+
+/// The nearest declaration containing a symbol.
+#[derive(Debug, Clone)]
+pub(crate) struct ContainerRef<'tree> {
+    pub name: String,
+    pub lookup: ContainerLookup<'tree>,
+}
+
+/// Finds the nearest container of `declaration`. The search starts at the
+/// declaration's parent, so a declaration is never its own container.
+///
+/// Sibling-scoped containers (a C# file-scoped namespace, a Perl
+/// `package Foo;` statement) are found among the preceding siblings at each
+/// level, before that level's parent.
+pub(crate) fn find_symbol_container<'tree>(
+    declaration: Node<'tree>,
     language: ProgrammingLanguage,
     source: &str,
-) -> Option<(String, SymbolKind)> {
-    let mut current = node.parent();
-    while let Some(parent) = current {
-        match language {
-            ProgrammingLanguage::Rust => {
-                if parent.kind() == "impl_item" {
-                    let trait_name = parent
-                        .child_by_field_name("trait")
-                        .and_then(|value| value.utf8_text(source.as_bytes()).ok())
-                        .map(str::to_string);
-                    let type_name = parent
-                        .child_by_field_name("type")
-                        .and_then(|value| value.utf8_text(source.as_bytes()).ok())
-                        .map(str::to_string);
-
-                    let container = match (trait_name, type_name) {
-                        (Some(trait_name), Some(type_name)) => {
-                            format!("impl {trait_name} for {type_name}")
-                        }
-                        (None, Some(type_name)) => format!("impl {type_name}"),
-                        _ => "impl".to_string(),
-                    };
-
-                    return Some((container, SymbolKind::Type));
-                }
-
-                if let Some(container) = named_container(
-                    parent,
-                    source,
-                    &[
-                        ("trait_item", SymbolKind::Trait),
-                        ("struct_item", SymbolKind::Type),
-                        ("enum_item", SymbolKind::Enum),
-                        ("mod_item", SymbolKind::Module),
-                    ],
-                ) {
-                    return Some(container);
-                }
-            }
-            _ => {
-                if let Some(container) = named_container(
-                    parent,
-                    source,
-                    &[
-                        ("class_declaration", SymbolKind::Class),
-                        ("class_definition", SymbolKind::Class),
-                        ("struct_declaration", SymbolKind::Type),
-                        ("struct_specifier", SymbolKind::Type),
-                        ("enum_declaration", SymbolKind::Enum),
-                        ("enum_specifier", SymbolKind::Enum),
-                        ("interface_declaration", SymbolKind::Interface),
-                        ("protocol_declaration", SymbolKind::Interface),
-                        ("record_declaration", SymbolKind::Type),
-                        ("namespace_declaration", SymbolKind::Namespace),
-                        ("namespace_definition", SymbolKind::Namespace),
-                        ("module", SymbolKind::Module),
-                        ("type_declaration", SymbolKind::Type),
-                    ],
-                ) {
-                    return Some(container);
-                }
-            }
+) -> Option<ContainerRef<'tree>> {
+    let mut child = declaration;
+    while let Some(parent) = child.parent() {
+        if !is_sibling_scoped_container(child, language)
+            && let Some(container) = preceding_sibling_container(child, language, source)
+        {
+            return Some(container);
         }
 
-        current = parent.parent();
+        if language == ProgrammingLanguage::Rust && parent.kind() == "impl_item" {
+            return impl_self_type_name(parent, source).map(|name| ContainerRef {
+                name,
+                lookup: ContainerLookup::SameFileType,
+            });
+        }
+
+        if let Some(container) = ancestor_container(parent, language, source) {
+            return Some(container);
+        }
+
+        child = parent;
     }
 
     None
+}
+
+fn ancestor_container<'tree>(
+    node: Node<'tree>,
+    language: ProgrammingLanguage,
+    source: &str,
+) -> Option<ContainerRef<'tree>> {
+    let kind_map: &[(&str, SymbolKind)] = match language {
+        ProgrammingLanguage::Rust => &[
+            ("trait_item", SymbolKind::Trait),
+            ("struct_item", SymbolKind::Type),
+            ("union_item", SymbolKind::Type),
+            ("enum_item", SymbolKind::Enum),
+            ("mod_item", SymbolKind::Module),
+        ],
+        // tree-sitter-swift parses every type kind, extensions included, as
+        // `class_declaration`; standalone Swift types report `Type`.
+        ProgrammingLanguage::Swift => &[
+            ("class_declaration", SymbolKind::Type),
+            ("protocol_declaration", SymbolKind::Interface),
+        ],
+        ProgrammingLanguage::Perl => {
+            return match node.kind() {
+                "package_statement" => perl_package_container(node, source),
+                "function_definition" => named_container_ref(
+                    node,
+                    source,
+                    &[("function_definition", SymbolKind::Function)],
+                ),
+                _ => None,
+            };
+        }
+        _ => &[
+            ("class_declaration", SymbolKind::Class),
+            ("class_definition", SymbolKind::Class),
+            ("abstract_class_declaration", SymbolKind::Class),
+            ("class_specifier", SymbolKind::Class),
+            ("struct_declaration", SymbolKind::Type),
+            ("struct_specifier", SymbolKind::Type),
+            ("union_specifier", SymbolKind::Type),
+            ("enum_declaration", SymbolKind::Enum),
+            ("enum_specifier", SymbolKind::Enum),
+            ("interface_declaration", SymbolKind::Interface),
+            ("protocol_declaration", SymbolKind::Interface),
+            ("trait_declaration", SymbolKind::Trait),
+            ("trait_definition", SymbolKind::Trait),
+            ("object_definition", SymbolKind::Module),
+            ("record_declaration", SymbolKind::Type),
+            ("namespace_declaration", SymbolKind::Namespace),
+            ("namespace_definition", SymbolKind::Namespace),
+            ("module", SymbolKind::Module),
+            ("type_declaration", SymbolKind::Type),
+        ],
+    };
+
+    named_container_ref(node, source, kind_map)
+}
+
+fn named_container_ref<'tree>(
+    node: Node<'tree>,
+    source: &str,
+    kind_map: &[(&str, SymbolKind)],
+) -> Option<ContainerRef<'tree>> {
+    named_container(node, source, kind_map).map(|(name, fallback)| ContainerRef {
+        name,
+        lookup: ContainerLookup::Node { node, fallback },
+    })
+}
+
+/// Whether `node` is a container that scopes its following siblings rather
+/// than its children.
+fn is_sibling_scoped_container(node: Node<'_>, language: ProgrammingLanguage) -> bool {
+    match language {
+        ProgrammingLanguage::CSharp => node.kind() == "file_scoped_namespace_declaration",
+        ProgrammingLanguage::Perl => {
+            node.kind() == "package_statement" && find_child_by_kind(node, "block").is_none()
+        }
+        _ => false,
+    }
+}
+
+fn preceding_sibling_container<'tree>(
+    node: Node<'tree>,
+    language: ProgrammingLanguage,
+    source: &str,
+) -> Option<ContainerRef<'tree>> {
+    if !matches!(language, ProgrammingLanguage::CSharp | ProgrammingLanguage::Perl) {
+        return None;
+    }
+
+    let mut sibling = node.prev_sibling();
+    while let Some(candidate) = sibling {
+        if is_sibling_scoped_container(candidate, language) {
+            return match language {
+                ProgrammingLanguage::Perl => perl_package_container(candidate, source),
+                _ => named_container_ref(
+                    candidate,
+                    source,
+                    &[("file_scoped_namespace_declaration", SymbolKind::Namespace)],
+                ),
+            };
+        }
+        sibling = candidate.prev_sibling();
+    }
+    None
+}
+
+fn perl_package_container<'tree>(node: Node<'tree>, source: &str) -> Option<ContainerRef<'tree>> {
+    let name = find_child_by_kind(node, "package_name")?
+        .utf8_text(source.as_bytes())
+        .ok()?
+        .to_string();
+    Some(ContainerRef {
+        name,
+        lookup: ContainerLookup::Node {
+            node,
+            fallback: SymbolKind::Module,
+        },
+    })
 }
 
 pub(crate) fn named_container(
@@ -270,6 +505,10 @@ pub(crate) fn symbol_kind_from_capture(capture_name: &str) -> Option<SymbolKind>
     match suffix {
         "function" => Some(SymbolKind::Function),
         "method" => Some(SymbolKind::Method),
+        "constructor" => Some(SymbolKind::Constructor),
+        "property" => Some(SymbolKind::Property),
+        "type_alias" => Some(SymbolKind::TypeAlias),
+        "enum_variant" => Some(SymbolKind::EnumVariant),
         "type" => Some(SymbolKind::Type),
         "class" => Some(SymbolKind::Class),
         "interface" => Some(SymbolKind::Interface),
@@ -321,40 +560,26 @@ pub(crate) fn text_span_for_node(node: Node<'_>) -> TextSpan {
 }
 
 pub(crate) fn body_span_for_declaration(node: Node<'_>) -> Option<TextSpan> {
+    body_node_for_declaration(node).map(text_span_for_node)
+}
+
+pub(crate) fn body_node_for_declaration(node: Node<'_>) -> Option<Node<'_>> {
     node.child_by_field_name("body")
         .or_else(|| find_child_by_kind(node, "class_body"))
         .or_else(|| find_child_by_kind(node, "enum_body"))
         .or_else(|| find_child_by_kind(node, "interface_body"))
         .or_else(|| find_child_by_kind(node, "object_type"))
-        .map(text_span_for_node)
 }
 
-pub(crate) fn symbol_kind_v2_for_node(
-    record: &SymbolRecord,
-    node: Node<'_>,
-    source: &str,
-) -> SymbolKindV2 {
-    match node.kind() {
-        "type_alias_declaration" => SymbolKindV2::TypeAlias,
-        "method_definition" => {
-            let is_constructor = node
-                .child_by_field_name("name")
-                .and_then(|name| name.utf8_text(source.as_bytes()).ok())
-                .is_some_and(|name| name == "constructor");
-            if is_constructor {
-                SymbolKindV2::Constructor
-            } else {
-                SymbolKindV2::Method
-            }
-        }
-        "public_field_definition" | "property_definition" | "property_signature" => {
-            SymbolKindV2::Property
-        }
-        _ => record.kind,
+/// The right-hand side of a type alias declaration (TypeScript `type A = …`,
+/// Rust `type A = …`).
+pub(crate) fn extract_type_alias_target(node: Node<'_>, source: &str) -> Option<String> {
+    if node.kind() == "type_item" {
+        return node
+            .child_by_field_name("type")
+            .and_then(|target| target.utf8_text(source.as_bytes()).ok())
+            .map(str::to_string);
     }
-}
-
-pub(crate) fn extract_typescript_type_alias_target(node: Node<'_>, source: &str) -> Option<String> {
     if node.kind() != "type_alias_declaration" {
         return None;
     }
@@ -372,7 +597,12 @@ pub(crate) fn extract_typescript_type_alias_target(node: Node<'_>, source: &str)
 pub(crate) fn is_exported_definition(symbol: &SymbolInfo, node: Node<'_>, root: Node<'_>) -> bool {
     if matches!(
         symbol.kind,
-        SymbolKind::Parameter | SymbolKind::Field | SymbolKind::Method
+        SymbolKind::Parameter
+            | SymbolKind::Field
+            | SymbolKind::Property
+            | SymbolKind::Method
+            | SymbolKind::Constructor
+            | SymbolKind::EnumVariant
     ) {
         return false;
     }
@@ -459,4 +689,137 @@ pub(crate) fn is_top_level_definition(node: Node<'_>, root: Node<'_>) -> bool {
     }
 
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::*;
+
+    fn parse(language: ProgrammingLanguage, file_name: &str, source: &str) -> tree_sitter::Tree {
+        let (grammar, _) = language.grammar_for_path(Path::new(file_name));
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&grammar).expect("grammar");
+        parser.parse(source, None).expect("parse")
+    }
+
+    /// The first node of `kind` whose text starts with `prefix`, in document order.
+    fn find_node<'tree>(node: Node<'tree>, kind: &str, prefix: &str, source: &str) -> Option<Node<'tree>> {
+        if node.kind() == kind && source[node.byte_range()].starts_with(prefix) {
+            return Some(node);
+        }
+        let mut cursor = node.walk();
+        let children: Vec<Node<'tree>> = node.children(&mut cursor).collect();
+        children
+            .into_iter()
+            .find_map(|child| find_node(child, kind, prefix, source))
+    }
+
+    fn container_name(declaration: Node<'_>, language: ProgrammingLanguage, source: &str) -> Option<String> {
+        find_symbol_container(declaration, language, source).map(|container| container.name)
+    }
+
+    /// The Perl rules ahead of the Perl query: a `package Foo;` statement
+    /// scopes the declarations after it, a block package its contents, and a
+    /// sub the variables inside it.
+    #[test]
+    fn perl_packages_and_subs_contain_the_declarations_they_scope() {
+        let source = include_str!("../../../tests/fixtures/symbols/perl.pl");
+        let tree = parse(ProgrammingLanguage::Perl, "fixture.pl", source);
+        let root = tree.root_node();
+        let perl = ProgrammingLanguage::Perl;
+        let node = |kind: &str, prefix: &str| {
+            find_node(root, kind, prefix, source)
+                .unwrap_or_else(|| panic!("no {kind} starting with {prefix:?}"))
+        };
+
+        let cases = [
+            (node("function_definition", "sub greet"), Some("Fixture::Greeter")),
+            (node("function_definition", "sub other_package_sub"), Some("Fixture::Other")),
+            (node("function_definition", "sub block_package_sub"), Some("Fixture::Block")),
+            // After the block form closes, the earlier statement form resumes.
+            (node("function_definition", "sub after_block_sub"), Some("Fixture::Other")),
+            (node("variable_declaration", "our $package_level_our"), Some("Fixture::Greeter")),
+            (node("variable_declaration", "our $block_package_our"), Some("Fixture::Block")),
+            (node("variable_declaration", "my $joined_name"), Some("greet")),
+            (node("variable_declaration", "my $block_local"), Some("block_package_sub")),
+            // A package statement is not contained by the package before it.
+            (node("package_statement", "package Fixture::Other"), None),
+        ];
+        for (declaration, expected) in cases {
+            assert_eq!(
+                container_name(declaration, perl, source).as_deref(),
+                expected,
+                "container of {:?}",
+                source[declaration.byte_range()].lines().next().unwrap_or_default()
+            );
+        }
+
+        let block_sub = node("function_definition", "sub block_package_sub");
+        let container = find_symbol_container(block_sub, perl, source).expect("container");
+        assert!(matches!(
+            container.lookup,
+            ContainerLookup::Node { fallback: SymbolKind::Module, .. }
+        ));
+    }
+
+    #[test]
+    fn perl_list_declaration_text_covers_every_name() {
+        let source = include_str!("../../../tests/fixtures/symbols/perl.pl");
+        let tree = parse(ProgrammingLanguage::Perl, "fixture.pl", source);
+        let root = tree.root_node();
+        for name in ["$first_name", "$last_name"] {
+            let variable = find_node(root, "scalar_variable", name, source).expect("list name");
+            let declaration = resolve_declaration_node(variable);
+            assert_eq!(
+                declaration_text(declaration, source).as_deref(),
+                Some("my ($first_name, $last_name)"),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn rust_type_alias_target_is_the_right_hand_side() {
+        let source = "pub type Meters = u32;\ntype Pair<T> = (T, T);\n";
+        let tree = parse(ProgrammingLanguage::Rust, "alias.rs", source);
+        let root = tree.root_node();
+        let meters = find_node(root, "type_item", "pub type Meters", source).expect("Meters");
+        let pair = find_node(root, "type_item", "type Pair", source).expect("Pair");
+        assert_eq!(extract_type_alias_target(meters, source).as_deref(), Some("u32"));
+        assert_eq!(extract_type_alias_target(pair, source).as_deref(), Some("(T, T)"));
+
+        let name = meters.child_by_field_name("name").expect("name");
+        assert_eq!(
+            refine_symbol_kind(SymbolKind::Type, name, meters, ProgrammingLanguage::Rust, source),
+            SymbolKind::TypeAlias
+        );
+    }
+
+    #[test]
+    fn capture_names_cover_every_extracted_kind() {
+        for (capture, kind) in [
+            ("local.definition.constructor", SymbolKind::Constructor),
+            ("local.definition.property", SymbolKind::Property),
+            ("local.definition.type_alias", SymbolKind::TypeAlias),
+            ("local.definition.enum_variant", SymbolKind::EnumVariant),
+            ("local.definition.method", SymbolKind::Method),
+        ] {
+            assert_eq!(symbol_kind_from_capture(capture), Some(kind), "{capture}");
+        }
+        assert_eq!(symbol_kind_from_capture("local.definition.property.context"), None);
+    }
+
+    #[test]
+    fn rust_static_item_is_a_variable() {
+        let source = "pub static LIMIT: u32 = 3;\n";
+        let tree = parse(ProgrammingLanguage::Rust, "static.rs", source);
+        let item = find_node(tree.root_node(), "static_item", "pub static", source).expect("static");
+        let name = item.child_by_field_name("name").expect("name");
+        assert_eq!(
+            refine_symbol_kind(SymbolKind::Constant, name, item, ProgrammingLanguage::Rust, source),
+            SymbolKind::Variable
+        );
+    }
 }

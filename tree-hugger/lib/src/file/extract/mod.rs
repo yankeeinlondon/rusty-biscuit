@@ -7,21 +7,29 @@
 //! others via `use super::*`.
 
 pub(crate) mod classify;
+pub(crate) mod declaration;
 pub(crate) mod doc_comments;
 pub(crate) mod navigation;
+pub(crate) mod rust_impl;
 pub(crate) mod signatures;
+pub(crate) mod static_flags;
 pub(crate) mod type_metadata;
+pub(crate) mod visibility;
 
 pub(crate) use classify::*;
+pub(crate) use declaration::*;
 pub(crate) use doc_comments::*;
 pub(crate) use navigation::*;
+pub(crate) use rust_impl::*;
 pub(crate) use signatures::*;
+pub(crate) use static_flags::*;
 pub(crate) use type_metadata::*;
+pub(crate) use visibility::*;
 
 // Shared imports re-exported so submodules can simply `use super::*`.
 pub(crate) use crate::shared::{
     CodeRange, FieldInfo, FunctionSignature, ParameterInfo, ProgrammingLanguage, SymbolInfo,
-    SymbolKind, SymbolKindV2, SymbolRecord, TextPoint, TextSpan, TypeAliasData, TypeMetadata,
+    SymbolKind, TextPoint, TextSpan, TypeAliasData, TypeMetadata,
     VariantInfo, Visibility,
 };
 pub(crate) use tree_sitter::Node;

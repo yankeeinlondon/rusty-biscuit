@@ -1,29 +1,25 @@
-//! Function signature, parameter, return-type, visibility, and static-modifier
-//! extraction helpers carved out of `tree_file.rs`.
+//! Function signature, parameter, and return-type extraction helpers carved
+//! out of `tree_file.rs`. Visibility and `static` live in the `visibility` and
+//! `static_flags` modules, which read any declaration node.
 
 use super::*;
 
 /// Extracts function signature from a function/method node.
+///
+/// Always returns a signature, with an empty parameter list when there are
+/// none, so a parameterless function renders as `tick()`. `is_static` is the
+/// symbol's shared flag; the signature only carries a copy of it.
 pub(crate) fn extract_signature(
     node: Node<'_>,
     language: ProgrammingLanguage,
     source: &str,
-) -> Option<FunctionSignature> {
-    let parameters = extract_parameters(node, language, source);
-    let return_type = extract_return_type(node, language, source);
-    let visibility = extract_visibility(node, language, source);
-    let is_static = extract_is_static(node, language, source);
-
-    if parameters.is_empty() && return_type.is_none() && visibility.is_none() && !is_static {
-        return None;
-    }
-
-    Some(FunctionSignature {
-        parameters,
-        return_type,
-        visibility,
+    is_static: bool,
+) -> FunctionSignature {
+    FunctionSignature {
+        parameters: extract_parameters(node, language, source),
+        return_type: extract_return_type(node, language, source),
         is_static,
-    })
+    }
 }
 
 /// Extracts parameters from a function node.
@@ -43,6 +39,7 @@ pub(crate) fn extract_parameters(
         ProgrammingLanguage::Java => "formal_parameters",
         ProgrammingLanguage::CSharp => "parameter_list",
         ProgrammingLanguage::Swift => return extract_swift_parameters(node, source),
+        ProgrammingLanguage::Lua => return extract_lua_parameters(node, source),
         _ => return Vec::new(),
     };
 
@@ -338,381 +335,6 @@ pub(crate) fn extract_return_type(
         ProgrammingLanguage::Scala => extract_scala_return_type(node, source),
         _ => None,
     }
-}
-
-/// Extracts visibility modifier from a function/method node.
-pub(crate) fn extract_visibility(
-    node: Node<'_>,
-    language: ProgrammingLanguage,
-    source: &str,
-) -> Option<Visibility> {
-    match language {
-        ProgrammingLanguage::TypeScript | ProgrammingLanguage::JavaScript => {
-            extract_ts_visibility(node, source)
-        }
-        ProgrammingLanguage::Java => extract_java_visibility(node, source),
-        ProgrammingLanguage::CSharp => extract_csharp_visibility(node, source),
-        ProgrammingLanguage::Php => extract_php_visibility(node, source),
-        ProgrammingLanguage::Rust => extract_rust_visibility(node, source),
-        ProgrammingLanguage::Cpp => extract_cpp_visibility(node, source),
-        ProgrammingLanguage::Swift => extract_swift_visibility(node, source),
-        // Go, Python, Scala, C don't have visibility keywords (use naming conventions instead)
-        _ => None,
-    }
-}
-
-/// Extracts visibility from TypeScript/JavaScript method_definition.
-///
-/// TypeScript AST structure has accessibility_modifier as a child:
-/// ```text
-/// method_definition
-///   accessibility_modifier (public/protected/private)
-///   property_identifier
-///   formal_parameters
-///   ...
-/// ```
-pub(crate) fn extract_ts_visibility(node: Node<'_>, source: &str) -> Option<Visibility> {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if child.kind() == "accessibility_modifier" {
-            let text = child.utf8_text(source.as_bytes()).ok()?;
-            return match text {
-                "public" => Some(Visibility::Public),
-                "protected" => Some(Visibility::Protected),
-                "private" => Some(Visibility::Private),
-                _ => None,
-            };
-        }
-    }
-    None
-}
-
-/// Extracts visibility from Java method_declaration.
-///
-/// Java AST structure has modifiers containing visibility:
-/// ```text
-/// method_declaration
-///   modifiers
-///     public/protected/private
-///   type_identifier
-///   identifier
-///   ...
-/// ```
-///
-/// In Java, interface members are implicitly public and cannot have explicit
-/// visibility modifiers. This function infers `Public` for members declared
-/// inside an interface.
-pub(crate) fn extract_java_visibility(node: Node<'_>, source: &str) -> Option<Visibility> {
-    if let Some(modifiers) = find_child_by_kind(node, "modifiers") {
-        let mut cursor = modifiers.walk();
-        for child in modifiers.children(&mut cursor) {
-            let text = child.utf8_text(source.as_bytes()).ok()?;
-            match text {
-                "public" => return Some(Visibility::Public),
-                "protected" => return Some(Visibility::Protected),
-                "private" => return Some(Visibility::Private),
-                _ => continue,
-            }
-        }
-    }
-
-    // Java interface members are implicitly public
-    if is_inside_interface(node) {
-        return Some(Visibility::Public);
-    }
-
-    None
-}
-
-/// Extracts visibility from C# method_declaration.
-///
-/// In C#, interface members are implicitly public and cannot have explicit
-/// visibility modifiers. This function infers `Public` for members declared
-/// inside an interface.
-pub(crate) fn extract_csharp_visibility(node: Node<'_>, source: &str) -> Option<Visibility> {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if child.kind() == "modifier" {
-            let text = child.utf8_text(source.as_bytes()).ok()?;
-            match text {
-                "public" => return Some(Visibility::Public),
-                "protected" => return Some(Visibility::Protected),
-                "private" => return Some(Visibility::Private),
-                "internal" => return Some(Visibility::Internal),
-                _ => continue,
-            }
-        }
-    }
-
-    // C# interface members are implicitly public
-    if is_inside_interface(node) {
-        return Some(Visibility::Public);
-    }
-
-    None
-}
-
-/// Extracts visibility from PHP method_declaration.
-pub(crate) fn extract_php_visibility(node: Node<'_>, source: &str) -> Option<Visibility> {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if child.kind() == "visibility_modifier" {
-            let text = child.utf8_text(source.as_bytes()).ok()?;
-            return match text {
-                "public" => Some(Visibility::Public),
-                "protected" => Some(Visibility::Protected),
-                "private" => Some(Visibility::Private),
-                _ => None,
-            };
-        }
-    }
-    None
-}
-
-/// Extracts visibility from Rust function_item (pub keyword).
-pub(crate) fn extract_rust_visibility(node: Node<'_>, source: &str) -> Option<Visibility> {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if child.kind() == "visibility_modifier" {
-            let text = child.utf8_text(source.as_bytes()).ok()?;
-            if text.starts_with("pub") {
-                return Some(Visibility::Public);
-            }
-        }
-    }
-    None
-}
-
-/// Extracts visibility from C++ method declarations.
-///
-/// C++ visibility is handled via access specifiers in the class (public:, private:, etc.)
-/// not as part of the method itself. For now, we check for inline access specifiers.
-pub(crate) fn extract_cpp_visibility(node: Node<'_>, source: &str) -> Option<Visibility> {
-    // C++ uses access specifiers at the section level, not per-method
-    // Check if there's an access_specifier sibling before this node
-    let mut prev = node.prev_sibling();
-    while let Some(sibling) = prev {
-        if sibling.kind() == "access_specifier" {
-            let text = sibling.utf8_text(source.as_bytes()).ok()?;
-            return match text.trim_end_matches(':') {
-                "public" => Some(Visibility::Public),
-                "protected" => Some(Visibility::Protected),
-                "private" => Some(Visibility::Private),
-                _ => None,
-            };
-        }
-        // Stop if we hit another method or declaration
-        if sibling.kind() == "function_definition"
-            || sibling.kind() == "declaration"
-            || sibling.kind() == "field_declaration"
-        {
-            break;
-        }
-        prev = sibling.prev_sibling();
-    }
-    None
-}
-
-/// Extracts visibility from Swift function declarations.
-pub(crate) fn extract_swift_visibility(node: Node<'_>, source: &str) -> Option<Visibility> {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        let kind = child.kind();
-        if kind == "modifiers" {
-            let mut mod_cursor = child.walk();
-            for modifier in child.children(&mut mod_cursor) {
-                let text = modifier.utf8_text(source.as_bytes()).ok()?;
-                match text {
-                    "public" => return Some(Visibility::Public),
-                    "internal" => return Some(Visibility::Internal),
-                    "private" => return Some(Visibility::Private),
-                    "fileprivate" => return Some(Visibility::Private),
-                    _ => continue,
-                }
-            }
-        }
-    }
-    None
-}
-
-/// Extracts whether a function/method is static.
-pub(crate) fn extract_is_static(
-    node: Node<'_>,
-    language: ProgrammingLanguage,
-    source: &str,
-) -> bool {
-    match language {
-        ProgrammingLanguage::Java | ProgrammingLanguage::CSharp => {
-            extract_java_csharp_is_static(node, source)
-        }
-        ProgrammingLanguage::TypeScript | ProgrammingLanguage::JavaScript => {
-            extract_ts_is_static(node)
-        }
-        ProgrammingLanguage::Php => extract_php_is_static(node),
-        ProgrammingLanguage::Python => extract_python_is_static(node, source),
-        ProgrammingLanguage::Swift => extract_swift_is_static(node, source),
-        ProgrammingLanguage::Scala => extract_scala_is_static(node),
-        ProgrammingLanguage::Cpp => extract_cpp_is_static(node, source),
-        ProgrammingLanguage::Rust => extract_rust_is_static(node, source),
-        // Go, C, and other languages don't have static methods in the same way
-        _ => false,
-    }
-}
-
-/// Checks if a Java or C# method has the `static` modifier.
-pub(crate) fn extract_java_csharp_is_static(node: Node<'_>, source: &str) -> bool {
-    // Java: modifiers child containing "static"
-    if let Some(modifiers) = find_child_by_kind(node, "modifiers") {
-        let mut cursor = modifiers.walk();
-        for child in modifiers.children(&mut cursor) {
-            if let Ok(text) = child.utf8_text(source.as_bytes())
-                && text == "static"
-            {
-                return true;
-            }
-        }
-    }
-
-    // C#: direct modifier child containing "static"
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if child.kind() == "modifier"
-            && let Ok(text) = child.utf8_text(source.as_bytes())
-            && text == "static"
-        {
-            return true;
-        }
-    }
-
-    false
-}
-
-/// Checks if a TypeScript/JavaScript method has the `static` keyword.
-pub(crate) fn extract_ts_is_static(node: Node<'_>) -> bool {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if child.kind() == "static" {
-            return true;
-        }
-    }
-    false
-}
-
-/// Checks if a PHP method has the `static_modifier`.
-pub(crate) fn extract_php_is_static(node: Node<'_>) -> bool {
-    find_child_by_kind(node, "static_modifier").is_some()
-}
-
-/// Checks if a Python method has @staticmethod or @classmethod decorator.
-pub(crate) fn extract_python_is_static(node: Node<'_>, source: &str) -> bool {
-    // Look at the decorated_definition parent if exists
-    if let Some(parent) = node.parent()
-        && parent.kind() == "decorated_definition"
-    {
-        let mut cursor = parent.walk();
-        for child in parent.children(&mut cursor) {
-            if child.kind() == "decorator"
-                && let Ok(text) = child.utf8_text(source.as_bytes())
-                && (text.contains("staticmethod") || text.contains("classmethod"))
-            {
-                return true;
-            }
-        }
-    }
-    false
-}
-
-/// Checks if a Swift method has `static` or `class` modifier.
-pub(crate) fn extract_swift_is_static(node: Node<'_>, source: &str) -> bool {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if child.kind() == "modifiers" {
-            let mut mod_cursor = child.walk();
-            for modifier in child.children(&mut mod_cursor) {
-                if let Ok(text) = modifier.utf8_text(source.as_bytes())
-                    && (text == "static" || text == "class")
-                {
-                    return true;
-                }
-            }
-        }
-    }
-    false
-}
-
-/// Checks if a Scala method is inside an object (companion object).
-pub(crate) fn extract_scala_is_static(node: Node<'_>) -> bool {
-    let mut current = node.parent();
-    while let Some(parent) = current {
-        if parent.kind() == "object_definition" {
-            return true;
-        }
-        // Stop if we hit a class definition
-        if parent.kind() == "class_definition" {
-            return false;
-        }
-        current = parent.parent();
-    }
-    false
-}
-
-/// Checks if a C++ method has the `static` specifier.
-pub(crate) fn extract_cpp_is_static(node: Node<'_>, source: &str) -> bool {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if child.kind() == "storage_class_specifier"
-            && let Ok(text) = child.utf8_text(source.as_bytes())
-            && text == "static"
-        {
-            return true;
-        }
-    }
-    false
-}
-
-/// Checks if a Rust method is an associated function (no self parameter).
-pub(crate) fn extract_rust_is_static(node: Node<'_>, source: &str) -> bool {
-    // A Rust method is "static" (associated function) if it doesn't have self parameter
-    // Only applies to methods inside impl blocks
-    if !is_inside_impl_block(node) {
-        return false;
-    }
-
-    // Look for parameters node
-    if let Some(params) = find_child_by_kind(node, "parameters") {
-        let mut cursor = params.walk();
-        for child in params.children(&mut cursor) {
-            // Check for self_parameter
-            if child.kind() == "self_parameter" {
-                return false;
-            }
-            // Check for `self` in the first parameter
-            if child.kind() == "parameter"
-                && let Some(pattern) = find_child_by_kind(child, "identifier")
-                && let Ok(text) = pattern.utf8_text(source.as_bytes())
-                && text == "self"
-            {
-                return false;
-            }
-        }
-        // Has parameters but no self -> associated function
-        return true;
-    }
-
-    // No parameters at all means it's an associated function
-    true
-}
-
-/// Checks if a Rust function is inside an impl block.
-pub(crate) fn is_inside_impl_block(node: Node<'_>) -> bool {
-    let mut current = node.parent();
-    while let Some(parent) = current {
-        if parent.kind() == "impl_item" {
-            return true;
-        }
-        current = parent.parent();
-    }
-    false
 }
 
 /// Extracts return type from Rust function_item.
@@ -1283,6 +905,18 @@ pub(crate) fn extract_csharp_parameter(node: Node<'_>, source: &str) -> Option<P
 ///   block { ... }
 /// ```
 pub(crate) fn extract_csharp_return_type(node: Node<'_>, source: &str) -> Option<String> {
+    // The field also covers a user-defined type (`PublicWidget Make()`),
+    // whose `identifier` the child scan below cannot tell from the name.
+    if let Some(return_type) = node
+        .child_by_field_name("returns")
+        .or_else(|| node.child_by_field_name("type"))
+    {
+        return return_type
+            .utf8_text(source.as_bytes())
+            .ok()
+            .map(str::to_string);
+    }
+
     let mut cursor = node.walk();
 
     for child in node.children(&mut cursor) {
@@ -1609,4 +1243,31 @@ pub(crate) fn find_default_value_after_equals(node: Node<'_>, source: &str) -> O
     }
 
     None
+}
+
+/// Extracts Lua parameters: plain names, plus `...` as a variadic parameter.
+pub(crate) fn extract_lua_parameters(node: Node<'_>, source: &str) -> Vec<ParameterInfo> {
+    let Some(params) = node.child_by_field_name("parameters") else {
+        return Vec::new();
+    };
+
+    let mut cursor = params.walk();
+    params
+        .named_children(&mut cursor)
+        .filter_map(|child| match child.kind() {
+            "identifier" => Some(ParameterInfo {
+                name: child.utf8_text(source.as_bytes()).ok()?.to_string(),
+                type_annotation: None,
+                default_value: None,
+                is_variadic: false,
+            }),
+            "vararg_expression" => Some(ParameterInfo {
+                name: "...".to_string(),
+                type_annotation: None,
+                default_value: None,
+                is_variadic: true,
+            }),
+            _ => None,
+        })
+        .collect()
 }
