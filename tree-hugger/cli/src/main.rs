@@ -577,12 +577,16 @@ impl OutputConfig {
 /// Returns the color style for a symbol kind.
 fn style_for_kind(kind: SymbolKind) -> Style {
     match kind {
-        SymbolKind::Function | SymbolKind::Method => Style::new().green(),
-        SymbolKind::Type | SymbolKind::Class | SymbolKind::Interface => Style::new().magenta(),
-        SymbolKind::Enum => Style::new().cyan(),
+        SymbolKind::Function | SymbolKind::Method | SymbolKind::Constructor => {
+            Style::new().green()
+        }
+        SymbolKind::Type | SymbolKind::TypeAlias | SymbolKind::Class | SymbolKind::Interface => {
+            Style::new().magenta()
+        }
+        SymbolKind::Enum | SymbolKind::EnumVariant => Style::new().cyan(),
         SymbolKind::Trait => Style::new().yellow(),
         SymbolKind::Variable | SymbolKind::Parameter => Style::new().blue(),
-        SymbolKind::Field => Style::new().cyan(),
+        SymbolKind::Field | SymbolKind::Property => Style::new().cyan(),
         SymbolKind::Namespace | SymbolKind::Module => Style::new().yellow(),
         SymbolKind::Macro => Style::new().red(),
         SymbolKind::Constant => Style::new().bright_blue(),
@@ -1151,7 +1155,7 @@ fn main() -> Result<(), TreeHuggerError> {
                 .unwrap_or(ProgrammingLanguage::Rust);
 
             let output = JsonOutput {
-                schema_version: SchemaVersion::V2_0,
+                schema_version: SchemaVersion::V3_0,
                 root_dir,
                 language: package_language,
                 files: summaries.clone(),
@@ -1640,10 +1644,15 @@ fn analyze_tree_file(
         language: tree_file.language,
         file_hash: tree_file.hash.clone(),
         analyzer_fingerprint: AnalyzerFingerprint {
-            schema_version: SchemaVersion::V2_0,
+            schema_version: SchemaVersion::V3_0,
             tree_hugger_version: env!("CARGO_PKG_VERSION").to_string(),
             grammar_fingerprint: tree_file.language.query_name().to_string(),
-            query_fingerprint: "locals+imports+references".to_string(),
+            // Moves with every extraction change, so a warm cache never serves
+            // records produced by older rules.
+            query_fingerprint: format!(
+                "locals+imports+references;extractor-revision={}",
+                tree_hugger::EXTRACTOR_REVISION
+            ),
             config_fingerprint: options.fingerprint(),
         },
     };
@@ -2260,10 +2269,7 @@ fn render_symbol_line(
 
     let name_with_sig = format_symbol_name(symbol, symbol.language);
     let presentation = symbol_presentation(symbol);
-    let visibility = symbol
-        .signature
-        .as_ref()
-        .and_then(|signature| signature.visibility.as_ref());
+    let visibility = symbol.visibility.as_ref();
 
     if config.use_colors {
         let kind_style = style_for_kind(presentation.style_kind);
@@ -2317,11 +2323,7 @@ fn render_symbols(symbols: &[SymbolInfo], config: &OutputConfig) {
         let name_with_sig = format_symbol_name(symbol, symbol.language);
         let presentation = symbol_presentation(symbol);
 
-        // Extract visibility for functions/methods
-        let visibility = symbol
-            .signature
-            .as_ref()
-            .and_then(|sig| sig.visibility.as_ref());
+        let visibility = symbol.visibility.as_ref();
 
         if config.use_colors {
             let kind_style = style_for_kind(presentation.style_kind);
@@ -3061,10 +3063,7 @@ fn render_member_section(
         let name_with_sig = format_symbol_name(method, language);
 
         // Get visibility
-        let visibility = method
-            .signature
-            .as_ref()
-            .and_then(|sig| sig.visibility.as_ref());
+        let visibility = method.visibility.as_ref();
 
         if config.use_colors {
             let vis_str = match visibility {
@@ -3372,9 +3371,13 @@ fn render_symbol_block(term: &Terminal, plain: bool, block: &SymbolBlock) {
 /// Prose color tag for a symbol kind, mirroring [`style_for_kind`].
 fn color_tag_for_kind(kind: SymbolKind) -> Option<&'static str> {
     match kind {
-        SymbolKind::Function | SymbolKind::Method => Some("green"),
-        SymbolKind::Type | SymbolKind::Class | SymbolKind::Interface => Some("magenta"),
-        SymbolKind::Enum | SymbolKind::Field => Some("cyan"),
+        SymbolKind::Function | SymbolKind::Method | SymbolKind::Constructor => Some("green"),
+        SymbolKind::Type | SymbolKind::TypeAlias | SymbolKind::Class | SymbolKind::Interface => {
+            Some("magenta")
+        }
+        SymbolKind::Enum | SymbolKind::EnumVariant | SymbolKind::Field | SymbolKind::Property => {
+            Some("cyan")
+        }
         SymbolKind::Trait | SymbolKind::Namespace | SymbolKind::Module => Some("yellow"),
         SymbolKind::Variable | SymbolKind::Parameter => Some("blue"),
         SymbolKind::Macro => Some("red"),

@@ -16,7 +16,12 @@ pub struct SchemaVersion {
 }
 
 impl SchemaVersion {
+    /// Shape before symbol kinds, declaration visibility, static markers and
+    /// container kinds were preserved; no longer emitted.
     pub const V2_0: Self = Self { major: 2, minor: 0 };
+    /// Current shape, emitted on records, file indexes, CLI envelopes and
+    /// analyzer fingerprints.
+    pub const V3_0: Self = Self { major: 3, minor: 0 };
 }
 
 /// 1-based text location.

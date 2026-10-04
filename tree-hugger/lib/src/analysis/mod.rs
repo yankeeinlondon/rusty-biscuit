@@ -101,7 +101,7 @@ fn parse_pass(tree_file: &TreeFile) -> Result<FileSymbolIndex, TreeHuggerError> 
     let diagnostics: Vec<Diagnostic> = tree_file.try_diagnostics()?;
 
     Ok(FileSymbolIndex {
-        schema_version: crate::shared::SchemaVersion::V2_0,
+        schema_version: crate::shared::SchemaVersion::V3_0,
         file: tree_file.file.clone(),
         language: tree_file.language,
         file_hash: tree_file.hash.clone(),
@@ -415,13 +415,17 @@ fn find_reference_target<'a>(
     symbols.iter().find(|symbol| symbol.identity.name == name)
 }
 
+/// Finds the record a child's container names: the smallest same-named
+/// declaration enclosing the child, else (for members declared outside their
+/// type, such as Rust `impl` members) the same-named declaration of the
+/// recorded container kind.
 fn find_container_symbol(
     symbols: &[crate::shared::SymbolRecord],
     child_idx: usize,
     container_name: &str,
 ) -> Option<(crate::shared::SymbolId, SymbolRef)> {
     let child = &symbols[child_idx];
-    symbols
+    let enclosing = symbols
         .iter()
         .enumerate()
         .filter(|(idx, candidate)| {
@@ -439,7 +443,19 @@ fn find_container_symbol(
                 .end_byte
                 .saturating_sub(candidate.source.declaration_span.start_byte)
         })
-        .map(|(_, candidate)| (candidate.id.clone(), symbol_ref(candidate)))
+        .map(|(_, candidate)| candidate);
+
+    enclosing
+        .or_else(|| {
+            let container_kind = child.identity.container_kind?;
+            symbols.iter().enumerate().find_map(|(idx, candidate)| {
+                (idx != child_idx
+                    && candidate.identity.name == container_name
+                    && candidate.kind == container_kind)
+                    .then_some(candidate)
+            })
+        })
+        .map(|candidate| (candidate.id.clone(), symbol_ref(candidate)))
 }
 
 fn find_export_target<'a>(

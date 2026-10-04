@@ -59,7 +59,7 @@ fn owner_symbol_index_picks_smallest_containing_span_with_equal_starts() {
 
 fn test_symbol(name: &str, start_byte: u32, end_byte: u32) -> SymbolRecord {
     SymbolRecord {
-        schema_version: SchemaVersion::V2_0,
+        schema_version: SchemaVersion::V3_0,
         id: SymbolId(name.to_string()),
         language: ProgrammingLanguage::Rust,
         kind: SymbolKindV2::Function,
@@ -68,6 +68,7 @@ fn test_symbol(name: &str, start_byte: u32, end_byte: u32) -> SymbolRecord {
             display_name: name.to_string(),
             qualified_name: None,
             module_path: None,
+            container_kind: None,
             stable_key: name.to_string(),
         },
         source: SourceFacet {

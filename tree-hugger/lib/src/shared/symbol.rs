@@ -244,22 +244,29 @@ impl fmt::Display for ProgrammingLanguage {
 pub enum SymbolKind {
     Function,
     Method,
+    Constructor,
     Type,
+    TypeAlias,
     Class,
     Interface,
     Enum,
+    EnumVariant,
     Trait,
     Module,
     Namespace,
     Variable,
     Parameter,
     Field,
+    Property,
     Macro,
     Constant,
     Unknown,
 }
 
-/// Visibility/access modifier for a symbol.
+/// Access declared or implicitly assigned to a declaration.
+///
+/// Mirrors the v2 `VisibilityLevel` one-to-one; its `Unknown` level is
+/// represented as `None` wherever an `Option<Visibility>` is stored.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Visibility {
     /// Public access (e.g., `public` in Java/C#/TS, `pub` in Rust)
@@ -268,8 +275,19 @@ pub enum Visibility {
     Protected,
     /// Private access (e.g., `private` in Java/C#/TS)
     Private,
-    /// Package-private/internal access (e.g., default in Java, `internal` in C#)
+    /// Assembly or module access (e.g., `internal` in C# and Swift)
     Internal,
+    /// Package access (e.g., the Java default, Swift `package`)
+    Package,
+    /// Crate access (e.g., Rust `pub(crate)`)
+    Crate,
+    /// Visible only within the declaring file or module (e.g., Swift
+    /// `fileprivate`, C `static` linkage)
+    ModulePrivate,
+    /// C# `protected internal`
+    ProtectedInternal,
+    /// C# `private protected`
+    PrivateProtected,
 }
 
 impl fmt::Display for Visibility {
@@ -279,6 +297,11 @@ impl fmt::Display for Visibility {
             Self::Protected => "protected",
             Self::Private => "private",
             Self::Internal => "internal",
+            Self::Package => "package",
+            Self::Crate => "crate",
+            Self::ModulePrivate => "module-private",
+            Self::ProtectedInternal => "protected internal",
+            Self::PrivateProtected => "private protected",
         };
         formatter.write_str(label)
     }
@@ -287,14 +310,19 @@ impl fmt::Display for Visibility {
 impl SymbolKind {
     /// Returns true for function-like symbols.
     pub fn is_function(self) -> bool {
-        matches!(self, Self::Function | Self::Method)
+        matches!(self, Self::Function | Self::Method | Self::Constructor)
     }
 
     /// Returns true for type-like symbols.
     pub fn is_type(self) -> bool {
         matches!(
             self,
-            Self::Type | Self::Class | Self::Interface | Self::Enum | Self::Trait
+            Self::Type
+                | Self::TypeAlias
+                | Self::Class
+                | Self::Interface
+                | Self::Enum
+                | Self::Trait
         )
     }
 
@@ -309,16 +337,20 @@ impl fmt::Display for SymbolKind {
         let label = match self {
             Self::Function => "function",
             Self::Method => "method",
+            Self::Constructor => "constructor",
             Self::Type => "type",
+            Self::TypeAlias => "type alias",
             Self::Class => "class",
             Self::Interface => "interface",
             Self::Enum => "enum",
+            Self::EnumVariant => "enum variant",
             Self::Trait => "trait",
             Self::Module => "module",
             Self::Namespace => "namespace",
             Self::Variable => "variable",
             Self::Parameter => "parameter",
             Self::Field => "field",
+            Self::Property => "property",
             Self::Macro => "macro",
             Self::Constant => "constant",
             Self::Unknown => "unknown",
@@ -414,10 +446,8 @@ pub struct FunctionSignature {
     /// The return type, if present.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub return_type: Option<String>,
-    /// The visibility/access modifier (public, protected, private).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub visibility: Option<Visibility>,
-    /// Whether this is a static method or associated function.
+    /// Whether this is a static method or associated function; a copy of
+    /// `SymbolInfo::is_static` for the same declaration.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub is_static: bool,
 }
@@ -434,17 +464,13 @@ impl FunctionSignature {
         Self {
             parameters: Vec::new(),
             return_type: None,
-            visibility: None,
             is_static: false,
         }
     }
 
     /// Returns true if the signature has no information.
     pub fn is_empty(&self) -> bool {
-        self.parameters.is_empty()
-            && self.return_type.is_none()
-            && self.visibility.is_none()
-            && !self.is_static
+        self.parameters.is_empty() && self.return_type.is_none() && !self.is_static
     }
 }
 
@@ -592,6 +618,19 @@ pub struct SymbolInfo {
     /// Documentation comment associated with the symbol.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub doc_comment: Option<String>,
+    /// Access declared or implicitly assigned to this declaration; `None`
+    /// when the level is unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub visibility: Option<Visibility>,
+    /// Member usable without an instance (static method/field, Python
+    /// `@classmethod`, Swift `class` member). Never set for storage or
+    /// linkage `static`, which is `is_static_storage`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_static: bool,
+    /// Storage or linkage `static` (Rust `static` items, C/C++ file-scope and
+    /// function-local `static`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_static_storage: bool,
     /// Function/method signature information.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signature: Option<FunctionSignature>,

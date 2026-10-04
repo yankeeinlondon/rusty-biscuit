@@ -2270,7 +2270,7 @@ x = 1
             SourceFacet, SymbolId, SymbolKindData, TextPoint, TextSpan, TypeFacet, VisibilityFacet,
         };
         SymbolRecord {
-            schema_version: SchemaVersion::V2_0,
+            schema_version: SchemaVersion::V3_0,
             id: SymbolId(String::new()),
             language: ProgrammingLanguage::Rust,
             kind: SymbolKindV2::Function,
@@ -2279,6 +2279,7 @@ x = 1
                 display_name: String::new(),
                 qualified_name: None,
                 module_path: None,
+                container_kind: None,
                 stable_key: String::new(),
             },
             source: SourceFacet {

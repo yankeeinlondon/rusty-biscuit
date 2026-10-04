@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use super::kinds::SymbolKindV2;
 use super::types::{SymbolId, TextSpan};
 
 /// Identity metadata for a symbol.
@@ -13,6 +14,10 @@ pub struct IdentityFacet {
     pub qualified_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub module_path: Option<String>,
+    /// Kind of the container named by `module_path`; absent when there is
+    /// no container or its kind cannot be determined from the file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container_kind: Option<SymbolKindV2>,
     pub stable_key: String,
 }
 
@@ -47,6 +52,10 @@ pub enum VisibilityLevel {
     Package,
     Crate,
     ModulePrivate,
+    /// C# `protected internal`
+    ProtectedInternal,
+    /// C# `private protected`
+    PrivateProtected,
     Unknown,
 }
 
@@ -161,7 +170,11 @@ pub struct Attribute {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "value")]
 pub enum Modifier {
+    /// Member usable without an instance.
     Static,
+    /// Storage or linkage `static` (Rust `static` items, C/C++ file-scope
+    /// and function-local `static`); never implies `Static`.
+    StaticStorage,
     Async,
     Const,
     Readonly,

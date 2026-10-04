@@ -311,6 +311,9 @@ pub(crate) fn symbol_from_prelude_export(
         container_name: None,
         container_kind: None,
         doc_comment,
+        visibility: None,
+        is_static: false,
+        is_static_storage: false,
         signature: None,
         type_metadata: None,
     }

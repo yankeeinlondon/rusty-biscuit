@@ -117,21 +117,27 @@ pub fn now_epoch_ms() -> u64 {
         .unwrap_or(0)
 }
 
+// Every conversion below is a wildcard-free `match`, so a variant added on
+// one side fails to compile until the other side handles it.
 impl From<SymbolKind> for SymbolKindV2 {
     fn from(value: SymbolKind) -> Self {
         match value {
             SymbolKind::Function => Self::Function,
             SymbolKind::Method => Self::Method,
+            SymbolKind::Constructor => Self::Constructor,
             SymbolKind::Type => Self::Type,
+            SymbolKind::TypeAlias => Self::TypeAlias,
             SymbolKind::Class => Self::Class,
             SymbolKind::Interface => Self::Interface,
             SymbolKind::Enum => Self::Enum,
+            SymbolKind::EnumVariant => Self::EnumVariant,
             SymbolKind::Trait => Self::Trait,
             SymbolKind::Module => Self::Module,
             SymbolKind::Namespace => Self::Namespace,
             SymbolKind::Variable => Self::Variable,
             SymbolKind::Parameter => Self::Parameter,
             SymbolKind::Field => Self::Field,
+            SymbolKind::Property => Self::Property,
             SymbolKind::Macro => Self::Macro,
             SymbolKind::Constant => Self::Constant,
             SymbolKind::Unknown => Self::Unknown,
@@ -144,40 +150,58 @@ impl From<SymbolKindV2> for SymbolKind {
         match value {
             SymbolKindV2::Function => Self::Function,
             SymbolKindV2::Method => Self::Method,
+            SymbolKindV2::Constructor => Self::Constructor,
             SymbolKindV2::Type => Self::Type,
+            SymbolKindV2::TypeAlias => Self::TypeAlias,
             SymbolKindV2::Class => Self::Class,
             SymbolKindV2::Interface => Self::Interface,
             SymbolKindV2::Enum => Self::Enum,
+            SymbolKindV2::EnumVariant => Self::EnumVariant,
             SymbolKindV2::Trait => Self::Trait,
             SymbolKindV2::Module => Self::Module,
             SymbolKindV2::Namespace => Self::Namespace,
             SymbolKindV2::Variable => Self::Variable,
             SymbolKindV2::Parameter => Self::Parameter,
             SymbolKindV2::Field => Self::Field,
+            SymbolKindV2::Property => Self::Property,
             SymbolKindV2::Macro => Self::Macro,
             SymbolKindV2::Constant => Self::Constant,
-            _ => Self::Unknown,
+            SymbolKindV2::Unknown => Self::Unknown,
         }
     }
 }
 
-fn visibility_to_level(visibility: Option<Visibility>) -> VisibilityLevel {
-    match visibility {
-        Some(Visibility::Public) => VisibilityLevel::Public,
-        Some(Visibility::Protected) => VisibilityLevel::Protected,
-        Some(Visibility::Private) => VisibilityLevel::Private,
-        Some(Visibility::Internal) => VisibilityLevel::Internal,
-        None => VisibilityLevel::Unknown,
+impl From<Option<Visibility>> for VisibilityLevel {
+    fn from(value: Option<Visibility>) -> Self {
+        match value {
+            Some(Visibility::Public) => Self::Public,
+            Some(Visibility::Protected) => Self::Protected,
+            Some(Visibility::Private) => Self::Private,
+            Some(Visibility::Internal) => Self::Internal,
+            Some(Visibility::Package) => Self::Package,
+            Some(Visibility::Crate) => Self::Crate,
+            Some(Visibility::ModulePrivate) => Self::ModulePrivate,
+            Some(Visibility::ProtectedInternal) => Self::ProtectedInternal,
+            Some(Visibility::PrivateProtected) => Self::PrivateProtected,
+            None => Self::Unknown,
+        }
     }
 }
 
-fn level_to_visibility(level: VisibilityLevel) -> Option<Visibility> {
-    match level {
-        VisibilityLevel::Public => Some(Visibility::Public),
-        VisibilityLevel::Protected => Some(Visibility::Protected),
-        VisibilityLevel::Private => Some(Visibility::Private),
-        VisibilityLevel::Internal => Some(Visibility::Internal),
-        _ => None,
+impl From<VisibilityLevel> for Option<Visibility> {
+    fn from(value: VisibilityLevel) -> Self {
+        match value {
+            VisibilityLevel::Public => Some(Visibility::Public),
+            VisibilityLevel::Protected => Some(Visibility::Protected),
+            VisibilityLevel::Private => Some(Visibility::Private),
+            VisibilityLevel::Internal => Some(Visibility::Internal),
+            VisibilityLevel::Package => Some(Visibility::Package),
+            VisibilityLevel::Crate => Some(Visibility::Crate),
+            VisibilityLevel::ModulePrivate => Some(Visibility::ModulePrivate),
+            VisibilityLevel::ProtectedInternal => Some(Visibility::ProtectedInternal),
+            VisibilityLevel::PrivateProtected => Some(Visibility::PrivateProtected),
+            VisibilityLevel::Unknown => None,
+        }
     }
 }
 
@@ -251,9 +275,7 @@ fn field_data_from_field(field: &FieldInfo) -> FieldData {
         name: field.name.clone(),
         qualified_name: None,
         type_text: field.type_annotation.clone(),
-        visibility: field
-            .visibility
-            .map(|visibility| visibility_to_level(Some(visibility))),
+        visibility: field.visibility.map(|visibility| Some(visibility).into()),
         is_static: field.is_static,
         is_readonly: false,
         is_mutable: true,
@@ -303,14 +325,13 @@ fn type_kind_data(metadata: &Option<TypeMetadata>, kind: SymbolKind) -> SymbolKi
     })
 }
 
-fn modifiers_from_signature(signature: &Option<FunctionSignature>) -> Vec<Modifier> {
+fn modifiers_from_symbol(symbol: &SymbolInfo) -> Vec<Modifier> {
     let mut modifiers = Vec::new();
-    if signature
-        .as_ref()
-        .map(|value| value.is_static)
-        .unwrap_or(false)
-    {
+    if symbol.is_static {
         modifiers.push(Modifier::Static);
+    }
+    if symbol.is_static_storage {
+        modifiers.push(Modifier::StaticStorage);
     }
     modifiers
 }
@@ -356,13 +377,7 @@ impl From<SymbolInfo> for SymbolRecord {
         );
         let now = now_epoch_ms();
 
-        let level = value
-            .signature
-            .as_ref()
-            .and_then(|signature| signature.visibility)
-            .map_or(VisibilityLevel::Unknown, |visibility| {
-                visibility_to_level(Some(visibility))
-            });
+        let level = VisibilityLevel::from(value.visibility);
 
         let mut comments = Vec::new();
         if let Some(raw_doc) = &value.doc_comment {
@@ -378,15 +393,17 @@ impl From<SymbolInfo> for SymbolRecord {
 
         let kind_data = if value.kind.is_function() {
             function_kind_data(&value.signature)
+        } else if value.kind == SymbolKind::TypeAlias {
+            SymbolKindData::TypeAlias(TypeAliasData::default())
         } else if value.kind.is_type() {
             type_kind_data(&value.type_metadata, value.kind)
-        } else if value.kind == SymbolKind::Field {
+        } else if matches!(value.kind, SymbolKind::Field | SymbolKind::Property) {
             SymbolKindData::Field(FieldData {
                 name: value.name.clone(),
                 qualified_name: None,
                 type_text: None,
                 visibility: Some(level),
-                is_static: false,
+                is_static: value.is_static,
                 is_readonly: false,
                 is_mutable: true,
                 is_optional: false,
@@ -404,9 +421,10 @@ impl From<SymbolInfo> for SymbolRecord {
         };
         let raw_doc = value.doc_comment.clone();
         let type_info = declared_type_views(&value);
+        let modifiers = modifiers_from_symbol(&value);
 
         Self {
-            schema_version: SchemaVersion::V2_0,
+            schema_version: SchemaVersion::V3_0,
             id: symbol_id_from_stable_key(&stable_key),
             language: value.language,
             kind,
@@ -415,6 +433,7 @@ impl From<SymbolInfo> for SymbolRecord {
                 display_name: value.name,
                 qualified_name,
                 module_path: value.container_name,
+                container_kind: value.container_kind.map(SymbolKindV2::from),
                 stable_key,
             },
             source: SourceFacet {
@@ -430,7 +449,9 @@ impl From<SymbolInfo> for SymbolRecord {
             },
             visibility: VisibilityFacet {
                 level,
-                is_exported: level == VisibilityLevel::Public,
+                // Export is decided by the declaration's syntax, never by its
+                // access level; `symbol_records()` and the bind pass set it.
+                is_exported: false,
                 is_reexported: false,
                 is_default_export: false,
                 is_imported: false,
@@ -446,13 +467,17 @@ impl From<SymbolInfo> for SymbolRecord {
                 parsed: None,
             },
             attributes: Vec::new(),
-            modifiers: modifiers_from_signature(&value.signature),
+            modifiers,
             type_info,
             relations: RelationFacet::default(),
             semantics: SemanticFacet::default(),
             provenance: ProvenanceFacet {
                 extractor: "tree-sitter".to_string(),
-                extractor_version: env!("CARGO_PKG_VERSION").to_string(),
+                extractor_version: format!(
+                    "{}+rev.{}",
+                    env!("CARGO_PKG_VERSION"),
+                    crate::file::EXTRACTOR_REVISION
+                ),
                 parse_pass: AnalysisPass::Parse.as_str().to_string(),
                 created_at_epoch_ms: now,
                 updated_at_epoch_ms: now,
@@ -463,12 +488,8 @@ impl From<SymbolInfo> for SymbolRecord {
     }
 }
 
-fn signature_from_function_data(function: FunctionData) -> Option<FunctionSignature> {
-    if function.parameters.is_empty() && function.return_info.type_text.is_none() {
-        return None;
-    }
-
-    Some(FunctionSignature {
+fn signature_from_function_data(function: FunctionData, is_static: bool) -> FunctionSignature {
+    FunctionSignature {
         parameters: function
             .parameters
             .into_iter()
@@ -480,9 +501,8 @@ fn signature_from_function_data(function: FunctionData) -> Option<FunctionSignat
             })
             .collect(),
         return_type: function.return_info.type_text,
-        visibility: None,
-        is_static: false,
-    })
+        is_static,
+    }
 }
 
 fn type_metadata_from_kind_data(kind_data: SymbolKindData) -> Option<TypeMetadata> {
@@ -495,7 +515,7 @@ fn type_metadata_from_kind_data(kind_data: SymbolKindData) -> Option<TypeMetadat
                     name: field.name,
                     type_annotation: field.type_text,
                     doc_comment: field.docs,
-                    visibility: field.visibility.and_then(level_to_visibility),
+                    visibility: field.visibility.and_then(Option::<Visibility>::from),
                     is_static: field.is_static,
                 })
                 .collect(),
@@ -517,7 +537,7 @@ fn type_metadata_from_kind_data(kind_data: SymbolKindData) -> Option<TypeMetadat
                             name: field.name,
                             type_annotation: field.type_text,
                             doc_comment: field.docs,
-                            visibility: field.visibility.and_then(level_to_visibility),
+                            visibility: field.visibility.and_then(Option::<Visibility>::from),
                             is_static: field.is_static,
                         })
                         .collect(),
@@ -539,22 +559,43 @@ impl TryFrom<SymbolRecord> for SymbolInfo {
             return Err("symbol record name is empty");
         }
 
-        let signature = match value.kind_data.clone() {
-            SymbolKindData::Function(function) => signature_from_function_data(function),
-            _ => None,
+        let kind = SymbolKind::from(value.kind);
+        let is_static = value
+            .modifiers
+            .iter()
+            .any(|modifier| matches!(modifier, Modifier::Static));
+        let is_static_storage = value
+            .modifiers
+            .iter()
+            .any(|modifier| matches!(modifier, Modifier::StaticStorage));
+
+        // Every function-like kind carries a signature, even with no
+        // parameters, so renderers print `tick()` rather than `tick`.
+        let signature = match (&value.kind_data, kind.is_function()) {
+            (SymbolKindData::Function(function), true) => {
+                Some(signature_from_function_data(function.clone(), is_static))
+            }
+            (_, true) => Some(FunctionSignature {
+                is_static,
+                ..FunctionSignature::new()
+            }),
+            (_, false) => None,
         };
 
         let type_metadata = type_metadata_from_kind_data(value.kind_data);
 
         Ok(Self {
             name,
-            kind: SymbolKind::from(value.kind),
+            kind,
             range: code_range_from_span(&value.source.declaration_span),
             language: value.language,
             file: value.source.file_path,
             container_name: value.identity.module_path,
-            container_kind: None,
+            container_kind: value.identity.container_kind.map(SymbolKind::from),
             doc_comment: value.docs.raw_doc,
+            visibility: value.visibility.level.into(),
+            is_static,
+            is_static_storage,
             signature,
             type_metadata,
         })
@@ -598,6 +639,9 @@ mod tests {
             container_name: None,
             container_kind: None,
             doc_comment: Some("Says hi".to_string()),
+            visibility: None,
+            is_static: false,
+            is_static_storage: false,
             signature: Some(FunctionSignature::new()),
             type_metadata: None,
         };
@@ -627,6 +671,9 @@ mod tests {
             container_name: None,
             container_kind: None,
             doc_comment: Some("Says hi".to_string()),
+            visibility: None,
+            is_static: false,
+            is_static_storage: false,
             signature: None,
             type_metadata: None,
         };
@@ -634,7 +681,7 @@ mod tests {
         let record: SymbolRecord = symbol.into();
         let json = serde_json::to_string(&record).expect("serialize");
         let parsed: SymbolRecord = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(parsed.schema_version, SchemaVersion::V2_0);
+        assert_eq!(parsed.schema_version, SchemaVersion::V3_0);
         assert_eq!(parsed.identity.name, "hello");
     }
 }
