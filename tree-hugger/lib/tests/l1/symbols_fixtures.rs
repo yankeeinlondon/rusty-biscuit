@@ -36,6 +36,30 @@ pub fn all_fixtures() -> Vec<PathBuf> {
     fixtures
 }
 
+/// The 16-language tree for multi-file, ordering, parallel and CLI golden
+/// tests; one file per language, some under `nested/`.
+pub fn multi_fixture_dir() -> PathBuf {
+    manifest_dir!().join("tests/fixtures/symbols/multi")
+}
+
+/// Every file under [`multi_fixture_dir`], recursively, sorted by path.
+pub fn multi_fixtures() -> Vec<PathBuf> {
+    fn walk(dir: &Path, found: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(dir).expect("read multi fixture dir") {
+            let path = entry.expect("read multi fixture entry").path();
+            if path.is_dir() {
+                walk(&path, found);
+            } else {
+                found.push(path);
+            }
+        }
+    }
+    let mut found = Vec::new();
+    walk(&multi_fixture_dir(), &mut found);
+    found.sort();
+    found
+}
+
 /// The fixture's file name, for failure messages.
 pub fn display_name(path: &Path) -> String {
     path.file_name()

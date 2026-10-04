@@ -3,9 +3,11 @@
 //! matrices (and the static matrix, where it has static members), and every
 //! symbol fixture is valid input.
 
-use tree_hugger::{ProgrammingLanguage, TreeFile};
+use tree_hugger::{ProgrammingLanguage, SymbolKind, TreeFile};
 
-use crate::symbols_fixtures::{all_fixtures, display_name, primary_fixture};
+use crate::symbols_fixtures::{
+    all_fixtures, display_name, multi_fixture_dir, multi_fixtures, primary_fixture,
+};
 use crate::symbols_kinds::KIND_MATRIX;
 use crate::symbols_static::{STATIC_LANGUAGES, STATIC_MATRIX};
 use crate::symbols_visibility::VISIBILITY_MATRIX;
@@ -41,6 +43,57 @@ fn every_symbols_fixture_parses_without_syntax_errors() {
             .collect();
         assert!(errors.is_empty(), "{} has syntax errors: {errors:?}", display_name(&path));
     }
+}
+
+/// The `multi/` tree's contract with the multi-file, ordering and golden
+/// tests: exactly one cleanly parsing file per language, at least one file in
+/// a nested directory, and one type name declared in two files (the
+/// `--sort name` tie-break case).
+#[test]
+fn multi_tree_has_one_clean_file_per_language() {
+    let root = multi_fixture_dir();
+    let files = multi_fixtures();
+    let mut languages: Vec<ProgrammingLanguage> = Vec::new();
+    for path in &files {
+        let language = ProgrammingLanguage::from_path(path)
+            .unwrap_or_else(|| panic!("{} maps to no supported language", path.display()));
+        assert!(
+            !languages.contains(&language),
+            "multi/ has a second {} file: {}",
+            language.name(),
+            path.display()
+        );
+        languages.push(language);
+
+        let tree_file = TreeFile::new(path)
+            .unwrap_or_else(|error| panic!("{} failed to load: {error}", path.display()));
+        let errors = tree_file.syntax_diagnostics();
+        assert!(errors.is_empty(), "{} has syntax errors: {errors:?}", path.display());
+    }
+    let missing: Vec<&str> = ProgrammingLanguage::all()
+        .into_iter()
+        .filter(|language| !languages.contains(language))
+        .map(|language| language.name())
+        .collect();
+    assert!(missing.is_empty(), "multi/ has no file for: {missing:?}");
+
+    assert!(
+        files.iter().any(|path| path.parent() != Some(root.as_path())),
+        "multi/ has no file in a nested directory"
+    );
+
+    let files_declaring_widget = files
+        .iter()
+        .filter(|path| {
+            TreeFile::new(path)
+                .expect("load multi fixture")
+                .symbols()
+                .expect("extract symbols")
+                .iter()
+                .any(|symbol| symbol.name == "Widget" && symbol.kind == SymbolKind::Type)
+        })
+        .count();
+    assert_eq!(files_declaring_widget, 2, "`Widget` must be a type in exactly two multi/ files");
 }
 
 /// A 17th language fails here until the matrices cover it.
