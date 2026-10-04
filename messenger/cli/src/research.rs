@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use biscuit_terminal::components::list::UnorderedList;
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::{Table, TableCellContent, TableColumn};
 use biscuit_terminal::terminal::Terminal;
@@ -170,7 +170,8 @@ pub fn run(args: ResearchArgs, snapshot: std::io::Result<RequestSnapshot>) -> i3
             if json {
                 println!("{}", pretty(&json!({ "error": message })));
             } else {
-                eprint!("{}", Prose::new(format!("<b>error:</b> {}", Prose::escape_text_outside_code_spans(&message))).render(&terminal()));
+                // A reference failure carries its `failure:` row.
+                eprint!("{}", Prose::new(format!("<b>error:</b> {}", Prose::escape_text_outside_code_spans(&message))).with_line_breaks(LineBreaks::Hard).render(&terminal()));
                 eprintln!();
             }
             EXIT_UNAVAILABLE
