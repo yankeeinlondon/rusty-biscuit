@@ -1,8 +1,9 @@
 //! The shared Prose grammar's outer layers: line-break mode, the block
 //! splitter, and the two entry points that feed [`super::tokens`].
 //!
-//! Parsing runs in a fixed order: fenced blocks are lifted from the whole
-//! input ([`lift_fences`](super::markdown::lift_fences)), the remaining text
+//! Parsing runs in a fixed order: opaque regions (fenced blocks, code spans,
+//! HTML comments, `<code-block>` bodies, quoted attributes) are recognized in the whole
+//! input ([`lift_opaque`](super::markdown::lift_opaque)), the remaining text
 //! is split into paragraphs on blank lines ([`split_blocks`], `Prose` only),
 //! and each paragraph's inline content is parsed on its own.
 //!
@@ -12,12 +13,13 @@
 //! inside a phrasing wrapper. Code spans, quoted tag attributes, and
 //! `<code-block>` bodies are opaque to the splitter.
 
-use renderable::tree::RenderNode;
+use renderable::tree::{NodeKind, RenderNode};
 
 use super::markdown::{
-    LIFT_MARK, Lifted, blank_run_end, is_escapable, lift_fences, parse_lift_placeholder,
-    preprocess_inline,
+    CODE_BLOCK_CLOSE, LIFT_MARK, Lifted, blank_run_end, find_ci, is_escapable, lift_opaque,
+    parse_lift_placeholder, preprocess_inline, tag_declaration_end,
 };
+use super::tree::{split_around_blocks, trim_paragraph_edges};
 use super::tokens::{InlineOptions, is_recognized_opening_tag, parse_opening_tag, parse_render_nodes};
 
 /// What a single newline inside a paragraph means.
@@ -125,11 +127,11 @@ fn trim_blank_edges(body: &str) -> &str {
     s
 }
 
-/// Split fence-lifted text into paragraphs and fenced blocks.
+/// Split [`lift_opaque`] output into paragraphs and fenced blocks.
 ///
 /// A run of two or more newlines separated only by spaces or tabs ends a
 /// paragraph, as does a fence placeholder. Leading and trailing blank lines
-/// and whitespace-only paragraphs produce no block.
+/// and paragraphs holding only whitespace and HTML comments produce no block.
 pub(super) fn split_blocks(text: &str, lifted: &[Lifted]) -> Vec<Block> {
     let chars: Vec<char> = text.chars().collect();
     let mut blocks = Vec::new();
@@ -167,12 +169,14 @@ pub(super) fn split_blocks(text: &str, lifted: &[Lifted]) -> Vec<Block> {
             continue;
         }
 
-        if ch == '`' {
-            let run = chars[i..].iter().take_while(|&&c| c == '`').count();
-            let span_end = closing_run_in_paragraph(&chars, i + run, run).map(|close| close + run);
-            let end = span_end.unwrap_or(i + run);
-            paragraph.push_content(&chars[i..end].iter().collect::<String>());
-            i = end;
+        // A comment is not content: a paragraph holding only comments and
+        // whitespace produces no block.
+        if ch == LIFT_MARK
+            && let Some((index, next)) = parse_lift_placeholder(&chars, i)
+            && matches!(lifted.get(index), Some(Lifted::Comment))
+        {
+            paragraph.push(&chars[i..next].iter().collect::<String>());
+            i = next;
             continue;
         }
 
@@ -192,9 +196,10 @@ pub(super) fn split_blocks(text: &str, lifted: &[Lifted]) -> Vec<Block> {
                 && let Some((name, _)) = parse_opening_tag(&content)
             {
                 if name == "code-block" {
-                    // An explicit code block is opaque: blank lines inside it
-                    // are code, not paragraph boundaries.
-                    let close = find_ci(&chars, end, "</code-block>").unwrap_or(chars.len());
+                    // The body is already a lifted placeholder; keep the
+                    // closing tag with it so the block is never an open scope.
+                    let close = find_ci(&chars, end, CODE_BLOCK_CLOSE)
+                        .map_or(chars.len(), |at| at + CODE_BLOCK_CLOSE.chars().count());
                     paragraph.push_content(&chars[i..close].iter().collect::<String>());
                     i = close;
                     continue;
@@ -215,73 +220,13 @@ pub(super) fn split_blocks(text: &str, lifted: &[Lifted]) -> Vec<Block> {
     blocks
 }
 
-/// Index of the closing backtick run of length `len` at or after `start`,
-/// before the next blank line.
-fn closing_run_in_paragraph(chars: &[char], start: usize, len: usize) -> Option<usize> {
-    let mut i = start;
-    while i < chars.len() {
-        match chars[i] {
-            '\n' if blank_run_end(chars, i).is_some() => return None,
-            '`' => {
-                let run = chars[i..].iter().take_while(|&&c| c == '`').count();
-                if run == len {
-                    return Some(i);
-                }
-                i += run;
-            }
-            _ => i += 1,
-        }
-    }
-    None
-}
-
-/// Index just past the `>` of the tag declaration opening at `chars[start]`,
-/// scanning quote- and escape-aware like the token parser, so a newline
-/// inside a quoted attribute belongs to the declaration. An unquoted blank
-/// line ends the attempt: the `<` is then literal text.
-fn tag_declaration_end(chars: &[char], start: usize) -> Option<usize> {
-    let mut quote: Option<char> = None;
-    let mut i = start + 1;
-    while i < chars.len() {
-        match chars[i] {
-            '\n' if quote.is_none() && blank_run_end(chars, i).is_some() => return None,
-            '\\' => i += 2,
-            c @ ('"' | '\'') => {
-                match quote {
-                    Some(q) if q == c => quote = None,
-                    None => quote = Some(c),
-                    Some(_) => {}
-                }
-                i += 1;
-            }
-            '>' if quote.is_none() => return Some(i + 1),
-            _ => i += 1,
-        }
-    }
-    None
-}
-
-/// Index just past the first case-insensitive occurrence of `needle` at or
-/// after `start`.
-fn find_ci(chars: &[char], start: usize, needle: &str) -> Option<usize> {
-    let needle: Vec<char> = needle.chars().collect();
-    (start..=chars.len().checked_sub(needle.len())?)
-        .find(|&i| {
-            chars[i..i + needle.len()]
-                .iter()
-                .zip(&needle)
-                .all(|(a, b)| a.eq_ignore_ascii_case(b))
-        })
-        .map(|i| i + needle.len())
-}
-
 /// Parse `Prose` content into block nodes: a `Paragraph` per paragraph and a
 /// `Code` per fenced block, in source order.
 ///
-/// A `<code-block>` tag or a fenced block nested in a style still lands as a
+/// A `<code-block>` tag or a fenced block nested in a style or link lands as a
 /// sibling block: the paragraph is split around it.
 pub(super) fn parse_blocks(content: &str, line_breaks: LineBreaks) -> Vec<RenderNode> {
-    let (text, mut lifted) = lift_fences(content);
+    let (text, lifted) = lift_opaque(content);
     let opts = InlineOptions {
         line_breaks,
         inline_only: false,
@@ -299,20 +244,38 @@ pub(super) fn parse_blocks(content: &str, line_breaks: LineBreaks) -> Vec<Render
                 }
             }
             Block::Paragraph(paragraph) => {
-                let pre = preprocess_inline(&paragraph, &mut lifted);
+                let pre = preprocess_inline(&paragraph);
                 let nodes = parse_render_nodes(&pre, &lifted, opts);
-                push_paragraphs(nodes, &mut out);
+                split_around_blocks(nodes, &mut out, RenderNode::paragraph);
             }
         }
     }
+    trim_edges_at_code(&mut out);
     out
+}
+
+/// Trim the breaks, spaces, and tabs at each paragraph edge that meets a
+/// code block, dropping a paragraph left empty: the line ending around
+/// `a\n<code-block>x</code-block>\nb` (or a fence) separates the blocks.
+fn trim_edges_at_code(blocks: &mut Vec<RenderNode>) {
+    let is_code = |node: &RenderNode| matches!(node.kind, NodeKind::Code { .. });
+    for at in 0..blocks.len() {
+        let start = at > 0 && is_code(&blocks[at - 1]);
+        let end = blocks.get(at + 1).is_some_and(is_code);
+        if let NodeKind::Paragraph { children } = &mut blocks[at].kind
+            && (start || end)
+        {
+            trim_paragraph_edges(children, start, end);
+        }
+    }
+    blocks.retain(|node| !matches!(&node.kind, NodeKind::Paragraph { children } if children.is_empty()));
 }
 
 /// Parse `InlineProse` content into phrasing nodes. Fenced blocks become
 /// `InlineCode`; blank lines are ordinary breaks.
 pub(super) fn parse_inline(content: &str, line_breaks: LineBreaks) -> Vec<RenderNode> {
-    let (text, mut lifted) = lift_fences(content);
-    let pre = preprocess_inline(&text, &mut lifted);
+    let (text, lifted) = lift_opaque(content);
+    let pre = preprocess_inline(&text);
     parse_render_nodes(
         &pre,
         &lifted,
@@ -323,33 +286,12 @@ pub(super) fn parse_inline(content: &str, line_breaks: LineBreaks) -> Vec<Render
     )
 }
 
-/// Wrap a paragraph's nodes in `Paragraph` blocks, splitting around any
-/// block-level `Code` child so code never sits inside phrasing content.
-/// A paragraph that parses to nothing (for example only an empty style tag)
-/// adds no block.
-fn push_paragraphs(nodes: Vec<RenderNode>, out: &mut Vec<RenderNode>) {
-    let mut run: Vec<RenderNode> = Vec::new();
-    for node in nodes {
-        if matches!(node.kind, renderable::tree::NodeKind::Code { .. }) {
-            if !run.is_empty() {
-                out.push(RenderNode::paragraph(std::mem::take(&mut run)));
-            }
-            out.push(node);
-        } else {
-            run.push(node);
-        }
-    }
-    if !run.is_empty() {
-        out.push(RenderNode::paragraph(run));
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn split(input: &str) -> Vec<Block> {
-        let (text, lifted) = lift_fences(input);
+        let (text, lifted) = lift_opaque(input);
         split_blocks(&text, &lifted)
     }
 
@@ -397,8 +339,11 @@ mod tests {
 
     #[test]
     fn code_spans_and_code_block_tags_are_opaque_to_the_splitter() {
-        assert_eq!(split("`<red>` a\n\nb"), [para("`<red>` a"), para("b")]);
-        assert_eq!(split("<code-block>a\n\nb</code-block>"), [para("<code-block>a\n\nb</code-block>")]);
+        assert_eq!(split("`<red>` a\n\nb"), [para("\u{2}0\u{2} a"), para("b")]);
+        assert_eq!(
+            split("<code-block>a\n\nb</code-block>"),
+            [para("<code-block>\u{2}0\u{2}</code-block>")]
+        );
     }
 
     #[test]

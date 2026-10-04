@@ -263,8 +263,9 @@ fn hidden_tag() {
         "got: {}",
         browser
     );
-    // Markdown: hidden has no portable sigil and degrades to inner text.
-    assert_eq!(md("<hidden>x</hidden>"), "<hidden>x</hidden>");
+    // Markdown: the same literal text, escaped so a reader does not take it
+    // as an HTML element.
+    assert_eq!(md("<hidden>x</hidden>"), r"\<hidden>x\</hidden>");
 }
 
 // ── Terminal: nested style restoration ───────────────────────────────────
@@ -316,9 +317,11 @@ fn terminal_link_markdown_fallback_when_unsupported() {
 #[test]
 fn terminal_path_like_link_resolves_to_file_url() {
     let terminal = full_terminal();
+    // Built the way the renderer builds it: `/usr/...` has no drive on Windows.
+    let url = url::Url::from_file_path(std::path::absolute("/usr/local/bin/x").unwrap()).unwrap();
     assert_eq!(
         term_caps(r#"<a href="/usr/local/bin/x">x</a>"#, &terminal),
-        "\x1b]8;;file:///usr/local/bin/x\x1b\\x\x1b]8;;\x1b\\"
+        format!("\x1b]8;;{url}\x1b\\x\x1b]8;;\x1b\\")
     );
 }
 
@@ -536,13 +539,13 @@ fn markdown_link_destination_with_whitespace_uses_angle_brackets() {
 fn markdown_link_description_not_double_escaped() {
     assert_eq!(
         md(r#"<a href="https://example.com">a]b</a>"#),
-        "[a]b](https://example.com)"
+        r"[a\]b](https://example.com)"
     );
 }
 
 #[test]
 fn markdown_unknown_tag_is_escaped_text() {
-    assert_eq!(md("<unknown>x</unknown>"), "<unknown>x</unknown>");
+    assert_eq!(md("<unknown>x</unknown>"), r"\<unknown>x\</unknown>");
 }
 
 #[test]

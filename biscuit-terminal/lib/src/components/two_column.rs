@@ -752,7 +752,8 @@ impl MarkdownRenderable for TwoColumn {
     /// `<div class="columns" style="display:flex;gap:{gap}ch">` with two
     /// `<div class="column">` children. The left column carries the width
     /// CSS from [`ColumnsHints::left_width`]; the right column flexes to
-    /// fill.
+    /// fill. The container is one raw HTML block, which a Markdown reader
+    /// does not parse, so the column bodies are the browser's HTML too.
     fn render_markdown_plus(&self) -> String {
         let node = <Self as TreeRenderable>::render_tree(self);
         let opts = MarkdownRenderOptions {

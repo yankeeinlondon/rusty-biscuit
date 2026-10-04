@@ -11,33 +11,37 @@
 //! | `_text_`          | `<i>text</i>`                     |
 //! | `` `code` ``      | a lifted-content placeholder resolved to `InlineCode` |
 //!
-//! Fenced code blocks are lifted once for the whole input
-//! ([`lift_fences`]), before paragraphs are split. Each paragraph then runs
-//! the inline phases in a fixed order ([`preprocess_inline`]): code spans →
-//! links → bold → italics. Each phase respects backslash escapes (`\*`,
-//! `\_`, `\[`, `\]`, `\(`, `\)`) so literal Markdown characters survive
-//! untouched and reach the token parser as-is.
+//! Opaque regions are recognized once for the whole input ([`lift_opaque`]),
+//! before paragraphs are split or anything is rewritten. Each paragraph then
+//! runs the inline phases in a fixed order ([`preprocess_inline`]): links →
+//! bold → italics. Each phase respects backslash escapes (`\*`, `\_`, `\[`,
+//! `\]`, `\(`, `\)`) so literal Markdown characters survive untouched and
+//! reach the token parser as-is.
 //!
-//! ## Lifted content
+//! ## Opaque regions
 //!
-//! Fenced code blocks and code spans are opaque. Each is moved into a
-//! [`Lifted`] table and replaced by a `\u{0002}<n>\u{0002}` placeholder that
-//! survives every later phase (the sentinel is non-word punctuation) and is
-//! resolved by the token parser straight into a `Code` or `InlineCode` node,
-//! never re-expanded into string markup.
+//! Fenced code blocks, code spans, HTML comments, and explicit
+//! `<code-block>` bodies are moved into a [`Lifted`] table and replaced by a
+//! `\u{0002}<n>\u{0002}` placeholder that survives every later phase (the
+//! sentinel is non-word punctuation) and is resolved by the token parser
+//! straight into a `Code` or `InlineCode` node, or into nothing for a
+//! comment, never re-expanded into string markup. Recognized tag
+//! declarations, quoted attribute values included, are copied through
+//! unread. A later phase therefore never sees code contents, and never finds
+//! a fence or code span inside an attribute value.
 //!
 //! Literal sentinel characters in user input are backslash-escaped by
-//! [`lift_fences`] before anything else runs, so an unescaped sentinel is
-//! always one the parser issued and input can never impersonate a lifted
-//! reference or a link-target placeholder.
+//! [`lift_opaque`] outside code before anything else runs, so an unescaped
+//! sentinel is always one the parser issued and input can never impersonate
+//! a lifted reference or a link-target placeholder.
 //!
 //! ## Code spans
 //!
 //! A backtick run opens a span only when a later run of the same length
-//! closes it, before the next blank line; an unmatched run is literal. The
-//! span's value follows CommonMark: backslashes are literal, line endings
-//! become spaces, and one space is stripped from each side when the content
-//! both begins and ends with a space and is not all spaces.
+//! closes it, before the next blank line or fence line; an unmatched run is
+//! literal. The span's value follows CommonMark: backslashes are literal,
+//! line endings become spaces, and one space is stripped from each side when
+//! the content both begins and ends with a space and is not all spaces.
 //!
 //! Emphasis delimiters follow the CommonMark left- and right-flanking rules
 //! (`_` additionally may not open or close inside a word, and `**` keeps the
@@ -53,7 +57,7 @@
 //! `https://example.com/path_with_underscores` — are never re-interpreted
 //! as Markdown emphasis markers.
 
-use super::tokens::is_recognized_opening_tag;
+use super::tokens::{is_recognized_opening_tag, parse_opening_tag};
 
 const HREF_PLACEHOLDER_MARK: char = '\u{0001}';
 
@@ -143,7 +147,7 @@ fn neighbours(chars: &[char], start: usize, len: usize) -> (Option<char>, Option
 /// Sentinel character delimiting a lifted-content placeholder
 /// (`\u{0002}<n>\u{0002}`, an index into the [`Lifted`] table). It is a C0
 /// control character; a literal one in user input is backslash-escaped by
-/// [`lift_fences`], so an unescaped occurrence is always parser-issued.
+/// [`lift_opaque`], so an unescaped occurrence is always parser-issued.
 pub(super) const LIFT_MARK: char = '\u{0002}';
 
 /// Whether `c` is one of the parser's placeholder sentinels.
@@ -170,6 +174,13 @@ pub(super) enum Lifted {
     Fence(FencedCode),
     /// A code span's final value (CommonMark adjustments already applied).
     Span(String),
+    /// An explicit `<code-block>` body, verbatim; its placeholder stays
+    /// between the opening and closing tags.
+    CodeBody(String),
+    /// An HTML comment. It contributes no node; the placeholder keeps the
+    /// comment opaque to the later phases and reads as punctuation to the
+    /// emphasis flanking rules, as the comment's `<` and `>` would.
+    Comment,
 }
 
 /// Placeholder text referring to `lifted[index]`.
@@ -190,144 +201,272 @@ pub(super) fn parse_lift_placeholder(chars: &[char], start: usize) -> Option<(us
     Some((index.parse().ok()?, digits_end + 1))
 }
 
-/// Stage 0 for the whole input: normalize line endings, lift fenced code
-/// blocks (` ```lang\n...\n``` `) into placeholders, and backslash-escape
-/// every literal sentinel character outside them (rule R1).
+/// Stage 0 for the whole input: normalize line endings, lift every opaque
+/// region into `lifted`, and backslash-escape every literal sentinel
+/// character outside them (rule R1).
 ///
 /// CRLF and lone CR become LF first, so the paragraph and break rules see
-/// the same structure whatever platform produced the text. A fence opens on
-/// a line starting (after indentation) with three backticks; an unclosed
-/// fence consumes the rest of the input. Fence bodies are lifted verbatim.
-pub(super) fn lift_fences(input: &str) -> (String, Vec<Lifted>) {
+/// the same structure whatever platform produced the text. One left-to-right
+/// scan then recognizes, whichever starts first:
+///
+/// - a fenced block: a line starting (after indentation) with three
+///   backticks, up to a line holding only three backticks; an unclosed fence
+///   consumes the rest of the input. The body is lifted verbatim.
+/// - a code span: a backtick run closed by a later run of the same length
+///   before the next blank line or fence line. Its CommonMark value is lifted.
+/// - an HTML comment (`<!-->`, `<!--->`, or `<!--` … `-->`) closed before the
+///   next blank line or fence line. It is lifted as [`Lifted::Comment`] and
+///   contributes no content, so Markdown that separates two code spans with
+///   `<!-- -->` reads back as the two values alone.
+/// - a recognized tag declaration, scanned quote-aware, so a quoted attribute
+///   value (newlines, backticks, fence lines, `>` and all) is copied through
+///   unread. For `<code-block>` the body up to the first `</code-block>` (or
+///   the end of input) is lifted verbatim as well.
+///
+/// No later phase can therefore rewrite code or an attribute value, and a
+/// placeholder never lands inside one.
+pub(super) fn lift_opaque(input: &str) -> (String, Vec<Lifted>) {
     let normalized = input.replace("\r\n", "\n").replace('\r', "\n");
-    let lines: Vec<&str> = normalized.split('\n').collect();
-    let mut output_lines: Vec<String> = Vec::with_capacity(lines.len());
+    let chars: Vec<char> = normalized.chars().collect();
+    let mut output = String::with_capacity(normalized.len());
     let mut lifted: Vec<Lifted> = Vec::new();
     let mut i = 0;
 
-    while i < lines.len() {
-        let line = lines[i];
-        let trimmed = line.trim_start();
-
-        if let Some(after_fence) = trimmed.strip_prefix("```") {
-            let lang = after_fence.trim().to_string();
-            let mut body_lines = Vec::new();
-            i += 1;
-
-            while i < lines.len() {
-                let body_line = lines[i];
-                if body_line.trim_start() == "```" {
-                    i += 1;
-                    break;
-                }
-                body_lines.push(body_line);
-                i += 1;
-            }
-
-            output_lines.push(lift_placeholder(lifted.len()));
-            lifted.push(Lifted::Fence(FencedCode {
-                lang,
-                body: body_lines.join("\n"),
-            }));
-        } else {
-            let mut escaped = String::with_capacity(line.len());
-            for c in line.chars() {
-                if is_sentinel(c) {
-                    escaped.push('\\');
-                }
-                escaped.push(c);
-            }
-            output_lines.push(escaped);
-            i += 1;
-        }
-    }
-
-    (output_lines.join("\n"), lifted)
-}
-
-/// Apply the inline Markdown phases to one paragraph of fence-lifted text.
-///
-/// Order: code spans → links → bold → italics. Code spans are appended to
-/// `lifted`; the returned text keeps their placeholders (and any fence
-/// placeholders) for the token parser.
-pub(super) fn preprocess_inline(paragraph: &str, lifted: &mut Vec<Lifted>) -> String {
-    let with_spans = lift_code_spans(paragraph, lifted);
-    let (with_links, hrefs) = convert_links(&with_spans);
-    let with_bold = convert_bold(&with_links);
-    let with_italics = convert_italics(&with_bold);
-    restore_hrefs(&with_italics, &hrefs)
-}
-
-/// Lift every inline code span into `lifted`, leaving a placeholder.
-///
-/// A backtick run opens a span only when a later run of the same length
-/// closes it before the next blank line; an unmatched run is literal. Tag
-/// declarations and existing escapes outside a span are copied through
-/// untouched.
-fn lift_code_spans(input: &str, lifted: &mut Vec<Lifted>) -> String {
-    let chars: Vec<char> = input.chars().collect();
-    let mut output = String::with_capacity(input.len());
-    let mut i = 0;
-
     while i < chars.len() {
-        let ch = chars[i];
-
-        if ch == '\\' && i + 1 < chars.len() && is_escapable(chars[i + 1]) {
-            output.push(ch);
-            output.push(chars[i + 1]);
-            i += 2;
-            continue;
-        }
-
-        if ch == '<'
-            && let Some(next) = copy_tag_declaration(&chars, i, &mut output)
+        if (i == 0 || chars[i - 1] == '\n')
+            && let Some(next) = lift_fence(&chars, i, &mut output, &mut lifted)
         {
             i = next;
             continue;
         }
 
-        if ch == '`' {
-            let run = backtick_run_len(&chars, i);
-            match closing_backtick_run(&chars, i + run, run) {
-                Some(close) => {
-                    output.push_str(&lift_placeholder(lifted.len()));
-                    lifted.push(Lifted::Span(code_span_value(&chars[i + run..close])));
-                    i = close + run;
+        let ch = chars[i];
+        match ch {
+            '\\' => match chars.get(i + 1) {
+                // A lone backslash before a literal sentinel is literal too:
+                // escape it so the sentinel keeps its own escape.
+                Some(&next) if is_sentinel(next) => {
+                    output.push_str("\\\\");
+                    i += 1;
                 }
-                None => {
-                    output.extend(&chars[i..i + run]);
-                    i += run;
+                Some(&next) if is_escapable(next) => {
+                    output.push(ch);
+                    output.push(next);
+                    i += 2;
+                }
+                _ => {
+                    output.push(ch);
+                    i += 1;
+                }
+            },
+            c if is_sentinel(c) => {
+                output.push('\\');
+                output.push(c);
+                i += 1;
+            }
+            '`' => {
+                let run = backtick_run_len(&chars, i);
+                match closing_backtick_run(&chars, i + run, run) {
+                    Some(close) => {
+                        output.push_str(&lift_placeholder(lifted.len()));
+                        lifted.push(Lifted::Span(code_span_value(&chars[i + run..close])));
+                        i = close + run;
+                    }
+                    None => {
+                        output.extend(&chars[i..i + run]);
+                        i += run;
+                    }
                 }
             }
-            continue;
+            '<' => match html_comment_end(&chars, i) {
+                Some(end) => {
+                    output.push_str(&lift_placeholder(lifted.len()));
+                    lifted.push(Lifted::Comment);
+                    i = end;
+                }
+                None => i = copy_opaque_tag(&chars, i, &mut output, &mut lifted),
+            },
+            _ => {
+                output.push(ch);
+                i += 1;
+            }
         }
-
-        output.push(ch);
-        i += 1;
     }
 
-    output
+    (output, lifted)
+}
+
+/// Lift the fenced block opening on the line at `chars[start]`, if that line
+/// is a fence. Returns the index of the line ending after the closing fence
+/// (or the end of input), leaving that line ending in place.
+fn lift_fence(chars: &[char], start: usize, output: &mut String, lifted: &mut Vec<Lifted>) -> Option<usize> {
+    let line_end = |from: usize| chars[from..].iter().position(|&c| c == '\n').map_or(chars.len(), |p| from + p);
+    let opening_end = line_end(start);
+    let opening: String = chars[start..opening_end].iter().collect();
+    let lang = opening.trim_start().strip_prefix("```")?.trim().to_string();
+
+    let mut body_lines: Vec<String> = Vec::new();
+    let mut i = opening_end;
+    while i < chars.len() {
+        let line_start = i + 1;
+        let end = line_end(line_start);
+        let line: String = chars[line_start..end].iter().collect();
+        i = end;
+        if line.trim_start() == "```" {
+            break;
+        }
+        body_lines.push(line);
+    }
+
+    output.push_str(&lift_placeholder(lifted.len()));
+    lifted.push(Lifted::Fence(FencedCode {
+        lang,
+        body: body_lines.join("\n"),
+    }));
+    Some(i)
+}
+
+/// Copy the tag declaration at `chars[start]` (a `<`) when it opens a tag
+/// the parser recognizes, escaping literal sentinels but reading nothing
+/// else inside it; a `<code-block>` body is lifted as [`Lifted::CodeBody`].
+/// Any other `<` is copied alone. Returns the index to resume scanning at.
+fn copy_opaque_tag(chars: &[char], start: usize, output: &mut String, lifted: &mut Vec<Lifted>) -> usize {
+    let Some(end) = tag_declaration_end(chars, start) else {
+        output.push('<');
+        return start + 1;
+    };
+    let content: String = chars[start + 1..end - 1].iter().collect();
+    if !is_recognized_opening_tag(&content) {
+        output.push('<');
+        return start + 1;
+    }
+    push_declaration(&chars[start..end], output);
+    if !parse_opening_tag(&content).is_some_and(|(name, _)| name == "code-block") {
+        return end;
+    }
+
+    let (body_end, resume) = match find_ci(chars, end, CODE_BLOCK_CLOSE) {
+        Some(close) => (close, close + CODE_BLOCK_CLOSE.chars().count()),
+        None => (chars.len(), chars.len()),
+    };
+    output.push_str(&lift_placeholder(lifted.len()));
+    lifted.push(Lifted::CodeBody(chars[end..body_end].iter().collect()));
+    output.extend(&chars[body_end..resume]);
+    resume
+}
+
+/// Index just past the HTML comment opening at `chars[start]` (a `<`), using
+/// CommonMark's comment syntax: `<!-->`, `<!--->`, or `<!--` then text without
+/// `-->` then `-->`. Like a code span, a comment never crosses a blank line or
+/// a fence line; an unclosed `<!--` is literal text.
+fn html_comment_end(chars: &[char], start: usize) -> Option<usize> {
+    let open = start + 4;
+    if !chars[start..].starts_with(&['<', '!', '-', '-']) {
+        return None;
+    }
+    if chars.get(open) == Some(&'>') {
+        return Some(open + 1);
+    }
+    if chars[open..].starts_with(&['-', '>']) {
+        return Some(open + 2);
+    }
+    let mut i = open;
+    while i < chars.len() {
+        if chars[i] == '\n' && (blank_run_end(chars, i).is_some() || is_fence_line(chars, i + 1)) {
+            return None;
+        }
+        if chars[i..].starts_with(&['-', '-', '>']) {
+            return Some(i + 3);
+        }
+        i += 1;
+    }
+    None
+}
+
+/// The closing tag that ends an explicit code-block body.
+pub(super) const CODE_BLOCK_CLOSE: &str = "</code-block>";
+
+/// Copy a tag declaration verbatim apart from literal sentinels, which are
+/// escaped (a backslash right before one is escaped too). Escape pairs are
+/// copied whole so a sentinel's escape never pairs with an authored one.
+fn push_declaration(declaration: &[char], output: &mut String) {
+    let mut i = 0;
+    while i < declaration.len() {
+        let c = declaration[i];
+        match declaration.get(i + 1) {
+            Some(&next) if c == '\\' && is_sentinel(next) => output.push_str("\\\\"),
+            Some(&next) if c == '\\' => {
+                output.push(c);
+                output.push(next);
+                i += 1;
+            }
+            _ if is_sentinel(c) => {
+                output.push('\\');
+                output.push(c);
+            }
+            _ => output.push(c),
+        }
+        i += 1;
+    }
+}
+
+/// Index just past the `>` of the tag declaration opening at `chars[start]`,
+/// scanning quote- and escape-aware like the token parser, so a newline or
+/// `>` inside a quoted attribute belongs to the declaration. An unquoted
+/// blank line ends the attempt: the `<` is then literal text.
+pub(super) fn tag_declaration_end(chars: &[char], start: usize) -> Option<usize> {
+    let mut quote: Option<char> = None;
+    let mut i = start + 1;
+    while i < chars.len() {
+        match chars[i] {
+            '\n' if quote.is_none() && blank_run_end(chars, i).is_some() => return None,
+            '\\' => i += 2,
+            c @ ('"' | '\'') => {
+                match quote {
+                    Some(q) if q == c => quote = None,
+                    None => quote = Some(c),
+                    Some(_) => {}
+                }
+                i += 1;
+            }
+            '>' if quote.is_none() => return Some(i + 1),
+            _ => i += 1,
+        }
+    }
+    None
+}
+
+/// Index of the first case-insensitive occurrence of `needle` at or after
+/// `start`.
+pub(super) fn find_ci(chars: &[char], start: usize, needle: &str) -> Option<usize> {
+    let needle: Vec<char> = needle.chars().collect();
+    (start..=chars.len().checked_sub(needle.len())?).find(|&i| {
+        chars[i..i + needle.len()]
+            .iter()
+            .zip(&needle)
+            .all(|(a, b)| a.eq_ignore_ascii_case(b))
+    })
+}
+
+/// Apply the inline Markdown phases to one paragraph of [`lift_opaque`]
+/// output.
+///
+/// Order: links → bold → italics. Every placeholder survives untouched for
+/// the token parser.
+pub(super) fn preprocess_inline(paragraph: &str) -> String {
+    let (with_links, hrefs) = convert_links(paragraph);
+    let with_bold = convert_bold(&with_links);
+    let with_italics = convert_italics(&with_bold);
+    restore_hrefs(&with_italics, &hrefs)
 }
 
 /// The CommonMark value of a code span's raw contents.
 ///
-/// Backslashes are literal, except the one [`lift_fences`] put in front of
-/// each sentinel, which is removed again. Line endings become spaces, and
-/// one space is stripped from each side when the content begins and ends
-/// with a space and is not all spaces.
+/// Backslashes are literal. Line endings become spaces, and one space is
+/// stripped from each side when the content begins and ends with a space
+/// and is not all spaces.
 fn code_span_value(contents: &[char]) -> String {
-    let mut value = String::with_capacity(contents.len());
-    let mut j = 0;
-    while j < contents.len() {
-        let c = contents[j];
-        if c == '\\' && contents.get(j + 1).is_some_and(|&n| is_sentinel(n)) {
-            value.push(contents[j + 1]);
-            j += 2;
-            continue;
-        }
-        value.push(if c == '\n' { ' ' } else { c });
-        j += 1;
-    }
+    let mut value: String = contents.iter().map(|&c| if c == '\n' { ' ' } else { c }).collect();
     if value.len() >= 2 && value.starts_with(' ') && value.ends_with(' ') && !value.chars().all(|c| c == ' ') {
         value = value[1..value.len() - 1].to_string();
     }
@@ -372,12 +511,12 @@ fn backtick_run_len(chars: &[char], start: usize) -> usize {
 }
 
 /// Index of the first backtick run of exactly `len` at or after `start`,
-/// searching no further than the next blank line (a span never crosses a
-/// paragraph boundary).
+/// searching no further than the next blank line or fence line (a span never
+/// crosses a paragraph boundary or a fenced block).
 fn closing_backtick_run(chars: &[char], start: usize, len: usize) -> Option<usize> {
     let mut i = start;
     while i < chars.len() {
-        if chars[i] == '\n' && blank_run_end(chars, i).is_some() {
+        if chars[i] == '\n' && (blank_run_end(chars, i).is_some() || is_fence_line(chars, i + 1)) {
             return None;
         }
         if chars[i] == '`' {
@@ -393,10 +532,17 @@ fn closing_backtick_run(chars: &[char], start: usize, len: usize) -> Option<usiz
     None
 }
 
+/// Whether the line starting at `chars[start]` opens a fenced block.
+fn is_fence_line(chars: &[char], start: usize) -> bool {
+    let rest = chars.get(start..).unwrap_or_default();
+    let indent = rest.iter().take_while(|&&c| c != '\n' && c.is_whitespace()).count();
+    rest[indent..].starts_with(&['`', '`', '`'])
+}
+
 /// Characters that participate in backslash escape sequences during
 /// Markdown pre-processing. Mirrors the set recognised by
 /// [`super::tokens::parse_render_nodes`]; the sentinels are included because
-/// [`lift_fences`] escapes literal ones.
+/// [`lift_opaque`] escapes literal ones.
 pub(super) fn is_escapable(c: char) -> bool {
     matches!(
         c,
@@ -404,32 +550,19 @@ pub(super) fn is_escapable(c: char) -> bool {
     ) || is_sentinel(c)
 }
 
-/// Copy a block-tag declaration `<…>` from the input to the output
-/// without interpreting any Markdown inside it. Returns the index just
-/// past the closing `>`, or `None` if no closing `>` exists (in which
-/// case the caller should fall through to the default per-character
-/// path).
+/// Copy a tag declaration `<…>` from the input to the output without
+/// interpreting any Markdown inside it. Returns the index just past the
+/// closing `>`, or `None` when [`tag_declaration_end`] finds none (the caller
+/// then falls through to the default per-character path).
 ///
-/// This preserves attribute values like `href="path_with_underscores"`
-/// from being chewed up by the italics phase, and keeps any literal
-/// Markdown inside an `href`/title attribute opaque to the pre-processor.
+/// The scan is quote-aware like the token parser's, so the two agree on
+/// where a declaration ends: attribute values such as
+/// `href="path_with_underscores"` or `href="a>**b**"` are never read as
+/// Markdown.
 fn copy_tag_declaration(chars: &[char], start: usize, output: &mut String) -> Option<usize> {
-    debug_assert_eq!(chars[start], '<');
-    let mut i = start + 1;
-    while i < chars.len() {
-        if chars[i] == '>' {
-            for c in &chars[start..=i] {
-                output.push(*c);
-            }
-            return Some(i + 1);
-        }
-        if chars[i] == '\\' && i + 1 < chars.len() && is_escapable(chars[i + 1]) {
-            i += 2;
-            continue;
-        }
-        i += 1;
-    }
-    None
+    let end = tag_declaration_end(chars, start)?;
+    output.extend(&chars[start..end]);
+    Some(end)
 }
 
 /// Phase 1: lift `[desc](ref)` into `<a href="...">desc</a>`.
@@ -483,8 +616,9 @@ fn convert_links(input: &str) -> (String, Vec<String>) {
 
 /// Try to parse `[desc](ref)` starting at `start` (which must point at the
 /// opening `[`). Returns the description, raw href, and the index *after*
-/// the closing `)`. Backslash escapes inside the description are passed
-/// through verbatim. Inside the href, only `\(` and `\)` are interpreted
+/// the closing `)`. Backslash escapes and tag declarations inside the
+/// description are passed through verbatim, so a `]` in a quoted attribute
+/// never ends it. Inside the href, only `\(` and `\)` are interpreted
 /// (the backslash is dropped and the paren is kept as a literal); all
 /// other characters are taken literally.
 fn try_parse_link(chars: &[char], start: usize) -> Option<(String, String, usize)> {
@@ -500,6 +634,12 @@ fn try_parse_link(chars: &[char], start: usize) -> Option<(String, String, usize
             desc.push(ch);
             desc.push(chars[i + 1]);
             i += 2;
+            continue;
+        }
+        if ch == '<'
+            && let Some(next) = copy_tag_declaration(chars, i, &mut desc)
+        {
+            i = next;
             continue;
         }
         if ch == ']' {
@@ -756,19 +896,7 @@ fn find_closing_single(chars: &[char], start: usize, marker: char) -> Option<usi
 /// without copying anything. Used inside the closer-search helpers,
 /// which must not mutate output state.
 fn scan_past_tag_declaration(chars: &[char], start: usize) -> Option<usize> {
-    debug_assert_eq!(chars[start], '<');
-    let mut i = start + 1;
-    while i < chars.len() {
-        if chars[i] == '>' {
-            return Some(i + 1);
-        }
-        if chars[i] == '\\' && i + 1 < chars.len() && is_escapable(chars[i + 1]) {
-            i += 2;
-            continue;
-        }
-        i += 1;
-    }
-    None
+    tag_declaration_end(chars, start)
 }
 
 /// Final phase: replace each `\u{0001}HREF<n>\u{0001}` placeholder with
@@ -826,31 +954,30 @@ mod tests {
 
     /// Run the pre-processor and return only the converted text.
     fn pp(input: &str) -> String {
-        let (text, mut lifted) = lift_fences(input);
-        preprocess_inline(&text, &mut lifted)
+        preprocess_inline(&lift_opaque(input).0)
     }
 
     /// Run the pre-processor and return the text plus every lifted span value.
     fn pp_spans(input: &str) -> (String, Vec<String>) {
-        let (text, mut lifted) = lift_fences(input);
-        let out = preprocess_inline(&text, &mut lifted);
+        let (text, lifted) = lift_opaque(input);
+        let out = preprocess_inline(&text);
         let spans = lifted
             .into_iter()
             .filter_map(|l| match l {
                 Lifted::Span(v) => Some(v),
-                Lifted::Fence(_) => None,
+                _ => None,
             })
             .collect();
         (out, spans)
     }
 
     fn fences(input: &str) -> (String, Vec<FencedCode>) {
-        let (text, lifted) = lift_fences(input);
+        let (text, lifted) = lift_opaque(input);
         let blocks = lifted
             .into_iter()
             .filter_map(|l| match l {
                 Lifted::Fence(f) => Some(f),
-                Lifted::Span(_) => None,
+                _ => None,
             })
             .collect();
         (text, blocks)

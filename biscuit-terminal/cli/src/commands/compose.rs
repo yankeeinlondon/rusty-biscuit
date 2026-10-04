@@ -125,7 +125,7 @@ impl Run for ComposeArgs {
             return Ok(());
         }
 
-        let term = terminal_for_render(ctx.plain);
+        let term = colorless_when_no_color(terminal_for_render(ctx.plain));
         let output = compose.render(&term);
         let output = if std::env::var("NO_COLOR").is_ok() {
             strip_sgr_sequences(&output)

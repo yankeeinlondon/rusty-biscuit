@@ -39,13 +39,13 @@ use renderable::tree::{
 };
 #[cfg(feature = "image")]
 use renderable::tree::TerminalMermaidMode;
-use renderable::tree::{ValidationError, ValidationMode, validate};
+use renderable::tree::{ValidationError, ValidationMode, is_html_comment_only, validate};
 
 use crate::components::block_quote::BlockQuote;
 use crate::components::horizontal_rule::{HorizontalRule, RuleAlignment, RuleStyle, RuleWeight};
 #[cfg(feature = "image")]
 use crate::components::mermaid::MermaidDiagram;
-use crate::components::prose::Prose;
+use crate::components::prose::{LineBreaks, Prose};
 use crate::components::renderable::TerminalRenderable;
 use crate::components::terminal_image::TerminalImage;
 use crate::discovery::detection::ImageSupport;
@@ -93,7 +93,8 @@ const ELLIPSIS: &str = "…";
 ///   escalated by the validation gate before the writer runs).
 /// - [`RenderError::Unsupported`] / [`RenderError::LossyRejected`] if
 ///   [`RenderStrictness::Strict`] meets content that cannot be rendered
-///   faithfully to a terminal (an unsupported node or raw HTML).
+///   faithfully to a terminal (an unsupported node, or raw HTML that is more
+///   than comments).
 pub fn render_terminal_node(
     node: &RenderNode,
     opts: &TerminalRenderOptions,
@@ -1158,6 +1159,7 @@ impl Writer<'_> {
                     Some(hints) => self.apply_text_layout(styled, hints),
                     None => styled,
                 };
+                let url = super::link::terminal_link_url(node, url);
                 if url.is_empty() {
                     Ok(styled)
                 } else if term.osc_link_support {
@@ -1679,8 +1681,12 @@ impl Writer<'_> {
         // rendered inline output are not mis-parsed as tags during wrap. A
         // colorless terminal keeps inline code as a backtick span, which the
         // re-parse reads literally, so its contents must stay unescaped.
+        // Soft breaks are already spaces here; every remaining newline is a
+        // hard break (or raw text's own line) and must survive the re-parse.
         let safe = Prose::escape_text_outside_code_spans(markup);
-        let prose = Prose::new(safe).with_word_wrap(WordWrap::WrapProse(None, hang));
+        let prose = Prose::new(safe)
+            .with_line_breaks(LineBreaks::Hard)
+            .with_word_wrap(WordWrap::WrapProse(None, hang));
         let rendered = prose.render_in_width(term, child_width);
 
         let mut out = String::new();
@@ -2143,12 +2149,19 @@ impl Writer<'_> {
     /// this is a [`RenderError::LossyRejected`]; under
     /// [`RenderStrictness::Warn`] the raw value is emitted verbatim with a
     /// diagnostic; under [`RenderStrictness::Lossy`] the node is dropped.
+    ///
+    /// A comment-only value ([`is_html_comment_only`]) has no visible content,
+    /// so it renders as nothing in every mode, with no diagnostic. Markdown
+    /// written by the shared renderer puts one between touching code spans.
     fn render_html(
         &mut self,
         node: &RenderNode,
         value: &str,
         _block: bool,
     ) -> Result<String, RenderError> {
+        if is_html_comment_only(value) {
+            return Ok(String::new());
+        }
         match self.opts.strictness {
             RenderStrictness::Strict => Err(RenderError::LossyRejected {
                 message: "raw HTML cannot be rendered to a terminal".to_string(),

@@ -32,8 +32,9 @@ base64 = "0.22"
 biscuit-visualized = { path = "../../biscuit-visualized/src", features = ["clap"], optional = true }
 # Structured config parsing for app-metadata value extraction. Normalizes
 # TOML/YAML/JSON5 to `serde_json::Value`; the underlying parsers stay indirect.
-# `default-features = false` keeps the heavy PDF/gix tree out.
-biscuit-file = { path = "../../biscuit-file/lib", default-features = false, features = ["toml", "yaml", "json5"] }
+# `file-reference` resolves Prose link destinations for terminal OSC 8 links
+# (it brings in gix). `default-features = false` keeps the PDF tree out.
+biscuit-file = { path = "../../biscuit-file/lib", default-features = false, features = ["toml", "yaml", "json5", "file-reference"] }
 ignore = "0.4"
 image = "0.25"
 renderable = { path = "../../renderable" }

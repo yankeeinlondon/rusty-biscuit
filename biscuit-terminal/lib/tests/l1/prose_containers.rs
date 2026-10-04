@@ -12,7 +12,7 @@ use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::compose::Compose;
 use biscuit_terminal::components::inline_content::InlineContent;
 use biscuit_terminal::components::list::{OrderedList, UnorderedList};
-use biscuit_terminal::components::prose::{InlineProse, Prose};
+use biscuit_terminal::components::prose::{InlineProse, LineBreaks, Prose};
 use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
 use biscuit_terminal::components::section::{HeadingLevel, Section};
 use biscuit_terminal::components::status::StatusState;
@@ -24,7 +24,13 @@ use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::{Length, TargetValue};
 use renderable::browser::BrowserRenderable;
 use renderable::markdown::MarkdownRenderable;
-use renderable::tree::{NodeKind, RenderNode, TreeRenderable, ValidationMode, validate};
+use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node};
+use renderable::tree::{
+    BrowserRenderOptions, MarkdownRenderOptions, NodeKind, RenderNode, RenderStrictness, TreeRenderable,
+    ValidationMode, render_browser_node, render_markdown_node, validate,
+};
+
+use crate::prose_grammar::{CODE_SYNTAXES, assert_split_around_code, wrappers};
 
 // ── helpers ─────────────────────────────────────────────────────────────
 
@@ -177,6 +183,55 @@ fn block_containers_keep_fenced_code_as_a_sibling_block() {
     }
 }
 
+/// Every wrapper branch around explicit or fenced block code, embedded in
+/// every block container: the tree validates, the code is a sibling block
+/// with the wrapper (style, link destination) resumed on both sides, and
+/// every target renders the content.
+#[test]
+fn block_containers_split_every_wrapper_around_block_code() {
+    let term = plain_term();
+    for wrapper in wrappers() {
+        for code in &CODE_SYNTAXES {
+            let prose = Prose::new(wrapper.wrap(code.source));
+            for (name, tree) in block_containers(&prose) {
+                let context = format!("{name}: {} around {} code", wrapper.name, code.name);
+                assert_valid(&context, &tree);
+                let parent = all_nodes(&tree)
+                    .into_iter()
+                    .find(|n| n.children().iter().any(|c| matches!(c.kind, NodeKind::Code { .. })))
+                    .unwrap_or_else(|| panic!("{context}: a Code block is embedded"));
+                // Compose separates one Prose's blocks with a blank-line `Text`.
+                let siblings: Vec<RenderNode> = parent
+                    .children()
+                    .iter()
+                    .filter(|c| !matches!(&c.kind, NodeKind::Text { value } if value.trim().is_empty()))
+                    .cloned()
+                    .collect();
+                let at = siblings
+                    .iter()
+                    .position(|c| matches!(c.kind, NodeKind::Code { .. }))
+                    .expect("found above");
+                assert!(at > 0, "{context}: a paragraph precedes the code");
+                assert_split_around_code(&context, &wrapper, code, &siblings[at - 1..=at + 1]);
+
+                let html = render_browser_node(&tree, &BrowserRenderOptions::default())
+                    .unwrap_or_else(|e| panic!("{context}: {e}"))
+                    .output
+                    .render();
+                assert!(html.contains("<code>x</code>"), "{context}: {html}");
+                let markdown = render_markdown_node(&tree, &MarkdownRenderOptions::default())
+                    .unwrap_or_else(|e| panic!("{context}: {e}"))
+                    .output;
+                assert!(markdown.contains("x\n"), "{context}: {markdown:?}");
+                let terminal = render_terminal_node(&tree, &TerminalRenderOptions::new(&term, RenderStrictness::Warn))
+                    .unwrap_or_else(|e| panic!("{context}: {e}"))
+                    .output;
+                assert!(strip(&terminal).contains('x'), "{context}: {terminal:?}");
+            }
+        }
+    }
+}
+
 /// Paragraph separation survives every target in the block containers that
 /// render blocks with blank-line spacing, and in `Compose`, whose sequence
 /// has no separator of its own.
@@ -291,6 +346,23 @@ fn inline_content_fence_is_one_inline_code_value() {
     );
 }
 
+/// Inline containers take `InlineProse`, where block code is inline code
+/// inside the wrapper: every wrapper and code syntax stays one line.
+#[test]
+fn inline_content_keeps_block_code_inside_every_wrapper() {
+    for wrapper in wrappers() {
+        for code in &CODE_SYNTAXES {
+            let context = format!("{} around {} code", wrapper.name, code.name);
+            let prose = InlineProse::new(wrapper.wrap(code.source));
+            assert_valid(&context, &prose.render_tree());
+            let inline = InlineContent::from("run ").with(prose);
+            let rendered = strip(&inline.render(&plain_term()));
+            assert!(rendered.starts_with("run ") && rendered.contains("`x`"), "{context}: {rendered:?}");
+            assert!(!rendered.contains('\n'), "{context}: {rendered:?}");
+        }
+    }
+}
+
 #[test]
 fn table_header_label_is_inline_prose() {
     let column = TableColumn::new_with_bold("Name");
@@ -309,4 +381,57 @@ fn two_column_prose_column_projects_structurally() {
     assert!(nodes.iter().any(|n| matches!(n.kind, NodeKind::Strong { .. })));
     assert!(nodes.iter().any(|n| matches!(n.kind, NodeKind::Emphasis { .. })));
     assert_eq!(paragraph_texts(&tree), ["left side", "right"]);
+}
+
+#[test]
+fn list_items_keep_the_hard_breaks_of_their_first_paragraph() {
+    for term in [plain_term(), styled_term()] {
+        let item = || Prose::new("Head\n  - Details: one").with_line_breaks(LineBreaks::Hard);
+        let mut unordered = UnorderedList::empty();
+        unordered.add(item()).add(item());
+        let mut ordered = OrderedList::empty();
+        ordered.add(item()).add(item());
+
+        for (name, rendered) in [
+            ("unordered", strip(&unordered.render(&term))),
+            ("ordered", strip(&ordered.render(&term))),
+        ] {
+            let rows: Vec<&str> = rendered.lines().filter(|row| !row.trim().is_empty()).collect();
+            assert_eq!(rows.len(), 4, "{name}: each item is two rows: {rendered:?}");
+            for pair in rows.chunks(2) {
+                assert!(pair[0].trim_end().ends_with("Head"), "{name}: {rendered:?}");
+                assert_eq!(pair[1].trim(), "- Details: one", "{name}: {rendered:?}");
+            }
+        }
+    }
+
+    // Control: a soft break still joins the item into one row.
+    let mut soft = UnorderedList::empty();
+    soft.add(Prose::new("Head\nmore"));
+    let rendered = strip(&soft.render(&plain_term()));
+    assert_eq!(rendered.lines().filter(|row| !row.trim().is_empty()).count(), 1, "{rendered:?}");
+    assert!(rendered.contains("Head more"), "{rendered:?}");
+}
+
+#[test]
+fn a_hard_mode_status_puts_each_line_on_a_row_of_its_own() {
+    use biscuit_terminal::components::status::Status;
+
+    for term in [plain_term(), styled_term()] {
+        let rendered = strip(
+            &Status::from_prose("captured=[<b>line one</b>\n  line two]")
+                .with_line_breaks(LineBreaks::Hard)
+                .state(StatusState::Info)
+                .render(&term),
+        );
+        let rows: Vec<&str> = rendered.lines().collect();
+        assert_eq!(rows.len(), 2, "{rendered:?}");
+        assert!(rows[0].ends_with("captured=[line one"), "{rendered:?}");
+        assert_eq!(rows[1], "  line two]", "{rendered:?}");
+    }
+
+    // Control: the default soft mode joins the lines.
+    let rendered = strip(&Status::from_prose("a\nb").render(&plain_term()));
+    assert_eq!(rendered.lines().count(), 1, "{rendered:?}");
+    assert!(rendered.ends_with("a b"), "{rendered:?}");
 }

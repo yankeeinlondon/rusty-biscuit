@@ -3,7 +3,7 @@ use std::sync::LazyLock;
 
 use serde::{Deserialize, Serialize};
 
-use crate::components::prose::InlineProse;
+use crate::components::prose::{InlineProse, LineBreaks};
 use crate::components::renderable::TerminalRenderable;
 use crate::discovery::detection::{ColorDepth, ColorMode};
 use crate::terminal::Terminal;
@@ -454,6 +454,8 @@ pub struct Status {
     #[serde(skip)]
     use_prose: bool,
     #[serde(skip)]
+    line_breaks: LineBreaks,
+    #[serde(skip)]
     layout: Layout,
 }
 
@@ -467,6 +469,7 @@ impl Default for Status {
             description: String::new(),
             color_icons: true,
             use_prose: false,
+            line_breaks: LineBreaks::default(),
             layout,
         }
     }
@@ -497,6 +500,15 @@ impl Status {
             },
             ..Self::default()
         }
+    }
+
+    /// Sets how a single newline in a [`from_prose`](Self::from_prose)
+    /// description renders. With [`LineBreaks::Hard`] each newline starts a
+    /// new row below the status line, as written (no added indent); the
+    /// default soft mode joins the lines with a space.
+    pub fn with_line_breaks(mut self, mode: LineBreaks) -> Self {
+        self.line_breaks = mode;
+        self
     }
 
     /// Set the status state.
@@ -548,7 +560,9 @@ impl Status {
         };
 
         let desc = if self.use_prose {
-            InlineProse::new(&self.description).render(term)
+            InlineProse::new(&self.description)
+                .with_line_breaks(self.line_breaks)
+                .render(term)
         } else {
             self.description.clone()
         };
@@ -574,9 +588,16 @@ impl TerminalRenderable for Status {
         // honored here. Margin, alignment, max_width, width, and padding are
         // N/A — the containing block owns the box when Status is composed
         // inside a block component.
+        // Each row of a multi-row description wraps on its own, so a row
+        // after the first keeps its written indentation; only a row's own
+        // continuation lines take the hanging indent.
         match &self.layout.word_wrap {
             WordWrap::None => content,
-            strategy => wrap_lines(vec![content], strategy, width).join("\n"),
+            strategy => content
+                .split('\n')
+                .flat_map(|row| wrap_lines(vec![row.to_string()], strategy, width))
+                .collect::<Vec<_>>()
+                .join("\n"),
         }
     }
 

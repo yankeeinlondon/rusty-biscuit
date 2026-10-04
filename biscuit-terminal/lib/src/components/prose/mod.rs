@@ -38,7 +38,6 @@ pub use self::prose::{IntoProseVec, Prose, ProseTag};
 #[cfg(test)]
 mod tests {
     use super::prose::Prose;
-    use super::styles::resolve_href;
     use crate::components::renderable::TerminalRenderable;
     use crate::discovery::detection::UnderlineSupport;
     use crate::terminal::Terminal;
@@ -374,44 +373,6 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_href_urls_unchanged() {
-        assert_eq!(resolve_href("https://example.com"), "https://example.com");
-        assert_eq!(resolve_href("http://example.com"), "http://example.com");
-        assert_eq!(
-            resolve_href("mailto:test@example.com"),
-            "mailto:test@example.com"
-        );
-        assert_eq!(resolve_href("file:///path/to/file"), "file:///path/to/file");
-    }
-
-    #[test]
-    fn test_resolve_href_absolute_path() {
-        assert_eq!(
-            resolve_href("/usr/local/bin/test"),
-            "file:///usr/local/bin/test"
-        );
-    }
-
-    #[test]
-    fn test_resolve_href_empty() {
-        assert_eq!(resolve_href(""), "");
-    }
-
-    #[test]
-    fn test_resolve_href_relative_with_dot_slash() {
-        let result = resolve_href("./test.txt");
-        assert!(result.starts_with("file://"));
-        assert!(result.contains("test.txt"));
-    }
-
-    #[test]
-    fn test_resolve_href_relative_without_prefix() {
-        let result = resolve_href("src/main.rs");
-        assert!(result.starts_with("file://"));
-        assert!(result.contains("src/main.rs"));
-    }
-
-    #[test]
     fn test_bg_rgb_tag() {
         let prose = Prose::new("<bg-rgb 255,0,0>red bg</bg-rgb>");
         let result = prose.render_optimistic(None);
@@ -513,7 +474,9 @@ mod tests {
     fn test_osc8_link_with_absolute_path() {
         let prose = Prose::new("<a href=\"/usr/local/bin/test\">link</a>");
         let result = prose.render_optimistic(None);
-        assert!(result.contains("file:///usr/local/bin/test"));
+        // Built the way the renderer builds it: `/usr/...` has no drive on Windows.
+        let expected = url::Url::from_file_path(std::path::absolute("/usr/local/bin/test").unwrap()).unwrap();
+        assert!(result.contains(expected.as_str()), "{result:?}");
     }
 
     #[test]

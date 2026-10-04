@@ -2495,7 +2495,7 @@ fn render_row_with_cursor_positioning(
         let is_padding_only = content.bytes().all(|b| b == b' ');
         if !is_padding_only {
             // Patch mid-content resets so the stripe survives between
-            // styled Prose spans (e.g. <bg-red>A</bg-red> gap <bg-red>B</bg-red>).
+            // styled Prose spans (e.g. <bg-coral>A</bg-coral> gap <bg-coral>B</bg-coral>).
             let patched: std::borrow::Cow<'_, str> = if has_stripe && content.contains("\x1b[") {
                 let mut s = content.to_string();
                 // Build full restore (bg + fg)
@@ -5166,7 +5166,7 @@ mod tests {
 
     #[test]
     fn test_stripe_survives_bg_reset_mid_content_space_padded() {
-        // When Prose content like <bg-red>A</bg-red> emits \x1b[49m (bg-only
+        // When Prose content like <bg-coral>A</bg-coral> emits \x1b[49m (bg-only
         // reset), the stripe bg must be re-applied so that text between styled
         // spans keeps the stripe.
         let content = "\x1b[41mERR\x1b[49m, \x1b[41mWARN\x1b[49m";

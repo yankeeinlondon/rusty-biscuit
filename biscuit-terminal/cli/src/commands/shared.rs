@@ -238,6 +238,24 @@ pub fn layout_style_frontmatter(layout: &LayoutArgs) -> Option<String> {
     Some(out)
 }
 
+/// Drops `term`'s color depth when `NO_COLOR` is set.
+///
+/// A command that strips SGR from its output under `NO_COLOR` must render
+/// through this terminal first: the renderer then chooses the unstyled forms
+/// itself (inline code keeps its backtick fence), whereas a styled render
+/// stripped afterwards leaves inline code unmarked. Hyperlink support and the
+/// other detected capabilities are kept.
+pub fn colorless_when_no_color(term: Terminal) -> Terminal {
+    if std::env::var("NO_COLOR").is_ok() {
+        Terminal {
+            color_depth: ColorDepth::None,
+            ..term
+        }
+    } else {
+        term
+    }
+}
+
 /// Strips SGR (Select Graphic Rendition) CSI sequences from `s`.
 ///
 /// This preserves non-color ANSI sequences such as OSC8 hyperlinks

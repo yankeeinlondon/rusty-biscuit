@@ -21,6 +21,8 @@ use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use serial_test::serial;
 use test_toolkit::{Backend, Level, require_level};
 
+use crate::common;
+
 static SHARED_WEZTERM: SharedHarness<WezTermHarness> = SharedHarness::new();
 static SHARED_KITTY: SharedHarness<KittyHarness> = SharedHarness::new();
 static SHARED_TMUX: SharedHarness<TmuxHarness> = SharedHarness::new();
@@ -374,7 +376,7 @@ fn sgr_run_cells(row: &str, mut apply: impl FnMut(&str, &mut bool)) -> Vec<(char
 /// Reconstructs the running state of the intensity attribute `on_code`
 /// (`"1"` bold, `"2"` dim) cell-by-cell across a captured raw row. See
 /// [`sgr_run_cells`].
-fn attr_run_cells(row: &str, on_code: &str) -> Vec<(char, bool)> {
+pub(crate) fn attr_run_cells(row: &str, on_code: &str) -> Vec<(char, bool)> {
     sgr_run_cells(row, |params, active| {
         apply_sgr_attr(params, on_code, active)
     })
@@ -382,7 +384,7 @@ fn attr_run_cells(row: &str, on_code: &str) -> Vec<(char, bool)> {
 
 /// Reconstructs whether the active SGR foreground is red, cell-by-cell across a
 /// captured raw row. See [`sgr_run_cells`] and [`apply_sgr_fg_red`].
-fn fg_red_run_cells(row: &str) -> Vec<(char, bool)> {
+pub(crate) fn fg_red_run_cells(row: &str) -> Vec<(char, bool)> {
     sgr_run_cells(row, apply_sgr_fg_red)
 }
 
@@ -523,7 +525,7 @@ fn assert_fg_red_contained(row: &str, needle: &str) {
 /// The capture is the terminal's re-serialization of the final grid in display
 /// order, so the link's `close` lands after the label regardless of how the
 /// standard and cursor-alignment paths originally ordered their bytes.
-fn osc8_run_cells(row: &str) -> Vec<(char, bool)> {
+pub(crate) fn osc8_run_cells(row: &str) -> Vec<(char, bool)> {
     let chars: Vec<char> = row.chars().collect();
     let mut cells = Vec::new();
     let mut link_open = false;
@@ -844,6 +846,61 @@ fn assert_prose_cell_link_styled<H: TerminalHarness>(harness: &mut H, cursor_ali
     }
 }
 
+/// Asserts inline code in a Prose table cell as the terminal displays it: the
+/// backtick delimiters are gone, the dim covers exactly the code (no border,
+/// padding, or neighboring text), a colored run keeps its color across the code
+/// and resumes after it, wrapped code stays bordered and dim on each line, a
+/// multi-line fence displays as one dim inline value with spaces for its
+/// newlines, and the colorless fallback keeps a backtick fence.
+///
+/// Border glyphs are visible cells, so a style run that bled onto a border
+/// would show up in the compared runs.
+fn assert_prose_cell_inline_code<H: TerminalHarness>(harness: &mut H) {
+    let dim_runs = |row: &str| common::active_runs(&attr_run_cells(row, "2"), true);
+
+    let frame = capture_bt(harness, "bt table --columns \"Cmd\" --prose-row 'run `md hash`'");
+    assert_bordered_line(&frame, "run md hash");
+    let row = cell_row(&frame, "run md hash")
+        .unwrap_or_else(|| panic!("missing the inline-code cell.\nplain:\n{}", frame.plain));
+    assert_eq!(dim_runs(&row), ["md hash"], "{row:?}");
+
+    let frame = capture_bt(harness, "bt table --columns \"Note\" --prose-row '<red>x `y` z</red>'");
+    let row = cell_row(&frame, "x y z")
+        .unwrap_or_else(|| panic!("missing the colored cell.\nplain:\n{}", frame.plain));
+    assert_fg_red_contained(&row, "x y z");
+    assert_eq!(common::active_runs(&fg_red_run_cells(&row), true), ["x y z"], "{row:?}");
+    assert_eq!(dim_runs(&row), ["y"], "{row:?}");
+
+    let frame = capture_bt(
+        harness,
+        "bt table --columns \"Cmd\" --col-width 9 --prose-row 'alpha `bravo charlie` delta'",
+    );
+    for (word, code) in [("alpha", false), ("bravo", true), ("charlie", true), ("delta", false)] {
+        assert_bordered_line(&frame, word);
+        let row = cell_row(&frame, word)
+            .unwrap_or_else(|| panic!("missing wrapped line {word:?}.\nplain:\n{}", frame.plain));
+        let expected: Vec<&str> = if code { vec![word] } else { Vec::new() };
+        assert_eq!(dim_runs(&row), expected, "{row:?}");
+    }
+
+    let frame = capture_bt(harness, "bt table --columns \"Cmd\" --prose-row '```\\nfoo\\nbar\\n```'");
+    assert_bordered_line(&frame, "foo bar");
+    let row = cell_row(&frame, "foo bar")
+        .unwrap_or_else(|| panic!("missing the fenced cell.\nplain:\n{}", frame.plain));
+    assert_eq!(dim_runs(&row), ["foo bar"], "{row:?}");
+    assert!(
+        !frame.plain.lines().any(|line| line.contains('│') && line.contains("```")),
+        "the fence must not display in the cell.\nplain:\n{}",
+        frame.plain,
+    );
+
+    let frame = capture_bt(harness, "bt table --plain --columns \"Cmd\" --prose-row 'run `md hash`'");
+    assert_bordered_line(&frame, "run `md hash`");
+    let row = cell_row(&frame, "run `md hash`")
+        .unwrap_or_else(|| panic!("missing the fallback cell.\nplain:\n{}", frame.plain));
+    assert!(dim_runs(&row).is_empty(), "{row:?}");
+}
+
 /// The inner cell segments of a rendered data row: the substrings between the
 /// vertical border glyphs, in column order. The leading empty segment (before
 /// the first border) and any trailing pane padding (after the last border) are
@@ -944,6 +1001,7 @@ fn level2_prose_cells_in_wezterm() {
     assert_prose_cursor_align(harness);
     assert_mixed_row_alignment(harness, false);
     assert_mixed_row_alignment(harness, true);
+    assert_prose_cell_inline_code(harness);
 }
 
 #[test]
@@ -965,6 +1023,7 @@ fn level2_prose_cells_in_kitty() {
     assert_prose_cursor_align(harness);
     assert_mixed_row_alignment(harness, false);
     assert_mixed_row_alignment(harness, true);
+    assert_prose_cell_inline_code(harness);
 }
 
 #[test]
@@ -977,9 +1036,9 @@ fn level2_prose_cells_in_tmux() {
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
 
-    // tmux carries no styling protocol of its own, but it faithfully relays text
-    // glyphs and box-drawing borders. Assert the Prose-cell text and borders
-    // survive and that no raw escape garbage leaks into the displayed cells.
+    // tmux relays text glyphs and box-drawing borders faithfully. Assert the
+    // Prose-cell text and borders survive and that no raw escape garbage leaks
+    // into the displayed cells.
     let frame = capture_bt(
         harness,
         "bt table --columns \"Status,Owner\" --prose-row \"<b>active</b>,<red>Alice</red>\"",
@@ -1006,7 +1065,7 @@ fn level2_prose_cells_in_tmux() {
         frame.plain,
     );
 
-    // tmux carries no styling, but it must still wrap a long styled cell onto
+    // tmux must also wrap a long styled cell onto
     // multiple bordered visual lines, and honor a hard line break inside a
     // styled run. Assert the wrap/newline geometry survives with intact borders.
     let frame = capture_bt(
@@ -1029,9 +1088,8 @@ fn level2_prose_cells_in_tmux() {
         frame.plain,
     );
 
-    // tmux carries no OSC8 protocol, but the link label and the cell box geometry
-    // must still relay faithfully (the OSC8 destination is asserted on the
-    // styling terminals above).
+    // The link label and the cell box geometry relay faithfully (the OSC8
+    // destination and extent are asserted on the GUI terminals above).
     let frame = capture_bt(
         harness,
         "bt table --columns \"Link\" --prose-row '<a href=\"https://example.com\">go</a>'",
@@ -1041,6 +1099,10 @@ fn level2_prose_cells_in_tmux() {
     // Typed-column alignment is geometry, not styling, so tmux must reproduce it:
     // the Prose cell at the left edge and the numeric cells at the right edge.
     assert_mixed_row_alignment(harness, false);
+
+    // `capture-pane -e` re-serializes each cell's SGR, so inline-code styling
+    // and its containment are checked here as on the GUI terminals.
+    assert_prose_cell_inline_code(harness);
 }
 
 /// L1 unit coverage for the [`assert_bold_contained`] SGR-state reconstruction.

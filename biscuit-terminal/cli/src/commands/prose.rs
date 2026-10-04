@@ -7,6 +7,17 @@ use biscuit_terminal::utils::layout::{Length, TargetValue, WordWrap};
 use clap::Args as ClapArgs;
 use renderable::browser::BrowserRenderable;
 use renderable::markdown::MarkdownRenderable;
+use renderable::tree::{RenderNode, TreeRenderable};
+
+/// Fail on a tree that does not validate.
+///
+/// Every target renders the same tree, and each degrades an invalid one
+/// differently (an in-band error string in HTML, empty Markdown), so the
+/// command would otherwise exit 0 without printing the content.
+fn ensure_renderable(tree: &RenderNode) -> color_eyre::Result<()> {
+    renderable::tree::ensure_valid(tree)
+        .map_err(|error| color_eyre::eyre::eyre!("prose content cannot be rendered: {error}"))
+}
 
 const PROSE_EXAMPLE: &str = "<b>Deploy status:</b> <green>healthy</green> after _3 checks_";
 const PROSE_EXAMPLE_CMD: &str =
@@ -97,6 +108,8 @@ impl Run for ProseArgs {
             prose.layout_mut().margin.bottom = TargetValue::universal(Length::ch(bottom));
         }
 
+        ensure_renderable(&prose.render_tree())?;
+
         // Cross-target output: HTML fragment or portable Markdown. Terminal
         // capability detection does not apply to these targets. `Prose`
         // renders its own layout as CSS (alignment aside, see
@@ -134,7 +147,7 @@ impl Run for ProseArgs {
         } else {
             terminal_for_render(false)
         };
-        let output = prose.render(&term);
+        let output = prose.render(&colorless_when_no_color(term));
 
         let output = if std::env::var("NO_COLOR").is_ok() {
             strip_sgr_sequences(&output)
@@ -159,5 +172,30 @@ impl Run for ProseArgs {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ensure_renderable_rejects_an_invalid_tree() {
+        let code_in_link = RenderNode::root(vec![RenderNode::paragraph(vec![RenderNode::link(
+            "https://e.io",
+            None,
+            vec![RenderNode::code(None, None, "x")],
+        )])]);
+
+        let error = ensure_renderable(&code_in_link).expect_err("a block inside a link is invalid");
+
+        assert!(error.to_string().contains("failed validation"), "{error}");
+    }
+
+    #[test]
+    fn ensure_renderable_accepts_a_valid_tree() {
+        let tree = RenderNode::root(vec![RenderNode::paragraph(vec![RenderNode::text("a")])]);
+
+        assert!(ensure_renderable(&tree).is_ok());
     }
 }

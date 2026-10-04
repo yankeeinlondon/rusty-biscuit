@@ -1622,6 +1622,33 @@ fn test_prose_empty_errors_to_stderr() {
     );
 }
 
+/// A Markdown link around an explicit code block renders linked paragraphs
+/// around the code block on every target, and exits 0.
+#[test]
+fn test_prose_link_around_explicit_code_renders_on_every_target() {
+    let bt = |flag: &str| {
+        let output = assert_cmd::Command::cargo_bin("bt").unwrap()
+            .args(["prose", "[a<code-block>x</code-block>b](https://e.io)", flag])
+            .output()
+            .expect("Failed to execute command");
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        assert!(output.status.success(), "bt prose {flag} should succeed, stderr: {stderr}");
+        assert!(!stderr.contains("validation"), "{flag}: {stderr}");
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    };
+
+    let html = bt("--html");
+    assert!(
+        html.contains(
+            "<p><a href=\"https://e.io\">a</a></p><pre><code>x</code></pre><p><a href=\"https://e.io\">b</a></p>"
+        ),
+        "{html}"
+    );
+    assert_eq!(bt("--md").trim_end(), "[a](https://e.io)\n\n```\nx\n```\n\n[b](https://e.io)");
+    let terminal = bt("--no-wrap");
+    assert!(terminal.contains('a') && terminal.contains('x') && terminal.contains('b'), "{terminal:?}");
+}
+
 /// Verifies that `bt prose --force-color` emits SGR sequences to a
 /// non-TTY pipe.
 ///
@@ -4498,4 +4525,41 @@ fn test_columns_example_with_html_succeeds() {
         "HTML example contains flex container: {stdout:?}"
     );
     assert!(stdout.contains("bt columns"), "command trailer: {stdout:?}");
+}
+
+/// `NO_COLOR` wins over forced color for `bt prose` and `bt compose`, and the
+/// output must then be the unstyled form: inline code keeps its backtick fence.
+/// Stripping the SGR from a styled render instead left the code unmarked.
+#[test]
+fn test_no_color_keeps_the_inline_code_fence_when_color_is_forced() {
+    let cases: [&[&str]; 4] = [
+        &["prose", "See `md hash` here"],
+        &["prose", "--force-color", "See `md hash` here"],
+        &["prose", "--force-color", "<red>See `md hash` here</red>"],
+        &["compose", "--prose", "See `md hash` here"],
+    ];
+    for args in cases {
+        let output = assert_cmd::Command::cargo_bin("bt")
+            .unwrap()
+            .env("NO_COLOR", "1")
+            .env("FORCE_COLOR", "1")
+            .env_remove("CLICOLOR_FORCE")
+            .args(args)
+            .output()
+            .expect("Failed to execute command");
+        assert!(output.status.success(), "{args:?}");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(stdout.trim_end(), "See `md hash` here", "{args:?}");
+    }
+
+    // Control: forced color without NO_COLOR marks the code by dimming it.
+    let output = assert_cmd::Command::cargo_bin("bt")
+        .unwrap()
+        .env_remove("NO_COLOR")
+        .env("FORCE_COLOR", "1")
+        .args(["prose", "See `md hash` here"])
+        .output()
+        .expect("Failed to execute command");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim_end(), "See \x1b[2mmd hash\x1b[0m here");
 }
