@@ -1366,6 +1366,37 @@ fn legend_entries_appear_only_for_markers_in_the_table() {
     );
 }
 
+/// Git reads a checkout through a link that replaced it and does not mark it
+/// `prunable`; the row is `✕`, and nothing claims Git can't read it.
+#[test]
+fn a_readable_replacement_link_is_unavailable_without_claiming_git_cant_read_it() {
+    let replaced = || {
+        let mut row = unavailable("feat-link", Some("feat/link"), Availability::Other(OtherCondition::Link), "");
+        row.entry.prunable = None;
+        row
+    };
+    let base = || status("repo", Some("main"), true, true, DirtyStatus::Clean);
+    let legend_line = |statuses: Vec<WorktreeStatus>| {
+        let rendered = Unavailable::with(statuses).table();
+        rendered.lines().find(|line| line.trim_start().starts_with('✕')).map(|line| line.trim().to_string())
+    };
+
+    let table = Unavailable::with(vec![base(), replaced()]).table();
+    assert!(table.lines().any(|line| line.contains("✕ feat-link")), "{table}");
+    assert_eq!(legend_line(vec![base(), replaced()]).as_deref(), Some("✕ its path is a link"));
+    assert_eq!(
+        legend_line(vec![base(), replaced(), unavailable("gone", Some("gone"), Availability::Missing, GIT_REASON)]).as_deref(),
+        Some("✕ git can't read this worktree, or its path is a link")
+    );
+    let note = note_for(replaced(), vec![]);
+    let words = note.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        words.contains("feat-link: /code/wts/feat-link is a link, which may have replaced the original checkout."),
+        "{words}"
+    );
+    assert!(!words.contains("Git can't read"), "{words}");
+}
+
 #[test]
 fn a_narrow_table_is_as_wide_as_its_widest_legend_line() {
     let example = Unavailable::with(vec![
@@ -1519,6 +1550,56 @@ fn notes_never_suggest_a_name_that_selects_another_worktree() {
     assert!(note.contains("wt remove lone"), "{note}");
 }
 
+/// Paths and commands in the notes are copied by users, so a narrow wrap
+/// never breaks them: one that fits moves to the next line whole, and one
+/// longer than a line gets a line of its own for the terminal to soft-wrap,
+/// never a forced break with an inserted `-`.
+#[test]
+fn notes_keep_paths_and_commands_whole_at_a_narrow_width() {
+    let width = 60;
+    let long_dir = format!("/private/var/folders/xy/{}/T/.tmpAbCdEf", "q".repeat(40));
+    let long = |name: &str| format!("{long_dir}/{name}");
+    let mut base = status("repo", Some("main"), true, true, DirtyStatus::Clean);
+    base.entry.path = PathBuf::from(long("main-repo"));
+    let mut link = at(&long("wt-moved"), Some("moved"), Availability::Other(OtherCondition::Link), "");
+    link.entry.prunable = None;
+    let short = at("/code/wts/feat-short-name", None, Availability::Unlinked, GIT_REASON);
+    let rows = vec![
+        base,
+        at(&long("wt-unlinked"), Some("unlinked"), Availability::Unlinked, GIT_REASON),
+        link,
+        short,
+        at("/code/wts/wt-gone", Some("feature/a-rather-long-branch-name"), Availability::Missing, GIT_REASON),
+    ];
+    let example = Unavailable::with(rows);
+    let facts = TableFacts {
+        ff_notice: Some(FfNotice::UnavailableHolder(PathBuf::from(long("holder-checkout")))),
+        ..example.facts()
+    };
+
+    let notes = list_table::render_notes(&facts, &terminal_at(width, false)).expect("notes");
+
+    for copyable in [
+        long("wt-moved"),
+        long("holder-checkout"),
+        format!("git -C {} worktree repair {}", long("main-repo"), long("wt-unlinked")),
+        format!("git -C {} worktree repair /code/wts/feat-short-name", long("main-repo")),
+        "wt remove feature/a-rather-long-branch-name".to_string(),
+    ] {
+        assert!(notes.contains(&copyable), "{copyable:?} whole in:\n{notes}");
+    }
+    for line in notes.lines() {
+        let fits = line.chars().count() <= width as usize;
+        assert!(fits || line.contains(&long_dir), "only a line holding an overlong run is wider: {line:?}\n{notes}");
+    }
+    // The wrap only moved text to new lines: nothing, such as an inserted
+    // `-`, was added to it.
+    let unwrapped = list_table::render_notes(&facts, &terminal_at(1000, false)).expect("notes");
+    let squeezed = |text: &str| text.split_whitespace().collect::<String>();
+    assert_eq!(squeezed(&notes), squeezed(&unwrapped), "{notes}");
+    assert!(!notes.chars().any(|ch| ('\u{FDD0}'..='\u{FDD4}').contains(&ch)), "no stand-in survives: {notes:?}");
+}
+
 #[test]
 fn names_paths_and_reasons_never_become_markup() {
     let hostile = "<red>boom</red>";
@@ -1531,6 +1612,148 @@ fn names_paths_and_reasons_never_become_markup() {
     assert!(!notes.contains("\u{1b}[31mboom"), "never styled red: {notes:?}");
     let table = list_table::render(&example.facts(), &color_terminal(), NOW);
     assert!(table.contains(hostile), "{table:?}");
+}
+
+/// One external field projected into the closing notes, and the literal
+/// text the notes must show for it.
+struct Projection {
+    name: &'static str,
+    example: Unavailable,
+    default_branch: String,
+    ff_notice: Option<FfNotice>,
+    fallback_notice: Option<Vec<String>>,
+    shown: Vec<String>,
+}
+
+fn projections(long_dir: &str, odd: &str) -> Vec<Projection> {
+    let base = || status("repo", Some("main"), true, true, DirtyStatus::Clean);
+    let detached = |path: String, availability: Availability, reason: &str| at(&path, None, availability, reason);
+    let projection = |name, rows: Vec<WorktreeStatus>, shown: Vec<String>| Projection {
+        name,
+        example: Unavailable::with([vec![base()], rows].concat()),
+        default_branch: "main".to_string(),
+        ff_notice: None,
+        fallback_notice: None,
+        shown,
+    };
+    let mut unlinked_base = base();
+    unlinked_base.entry.path = PathBuf::from(format!("{long_dir}/base{odd}"));
+    let mut link = detached(format!("{long_dir}/link{odd}"), Availability::Other(OtherCondition::Link), "");
+    link.entry.prunable = None;
+    let mut competing = status("dup", Some("feat/dup"), false, false, DirtyStatus::Clean);
+    competing.entry.path = PathBuf::from(format!("{long_dir}/b{odd}/dup"));
+    let other = |condition: OtherCondition, reason: &str| {
+        vec![detached("/code/wts/x".to_string(), Availability::Other(condition), reason)]
+    };
+    let ff = |name, default_branch: String, notice: Option<FfNotice>, keys: Option<Vec<String>>, shown| Projection {
+        default_branch,
+        ff_notice: notice,
+        fallback_notice: keys,
+        ..projection(name, vec![], shown)
+    };
+    vec![
+        projection(
+            "missing-entry removal command and worktree label",
+            vec![detached(format!("/code/wts/target{odd}"), Availability::Missing, GIT_REASON)],
+            vec![format!("- target{odd}:"), format!("wt remove 'target{odd}'")],
+        ),
+        Projection {
+            example: Unavailable::with(vec![
+                unlinked_base,
+                detached(format!("{long_dir}/unlinked{odd}"), Availability::Unlinked, GIT_REASON),
+            ]),
+            ..projection(
+                "unlinked repair command target and base paths",
+                vec![],
+                vec![format!("git -C '{long_dir}/base{odd}' worktree repair '{long_dir}/unlinked{odd}'")],
+            )
+        },
+        projection("other-unavailable observed path", vec![link], vec![format!("{long_dir}/link{odd}")]),
+        projection(
+            "name-conflict competing path",
+            vec![competing, at("/code/a/dup", None, Availability::Missing, GIT_REASON)],
+            vec![format!("{long_dir}/b{odd}/dup")],
+        ),
+        ff(
+            "fast-forward refusal holder path",
+            "main".to_string(),
+            Some(FfNotice::UnavailableHolder(PathBuf::from(format!("{long_dir}/holder{odd}")))),
+            None,
+            vec![format!("{long_dir}/holder{odd}")],
+        ),
+        projection(
+            "Git reason",
+            other(OtherCondition::GitEntryPresent, &format!("gone{odd}")),
+            vec![format!("reports: gone{odd}")],
+        ),
+        projection(
+            "path inspection error",
+            other(OtherCondition::PathUninspectable(format!("denied{odd}")), GIT_REASON),
+            vec![format!("(denied{odd})")],
+        ),
+        projection(
+            ".git inspection error",
+            other(OtherCondition::GitEntryUninspectable(format!("denied{odd}")), GIT_REASON),
+            vec![format!("(denied{odd})")],
+        ),
+        ff(
+            "default-branch note",
+            format!("main{odd}"),
+            Some(FfNotice::Diverged),
+            None,
+            vec![format!("main{odd}"), format!("origin/main{odd},")],
+        ),
+        ff(
+            "missing-ref note",
+            "main".to_string(),
+            Some(FfNotice::Missing(format!("origin/main{odd}"))),
+            None,
+            vec![format!("fast-forwarded: origin/main{odd}")],
+        ),
+        ff(
+            "fallback-key note",
+            "main".to_string(),
+            None,
+            Some(vec![format!("GITHUB_TOKEN{odd}"), format!("GH{odd}")]),
+            vec![format!("GITHUB_TOKEN{odd}"), format!("GH{odd}")],
+        ),
+    ]
+}
+
+/// Every external field the closing notes show, holding ordinary markup or
+/// that markup behind any of U+FDD0..U+FDD4 (characters an earlier renderer
+/// used as its own delimiters), renders literally at a wide and a narrow
+/// width: markup is never styled, and copyable paths and commands are never
+/// broken.
+#[test]
+fn every_external_field_in_the_notes_is_shown_literally() {
+    let long_dir = format!("/private/var/folders/xy/{}/T", "q".repeat(40));
+    for injected in ["", "\u{FDD0}", "\u{FDD1}", "\u{FDD2}", "\u{FDD3}", "\u{FDD4}"] {
+        let odd = format!("{injected}<red>INJECTED");
+        for width in [400, 60] {
+            for case in projections(&long_dir, &odd) {
+                let facts = TableFacts {
+                    default_branch: &case.default_branch,
+                    ff_notice: case.ff_notice.clone(),
+                    fallback_notice: case.fallback_notice.clone(),
+                    ..case.example.facts()
+                };
+                let colored = list_table::render_notes(&facts, &terminal_at(width, true)).expect("notes");
+                let notes = biscuit_test_harness::strip_ansi(&colored);
+                let context = format!("{} with {injected:?} at {width} columns:\n{notes}", case.name);
+                for shown in &case.shown {
+                    assert!(notes.contains(shown.as_str()), "{shown:?} whole in {context}");
+                }
+                if injected.is_empty() {
+                    assert!(!notes.chars().any(|ch| ('\u{FDD0}'..='\u{FDD4}').contains(&ch)), "{context}");
+                }
+                for line in notes.lines() {
+                    let fits = line.chars().count() <= width as usize;
+                    assert!(fits || line.contains(&long_dir), "only an overlong run is wider: {line:?} in {context}");
+                }
+            }
+        }
+    }
 }
 
 #[test]

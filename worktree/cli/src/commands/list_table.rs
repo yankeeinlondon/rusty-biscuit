@@ -259,58 +259,65 @@ impl TableFacts<'_> {
 ///
 /// `now` is Unix seconds, for the PR age.
 pub fn render_status(facts: &TableFacts<'_>, terminal: &Terminal, now: u64) -> Option<String> {
-    let lines: Vec<String> = facts
+    let lines: Vec<Note> = facts
         .pr_outcome
         .and_then(|outcome| pr_status_markup(outcome, facts.prs, now))
         .into_iter()
         .chain(facts.timed_out.then(|| format!("<dim>{REFRESH_HINT}</dim>")))
+        .map(Note::from)
         .collect();
-    (!lines.is_empty()).then(|| notes_list(lines, terminal))
+    (!lines.is_empty()).then(|| notes_list(&lines, terminal))
 }
 
 /// The closing notes: the `--ff` result or the §9 suggestion, then the §8
-/// notice, then one note per worktree Git can't read, in table row order;
+/// notice, then one note per unavailable worktree, in table row order;
 /// `None` when there is nothing to say.
 pub fn render_notes(facts: &TableFacts<'_>, terminal: &Terminal) -> Option<String> {
     let local = Prose::escape_text(facts.default_branch);
     let tracking = Prose::escape_text(&format!("origin/{}", facts.default_branch));
-    let mut lines = Vec::new();
+    let mut lines: Vec<Note> = Vec::new();
     if let Some(notice) = &facts.ff_notice {
         lines.push(match notice {
             FfNotice::DirtyCheckout => format!(
                 "{local} wasn't fast-forwarded: the checkout has uncommitted changes to files the update touches."
-            ),
-            FfNotice::Diverged => format!("{local} has diverged from {tracking}, so it can't be fast-forwarded."),
+            )
+            .into(),
+            FfNotice::Diverged => format!("{local} has diverged from {tracking}, so it can't be fast-forwarded.").into(),
             FfNotice::Missing(reference) => {
-                format!("{local} wasn't fast-forwarded: {} doesn't exist.", Prose::escape_text(reference))
+                format!("{local} wasn't fast-forwarded: {} doesn't exist.", Prose::escape_text(reference)).into()
             }
-            FfNotice::Changed => {
-                format!("{local} wasn't fast-forwarded: it changed while wt was updating it.")
-            }
-            FfNotice::UnavailableHolder(path) => format!(
-                "{local} wasn't fast-forwarded: Git can't read the worktree that has it checked out, {}.",
-                Prose::escape_text(&path.to_string_lossy())
-            ),
-            FfNotice::Failed => format!("{local} wasn't fast-forwarded: Git couldn't complete the update."),
+            FfNotice::Changed => format!("{local} wasn't fast-forwarded: it changed while wt was updating it.").into(),
+            FfNotice::UnavailableHolder(path) => Note::from(format!(
+                "{local} wasn't fast-forwarded: Git can't read the worktree that has it checked out, "
+            ))
+            .copyable(path.to_string_lossy())
+            .markup("."),
+            FfNotice::Failed => format!("{local} wasn't fast-forwarded: Git couldn't complete the update.").into(),
         });
     }
     if let Some(suggestion) = &facts.ff_suggestion {
-        lines.push(format!(
-            "{local} is {} behind {tracking}; run {} to fast-forward it.",
-            commits(suggestion.behind),
-            command_badge("wt --ff")
-        ));
+        lines.push(
+            format!(
+                "{local} is {} behind {tracking}; run {} to fast-forward it.",
+                commits(suggestion.behind),
+                command_badge("wt --ff")
+            )
+            .into(),
+        );
     }
     if let Some(keys) = &facts.fallback_notice {
-        lines.push("Git checked origin using `ls-remote`; this can take longer than the provider API.".to_string());
-        lines.push(format!(
-            "Set {} to let wt try the provider API, or use {} to use Git directly for this repository.",
-            Prose::escape_text(&keys.join(" or ")),
-            command_badge("--ignore-api")
-        ));
+        lines.push("Git checked origin using `ls-remote`; this can take longer than the provider API.".into());
+        lines.push(
+            format!(
+                "Set {} to let wt try the provider API, or use {} to use Git directly for this repository.",
+                Prose::escape_text(&keys.join(" or ")),
+                command_badge("--ignore-api")
+            )
+            .into(),
+        );
     }
     lines.extend(facts.row_statuses().into_iter().filter_map(|status| unavailable_note(status, facts.statuses)));
-    (!lines.is_empty()).then(|| notes_list(lines, terminal))
+    (!lines.is_empty()).then(|| notes_list(&lines, terminal))
 }
 
 /// The sections of one listing, in the order [`assemble`] prints them.
@@ -340,17 +347,154 @@ pub fn assemble(sections: Sections<'_>) -> String {
     out
 }
 
-fn notes_list(lines: impl IntoIterator<Item = String>, terminal: &Terminal) -> String {
+/// Renders `notes` as the bulleted list both note sections use. A note's
+/// [`Note::copyable`] text is never broken by the wrap: it moves to the next
+/// line whole, and a run too long for any line gets a line of its own that
+/// the terminal soft-wraps. Prose would otherwise break it at whitespace or a
+/// `-`, or force-break it with an inserted `-`, and a copied path or command
+/// would no longer be the one `wt` means.
+fn notes_list(notes: &[Note], terminal: &Terminal) -> String {
+    // A continuation line holds the terminal's width less the bullet and the
+    // hanging indent (two columns each). The wrap breaks only at a space it
+    // finds within the line, so a run must leave room for the one after it
+    // and for a glued punctuation mark: then it fits on any line of a note.
+    let line_width = terminal.width().saturating_sub(6).max(1) as usize;
+    let mut originals = Vec::new();
     let mut list = UnorderedList::empty();
-    for line in lines {
-        list.add(Prose::new(line));
+    for note in notes {
+        list.add(Prose::new(note.wrap_markup(line_width, &mut originals)));
     }
-    let rendered = list.render(terminal);
+    let rendered = restore_kept(&list.render(terminal), &originals).unwrap_or_else(|| {
+        // Unreachable while Prose keeps every non-whitespace character in
+        // order; correct text matters more than an unbroken command.
+        debug_assert!(false, "Prose changed the number of {KEEP:?} stand-ins");
+        let mut list = UnorderedList::empty();
+        for note in notes {
+            list.add(Prose::new(note.to_markup()));
+        }
+        list.render(terminal)
+    });
     let mut out = String::new();
     for line in rendered.trim_end().lines() {
         out.push_str(&format!(" {line}\n"));
     }
     out
+}
+
+/// What [`notes_list`] puts in a note's markup where the wrap must not
+/// break or measure the real text: a character that is neither whitespace
+/// nor `-`. Text may genuinely contain it, so every occurrence, inserted or
+/// genuine, is restored by position (see [`restore_kept`]).
+const KEEP: char = '\u{FDD0}';
+
+/// `rendered` with its `n`th [`KEEP`] replaced by `originals[n]`; `None`
+/// when the counts differ.
+fn restore_kept(rendered: &str, originals: &[String]) -> Option<String> {
+    let mut originals = originals.iter();
+    let mut out = String::with_capacity(rendered.len());
+    for ch in rendered.chars() {
+        if ch == KEEP {
+            out.push_str(originals.next()?);
+        } else {
+            out.push(ch);
+        }
+    }
+    originals.next().is_none().then_some(out)
+}
+
+/// One closing note or status item. External text (names, paths, reasons,
+/// commands) is held as data, never spliced into markup unescaped, so none
+/// of it can become a style or a wrap instruction.
+#[derive(Debug, Clone, Default)]
+struct Note(Vec<Segment>);
+
+#[derive(Debug, Clone)]
+enum Segment {
+    /// Prose markup: fixed wording, or external text already passed through
+    /// [`Prose::escape_text`].
+    Markup(String),
+    /// Raw text the user may copy, a path or a command, shown literally.
+    Copyable(String),
+}
+
+impl From<String> for Note {
+    fn from(markup: String) -> Self {
+        Note(vec![Segment::Markup(markup)])
+    }
+}
+
+impl From<&str> for Note {
+    fn from(markup: &str) -> Self {
+        markup.to_string().into()
+    }
+}
+
+impl Note {
+    fn markup(mut self, markup: impl Into<String>) -> Self {
+        self.0.push(Segment::Markup(markup.into()));
+        self
+    }
+
+    fn copyable(mut self, text: impl Into<String>) -> Self {
+        self.0.push(Segment::Copyable(text.into()));
+        self
+    }
+
+    fn then(mut self, other: Note) -> Self {
+        self.0.extend(other.0);
+        self
+    }
+
+    /// Prose markup showing every segment literally, with nothing kept
+    /// whole; for renderers other than [`notes_list`].
+    fn to_markup(&self) -> String {
+        self.0
+            .iter()
+            .map(|segment| match segment {
+                Segment::Markup(markup) => markup.clone(),
+                Segment::Copyable(text) => Prose::escape_text(text),
+            })
+            .collect()
+    }
+
+    /// Prose markup for [`notes_list`]: each copyable run that fits in
+    /// `line_width` columns has its whitespace and `-` (where the wrap
+    /// breaks) replaced by [`KEEP`]; a longer run becomes a whole line of
+    /// [`KEEP`] standing for the run then for nothing. Every [`KEEP`] in the
+    /// result, genuine ones included, has its original pushed to `originals`
+    /// in order.
+    fn wrap_markup(&self, line_width: usize, originals: &mut Vec<String>) -> String {
+        let mut out = String::new();
+        let mut keep = |out: &mut String, original: String| {
+            out.push(KEEP);
+            originals.push(original);
+        };
+        for segment in &self.0 {
+            match segment {
+                Segment::Markup(markup) => {
+                    for ch in markup.chars() {
+                        if ch == KEEP { keep(&mut out, ch.to_string()) } else { out.push(ch) }
+                    }
+                }
+                Segment::Copyable(text) if visible_width(text) as usize <= line_width => {
+                    for ch in Prose::escape_text(text).chars() {
+                        if ch.is_whitespace() || ch == '-' || ch == KEEP {
+                            keep(&mut out, ch.to_string());
+                        } else {
+                            out.push(ch);
+                        }
+                    }
+                }
+                Segment::Copyable(text) => {
+                    keep(&mut out, text.clone());
+                    for _ in 1..line_width {
+                        keep(&mut out, String::new());
+                    }
+                }
+            }
+        }
+        out
+    }
 }
 
 fn commits(n: usize) -> String {
@@ -500,7 +644,8 @@ pub fn age_text(seconds: u64) -> String {
 /// The legend lines: the Worktree column's glyphs, then the Branch column's.
 /// The `conflicts` sample sits in the column of the source-files dot above
 /// it. `✕` and `?` are explained only when a row of `facts` shows them, on a
-/// second Worktree line so the legend does not widen the table.
+/// second Worktree line so the legend does not widen the table; `✕` is
+/// worded for the rows that show it (see [`Availability::Other`]).
 pub fn legend_markup(facts: &TableFacts<'_>) -> Vec<String> {
     let rows = facts.row_statuses();
     let mut lines = vec![format!(
@@ -510,8 +655,19 @@ pub fn legend_markup(facts: &TableFacts<'_>) -> Vec<String> {
         dirty_dot(DirtyStatus::DirtySource),
     )];
     let mut unreadable = Vec::new();
-    if rows.iter().any(|status| status.availability.is_unavailable()) {
-        unreadable.push(format!("{UNAVAILABLE_MARK} <dim>git can't read this worktree</dim>"));
+    // Git does not mark a checkout it reads through a replacement link, so
+    // such a row gets its own wording rather than a claim Git can't read it.
+    let unavailable = |marked: bool| {
+        rows.iter().any(|status| status.availability.is_unavailable() && status.entry.prunable.is_some() == marked)
+    };
+    let meaning = match (unavailable(true), unavailable(false)) {
+        (true, false) => Some("git can't read this worktree"),
+        (false, true) => Some("its path is a link"),
+        (true, true) => Some("git can't read this worktree, or its path is a link"),
+        (false, false) => None,
+    };
+    if let Some(meaning) = meaning {
+        unreadable.push(format!("{UNAVAILABLE_MARK} <dim>{meaning}</dim>"));
     }
     if rows.iter().any(|status| !status.availability.is_unavailable() && status.dirty == DirtyStatus::Unknown) {
         unreadable.push(format!("{} <dim>couldn't check</dim>", dirty_dot(DirtyStatus::Unknown)));
@@ -807,11 +963,11 @@ fn connector_markup(glyph: &str, state: Option<MergeState>, parent_deleted: bool
     }
 }
 
-/// The Worktree column's glyph for a checkout Git can't read.
+/// The Worktree column's glyph for an unavailable checkout.
 const UNAVAILABLE_MARK: &str = "<red>✕</red>";
 
-/// A row's Worktree glyph: [`UNAVAILABLE_MARK`] when Git can't read the
-/// checkout, whatever its dirtiness, otherwise [`dirty_dot`].
+/// A row's Worktree glyph: [`UNAVAILABLE_MARK`] when the checkout is
+/// unavailable, whatever its dirtiness, otherwise [`dirty_dot`].
 fn worktree_marker(status: &WorktreeStatus) -> &'static str {
     if status.availability.is_unavailable() { UNAVAILABLE_MARK } else { dirty_dot(status.dirty) }
 }
@@ -826,63 +982,83 @@ fn dirty_dot(dirty: DirtyStatus) -> &'static str {
     }
 }
 
-/// The dim note for a row Git can't read, `None` for an available one.
+/// The dim note for an unavailable row, `None` for an available one.
 /// `statuses` is every listed worktree, for name resolution and the base
 /// checkout's path. Commands are shown only when [`shell_word`] can spell
 /// every argument; they are display text, never run.
-fn unavailable_note(status: &WorktreeStatus, statuses: &[WorktreeStatus]) -> Option<String> {
+fn unavailable_note(status: &WorktreeStatus, statuses: &[WorktreeStatus]) -> Option<Note> {
     let entry = &status.entry;
     let label = Prose::escape_text(&display_name(entry));
-    let path = Prose::escape_text(&entry.path.to_string_lossy());
+    let path = || Note::default().copyable(entry.path.to_string_lossy());
     // Without a name that selects the row, the command is named but not
     // spelled out, and a closing sentence says why.
     let (remove, unnamed) = match remove_argument(entry, statuses) {
-        Ok(argument) => (command_badge(&format!("wt remove {argument}")), String::new()),
-        Err(reasons) => (
-            "wt remove".to_string(),
-            format!(" No name selects it for wt remove: {}.", Prose::escape_text(&reasons.join("; "))),
-        ),
+        Ok(argument) => (copyable_badge(format!("wt remove {argument}")), Note::default()),
+        Err(reasons) => {
+            let mut unnamed = Note::from(" No name selects it for wt remove: ");
+            for (index, reason) in reasons.into_iter().enumerate() {
+                unnamed = if index == 0 { unnamed } else { unnamed.markup("; ") }.then(reason);
+            }
+            (Note::from("wt remove"), unnamed.markup("."))
+        }
     };
     let text = match &status.availability {
         Availability::Healthy => return None,
-        Availability::Missing => {
-            format!("{label}: its directory is gone; {remove} checks whether its remaining Git record can be removed safely.{unnamed}")
-        }
+        Availability::Missing => Note::from(format!("{label}: its directory is gone; "))
+            .then(remove)
+            .markup(" checks whether its remaining Git record can be removed safely.")
+            .then(unnamed),
         Availability::Unlinked => {
             let base = statuses.iter().find(|status| status.entry.is_main).map(|status| &status.entry.path);
             let repair = base
                 .and_then(|base| Some((shell_word(&base.to_string_lossy())?, shell_word(&entry.path.to_string_lossy())?)))
-                .map(|(base, target)| command_badge(&format!("git -C {base} worktree repair {target}")))
-                .unwrap_or_else(|| format!("git worktree repair from the base checkout, naming {path}"));
-            format!(
-                "{label}: its .git file is missing; {remove} attempts to restore the link before checking its files. To restore it without removing it, run {repair}.{unnamed}"
-            )
+                .map(|(base, target)| copyable_badge(format!("git -C {base} worktree repair {target}")))
+                .unwrap_or_else(|| Note::from("git worktree repair from the base checkout, naming ").then(path()));
+            Note::from(format!("{label}: its .git file is missing; "))
+                .then(remove)
+                .markup(" attempts to restore the link before checking its files. To restore it without removing it, run ")
+                .then(repair)
+                .markup(".")
+                .then(unnamed)
         }
         Availability::Other(condition) => {
-            format!("{label}: Git can't read this worktree: {}.", observed_condition(entry, condition))
+            Note::from(format!("{label}: ")).then(reason_note(entry, condition, path())).markup(".")
         }
     };
-    Some(format!("<dim>{text}</dim>"))
+    Some(Note::from("<dim>").then(text).markup("</dim>"))
 }
 
-/// Prose markup for what was observed at `entry`, a worktree Git can't read
-/// that is neither missing nor unlinked, followed by Git's `prunable` reason
-/// when it gave one. Paths, errors, and the reason are escaped.
-pub(crate) fn observed_condition(entry: &WorktreeEntry, condition: &OtherCondition) -> String {
-    let path = Prose::escape_text(&entry.path.to_string_lossy());
+/// Prose markup for why `entry`, in [`Availability::Other`], can't be used:
+/// what was observed, after "Git can't read this worktree" when Git marks it
+/// `prunable`. A link Git still reads through gets no such claim.
+pub(crate) fn unavailable_reason(entry: &WorktreeEntry, condition: &OtherCondition) -> String {
+    reason_note(entry, condition, Note::default().copyable(entry.path.to_string_lossy())).to_markup()
+}
+
+/// [`unavailable_reason`] as a [`Note`], with `path` showing the entry's
+/// path.
+fn reason_note(entry: &WorktreeEntry, condition: &OtherCondition, path: Note) -> Note {
+    let observed = observed_condition(entry, condition, path);
+    if entry.prunable.is_some() { Note::from("Git can't read this worktree: ").then(observed) } else { observed }
+}
+
+/// What was observed at `entry`, a worktree that is neither healthy,
+/// missing, nor unlinked, followed by Git's `prunable` reason when it gave
+/// one. `path` shows the entry's path; errors and the reason are escaped.
+fn observed_condition(entry: &WorktreeEntry, condition: &OtherCondition, path: Note) -> Note {
     let observed = match condition {
-        OtherCondition::NotADirectory => format!("{path} is not a directory"),
-        OtherCondition::Link => format!("{path} is a link, which may have replaced the original checkout"),
+        OtherCondition::NotADirectory => path.markup(" is not a directory"),
+        OtherCondition::Link => path.markup(" is a link, which may have replaced the original checkout"),
         OtherCondition::PathUninspectable(error) => {
-            format!("{path} couldn't be inspected ({})", Prose::escape_text(error))
+            path.markup(format!(" couldn't be inspected ({})", Prose::escape_text(error)))
         }
         OtherCondition::GitEntryUninspectable(error) => {
-            format!("its .git couldn't be inspected ({})", Prose::escape_text(error))
+            format!("its .git couldn't be inspected ({})", Prose::escape_text(error)).into()
         }
-        OtherCondition::GitEntryPresent => "its .git exists, but Git can't use it".to_string(),
+        OtherCondition::GitEntryPresent => "its .git exists, but Git can't use it".into(),
     };
     match entry.prunable.as_deref() {
-        Some(reason) if !reason.is_empty() => format!("{observed}; Git reports: {}", Prose::escape_text(reason)),
+        Some(reason) if !reason.is_empty() => observed.markup(format!("; Git reports: {}", Prose::escape_text(reason))),
         _ => observed,
     }
 }
@@ -898,30 +1074,32 @@ fn display_name(entry: &WorktreeEntry) -> String {
 /// The first of `entry`'s branch and directory basename that
 /// [`resolve_worktree`] resolves to exactly `entry` and that [`shell_word`]
 /// can spell, shell-ready; otherwise why each candidate can't be used.
-fn remove_argument(entry: &WorktreeEntry, statuses: &[WorktreeStatus]) -> Result<String, Vec<String>> {
+fn remove_argument(entry: &WorktreeEntry, statuses: &[WorktreeStatus]) -> Result<String, Vec<Note>> {
     let entries: Vec<WorktreeEntry> = statuses.iter().map(|status| status.entry.clone()).collect();
     let basename = entry.path.file_name().and_then(|name| name.to_str());
     let mut reasons = Vec::new();
     for candidate in [entry.branch.as_deref(), basename].into_iter().flatten() {
+        let name = Prose::escape_text(candidate);
         match resolve_worktree(&entries, candidate) {
             Ok(resolved) if resolved.path == entry.path => match shell_word(candidate) {
                 Some(word) => return Ok(word),
-                None => reasons.push(format!("{candidate} can't be typed the same way in every shell")),
+                None => reasons.push(format!("{name} can't be typed the same way in every shell").into()),
             },
-            Ok(resolved) => reasons.push(format!("{candidate} selects {}", resolved.path.display())),
-            Err(WorktreeError::AmbiguousWorktree { candidates, .. }) => {
-                let others: Vec<String> = candidates
-                    .iter()
-                    .filter(|other| other.path != entry.path)
-                    .map(|other| other.path.display().to_string())
-                    .collect();
-                reasons.push(format!("{candidate} also matches {}", others.join(", ")));
+            Ok(resolved) => {
+                reasons.push(Note::from(format!("{name} selects ")).copyable(resolved.path.to_string_lossy()))
             }
-            Err(_) => reasons.push(format!("{candidate} doesn't select it")),
+            Err(WorktreeError::AmbiguousWorktree { candidates, .. }) => {
+                let mut reason = Note::from(format!("{name} also matches "));
+                for (index, other) in candidates.iter().filter(|other| other.path != entry.path).enumerate() {
+                    reason = if index == 0 { reason } else { reason.markup(", ") }.copyable(other.path.to_string_lossy());
+                }
+                reasons.push(reason);
+            }
+            Err(_) => reasons.push(format!("{name} doesn't select it").into()),
         }
     }
     if reasons.is_empty() {
-        reasons.push("it has no branch or directory name".to_string());
+        reasons.push("it has no branch or directory name".into());
     }
     Err(reasons)
 }
@@ -953,6 +1131,11 @@ fn local_badge(name: &str) -> String {
 /// A command the user can type, in reverse video.
 fn command_badge(command: &str) -> String {
     format!("<inverse> {} </inverse>", Prose::escape_text(command))
+}
+
+/// [`command_badge`] whose command [`notes_list`] keeps whole.
+fn copyable_badge(command: String) -> Note {
+    Note::from("<inverse> ").copyable(command).markup(" </inverse>")
 }
 
 /// A remote-tracking branch badge.

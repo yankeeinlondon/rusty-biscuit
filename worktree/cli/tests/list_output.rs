@@ -283,3 +283,76 @@ fn worktrees_git_cannot_read_are_crossed_and_explained_without_repair() {
     assert!(fs::symlink_metadata(&missing).is_err(), "nothing was recreated");
     assert_eq!(porcelain(), records_before, "Git's records are unchanged");
 }
+
+/// A checkout moved away and replaced by a link to it: Git reads through the
+/// link and does not mark it `prunable`, yet the row is `✕` with a note, and
+/// listing changes nothing.
+#[test]
+fn a_checkout_replaced_by_a_readable_link_is_crossed() {
+    let repo = tempfile::tempdir().expect("create temp dir");
+    let main = repo.path().join("main");
+    fs::create_dir(&main).expect("create main repo dir");
+    init_repo(&main);
+    commit(&main, "file.txt", "1\n");
+    let target = repo.path().join("target");
+    let saved = repo.path().join("saved");
+    run_git(&main, &["worktree", "add", "-q", "-b", "topic", target.to_str().unwrap()]);
+    fs::rename(&target, &saved).expect("move checkout");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&saved, &target).expect("symlink");
+    #[cfg(windows)]
+    {
+        let status = Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&target)
+            .arg(&saved)
+            .stdout(std::process::Stdio::null())
+            .status()
+            .expect("cmd runs");
+        assert!(status.success(), "mklink /J needs no privilege");
+    }
+
+    let output = Home::new().wt(&main, &["list"]);
+
+    assert!(output.status.success(), "wt list should succeed: {output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let row = stderr.lines().find(|line| line.contains(" target ")).unwrap_or_else(|| panic!("{stderr}"));
+    assert_eq!(row.split('│').nth(1).unwrap().trim(), "✕ target", "{stderr}");
+    assert!(stderr.contains("✕ its path is a link"), "{stderr}");
+    let words: String = stderr.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(words.contains("is a link, which may have replaced the original checkout."), "{words}");
+    assert!(!words.contains("Git can't read"), "{words}");
+    assert!(saved.join("file.txt").is_file());
+}
+
+/// A missing worktree whose recorded path ends in a name holding a
+/// noncharacter and markup-like text: Git lists the path from its metadata,
+/// the branch is ambiguous with another worktree's directory, so the note
+/// suggests the basename, and it must be the exact recorded one, quoted, with
+/// the markup shown literally. The path only exists in Git's metadata; some
+/// filesystems (APFS) refuse the noncharacter in a real filename.
+#[test]
+fn a_missing_entry_named_with_delimiter_like_text_gets_its_exact_remove_command() {
+    let repo = tempfile::tempdir().expect("create temp dir");
+    let main = repo.path().join("main");
+    fs::create_dir(&main).expect("create main repo dir");
+    init_repo(&main);
+    commit(&main, "file.txt", "1\n");
+    let target = repo.path().join("target");
+    let topic_dir = repo.path().join("topic");
+    run_git(&main, &["worktree", "add", "-q", "-b", "topic", target.to_str().unwrap()]);
+    run_git(&main, &["worktree", "add", "-q", "-b", "other", topic_dir.to_str().unwrap()]);
+    fs::remove_dir_all(&target).expect("remove directory");
+    let name = "target\u{FDD1}<red>INJECTED";
+    let gitdir = main.join(".git").join("worktrees").join("target").join("gitdir");
+    let recorded = fs::read_to_string(&gitdir).expect("read gitdir");
+    let parent = recorded.trim_end().strip_suffix("target/.git").unwrap_or_else(|| panic!("{recorded:?}"));
+    fs::write(&gitdir, format!("{parent}{name}/.git\n")).expect("rewrite gitdir");
+
+    let output = Home::new().wt(&main, &["list"]);
+
+    assert!(output.status.success(), "wt list should succeed: {output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains(&format!("{name}: its directory is gone;")), "{stderr}");
+    assert!(stderr.contains(&format!("wt remove '{name}'")), "{stderr}");
+}

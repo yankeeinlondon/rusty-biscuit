@@ -3094,3 +3094,25 @@ fn the_observed_graph_keeps_recent_commits_on_every_lane_at_200x60() {
     let sniff_start = first_on_lane(&geometry, "fix/sniff");
     assert!(repo.w1().starts_with(sniff_start.parents[0].as_str()), "fix/sniff forks at W1: {sniff_start:?}\n{context}");
 }
+
+/// Commit messages, scopes, and ref names are Git data, so the verbose
+/// section shows them literally rather than as Prose markup.
+#[test]
+fn verbose_commit_lines_show_messages_and_refs_literally() {
+    use biscuit_terminal::components::renderable::TerminalRenderable as _;
+    let render = |message: &str, refs: &str| {
+        let commit = CommitDetail {
+            short_sha: "abc1234".to_string(),
+            message: message.to_string(),
+            timestamp: Local::now(),
+            refs: refs.to_string(),
+        };
+        biscuit_test_harness::strip_ansi(&Prose::new(format_commit(&commit)).render_optimistic(Some(400)))
+    };
+    let conventional = render("fix(<red>s</red>): a_b_c <red>d</red>", "HEAD -> feat/<b>x, tag: v_1_, origin/<i>y");
+    for literal in ["<red>s</red>", "a_b_c <red>d</red>", "feat/<b>x", "v_1_", "origin/<i>y"] {
+        assert!(conventional.contains(literal), "{literal:?} in {conventional:?}");
+    }
+    let plain = render("<red>plain</red> *message*", "");
+    assert!(plain.contains("<red>plain</red> *message*"), "{plain:?}");
+}

@@ -21,6 +21,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use biscuit_terminal::components::git_graph::{GitGraph, GraphLine, GraphPullRequest, LaneEntry};
+use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::terminal_image::ImageWidth;
 use chrono::{DateTime, Local, TimeZone, Timelike};
 use worktree::fork_origin::ForkOriginStore;
@@ -960,15 +961,17 @@ fn snapshot_labels(input: &GatherInput, sha: &str, live: &str) -> String {
 
 /// Format a commit in the same style as `sniff repo git-status`.
 pub fn format_commit(commit: &CommitDetail) -> String {
-    let sha_display = format!("<b>{}</b>", commit.short_sha);
+    let sha_display = format!("<b>{}</b>", Prose::escape_text(&commit.short_sha));
     let (date_str, time_str, use_on) = format_datetime(&commit.timestamp);
     let date_prefix = if use_on { "<i>on</i> " } else { "" };
     let refs_part = format_refs(&commit.refs);
 
     let cc = parse_conventional(&commit.message);
     if let Some((op, scope, desc)) = cc {
+        let op = Prose::escape_text(&op);
+        let desc = Prose::escape_text(&desc);
         let scope_part = scope
-            .map(|s| format!("(<dim>{s}</dim>)"))
+            .map(|s| format!("(<dim>{}</dim>)", Prose::escape_text(&s)))
             .unwrap_or_default();
         format!(
             "[{sha_display}] <b><yellow>{op}</yellow></b>{scope_part} <i>at</i> <blue><b>{time_str}</b></blue> {date_prefix}<blue>{date_str}</blue>{refs_part}: <dim>{desc}</dim>"
@@ -980,6 +983,7 @@ pub fn format_commit(commit: &CommitDetail) -> String {
         } else {
             first_line.to_string()
         };
+        let truncated = Prose::escape_text(&truncated);
         format!(
             "[{sha_display}] <dim>{truncated}</dim> {date_prefix}<blue><b>{time_str}</b></blue> <blue>{date_str}</blue>{refs_part}"
         )
@@ -1022,16 +1026,17 @@ fn format_refs(refs_raw: &str) -> String {
         .split(", ")
         .map(|r| {
             let r = r.trim();
+            let esc = Prose::escape_text;
             if r.contains("HEAD -> ") {
                 let branch = r.strip_prefix("HEAD -> ").unwrap_or(r);
-                format!("<cyan><b>HEAD -></b> {branch}</cyan>")
+                format!("<cyan><b>HEAD -></b> {}</cyan>", esc(branch))
             } else if r.starts_with("tag: ") {
                 let tag = r.strip_prefix("tag: ").unwrap_or(r);
-                format!("<yellow>{tag}</yellow>")
+                format!("<yellow>{}</yellow>", esc(tag))
             } else if r.contains('/') {
-                format!("<green>{r}</green>")
+                format!("<green>{}</green>", esc(r))
             } else {
-                format!("<cyan>{r}</cyan>")
+                format!("<cyan>{}</cyan>", esc(r))
             }
         })
         .collect();
