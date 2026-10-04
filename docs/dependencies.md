@@ -30,9 +30,14 @@
   `system-proxy` (`hyper-util/client-proxy-system`), which removed
   `system-configuration`, `system-configuration-sys`, `windows-registry`, and
   `core-foundation 0.9` from the graph. **`default-tls` is re-listed
-  deliberately** — it resolves to rustls under reqwest 0.13 and to native-tls
-  under 0.12 (`messenger/lib`), so dropping it would silently switch a TLS
-  backend. What `system-proxy` provided was narrow: a *manually* configured
+  deliberately** — it resolves to rustls (with `rustls-platform-verifier`, so
+  the OS trust store) under reqwest 0.13 and to native-tls under 0.12, so
+  dropping it would silently switch a TLS backend. `messenger/lib` moved to
+  0.13 on 2026-10-03, which took native-tls and OpenSSL out of the workspace
+  graph entirely; that is what lets `claudine-cli` build for Linux, musl
+  included, with no `libssl`. reqwest 0.12 remains only in
+  `biscuit-location`, `schematic-oauth` (pinned by `oauth2 5.0`), and
+  `chromiumoxide 0.7`, all on rustls. What `system-proxy` provided was narrow: a *manually* configured
   HTTP/HTTPS `host:port` from macOS System Settings or the Windows
   `Internet Settings` registry key. It never read PAC/auto-configuration, WPAD,
   SOCKS, Keychain credentials, or — on macOS only — the system bypass list, so

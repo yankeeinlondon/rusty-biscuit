@@ -64,6 +64,15 @@ First release set (decided 2026-10-03): `md` (`darkmatter-cli`) + `dmls`
   `biscuit-file`, `reaper`, `reaper-cli`, `model-citizen`,
   `model-citizen-cli`). Applied to every workspace member and the excluded
   `zed-dmls`; test fixtures and spikes are not crates we ship.
+- **Prebuilt binaries include native audio** (decided 2026-10-04).
+  `claudine` ships in R1 with `playa`'s `native-playback` and
+  `biscuit-speaks`, on macOS, Windows, and glibc Linux. On Linux that links
+  `libasound` (`alsa-sys` via `rodio` → `cpal`), the binary's only dynamic
+  system-library dependency now that OpenSSL is gone. The Linux installers
+  and docs state the `libasound2` requirement. There is no musl build of
+  `claudine`. Runtime discovery of TTS providers and host players is
+  unchanged; it starts only once the binary has loaded, which is why the
+  ALSA library itself must be present.
 - **release-plz keeps versioning, changelogs, and tags; dist owns the GitHub
   Release.** Set `git_release_enable = false` in `release-plz.toml`.
 
@@ -149,13 +158,20 @@ installers, and Homebrew, for the 8 CLIs.
   dist custom publish job (`./.github/workflows/publish-pypi.yml`,
   `workflow_call`). **Needs:** a pending trusted publisher registered on
   PyPI for each project name.
-- PyPI names are free for `darkmatter-cli`, `darkmatter-lsp`,
-  `git-wt-cli`, `sniff-detection-cli`, `claudine-cli`, `biscuit-file`, and
-  `biscuit-hash`. They are taken for `tree-hugger` and `claudine`, so
-  `tree-hugger-cli` needs checking and any taken name needs a prefix on PyPI
-  (open question 1).
+- **PyPI project name = the Cargo package name** (decided 2026-10-04),
+  falling back to a `biscuit-` prefix only where the Cargo name is taken on
+  PyPI. All eight are free as of 2026-10-04 (`darkmatter-cli`,
+  `darkmatter-lsp`, `git-wt-cli`, `sniff-detection-cli`, `tree-hugger-cli`,
+  `claudine-cli`, `biscuit-file-cli`, `biscuit-hash-cli`), so no prefix is
+  needed today: `uv tool install sniff-detection-cli`.
 
 ### R3 — crates.io for the free names
+
+**Starts early, in parallel with R1** (decided 2026-10-04). Names are
+protected by publishing real crates soon, not placeholders: crates.io's usage
+policy prohibits name squatting. `biscuit-hash`/`biscuit-hash-cli` and
+`biscuit-file`/`biscuit-file-cli` go first because they need only metadata
+fixes. The CLIs whose names matter most follow as their blockers clear.
 
 Order by cost: `bh` and `bf` first (metadata only), then `hug`, then `md`,
 `dmls` (`darkmatter-lsp`), `sniff` (`sniff-detection-cli`), `wt`
@@ -185,8 +201,4 @@ Order by cost: `bh` and `bf` first (metadata only), then `hug`, then `md`,
 
 ## Open questions
 
-1. **PyPI prefix** for taken names: `biscuit-sniff`, or `rb-sniff`?
-2. **`claudine` timing:** ship it in R1 with glibc-only Linux builds, or
-   hold it until the `2026-09-20-upgrade-reqwest` spec removes OpenSSL?
-3. **Name squatting:** 27 of our crate names on crates.io are free today.
-   Should placeholder versions be reserved before R3?
+None as of 2026-10-04.
