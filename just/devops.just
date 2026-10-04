@@ -2075,7 +2075,8 @@ _sanity pkg *args="": _storage_preflight
 #
 #   1. Builds `biscuit-harness-broker` and uses it to spawn ONE pane /
 #      window / session per backend (WezTerm, kitty, tmux, Apple
-#      Terminal) on the host. Each spawn's id is exported via a
+#      Terminal, only when the package's `l2-backends` declares it) on the
+#      host. Each spawn's id is exported via a
 #      `BISCUIT_SHARED_*` env var so each nextest child can attach via
 #      `<Backend>Harness::shared_or_spawn()` instead of spawning fresh.
 #
@@ -2223,6 +2224,12 @@ _test_l2 pkg *args="": _storage_preflight
     # unset, this is a local run and the broker is built here as before —
     # except in archive mode, where building it is exactly what must not happen.
     broker="${BISCUIT_HARNESS_BROKER_BIN:-}"
+    # Terminal.app has no background mode: the shared window is a visible
+    # window on the developer's desktop for the whole run. Spawn it only for
+    # a package whose `l2-backends` declares `apple-terminal`. Left at 1 when
+    # the metadata is not read here (archive mode, where `CI` already makes
+    # the backend unavailable).
+    want_apple_terminal=1
     if [[ -z "${broker}" ]] && (( archive_mode == 0 )); then
         cargo build -p biscuit-test-harness --bin biscuit-harness-broker --quiet
         # Read cargo metadata via a tempfile to avoid the `bash -c`
@@ -2232,6 +2239,9 @@ _test_l2 pkg *args="": _storage_preflight
         meta_file="$(mktemp "${TMPDIR:-/tmp}/biscuit-test-l2-meta.XXXXXX")"
         cargo metadata --no-deps --format-version 1 > "${meta_file}"
         target_dir="$(jq -r '.target_directory' "${meta_file}")"
+        if ! jq -e --arg p '{{ pkg }}' '.packages[] | select(.name == $p) | .metadata.ci.tests["l2-backends"] // [] | index("apple-terminal")' "${meta_file}" > /dev/null; then
+            want_apple_terminal=0
+        fi
         rm -f "${meta_file}"
         broker="${target_dir}/debug/biscuit-harness-broker${bin_suffix}"
     fi
@@ -2273,7 +2283,7 @@ _test_l2 pkg *args="": _storage_preflight
         echo "tmux ${id}" >> "${SHARED_REGISTRY}"
         echo -e "  {{ dim }}spawned tmux session ${id}{{ reset }}"
     fi
-    if id="$("${broker}" spawn apple-terminal 2>/dev/null)" && [[ -n "${id}" ]]; then
+    if (( want_apple_terminal == 1 )) && id="$("${broker}" spawn apple-terminal 2>/dev/null)" && [[ -n "${id}" ]]; then
         export BISCUIT_SHARED_APPLE_TERMINAL_WINDOW_ID="${id}"
         echo "apple-terminal ${id}" >> "${SHARED_REGISTRY}"
         echo -e "  {{ dim }}spawned apple-terminal window ${id}{{ reset }}"
