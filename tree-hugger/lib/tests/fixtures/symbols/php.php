@@ -77,3 +77,23 @@ interface ConstantContract { const INTERFACE_CONSTANT = 2; }
 trait ConstantTrait { const TRAIT_CONSTANT = 3; }
 enum ConstantEnum { case Only; const ENUM_CONSTANT = 4; }
 const TOP_CONSTANT = 5;
+
+// ---- Declaration boundaries (keyword and signature text) ----
+
+// A comment naming declaration keywords: function class interface trait enum
+const BOUNDARY_TABLE = [
+    1, 2,
+    3, 4,
+];
+
+function boundary_multi_line_header(
+    int $firstValue,
+    int $secondValue
+): int {
+    return $firstValue + $secondValue;
+}
+
+#[Deprecated]
+function boundary_annotated(): void
+{
+}

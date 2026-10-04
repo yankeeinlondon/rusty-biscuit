@@ -41,4 +41,18 @@ sub after_block_sub {
     return 5;
 }
 
+# ---- Declaration boundaries (keyword and signature text) ----
+
+# A comment naming declaration keywords: sub my our package
+our %boundary_table = (
+    first  => 1,
+    second => 2,
+);
+
+sub boundary_multi_line_header
+{
+    my ($first_value, $second_value) = @_;
+    return $first_value + $second_value;
+}
+
 1;

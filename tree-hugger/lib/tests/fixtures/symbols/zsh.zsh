@@ -19,3 +19,17 @@ _conventionally_private_function() {
 }
 
 GLOBAL_VARIABLE="value"
+
+# ---- Declaration boundaries (keyword and signature text) ----
+
+# A comment naming declaration keywords: function local declare
+BOUNDARY_TABLE=(
+  first
+  second
+)
+
+# tree-sitter-zsh rejects a body brace on the line after the header, so
+# this function keeps a one-line header.
+boundary_header() {
+  print -- "header"
+}

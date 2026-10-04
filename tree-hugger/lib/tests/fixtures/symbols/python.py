@@ -52,3 +52,28 @@ def free_function_assigning_attribute(target_object: PlainWidget) -> None:
 class AssignmentFieldForms:
     first = second = 0
     a, b = (1, 2)
+
+
+# ---- Declaration boundaries (keyword and signature text) ----
+
+# A comment naming declaration keywords: def class async lambda
+BOUNDARY_TABLE = {
+    "first": 1,
+    "second": 2,
+}
+
+
+def boundary_multi_line_header(
+    first_value: int,
+    second_value: int,
+) -> int:
+    return first_value + second_value
+
+
+def boundary_marker(function):
+    return function
+
+
+@boundary_marker
+def boundary_decorated() -> None:
+    pass

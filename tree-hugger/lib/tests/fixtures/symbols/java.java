@@ -88,3 +88,22 @@ abstract class PackageAbstractBase {
 class AnnotatedPackageWidget {
     void annotatedWidgetMethod() {}
 }
+
+class DeclarationBoundaries {
+    // A comment naming declaration keywords: class interface enum record
+    static final int[] BOUNDARY_TABLE = {
+        1, 2,
+        3, 4,
+    };
+
+    int boundaryMultiLineHeader(
+            int firstValue,
+            int secondValue) {
+        return firstValue + secondValue;
+    }
+
+    @Deprecated
+    void boundaryAnnotated() {}
+
+    public @Deprecated static void boundaryAnnotationBetweenModifiers() {}
+}

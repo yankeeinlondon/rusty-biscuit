@@ -50,3 +50,18 @@ func (receiver *ExportedStruct) ExportedMethod() string {
 func (receiver ExportedStruct) packageMethod() {}
 
 func (receiver packageStruct) OtherExportedMethod() {}
+
+// ---- Declaration boundaries (keyword and signature text) ----
+
+// A comment naming declaration keywords: func type var const struct
+var boundaryTable = []int{
+	1, 2,
+	3, 4,
+}
+
+func boundaryMultiLineHeader(
+	firstValue int,
+	secondValue int,
+) int {
+	return firstValue + secondValue
+}

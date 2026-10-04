@@ -30,4 +30,19 @@ if globalVariable then
   local function nestedBlockLocalFunction() end
 end
 
+-- ---- Declaration boundaries (keyword and signature text) ----
+
+-- A comment naming declaration keywords: function local
+local boundaryTable = {
+  1, 2,
+  3, 4,
+}
+
+function Widget.boundaryMultiLineHeader(
+  firstValue,
+  secondValue
+)
+  return firstValue + secondValue
+end
+
 return Widget

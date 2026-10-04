@@ -101,3 +101,21 @@ struct DeclaratorFieldForms {
     int (*callback)(int);
     template<class T> static T cache[3];
 };
+
+// ---- Declaration boundaries (keyword and signature text) ----
+
+// A comment naming declaration keywords: class struct namespace enum template
+const int boundaryTable[] = {
+    1, 2,
+    3, 4,
+};
+
+int boundaryMultiLineHeader(
+    int firstValue,
+    int secondValue) {
+    return firstValue + secondValue;
+}
+
+[[nodiscard]] int boundaryAnnotated() {
+    return 0;
+}

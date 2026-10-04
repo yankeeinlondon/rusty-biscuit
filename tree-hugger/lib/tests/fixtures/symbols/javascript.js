@@ -43,3 +43,30 @@ class ModuleWidget {
 
   instanceMethod() {}
 }
+
+// ---- Declaration boundaries (keyword and signature text) ----
+
+// A comment naming declaration keywords: function class const let var
+export const BOUNDARY_TABLE = {
+  first: 1,
+  second: 2,
+};
+
+export function boundaryMultiLineHeader(
+  firstValue,
+  secondValue,
+) {
+  return firstValue + secondValue;
+}
+
+export const boundaryArrow = (value) => value * 2;
+
+function boundarySealed(target) {}
+
+function boundaryLogged(target, key) {}
+
+@boundarySealed
+export class BoundaryDecorated {
+  @boundaryLogged
+  decoratedMethod() {}
+}

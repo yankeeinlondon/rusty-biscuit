@@ -101,3 +101,23 @@ record RecordFieldForms { public int value; }
 class ConstantForms { public const int ClassConstant = 1; }
 struct ConstantStruct { const int StructConstant = 2; }
 interface IConstantForms { const int InterfaceConstant = 3; }
+
+class DeclarationBoundaries
+{
+    // A comment naming declaration keywords: class struct interface enum record
+    static readonly int[] BoundaryTable = new[]
+    {
+        1, 2,
+        3, 4,
+    };
+
+    int BoundaryMultiLineHeader(
+        int firstValue,
+        int secondValue)
+    {
+        return firstValue + secondValue;
+    }
+
+    [Obsolete]
+    void BoundaryAnnotated() { }
+}

@@ -57,3 +57,21 @@ int function_with_local_static(void) {
     static int local_static_counter = 0;
     return ++local_static_counter;
 }
+
+/* ---- Declaration boundaries (keyword and signature text) ---- */
+
+/* A comment naming declaration keywords: struct enum union typedef static */
+const int boundary_table[] = {
+    1, 2,
+    3, 4,
+};
+
+int boundary_multi_line_header(
+    int first_value,
+    int second_value) {
+    return first_value + second_value;
+}
+
+[[maybe_unused]] int boundary_annotated(void) {
+    return 0;
+}

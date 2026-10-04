@@ -19,3 +19,16 @@ _conventionally_private_function() {
 }
 
 GLOBAL_VARIABLE="value"
+
+# ---- Declaration boundaries (keyword and signature text) ----
+
+# A comment naming declaration keywords: function local declare
+BOUNDARY_TABLE=(
+  first
+  second
+)
+
+boundary_multi_line_header ()
+{
+  echo "header"
+}

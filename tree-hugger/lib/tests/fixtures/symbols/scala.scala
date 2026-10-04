@@ -45,3 +45,19 @@ class Shape:
   protected[this] def tick(): Unit = ()
   private[example] def scale() = 1
   private[Shape] def secret() = 2
+
+// ---- Declaration boundaries (keyword and signature text) ----
+
+// A comment naming declaration keywords: def val class trait object
+val boundaryTable: List[Int] = List(
+  1, 2,
+  3, 4
+)
+
+def boundaryMultiLineHeader(
+    firstValue: Int,
+    secondValue: Int
+): Int = firstValue + secondValue
+
+@deprecated("use something else", "1.0")
+def boundaryAnnotated(): Unit = ()

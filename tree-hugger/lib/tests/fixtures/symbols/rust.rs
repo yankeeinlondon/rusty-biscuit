@@ -171,3 +171,24 @@ union UnionFieldForms {
     number: i32,
     bytes: [u8; 4],
 }
+
+// ---- Declaration boundaries (keyword and signature text) ----
+
+// A comment naming declaration keywords: fn struct enum trait const static
+pub const BOUNDARY_TABLE: [u32; 4] = [
+    1, 2,
+    3, 4,
+];
+
+pub fn boundary_multi_line_header(
+    first_value: u32,
+    second_value: u32,
+) -> u32 {
+    first_value + second_value
+}
+
+#[derive(Debug)]
+#[allow(dead_code)]
+pub struct BoundaryAttributed {
+    pub attributed_value: u32,
+}

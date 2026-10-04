@@ -88,3 +88,21 @@ protocol PlainDrawable {
 }
 
 struct BindingFieldForms { static var first = 1, second = 2 }
+
+// ---- Declaration boundaries (keyword and signature text) ----
+
+// A comment naming declaration keywords: func struct class let var
+let boundaryTable = [
+    1, 2,
+    3, 4,
+]
+
+func boundaryMultiLineHeader(
+    firstValue: Int,
+    secondValue: Int
+) -> Int {
+    return firstValue + secondValue
+}
+
+@available(*, deprecated)
+func boundaryAnnotated() {}

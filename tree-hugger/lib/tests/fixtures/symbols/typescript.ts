@@ -91,3 +91,30 @@ export namespace ExportedNamespace {
 abstract class AbstractFieldForms { static count = 0; }
 class PrivateFieldForms { static #count = 0; }
 interface QuotedFieldForms { "label": string; }
+
+// ---- Declaration boundaries (keyword and signature text) ----
+
+// A comment naming declaration keywords: function class interface const let
+export const BOUNDARY_TABLE = {
+  first: 1,
+  second: 2,
+};
+
+export function boundaryMultiLineHeader(
+  firstValue: number,
+  secondValue: number,
+): number {
+  return firstValue + secondValue;
+}
+
+export const boundaryArrow = (value: number): number => value * 2;
+
+function boundarySealed(target: unknown): void {}
+
+function boundaryLogged(target: unknown, key: string): void {}
+
+@boundarySealed
+export class BoundaryDecorated {
+  @boundaryLogged
+  decoratedMethod(): void {}
+}
