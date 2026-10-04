@@ -63,7 +63,7 @@ The variable turns a missing-backend skip into a failure.
 | Stand-in | What it does | Use when |
 | -------- | ------------ | -------- |
 | `ProxyStub` | `HTTPS_PROXY` to a hanging or refused local port (sniff's reqwest honors it). `closing_after(hold)` counts connections and drops each after `hold`. | HTTPS PR paths; one connection per worker half |
-| `FakeGitea` | Plain-HTTP provider. Answers `/branches/` 404 at once (or, after `hold_branch_heads`, once released), counted apart (`branch_requests`), so `requests()` counts PR requests only. `hold` stalls PR requests. `serve_repositories` answers git smart HTTP via `git http-backend`; `hold_git(GitHold::All \| Fetch)`; `answer_branch_heads_with(429)` | holding a PR request or check |
+| `FakeGitea` | Plain-HTTP provider. Answers `/branches/` 404 at once (or, after `hold_branch_heads`, once released), counted apart (`branch_requests`), so `requests()` counts PR requests only. `hold` stalls PR requests. `serve_repositories` answers git smart HTTP via `git http-backend`; `hold_git(GitHold::All \| Fetch)`; `answer_branch_heads_with(429)`; `answer_branch_heads_at(sha)` makes the API check succeed | holding a PR request or check; a successful (anonymous unless the command sets a token) API answer |
 | `perf_support::HoldingOrigin` | Loopback HTTP origin that records each request line and holds git's `ls-remote` until `close_held` | live-head path with real git HTTP |
 
 - **Hold PR requests at `FakeGitea`, never at a hanging `ProxyStub`**: CONNECT
@@ -87,8 +87,46 @@ The variable turns a missing-backend skip into a failure.
 - `MixedFixture::serve_gitea_origin_one_commit_ahead` with
   `wt_command_via_gitea_git`: a real `origin` behind `FakeGitea`
   (`list_prs::a_pr_failure_never_blocks_a_permitted_fast_forward`).
+- Seeded PR stores carry `"credentials": {"state": "unknown"}` (required
+  since format 6), so a seeded answer can never produce the keyless notice.
+- Keyless regressions through the binary (`list_prs::*keyless*`): PR success
+  with head 500, head success (`serve_gitea_origin_one_commit_ahead` +
+  `answer_branch_heads_at`) with PR 500, both, a keyed run (`GITEA_TOKEN` on
+  the command; its value in neither store nor output), and coexistence with
+  the fallback notice (head 401 + answering `ls-remote`).
 - `seed_empty_pr_store(age)` isolates the live-head path from PR requests;
   `isolated_cache_file(home, xdg, real)` resolves a store path the way `wt` will.
+
+### The pipeline overlap seam (`list/tests.rs`, `list/tests/pipeline.rs`)
+
+- `tests::overlap` is a `#[cfg(test)]` seam inside `gather_listing`: each
+  local gather reports `arrive`/`finished`, the calling thread
+  `remote_finished`. Without `overlap::Installed` it does nothing. Modes:
+  `Rendezvous` (list and graph each wait for the other to start), `Observe`
+  (record only), `HoldListUntilRemote` (the list gather starts after the
+  wait). Every wait is bounded (10 s), so a non-overlapping pipeline fails
+  instead of hanging; no sleeps or elapsed-time asserts.
+- `pipeline.rs` drives `gather_listing` with a **scripted launch**: it runs on
+  the calling thread inside the wait, so blocking in it (on
+  `overlap::await_both_started` / `await_both_finished`) holds the worker's
+  outcome. Released, it runs its ref `moves` (as a fetch would), then records
+  a finished attempt and receipt in the real per-user stores, or stays silent
+  (`finishes: false`) for timeout cases. `Repo` removes every
+  `<repo hash>.*` cache file on drop.
+- Assert through the returned `Listing` and counters: `git status` walks,
+  `for-each-ref` reads, `merge-tree` calls (via `recorder`), and the
+  `regather` / `checkout status refresh` perf stage names. Report shape is
+  asserted with `tests::perf_shape` / `perf_group` and
+  `tests::assert_perf_reconciles` (exact sum, no child longer than its
+  group) over `PerfCollector::build_perf_tree`.
+  `assert_describes_the_final_state` compares caption, target, tree, counts,
+  dirtiness, graph, and verbose labels with a from-scratch gather after the
+  run.
+- Fail the Nth ref read with `recorder::fail_matching` plus an `AtomicUsize`
+  (`for-each-ref` is the only call it matches in a listing).
+- `run_pipeline_gathers_the_graph_while_list_gather_is_unfinished` has no
+  `origin`: it proves list-versus-graph overlap only. Overlap with the wait is
+  `pipeline::the_local_gathers_start_while_the_worker_outcome_is_held`.
 
 ### Tearing down a detached worker
 
@@ -119,9 +157,18 @@ worker is gone.
 
 Measurements: `worktree/docs/performance-testing.md`.
 
+- Read `--perf` rows with `perf_support::stage_from_perf` (whole-label match
+  at any depth; panics on a duplicate label) or `perf_rows` (label, depth,
+  duration). Never substring-match a row: the group
+  `remote wait ‖ local gather` contains its child's name. Give a new row a
+  label no other row shares.
+- `perf_support`'s own unit tests sit under a `perf_`-prefixed module, so they
+  run only in `just test-perf`; the L1 parser and report-shape tests are in
+  `cli/tests/perf_flag.rs`.
+
 - `perf_pr_request::perf_list_meets_sla_with_a_stale_answer_and_a_failing_refresh`
   is the stale timing gate: reseeds a stale store per sample and asserts every
-  `pr gather` < 300 ms (the 1 s full-command bound alone would hide a
+  sample's foreground PR reads (`pr gather` + `pr reread`) < 300 ms (the 1 s full-command bound alone would hide a
   reintroduced wait).
 - `perf_a_held_live_head_check_costs_the_listing_only_its_wait`,
   `perf_a_held_fetch_costs_the_listing_only_its_wait`, and
@@ -161,7 +208,8 @@ params and 256-color downgrade).
 | ---- | ------- | ------ |
 | `level2_list_stale_pr_answer_shows_a_dim_age_line_in_tmux` | `DesignFixture::with_gitea_pr_age` (stored answer names `o/r`); PR request held at `FakeGitea` past the 3 s wait | dim `- PRs as of` item directly beneath the legend (tmux draws no graph), dim hint after it, spinner gone, caption not "still checking" |
 | `level2_list_failed_pr_refresh_shows_a_dim_couldnt_refresh_item_in_tmux` | | dim `(couldn't refresh)` item and no hint |
-| `level2_list_credentials_warning_is_a_dim_line_beneath_the_caption_in_tmux` | `DesignFixture::with_gitea_origin` (404 without a key plus the refused fallback) | dim §5 line directly beneath the caption |
+| `level2_list_credentials_warning_is_a_dim_line_beneath_the_caption_in_tmux` | `DesignFixture::with_gitea_origin` (404 without a key plus the refused fallback) | dim §5 line directly beneath the caption; it outranks the anonymous PR answer in the same run |
+| `level2_list_keyless_notice_is_a_dim_line_beneath_the_caption_after_the_spinner_in_tmux` | `with_gitea_origin`, `answer_branch_heads_with(500)` held until the spinner draws, PR answered anonymously | dim keyless notice directly beneath the caption, spinner frames and text gone |
 | `level2_list_clears_the_spinner_before_the_caption_and_shows_a_dim_hint_in_tmux` | `hold_branch_heads`, `DesignFixture::start_in_pane` | spinner seen mid-wait, then no frame or spinner text remains; dim hint follows the legend |
 | `level2_list_spinner_moves_from_the_fallback_to_the_fetch_on_one_line_in_tmux`, `level2_list_spinner_shows_the_rate_limited_fallback_in_tmux` | `DesignFixture::with_gitea_repository` (bare `o/r.git` one commit past `origin/main`, pane's `http.proxy` at the stand-in) + `FakeGitea::serve_repositories` + `hold_git(GitHold::All \| Fetch)`; `answer_branch_heads_with(429)` for rate-limited | under `wt list -r` each phase is exactly one `<frame> <text>` line, fetch text replaces the longer fallback text with no remnant, no spinner before the caption when finished |
 

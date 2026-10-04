@@ -90,6 +90,21 @@ focus-stealing tests could run, and they do not run on CI at all. Details in
 
 ## Host conditions that look like repo failures
 
+- **A Homebrew upgrade of `libgit2` breaks linking with `ld: library 'git2'
+  not found`.** `libgit2-sys` links the system library when `pkg-config`
+  finds a compatible one, and its build-script output records the versioned
+  Cellar path (`/opt/homebrew/Cellar/libgit2/1.9.4/lib`). After `brew upgrade`
+  moves it (1.9.7 on 2026-10-03), every feature combination whose
+  `libgit2-sys` build predates the upgrade fails to link (for example
+  `cd sniff && just test`, `just check-tier-coverage sniff`), while another
+  combination built later links fine, so it looks like a change-specific
+  failure. Confirm with `grep link-search target/debug/build/libgit2-sys-*/output`.
+  `cargo clean -p libgit2-sys` did **not** help: the rerun build script wrote
+  the same stale path (the cached build under `kache` is the suspect, not
+  proven). Prefixing the command with `LIBGIT2_NO_PKG_CONFIG=1` builds the
+  vendored libgit2 instead and links (one-time C build, about 4 min under
+  load).
+
 - **`CDPATH` sends a relative `cd` from a linked worktree into the main
   checkout.** Agent shells on this host inherit a `CDPATH` that lists
   `/Users/ken/coding/personal/rusty-biscuit` and does not start with `.`. In

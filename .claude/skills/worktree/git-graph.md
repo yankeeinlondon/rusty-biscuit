@@ -17,6 +17,25 @@ this page holds the implementation facts and traps.
 
 Two stages on scoped threads.
 
+### Snapshot input
+
+- `GatherInput::from_list(list, refs)` takes the tips explicitly: `wt list`
+  gathers from the parse step's read during the remote wait, and again from
+  the final read when the tips changed ([list.md](list.md#pipeline)). Every
+  `log`/`rev-list`/`merge-base` argument is a SHA from `refs` (or a fork-origin
+  `base_sha`), never a branch name; keep it that way, or a discarded
+  speculative gather could still describe live refs.
+- Verbose labels: `DETAIL_FMT` reads `%H` and `%D` with
+  `--decorate-refs-exclude=HEAD|refs/heads/|refs/remotes/`, so `%D` carries
+  only what the snapshot does not capture (tags, other decorated refs).
+  `snapshot_labels` rebuilds `HEAD -> <current>` (at the snapshot's current
+  tip), the remote-tracking names plus `RefTips::remote_heads`
+  (`origin/HEAD` beside its target's tip), and the other local branches, in
+  Git's reverse-refname order. A `--decorate-refs=` include pattern would drop
+  tags: Git then decorates only the included refs.
+- `verbose_labels_follow_the_snapshot_and_keep_live_tags` pins the spelling to
+  Git's own `%D` when nothing moved.
+
 ### Stage 1: `History::classify`
 
 Rule R4 with R4-A1: `C` is the leading run of
@@ -190,7 +209,9 @@ Other L1 facts:
 
 - `graph gather` and `graph image render (biscuit-terminal)` exist only when
   stderr is a terminal and `TERM_PROGRAM` names an image emulator, so a captured
-  `wt list --perf` never reports them.
+  `wt list --perf` never reports them. `graph gather` is a child of the
+  `remote wait ‖ local gather` (or `local gather`) group and overlaps the
+  wait, so it is not part of the total; the render is a top-level row.
 - The test runs `wt list --perf` through `script` in a 120×40 pty over
   `perf_support::graph::GraphFixture` (floor, ordinary, older essential
   connections, multiple selected branches; built by `git fast-import`), and

@@ -7,32 +7,79 @@ wait, load [list-remote.md](list-remote.md). For the graph, load
 
 ## Pipeline
 
+`list::gather_listing` (CLI) gathers; `run_pipeline` renders its `Listing`
+once.
+
 ```mermaid
 flowchart TD
-  A[parse_worktree_state<br/>worktree list, default branch,<br/>for-each-ref, fork-origin store] --> B[CLI: start graph gathering<br/>+ launch refresh worker]
-  B --> W[list/wait.rs: wait for both halves]
-  W --> F[--ff fast_forward_default]
-  F --> R[WorktreeList::reread_refs]
-  R --> C[fill_worktree_statuses<br/>dirty, caption, target, tree,<br/>comparisons, fork-store prune]
-  C --> T[list_table::assemble]
+  A[parse_worktree_state<br/>worktree list, default branch,<br/>initial RefSnapshot, fork-origin store] --> P[prepare_remote<br/>origin lookup, --ignore-api write]
+  P --> S{std::thread::scope}
+  S --> W[calling thread: follow_remote<br/>launch + list/wait.rs + spinner]
+  S --> L[scoped: WorktreeList::gather_local<br/>dirtiness ∥ gather_ref_facts]
+  S --> G[scoped: git_graph::gather<br/>graph and/or verbose]
+  W --> J[join]
+  L --> J
+  G --> J
+  J --> F[--ff fast_forward_default]
+  F --> R[RefSnapshot::read, when waited or --ff]
+  R --> E{initial.matches final?}
+  E -- yes --> K[keep first gather]
+  E -- no --> X[regather: gather_ref_facts + git_graph::gather<br/>from the final read]
+  K --> C[WorktreeList::commit<br/>cache save, fork prune, copy prune]
+  X --> C
+  C --> D[refresh_dirty_status for FfResult::Moved checkout]
+  D --> T[list_table::assemble]
 ```
 
 - `parse_worktree_state` reads `worktree list`, the default branch, one
-  `for-each-ref refs/heads refs/remotes` (`listing::RefTips`), and the
-  fork-origin store.
-- `fill_worktree_statuses` runs dirty status, the caption, the target
-  (`default_target::choose_default_target`, ancestry taken from the cached
-  caption counts, so a warm run has no `merge-base`), the tree
-  (`listing::build_tree`, pure), every comparison, and the fork-store prune.
-- `--ff` (`worktree::fast_forward::fast_forward_default`), `WorktreeList::reread_refs`, and the local gather run **after** the wait, so refs,
-  counts, and graph describe the post-fetch state.
+  `for-each-ref refs/heads refs/remotes` (`listing::RefSnapshot`, which wraps
+  `RefTips` with success and `read_at`), and the fork-origin store.
+- The library gathers have **no persistent side effects**:
+  `gather_dirtiness`, `WorktreeList::gather_ref_facts` (caption, target via
+  `default_target::choose_default_target` with ancestry taken from the cached
+  caption counts so a warm run has no `merge-base`, tree via the pure
+  `listing::build_tree`, every comparison), and `gather_local` (both,
+  concurrently). New comparisons go into the in-memory
+  `load_comparison_cache()` mutex only.
+- `WorktreeList::commit(refs, dirty, facts, cache)` is the one place that
+  saves the cache, prunes fork records (reloading the file first; needs
+  `refs.succeeded()`; records created at or after `refs.read_at()` are
+  rechecked), and prunes copy records. `fill_worktree_statuses` (and so
+  `list_worktrees`) is `gather_local` + `commit` on the parse step's read.
+- **Acceptance**: `RefSnapshot::matches` is true only when both reads
+  succeeded and the complete `local`, `remote`, and `remote_heads` maps are
+  equal. Without a wait or `--ff` there is no second read and the first gather
+  is accepted (as before, including a failed parse-step read). One regather at
+  most; no stabilization loop.
+- **Every history and comparison query names object IDs from the snapshot**,
+  never a branch name, so a speculative gather's result is a pure function of
+  its `RefTips`. Verbose `%D` labels are rebuilt from the snapshot
+  ([git-graph.md](git-graph.md#gathering-git_graphtopologyrs)).
+- Dirtiness is measured once. `--ff` runs after the join; only
+  `FfResult::Moved { checkout: Some(path) }` re-runs `git status`, for the
+  entry whose path equals `path` (both spelled by `git worktree list`).
+- Scoped tasks never print; the spinner lives on the calling thread and is
+  cleared inside `follow_remote`. A scoped panic surfaces at `join` after the
+  wait.
 - **Prune only after a successful `for-each-ref`**; an empty ref set would make
   every record look deleted.
+- `--perf` rows (`perf::PerfCollector`): top-level `pre-dispatch`,
+  `pr gather` (origin lookup only), then the group
+  `remote wait ‖ local gather` (`local gather` without remote work) with
+  children `remote wait`, `pr reread`, `list gather`,
+  `graph gather`/`verbose gather`; then `fast-forward`, a `regather` group
+  (`list regather`, `graph regather`/`verbose regather`), and
+  `checkout status refresh`. `record_group` takes the group's own measured
+  span; children are diagnostic (no share, never summed). Top-level rows are
+  sequential, so they plus `unattributed` equal the total exactly; an excess
+  is shown as `perf::OVER_ATTRIBUTED`, never clipped. Record new overlapping
+  work as a group child, never as a top-level row.
 
 ## Comparison cache (`worktree::cache`)
 
-- `worktree::worktree::list_worktrees` persists SHA-pair comparison results under the user cache
-  directory.
+- `WorktreeList::commit` persists SHA-pair comparison results under the user
+  cache directory, including those of a discarded speculative gather (they
+  describe fixed SHA pairs). Failed comparisons are never cached.
 - Key: `(target_tip_sha, branch_tip_sha, CACHE_FORMAT_VERSION)` (version 2). One
   cache serves the `-> {default}` column, the `-> parent` column, and the
   caption (local default vs `origin/<default>`); any tip movement
@@ -77,6 +124,17 @@ Pure over `TableFacts`; snapshot tests in `cli/tests/list_table.rs`.
   run's followed attempt's `ApiNote` and this run's PR failure
   (`list::observed_pr_failure`: the receipt's, in every mode), with names from
   sniff's `credential_env`.
+- `credential_line` picks **one** line: the attempt's confirmed condition,
+  else the PR failure's, else `CredentialCondition::AnsweredWithoutKey` when
+  `list::observed_keyless` holds: the followed attempt's `credentials` or the
+  wait's `pr_credentials` (with `PrEnd::Published`) is `anonymous`, the
+  repository is not ignored, `origin` did not change (here, or as the
+  attempt's `Unavailable` outcome). Never from the foreground environment.
+  `keyed_limits_are_higher` decides the wording by sniff's display name
+  (GitHub, GitLab, Bitbucket: "for higher rate limits"; Gitea/Forgejo:
+  "to authenticate API requests"); its test pins the names. Proven by
+  `list::tests::observations::keyless::*` and, through the binary,
+  `list_prs::*keyless*`.
 - `list_table::render_status` is a list: this run's PR item from
   `list_table::PrOutcome` via `pr_status_markup`, then §6 when the wait timed
   out. Every row is the `list_table::pr_presentation_snapshot_every_row`

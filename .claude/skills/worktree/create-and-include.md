@@ -18,9 +18,9 @@ Load before changing `worktree::fork_origin`, `worktree::include`,
 - Prune races with `wt create`:
   - it prunes the file **as reread at prune time**, not the copy it loaded
     before its remote wait;
-  - a record created at or after the listing's ref read
-    (`WorktreeList::refs_read_at`) is kept unless `rev-parse --verify` finds no
-    branch.
+  - a record created at or after the accepted ref read
+    (`RefSnapshot::read_at`, the final read when `wt list` read twice) is kept
+    unless `rev-parse --verify` finds no branch.
   - Proof:
     `listing::repo_tests::a_fork_record_written_while_the_listing_waits_survives_its_prune`.
 - The git graph reads `base_sha` as a lane cutoff; see [git-graph.md](git-graph.md).
@@ -72,8 +72,8 @@ Load before changing `worktree::fork_origin`, `worktree::include`,
 
 ## Record lifecycle elsewhere
 
-- `fill_worktree_statuses` (`wt list`) prunes records for removed worktrees
-  after a successful listing. A record goes only when its worktree is missing
+- `WorktreeList::commit` (once per `wt list`, after the accepted gather)
+  prunes records for removed worktrees. A record goes only when its worktree is missing
   from the listing's `worktree list` **and** its admin directory no longer holds
   the record's marker — that list predates any worktree created during the
   remote wait.
