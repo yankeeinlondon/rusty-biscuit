@@ -5,9 +5,9 @@ owner: Ken Snyder <ken@ken.net>
 origin: request to ship installable binaries on release (binstall, brew, uv, npm)
 packages:
     - darkmatter-cli
-    - dmls
-    - sniff-cli
-    - worktree-cli
+    - darkmatter-lsp
+    - sniff-detection-cli
+    - git-wt-cli
     - tree-hugger-cli
     - claudine-cli
     - biscuit-file-cli
@@ -25,16 +25,16 @@ installs it with any of:
 
 | Channel | Command (example: `md`) |
 |---|---|
-| cargo-binstall (crates.io name is ours) | `cargo binstall darkmatter-cli` |
-| cargo-binstall (crates.io name is taken) | `cargo binstall --git https://github.com/yankeeinlondon/rusty-biscuit sniff-cli` |
+| cargo-binstall | `cargo binstall darkmatter-cli` |
 | Homebrew | `brew install yankeeinlondon/tap/md` |
 | shell / PowerShell | `curl -LsSf <release>/darkmatter-cli-installer.sh \| sh` |
 | npm | `npm i -g @yankeeinlondon/darkmatter-cli` |
 | uv / pipx (PyPI) | `uv tool install darkmatter-cli` |
 
-First release set (decided 2026-10-03): `md` + `dmls` (darkmatter),
-`sniff`, `wt` (worktree), `hug` (tree-hugger), `claudine`, `bf`
-(biscuit-file), `bh` (biscuit-hash).
+First release set (decided 2026-10-03): `md` (`darkmatter-cli`) + `dmls`
+(`darkmatter-lsp`), `sniff` (`sniff-detection-cli`), `wt` (`git-wt-cli`),
+`hug` (`tree-hugger-cli`), `claudine` (`claudine-cli`), `bf`
+(`biscuit-file-cli`), `bh` (`biscuit-hash-cli`).
 
 ## Decisions taken
 
@@ -42,6 +42,15 @@ First release set (decided 2026-10-03): `md` + `dmls` (darkmatter),
   is taken.** As of 2026-10-03, these names belong to unrelated projects:
   `darkmatter`, `dmls`, `messenger`, `playa`, `sniff`, `sniff-cli`,
   `worktree`, `worktree-cli`.
+- **The three CLI packages with taken names were renamed** (decided
+  2026-10-03) so every CLI in the first set can go to crates.io: `dmls` →
+  `darkmatter-lsp`, `sniff-cli` → `sniff-detection-cli`, `worktree-cli` →
+  `git-wt-cli`. Only the package name changed; the binaries (`dmls`,
+  `sniff`, `wt`) and library crate names (`dmls`, `sniff_cli`,
+  `worktree_cli`) are unchanged. All three new names were free on crates.io
+  and PyPI on 2026-10-03. `git-wt-cli` is taken on unscoped npm, which does
+  not matter because npm packages live under `@yankeeinlondon`. The git
+  route (`cargo binstall --git …`) remains available for every CLI.
 - **Channels:** GitHub Release archives, cargo-binstall, Homebrew tap,
   shell/PowerShell installers, npm, PyPI (for `uv tool install`).
 - **Tooling:** `dist` (axodotdev, formerly cargo-dist; v0.33.0 at the time
@@ -50,6 +59,11 @@ First release set (decided 2026-10-03): `md` + `dmls` (darkmatter),
   `{package}-v{version}` tags without changes, and binstall detects its
   artifact layout automatically. dist cannot build Python wheels, so PyPI
   uses maturin with `bindings = "bin"`, run as a dist custom publish job.
+- **Every first-party crate is `AGPL-3.0-only`** (decided 2026-10-03),
+  including the six that previously declared MIT (`biscuit-contract`,
+  `biscuit-file`, `reaper`, `reaper-cli`, `model-citizen`,
+  `model-citizen-cli`). Applied to every workspace member and the excluded
+  `zed-dmls`; test fixtures and spikes are not crates we ship.
 - **release-plz keeps versioning, changelogs, and tags; dist owns the GitHub
   Release.** Set `git_release_enable = false` in `release-plz.toml`.
 
@@ -70,11 +84,11 @@ First release set (decided 2026-10-03): `md` + `dmls` (darkmatter),
 3. **Publishing to crates.io is blocked in every crate today:**
    - no crate sets `repository`;
    - no workspace path dependency carries a `version`;
-   - 9 crates have no license;
+   - 9 crates had no license (resolved below);
    - 17 crates have no description.
 4. **Test infrastructure ships as optional normal dependencies.**
-   `biscuit-terminal`, `darkmatter`, `darkmatter-cli`, `sniff-cli`,
-   `tree-hugger-cli`, and `worktree-cli` depend on `test-toolkit`,
+   `biscuit-terminal`, `darkmatter`, `darkmatter-cli`, `sniff-detection-cli`,
+   `tree-hugger-cli`, and `git-wt-cli` depend on `test-toolkit`,
    `biscuit-test-harness`, `biscuit-browser-harness`, and
    `biscuit-visualized` behind features. Two of those are `publish = false`,
    and crates.io requires every optional dependency to be published.
@@ -135,19 +149,21 @@ installers, and Homebrew, for the 8 CLIs.
   dist custom publish job (`./.github/workflows/publish-pypi.yml`,
   `workflow_call`). **Needs:** a pending trusted publisher registered on
   PyPI for each project name.
-- PyPI and npm names are free for `darkmatter-cli`, `dmls`, `worktree-cli`,
-  `claudine-cli`, `biscuit-file`, and `biscuit-hash`. They are taken for
-  `sniff`, `sniff-cli`, `tree-hugger`, and `claudine`, so those need a
-  prefix on PyPI (open question 3).
+- PyPI names are free for `darkmatter-cli`, `darkmatter-lsp`,
+  `git-wt-cli`, `sniff-detection-cli`, `claudine-cli`, `biscuit-file`, and
+  `biscuit-hash`. They are taken for `tree-hugger` and `claudine`, so
+  `tree-hugger-cli` needs checking and any taken name needs a prefix on PyPI
+  (open question 1).
 
 ### R3 — crates.io for the free names
 
-Order by cost: `bh` and `bf` first (metadata only), then `hug`, then `md`
-and `claudine`.
+Order by cost: `bh` and `bf` first (metadata only), then `hug`, then `md`,
+`dmls` (`darkmatter-lsp`), `sniff` (`sniff-detection-cli`), `wt`
+(`git-wt-cli`), and `claudine`.
 
 - Declare every workspace crate once in `[workspace.dependencies]` with both
   `path` and `version`, and have members use `{ workspace = true }`.
-- Add `repository`, `license`, and `description` to every published crate.
+- Add `repository` and `description` to every published crate.
 - Move the test-infrastructure optional dependencies (constraint 4) out of
   the normal dependency graph.
 - Move out-of-crate embeds (constraint 5) inside the crate, or behind
@@ -157,6 +173,9 @@ and `claudine`.
   `biscuit-messenger`, `biscuit-playa`. Dependents write
   `darkmatter = { package = "biscuit-darkmatter", … }`, so `use` paths and
   binary names stay the same.
+- The renamed packages have no `{package}-v{version}` tags under their new
+  names, so release-plz treats each as an initial release at its current
+  version.
 - release-plz: `publish = true` for the published set. `git_only = true`
   cannot be combined with publishing, so it is dropped for those crates;
   once the names on crates.io are ours, the "stranger's baseline" problem
@@ -166,15 +185,8 @@ and `claudine`.
 
 ## Open questions
 
-1. **License** for the 9 unlicensed crates (`biscuit-hash`,
-   `biscuit-hash-cli`, `biscuit-file-cli`, `biscuit-visualized`, `dmls`,
-   `messenger`, `playa`, `tree-hugger`, `tree-hugger-cli`). Should they
-   match the rest at `AGPL-3.0-only`?
-2. **Taken CLI names:** rename the packages `sniff-cli`, `worktree-cli`,
-   and `dmls` (e.g. `biscuit-sniff-cli`) so they can go to crates.io too, or
-   keep the git route for them permanently?
-3. **PyPI prefix** for taken names: `biscuit-sniff`, or `rb-sniff`?
-4. **`claudine` timing:** ship it in R1 with glibc-only Linux builds, or
+1. **PyPI prefix** for taken names: `biscuit-sniff`, or `rb-sniff`?
+2. **`claudine` timing:** ship it in R1 with glibc-only Linux builds, or
    hold it until the `2026-09-20-upgrade-reqwest` spec removes OpenSSL?
-5. **Name squatting:** 24 of our crate names on crates.io are free today.
+3. **Name squatting:** 27 of our crate names on crates.io are free today.
    Should placeholder versions be reserved before R3?

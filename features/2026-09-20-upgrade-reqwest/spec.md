@@ -9,6 +9,8 @@ packages:
     - biscuit-browser-harness
     - darkmatter
     - schematic-oauth
+related:
+    - 2026-10-03-binary-releases
 ---
 
 # Retire reqwest 0.12 from the workspace
@@ -19,6 +21,18 @@ packages:
 an HTTP client is on `reqwest 0.13`, with `default-features = false` and its
 TLS backend named explicitly, and the one external crate that still pinned
 0.12 for a feature we use is upgraded past it.
+
+**Release dependency (added 2026-10-03).** `messenger`'s `reqwest 0.12` with
+`default-tls` is the **only** path by which OpenSSL reaches `claudine-cli`
+(`claudine` → `messenger` → `reqwest 0.12` → `hyper-tls`/`native-tls` →
+`openssl-sys`, identical on `x86_64-unknown-linux-gnu` and `-musl`). Step 1
+below (messenger → 0.13, rustls) therefore removes OpenSSL from `claudine`'s
+graph, which is what `2026-10-03-binary-releases` needs before it can ship
+`claudine` with static (musl) Linux builds and no `libssl` runtime
+dependency. Confirm with
+`cargo tree -p claudine-cli -e normal,build --target x86_64-unknown-linux-musl -i openssl-sys`
+returning no match. ALSA (`alsa-sys`, via `playa`) remains a separate Linux
+build dependency and is out of this spec's scope.
 
 ## Where things stand
 
