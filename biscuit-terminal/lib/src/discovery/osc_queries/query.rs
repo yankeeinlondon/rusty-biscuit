@@ -69,17 +69,7 @@ pub(super) fn query_osc_color_with_timeout(code: u8, timeout: Duration) -> Optio
     // Try actual OSC query first (if terminal supports it)
     #[cfg(unix)]
     if tty && !ci {
-        let term_app = get_terminal_app();
-        let supports_osc = matches!(
-            term_app,
-            TerminalApp::Kitty
-                | TerminalApp::Wezterm
-                | TerminalApp::ITerm2
-                | TerminalApp::Alacritty
-                | TerminalApp::Ghostty
-                | TerminalApp::Foot
-                | TerminalApp::Contour
-        );
+        let supports_osc = super::support::answers_color_queries(&get_terminal_app());
 
         if supports_osc && detect_multiplexer().is_none() {
             tracing::debug!(
@@ -165,12 +155,11 @@ pub(super) fn query_osc_color_with_timeout(code: u8, timeout: Duration) -> Optio
 /// Get default colors for known terminal applications.
 fn get_terminal_default_color(app: &TerminalApp, code: u8) -> Option<RgbValue> {
     match app {
-        // Apple Terminal defaults to white background (light mode)
-        TerminalApp::AppleTerminal => match code {
-            10 | 12 => Some(RgbValue::new(0, 0, 0)),
-            11 => Some(RgbValue::new(255, 255, 255)),
-            _ => None,
-        },
+        // No guess: it is never queried, and its profiles range from the
+        // white "Basic" (which follows the system appearance) to dark ones,
+        // so a fixed white default once read a dark profile as light.
+        // `color_mode` falls back to the system appearance instead.
+        TerminalApp::AppleTerminal => None,
 
         // Most modern terminals default to dark themes
         TerminalApp::Kitty
@@ -315,17 +304,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_get_terminal_default_color_apple_terminal() {
+    fn apple_terminal_has_no_default_color() {
         let app = TerminalApp::AppleTerminal;
-
-        let bg = get_terminal_default_color(&app, 11);
-        assert!(bg.is_some());
-        assert!(bg.unwrap().is_light());
-
-        let fg = get_terminal_default_color(&app, 10);
-        assert!(fg.is_some());
-        assert!(fg.unwrap().is_dark());
+        for code in [10, 11, 12] {
+            assert_eq!(get_terminal_default_color(&app, code), None, "OSC{code}");
+        }
     }
+
 
     #[test]
     fn test_get_terminal_default_color_modern_terminals() {
