@@ -450,12 +450,14 @@ gitnexus:
     # after its worktree, and the `.gitnexus/` inside it, is deleted. It is a
     # fixed path rather than `$TMPDIR` because agent sandboxes may override
     # `$TMPDIR`, which would split the registry. Each watcher has `<slug>.pid`
-    # (pid, then worktree root) and `<slug>.log`.
+    # (pid, then worktree root) and `<slug>.log`, plus `<slug>.bootstrap` while
+    # its initial forced build is still running.
     state_dir="/tmp/gitnexus-watch-$(id -un)"
     mkdir -p "${state_dir}"
     slug=$(printf '%s' "${repo_root}" | sed -e 's/[^A-Za-z0-9._-]/-/g' -e 's/^-*//')
     pid_file="${state_dir}/${slug}.pid"
     log_file="${state_dir}/${slug}.log"
+    bootstrap_file="${state_dir}/${slug}.bootstrap"
 
     # Prints a log path as an OSC 8 hyperlink when the stream it is written to
     # ($2: `out`, the default, or `err`) is a terminal, and as plain text
@@ -506,15 +508,46 @@ gitnexus:
         entry_pid="" entry_root=""
         { IFS= read -r entry_pid; IFS= read -r entry_root; } < "${entry}" || true
         if ! is_watcher_pid "${entry_pid}"; then
-            rm -f "${entry}"
+            rm -f "${entry}" "${entry%.pid}.bootstrap"
         elif [[ -n "${entry_root}" && ! -e "${entry_root}/.git" ]]; then
             stop_watcher "${entry_pid}"
-            rm -f "${entry}"
+            rm -f "${entry}" "${entry%.pid}.bootstrap"
             echo "Stopped GitNexus watcher (pid ${entry_pid}) for ${entry_root}:"
             echo "  that worktree has been removed, so there is nothing left to watch."
             echo "  Its log remains at $(log_link "${entry%.pid}.log")"
         fi
     done
+
+    # Prints the pid holding this worktree's `analyze.lock` when that process
+    # is still alive; GitNexus leaves the file behind after a crash.
+    analyze_lock_holder() {
+        local lock_file="${repo_root}/.gitnexus/analyze.lock" lock_pid
+        [[ -f "${lock_file}" ]] || return 1
+        lock_pid=$(sed -n 's/.*"pid":\([0-9][0-9]*\).*/\1/p' "${lock_file}")
+        [[ -n "${lock_pid}" ]] && kill -0 "${lock_pid}" 2>/dev/null || return 1
+        printf '%s' "${lock_pid}"
+    }
+
+    # `gitnexus status` without its two analyzer-runner-identity lines, each a
+    # single JSON object several hundred characters wide.
+    index_status() {
+        local output exit_code=0
+        output="$(gitnexus status 2>&1)" || exit_code=$?
+        grep -v 'analyzer runner identity:' <<< "${output}" || true
+        return "${exit_code}"
+    }
+
+    # A stale index advises `gitnexus analyze`, but a running watcher is
+    # already rebuilding it, so name that build instead.
+    print_index_status() {
+        local status_output=$1 lock_pid
+        printf '%s\n' "${status_output}"
+        if lock_pid=$(analyze_lock_holder); then
+            echo "  An index build (pid ${lock_pid}) is running now; see the log for progress."
+        elif grep -q '^Status: .*stale' <<< "${status_output}"; then
+            echo "  The watcher brings a stale index up to date when it starts and on each change."
+        fi
+    }
 
     report_running_watcher() {
         local pid
@@ -522,7 +555,23 @@ gitnexus:
         echo "GitNexus watcher already running (pid ${pid}) for ${repo_root}"
         echo "  Log: $(log_link "${log_file}")"
         echo
-        gitnexus status
+
+        # Until the initial forced build finishes, `gitnexus status` describes
+        # the previous index, or none, and advises `gitnexus analyze`; a second
+        # analyze would only wait on the running one for `analyze.lock`. The
+        # lock check below also covers builds this recipe did not start.
+        if [[ -f "${bootstrap_file}" ]]; then
+            echo "  The initial full index build is still running; watching begins once it finishes."
+            return 0
+        fi
+        local status_output
+        status_output="$(index_status)" || { printf '%s\n' "${status_output}"; return 1; }
+        if grep -q 'Repository not indexed' <<< "${status_output}" && ! analyze_lock_holder > /dev/null; then
+            echo "  The watcher has no index and no build is running, so building one now."
+            gitnexus analyze "${repo_root}" --skip-agents-md --force
+            return $?
+        fi
+        print_index_status "${status_output}"
     }
 
     if [[ -f "${pid_file}" ]]; then
@@ -536,47 +585,49 @@ gitnexus:
             exit $?
         fi
 
-        # Without index metadata, GitNexus treats a non-empty `.gitnexus/` (the
-        # Claude Code hook's `.hook-locks/`, say) as "unowned" storage and
-        # refuses to analyze. `--watch` rejects `--force`, so a worktree with no
-        # index yet is bootstrapped by a one-shot forced build first.
-        needs_bootstrap=false
-        if [[ ! -f "${repo_root}/.gitnexus/gitnexus.json" && ! -f "${repo_root}/.gitnexus/meta.json" ]]; then
-            needs_bootstrap=true
-        fi
+        # `--watch` starts with an incremental update that can leave a stale
+        # index reported as current, and it rejects `--force`, so every watcher
+        # begins with a one-shot forced build. Forcing also gets past GitNexus
+        # refusing a non-empty `.gitnexus/` that has no index metadata yet (the
+        # Claude Code hook's `.hook-locks/`, say) as "unowned" storage.
+        : > "${bootstrap_file}"
 
         printf '\n=== %s: starting watcher for %s ===\n' "$(date '+%Y-%m-%d %H:%M:%S')" "${repo_root}" >> "${log_file}"
         # `set -m` puts the watcher in its own process group. Without it the
         # watcher stays in the terminal's foreground group and dies of SIGHUP
         # when that terminal closes; node does not honor nohup's ignored SIGHUP.
-        # `exec` makes the recorded pid the watcher itself once any bootstrap
+        # `exec` makes the recorded pid the watcher itself once the forced
         # build has finished.
         set -m
         # shellcheck disable=SC2016
         nohup bash -c '
-            if [[ "$2" == true ]]; then
-                gitnexus analyze "$1" --skip-agents-md --force || exit $?
-            fi
+            gitnexus analyze "$1" --skip-agents-md --force || exit $?
+            rm -f "$2"
             exec gitnexus analyze "$1" --watch
-        ' gitnexus-watch "${repo_root}" "${needs_bootstrap}" < /dev/null >> "${log_file}" 2>&1 &
+        ' gitnexus-watch "${repo_root}" "${bootstrap_file}" < /dev/null >> "${log_file}" 2>&1 &
         watcher_pid=$!
         set +m
         printf '%s\n%s\n' "${watcher_pid}" "${repo_root}" > "${pid_file}"
 
         sleep 1
         if ! kill -0 "${watcher_pid}" 2>/dev/null; then
-            rm -f "${pid_file}"
+            rm -f "${pid_file}" "${bootstrap_file}"
             echo "GitNexus watcher exited immediately; see $(log_link "${log_file}" err)" >&2
             tail -n 20 "${log_file}" >&2
             exit 1
         fi
 
         echo "Started GitNexus watcher (pid ${watcher_pid}) for ${repo_root}"
-        if [[ "${needs_bootstrap}" == true ]]; then
-            echo "  No index exists yet, so a full build runs before watching begins."
-        fi
         echo "  Log: $(log_link "${log_file}")"
         echo "  Stop: kill ${watcher_pid}"
+        echo
+        if [[ -f "${repo_root}/.gitnexus/gitnexus.json" || -f "${repo_root}/.gitnexus/meta.json" ]]; then
+            echo "Index before this build:"
+            index_status || true
+            echo
+        fi
+        echo "  A full index build (gitnexus analyze --force) runs now; watching begins once it"
+        echo "  finishes. Re-run \`just gitnexus\` for the updated status."
         exit 0
     fi
 
