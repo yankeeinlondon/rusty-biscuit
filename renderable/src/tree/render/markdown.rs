@@ -22,11 +22,16 @@
 //! assert_eq!(rendered.output, "## Title");
 //! ```
 
+use crate::browser::fragment::RawRange;
+use crate::browser::utils::escape_attribute;
+use crate::tree::SourceSpan;
 use crate::tree::diagnostic::{Diagnostic, Severity};
 use crate::tree::document::{Document, FrontmatterFormat};
 use crate::tree::error::{RenderError, RenderStrictness, Rendered};
-use crate::tree::node::{ColumnAlign, NodeKind, RenderNode};
-use crate::tree::validate::{ValidationError, ValidationMode, validate};
+use crate::tree::node::{ColumnAlign, NodeKind, RenderNode, is_html_comment_only};
+use crate::tree::validate::{
+    ValidationError, ValidationMode, is_block, is_inline_kind, kind_name, validate,
+};
 
 /// The Markdown dialect a render targets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -83,8 +88,10 @@ pub struct MarkdownRenderOptions {
 ///   finding (this includes [`NodeKind::Unsupported`] nodes, whose warning is
 ///   escalated by the validation gate before the writer runs).
 /// - [`RenderError::LossyRejected`] if [`RenderStrictness::Strict`] meets a
-///   construct that cannot be rendered without loss (raw HTML or a classed
-///   span under [`MarkdownDialect::Markdown`]).
+///   construct that cannot be rendered without loss (for example raw HTML or
+///   a classed span under [`MarkdownDialect::Markdown`], a block other than
+///   one paragraph in a table cell, or a footnote identifier no label can
+///   spell).
 pub fn render_markdown_node(
     node: &RenderNode,
     opts: &MarkdownRenderOptions,
@@ -102,6 +109,8 @@ pub fn render_markdown_node(
         diagnostics: Vec::new(),
         table_cell_depth: 0,
         html_depth: 0,
+        mid_line: 0,
+        heading_depth: 0,
     };
 
     // Warning-severity validation findings escalate to an error under Strict
@@ -173,14 +182,24 @@ struct Writer<'a> {
     opts: &'a MarkdownRenderOptions,
     diagnostics: Vec<Diagnostic>,
     /// Non-zero while rendering descendants of a [`NodeKind::TableCell`].
-    /// Inside a table cell, text is escaped so literal pipes and newlines
-    /// cannot corrupt the GFM pipe-delimited table structure.
+    /// Inside a table cell every field protects its pipes (see
+    /// [`escape_cell_pipes`] and [`encode_generated_attribute`]) and its
+    /// line endings, so neither can corrupt the GFM pipe-delimited row.
     table_cell_depth: u32,
     /// Non-zero while rendering the body of a MarkdownPlus inline-HTML span
     /// (a classed or styled [`NodeKind::Span`]). Inside that body, text nodes
-    /// HTML-escape `<`, `>`, and `&` so literal markup stays inert, while
-    /// generated Markdown sigils and nested span tags pass through unescaped.
+    /// HTML-escape `<`, `>`, and `&` instead of backslash-escaping them; the
+    /// body is still parsed as Markdown, so other punctuation is escaped as
+    /// usual.
     html_depth: u32,
+    /// Non-zero while rendering an inline sequence that a reader never sees
+    /// at the start of a line (a heading's text, a link label, a delimiter
+    /// or HTML span body), so its first character needs no line-start
+    /// protection and its last is not the end of a line.
+    mid_line: u32,
+    /// Non-zero while rendering a heading's text, which must stay on one
+    /// line.
+    heading_depth: u32,
 }
 
 impl Writer<'_> {
@@ -198,7 +217,7 @@ impl Writer<'_> {
             }
             NodeKind::Heading { depth, children } => {
                 let hashes = "#".repeat(usize::from(depth.get()));
-                Ok(format!("{hashes} {}", self.render_inline(children)?))
+                Ok(format!("{hashes} {}", self.render_heading_text(children)?))
             }
             NodeKind::Section {
                 depth,
@@ -206,7 +225,7 @@ impl Writer<'_> {
                 children,
             } => {
                 let hashes = "#".repeat(usize::from(depth.get()));
-                let heading_line = format!("{hashes} {}", self.render_inline(heading)?);
+                let heading_line = format!("{hashes} {}", self.render_heading_text(heading)?);
                 let body = self.render_blocks(children)?;
                 if body.is_empty() {
                     Ok(heading_line)
@@ -217,18 +236,33 @@ impl Writer<'_> {
             NodeKind::Paragraph { children } => {
                 // A projected `Progress` widget carries `ProgressHints`. Plain
                 // Markdown renders the paragraph fallback text; MarkdownPlus
-                // emits the same semantic progress HTML as the browser.
+                // emits the same semantic progress HTML as the browser, with
+                // the label taken from the children's plain text as the
+                // browser takes it. `progress_html` encodes that text for
+                // each place it writes it.
                 match node.attrs.progress_hints_ref() {
                     Some(hints) if self.opts.dialect == MarkdownDialect::MarkdownPlus => {
-                        let text = self.render_inline(children)?;
-                        Ok(progress_html(hints, &text))
+                        let html = progress_html(hints, &super::browser::plain_text(children));
+                        // All of it is generated and escaped, and the visible
+                        // label body has no line endings, so every line
+                        // ending and cell pipe left sits in an attribute value
+                        // (`aria-label`, the glyph `data-*` attributes).
+                        Ok(encode_generated_attribute(
+                            &html,
+                            self.table_cell_depth > 0,
+                        ))
                     }
                     _ => self.render_inline(children),
                 }
             }
             NodeKind::BlockQuote { children } => {
                 if let Some(hints) = node.attrs.columns_hints_ref() {
-                    self.render_columns(children, hints)
+                    match self.opts.dialect {
+                        MarkdownDialect::Markdown => self.render_columns(children, hints),
+                        MarkdownDialect::MarkdownPlus => {
+                            self.lower_to_html(std::slice::from_ref(node))
+                        }
+                    }
                 } else {
                     let inner = self.render_blocks(children)?;
                     Ok(prefix_lines(&inner, "> "))
@@ -248,7 +282,7 @@ impl Writer<'_> {
                 })
             }
             NodeKind::Code { lang, meta, value } => {
-                let mut fence = String::from("```");
+                let mut fence = code_block_fence(value);
                 if let Some(lang) = lang {
                     fence.push_str(lang);
                 }
@@ -257,55 +291,55 @@ impl Writer<'_> {
                     fence.push_str(meta);
                 }
                 let body = value.trim_end_matches('\n');
-                Ok(format!("{fence}\n{body}\n```"))
+                let close = code_block_fence(value);
+                Ok(format!("{fence}\n{body}\n{close}"))
             }
             NodeKind::ThematicBreak => Ok("---".to_string()),
             NodeKind::Table { align, children } => {
                 let table = self.render_table(align, children)?;
-                // A table title/caption is emitted as escaped plain text on
+                // A table title/caption is emitted as a literal paragraph on
                 // its own line before the table, separated by a blank line.
                 // An empty or whitespace-only title is ignored.
                 match node.attrs.table_title_ref() {
                     Some(title) if !title.trim().is_empty() => Ok(format!(
                         "{}\n\n{table}",
-                        escape_literal_backslashes(&escape_text(title.trim()))
+                        protect_lines(&escape_markdown_text(title.trim(), true), true)
                     )),
                     _ => Ok(table),
                 }
             }
             NodeKind::TableRow { children } => self.render_table_row(children),
-            NodeKind::TableCell { children } => {
-                // Descendants of a table cell render in cell-escaping mode so
-                // literal pipes and newlines cannot break GFM table structure.
-                self.table_cell_depth += 1;
-                let result = self.render_inline(children);
-                self.table_cell_depth -= 1;
-                result
-            }
+            NodeKind::TableCell { children } => Ok(self.render_table_cell(children)?.text),
             NodeKind::FootnoteDefinition {
                 identifier,
                 children,
             } => {
+                let label = self.footnote_label(node, identifier)?;
                 let body = self.render_blocks(children)?;
-                Ok(format!("[^{identifier}]: {body}"))
+                // A GFM reader keeps a line in the definition only when it is
+                // blank or indented by four spaces, whatever the label width.
+                Ok(format!(
+                    "[^{label}]: {}",
+                    indent_continuation(&body, FOOTNOTE_CONTINUATION)
+                ))
             }
-            NodeKind::Text { value } => Ok(self.render_text(value)),
-            NodeKind::Emphasis { children } => {
-                Ok(format!("_{}_", self.render_delimited_inline(children)?))
-            }
-            NodeKind::Strong { children } => {
-                Ok(format!("**{}**", self.render_delimited_inline(children)?))
-            }
-            NodeKind::Delete { children } => {
-                Ok(format!("~~{}~~", self.render_delimited_inline(children)?))
-            }
+            // A text node outside an inline sequence (a block of its own) is
+            // written as a one-piece sequence, so it gets the same line
+            // protection.
+            NodeKind::Text { .. } => self.render_inline(std::slice::from_ref(node)),
+            // A delimiter wrapper's spelling depends on its neighbors, which
+            // only the enclosing inline sequence sees.
+            NodeKind::Emphasis { .. }
+            | NodeKind::Strong { .. }
+            | NodeKind::Delete { .. }
+            | NodeKind::Extended { .. } => self.render_inline(std::slice::from_ref(node)),
             NodeKind::Span { children } => self.render_span(node, children),
             NodeKind::InlineCode { value } => Ok(if self.table_cell_depth > 0 {
                 // A literal pipe inside inline code still breaks a GFM table
                 // cell, so it is escaped even though the run is code. The
                 // escape goes in before fencing so the fence sees the final
                 // content.
-                crate::markdown::code_span(&value.replace('|', "\\|"))
+                crate::markdown::code_span(&escape_cell_pipes(value))
             } else {
                 crate::markdown::code_span(value)
             }),
@@ -314,42 +348,41 @@ impl Writer<'_> {
                 title,
                 children,
             } => {
-                let text = self.render_inline(children)?;
-                Ok(format!("[{text}]({})", self.link_target(url, title)))
+                self.mid_line += 1;
+                let text = self.render_inline(children);
+                self.mid_line -= 1;
+                Ok(format!("[{}]({})", text?, self.link_target(url, title)))
             }
             NodeKind::Image { url, title, alt } => {
-                // The alt text is a literal Markdown segment, so inside a
-                // table cell it is escaped just like a `Text` node.
-                let alt = escape_literal_backslashes(alt);
+                // A reader parses alt text as inline Markdown, so it is
+                // escaped like a `Text` node, including inside a table cell
+                // or heading.
+                let alt = escape_markdown_text(alt, false);
                 let alt = if self.table_cell_depth > 0 {
                     escape_table_cell_text(&alt)
+                } else if self.heading_depth > 0 {
+                    encode_heading_line_feeds(&alt)
                 } else {
-                    alt
+                    protect_lines(&alt, false)
                 };
                 Ok(format!("![{alt}]({})", self.link_target(url, title)))
             }
-            NodeKind::FootnoteReference { identifier } => Ok(format!("[^{identifier}]")),
-            // A soft break is rendered as a newline; the surrounding block
-            // is responsible for any further wrapping. Inside a table cell a
-            // soft break collapses to a single space.
-            NodeKind::SoftBreak => Ok(if self.table_cell_depth > 0 {
-                " ".to_string()
-            } else {
-                "\n".to_string()
-            }),
-            // A hard break is a backslash followed by a newline, the visible
-            // CommonMark form (trailing spaces are invisible and are stripped
-            // by editors). Inside a table cell it becomes `<br>` so the row
-            // stays valid.
-            NodeKind::HardBreak => Ok(if self.table_cell_depth > 0 {
-                "<br>".to_string()
-            } else {
-                "\\\n".to_string()
-            }),
+            NodeKind::FootnoteReference { identifier } => {
+                let label = self.footnote_label(node, identifier)?;
+                Ok(if self.table_cell_depth > 0 {
+                    // The table reader removes the escape before it matches
+                    // the label, so `[^a\|b]` still refers to `[^a|b]: …`.
+                    format!("[^{}]", escape_cell_pipes(&label))
+                } else {
+                    format!("[^{label}]")
+                })
+            }
+            // A break's spelling depends on its position in the enclosing
+            // inline sequence: see `Self::write_break`.
+            NodeKind::SoftBreak | NodeKind::HardBreak => {
+                self.render_inline(std::slice::from_ref(node))
+            }
             NodeKind::Html { value, block } => self.render_html(node, value, *block),
-            NodeKind::Extended {
-                token, children, ..
-            } => self.render_extended(token, children),
             NodeKind::Unsupported { label } => self.render_unsupported(node, label),
             NodeKind::Disclosure { summary, children, .. } => self.render_disclosure(summary, children),
         }
@@ -359,9 +392,10 @@ impl Writer<'_> {
     ///
     /// Plain Markdown emits the `::disclosure / ::details / ::end-disclosure`
     /// DSL verbatim so the output remains a clean Darkmatter document.
-    /// MarkdownPlus renders the summary and body to Markdown first, then wraps
-    /// them with `<details>`/`<summary>`; the summary is rendered inside an
-    /// inline-HTML context so `<`, `>`, and `&` are escaped.
+    /// MarkdownPlus wraps the summary and body with `<details>`/`<summary>`.
+    /// The summary line opens a raw HTML block that a reader does not parse
+    /// as Markdown, so the summary is written as HTML (see
+    /// [`Self::lower_to_html`]); the body after the blank line is Markdown.
     fn render_disclosure(
         &mut self,
         summary: &[RenderNode],
@@ -376,10 +410,7 @@ impl Writer<'_> {
                 ))
             }
             MarkdownDialect::MarkdownPlus => {
-                self.html_depth += 1;
-                let summary_text = self.render_inline(summary);
-                self.html_depth -= 1;
-                let summary_text = summary_text?;
+                let summary_text = self.lower_to_html(summary)?;
                 let body_text = self.render_blocks(children)?;
                 Ok(format!(
                     "<details><summary>{summary_text}</summary>\n\n{body_text}\n</details>"
@@ -388,30 +419,415 @@ impl Writer<'_> {
         }
     }
 
-    /// Renders a [`NodeKind::Extended`] node.
+    /// Collects the inline pieces `node` writes, flattening wrappers that
+    /// write no markup of their own so a delimiter wrapper inside one still
+    /// sees its real neighbors.
     ///
-    /// Built-in tokens roundtrip to their darkmatter source syntax: `mark`
-    /// emits `==children==` and `dim` emits `⌄children⌄` (U+2304). A token
-    /// without a Markdown spelling falls back to rendering its `children` as
-    /// plain inline Markdown.
-    fn render_extended(
+    /// Built-in [`NodeKind::Extended`] tokens roundtrip to their darkmatter
+    /// source syntax: `mark` is `==children==` and `dim` is `⌄children⌄`
+    /// (U+2304). A token without a Markdown spelling writes its `children`
+    /// as plain inline Markdown.
+    fn push_pieces(
         &mut self,
-        token: &str,
+        node: &RenderNode,
+        pieces: &mut Vec<InlinePiece>,
+    ) -> Result<(), RenderError> {
+        let pending = match &node.kind {
+            NodeKind::Emphasis { children } => {
+                self.pending_delimited(DelimitedKind::Emphasis, node, children)?
+            }
+            NodeKind::Strong { children } => {
+                self.pending_delimited(DelimitedKind::Strong, node, children)?
+            }
+            NodeKind::Delete { children } => {
+                self.pending_delimited(DelimitedKind::Delete, node, children)?
+            }
+            NodeKind::Extended {
+                token, children, ..
+            } => match &token[..] {
+                "mark" => self.pending_delimited(DelimitedKind::Mark, node, children)?,
+                "dim" => self.pending_delimited(DelimitedKind::Dim, node, children)?,
+                _ => {
+                    for child in children {
+                        self.push_pieces(child, pieces)?;
+                    }
+                    return Ok(());
+                }
+            },
+            NodeKind::Span { children } if !self.span_writes_html(node) => {
+                self.degrade_plain_span(node)?;
+                for child in children {
+                    self.push_pieces(child, pieces)?;
+                }
+                return Ok(());
+            }
+            NodeKind::Text { value } => {
+                pieces.push(InlinePiece::Literal(self.render_text(value)));
+                return Ok(());
+            }
+            NodeKind::SoftBreak => {
+                pieces.push(InlinePiece::Break(Break::Soft));
+                return Ok(());
+            }
+            NodeKind::HardBreak => {
+                pieces.push(InlinePiece::Break(Break::Hard));
+                return Ok(());
+            }
+            NodeKind::InlineCode { .. } => {
+                pieces.push(InlinePiece::Code(self.render(node)?));
+                return Ok(());
+            }
+            kind if (self.table_cell_depth > 0 || self.heading_depth > 0) && is_block(kind) => {
+                pieces.push(InlinePiece::Block(self.render_one_line_block(node)?));
+                return Ok(());
+            }
+            _ => {
+                pieces.push(InlinePiece::Text(self.render(node)?));
+                return Ok(());
+            }
+        };
+        let (leading, pending, trailing) = pending;
+        for edge in &leading {
+            self.push_pieces(edge, pieces)?;
+        }
+        pieces.push(InlinePiece::Delimited(pending));
+        for edge in &trailing {
+            self.push_pieces(edge, pieces)?;
+        }
+        Ok(())
+    }
+
+    /// Renders a delimiter wrapper's body; its delimiters are chosen later
+    /// by [`Self::join_pieces`].
+    ///
+    /// A delimiter run only opens when no whitespace follows it and only
+    /// closes when no whitespace precedes it, and a break between the run and
+    /// its text has the same effect. Edge whitespace and edge soft/hard
+    /// breaks, including those at the edge of a nested wrapper, are therefore
+    /// returned as the leading and trailing nodes, which the enclosing
+    /// sequence writes outside the delimiters (`a<b> b</b>` → `a **b**`), so
+    /// a moved break is spelled for its position there. A wrapper with
+    /// nothing else to show writes only its edges.
+    fn pending_delimited(
+        &mut self,
+        kind: DelimitedKind,
+        node: &RenderNode,
         children: &[RenderNode],
-    ) -> Result<String, RenderError> {
-        let inner = self.render_inline(children)?;
-        Ok(match token {
-            "mark" => format!("=={inner}=="),
-            "dim" => format!("\u{2304}{inner}\u{2304}"),
-            _ => inner,
+    ) -> Result<(Vec<RenderNode>, PendingDelimited, Vec<RenderNode>), RenderError> {
+        let mut core = None;
+        let mut leading = Vec::new();
+        let mut trailing = Vec::new();
+        if self.has_edge(children, Edge::Leading) || self.has_edge(children, Edge::Trailing) {
+            let mut nodes = children.to_vec();
+            leading = self.take_edge(&mut nodes, Edge::Leading);
+            trailing = self.take_edge(&mut nodes, Edge::Trailing);
+            core = Some(nodes);
+        }
+        let core = core.as_deref().unwrap_or(children);
+        self.mid_line += 1;
+        let body = self.render_inline_joined(core);
+        self.mid_line -= 1;
+        let pending = PendingDelimited {
+            kind,
+            body: body?,
+            span: node.span.clone(),
+        };
+        Ok((leading, pending, trailing))
+    }
+
+    /// Concatenates inline pieces, choosing each delimiter wrapper's
+    /// spelling from the characters on both sides of its delimiters.
+    ///
+    /// The first spelling in [`DelimitedKind::spellings`] that a reader can
+    /// open and close there is used, so content that already reads back
+    /// correctly keeps its usual delimiter. A sequence edge counts as
+    /// whitespace: every context that holds an inline sequence (line start,
+    /// a delimiter, `[`, `>`, `|`) flanks the same way.
+    ///
+    /// Line-start and line-end protection is decided on the logical line the
+    /// pieces assemble (see [`LineWriter`]), not per piece, so a marker split
+    /// across adjacent text values or flattened wrappers is still protected.
+    /// A sequence that is a whole block (`mid_line` is zero) also encodes
+    /// its trailing whitespace, which a reader would strip.
+    ///
+    /// Two code spans that would touch, directly or across pieces that write
+    /// nothing (an empty value, a flattened wrapper, a wrapper written
+    /// unstyled), get [`CODE_SPAN_SEPARATOR`] between them. The returned
+    /// [`FenceEdges`] carry the same check across a nested sequence's edges.
+    fn join_pieces(&mut self, pieces: &[InlinePiece]) -> Result<Joined, RenderError> {
+        let block = self.mid_line == 0;
+        let mut output = LineWriter::new(block, self.writes_line_starts());
+        // A block written on a table cell's line is set off from whatever
+        // the cell writes before and after it by `<br>`.
+        let mut after_block = false;
+        let mut seq = FenceSequence::default();
+        for (index, piece) in pieces.iter().enumerate() {
+            if after_block && piece.writes() {
+                // A following block writes its own separator.
+                if !matches!(piece, InlinePiece::Block(_)) {
+                    seq.write(&mut output, FenceEdges::default(), "<br>", false);
+                }
+                after_block = false;
+            }
+            // Whether this piece ends its block: nothing after it writes
+            // anything, and the sequence is a whole block rather than one a
+            // closing `]`, delimiter, or tag follows.
+            let ends_block = block && !pieces[index + 1..].iter().any(InlinePiece::writes);
+            let pending = match piece {
+                InlinePiece::Text(text) => {
+                    seq.write(&mut output, FenceEdges::default(), text, false);
+                    continue;
+                }
+                InlinePiece::Code(text) => {
+                    let edges = FenceEdges {
+                        starts: true,
+                        ends: true,
+                    };
+                    seq.write(&mut output, edges, text, false);
+                    continue;
+                }
+                InlinePiece::Break(kind) => {
+                    let before = output.text.len();
+                    self.write_break(&mut output, *kind, ends_block);
+                    if output.text.len() > before {
+                        seq.wrote_other();
+                    }
+                    continue;
+                }
+                InlinePiece::Literal(text) => {
+                    seq.write(&mut output, FenceEdges::default(), text, true);
+                    continue;
+                }
+                InlinePiece::Block(joined) => {
+                    if !output.text.is_empty() {
+                        seq.write(&mut output, FenceEdges::default(), "<br>", false);
+                    }
+                    seq.write(&mut output, joined.fences, &joined.text, false);
+                    after_block = true;
+                    continue;
+                }
+                InlinePiece::Delimited(pending) => pending,
+            };
+            let body = &pending.body;
+            if body.text.is_empty() {
+                continue;
+            }
+            let sides = Sides {
+                before: Neighbor::before(&output.text),
+                first: Neighbor::after(&body.text),
+                last: Neighbor::before(&body.text),
+                after: Neighbor::following(&pieces[index + 1..]),
+            };
+            let spelling = pending
+                .kind
+                .spellings()
+                .iter()
+                .copied()
+                .find(|spelling| spelling.fits(&sides))
+                .unwrap_or(Spelling::Unstyled);
+            match spelling {
+                Spelling::Run(delimiter, _) => {
+                    let text = format!("{delimiter}{}{delimiter}", body.text);
+                    seq.write(&mut output, FenceEdges::default(), &text, false);
+                }
+                Spelling::Html(tag) => {
+                    let text = format!("<{tag}>{}</{tag}>", body.text);
+                    seq.write(&mut output, FenceEdges::default(), &text, false);
+                }
+                Spelling::Unstyled => {
+                    self.record_unstyled(pending)?;
+                    // The body was escaped mid-line; written bare, it is
+                    // literal content of this line again, and its code
+                    // fences are this sequence's neighbors.
+                    seq.write(&mut output, body.fences, &body.text, true);
+                }
+            }
+        }
+        if block {
+            output.finish();
+        }
+        Ok(Joined {
+            text: output.text,
+            fences: seq.edges(),
         })
     }
 
+    /// Writes a soft or hard break in the spelling its context reads back.
+    ///
+    /// | Context | Soft break | Hard break |
+    /// |---|---|---|
+    /// | table cell | space | `<br>` |
+    /// | heading text (one ATX line) | space | `<br>` |
+    /// | Markdown line, content on both sides | line ending | `\` + line ending |
+    /// | Markdown line, nothing after it in the block | space | `<br>` |
+    /// | Markdown line, the line so far is blank | space | `\` + line ending |
+    ///
+    /// A reader strips a line ending at a block's end, and reads a backslash
+    /// there literally; a line ending on a blank line ends the paragraph;
+    /// and a line holding only an HTML open tag (a MarkdownPlus span opener)
+    /// starts a raw HTML block. The space written instead of a soft break is
+    /// literal content, so [`LineWriter`] encodes it as `&#32;` at a line
+    /// edge.
+    fn write_break(&self, output: &mut LineWriter, kind: Break, ends_block: bool) {
+        let one_line = self.table_cell_depth > 0 || self.heading_depth > 0;
+        match kind {
+            Break::Soft if one_line || output.line_is_blank() || ends_block => {
+                output.push_literal(" ");
+            }
+            Break::Soft => output.end_line("\n"),
+            Break::Hard if one_line || ends_block => output.push_markup("<br>"),
+            Break::Hard => output.end_line("\\\n"),
+        }
+    }
+
+    /// Records that a wrapper with no spelling a reader can open and close
+    /// at its position was written as plain text, per the strictness model.
+    fn record_unstyled(&mut self, pending: &PendingDelimited) -> Result<(), RenderError> {
+        let message = format!(
+            "{} has no Markdown spelling between these neighbors; written unstyled",
+            pending.kind.label()
+        );
+        match self.opts.strictness {
+            RenderStrictness::Strict => Err(RenderError::LossyRejected { message }),
+            RenderStrictness::Warn => {
+                self.diagnostics
+                    .push(Diagnostic::lossy(message, Some(pending.span.clone())));
+                Ok(())
+            }
+            RenderStrictness::Lossy => Ok(()),
+        }
+    }
+
+    /// Whether `node` writes no markup at its own edges, so whitespace or a
+    /// break at its edge also sits at the edge of an enclosing delimiter
+    /// wrapper.
+    fn passes_edges_through(&self, node: &RenderNode) -> bool {
+        match &node.kind {
+            NodeKind::Emphasis { .. }
+            | NodeKind::Strong { .. }
+            | NodeKind::Delete { .. }
+            | NodeKind::Extended { .. } => true,
+            NodeKind::Span { .. } => !self.span_writes_html(node),
+            _ => false,
+        }
+    }
+
+    /// Whether `node` writes nothing: empty text or code (which has no code
+    /// span spelling), or a pass-through wrapper whose children all write
+    /// nothing.
+    fn is_blank(&self, node: &RenderNode) -> bool {
+        match &node.kind {
+            NodeKind::Text { value } | NodeKind::InlineCode { value } => value.is_empty(),
+            _ => {
+                self.passes_edges_through(node)
+                    && node.children().iter().all(|child| self.is_blank(child))
+            }
+        }
+    }
+
+    /// The index of the first (or last) child that writes something.
+    fn edge_index(&self, nodes: &[RenderNode], edge: Edge) -> Option<usize> {
+        match edge {
+            Edge::Leading => nodes.iter().position(|node| !self.is_blank(node)),
+            Edge::Trailing => nodes.iter().rposition(|node| !self.is_blank(node)),
+        }
+    }
+
+    /// Whether `nodes` begin (or end) with whitespace or a break.
+    fn has_edge(&self, nodes: &[RenderNode], edge: Edge) -> bool {
+        let Some(node) = self.edge_index(nodes, edge).map(|index| &nodes[index]) else {
+            return false;
+        };
+        match &node.kind {
+            NodeKind::SoftBreak | NodeKind::HardBreak => true,
+            NodeKind::Text { value } => match edge {
+                Edge::Leading => value.starts_with(char::is_whitespace),
+                Edge::Trailing => value.ends_with(char::is_whitespace),
+            },
+            _ => self.passes_edges_through(node) && self.has_edge(node.children(), edge),
+        }
+    }
+
+    /// Removes the whitespace and breaks at one edge of `nodes`, descending
+    /// into pass-through wrappers, and returns them in document order.
+    fn take_edge(&self, nodes: &mut Vec<RenderNode>, edge: Edge) -> Vec<RenderNode> {
+        let mut moved: Vec<RenderNode> = Vec::new();
+        let place = |moved: &mut Vec<RenderNode>, items: Vec<RenderNode>| match edge {
+            Edge::Leading => moved.extend(items),
+            Edge::Trailing => {
+                moved.splice(0..0, items);
+            }
+        };
+        while let Some(index) = self.edge_index(nodes, edge) {
+            let passes_through = self.passes_edges_through(&nodes[index]);
+            match &nodes[index].kind {
+                NodeKind::SoftBreak | NodeKind::HardBreak => {
+                    let node = nodes.remove(index);
+                    place(&mut moved, vec![node]);
+                }
+                NodeKind::Text { value } => {
+                    let kept = match edge {
+                        Edge::Leading => value.trim_start(),
+                        Edge::Trailing => value.trim_end(),
+                    };
+                    if kept.len() == value.len() {
+                        break;
+                    }
+                    let (kept, outside) = match edge {
+                        Edge::Leading => (
+                            kept.to_string(),
+                            value[..value.len() - kept.len()].to_string(),
+                        ),
+                        Edge::Trailing => (kept.to_string(), value[kept.len()..].to_string()),
+                    };
+                    let mut outside_node = nodes[index].clone();
+                    outside_node.kind = NodeKind::Text { value: outside };
+                    place(&mut moved, vec![outside_node]);
+                    if kept.is_empty() {
+                        nodes.remove(index);
+                    } else {
+                        nodes[index].kind = NodeKind::Text { value: kept };
+                        break;
+                    }
+                }
+                _ if passes_through => {
+                    let Some(children) = nodes[index].children_mut() else {
+                        break;
+                    };
+                    let inner = self.take_edge(children, edge);
+                    if inner.is_empty() {
+                        break;
+                    }
+                    place(&mut moved, inner);
+                    // A wrapper that still writes something ends the edge; an
+                    // emptied one is now blank and the next sibling is tried.
+                    if !self.is_blank(&nodes[index]) {
+                        break;
+                    }
+                }
+                _ => break,
+            }
+        }
+        moved
+    }
+
     /// Renders a sequence of block-level nodes, joined by blank lines.
+    ///
+    /// A break child joins the phrasing children beside it into one inline
+    /// sequence (see [`break_run`]); written as a block of its own, a reader
+    /// would lose it or read its backslash literally. Other phrasing
+    /// children stay separate blocks.
     fn render_blocks(&mut self, children: &[RenderNode]) -> Result<String, RenderError> {
         let mut parts = Vec::with_capacity(children.len());
-        for child in children {
-            parts.push(self.render(child)?);
+        let mut rest = children;
+        while !rest.is_empty() {
+            let run = break_run(rest);
+            parts.push(if run > 1 {
+                self.render_inline(&rest[..run])?
+            } else {
+                self.render(&rest[0])?
+            });
+            rest = &rest[run..];
         }
         let mut result = String::new();
         for (i, part) in parts.iter().enumerate() {
@@ -433,78 +849,56 @@ impl Writer<'_> {
     /// directly, preserving the component's no-separator contract instead of
     /// the document-block blank-line spacing of [`Self::render_blocks`].
     fn render_sequence(&mut self, children: &[RenderNode]) -> Result<String, RenderError> {
-        let mut output = String::new();
-        for child in children {
-            output.push_str(&self.render(child)?);
-        }
-        Ok(output)
+        self.render_inline(children)
     }
 
     /// Renders a sequence of inline nodes, concatenated without separators.
     fn render_inline(&mut self, children: &[RenderNode]) -> Result<String, RenderError> {
-        let mut output = String::new();
+        Ok(self.render_inline_joined(children)?.text)
+    }
+
+    /// [`Self::render_inline`], keeping the code-fence edges for a sequence
+    /// that writes the result as one of its pieces.
+    fn render_inline_joined(&mut self, children: &[RenderNode]) -> Result<Joined, RenderError> {
+        let mut pieces = Vec::with_capacity(children.len());
         for child in children {
-            output.push_str(&self.render(child)?);
+            self.push_pieces(child, &mut pieces)?;
         }
-        Ok(output)
+        self.join_pieces(&pieces)
     }
 
-    /// Renders the children of an emphasis-style wrapper (`_`, `**`, `~~`).
-    ///
-    /// A `*`, `_`, or `~` that is the first character of a leading `Text`
-    /// child or the last character of a trailing one touches the wrapper's own
-    /// delimiter, where a reader would merge it into the delimiter run
-    /// (`**a***`). Only that edge character is backslash-escaped; the same
-    /// character anywhere else in the text is written as-is.
-    fn render_delimited_inline(&mut self, children: &[RenderNode]) -> Result<String, RenderError> {
-        let last = children.len().saturating_sub(1);
-        let mut output = String::new();
-        for (index, child) in children.iter().enumerate() {
-            match &child.kind {
-                NodeKind::Text { value } if index == 0 || index == last => {
-                    output.push_str(&self.render_edge_text(value, index == 0, index == last));
-                }
-                _ => output.push_str(&self.render(child)?),
-            }
+    /// Renders a heading's text. A reader does not parse it for block
+    /// starts, but a closing run of `#` after whitespace would be read as the
+    /// optional closing sequence and dropped.
+    /// A reader also strips the text's edge whitespace, so it is written as
+    /// character references.
+    fn render_heading_text(&mut self, children: &[RenderNode]) -> Result<String, RenderError> {
+        // Only an inline extension can carry a block into a heading.
+        if let Some(block) = first_block(children) {
+            self.record_one_line_block(block, "heading")?;
         }
-        Ok(output)
+        self.mid_line += 1;
+        self.heading_depth += 1;
+        let text = self.render_inline(children);
+        self.heading_depth -= 1;
+        self.mid_line -= 1;
+        let mut text = text?;
+        encode_line_end(&mut text);
+        encode_line_start(&mut text);
+        let run = text.len() - text.trim_end_matches('#').len();
+        let before = &text[..text.len() - run];
+        if run > 0 && (before.is_empty() || before.ends_with([' ', '\t'])) {
+            Ok(format!("{before}\\{}", &text[before.len()..]))
+        } else {
+            Ok(text)
+        }
     }
 
-    /// Renders a text node whose leading and/or trailing character abuts an
-    /// emphasis delimiter, escaping that character when it is one of `*`,
-    /// `_`, or `~`. The middle goes through [`Self::render_text`] unchanged.
-    fn render_edge_text(&self, value: &str, leading: bool, trailing: bool) -> String {
-        let is_delimiter = |c: char| matches!(c, '*' | '_' | '~');
-        let mut middle = value;
-        let mut lead = None;
-        if leading && let Some(first) = middle.chars().next().filter(|c| is_delimiter(*c)) {
-            lead = Some(first);
-            middle = &middle[first.len_utf8()..];
-        }
-        let mut trail = None;
-        if trailing && let Some(last) = middle.chars().next_back().filter(|c| is_delimiter(*c)) {
-            trail = Some(last);
-            middle = &middle[..middle.len() - last.len_utf8()];
-        }
-        let mut out = String::with_capacity(value.len() + 2);
-        if let Some(c) = lead {
-            out.push('\\');
-            out.push(c);
-        }
-        out.push_str(&self.render_text(middle));
-        if let Some(c) = trail {
-            out.push('\\');
-            out.push(c);
-        }
-        out
-    }
-
-    /// Renders a two-column block quote.
-    ///
-    /// Portable [`MarkdownDialect::Markdown`] has no side-by-side layout: the
+    /// Renders a two-column block quote for portable
+    /// [`MarkdownDialect::Markdown`], which has no side-by-side layout: the
     /// left column's blocks are emitted first, then a blank line, then the
-    /// right column's blocks. [`MarkdownDialect::MarkdownPlus`] emits a block
-    /// HTML flex container equivalent to the browser shape.
+    /// right column's blocks. MarkdownPlus writes the browser's flex
+    /// container instead (see [`Self::lower_to_html`]).
     fn render_columns(
         &mut self,
         children: &[RenderNode],
@@ -512,11 +906,6 @@ impl Writer<'_> {
     ) -> Result<String, RenderError> {
         let split = hints.left_count.min(children.len());
         let (left, right) = children.split_at(split);
-
-        if self.opts.dialect == MarkdownDialect::MarkdownPlus {
-            return self.render_columns_html(left, right, hints);
-        }
-
         let left = self.render_blocks(left)?;
         let right = self.render_blocks(right)?;
         Ok(match (left.is_empty(), right.is_empty()) {
@@ -527,49 +916,221 @@ impl Writer<'_> {
         })
     }
 
-    /// Renders a two-column layout as a block HTML flex container for
-    /// MarkdownPlus.
+    /// Renders a table cell's content on its one line.
+    fn render_table_cell(&mut self, children: &[RenderNode]) -> Result<Joined, RenderError> {
+        // A cell holding only one paragraph is that paragraph's text; any
+        // other block has no GFM cell spelling and is written on the cell's
+        // line (see `Self::render_one_line_block`).
+        let inline_scope = match children {
+            [only] if matches!(only.kind, NodeKind::Paragraph { .. }) => only.children(),
+            _ => children,
+        };
+        if let Some(block) = first_block(inline_scope) {
+            self.record_one_line_block(block, "table cell")?;
+        }
+        // Descendants of a table cell render in cell-escaping mode so
+        // literal pipes and newlines cannot break GFM table structure.
+        self.table_cell_depth += 1;
+        let result = self.render_inline_joined(children);
+        self.table_cell_depth -= 1;
+        // A table reader trims each cell, so edge whitespace is written as
+        // character references. A code fence is not whitespace, so the
+        // fence edges are unchanged.
+        let mut cell = result?;
+        encode_line_end(&mut cell.text);
+        encode_line_start(&mut cell.text);
+        Ok(cell)
+    }
+
+    /// Writes a block that sits inside a table cell, or inside a heading
+    /// (through an inline extension), on that one line.
     ///
-    /// The shape mirrors the browser renderer: an outer
-    /// `<div class="columns" style="display:flex;gap:{gap}ch">` with two
-    /// `<div class="column">` children. The left column carries the width CSS
-    /// from [`ColumnsHints::left_width`]; the right column flexes to fill.
-    /// `Layout` is not applied — Markdown ignores layout by contract.
-    ///
-    /// Child blocks are rendered through the active Markdown renderer and
-    /// joined with blank lines, the same as any block sequence. A column with
-    /// multiple blocks therefore contains a blank line inside the raw HTML
-    /// container. This is the accepted parser constraint: a strict CommonMark
-    /// parser may treat that blank line as terminating the raw HTML block, so
-    /// the trailing `</div>` markup can leak into the rendered output. The
-    /// shape is correct for non-strict/MarkdownPlus consumers; single-block
-    /// columns are unaffected.
-    fn render_columns_html(
+    /// Both hold only inline content, so a block keeps its text and loses its
+    /// block structure: the inline content of each paragraph, heading,
+    /// quote, disclosure summary and body, footnote body, and nested table
+    /// cell is written as it would be there, and the enclosing inline
+    /// sequence sets each block off with `<br>`. A code
+    /// block becomes a code span (line endings as spaces, info string
+    /// dropped), the form [`crate::markdown::code_span`] gives a fenced block
+    /// written inline; a list item is prefixed with its marker as text; a
+    /// thematic break writes nothing between its two `<br>`. The cell's or
+    /// heading's own protection (pipes, line endings) applies to all of it.
+    /// [`Self::record_one_line_block`] reports the loss.
+    fn render_one_line_block(&mut self, node: &RenderNode) -> Result<Joined, RenderError> {
+        match &node.kind {
+            NodeKind::Heading { children, .. }
+            | NodeKind::BlockQuote { children }
+            | NodeKind::FootnoteDefinition { children, .. } => self.render_inline_joined(children),
+            NodeKind::Section {
+                heading, children, ..
+            } => {
+                let heading = self.render_inline_joined(heading)?;
+                let body = self.render_inline_joined(children)?;
+                Ok(join_one_line_parts([heading, body]))
+            }
+            NodeKind::Disclosure {
+                summary, children, ..
+            } => {
+                let summary = self.render_inline_joined(summary)?;
+                let body = self.render_inline_joined(children)?;
+                Ok(join_one_line_parts([summary, body]))
+            }
+            NodeKind::List {
+                ordered,
+                start,
+                children,
+            } => {
+                let mut items = Vec::with_capacity(children.len());
+                for (offset, item) in children.iter().enumerate() {
+                    let mut marker = if *ordered {
+                        format!("{}. ", start.unwrap_or(1) + offset as u64)
+                    } else {
+                        "- ".to_string()
+                    };
+                    if let NodeKind::ListItem {
+                        checked: Some(checked),
+                        ..
+                    } = item.kind
+                    {
+                        marker.push_str(if checked { "[x] " } else { "[ ] " });
+                    }
+                    let body = self.render_inline_joined(item.children())?;
+                    items.push(Joined {
+                        text: format!("{}{}", self.render_text(&marker), body.text),
+                        fences: FenceEdges {
+                            starts: false,
+                            ends: body.fences.ends,
+                        },
+                    });
+                }
+                Ok(join_one_line_parts(items))
+            }
+            NodeKind::Code { value, .. } => {
+                // The final line ending closes the block's last line; it is
+                // not content, as in the fenced form.
+                let value = value.trim_end_matches(['\r', '\n']);
+                let text = crate::markdown::code_span(&if self.table_cell_depth > 0 {
+                    escape_cell_pipes(value)
+                } else {
+                    value.to_string()
+                });
+                Ok(Joined {
+                    text,
+                    fences: FenceEdges {
+                        starts: true,
+                        ends: true,
+                    },
+                })
+            }
+            NodeKind::ThematicBreak => Ok(Joined::default()),
+            NodeKind::Table { children, .. } => {
+                let mut cells = Vec::new();
+                for row in children {
+                    for cell in row.children() {
+                        cells.push(self.render_table_cell(cell.children())?);
+                    }
+                }
+                Ok(join_one_line_parts(cells))
+            }
+            // A paragraph is already one inline line.
+            NodeKind::Paragraph { children } if node.attrs.progress_hints_ref().is_none() => {
+                self.render_inline_joined(children)
+            }
+            _ => Ok(Joined::markup(self.render(node)?)),
+        }
+    }
+
+    /// Applies the strictness model to a block that a table cell or heading
+    /// (`container`) writes on its line (see [`Self::render_one_line_block`]),
+    /// once per container.
+    fn record_one_line_block(
         &mut self,
-        left: &[RenderNode],
-        right: &[RenderNode],
-        hints: &crate::tree::ColumnsHints,
+        block: &RenderNode,
+        container: &str,
+    ) -> Result<(), RenderError> {
+        let message = format!(
+            "{} block in a {container} has no Markdown spelling, since a {container} \
+             holds one line of inline content; written on that line",
+            kind_name(&block.kind)
+        );
+        match self.opts.strictness {
+            RenderStrictness::Strict => Err(RenderError::LossyRejected { message }),
+            RenderStrictness::Warn => {
+                self.diagnostics
+                    .push(Diagnostic::lossy(message, Some(block.span.clone())));
+                Ok(())
+            }
+            RenderStrictness::Lossy => Ok(()),
+        }
+    }
+
+    /// The label a footnote reference or definition writes for
+    /// `identifier`: the identifier itself when a reader reads it back
+    /// exactly, otherwise the [`footnote_label_spelling`] degradation,
+    /// applied per the strictness model. The reference and its definition
+    /// degrade the same way, so they still pair.
+    fn footnote_label(
+        &mut self,
+        node: &RenderNode,
+        identifier: &str,
     ) -> Result<String, RenderError> {
-        let container_css = super::shared::columns_container_css(hints, "");
-        let left_css = super::shared::left_column_css(hints.left_width);
-        let right_css = super::shared::right_column_css();
+        let label = footnote_label_spelling(identifier);
+        if label != identifier {
+            let message = format!(
+                "footnote identifier {identifier:?} has no exact Markdown label spelling; \
+                 written as {label:?}"
+            );
+            match self.opts.strictness {
+                RenderStrictness::Strict => return Err(RenderError::LossyRejected { message }),
+                RenderStrictness::Warn => {
+                    self.diagnostics
+                        .push(Diagnostic::lossy(message, Some(node.span.clone())));
+                }
+                RenderStrictness::Lossy => {}
+            }
+        }
+        Ok(label)
+    }
 
-        let left_body = self.render_blocks(left)?;
-        let right_body = self.render_blocks(right)?;
-
-        Ok(format!(
-            concat!(
-                r#"<div class="columns" style="{container}">"#,
-                r#"<div class="column" style="{left_css}">{left}</div>"#,
-                r#"<div class="column" style="{right_css}">{right}</div>"#,
-                "</div>",
-            ),
-            container = container_css,
-            left_css = left_css,
-            left = left_body,
-            right_css = right_css,
-            right = right_body,
-        ))
+    /// Writes `nodes` as the HTML the browser renderer writes for them, for a
+    /// MarkdownPlus raw HTML block (a disclosure summary, the columns
+    /// container) whose content a reader passes through without parsing it
+    /// as Markdown. Markdown syntax there would show literally, and code
+    /// written as a code span would be read as markup, so the content takes
+    /// the browser's HTML: `<code>` with escaped text, `<strong>`, `<a>`,
+    /// `<mark>`, and so on.
+    ///
+    /// A blank line ends a raw HTML block, so none is left inside the
+    /// content (see [`keep_html_block_open`]). Raw [`NodeKind::Html`]
+    /// payloads are written byte for byte. A payload that would itself leave
+    /// a blank line cannot be embedded faithfully: under
+    /// [`RenderStrictness::Strict`] that is a [`RenderError::LossyRejected`];
+    /// otherwise its line ending is written as a character reference, and
+    /// [`RenderStrictness::Warn`] records a lossy diagnostic.
+    ///
+    /// Both callers are blocks, which a table cell writes on one line
+    /// instead (see [`Self::render_one_line_block`]), so this never runs in a
+    /// cell.
+    fn lower_to_html(&mut self, nodes: &[RenderNode]) -> Result<String, RenderError> {
+        let lowered = super::browser::lower_to_html(nodes, self.opts.strictness)?;
+        self.diagnostics.extend(lowered.diagnostics);
+        let (html, unfaithful) = keep_html_block_open(&lowered.html, &lowered.raw);
+        for span in unfaithful {
+            let message = "raw HTML holds a blank line, which would end the MarkdownPlus HTML \
+                           block around it; its line ending was written as a character \
+                           reference, which script, style, comments, and unquoted attributes \
+                           do not decode"
+                .to_string();
+            match self.opts.strictness {
+                RenderStrictness::Strict => return Err(RenderError::LossyRejected { message }),
+                RenderStrictness::Warn => {
+                    self.diagnostics
+                        .push(Diagnostic::lossy(message, Some(span)));
+                }
+                RenderStrictness::Lossy => {}
+            }
+        }
+        Ok(html)
     }
 
     /// Renders a list, numbering ordered items from `start`.
@@ -660,7 +1221,10 @@ impl Writer<'_> {
     /// color, background color, or an underline variant) lowers to a single
     /// inline `<span>` carrying a `class` and/or `style` attribute, with both
     /// attributes coalesced onto one element when present. Its body is rendered
-    /// with `<`, `>`, and `&` HTML-escaped so literal markup stays inert.
+    /// with `<`, `>`, and `&` HTML-escaped so literal markup stays inert. The
+    /// class value is attribute-escaped, its line endings are written as
+    /// character references, and in a table cell its pipes are written
+    /// `&#124;` (see [`encode_generated_attribute`]).
     /// Emphasis layers without a MarkdownPlus CSS form here (`dim`, `blink`,
     /// `inverse`) carry no inline style and degrade to inner text.
     ///
@@ -674,118 +1238,172 @@ impl Writer<'_> {
         node: &RenderNode,
         children: &[RenderNode],
     ) -> Result<String, RenderError> {
+        if !self.span_writes_html(node) {
+            return self.render_inline(std::slice::from_ref(node));
+        }
+        // The children become the body of an inline HTML element, so
+        // descendant text HTML-escapes its markup characters.
+        self.html_depth += 1;
+        self.mid_line += 1;
+        let inner = self.render_inline(children);
+        self.mid_line -= 1;
+        self.html_depth -= 1;
+        let inner = inner?;
+
+        let mut attrs = String::new();
+        if !node.attrs.classes.is_empty() {
+            let joined = node.attrs.classes.join(" ");
+            let classes =
+                encode_generated_attribute(&escape_attribute(&joined), self.table_cell_depth > 0);
+            attrs.push_str(&format!(" class=\"{classes}\""));
+        }
+        if let Some(css) = span_style_css(node) {
+            attrs.push_str(&format!(" style=\"{css}\""));
+        }
+        Ok(format!("<span{attrs}>{inner}</span>"))
+    }
+
+    /// Whether a span lowers to an HTML element: only in MarkdownPlus, and
+    /// only with a class or a style that has a CSS form. Otherwise it writes
+    /// just its children.
+    fn span_writes_html(&self, node: &RenderNode) -> bool {
+        self.opts.dialect == MarkdownDialect::MarkdownPlus
+            && (!node.attrs.classes.is_empty() || span_style_css(node).is_some())
+    }
+
+    /// Applies the strictness model to a classed or styled span that plain
+    /// Markdown writes as its inner text.
+    fn degrade_plain_span(&mut self, node: &RenderNode) -> Result<(), RenderError> {
         let classes = &node.attrs.classes;
-        let style_css = node
-            .attrs
-            .style_ref()
-            .filter(|style| !style.is_empty())
-            .and_then(markdown_plus_style_css);
-
-        match self.opts.dialect {
-            MarkdownDialect::MarkdownPlus => {
-                if classes.is_empty() && style_css.is_none() {
-                    return self.render_inline(children);
-                }
-                // The children become the body of an inline HTML element, so
-                // descendant text HTML-escapes its markup characters.
-                self.html_depth += 1;
-                let inner = self.render_inline(children);
-                self.html_depth -= 1;
-                let inner = inner?;
-
-                let mut attrs = String::new();
-                if !classes.is_empty() {
-                    attrs.push_str(&format!(" class=\"{}\"", classes.join(" ")));
-                }
-                if let Some(css) = &style_css {
-                    attrs.push_str(&format!(" style=\"{css}\""));
-                }
-                Ok(format!("<span{attrs}>{inner}</span>"))
+        let has_style = span_style_css(node).is_some();
+        if self.opts.dialect == MarkdownDialect::MarkdownPlus || (classes.is_empty() && !has_style)
+        {
+            return Ok(());
+        }
+        let message = span_lossy_message(classes, has_style);
+        match self.opts.strictness {
+            RenderStrictness::Strict => Err(RenderError::LossyRejected { message }),
+            RenderStrictness::Warn => {
+                self.diagnostics
+                    .push(Diagnostic::lossy(message, Some(node.span.clone())));
+                Ok(())
             }
-            MarkdownDialect::Markdown => {
-                let inner = self.render_inline(children)?;
-                if classes.is_empty() && style_css.is_none() {
-                    return Ok(inner);
-                }
-                let message = span_lossy_message(classes, style_css.is_some());
-                match self.opts.strictness {
-                    RenderStrictness::Strict => Err(RenderError::LossyRejected { message }),
-                    RenderStrictness::Warn => {
-                        self.diagnostics
-                            .push(Diagnostic::lossy(message, Some(node.span.clone())));
-                        Ok(inner)
-                    }
-                    RenderStrictness::Lossy => Ok(inner),
-                }
-            }
+            RenderStrictness::Lossy => Ok(()),
         }
     }
 
-    /// Renders a text node, applying HTML-body escaping inside a MarkdownPlus
-    /// inline-HTML span, literal-backslash escaping everywhere, and GFM
-    /// table-cell escaping inside a table cell.
+    /// Renders a text value so a reader sees exactly that value: see
+    /// [`escape_markdown_text`]. Inside a MarkdownPlus inline-HTML span `<`,
+    /// `>`, and `&` are HTML-escaped; inside a table cell pipes and newlines
+    /// are made row-safe; inside a heading a line ending is a character
+    /// reference. Line-start and line-end protection depend on neighboring
+    /// values, so [`Self::join_pieces`] applies it to the assembled line.
     fn render_text(&self, value: &str) -> String {
-        let mut text = if self.html_depth > 0 {
-            escape_inline_html_body(value)
-        } else {
-            value.to_string()
-        };
-        // After the HTML escape, so a backslash is judged against the
-        // character a reader actually sees next (`&`, not `<`); before the
-        // cell escape, whose `\|` must stay a pipe escape.
-        text = escape_literal_backslashes(&text);
+        let text = escape_markdown_text(value, self.html_depth > 0);
+        // The cell escape runs last: its `\|` must stay a pipe escape.
         if self.table_cell_depth > 0 {
-            text = escape_table_cell_text(&text);
+            escape_table_cell_text(&text)
+        } else if self.heading_depth > 0 {
+            encode_heading_line_feeds(&text)
+        } else {
+            text
         }
-        text
+    }
+
+    /// Whether text written now can begin a Markdown line: not in a table
+    /// cell (newlines become `<br>` there).
+    fn writes_line_starts(&self) -> bool {
+        self.table_cell_depth == 0
     }
 
     /// Renders raw HTML, degrading it under plain Markdown.
+    ///
+    /// Plain Markdown reports raw HTML as not portable, except a comment-only
+    /// payload ([`is_html_comment_only`]), which every reader shows as nothing.
+    ///
+    /// Inside a heading or a table cell, which are one Markdown line, a line
+    /// ending in the payload would end the heading or the table row. It
+    /// cannot be kept without changing the payload's bytes: under
+    /// [`RenderStrictness::Strict`] that is a [`RenderError::LossyRejected`];
+    /// otherwise each ending is written as `&#13;` / `&#10;`, and
+    /// [`RenderStrictness::Warn`] records a lossy diagnostic. A payload
+    /// without a line ending is written byte for byte, except that in a
+    /// table cell each `|` gets the cell escape (see [`Self::cell_safe_raw`]).
     fn render_html(
         &mut self,
         node: &RenderNode,
         value: &str,
         _block: bool,
     ) -> Result<String, RenderError> {
-        match self.opts.dialect {
-            // Inline HTML is valid MarkdownPlus, so it is emitted verbatim.
-            MarkdownDialect::MarkdownPlus => Ok(value.to_string()),
-            MarkdownDialect::Markdown => {
-                let message = "raw HTML is not portable plain Markdown".to_string();
-                match self.opts.strictness {
-                    RenderStrictness::Strict => Err(RenderError::LossyRejected { message }),
-                    // Under Warn/Lossy the raw value is emitted (CommonMark
-                    // permits raw HTML); Warn additionally records it.
-                    RenderStrictness::Warn => {
-                        self.diagnostics
-                            .push(Diagnostic::lossy(message, Some(node.span.clone())));
-                        Ok(value.to_string())
-                    }
-                    RenderStrictness::Lossy => Ok(value.to_string()),
+        // A comment is read as nothing by every CommonMark reader, so it is as
+        // portable as the separator this writer puts between code spans.
+        if self.opts.dialect == MarkdownDialect::Markdown && !is_html_comment_only(value) {
+            let message = "raw HTML is not portable plain Markdown".to_string();
+            match self.opts.strictness {
+                RenderStrictness::Strict => return Err(RenderError::LossyRejected { message }),
+                // Under Warn/Lossy the raw value is emitted (CommonMark
+                // permits raw HTML); Warn additionally records it.
+                RenderStrictness::Warn => {
+                    self.diagnostics
+                        .push(Diagnostic::lossy(message, Some(node.span.clone())));
                 }
+                RenderStrictness::Lossy => {}
             }
+        }
+        let one_line = self.table_cell_depth > 0 || self.heading_depth > 0;
+        if !one_line || !value.contains(['\r', '\n']) {
+            return Ok(self.cell_safe_raw(value.to_string()));
+        }
+        let message = "raw HTML holds a line ending, which would end the heading or table row \
+                       it is in; it was written as a character reference, which script, style, \
+                       comments, and unquoted attributes do not decode"
+            .to_string();
+        match self.opts.strictness {
+            RenderStrictness::Strict => return Err(RenderError::LossyRejected { message }),
+            RenderStrictness::Warn => {
+                self.diagnostics
+                    .push(Diagnostic::lossy(message, Some(node.span.clone())));
+            }
+            RenderStrictness::Lossy => {}
+        }
+        // A character reference, not the `<br>` a table cell writes for a
+        // text line ending: in element text and quoted attribute values an
+        // HTML reader decodes it to the payload's own character, where `<br>`
+        // would add a line break the payload does not have. Each CR and LF is
+        // encoded alone, so a CRLF split across two payloads reads the same
+        // as one.
+        Ok(self.cell_safe_raw(value.replace('\r', "&#13;").replace('\n', "&#10;")))
+    }
+
+    /// Makes raw HTML (an authored payload, or a placeholder carrying an
+    /// authored label) safe in a table cell with [`escape_cell_pipes`], the
+    /// rule code spans use: a reader that splits the row removes the escape
+    /// again, so the payload reaches the HTML reader unchanged even inside a
+    /// comment, `<script>`, or attribute, where `&#124;` would not be decoded.
+    /// Outside a table cell a pipe has no meaning and the payload is kept.
+    fn cell_safe_raw(&self, html: String) -> String {
+        if self.table_cell_depth > 0 {
+            escape_cell_pipes(&html)
+        } else {
+            html
         }
     }
 
     /// Formats a link/image target, appending a quoted title when present.
     ///
-    /// Inside a table cell the URL and title are escaped the same way a
-    /// `Text` node is — a literal `|` or newline in either value would
-    /// otherwise split the GFM pipe-delimited row. Outside a table cell the
-    /// destination is escaped per CommonMark by
-    /// [`escape_markdown_destination`] so parentheses, backslashes, and
-    /// whitespace cannot truncate or break the destination.
+    /// The destination is escaped per CommonMark by
+    /// [`escape_markdown_destination`] so parentheses, backslashes,
+    /// whitespace, and entity spellings cannot truncate or change it, and the
+    /// title by [`escape_link_title`], which also keeps it on one line in
+    /// every context. Inside a table cell the pipes of both are then escaped
+    /// by [`escape_cell_pipes`], since a literal `|` would split the GFM row.
     fn link_target(&self, url: &str, title: &Option<String>) -> String {
         if self.table_cell_depth > 0 {
-            // A cell destination faces both concerns: CommonMark bare-destination
-            // safety (escape `(`, `)`, `\` — matching standalone Prose) and GFM
-            // row safety (`|` → `\|`, newline → `<br>`). The title keeps the
-            // GFM-only escaping it already had.
             let dest = escape_cell_link_destination(url);
             return match title {
                 Some(title) => format!(
                     "{dest} \"{}\"",
-                    escape_table_cell_text(&escape_link_title(title))
+                    escape_cell_pipes(&escape_link_title(title))
                 ),
                 None => dest,
             };
@@ -797,7 +1415,9 @@ impl Writer<'_> {
         }
     }
 
-    /// Renders an unsupported node according to strictness.
+    /// Renders an unsupported node according to strictness. The `Warn`
+    /// placeholder comment carries the label made comment-safe by
+    /// [`comment_safe_label`].
     fn render_unsupported(
         &mut self,
         node: &RenderNode,
@@ -816,11 +1436,534 @@ impl Writer<'_> {
                     format!("unsupported content dropped: {label}"),
                     Some(node.span.clone()),
                 ));
-                Ok(format!("<!-- unsupported: {label} -->"))
+                Ok(self.cell_safe_raw(format!(
+                    "<!-- unsupported: {} -->",
+                    comment_safe_label(label)
+                )))
             }
             RenderStrictness::Lossy => Ok(String::new()),
         }
     }
+}
+
+/// Which edge of a delimiter wrapper's content is being examined.
+#[derive(Debug, Clone, Copy)]
+enum Edge {
+    Leading,
+    Trailing,
+}
+
+/// The CSS a MarkdownPlus span carries for its style, if any.
+fn span_style_css(node: &RenderNode) -> Option<String> {
+    node.attrs
+        .style_ref()
+        .filter(|style| !style.is_empty())
+        .and_then(markdown_plus_style_css)
+}
+
+/// One part of an inline sequence: finished Markdown, or a delimiter wrapper
+/// whose delimiters wait on the characters around it.
+enum InlinePiece {
+    Text(String),
+    /// A soft or hard break, spelled by [`Writer::write_break`] once its
+    /// position on the line and in the block is known.
+    Break(Break),
+    /// An escaped text value, which may still need line-start or line-end
+    /// protection on the line it joins.
+    Literal(String),
+    /// A fenced code span; an empty value writes nothing.
+    Code(String),
+    Delimited(PendingDelimited),
+    /// A block inside a table cell or heading, already written on one line by
+    /// [`Writer::render_one_line_block`].
+    Block(Joined),
+}
+
+impl InlinePiece {
+    /// Whether the piece writes anything; a delimiter wrapper with an empty
+    /// body writes nothing, since its edges are separate pieces.
+    fn writes(&self) -> bool {
+        match self {
+            Self::Text(text) | Self::Literal(text) | Self::Code(text) => !text.is_empty(),
+            Self::Break(_) | Self::Block(_) => true,
+            Self::Delimited(pending) => !pending.body.text.is_empty(),
+        }
+    }
+}
+
+/// Written between two code spans that would otherwise touch.
+///
+/// A code span's fence is a backtick run that no backtick touches, so two
+/// fences written side by side merge into one longer run and a reader finds
+/// a different code span (`` `a``b` `` is the one value ```` a``b ````).
+/// Every visible separator changes the text, and CommonMark has no empty
+/// inline construct except raw HTML, so an empty comment is the only
+/// lossless boundary. Plain Markdown already writes inline HTML for
+/// structure (`<br>`, `<em>`), and the comment is mid-line, after a closing
+/// fence, so it can never start an HTML block.
+///
+/// Readers in this repository treat it as structure, not text: the shared
+/// terminal and browser renderers show a comment-only raw HTML node as
+/// nothing under every strictness and raw-HTML policy except browser
+/// `Allow` (which writes the comment itself), and Prose's grammar reads a
+/// comment as no content.
+const CODE_SPAN_SEPARATOR: &str = "<!-- -->";
+
+/// Whether written Markdown begins or ends with a code span's fence, so a
+/// neighboring code span needs [`CODE_SPAN_SEPARATOR`].
+#[derive(Debug, Clone, Copy, Default)]
+struct FenceEdges {
+    starts: bool,
+    ends: bool,
+}
+
+/// An inline sequence as written, with the code-fence edges a sequence that
+/// embeds it as one piece needs.
+#[derive(Debug, Default)]
+struct Joined {
+    text: String,
+    fences: FenceEdges,
+}
+
+impl Joined {
+    /// Markup that begins and ends with something other than a code fence.
+    fn markup(text: String) -> Self {
+        Self {
+            text,
+            fences: FenceEdges::default(),
+        }
+    }
+}
+
+/// A structural line break.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Break {
+    Soft,
+    Hard,
+}
+
+/// A rendered delimiter wrapper body before its spelling is chosen.
+struct PendingDelimited {
+    kind: DelimitedKind,
+    body: Joined,
+    span: crate::tree::SourceSpan,
+}
+
+/// The code-fence state of an inline sequence being joined.
+#[derive(Debug, Default)]
+struct FenceSequence {
+    /// Whether the first piece written begins with a code fence.
+    starts: Option<bool>,
+    /// Whether the output ends with a code span's closing fence.
+    open: bool,
+}
+
+impl FenceSequence {
+    /// Writes a piece whose own fence edges are `edges`, separating it from
+    /// a code span it would touch.
+    fn write(&mut self, output: &mut LineWriter, edges: FenceEdges, text: &str, literal: bool) {
+        if text.is_empty() {
+            return;
+        }
+        if self.open && edges.starts {
+            output.push_markup(CODE_SPAN_SEPARATOR);
+        }
+        self.starts.get_or_insert(edges.starts);
+        if literal {
+            output.push_literal(text);
+        } else {
+            output.push_markup(text);
+        }
+        self.open = edges.ends;
+    }
+
+    /// Records a piece written without a code fence at either edge.
+    fn wrote_other(&mut self) {
+        self.starts.get_or_insert(false);
+        self.open = false;
+    }
+
+    fn edges(&self) -> FenceEdges {
+        FenceEdges {
+            starts: self.starts.unwrap_or(false),
+            ends: self.open,
+        }
+    }
+}
+
+/// The node kinds written with a delimiter run.
+#[derive(Debug, Clone, Copy)]
+enum DelimitedKind {
+    Emphasis,
+    Strong,
+    Delete,
+    Mark,
+    Dim,
+}
+
+impl DelimitedKind {
+    /// The spellings to try, in order of preference.
+    ///
+    /// CommonMark and GFM readers pass inline HTML through, so `Emphasis`,
+    /// `Strong`, and `Delete` fall back to `<em>`, `<strong>`, and `<del>`
+    /// where no delimiter can open and close (`a**(b)**` is not bold;
+    /// `a<strong>(b)</strong>` is). The `mark` and `dim` extensions are read
+    /// only by darkmatter, which has no HTML form for them, so they fall back
+    /// to plain text.
+    fn spellings(self) -> &'static [Spelling] {
+        match self {
+            Self::Emphasis => &[
+                Spelling::Run("_", RunRule::Underscore),
+                Spelling::Run("*", RunRule::Star),
+                Spelling::Html("em"),
+            ],
+            Self::Strong => &[
+                Spelling::Run("**", RunRule::Star),
+                Spelling::Run("__", RunRule::Underscore),
+                Spelling::Html("strong"),
+            ],
+            Self::Delete => &[Spelling::Run("~~", RunRule::Star), Spelling::Html("del")],
+            Self::Mark => &[Spelling::Run("==", RunRule::Mark), Spelling::Unstyled],
+            Self::Dim => &[Spelling::Run("\u{2304}", RunRule::Dim), Spelling::Unstyled],
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Emphasis => "emphasis",
+            Self::Strong => "strong",
+            Self::Delete => "strikethrough",
+            Self::Mark => "mark",
+            Self::Dim => "dim",
+        }
+    }
+}
+
+/// One way to write a delimiter wrapper.
+#[derive(Debug, Clone, Copy)]
+enum Spelling {
+    /// The same delimiter run on both sides of the body.
+    Run(&'static str, RunRule),
+    /// An inline HTML element around the body.
+    Html(&'static str),
+    /// The body alone.
+    Unstyled,
+}
+
+/// The reader rule that decides whether a delimiter run opens or closes.
+#[derive(Debug, Clone, Copy)]
+enum RunRule {
+    /// CommonMark `*`, also GFM `~~`: opens when left-flanking, closes when
+    /// right-flanking.
+    Star,
+    /// CommonMark `_`: as `Star`, but not inside a word.
+    Underscore,
+    /// Darkmatter `==`: pairs left to right with no flanking rule.
+    Mark,
+    /// Darkmatter `⌄`: no whitespace on the inner side, and never between
+    /// two alphanumerics.
+    Dim,
+}
+
+impl Spelling {
+    /// Whether a reader parses this spelling back to the wrapper at `sides`.
+    fn fits(self, sides: &Sides) -> bool {
+        let Self::Run(delimiter, rule) = self else {
+            return true;
+        };
+        let delimiter = delimiter.chars().next();
+        // A neighbor of the same character joins the run and changes its
+        // length. `==` pairs from the left, so only a body that ends in `=`
+        // can steal the closer.
+        let merges = |side: &Neighbor| side.delimiter.is_some() && side.delimiter == delimiter;
+        if merges(&sides.before) || merges(&sides.last) || merges(&sides.after) {
+            return false;
+        }
+        if !matches!(rule, RunRule::Mark) && merges(&sides.first) {
+            return false;
+        }
+        // Darkmatter reads `\==` as one escaped pair, so an escaped `=` before
+        // the opener takes the opener's first `=` with it.
+        if matches!(rule, RunRule::Mark) && sides.before.escaped == Some('=') {
+            return false;
+        }
+        match rule {
+            RunRule::Mark => true,
+            RunRule::Dim => {
+                let word = |side: &Neighbor| side.flank == Flank::Word;
+                sides.first.flank != Flank::Space
+                    && sides.last.flank != Flank::Space
+                    && !(word(&sides.before) && word(&sides.first))
+                    && !(word(&sides.last) && word(&sides.after))
+            }
+            RunRule::Star | RunRule::Underscore => sides.resolutions().all(|[b, f, l, a]| {
+                let opens = left_flanking(b, f)
+                    && (matches!(rule, RunRule::Star)
+                        || !right_flanking(b, f)
+                        || b == Flank::Punct);
+                let closes = right_flanking(l, a)
+                    && (matches!(rule, RunRule::Star) || !left_flanking(l, a) || a == Flank::Punct);
+                opens && closes
+            }),
+        }
+    }
+}
+
+/// CommonMark's left-flanking test for a run between `before` and `after`.
+fn left_flanking(before: Flank, after: Flank) -> bool {
+    after != Flank::Space
+        && (after != Flank::Punct || matches!(before, Flank::Space | Flank::Punct))
+}
+
+/// CommonMark's right-flanking test for a run between `before` and `after`.
+fn right_flanking(before: Flank, after: Flank) -> bool {
+    before != Flank::Space
+        && (before != Flank::Punct || matches!(after, Flank::Space | Flank::Punct))
+}
+
+/// How a character beside a delimiter run counts for flanking.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Flank {
+    /// Whitespace, a line edge, or the edge of an inline sequence.
+    Space,
+    Punct,
+    /// Alphanumeric (or another character that is neither space nor
+    /// punctuation).
+    Word,
+    /// A non-ASCII symbol or mark: readers disagree on whether it is
+    /// punctuation (CommonMark 0.31 counts Unicode symbols, earlier versions
+    /// do not), so a spelling must work either way.
+    Unsure,
+}
+
+impl Flank {
+    fn of(c: char) -> Self {
+        if c.is_whitespace() {
+            Self::Space
+        } else if c.is_ascii_punctuation() {
+            Self::Punct
+        } else if c.is_alphanumeric() || c.is_ascii() {
+            Self::Word
+        } else {
+            Self::Unsure
+        }
+    }
+
+    /// The concrete classes this one may be read as.
+    fn resolutions(self) -> &'static [Flank] {
+        match self {
+            Self::Unsure => &[Flank::Punct, Flank::Word],
+            Self::Space => &[Flank::Space],
+            Self::Punct => &[Flank::Punct],
+            Self::Word => &[Flank::Word],
+        }
+    }
+}
+
+/// The character on one side of a delimiter run.
+#[derive(Debug, Clone, Copy)]
+struct Neighbor {
+    flank: Flank,
+    /// The character, when a reader could take it as part of a delimiter run
+    /// (it is not backslash-escaped).
+    delimiter: Option<char>,
+    /// The character, when it is backslash-escaped.
+    escaped: Option<char>,
+}
+
+impl Neighbor {
+    const EDGE: Self = Self {
+        flank: Flank::Space,
+        delimiter: None,
+        escaped: None,
+    };
+
+    /// The last character of `markdown`.
+    fn before(markdown: &str) -> Self {
+        let Some(last) = markdown.chars().next_back() else {
+            return Self::EDGE;
+        };
+        let rest = &markdown[..markdown.len() - last.len_utf8()];
+        let backslashes = rest.chars().rev().take_while(|c| *c == '\\').count();
+        if backslashes % 2 == 1 {
+            return Self {
+                flank: Flank::Punct,
+                delimiter: None,
+                escaped: Some(last),
+            };
+        }
+        Self {
+            flank: Flank::of(last),
+            delimiter: Some(last),
+            escaped: None,
+        }
+    }
+
+    /// The first character of `markdown`.
+    fn after(markdown: &str) -> Self {
+        markdown.chars().next().map_or(Self::EDGE, |first| Self {
+            flank: Flank::of(first),
+            delimiter: Some(first),
+            escaped: None,
+        })
+    }
+
+    /// The first character the pieces after a wrapper write. A later wrapper
+    /// starts with its own delimiter (punctuation), and it is that wrapper
+    /// that avoids repeating this one's character.
+    ///
+    /// A break counts as whitespace: each of its spellings (a line ending, a
+    /// space, `\`, `<br>`) closes a run exactly as whitespace does.
+    fn following(pieces: &[InlinePiece]) -> Self {
+        for piece in pieces {
+            match piece {
+                InlinePiece::Text(text) | InlinePiece::Literal(text) | InlinePiece::Code(text)
+                    if !text.is_empty() =>
+                {
+                    return Self::after(text);
+                }
+                InlinePiece::Text(_) | InlinePiece::Literal(_) | InlinePiece::Code(_) => {}
+                // A block is set off by `<br>`, which flanks like a break.
+                InlinePiece::Break(_) | InlinePiece::Block(_) => return Self::EDGE,
+                InlinePiece::Delimited(pending) => {
+                    if !pending.body.text.is_empty() {
+                        return Self {
+                            flank: Flank::Punct,
+                            delimiter: None,
+                            escaped: None,
+                        };
+                    }
+                }
+            }
+        }
+        Self::EDGE
+    }
+}
+
+/// The four characters a delimiter wrapper's runs touch.
+struct Sides {
+    before: Neighbor,
+    first: Neighbor,
+    last: Neighbor,
+    after: Neighbor,
+}
+
+impl Sides {
+    /// Every concrete reading of the four flanks.
+    fn resolutions(&self) -> impl Iterator<Item = [Flank; 4]> + '_ {
+        let [b, f, l, a] = [
+            self.before.flank,
+            self.first.flank,
+            self.last.flank,
+            self.after.flank,
+        ];
+        b.resolutions().iter().flat_map(move |&b| {
+            f.resolutions().iter().flat_map(move |&f| {
+                l.resolutions()
+                    .iter()
+                    .flat_map(move |&l| a.resolutions().iter().map(move |&a| [b, f, l, a]))
+            })
+        })
+    }
+}
+
+/// The number of leading `nodes` written as one block: a phrasing node
+/// together with every break that follows it and the phrasing node after
+/// each such break, or a lone node otherwise.
+fn break_run(nodes: &[RenderNode]) -> usize {
+    let is_break = |node: &RenderNode| matches!(node.kind, NodeKind::SoftBreak | NodeKind::HardBreak);
+    if !is_inline_kind(&nodes[0].kind) {
+        return 1;
+    }
+    let mut run = 1;
+    while let Some(next) = nodes.get(run) {
+        let joins = is_break(next) || (is_break(&nodes[run - 1]) && is_inline_kind(&next.kind));
+        if !joins {
+            break;
+        }
+        run += 1;
+    }
+    run
+}
+
+/// The first block among `nodes` or inside their inline descendants, in
+/// document order.
+fn first_block(nodes: &[RenderNode]) -> Option<&RenderNode> {
+    nodes.iter().find_map(|node| {
+        if is_block(&node.kind) {
+            Some(node)
+        } else {
+            first_block(node.children())
+        }
+    })
+}
+
+/// Joins the non-empty one-line parts of a block in a table cell or heading
+/// with `<br>`.
+fn join_one_line_parts(parts: impl IntoIterator<Item = Joined>) -> Joined {
+    let parts: Vec<Joined> = parts.into_iter().filter(|part| !part.text.is_empty()).collect();
+    Joined {
+        text: parts
+            .iter()
+            .map(|part| part.text.as_str())
+            .collect::<Vec<_>>()
+            .join("<br>"),
+        fences: FenceEdges {
+            starts: parts.first().is_some_and(|part| part.fences.starts),
+            ends: parts.last().is_some_and(|part| part.fences.ends),
+        },
+    }
+}
+
+/// The footnote label written for `identifier`, equal to it when a reader
+/// reads `[^identifier]` back as exactly `identifier`.
+///
+/// A reader matches a label without processing its escapes, so a character
+/// that cannot appear literally has no faithful spelling. The degraded label
+/// is chosen so a reader still reads it as one label, and the reference and
+/// definition still pair:
+///
+/// - a run of spaces, tabs, and line endings becomes one space, and edge
+///   whitespace is removed, which is the reader's own normalization
+///   (`a\n b` → `a b`);
+/// - an identifier with nothing else left is `_`;
+/// - a `[` or `]` not already escaped by an odd backslash run gets a
+///   backslash (`a]b` → `a\]b`), and an odd trailing backslash run gets
+///   one more (`a\` → `a\\`), so it cannot escape the closing `]`.
+fn footnote_label_spelling(identifier: &str) -> String {
+    let words: Vec<&str> = identifier
+        .split([' ', '\t', '\r', '\n'])
+        .filter(|word| !word.is_empty())
+        .collect();
+    if words.is_empty() {
+        return "_".to_string();
+    }
+    let mut label = String::with_capacity(identifier.len());
+    let mut backslashes = 0;
+    for c in words.join(" ").chars() {
+        if matches!(c, '[' | ']') && backslashes % 2 == 0 {
+            label.push('\\');
+        }
+        backslashes = if c == '\\' { backslashes + 1 } else { 0 };
+        label.push(c);
+    }
+    if backslashes % 2 == 1 {
+        label.push('\\');
+    }
+    label
+}
+
+/// Makes an unsupported-content label safe inside the `Warn` placeholder
+/// comment. A `>` becomes `&gt;`, so no `-->` or `--!>` in the label can
+/// close the comment early, and a line ending becomes a space, so the
+/// placeholder stays on its line (a table row, a heading, or a paragraph a
+/// blank line would end). A comment does not decode the reference; the
+/// placeholder is already lossy, so it reads `&gt;` instead of `>`.
+fn comment_safe_label(label: &str) -> String {
+    label
+        .replace('>', "&gt;")
+        .replace("\r\n", " ")
+        .replace(['\r', '\n'], " ")
 }
 
 /// Builds a GFM table delimiter row from per-column alignments.
@@ -837,42 +1980,576 @@ fn delimiter_row(align: &[ColumnAlign]) -> String {
     format!("| {} |", cells.join(" | "))
 }
 
-/// Prefixes every line of `text` with `prefix`.
-fn prefix_lines(text: &str, prefix: &str) -> String {
-    text.lines()
-        .map(|line| {
-            if line.is_empty() {
-                prefix.trim_end().to_string()
-            } else {
-                format!("{prefix}{line}")
+/// Splits `text` into lines as CommonMark does: each line with the ending
+/// that closes it (`\n`, `\r`, or `\r\n`; empty for an unterminated last
+/// line). Like [`str::lines`], a final line ending does not start another
+/// line; unlike it, a lone carriage return ends a line and every ending is
+/// kept, so raw content survives a re-join byte for byte.
+fn split_line_endings(text: &str) -> impl Iterator<Item = (&str, &str)> {
+    let mut rest = text;
+    std::iter::from_fn(move || {
+        if rest.is_empty() {
+            return None;
+        }
+        let (line, ending, tail) = match rest.find(['\r', '\n']) {
+            None => (rest, "", ""),
+            Some(at) => {
+                let width = if rest[at..].starts_with("\r\n") { 2 } else { 1 };
+                (&rest[..at], &rest[at..at + width], &rest[at + width..])
             }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+        };
+        rest = tail;
+        Some((line, ending))
+    })
 }
 
-/// HTML-escapes text for embedding in inline/block HTML or as plain text.
-fn escape_text(text: &str) -> String {
-    text.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
+/// Prefixes every line of `text` with `prefix` (trimmed of trailing spaces
+/// on an empty line), keeping each line's ending bytes; see
+/// [`split_line_endings`] for what ends a line.
+fn prefix_lines(text: &str, prefix: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for (line, ending) in split_line_endings(text) {
+        if line.is_empty() {
+            out.push_str(prefix.trim_end());
+        } else {
+            out.push_str(prefix);
+            out.push_str(line);
+        }
+        out.push_str(ending);
+    }
+    out
+}
+
+/// Keeps `html`, written between markup on the line that opens a raw HTML
+/// block and markup that closes it, one raw HTML block: no line in it may be
+/// blank (only spaces or tabs). Returns the HTML and the span of each raw
+/// payload that could not be kept byte for byte.
+///
+/// Line endings are read from the concatenated HTML, as a reader does: a
+/// carriage return and the line feed after it are one ending even when they
+/// come from different raw payloads, or one is raw and the other generated.
+/// Which bytes came from where (the `raw` ranges) only decides which may be
+/// rewritten.
+///
+/// Only HTML the browser writer generated is re-encoded, since its text and
+/// attribute values are escaped and an HTML reader decodes a character
+/// reference there. A generated carriage return is always `&#13;`, so it
+/// never starts a line ending, not even before a raw line feed: the
+/// reference keeps the generated character, which a reader would otherwise
+/// fold into the line ending, and the raw line feed stays one line ending.
+/// A line ending is encoded only when every byte of it is generated: a line
+/// feed beside a blank line becomes `&#10;`, which makes that line
+/// non-blank. The ending before the blank line is encoded when it is wholly
+/// generated, otherwise the one after it.
+///
+/// A raw payload's bytes (a `raw` range) are left alone, including its
+/// carriage returns: HTML reads one as a line feed in every context. Where
+/// neither ending around a blank line is wholly generated, nothing can hold
+/// the block open without changing raw content; the ending before the line
+/// is encoded and every payload holding a byte of it is reported. Its first
+/// and last lines are never blank, since markup flanks them.
+fn keep_html_block_open(html: &str, raw: &[RawRange]) -> (String, Vec<SourceSpan>) {
+    /// A line and the ending that follows it, empty for the last line. Each
+    /// ending character carries the index in `raw` of the payload holding
+    /// it, or `None` when it was generated.
+    struct Line {
+        text: String,
+        ending: Vec<(char, Option<usize>)>,
+    }
+    // The ranges are in output order and never overlap.
+    let raw_at = |at: usize| {
+        let index = raw.partition_point(|r| r.range.end <= at);
+        raw.get(index)
+            .filter(|r| r.range.contains(&at))
+            .map(|_| index)
+    };
+    let mut lines = vec![Line {
+        text: String::new(),
+        ending: Vec::new(),
+    }];
+    let mut chars = html.char_indices().peekable();
+    while let Some((at, c)) = chars.next() {
+        if c != '\r' && c != '\n' {
+            lines.last_mut().expect("one line").text.push(c);
+            continue;
+        }
+        let owner = raw_at(at);
+        if c == '\r' && owner.is_none() {
+            lines.last_mut().expect("one line").text.push_str("&#13;");
+            continue;
+        }
+        let mut ending = vec![(c, owner)];
+        if c == '\r'
+            && let Some(&(next, '\n')) = chars.peek()
+        {
+            chars.next();
+            ending.push(('\n', raw_at(next)));
+        }
+        lines.last_mut().expect("one line").ending = ending;
+        lines.push(Line {
+            text: String::new(),
+            ending: Vec::new(),
+        });
+    }
+
+    // `encoded[i]` is set when the ending after line `i` is written as a
+    // reference, joining line `i + 1` to it.
+    let mut encoded = vec![false; lines.len()];
+    let mut unfaithful = Vec::new();
+    let generated = |line: &Line| line.ending.iter().all(|(_, owner)| owner.is_none());
+    let last = lines.len() - 1;
+    for index in 1..last {
+        let blank = lines[index].text.trim_matches([' ', '\t']).is_empty();
+        if !blank || encoded[index - 1] {
+            continue;
+        }
+        let before = &lines[index - 1];
+        if generated(before) {
+            encoded[index - 1] = true;
+        } else if generated(&lines[index]) {
+            encoded[index] = true;
+        } else {
+            encoded[index - 1] = true;
+            for &(_, owner) in &before.ending {
+                if let Some(owner) = owner {
+                    unfaithful.push(raw[owner].span.clone());
+                }
+            }
+        }
+    }
+
+    let mut out = String::with_capacity(html.len());
+    for (index, line) in lines.iter().enumerate() {
+        out.push_str(&line.text);
+        for &(c, _) in &line.ending {
+            if encoded[index] {
+                out.push_str(if c == '\r' { "&#13;" } else { "&#10;" });
+            } else {
+                out.push(c);
+            }
+        }
+    }
+    unfaithful.dedup();
+    (out, unfaithful)
+}
+
+/// The backtick fence for a code block holding `value`: three backticks, or
+/// one more than the longest backtick run that starts a line of `value`, so
+/// no body line can close the block early (CommonMark closes a fence on a
+/// line holding a run at least as long as the opener).
+fn code_block_fence(value: &str) -> String {
+    let longest = split_line_endings(value)
+        .map(|(line, _)| line.trim_start().chars().take_while(|&c| c == '`').count())
+        .max()
+        .unwrap_or(0);
+    "`".repeat(longest.max(2) + 1)
+}
+
+/// Escapes a literal text value for Markdown inline content so a CommonMark
+/// or GFM reader (and darkmatter's `==` mark extension) sees exactly the
+/// value: formatting comes only from structural nodes, never from text.
+///
+/// Each character is escaped only where a reader could take it as syntax, so
+/// ordinary prose such as `snake_case`, `C:\dir`, `a < b`, and `AT&T rocks`
+/// stays byte-identical:
+///
+/// - a `\` before ASCII punctuation, a line ending, or the value's end (the
+///   next character then comes from a sibling the value cannot see);
+/// - a `*`, `_`, or `~` that could open or close a delimiter run, judged by
+///   CommonMark flanking with an unknown neighbor at either end of the value;
+/// - every `` ` ``, `[`, and `]` (code spans, links, footnotes);
+/// - a `==` pair, and a `=` at either end of the value;
+/// - a `<` that could start an HTML tag, a URI autolink, or an email
+///   autolink (whose local part may start with a digit or punctuation);
+/// - a `&` that could start an entity or character reference;
+/// - a lone carriage return, which a reader takes as a line ending, as
+///   `&#13;`.
+///
+/// With `html` set (the body of a MarkdownPlus inline-HTML element) `<`,
+/// `>`, and `&` are HTML-escaped instead. Line-start block syntax is handled
+/// separately by [`LineWriter`] and [`protect_lines`].
+fn escape_markdown_text(text: &str, html: bool) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len() + 4);
+    let mut index = 0;
+    while index < chars.len() {
+        let c = chars[index];
+        let prev = index.checked_sub(1).map(|i| chars[i]);
+        let next = chars.get(index + 1).copied();
+        match c {
+            '\\' => {
+                out.push('\\');
+                if next.is_none_or(|n| n.is_ascii_punctuation() || n == '\n' || n == '\r') {
+                    out.push('\\');
+                }
+            }
+            '*' | '_' | '~' if delimiter_may_act(c, prev, next) => {
+                out.push('\\');
+                out.push(c);
+            }
+            '`' | '[' | ']' => {
+                out.push('\\');
+                out.push(c);
+            }
+            '=' if next == Some('=') => {
+                out.push_str("\\==");
+                index += 2;
+                continue;
+            }
+            '=' if prev.is_none() || next.is_none() => out.push_str("\\="),
+            '<' if html => out.push_str("&lt;"),
+            '>' if html => out.push_str("&gt;"),
+            '&' if html => out.push_str("&amp;"),
+            '<' if may_open_tag_or_autolink(&chars[index + 1..]) => out.push_str("\\<"),
+            '&' if may_start_reference(&chars[index + 1..]) => out.push_str("\\&"),
+            // A lone carriage return ends a line for a reader; a line feed
+            // after it is the ordinary CRLF line ending.
+            '\r' if next != Some('\n') => out.push_str("&#13;"),
+            _ => out.push(c),
+        }
+        index += 1;
+    }
+    out
+}
+
+/// [`escape_markdown_text`] plus [`protect_lines`] on every line, for a value
+/// written on its own as inline content; see [`crate::markdown::escape_text`].
+pub(crate) fn escape_literal_text(value: &str) -> String {
+    protect_lines(&escape_markdown_text(value, false), true)
+}
+
+/// Whether a `<` followed by `rest` could open raw HTML or an autolink.
+///
+/// Raw HTML and URI autolinks start with a letter, `/`, `!`, or `?`. An email
+/// autolink's local part may also start with a digit or one of
+/// ``.!#$%&'*+/=?^_`{|}~-``, so such a start counts when the rest could
+/// still complete `local@domain>`. Reaching the value's end counts too,
+/// since a sibling could supply the rest.
+fn may_open_tag_or_autolink(rest: &[char]) -> bool {
+    let is_local = |c: char| c.is_ascii_alphanumeric() || ".!#$%&'*+/=?^_`{|}~-".contains(c);
+    match rest.first() {
+        None => return true,
+        Some(&c) if c.is_ascii_alphabetic() || matches!(c, '/' | '!' | '?') => return true,
+        Some(&c) if !is_local(c) => return false,
+        Some(_) => {}
+    }
+    let local = rest.iter().take_while(|&&c| is_local(c)).count();
+    match rest.get(local) {
+        None => return true,
+        Some('@') => {}
+        Some(_) => return false,
+    }
+    let domain = &rest[local + 1..];
+    let label = domain
+        .iter()
+        .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-'))
+        .count();
+    matches!(domain.get(label), None | Some('>'))
+}
+
+/// Whether a `&` followed by `rest` could be read as an entity or numeric
+/// character reference: a run of alphanumerics or `#` closed by `;`, or one
+/// reaching the value's end, where a sibling could supply the rest.
+fn may_start_reference(rest: &[char]) -> bool {
+    let run = rest
+        .iter()
+        .take_while(|c| c.is_ascii_alphanumeric() || **c == '#')
+        .count();
+    match rest.get(run) {
+        None => true,
+        Some(';') => run > 0,
+        Some(_) => false,
+    }
+}
+
+/// Whether a `*`, `_`, or `~` between `prev` and `next` could open or close
+/// a delimiter run. `None` is the value's edge, which may be any character.
+fn delimiter_may_act(c: char, prev: Option<char>, next: Option<char>) -> bool {
+    const ANY: &[Flank] = &[Flank::Space, Flank::Punct, Flank::Word];
+    let options = |side: Option<char>| side.map_or(ANY, |c| Flank::of(c).resolutions());
+    options(prev).iter().any(|&before| {
+        options(next).iter().any(|&after| {
+            let left = left_flanking(before, after);
+            let right = right_flanking(before, after);
+            if c == '_' {
+                (left && (!right || before == Flank::Punct))
+                    || (right && (!left || after == Flank::Punct))
+            } else {
+                left || right
+            }
+        })
+    })
+}
+
+/// Protects each line of already-escaped inline Markdown so a reader keeps
+/// it as paragraph text with its whitespace: see [`line_start_edit`] for the
+/// start of a line and [`encode_line_end`] for the end before each line
+/// ending. The first line's start is checked only when `first_line` is set;
+/// the end of the last line is left alone, since text may follow it.
+fn protect_lines(text: &str, first_line: bool) -> String {
+    let mut out = LineWriter::new(first_line, true);
+    out.push_literal(text);
+    out.text
+}
+
+/// How the start of a line must change so a reader keeps it as paragraph
+/// text holding exactly its characters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LineEdit {
+    /// A backslash goes before this byte offset: the line would start a
+    /// block (`# `, `> `, `- `, `+ `, `* `, `1. `, `1) `, a setext underline,
+    /// or a thematic break).
+    Escape(usize),
+    /// The leading space or tab becomes a character reference. A reader
+    /// strips a line's leading whitespace and reads four columns of it as
+    /// indented code; the reference is ordinary text to both rules.
+    Entity,
+}
+
+/// The edit that keeps `line`, the start of a line of escaped inline
+/// Markdown, from starting a block or losing its leading whitespace.
+fn line_start_edit(line: &str) -> Option<LineEdit> {
+    let bytes = line.as_bytes();
+    let first = *bytes.first()?;
+    // A marker must be followed by whitespace or the line's end; the end of
+    // the text may be followed by a break or nothing at all.
+    let ends_marker = |at: usize| matches!(bytes.get(at), None | Some(b' ' | b'\t'));
+    let trimmed = line.trim_end();
+    let underline = matches!(first, b'-' | b'=') && trimmed.bytes().all(|b| b == first);
+    let thematic = matches!(first, b'-' | b'*' | b'_')
+        && line.bytes().all(|b| b == first || b == b' ' || b == b'\t')
+        && line.bytes().filter(|&b| b == first).count() >= 3;
+    match first {
+        b' ' | b'\t' => Some(LineEdit::Entity),
+        _ if is_table_delimiter_row(line) => Some(LineEdit::Escape(0)),
+        b'>' => Some(LineEdit::Escape(0)),
+        b'-' | b'+' | b'*' if ends_marker(1) => Some(LineEdit::Escape(0)),
+        _ if underline || thematic => Some(LineEdit::Escape(0)),
+        b'#' => {
+            let run = bytes.iter().take_while(|&&b| b == b'#').count();
+            (run <= 6 && ends_marker(run)).then_some(LineEdit::Escape(0))
+        }
+        b'0'..=b'9' => {
+            let run = bytes.iter().take_while(|b| b.is_ascii_digit()).count();
+            (run <= 9 && matches!(bytes.get(run), Some(b'.' | b')')) && ends_marker(run + 1))
+                .then_some(LineEdit::Escape(run))
+        }
+        _ => None,
+    }
+}
+
+/// Whether `line` could still be, or already is, a GFM table delimiter row
+/// (`--|--`, `| :- | -: |`): only pipes, hyphens, colons, and whitespace.
+fn may_be_table_delimiter_row(line: &str) -> bool {
+    line.bytes()
+        .all(|b| matches!(b, b'|' | b'-' | b':' | b' ' | b'\t'))
+}
+
+/// Whether `line` is a GFM table delimiter row, which turns the line before
+/// it into a table header. A backslash before any of its characters breaks
+/// the row.
+fn is_table_delimiter_row(line: &str) -> bool {
+    may_be_table_delimiter_row(line) && line.contains('|') && line.contains('-')
+}
+
+/// The character reference for a space or tab.
+fn whitespace_entity(c: char) -> &'static str {
+    if c == '\t' { "&#9;" } else { "&#32;" }
+}
+
+/// Replaces the last character of `text` with its character reference when
+/// it is a space or tab (looking past a final `\r` of a CRLF line ending),
+/// because a reader strips whitespace at the end of a line, and two spaces
+/// before a line ending would make a hard break.
+fn encode_line_end(text: &mut String) {
+    let cr = usize::from(text.ends_with('\r'));
+    let body = &text[..text.len() - cr];
+    if let Some(last) = body.chars().next_back().filter(|c| matches!(c, ' ' | '\t')) {
+        let at = body.len() - 1;
+        let backslashes = body[..at].bytes().rev().take_while(|&b| b == b'\\').count();
+        text.replace_range(at..=at, whitespace_entity(last));
+        // A literal backslash before the whitespace was left single, since a
+        // space is not escapable; before `&` it would escape the reference.
+        if backslashes % 2 == 1 {
+            text.insert(at, '\\');
+        }
+    }
+}
+
+/// Replaces the first character of `text` with its character reference when
+/// it is a space or tab.
+fn encode_line_start(text: &mut String) {
+    if let Some(first) = text.chars().next().filter(|c| matches!(c, ' ' | '\t')) {
+        text.replace_range(0..1, whitespace_entity(first));
+    }
+}
+
+/// Accumulates inline Markdown while tracking the logical line being
+/// written, so block syntax assembled from several adjacent literal values
+/// (`1` then `. literal`, or ` ` then `# literal`) is protected as one line.
+///
+/// Literal content (text values, including whitespace moved outside a
+/// delimiter wrapper, and the space a break may be written as) may be
+/// edited at a line's start and end; markup written by other nodes is never
+/// edited and ends the line's protection.
+struct LineWriter {
+    text: String,
+    /// The byte offset where the current line began, while that line may
+    /// still read as a block start. Only a line of literal digits so far
+    /// (`12` before `) literal`) or of table-delimiter characters (`|`
+    /// before `-|-`) stays open after its first character.
+    line: Option<usize>,
+    /// The byte offset where the line being written began. A writer that
+    /// starts mid-line treats its start as a line start, since it cannot see
+    /// what precedes it.
+    line_start: usize,
+    /// Whether the text is a whole block rather than a mid-line sequence.
+    block: bool,
+    /// Whether a line begun by a line ending written here can start a block.
+    guards_lines: bool,
+    /// Whether the text ends with literal content, whose trailing
+    /// whitespace may be encoded at a line's end.
+    literal_tail: bool,
+}
+
+impl LineWriter {
+    fn new(at_line_start: bool, guards_lines: bool) -> Self {
+        Self {
+            text: String::new(),
+            line: (at_line_start && guards_lines).then_some(0),
+            line_start: 0,
+            block: at_line_start,
+            guards_lines,
+            literal_tail: false,
+        }
+    }
+
+    /// Whether the line being written holds nothing but spaces or tabs, so
+    /// a line ending now would leave a blank line (ending the paragraph) or
+    /// a line holding only an HTML open tag (starting a raw HTML block).
+    fn line_is_blank(&self) -> bool {
+        self.text[self.line_start..]
+            .bytes()
+            .all(|b| matches!(b, b' ' | b'\t'))
+    }
+
+    /// Writes escaped literal content, protecting each line it starts or
+    /// continues and the end of each line it finishes.
+    ///
+    /// Inside a mid-line sequence (a link label, a span or delimiter body) a
+    /// literal line ending on a blank line is written as a space: a blank
+    /// line there would end the enclosing syntax, and a line holding only a
+    /// span's open tag would start a raw HTML block. In a block a literal
+    /// blank line is kept; it separates paragraphs by design (`Compose`
+    /// places one between the paragraphs of a `Prose`).
+    ///
+    /// A line feed that follows a carriage return written by markup
+    /// completes that line ending rather than ending the (empty) line after
+    /// it, since a reader takes the two as one CRLF.
+    fn push_literal(&mut self, literal: &str) {
+        if literal.is_empty() {
+            return;
+        }
+        let literal = match literal.strip_prefix('\n') {
+            Some(rest) if self.text.ends_with('\r') => {
+                self.text.push('\n');
+                self.line_start = self.text.len();
+                self.line = self.guards_lines.then_some(self.text.len());
+                rest
+            }
+            _ => literal,
+        };
+        let guards_mid_line = self.guards_lines && !self.block;
+        let normalized;
+        let literal = if guards_mid_line && literal.contains("\r\n") {
+            normalized = literal.replace("\r\n", "\n");
+            &normalized
+        } else {
+            literal
+        };
+        for (index, segment) in literal.split('\n').enumerate() {
+            if index > 0 {
+                if guards_mid_line && self.line_is_blank() {
+                    self.push_segment(" ");
+                } else {
+                    self.end_line("\n");
+                }
+            }
+            self.push_segment(segment);
+        }
+    }
+
+    /// Writes literal content holding no line ending.
+    fn push_segment(&mut self, segment: &str) {
+        if segment.is_empty() {
+            return;
+        }
+        self.literal_tail = true;
+        let Some(start) = self.line else {
+            self.text.push_str(segment);
+            return;
+        };
+        let written = self.text.len() - start;
+        self.text.push_str(segment);
+        let line = &self.text[start..];
+        match line_start_edit(line) {
+            // A delimiter row completed by this segment is broken at the
+            // segment's first character, which is not whitespace: the row
+            // was not one before it.
+            Some(LineEdit::Escape(_)) if written > 0 && is_table_delimiter_row(line) => {
+                let skip = segment.len() - segment.trim_start().len();
+                self.text.insert(start + written + skip, '\\');
+            }
+            Some(LineEdit::Escape(at)) if at >= written => self.text.insert(start + at, '\\'),
+            Some(LineEdit::Entity) if written == 0 => {
+                let mut line = self.text.split_off(start);
+                encode_line_start(&mut line);
+                self.text.push_str(&line);
+            }
+            _ => {}
+        }
+        let line = &self.text[start..];
+        if !line.bytes().all(|b| b.is_ascii_digit()) && !may_be_table_delimiter_row(line) {
+            self.line = None;
+        }
+    }
+
+    /// Writes markup from a non-literal node. Its first character settles
+    /// the current line, and a line it ends opens the next one. A raw
+    /// payload's carriage return is a line ending too, as a reader takes it.
+    fn push_markup(&mut self, markup: &str) {
+        if markup.is_empty() {
+            return;
+        }
+        self.text.push_str(markup);
+        self.literal_tail = false;
+        if let Some(at) = markup.rfind(['\n', '\r']) {
+            self.line_start = self.text.len() - markup.len() + at + 1;
+        }
+        self.line =
+            (self.guards_lines && markup.ends_with(['\n', '\r'])).then_some(self.text.len());
+    }
+
+    /// Finishes the current line with `ending` and opens the next one.
+    fn end_line(&mut self, ending: &str) {
+        self.finish();
+        self.text.push_str(ending);
+        self.literal_tail = false;
+        self.line_start = self.text.len();
+        self.line = self.guards_lines.then_some(self.text.len());
+    }
+
+    /// Encodes trailing literal whitespace where a line ends.
+    fn finish(&mut self) {
+        if self.guards_lines && self.literal_tail {
+            encode_line_end(&mut self.text);
+        }
+    }
 }
 
 /// Backslash-escapes each literal `\` a CommonMark reader would otherwise
-/// consume as an escape.
-///
-/// A backslash is an escape only before ASCII punctuation or a line ending,
-/// so only those backslashes are doubled — `C:\dir` stays byte-identical. A
-/// backslash at the *end* of the value is always doubled because the next
-/// character comes from a sibling node the text cannot see: a soft break's
-/// newline (which would turn into a hard break), a hard break's own `\`, a
-/// table cell's `<br>`, or a wrapper delimiter such as the closing `**` of
-/// [`NodeKind::Strong`].
-///
-/// Other Markdown punctuation in literal text (`*`, `_`, `[`, `#`, …) is left
-/// as-is: escaping it would rewrite nearly every rendered document. The one
-/// place such a character meets node syntax, the edge of an emphasis wrapper,
-/// is handled by `Writer::render_delimited_inline`.
+/// consume as an escape: one before ASCII punctuation or a line ending, or at
+/// the end of the value, where a sibling supplies the next character.
 fn escape_literal_backslashes(text: &str) -> String {
     if !text.contains('\\') {
         return text.to_string();
@@ -895,57 +2572,115 @@ fn escape_literal_backslashes(text: &str) -> String {
 }
 
 /// Escapes a link title for its double-quoted form: a `"` would end the title
-/// early and a trailing `\\` would escape the closing quote.
+/// early, a trailing `\\` would escape the closing quote, and a reader decodes
+/// entity references there (`&copy;` must not become `©`).
+///
+/// Each CR and LF is written `&#13;` / `&#10;` (a CRLF both), which a reader
+/// decodes back into the title value. A literal line ending would end a table
+/// row or heading, and a blank line would end the title; a `<br>` would be
+/// literal title text. The references are added after the `&` escape, so they
+/// are the only ones a reader decodes, and after the backslash escape, which
+/// doubles a `\\` before a line ending so it cannot escape the reference's
+/// `&`.
 fn escape_link_title(title: &str) -> String {
-    escape_literal_backslashes(title).replace('"', "\\\"")
+    encode_line_endings(
+        &escape_references(&escape_literal_backslashes(title)).replace('"', "\\\""),
+    )
 }
 
-/// Escapes a text node for safe placement inside a GFM table cell.
-///
-/// Literal pipes are escaped as `\|`; literal newlines become `<br>` so the
-/// cell does not split the pipe-delimited row.
-fn escape_table_cell_text(text: &str) -> String {
-    text.replace('|', "\\|")
-        .replace("\r\n", "<br>")
-        .replace('\n', "<br>")
+/// Writes each CR as `&#13;` and each LF as `&#10;`, so a CRLF is both. For
+/// fields a reader decodes character references in (a link title, a quoted
+/// HTML attribute value), this keeps the value exact and on one line.
+fn encode_line_endings(value: &str) -> String {
+    if !value.contains(['\r', '\n']) {
+        return value.to_string();
+    }
+    value.replace('\r', "&#13;").replace('\n', "&#10;")
 }
 
-/// Escapes a link/image destination for placement inside a GFM table cell.
-///
-/// Combines the two concerns a cell destination faces: CommonMark bare-
-/// destination safety (a literal `(`, `)`, or `\` is backslash-escaped, matching
-/// standalone Prose via [`escape_markdown_destination`]) and GFM row safety (a
-/// literal `|` becomes `\|`, a newline becomes `<br>`). An ordinary destination
-/// is therefore byte-identical to a standalone Prose link while a pipe or
-/// newline can never split the pipe-delimited row.
-fn escape_cell_link_destination(url: &str) -> String {
-    let mut out = String::with_capacity(url.len());
-    for c in url.chars() {
-        match c {
-            '\\' | '(' | ')' => {
-                out.push('\\');
-                out.push(c);
-            }
-            '|' => out.push_str("\\|"),
-            '\n' => out.push_str("<br>"),
-            '\r' => {}
-            _ => out.push(c),
+/// Backslash-escapes each `&` a reader could decode as an entity or numeric
+/// character reference, for link titles and destinations, where Markdown
+/// punctuation is otherwise literal.
+fn escape_references(text: &str) -> String {
+    if !text.contains('&') {
+        return text.to_string();
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len() + 2);
+    for (index, &c) in chars.iter().enumerate() {
+        if c == '&' && may_start_reference(&chars[index + 1..]) {
+            out.push('\\');
         }
+        out.push(c);
     }
     out
 }
 
-/// HTML-escapes `<`, `>`, and `&` for text placed inside the body of a
-/// MarkdownPlus inline-HTML element, so literal markup stays inert.
+/// The one cell rule for a pipe: writes `\|` for every `|` in Markdown that
+/// is already correct for its own context (escaped text, a code span body, a
+/// raw HTML payload, a footnote identifier, a link destination or title).
 ///
-/// Markdown sigils are intentionally left untouched — CommonMark still parses
-/// Markdown inside inline HTML, so a nested `Strong`/`Emphasis` node's `**` /
-/// `_` must survive. `"` is not escaped because the body is element content,
-/// not an attribute value.
-fn escape_inline_html_body(text: &str) -> String {
-    text.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
+/// GFM splits a row into cells before it parses anything inline, and while
+/// splitting it removes exactly one backslash in front of each pipe, inside
+/// code spans and raw HTML as well. So the cell then holds exactly the
+/// Markdown this function was given, whatever came before the pipe: a
+/// payload's own `\|` is written `\\|` and reads back as `\|`. Applying it
+/// twice would add a second backslash, so each site applies it once, last.
+///
+/// pulldown-cmark and markdown-rs remove that backslash in text and code
+/// spans but keep it inside an inline HTML token (a tag or comment), where
+/// such a reader shows `\|` for the payload's `|`; the row and its cells
+/// still read correctly. Generated attribute values avoid the difference
+/// with `&#124;` instead (see [`encode_generated_attribute`]).
+fn escape_cell_pipes(markdown: &str) -> String {
+    markdown.replace('|', "\\|")
+}
+
+/// Keeps a generated, already attribute-escaped quoted HTML attribute value
+/// on its Markdown line without changing what an HTML reader decodes, in any
+/// context: each CR and LF becomes a character reference (see
+/// [`encode_line_endings`]), since a literal one would end a table row or
+/// heading and a blank line would end the paragraph holding the inline tag.
+/// With `in_cell`, each `|` also becomes `&#124;`. Unlike the `\|` of
+/// [`escape_cell_pipes`], that reads the same in readers that keep a pipe
+/// escape inside an inline HTML tag.
+///
+/// Also applied to a whole generated element whose only line endings and
+/// pipes sit in such attribute values. Never applied to raw HTML, where a
+/// reference is not decoded in every position.
+fn encode_generated_attribute(value: &str, in_cell: bool) -> String {
+    let value = encode_line_endings(value);
+    if in_cell {
+        value.replace('|', "&#124;")
+    } else {
+        value
+    }
+}
+
+/// Keeps text escaped by [`escape_markdown_text`] on a heading's one ATX
+/// line: each line feed is written `&#10;`, and the CR of a CRLF `&#13;`,
+/// since left alone it would end the heading by itself (a lone CR is already
+/// `&#13;`). A reader decodes both back into the text.
+fn encode_heading_line_feeds(text: &str) -> String {
+    text.replace("\r\n", "&#13;&#10;").replace('\n', "&#10;")
+}
+
+/// Escapes a text node for safe placement inside a GFM table cell.
+///
+/// Literal pipes follow [`escape_cell_pipes`]; literal newlines become
+/// `<br>` so the cell does not split the pipe-delimited row.
+fn escape_table_cell_text(text: &str) -> String {
+    escape_cell_pipes(text)
+        .replace("\r\n", "<br>")
+        .replace('\n', "<br>")
+}
+
+/// Escapes a link/image destination for placement inside a GFM table cell:
+/// the standalone CommonMark escape of [`escape_markdown_destination`], then
+/// [`escape_cell_pipes`]. A table reader removes that escape before the
+/// destination is parsed.
+fn escape_cell_link_destination(url: &str) -> String {
+    escape_cell_pipes(&escape_markdown_destination(url))
 }
 
 /// Lowers the MarkdownPlus-supported layers of a [`Style`](crate::style::Style)
@@ -1012,7 +2747,9 @@ fn span_lossy_message(classes: &[String], has_style: bool) -> String {
 /// or backslashes are backslash-escaped so the first unescaped `)` cannot
 /// truncate the destination. A destination containing whitespace is emitted in
 /// *angle-bracket* form (`<…>`), which permits spaces but forbids unescaped
-/// `<` and `>`; line endings, invalid in either form, degrade to spaces.
+/// `<` and `>`; line endings, invalid in either form, degrade to spaces. A
+/// reader decodes entity references in either form, so a `&` that could
+/// start one is escaped too (`https://x.io/&copy;` stays exact).
 fn escape_markdown_destination(url: &str) -> String {
     if url.chars().any(|c| c.is_ascii_whitespace()) {
         let mut out = String::with_capacity(url.len() + 2);
@@ -1028,19 +2765,24 @@ fn escape_markdown_destination(url: &str) -> String {
             }
         }
         out.push('>');
-        out
+        escape_references(&out)
     } else {
         let mut out = String::with_capacity(url.len());
-        for c in url.chars() {
+        for (index, c) in url.chars().enumerate() {
             match c {
                 '\\' | '(' | ')' => {
+                    out.push('\\');
+                    out.push(c);
+                }
+                // A leading `<` would open the angle-bracket form.
+                '<' if index == 0 => {
                     out.push('\\');
                     out.push(c);
                 }
                 _ => out.push(c),
             }
         }
-        out
+        escape_references(&out)
     }
 }
 
@@ -1051,23 +2793,35 @@ fn escape_markdown_destination(url: &str) -> String {
 /// Color slots lower to inline CSS; non-default glyphs and brackets are
 /// preserved in `data-*` attributes. `Layout` is not applied — Markdown
 /// ignores layout by contract — so the outer style carries only color.
+///
+/// The visible label sits in an inline element whose body a reader parses as
+/// Markdown, so it is escaped like a MarkdownPlus span body.
 fn progress_html(hints: &crate::tree::ProgressHints, fallback_text: &str) -> String {
-    super::shared::progress_html(hints, fallback_text, "")
+    super::shared::progress_html_with_label(hints, fallback_text, "", |label| {
+        // A line ending is whitespace in the label's HTML element, and two
+        // of them would end the paragraph that holds the widget.
+        escape_markdown_text(&label.replace(['\r', '\n'], " "), true)
+    })
 }
 
-/// Indents continuation lines (every line after the first) by `indent`.
+/// The continuation indent of a GFM footnote definition.
+const FOOTNOTE_CONTINUATION: &str = "    ";
+
+/// Indents continuation lines (every line after the first) by `indent`,
+/// keeping each line's ending bytes; see [`split_line_endings`] for what
+/// ends a line. Used for list items and footnote definitions. A final line
+/// feed is dropped, since the enclosing join writes one after the container;
+/// a carriage return before it stays, completing a CRLF with the joining
+/// line feed.
 fn indent_continuation(text: &str, indent: &str) -> String {
-    let mut lines = text.lines();
-    let Some(first) = lines.next() else {
-        return String::new();
-    };
-    let mut output = first.to_string();
-    for line in lines {
-        output.push('\n');
-        if !line.is_empty() {
+    let text = text.strip_suffix('\n').unwrap_or(text);
+    let mut output = String::with_capacity(text.len());
+    for (index, (line, ending)) in split_line_endings(text).enumerate() {
+        if index > 0 && !line.is_empty() {
             output.push_str(indent);
         }
         output.push_str(line);
+        output.push_str(ending);
     }
     output
 }
@@ -1371,8 +3125,20 @@ mod tests {
 
     #[test]
     fn soft_and_hard_breaks() {
-        assert_eq!(render(&RenderNode::soft_break()).output, "\n");
-        assert_eq!(render(&RenderNode::hard_break()).output, "\\\n");
+        let between = |node: RenderNode| {
+            render(&RenderNode::paragraph(vec![
+                RenderNode::text("a"),
+                node,
+                RenderNode::text("b"),
+            ]))
+            .output
+        };
+        assert_eq!(between(RenderNode::soft_break()), "a\nb");
+        assert_eq!(between(RenderNode::hard_break()), "a\\\nb");
+        // With nothing after it in its block, a break has no line-ending
+        // spelling: a reader strips the line ending and reads the backslash.
+        assert_eq!(render(&RenderNode::soft_break()).output, "&#32;");
+        assert_eq!(render(&RenderNode::hard_break()).output, "<br>");
     }
 
     #[test]
@@ -1749,6 +3515,30 @@ mod tests {
     }
 
     #[test]
+    fn progress_markdown_plus_label_stays_literal_in_attribute_and_body() {
+        let mut para =
+            RenderNode::paragraph(vec![RenderNode::text(r"**a** &copy; <em>\ 60%")]);
+        para.attrs.set_progress_hints(&crate::tree::ProgressHints {
+            value: 0.6,
+            ..Default::default()
+        });
+        let out = render_with(
+            &para,
+            &opts(MarkdownDialect::MarkdownPlus, RenderStrictness::Warn),
+        )
+        .output;
+        // The attribute is raw HTML; the label element's body is Markdown.
+        assert!(
+            out.contains(r#"aria-label="**a** &amp;copy; &lt;em&gt;\""#),
+            "{out}"
+        );
+        assert!(
+            out.contains(r#"<span class="progress-label">\*\*a\*\* &amp;copy; &lt;em&gt;\\</span>"#),
+            "{out}"
+        );
+    }
+
+    #[test]
     fn progress_markdown_plus_lowers_color_slots() {
         use crate::color::{BasicColor, Color};
         let mut para = RenderNode::paragraph(vec![RenderNode::text("50%")]);
@@ -2020,10 +3810,10 @@ mod tests {
     }
 
     #[test]
-    fn table_cell_escapes_newline_in_link_url() {
+    fn table_cell_link_url_newline_degrades_to_space_as_outside_a_cell() {
         let link = RenderNode::link("a\nb", None, vec![RenderNode::text("x")]);
         let out = render(&one_cell_table(link)).output;
-        assert!(out.contains("(a<br>b)"), "{out}");
+        assert!(out.contains("(<a b>)"), "{out}");
     }
 
     #[test]
@@ -2174,8 +3964,11 @@ mod tests {
             &opts(MarkdownDialect::MarkdownPlus, RenderStrictness::Warn),
         )
         .output;
-        assert!(out.contains("**bold**"), "{out}");
-        assert!(out.contains("_italic_"), "{out}");
+        // The container is one raw HTML block, which a reader does not parse
+        // as Markdown, so its content is the browser's HTML.
+        assert!(out.contains("<p>plain <strong>bold</strong></p>"), "{out}");
+        assert!(out.contains("<p><em>italic</em></p>"), "{out}");
+        assert!(!out.contains("**"), "{out}");
     }
 
     #[test]
@@ -2205,13 +3998,13 @@ mod tests {
         // The container is well-formed: one opening and one closing div trio.
         assert_eq!(out.matches("<div").count(), 3, "{out}");
         assert_eq!(out.matches("</div>").count(), 3, "{out}");
-        assert!(out.contains("- li"), "{out}");
+        assert!(out.contains("<ul><li><p>li</p></li></ul>"), "{out}");
     }
 
     #[test]
     fn columns_markdown_plus_image_column_renders_without_malformed_html() {
-        // An image is valid Markdown image syntax embedded in the HTML
-        // container; the column markup stays well-formed under Warn.
+        // An image in the HTML container is an `<img>` element; the column
+        // markup stays well-formed under Warn.
         let warn = columns_node(
             crate::tree::ColumnsHints {
                 left_count: 1,
@@ -2227,12 +4020,12 @@ mod tests {
             &opts(MarkdownDialect::MarkdownPlus, RenderStrictness::Warn),
         )
         .output;
-        assert!(out.contains("![alt](pic.png)"), "{out}");
+        assert!(out.contains(r#"<img src="pic.png" alt="alt">"#), "{out}");
         assert_eq!(out.matches("<div").count(), 3, "{out}");
         assert_eq!(out.matches("</div>").count(), 3, "{out}");
 
-        // Under Strict the same content renders without error — an image is a
-        // portable Markdown construct, so no lossy rejection is triggered.
+        // Under Strict the same content renders without error: an image has
+        // an HTML form, so no lossy rejection is triggered.
         let strict = columns_node(
             crate::tree::ColumnsHints {
                 left_count: 1,
@@ -2251,13 +4044,9 @@ mod tests {
     }
 
     #[test]
-    fn columns_markdown_plus_multiple_blocks_per_column_documents_parser_constraint() {
-        // A column with two blocks renders them joined by a blank line, the
-        // same as any block sequence. That blank line lives inside the raw
-        // HTML container. This test documents the accepted parser constraint:
-        // a strict CommonMark parser may treat the blank line as ending the
-        // raw HTML block, so the markup is well-formed at the renderer level
-        // but a downstream strict parser may not nest the second block.
+    fn columns_markdown_plus_multiple_blocks_per_column_stay_one_html_block() {
+        // A blank line would end the raw HTML block, so two blocks in a
+        // column are adjacent HTML elements with no blank line between them.
         let node = columns_node(
             crate::tree::ColumnsHints {
                 left_count: 2,
@@ -2274,11 +4063,10 @@ mod tests {
             &opts(MarkdownDialect::MarkdownPlus, RenderStrictness::Warn),
         )
         .output;
-        // The renderer output itself is well-formed: one div trio, both left
-        // blocks present, joined by the standard blank-line block separator.
         assert_eq!(out.matches("<div").count(), 3, "{out}");
         assert_eq!(out.matches("</div>").count(), 3, "{out}");
-        assert!(out.contains("left-one\n\nleft-two"), "{out}");
+        assert!(out.contains("<p>left-one</p><p>left-two</p>"), "{out}");
+        assert!(!out.contains("\n\n"), "{out}");
         assert!(out.contains("right"), "{out}");
     }
 
@@ -2981,13 +4769,743 @@ mod literal_backslash_tests {
     }
 
     #[test]
-    fn delimiters_away_from_wrapper_edges_are_byte_identical() {
+    fn delimiter_characters_are_escaped_only_where_they_could_act() {
         for dialect in DIALECTS {
             let para = RenderNode::paragraph(vec![
-                RenderNode::text("*x* "),
+                RenderNode::text("*x* snake_case 2 * 3 "),
                 RenderNode::strong(vec![RenderNode::text("a*b_c~d")]),
             ]);
-            assert_eq!(render_in(&para, dialect), "*x* **a*b_c~d**", "{dialect:?}");
+            let markdown = render_in(&para, dialect);
+            assert_eq!(
+                markdown, "\\*x\\* snake_case 2 * 3 **a\\*b_c\\~d**",
+                "{dialect:?}"
+            );
+            assert_eq!(
+                read_back(&markdown),
+                "*x* snake_case 2 * 3 <strong>a*b_c~d</strong>",
+                "{dialect:?}"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod code_block_fence_tests {
+    use super::*;
+    use pulldown_cmark::{Event, Parser, Tag, TagEnd};
+
+    /// Each code block's text and language as a CommonMark reader sees them.
+    fn read_code_blocks(markdown: &str) -> Vec<(String, String)> {
+        let mut blocks = Vec::new();
+        let mut current: Option<(String, String)> = None;
+        for event in Parser::new(markdown) {
+            match event {
+                Event::Start(Tag::CodeBlock(pulldown_cmark::CodeBlockKind::Fenced(info))) => {
+                    current = Some((info.to_string(), String::new()));
+                }
+                Event::Text(text) => {
+                    if let Some((_, body)) = current.as_mut() {
+                        body.push_str(&text);
+                    }
+                }
+                Event::End(TagEnd::CodeBlock) => blocks.extend(current.take()),
+                _ => {}
+            }
+        }
+        blocks
+    }
+
+    #[test]
+    fn code_block_body_with_fence_lines_reads_back_whole() {
+        for dialect in [MarkdownDialect::Markdown, MarkdownDialect::MarkdownPlus] {
+            let opts = MarkdownRenderOptions {
+                dialect,
+                strictness: RenderStrictness::Warn,
+                style: None,
+            };
+            for (lang, value) in [
+                (None, "a\n```\nb\n```\nc"),
+                (Some("md"), "  ````rust\nx\n````"),
+                (None, "plain"),
+                (None, "inline ``` run"),
+            ] {
+                let node = RenderNode::code(lang.map(String::from), None, value);
+                let markdown = render_markdown_node(&node, &opts).expect("render").output;
+                assert_eq!(
+                    read_code_blocks(&markdown),
+                    [(lang.unwrap_or_default().to_string(), format!("{value}\n"))],
+                    "{dialect:?} {markdown:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn code_block_fence_is_three_backticks_unless_a_line_needs_more() {
+        assert_eq!(code_block_fence("plain"), "```");
+        assert_eq!(code_block_fence("inline ``` run"), "```");
+        assert_eq!(code_block_fence("a\n```\nb"), "````");
+        assert_eq!(code_block_fence("  `````x"), "``````");
+    }
+
+    #[test]
+    fn code_block_fence_reads_a_carriage_return_as_a_line_ending() {
+        // A reader starts a line after a lone CR or a CRLF, so a backtick
+        // run there could close a three-backtick fence.
+        assert_eq!(code_block_fence("a\r```\rb"), "````");
+        assert_eq!(code_block_fence("a\r\n````"), "`````");
+        for dialect in [MarkdownDialect::Markdown, MarkdownDialect::MarkdownPlus] {
+            let opts = MarkdownRenderOptions {
+                dialect,
+                strictness: RenderStrictness::Warn,
+                style: None,
+            };
+            let node = RenderNode::code(None, None, "a\r```\rb");
+            let markdown = render_markdown_node(&node, &opts).expect("render").output;
+            // pulldown-cmark does not end a code block line at a lone CR,
+            // so it reads the output with that ending spelled as LF.
+            assert_eq!(
+                read_code_blocks(&markdown.replace('\r', "\n")),
+                [(String::new(), "a\n```\nb\n".to_string())],
+                "{dialect:?} {markdown:?}"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod container_line_ending_tests {
+    use super::*;
+
+    #[test]
+    fn prefix_lines_keeps_every_line_ending_and_prefixes_after_each() {
+        assert_eq!(prefix_lines("a\nb\n", "> "), "> a\n> b\n");
+        assert_eq!(prefix_lines("a\r\nb", "> "), "> a\r\n> b");
+        assert_eq!(prefix_lines("a\rb\r", "> "), "> a\r> b\r");
+        assert_eq!(prefix_lines("", "> "), "");
+    }
+
+    #[test]
+    fn prefix_lines_writes_a_bare_marker_on_a_blank_line_for_every_ending() {
+        assert_eq!(prefix_lines("a\n\nb", "> "), "> a\n>\n> b");
+        assert_eq!(prefix_lines("a\r\rb", "> "), "> a\r>\r> b");
+        assert_eq!(prefix_lines("a\r\n\r\nb", "> "), "> a\r\n>\r\n> b");
+    }
+
+    #[test]
+    fn indent_continuation_keeps_endings_and_indents_after_each() {
+        assert_eq!(indent_continuation("a\nb\n", "  "), "a\n  b");
+        assert_eq!(indent_continuation("a\r\nb", "  "), "a\r\n  b");
+        assert_eq!(indent_continuation("a\rb", "  "), "a\r  b");
+        assert_eq!(indent_continuation("a\r\rb", "  "), "a\r\r  b");
+        // Only a final LF goes; the CR of a final CRLF stays.
+        assert_eq!(indent_continuation("a\r\n", "  "), "a\r");
+        assert_eq!(indent_continuation("", "  "), "");
+    }
+}
+
+/// Delimiter wrappers whose content starts or ends with whitespace or a break.
+///
+/// A delimiter run followed (or preceded) by whitespace or a line ending does
+/// not open (or close) emphasis, so these tests read the output back with
+/// `pulldown-cmark` and check that the emphasis covers exactly the text.
+#[cfg(test)]
+mod delimiter_edge_tests {
+    use super::*;
+    use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+
+    const DIALECTS: [MarkdownDialect; 2] =
+        [MarkdownDialect::Markdown, MarkdownDialect::MarkdownPlus];
+
+    fn render_in(node: &RenderNode, dialect: MarkdownDialect) -> String {
+        let opts = MarkdownRenderOptions {
+            dialect,
+            strictness: RenderStrictness::Warn,
+            style: None,
+        };
+        render_markdown_node(node, &opts).expect("render").output
+    }
+
+    /// Reads `markdown` back as visible text with `{SB}`/`{HB}` for breaks,
+    /// `<strong>`/`<em>`/`<del>` around emphasis, and inline HTML verbatim.
+    fn read_back(markdown: &str) -> String {
+        let mut out = String::new();
+        let options = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH;
+        for event in Parser::new_ext(markdown, options) {
+            match event {
+                Event::Text(text) | Event::Code(text) => out.push_str(&text),
+                Event::SoftBreak => out.push_str("{SB}"),
+                Event::HardBreak => out.push_str("{HB}"),
+                Event::InlineHtml(html) => out.push_str(&html),
+                Event::Start(Tag::Strong) => out.push_str("<strong>"),
+                Event::End(TagEnd::Strong) => out.push_str("</strong>"),
+                Event::Start(Tag::Emphasis) => out.push_str("<em>"),
+                Event::End(TagEnd::Emphasis) => out.push_str("</em>"),
+                Event::Start(Tag::Strikethrough) => out.push_str("<del>"),
+                Event::End(TagEnd::Strikethrough) => out.push_str("</del>"),
+                _ => {}
+            }
+        }
+        out
+    }
+
+    type Wrap = fn(Vec<RenderNode>) -> RenderNode;
+
+    /// Each CommonMark delimiter wrapper with its read-back tag.
+    fn wrappers() -> [(Wrap, &'static str); 3] {
+        [
+            (RenderNode::emphasis, "em"),
+            (RenderNode::strong, "strong"),
+            (RenderNode::delete, "del"),
+        ]
+    }
+
+    /// An edge node with its read-back outside and inside a table cell.
+    fn edges() -> Vec<(RenderNode, &'static str, &'static str)> {
+        vec![
+            (RenderNode::text(" "), " ", " "),
+            (RenderNode::text("\t"), "\t", "\t"),
+            (RenderNode::soft_break(), "{SB}", " "),
+            (RenderNode::hard_break(), "{HB}", "<br>"),
+        ]
+    }
+
+    fn cell_table(cell: Vec<RenderNode>) -> RenderNode {
+        RenderNode::table(
+            vec![ColumnAlign::None],
+            vec![
+                RenderNode::table_row(vec![RenderNode::table_cell(vec![RenderNode::text("H")])]),
+                RenderNode::table_row(vec![RenderNode::table_cell(cell)]),
+            ],
+        )
+    }
+
+    /// Renders `inline` in a paragraph or a table cell and reads it back,
+    /// dropping the table header cell.
+    fn render_and_read(
+        inline: Vec<RenderNode>,
+        in_cell: bool,
+        dialect: MarkdownDialect,
+    ) -> (String, String) {
+        let node = if in_cell {
+            cell_table(inline)
+        } else {
+            RenderNode::paragraph(inline)
+        };
+        let markdown = render_in(&node, dialect);
+        let read = read_back(&markdown);
+        let read = if in_cell {
+            read.strip_prefix('H').unwrap_or(&read).to_string()
+        } else {
+            read
+        };
+        (markdown, read)
+    }
+
+    #[test]
+    fn leading_edges_are_written_outside_every_delimiter() {
+        for dialect in DIALECTS {
+            for (wrap, tag) in wrappers() {
+                for (edge, outside, in_table) in edges() {
+                    for in_cell in [false, true] {
+                        let inline = vec![
+                            RenderNode::text("a"),
+                            wrap(vec![edge.clone(), RenderNode::text("b")]),
+                            RenderNode::text(" c"),
+                        ];
+                        let (markdown, read) = render_and_read(inline, in_cell, dialect);
+                        let shown = if in_cell { in_table } else { outside };
+                        assert_eq!(
+                            read,
+                            format!("a{shown}<{tag}>b</{tag}> c"),
+                            "{dialect:?} {tag} {edge:?} in_cell={in_cell}: {markdown:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn trailing_edges_are_written_outside_every_delimiter() {
+        for dialect in DIALECTS {
+            for (wrap, tag) in wrappers() {
+                for (edge, outside, in_table) in edges() {
+                    for in_cell in [false, true] {
+                        let inline = vec![
+                            RenderNode::text("a "),
+                            wrap(vec![RenderNode::text("b"), edge.clone()]),
+                            RenderNode::text("c"),
+                        ];
+                        let (markdown, read) = render_and_read(inline, in_cell, dialect);
+                        let shown = if in_cell { in_table } else { outside };
+                        assert_eq!(
+                            read,
+                            format!("a <{tag}>b</{tag}>{shown}c"),
+                            "{dialect:?} {tag} {edge:?} in_cell={in_cell}: {markdown:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn text_with_edge_whitespace_keeps_emphasis_on_its_words() {
+        for dialect in DIALECTS {
+            for (wrap, tag) in wrappers() {
+                for in_cell in [false, true] {
+                    let inline = vec![
+                        RenderNode::text("a"),
+                        wrap(vec![RenderNode::text(" \tb c\t ")]),
+                        RenderNode::text("d"),
+                    ];
+                    let (markdown, read) = render_and_read(inline, in_cell, dialect);
+                    assert!(
+                        read.contains(&format!("<{tag}>b c</{tag}>")),
+                        "{dialect:?} {tag} in_cell={in_cell}: {markdown:?} read {read:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn edges_of_nested_wrappers_move_outside_the_outer_delimiters() {
+        // `<b><i> a\n</i></b>`: the space and the break leave both wrappers.
+        let inline = vec![
+            RenderNode::text("x"),
+            RenderNode::strong(vec![RenderNode::emphasis(vec![
+                RenderNode::text(" a"),
+                RenderNode::soft_break(),
+            ])]),
+            RenderNode::text("y"),
+        ];
+        for dialect in DIALECTS {
+            let (markdown, read) = render_and_read(inline.clone(), false, dialect);
+            assert_eq!(markdown, "x **_a_**\ny", "{dialect:?}");
+            assert_eq!(read, "x <strong><em>a</em></strong>{SB}y", "{dialect:?}");
+        }
+    }
+
+    #[test]
+    fn a_wrapper_with_only_whitespace_or_breaks_writes_no_delimiters() {
+        for dialect in DIALECTS {
+            for (wrap, _) in wrappers() {
+                let inline = vec![
+                    RenderNode::text("a"),
+                    wrap(vec![RenderNode::text(" "), RenderNode::soft_break()]),
+                    RenderNode::text("b"),
+                ];
+                let (markdown, read) = render_and_read(inline, false, dialect);
+                // The space ends a line, so it is a reference a reader keeps.
+                assert_eq!(markdown, "a&#32;\nb", "{dialect:?}");
+                assert_eq!(read, "a {SB}b", "{dialect:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn an_edge_delimiter_character_is_still_escaped_after_the_whitespace_moves() {
+        let node = RenderNode::paragraph(vec![
+            RenderNode::text("a"),
+            RenderNode::strong(vec![RenderNode::text(" *b")]),
+        ]);
+        for dialect in DIALECTS {
+            let markdown = render_in(&node, dialect);
+            assert_eq!(markdown, "a **\\*b**", "{dialect:?}");
+            assert_eq!(read_back(&markdown), "a <strong>*b</strong>");
+        }
+    }
+
+    #[test]
+    fn mark_and_dim_delimiters_touch_their_text() {
+        // Darkmatter reads `==`/`⌄` only when no whitespace follows the opener
+        // or precedes the closer, and only within one line.
+        for (token, delimiter) in [("mark", "=="), ("dim", "\u{2304}")] {
+            for (edge, ..) in edges() {
+                let leading = RenderNode::paragraph(vec![
+                    RenderNode::text("a"),
+                    RenderNode::extended(token, vec![edge.clone(), RenderNode::text("b")], None),
+                ]);
+                let trailing = RenderNode::paragraph(vec![
+                    RenderNode::extended(token, vec![RenderNode::text("b"), edge.clone()], None),
+                    RenderNode::text("c"),
+                ]);
+                for dialect in DIALECTS {
+                    let between = RenderNode::paragraph(vec![
+                        RenderNode::text("a"),
+                        edge.clone(),
+                        RenderNode::text("c"),
+                    ]);
+                    let between = render_in(&between, dialect);
+                    let shown = &between[1..between.len() - 1];
+                    assert_eq!(
+                        render_in(&leading, dialect),
+                        format!("a{shown}{delimiter}b{delimiter}"),
+                        "{token} {edge:?} {dialect:?}"
+                    );
+                    assert_eq!(
+                        render_in(&trailing, dialect),
+                        format!("{delimiter}b{delimiter}{shown}c"),
+                        "{token} {edge:?} {dialect:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn wrappers_without_edge_whitespace_are_byte_identical() {
+        let cases = [
+            (RenderNode::strong(vec![RenderNode::text("a")]), "**a**"),
+            (RenderNode::emphasis(vec![RenderNode::text("a b")]), "_a b_"),
+            (RenderNode::delete(vec![RenderNode::text("a")]), "~~a~~"),
+            (
+                RenderNode::strong(vec![
+                    RenderNode::text("a"),
+                    RenderNode::soft_break(),
+                    RenderNode::text("b"),
+                ]),
+                "**a\nb**",
+            ),
+            (
+                RenderNode::extended("mark", vec![RenderNode::text("a")], None),
+                "==a==",
+            ),
+        ];
+        for (node, expected) in cases {
+            for dialect in DIALECTS {
+                assert_eq!(
+                    render_in(&RenderNode::paragraph(vec![node.clone()]), dialect),
+                    expected
+                );
+            }
+        }
+    }
+
+    /// A wrapper between outer neighbors where the usual delimiter cannot
+    /// open or close, with the inline nodes around it and the expected
+    /// read-back (`{tag}` stands for the wrapper's tag).
+    fn flanking_cases(wrap: Wrap) -> Vec<(&'static str, Vec<RenderNode>, &'static str)> {
+        let punct = || wrap(vec![RenderNode::text("(b)")]);
+        vec![
+            (
+                "punctuation inside, letter outside the opener",
+                vec![RenderNode::text("a"), punct(), RenderNode::text(" c")],
+                "a<{tag}>(b)</{tag}> c",
+            ),
+            (
+                "punctuation inside, letter outside the closer",
+                vec![RenderNode::text("a "), punct(), RenderNode::text("c")],
+                "a <{tag}>(b)</{tag}>c",
+            ),
+            (
+                "punctuation inside, letters outside both",
+                vec![RenderNode::text("a"), punct(), RenderNode::text("c")],
+                "a<{tag}>(b)</{tag}>c",
+            ),
+            (
+                "inline code inside, letters outside",
+                vec![
+                    RenderNode::text("a"),
+                    wrap(vec![RenderNode::inline_code("b")]),
+                    RenderNode::text("c"),
+                ],
+                "a<{tag}>b</{tag}>c",
+            ),
+            (
+                "intraword",
+                vec![
+                    RenderNode::text("a"),
+                    wrap(vec![RenderNode::text("b")]),
+                    RenderNode::text("c"),
+                ],
+                "a<{tag}>b</{tag}>c",
+            ),
+            (
+                "an unescaped `*` in the text outside",
+                vec![
+                    RenderNode::text("a*"),
+                    wrap(vec![RenderNode::text("b")]),
+                    RenderNode::text("*c"),
+                ],
+                "a*<{tag}>b</{tag}>*c",
+            ),
+            (
+                "an unescaped `_` in the text outside",
+                vec![
+                    RenderNode::text("a_"),
+                    wrap(vec![RenderNode::text("b")]),
+                    RenderNode::text("_c"),
+                ],
+                "a_<{tag}>b</{tag}>_c",
+            ),
+            (
+                "an unescaped `~` in the text outside",
+                vec![
+                    RenderNode::text("a~"),
+                    wrap(vec![RenderNode::text("b")]),
+                    RenderNode::text("~c"),
+                ],
+                "a~<{tag}>b</{tag}>~c",
+            ),
+            (
+                "inside a span that writes no markup",
+                vec![
+                    RenderNode::text("a"),
+                    RenderNode::span(Vec::new(), vec![punct()]),
+                    RenderNode::text("c"),
+                ],
+                "a<{tag}>(b)</{tag}>c",
+            ),
+        ]
+    }
+
+    #[test]
+    fn every_wrapper_reads_back_where_its_delimiter_cannot_flank() {
+        for dialect in DIALECTS {
+            for (wrap, tag) in wrappers() {
+                for (label, inline, expected) in flanking_cases(wrap) {
+                    for in_cell in [false, true] {
+                        let (markdown, read) = render_and_read(inline.clone(), in_cell, dialect);
+                        assert_eq!(
+                            read,
+                            expected.replace("{tag}", tag),
+                            "{dialect:?} {tag} {label} in_cell={in_cell}: {markdown:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn flanking_fallbacks_use_the_first_spelling_that_reads_back() {
+        let a = || RenderNode::text("a");
+        let c = || RenderNode::text("c");
+        let paren = || RenderNode::text("(b)");
+        let b = || RenderNode::text("b");
+        let cases = [
+            // `*` opens and closes inside a word; `_` does not.
+            (vec![a(), RenderNode::emphasis(vec![b()]), c()], "a*b*c"),
+            (vec![a(), RenderNode::strong(vec![b()]), c()], "a**b**c"),
+            (vec![a(), RenderNode::delete(vec![b()]), c()], "a~~b~~c"),
+            // No delimiter flanks punctuation against a letter.
+            (
+                vec![a(), RenderNode::emphasis(vec![paren()]), c()],
+                "a<em>(b)</em>c",
+            ),
+            (
+                vec![a(), RenderNode::strong(vec![paren()]), c()],
+                "a<strong>(b)</strong>c",
+            ),
+            (
+                vec![a(), RenderNode::delete(vec![paren()]), c()],
+                "a<del>(b)</del>c",
+            ),
+            // Text beside a wrapper escapes its delimiter characters, so the
+            // usual run fits; a run beside an unescaped one would merge.
+            (
+                vec![RenderNode::text("x*"), RenderNode::strong(vec![b()])],
+                "x\\***b**",
+            ),
+            (
+                vec![RenderNode::text("x_"), RenderNode::emphasis(vec![b()])],
+                "x\\__b_",
+            ),
+            (
+                vec![RenderNode::strong(vec![a()]), RenderNode::strong(vec![b()])],
+                "**a**__b__",
+            ),
+            // The outer wrapper sees its body's first and last characters.
+            (
+                vec![
+                    a(),
+                    RenderNode::emphasis(vec![RenderNode::strong(vec![b()])]),
+                    c(),
+                ],
+                "a<em>**b**</em>c",
+            ),
+            (
+                vec![RenderNode::strong(vec![
+                    a(),
+                    RenderNode::emphasis(vec![b()]),
+                ])],
+                "__a*b*__",
+            ),
+        ];
+        for (inline, expected) in cases {
+            for dialect in DIALECTS {
+                let para = RenderNode::paragraph(inline.clone());
+                let markdown = render_in(&para, dialect);
+                assert_eq!(markdown, expected, "{dialect:?}");
+                assert_eq!(read_back(&markdown), read_back(expected), "{dialect:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn nested_and_adjacent_wrappers_read_back_with_their_structure() {
+        let cases = [
+            (
+                vec![
+                    RenderNode::text("a"),
+                    RenderNode::emphasis(vec![RenderNode::strong(vec![RenderNode::text("b")])]),
+                    RenderNode::text("c"),
+                ],
+                "a<em><strong>b</strong></em>c",
+            ),
+            (
+                vec![RenderNode::strong(vec![
+                    RenderNode::text("a"),
+                    RenderNode::emphasis(vec![RenderNode::text("b")]),
+                ])],
+                "<strong>a<em>b</em></strong>",
+            ),
+            (
+                vec![
+                    RenderNode::strong(vec![RenderNode::text("a")]),
+                    RenderNode::strong(vec![RenderNode::text("b")]),
+                ],
+                "<strong>a</strong><strong>b</strong>",
+            ),
+            (
+                vec![
+                    RenderNode::text("a"),
+                    RenderNode::emphasis(vec![RenderNode::text("b")]),
+                    RenderNode::strong(vec![RenderNode::text("c")]),
+                    RenderNode::text("d"),
+                ],
+                "a<em>b</em><strong>c</strong>d",
+            ),
+        ];
+        for dialect in DIALECTS {
+            for (inline, expected) in &cases {
+                for in_cell in [false, true] {
+                    let (markdown, read) = render_and_read(inline.clone(), in_cell, dialect);
+                    assert_eq!(
+                        read, *expected,
+                        "{dialect:?} in_cell={in_cell}: {markdown:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn well_formed_delimiters_are_byte_identical() {
+        let text = RenderNode::text;
+        let cases = [
+            (
+                vec![
+                    text("x "),
+                    RenderNode::emphasis(vec![text("(b)")]),
+                    text(" y"),
+                ],
+                "x _(b)_ y",
+            ),
+            (
+                vec![text("x "), RenderNode::strong(vec![text("b")]), text(".")],
+                "x **b**.",
+            ),
+            (
+                vec![text("("), RenderNode::strong(vec![text("(b)")]), text(")")],
+                "(**(b)**)",
+            ),
+            (
+                vec![RenderNode::emphasis(vec![text("a")]), text(", b")],
+                "_a_, b",
+            ),
+            (
+                vec![text("x "), RenderNode::delete(vec![text("b")]), text(" y")],
+                "x ~~b~~ y",
+            ),
+            (
+                vec![RenderNode::strong(vec![RenderNode::emphasis(vec![text(
+                    "a",
+                )])])],
+                "**_a_**",
+            ),
+            (
+                vec![RenderNode::emphasis(vec![RenderNode::strong(vec![text(
+                    "a",
+                )])])],
+                "_**a**_",
+            ),
+            (
+                vec![RenderNode::link(
+                    "u",
+                    None,
+                    vec![RenderNode::strong(vec![text("(a)")])],
+                )],
+                "[**(a)**](u)",
+            ),
+            (
+                vec![RenderNode::strong(vec![text("é")]), text("x")],
+                "**é**x",
+            ),
+        ];
+        for (inline, expected) in cases {
+            for dialect in DIALECTS {
+                assert_eq!(
+                    render_in(&RenderNode::paragraph(inline.clone()), dialect),
+                    expected,
+                    "{dialect:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn mark_and_dim_fall_back_to_plain_text_where_darkmatter_cannot_read_them() {
+        let dim = |text: &str| RenderNode::extended("dim", vec![RenderNode::text(text)], None);
+        let mark = |text: &str| RenderNode::extended("mark", vec![RenderNode::text(text)], None);
+        let a = || RenderNode::text("a");
+        let c = || RenderNode::text("c");
+        let readable = [
+            (vec![a(), mark("(b)"), c()], "a==(b)==c"),
+            (vec![a(), mark("b"), c()], "a==b==c"),
+            (vec![a(), dim("(b)"), c()], "a\u{2304}(b)\u{2304}c"),
+            (
+                vec![RenderNode::text("a "), dim("b"), RenderNode::text(".")],
+                "a \u{2304}b\u{2304}.",
+            ),
+        ];
+        let unreadable = [
+            // `⌄` never opens or closes between two alphanumerics.
+            (vec![a(), dim("b"), c()], "abc"),
+            // `==` pairs from the left, so a preceding `=`, escaped or not,
+            // steals the opener.
+            (vec![RenderNode::text("a="), mark("b")], "a\\=b"),
+        ];
+        for dialect in DIALECTS {
+            for (inline, expected) in &readable {
+                let para = RenderNode::paragraph(inline.clone());
+                let rendered = render_markdown_node(&para, &opts(dialect, RenderStrictness::Warn))
+                    .expect("render");
+                assert_eq!(rendered.output, *expected, "{dialect:?}");
+                assert!(rendered.diagnostics.is_empty(), "{dialect:?}");
+            }
+            for (inline, expected) in &unreadable {
+                let para = RenderNode::paragraph(inline.clone());
+                let warn = render_markdown_node(&para, &opts(dialect, RenderStrictness::Warn))
+                    .expect("render");
+                assert_eq!(warn.output, *expected, "{dialect:?}");
+                assert_eq!(warn.diagnostics.len(), 1, "{dialect:?}");
+                assert!(matches!(
+                    render_markdown_node(&para, &opts(dialect, RenderStrictness::Strict)),
+                    Err(RenderError::LossyRejected { .. })
+                ));
+            }
+        }
+    }
+
+    fn opts(dialect: MarkdownDialect, strictness: RenderStrictness) -> MarkdownRenderOptions {
+        MarkdownRenderOptions {
+            dialect,
+            strictness,
+            style: None,
         }
     }
 }

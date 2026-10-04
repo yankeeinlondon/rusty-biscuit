@@ -97,7 +97,7 @@ fn format_findings(findings: &[ValidationFinding]) -> String {
 }
 
 /// Returns `true` if `kind` is a block-level node.
-fn is_block(kind: &NodeKind) -> bool {
+pub(crate) fn is_block(kind: &NodeKind) -> bool {
     matches!(
         kind,
         NodeKind::Root { .. }
@@ -118,7 +118,7 @@ fn is_block(kind: &NodeKind) -> bool {
 }
 
 /// Returns `true` if `kind` is an inline (phrasing-level) node.
-fn is_inline_kind(kind: &NodeKind) -> bool {
+pub(crate) fn is_inline_kind(kind: &NodeKind) -> bool {
     matches!(
         kind,
         NodeKind::Text { .. }
@@ -151,7 +151,7 @@ fn is_phrasing_only(kind: &NodeKind) -> bool {
 }
 
 /// A short name for a node kind, used in finding messages.
-fn kind_name(kind: &NodeKind) -> &'static str {
+pub(crate) fn kind_name(kind: &NodeKind) -> &'static str {
     match kind {
         NodeKind::Root { .. } => "Root",
         NodeKind::Heading { .. } => "Heading",

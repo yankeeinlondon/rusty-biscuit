@@ -184,12 +184,14 @@ several ways, in both dialects:
 
 | Node | Markdown | Inside a table cell |
 |------|----------|---------------------|
-| `HardBreak` | `first\` then a newline, then `second` | `first<br>second` |
-| `SoftBreak` | a newline | a space |
+| `HardBreak` | `first\` then a newline, then `second` (see [Breaks by position](#breaks-by-position)) | `first<br>second` |
+| `SoftBreak` | a newline (see [Breaks by position](#breaks-by-position)) | a space |
 | `InlineCode` | a code span with a safe backtick fence | the same, with each pipe escaped by a backslash before the fence is chosen |
+| `Code` | a backtick fence of three, or one longer than the longest backtick run that starts a body line | a code span, with a diagnostic (see [Blocks in a table cell](#blocks-in-a-table-cell)) |
 
 A hard break uses the visible backslash form; two trailing spaces are never
-emitted. An inline-code value is literal, so the renderer chooses a fence that
+emitted. A code block whose body holds a line such as ```` ``` ```` is written
+with a ```` ```` ```` fence, so a reader does not close the block at that line. An inline-code value is literal, so the renderer chooses a fence that
 cannot be closed early by the value:
 
 | Value | Markdown |
@@ -207,34 +209,656 @@ space, and an empty value renders as nothing. The same rule is public as
 `renderable::markdown::code_span`, so any other producer of a code span
 spells it identically.
 
-A `Text` value is literal, so a backslash in it must reach a Markdown reader
-as a backslash. The renderer doubles each backslash that a reader would
-otherwise take as an escape: one before ASCII punctuation or a line ending,
-and one at the end of the value, because the next character comes from a
-neighboring node (a break, a closing `**`, a table cell's `<br>`):
+Two code spans that would touch are separated by an empty HTML comment. A
+fence is a backtick run with no backtick beside it, so two fences written
+side by side merge into one longer run, and a reader finds a different code
+span. This happens wherever nothing visible sits between two code values:
+direct neighbors, an empty node between them, or a wrapper that writes no
+Markdown of its own (a neutral span, an unknown extension, a class or style
+that plain Markdown removes, a `mark`/`dim` wrapper written unstyled):
+
+| Inline nodes | Markdown | A reader sees |
+|--------------|----------|---------------|
+| `InlineCode("a")`, `InlineCode("b")` | `` `a`<!-- -->`b` `` | code `a`, then code `b` |
+| ``InlineCode("x`y")``, ``InlineCode("z``w")`` | ```` ``x`y``<!-- -->```z``w``` ```` | code ``x`y``, then code ````z``w```` |
+| `InlineCode("a")`, `Text(" ")`, `InlineCode("b")` | `` `a` `b` `` | unchanged: the space separates them |
+| `InlineCode("a")`, `Strong[InlineCode("b")]` | ``` `a`**`b`** ``` | unchanged: the delimiter separates them |
+
+Without the comment, the first row would be `` `a``b` ``, the single value
+```` a``b ````. Every visible separator would change the text, and the
+comment is CommonMark's only empty inline construct, so both dialects write
+it and no strictness mode reports a loss. It always follows a closing fence
+on the same line, so it can never start an HTML block, and it holds no `|`,
+so a table row is unaffected. An empty code value writes nothing, so it
+neither separates two values nor needs a separator.
+
+The comment is structure, not text, for every reader in this repository, so
+the separator never shows:
+
+| Reader | What it does with `` `a`<!-- -->`b` `` |
+|--------|----------------------------------------|
+| Darkmatter's Markdown fold | keeps the comment as an `Html` node between the two `InlineCode` nodes, so re-serializing writes the same bytes |
+| Terminal renderer | writes nothing for a comment-only `Html` node, in every strictness, with no diagnostic |
+| Browser renderer | writes nothing under `RawHtmlPolicy::Escape` (the default) and `Reject`, in every strictness, with no diagnostic; writes the comment itself under `Allow` |
+| Markdown renderer | writes a comment-only `Html` node back as is; plain Markdown does not report it as unportable |
+| `Prose` / `InlineProse` | read a comment as no content (see biscuit-terminal's Prose grammar) |
+
+"Comment-only" (`renderable::tree::is_html_comment_only`) means the whole raw
+HTML value is one or more CommonMark comments (`<!-->`, `<!--->`, or `<!--`
+… `-->`) with only whitespace around them. Anything more is raw HTML under
+the usual policy: `<!-- a --> b` and `<span title="<!-- -->">` are escaped
+by default and rejected by a strict `Reject`, and a code value or text that
+looks like a comment is content, shown as written.
+
+A `Text` value is literal: formatting comes only from structural nodes
+(`Strong`, `Link`, `Html`, …), so whatever characters a value holds, a
+CommonMark/GFM reader sees exactly those characters. The renderer escapes a
+character only where a reader could take it as syntax, so ordinary prose is
+written unchanged:
+
+| `Text` value | Markdown | A reader sees |
+|--------------|----------|---------------|
+| `**literal**` | `\*\*literal\*\*` | `**literal**`, not bold |
+| `[docs](https://x.io)` | `\[docs\](https://x.io)` | the text, not a link |
+| `<em>hi</em>` | `\<em>hi\</em>` | the tags as text |
+| `&copy;` | `\&copy;` | `&copy;`, not `©` |
+| `<3@example.com>` | `\<3@example.com>` | the text, not an email link |
+| `snake_case, 2 * 3, a < b, I <3 you, AT&T rocks` | unchanged | the same |
+
+The rules, character by character:
+
+- `` ` ``, `[`, and `]` are always escaped (code spans, links, footnotes).
+- `*`, `_`, and `~` are escaped where CommonMark's flanking rules would let
+  them open or close emphasis or strikethrough; at either end of a value the
+  neighbor comes from another node, so it is assumed to be anything.
+  `snake_case` and `2 * 3` cannot act and stay as written.
+- `<` is escaped before a letter, `/`, `!`, or `?` (an HTML tag or URI
+  autolink), and before anything that could still complete an email
+  autolink `<local@domain>`, whose local part may start with a digit or
+  ``.!#$%&'*+/=?^_`{|}~-`` (`<3@example.com>`, `<+foo@example.com>`).
+  `I <3 you` and `a <- b` cannot become one and stay as written. A `<` at
+  the end of a value is escaped, since a neighbor could complete it.
+- `&` is escaped where it could start an entity or numeric reference
+  (`&copy;`, `&#169;`).
+- A lone carriage return, which a reader takes as a line ending, is written
+  as `&#13;`.
+- `==` is escaped as `\==`, and an `=` at either end of a value, so
+  darkmatter does not read a `mark`.
+- A backslash is doubled where a reader would take it as an escape: before
+  ASCII punctuation or a line ending, and at the end of the value, because
+  the next character comes from a neighboring node (a break, a closing `**`,
+  a table cell's `<br>`). `C:\dir` is unchanged.
 
 | Tree | Markdown | A reader sees |
 |------|----------|---------------|
 | `Text("a\")`, `SoftBreak`, `Text("b")` | `a\\`, newline, `b` | `a\`, soft break, `b` |
 | `Text("a\")`, `HardBreak`, `Text("b")` | `a\\\`, newline, `b` | `a\`, hard break, `b` |
-| `Strong[Text("a\")]` | `**a\\**` | bold `a\` |
-| `Text("C:\dir")` | `C:\dir` (unchanged) | `C:\dir` |
+| `Strong[Text("a*")]` | `**a\***` | bold `a*` |
 
-The same rule covers image alt text, a table title, and a link title (which
-also escapes `"`).
+A line that text starts (a paragraph's first line, or the line after a break
+or a newline inside the value) is protected from block syntax: a leading
+`#`, `>`, `-`/`+`/`*` list marker, `1.`/`1)`, setext underline, thematic
+break, or GFM table delimiter row (`--|--`) is escaped (`\# not a heading`,
+`1\. not a list`). The decision is made on the **whole line** the inline
+content assembles, not on each value: adjacent `Text` values, the children
+of a transparent span or unknown extended wrapper, and a styled span that
+plain Markdown writes as its bare text all count as one line. A raw `Html`
+value that ends with a carriage return ends its line, as a reader takes it,
+so text after it is protected too; a line feed at the start of that text
+completes the same CRLF rather than starting a blank line.
 
-Inside `Emphasis`, `Strong`, and `Delete`, a `*`, `_`, or `~` that touches
-the wrapper's delimiter is escaped too: the first character of a leading
-`Text` child and the last character of a trailing one. `Strong[Text("a*")]`
-is written `**a\***`, which a reader sees as bold `a*`; without the escape it
-would merge into the closing `**`. The same character elsewhere in the text
-is untouched.
+| Tree | Markdown | A reader sees |
+|------|----------|---------------|
+| `Text("1")`, `Span[Text(". literal")]` | `1\. literal` | `1. literal`, not a list |
+| `Text(" ")`, `Text("# literal")` | `&#32;# literal` | ` # literal`, not a heading |
+| `Html("<i>a</i>\r")`, `Text("# literal")` | `<i>a</i>`, CR, `\# literal` | the raw HTML, then `# literal` on the next line, not a heading |
 
-Other Markdown punctuation in a `Text` value is written as-is: text
-containing `*` or `_` away from a wrapper edge can still be read as markup.
-Beyond backslashes and wrapper edges, only two contexts escape text: a table cell (pipes and
-newlines) and the body of an HTML element the MarkdownPlus dialect emits
-(HTML escaping).
+The same holds for a table delimiter row: after a line `a | b`, the values
+`|` and `-|-|` on the next line are written `|\-|-|`, which no reader takes
+as the start of a table.
+
+Leading and trailing whitespace on a line is written as a character
+reference (`&#32;` for a space, `&#9;` for a tab), because a reader strips
+it, reads four columns of indentation as a code block, and reads two
+trailing spaces before a line ending as a hard break. Only the outermost
+character is encoded; the rest stays as written.
+
+| Tree | Markdown | A reader sees |
+|------|----------|---------------|
+| `Text("    literal")` | `&#32;   literal` | `    literal`, not code |
+| `Text("a")`, `HardBreak`, `Text("\tb")` | `a\`, newline, `&#9;b` | `a`, hard break, a tab, `b` |
+| `Text("a  ")`, `SoftBreak`, `Text("b")` | `a &#32;`, newline, `b` | `a  `, soft break, `b` |
+
+A heading's text and a table cell's content are trimmed by a reader too, so
+their edge whitespace is encoded the same way, and a line feed in a
+heading's text is written as `&#10;` (a CRLF as `&#13;&#10;`) so the heading
+stays one line. A
+heading whose text ends in whitespace and `#` escapes that run, which would
+otherwise be read as the closing sequence and dropped.
+
+Each context applies the same encoding with its own additions:
+
+| Context | Encoding |
+|---------|----------|
+| Paragraph, heading, quote, list item, footnote body, link label, emphasis body, sequence container, plain-Markdown disclosure summary | the rules above |
+| Image alternative text | the rules above (a reader parses alt text as inline Markdown), with each line after the first protected like a line of text; in a heading a line ending is a reference, as in heading text |
+| Table title | the rules above after trimming the title, which is deliberate: a title is written trimmed |
+| Table cell | the rules above, then `\|` for a pipe and `<br>` for a line ending, and edge whitespace as references (every other field in a cell protects its pipes too: see [Pipes in a table cell](#pipes-in-a-table-cell)) |
+| MarkdownPlus inline-HTML span body (color, underline, class) | `<`, `>`, `&` HTML-escaped; other punctuation escaped as above, because the body is still Markdown |
+| MarkdownPlus disclosure summary, columns container | written as the browser's HTML, never Markdown: see [HTML-backed MarkdownPlus content](#html-backed-markdownplus-content) |
+| MarkdownPlus progress label | the children's plain text, as the browser takes it; HTML-escaped in the `aria-label` with its line endings as references (see [Line endings in quoted fields](#line-endings-in-quoted-fields)), and escaped as above in the visible label element, whose body a reader parses as Markdown, with each line ending as a space |
+| Link/image title | `"` and backslashes escaped, a reference-forming `&`, and each CR/LF as `&#13;`/`&#10;` in every context (see [Line endings in quoted fields](#line-endings-in-quoted-fields)); Markdown punctuation is literal there |
+| Link/image destination | `(`, `)`, `\`, a leading `<`, and a reference-forming `&` escaped (`https://x.io/&copy;` stays exact); whitespace switches to the `<…>` form, in which a tab or line ending becomes a space |
+| Inline code, code block, raw `Html` | never escaped |
+
+The same text encoding is public as `renderable::markdown::escape_text`, for
+code that writes Markdown by hand. It protects the start of every line of the
+value and the end of every line but the last; whitespace at the very end is
+left alone, since the caller decides what follows it.
+
+A delimiter followed by whitespace or a line ending does not open emphasis,
+and one preceded by them does not close it. So whitespace and soft or hard
+breaks at the start or end of a delimiter wrapper (`Emphasis`, `Strong`,
+`Delete`, and the `mark`/`dim` extensions) are written outside the
+delimiters, including those at the edge of a nested wrapper:
+
+| Tree | Markdown | A reader sees |
+|------|----------|---------------|
+| `Text("a")`, `Strong[Text(" b")]` | `a **b**` | `a `, bold `b` |
+| `Strong[Text("a ")]`, `Text("b")` | `**a** b` | bold `a`, ` b` |
+| `Text("a ")`, `Strong[SoftBreak, Text("b")]` | `a `, newline, `**b**` | `a`, soft break, bold `b` |
+| `Strong[Text("b"), HardBreak]` in a table cell | `**b**<br>` | bold `b`, line break |
+| `Strong[Text("b"), HardBreak]` ending a paragraph | `**b**<br>` | bold `b`, line break |
+| `Strong[Text(" ")]` | ` ` | a space, no bold |
+
+A break moved outside the delimiters is spelled for its new position (see
+[Breaks by position](#breaks-by-position)). A wrapper that holds only
+whitespace and breaks is written without delimiters. A wrapper without edge whitespace or breaks is written
+unchanged: `Strong[Text("a")]` is `**a**`.
+
+A delimiter run also has to *flank* the text it marks, judged from the
+characters on both sides of each run. CommonMark does not let a run open
+when punctuation follows it and a letter precedes it (`a**(b)**` is not
+bold), and `_` never opens or closes inside a word (`a_b_c` is not
+emphasis). A run next to the same unescaped character joins it and changes
+its length. The renderer therefore checks each wrapper's spellings in order
+and writes the first one a reader can open and close at that position:
+
+| Wrapper | Spellings, in order |
+|---------|---------------------|
+| `Emphasis` | `_b_`, `*b*`, `<em>b</em>` |
+| `Strong` | `**b**`, `__b__`, `<strong>b</strong>` |
+| `Delete` | `~~b~~`, `<del>b</del>` |
+| `mark` | `==b==`, then plain text |
+| `dim` | `⌄b⌄`, then plain text |
+
+| Tree | Markdown | A reader sees |
+|------|----------|---------------|
+| `Text("a")`, `Emphasis[Text("b")]`, `Text("c")` | `a*b*c` | `a`, emphasized `b`, `c` |
+| `Text("a")`, `Strong[Text("b")]`, `Text("c")` | `a**b**c` | `a`, bold `b`, `c` |
+| `Text("a")`, `Strong[Text("(b)")]`, `Text("c")` | `a<strong>(b)</strong>c` | `a`, bold `(b)`, `c` |
+| `Text("x*")`, `Strong[Text("b")]` | `x\***b**` | `x*`, bold `b` |
+| `Text("a")`, `dim[Text("b")]`, `Text("c")` | `abc` | `abc`, not dimmed |
+
+The first spelling is used wherever it works, so typical output does not
+change: `x **(b)** y` and `[**(a)**](u)` stay as they are. The inline HTML
+fallback is used in both dialects, the same way a table cell's hard break
+is written as `<br>`: CommonMark and GFM readers pass inline HTML through
+and keep parsing the Markdown inside it, and no delimiter spelling exists
+for these positions. It is not treated as lossy raw HTML. Darkmatter reads
+`==`/`⌄` with their own rules (`==` pairs left to right; `⌄` does not open
+or close between two letters or digits) and has no HTML form for them, so a
+`mark` or `dim` wrapper with no working spelling is written as plain text:
+a lossy diagnostic under `Warn`, an error under `Strict`, and silent under
+`Lossy`.
+
+A character that is neither ASCII nor alphanumeric (a symbol such as `→`)
+counts as punctuation to some readers and not to others, so a spelling next
+to one must work either way. The edge of an inline sequence (the start of a
+paragraph, table cell, or link text, or the inside of a wrapper's
+delimiters) counts as whitespace.
+
+### Line endings inside block quotes, list items, footnotes, and code fences
+
+A Markdown reader ends a line at a line feed (LF), a carriage return (CR),
+or a CRLF, and treats the three alike. The writer reads the content of a
+block quote, list item, or footnote definition the same way when it adds
+the container's prefix: every line gets `> ` (a bare `>` on an empty line),
+the list item's continuation indent, or the footnote's four-space indent,
+and each line keeps the ending bytes it had. A raw
+`Html` payload's CR therefore stays a CR and the line after it stays inside
+the container, and a CRLF keeps its CR:
+
+| Tree | Markdown | A reader sees |
+|---|---|---|
+| `BlockQuote[Html("<div>\r</div>")]` | `> <div>`, CR, `> </div>` | one HTML block inside the quote |
+| `BlockQuote[Paragraph[Html("<i>a</i>\r\n<i>b</i>")]]` | `> <i>a</i>`, CRLF, `> <i>b</i>` | one paragraph inside the quote |
+| `List[ListItem[Html("<div>\r</div>")]]` | `- <div>`, CR, `  </div>` | one HTML block inside the item |
+| `List[ListItem[BlockQuote[Html("<div>\n</div>")]]]` | `- > <div>`, LF, `  > </div>` | one HTML block inside the quote inside the item |
+| `BlockQuote[Paragraph[Text("a")], Paragraph[Text("b")]]` | `> a`, LF, `>`, LF, `> b` | two paragraphs inside the quote |
+| `FootnoteDefinition("n", [Paragraph[Text("a")], Code("x\r\n")])` | `[^n]: a`, LF, LF, then the fence, `x` (ending CRLF), and closing fence, each after four spaces | one footnote holding the paragraph and the code block |
+
+A GFM reader keeps a line in a footnote definition only when it is blank or
+indented by four spaces, whatever the label's width, so every non-empty line
+after `[^n]: ` is indented by four spaces. Without it, a second block, the
+lines of a code block, list, or raw HTML block, and anything after them
+would leave the footnote. A one-line definition stays `[^n]: text`; a
+longer one reads:
+
+```markdown
+[^n]: First paragraph.
+
+    Second paragraph.
+
+    - item
+```
+
+A list item's or footnote's body loses only a final LF, since the
+enclosing join writes one after it; a CR before it stays, and the joining
+LF completes that CRLF.
+
+A fenced code block's fence is one backtick longer than the longest run
+that starts a line of its value, where a line starts after a CR as well as
+an LF, so a value such as `a\r```\rb` gets a four-backtick fence.
+
+> `pulldown-cmark` 0.13 does not end a line at a lone CR inside an HTML or
+> code block (the commonmark.js reference parser does). Tests that read the
+> writer's output with it to check where a container or fence ends spell
+> each line ending as LF first.
+
+### Raw HTML in a heading or table cell
+
+An ATX heading and a GFM table row are each one Markdown line, so any line
+ending (LF, CR, or CRLF) written inside them ends the heading or the row,
+and a reader sees different structure. Text is safe there: a heading's
+text writes a line ending as `&#10;` / `&#13;`, a cell's text writes it as
+`<br>`. A raw `Html` payload, directly in the heading or cell or nested in
+a `Strong`, `Link`, or span inside it, is the author's bytes, so a line
+ending in it cannot be kept. The writer treats it as lossy content, in both
+dialects:
+
+| Strictness | Result |
+|---|---|
+| `Strict` | `RenderError::LossyRejected` |
+| `Warn` | each CR is written as `&#13;` and each LF as `&#10;`, and a `Lossy` diagnostic names the node |
+| `Lossy` | the same output, no diagnostic |
+
+A payload without a line ending is written byte for byte (in a cell, apart
+from its pipes: see [Pipes in a table cell](#pipes-in-a-table-cell)) and
+reported only as plain Markdown reports any raw HTML (not portable). Each CR and LF is
+encoded on its own, so a CRLF split across two adjacent payloads is written
+the same as one payload holding it, with one diagnostic per payload.
+
+| Tree | Markdown (`Warn`) | A reader sees |
+|---|---|---|
+| `Heading[Html("<span title=\"a\nb\">t</span>")]` | `## <span title="a&#10;b">t</span>` plus a diagnostic | one heading; the title holds a line feed |
+| table cell `Html("<b>x</b>\r\n<i>y</i>")` | `\| <b>x</b>&#13;&#10;<i>y</i> \|` plus a diagnostic | one row |
+| `Heading[Html("<span title=\"a b\">t</span>")]` | `## <span title="a b">t</span>` | the payload as written |
+
+The cell uses a character reference rather than the `<br>` its text gets:
+in element text and quoted attribute values an HTML reader decodes the
+reference to the payload's own character, where `<br>` would add a line
+break the payload does not have. Script and style source, comments, and
+unquoted attributes do not decode it, so render such content under
+`Strict` (or check for the diagnostic) when it must survive exactly.
+
+### Pipes in a table cell
+
+A GFM reader splits a table row into cells **before** it parses anything
+inline, so a `|` is a cell delimiter wherever it sits in a cell: in text, in
+a code span, inside a raw HTML tag, comment, or `<script>`, or in a footnote
+identifier. An unprotected pipe stops a header row from being a table at
+all, or shifts a body row's later cells and drops the last one.
+
+While it splits, the reader removes one backslash in front of each pipe. The
+writer protects every pipe it puts in a cell with one of two spellings:
+
+| What is written | Spelling of a pipe | Why |
+|---|---|---|
+| Text, code span, link label/destination/title, image alt/destination/title, raw `Html` payload, footnote identifier, the `Warn` placeholder for unsupported content | a backslash before it, added once, after the field's own escaping | the reader removes it again, so the cell holds exactly what the field would hold outside a table, even inside a comment or script |
+| A generated HTML attribute value (a MarkdownPlus span's `class`), a MarkdownPlus progress widget (its `aria-label` and glyph `data-*` attributes) | `&#124;` | an HTML reader decodes it in attribute values and element text |
+
+Each example is one cell of a table; the second line is what the writer
+emits:
+
+```text
+Html("<span title=\"a|b\">t</span>")
+| <span title="a\|b">t</span> |          one cell; the tag <span title="a|b">
+
+Html("<span>a\\|b</span>")                  a payload with its own \|
+| <span>a\\|b</span> |                     reads as the payload outside a table
+
+InlineCode("a\\|b")
+| `a\\|b` |                                code a\|b
+
+FootnoteReference("a|b")
+| [^a\|b] |                                refers to the definition [^a|b]: …
+
+Span(classes: ["a|b"])[Text("t")]          MarkdownPlus
+| <span class="a&#124;b">t</span> |        class="a|b"
+
+Html("<span>a&#124;b</span>")
+| <span>a&#124;b</span> |                  unchanged: it holds no pipe
+```
+
+Generated attribute values take the reference rather than the backslash
+because some readers (pulldown-cmark, markdown-rs) do not remove the
+backslash inside an inline HTML tag or comment; there a raw payload's pipe
+reads as `\|`, while the row and its cells are still correct. GitHub's
+reader (cmark-gfm) removes it everywhere. Applying either spelling twice
+would change the cell, so each field is protected exactly once.
+
+Outside a table row a pipe means nothing to the reader, and every field,
+including raw HTML and footnote identifiers in headings, is written as is.
+
+The class attribute of a MarkdownPlus span is HTML-attribute-escaped in
+every context (`&`, `<`, `"`, `'`), as the browser renderer writes it, so a
+class value cannot end the attribute early.
+
+### Line endings in quoted fields
+
+A link or image title and a generated HTML attribute value are quoted
+fields: their value is everything between the quotes, line endings
+included. A literal line ending there still ends the Markdown line around
+it, so a table row splits and a heading ends early; a blank line ends the
+paragraph, and a generated tag left open by it becomes literal text. So in
+every context the writer spells each CR as `&#13;` and each LF as `&#10;` (a
+CRLF as both), which both readers decode back into the value:
+
+| Field | Reader that decodes the reference |
+|---|---|
+| Link or image title | the CommonMark reader, which decodes character references in a title |
+| MarkdownPlus span `class` | the HTML reader of the attribute value |
+| MarkdownPlus progress `aria-label`, `data-fill-char`, `data-empty-char`, `data-left-bracket`, `data-right-bracket` | the HTML reader of the attribute value |
+
+```text
+Link("https://x.test", title: "a\nb")[Text("t")]
+[t](https://x.test "a&#10;b")              title "a<LF>b", in a cell or heading too
+
+Span(classes: ["a\r\nb"])[Text("t")]        MarkdownPlus
+<span class="a&#13;&#10;b">t</span>        class "a<CR><LF>b", one line
+
+Progress label "a\n\nb 60%"                 MarkdownPlus
+<span class="progress" … aria-label="a&#10;&#10;b">…   one paragraph
+```
+
+The value reads back exactly, so no strictness mode reports a loss. A
+title's `<br>` would be literal title text, which is why a title in a
+table cell does not take the cell's text spelling. A `&` the author wrote
+is still escaped first, so the writer's references are the only ones a
+reader decodes.
+
+Plain Markdown writes neither attribute: a classed span degrades to its
+text, and a progress widget to its paragraph text, under the strictness
+model. Raw `Html`, destinations, link labels, text, and code keep their own
+policies above. HTML-backed MarkdownPlus content (disclosure summaries and
+columns) is written by the browser's HTML lowering inside an HTML block,
+where a line ending in an attribute is harmless and a blank line is kept
+from ending the block.
+
+### Blocks in a table cell
+
+A GFM table cell is one line of inline content: there is no way to write a
+code block, a list, a heading, a quote, a rule, or even a second paragraph
+inside one. The tree allows any block under a `TableCell` (the browser and
+terminal renderers can show them), so the Markdown writer has to decide what
+to do with one. A cell holding only inline content, or exactly one
+`Paragraph`, is written as before with no diagnostic. Any other block in a
+cell, at any depth, follows the strictness model:
+
+| Strictness | Result |
+|---|---|
+| `Strict` | `RenderError::LossyRejected` |
+| `Warn` | the block is written on the cell's line, plus one `Diagnostic::lossy` for the cell (naming its first block) |
+| `Lossy` | the same line, no diagnostic |
+
+The one-line spelling keeps a block's text and drops its structure. Each
+block is set off from the content before and after it by `<br>`, the line
+break a cell already uses for a hard break:
+
+| Block in the cell | Written as |
+|---|---|
+| `Paragraph`, `Heading`, `BlockQuote`, `FootnoteDefinition` | its inline content (heading level, quote, and definition label dropped) |
+| `Section`, `Disclosure` | its heading or summary, `<br>`, then its body |
+| `Code` | a code span, as `renderable::markdown::code_span` writes it: line endings become spaces, the language is dropped |
+| `List` | each item on its own line, its marker (`- `, `3. `, `[x] `) written as text |
+| `ThematicBreak` | nothing; its two `<br>` separators leave an empty line |
+| `Table` | each of its cells on its own line |
+| `BlockQuote` with `ColumnsHints` (both dialects) | the left column's blocks, then the right column's |
+
+```text
+TableCell[Paragraph("a"), Code("x || y\nz\n"), Paragraph("b")]
+| a<br>`x \|\| y z`<br>b |                 one cell; a Warn diagnostic
+
+TableCell[List(ordered, start 3)[Item[Paragraph("one")], Item[Paragraph("two")]]]
+| 3. one<br>4. two |
+
+TableCell[Paragraph("one")]
+| one |                                     unchanged, no diagnostic
+```
+
+Everything written this way is still cell content, so the pipe and
+line-ending protection of the previous section applies to it.
+
+A heading is one line as well. Its direct children are inline by
+validation, but an inline extension (`Extended`) can carry a block into it;
+that block gets the same one-line spelling and the same strictness, with
+the heading's escaping instead of the cell's (a pipe stays a pipe):
+
+```text
+Heading[Text("h"), Extended("custom")[Code("a\nb")]]
+## h<br>`a b`                              one heading line; a Warn diagnostic
+``` MarkdownPlus
+writes columns and disclosures in a cell the same way rather than as HTML:
+a cell is parsed as inline Markdown, so the raw HTML blocks those
+constructs use elsewhere would not survive there.
+
+### Footnote labels
+
+A reference is written `[^label]` and its definition `[^label]: …`. A reader
+matches a label without processing escapes, and normalizes its whitespace,
+so some identifiers have no label that reads back as the same identifier.
+The reference and the definition get the same degraded label, so they
+still pair:
+
+| Identifier | Problem | Label under `Warn` / `Lossy` |
+|---|---|---|
+| `a]b`, `a[b` | an unescaped bracket ends or breaks the label | `a\]b`, `a\[b` (the reader's identifier is then `a\]b`) |
+| `a\` | the odd trailing backslash escapes the closing `]` | `a\\` |
+| `a\nb`, `" a \t b "` | line endings, tabs, and space runs are collapsed and trimmed by the reader | `a b` |
+| empty or whitespace only | not a label at all | `_` |
+
+`Strict` rejects such an identifier with `RenderError::LossyRejected`;
+`Warn` records one `Diagnostic::lossy` for the reference and one for the
+definition. Identifiers a reader reads back exactly, such as `a\]b` (an
+already-escaped bracket), `a\b`, or `a|b`, are written as they are (a pipe
+in a cell takes the cell escape, `[^a\|b]`).
+
+### The `Warn` placeholder for unsupported content
+
+Under `Warn` an `Unsupported` node is written as the comment
+`<!-- unsupported: {label} -->` (`Strict` fails, `Lossy` writes nothing). The
+label is authored text, so it is made comment-safe first:
+
+| Label | Written as | Why |
+|---|---|---|
+| `a-->b`, `a--!>b` | `a--&gt;b`, `a--!&gt;b` | `-->` ends the comment for every reader, `--!>` for an HTML reader; neither can appear once `>` is a reference |
+| `a\nb` | `a b` | a line ending would end a table row or heading, and a blank line would end a paragraph |
+
+A comment does not decode `&gt;`, so the placeholder shows the reference;
+it is a lossy marker either way. A pipe in a cell gets the cell escape.
+
+
+### Breaks by position
+
+A `SoftBreak` shows as a space and a `HardBreak` as a line break, on every
+target. In Markdown, the newline and backslash-newline spellings only mean
+that where more content follows on the next line of the same block, so the
+writer picks each break's spelling from its position:
+
+| Where the break is | `SoftBreak` | `HardBreak` |
+|---|---|---|
+| Content before it on its line and after it in its block | a newline | `\`, newline |
+| Nothing after it in its block (paragraph, quote, list item, footnote, disclosure summary or body, root sequence) | a space (`&#32;` at the line end) | `<br>` |
+| Its line is blank so far: the start of a block, a link label, or a span body, or right after another break | a space (`&#32;` at a line start) | `\`, newline |
+| Heading text (an ATX heading is one line) | a space | `<br>` |
+| Table cell | a space | `<br>` |
+| MarkdownPlus disclosure summary and columns (raw HTML, written by the browser renderer) | a space | `<br>` |
+| MarkdownPlus progress label (plain text) | a space | a space, as the browser writes it |
+
+Each fallback exists because a reader would otherwise change the meaning:
+
+- A reader drops a newline at the end of a block and reads a backslash there
+  literally, so `Paragraph[Text("a"), HardBreak]` is `a<br>`, not `a\`.
+- A newline on a blank line ends the paragraph, so two soft breaks in a row
+  are a newline and then `&#32;`.
+- A line that holds only an HTML open tag starts a raw HTML block, in which
+  Markdown is not parsed. A MarkdownPlus span whose body starts with a soft
+  break is therefore `<span style="…"> **a**</span>`, not the opener alone
+  on its line.
+- A raw HTML block such as the MarkdownPlus `<summary>` never reads a
+  backslash escape, so its breaks are the browser's: a space and `<br>`. A
+  line feed in a MarkdownPlus progress label is written as a space, the
+  same whitespace to a browser.
+
+```mermaid
+flowchart TD
+    B[break] --> C{table cell, heading,<br/>or raw HTML?}
+    C -- yes --> S1[soft: space<br/>hard: &lt;br&gt;]
+    C -- no --> E{anything after it<br/>in its block?}
+    E -- no --> S2[soft: &#38;#32;<br/>hard: &lt;br&gt;]
+    E -- yes --> L{line blank so far?}
+    L -- yes --> S3[soft: space<br/>hard: backslash, newline]
+    L -- no --> S4[soft: newline<br/>hard: backslash, newline]
+```
+
+| Tree | Markdown | A reader sees |
+|---|---|---|
+| `Text("a")`, `SoftBreak`, `Text("b")` | `a`, newline, `b` | `a`, soft break, `b` |
+| `Text("a")`, `HardBreak` | `a<br>` | `a`, line break |
+| `SoftBreak`, `Text("a")` | `&#32;a` | ` a` |
+| `Text("a")`, `SoftBreak`, `SoftBreak`, `Text("b")` | `a`, newline, `&#32;b` | `a`, soft break, ` b` |
+| `Strong[Text("a"), HardBreak]` | `**a**<br>` | bold `a`, line break |
+| MarkdownPlus `Span(color)[SoftBreak, Strong[Text("a")]]` | `<span style="…"> **a**</span>` | a space, bold `a`, in the span |
+| `Heading[Text("a"), HardBreak, Text("b")]` | `## a<br>b` | heading `a`, line break, `b` |
+
+A break that is a direct child of a block container (a `Root`, or a list
+item holding bare phrasing) joins the phrasing nodes on either side of it
+into one inline sequence. Other adjacent phrasing children of a block
+container stay separate blocks.
+
+`<br>` is inline HTML in both dialects, as in a table cell. A block whose
+only content is one hard break has no Markdown paragraph spelling: it is
+written `<br>`, which a reader takes as a raw HTML line break on its own
+rather than a paragraph holding one. Inline code and raw `Html` values are
+never treated as breaks.
+
+Inside a link label or a span or delimiter body, a literal line feed in a
+`Text` value on an otherwise blank line is also written as a space, for the
+same reasons. In a block, a literal blank line is kept: it separates
+paragraphs, and `Compose` relies on that between the paragraphs of a
+`Prose`.
+### HTML-backed MarkdownPlus content
+
+MarkdownPlus writes three constructs as HTML because Markdown has no
+spelling for them: a disclosure, a two-column layout, and a progress
+widget (inside a table cell, a disclosure or columns block is written on the
+cell's line instead: see [Blocks in a table cell](#blocks-in-a-table-cell)). Their content goes where a reader consumes HTML or plain text, not
+Markdown, so the writer does not put Markdown there:
+
+| Construct | Where the content goes | What the writer puts there |
+|---|---|---|
+| `Disclosure` | the `<summary>` on the `<details>` line, which opens a raw HTML block | the summary as the browser renderer writes it |
+| `BlockQuote` with `ColumnsHints` | the `<div class="columns">` container, one raw HTML block | the whole container, column bodies included, as the browser renderer writes it |
+| `Paragraph` with `ProgressHints` | the `aria-label` attribute and the label element | the children's plain text, as the browser takes it |
+
+A reader passes a raw HTML block through without parsing it as Markdown, so
+`**a**` would show its asterisks, and a code span holding `<em>x</em>` would
+become an emphasis element. Written as HTML, inline code is a `<code>`
+element with its value escaped, so `<em>x</em>` and `&copy;` stay literal;
+emphasis, links, images, and footnote references are their elements;
+`mark` is `<mark>` and `dim` a span with the dim opacity; a styled span is a
+`<span>` with its CSS; and literal text is HTML-escaped (`&lt;`), never
+backslash-escaped. Column bodies keep their block structure: paragraphs,
+lists, and code blocks are `<p>`, `<ul>`, and `<pre><code>` inside the
+column. A Mermaid block stays a code block, since Markdown output carries
+no scripts.
+
+A blank line (empty, or only spaces and tabs) ends a raw HTML block, so
+the writer never leaves one inside the summary or the container. It
+re-encodes only the HTML it generated, where an HTML reader decodes a
+character reference: a line ending beside a blank line in a code block or
+a text value is written as `&#10;`, and a carriage return as `&#13;`.
+
+A raw `Html` node is the author's HTML, written byte for byte. Its
+consumer may not decode references at all (script and style source,
+comments, `xmp`, `iframe`, `noembed`, `noframes`) or may read whitespace as
+syntax (between unquoted attributes), so the writer never re-encodes it
+when it fits. A carriage return in it is kept: HTML reads one as a line
+feed everywhere. When a raw payload and the text around it meet at a blank
+line, the generated line ending beside it takes the reference instead.
+
+Line endings are read from the HTML as a whole, the way a reader sees it,
+not node by node. A CR and the LF right after it are one line ending even
+when they come from two adjacent nodes, so splitting a payload anywhere
+never changes the output:
+
+| Summary children (MarkdownPlus) | Written | Why |
+|---|---|---|
+| `Html("<i>a</i>\r")`, `Html("\n<i>b</i>")` | `<i>a</i>`, CRLF, `<i>b</i>`, as the single node `Html("<i>a</i>\r\n<i>b</i>")` | one line ending, no blank line |
+| `Html("<i>a</i>\r")`, `Text("\nb")` | `<i>a</i>`, CRLF, `b` | one line ending, part raw, part generated |
+| `Text("a\r")`, `Html("\n<i>b</i>")` | `a&#13;`, LF, `<i>b</i>` | a generated CR is always `&#13;`, which keeps the text's character; the raw LF stays the line ending |
+| `Html("<i>a</i>\r")`, `Text("\n\nb")` | `<i>a</i>`, CRLF, `&#10;b` | a real blank line; the generated LF after it takes the reference |
+
+A line ending is re-encoded only when all of its bytes were generated. A
+CRLF with a raw CR and a generated LF cannot be: encoding the LF alone
+would leave the CR as a line ending. When neither line ending around a
+blank line is wholly generated, the blank line is lossy, as below.
+
+A raw payload that holds a blank line itself cannot be embedded unchanged.
+The writer treats it as lossy content:
+
+| Strictness | Result |
+|---|---|
+| `Strict` | `RenderError::LossyRejected` |
+| `Warn` | the payload's line ending before the blank line is written as a character reference, and a `Lossy` diagnostic names the node |
+| `Lossy` | the same output, no diagnostic |
+
+That reference changes script and style source and unquoted attributes, so
+render such content under `Strict` (or check for the diagnostic) when it
+must survive exactly. Elsewhere — paragraphs, disclosure bodies, styled
+spans, link labels, a raw node of its own, and every plain-Markdown route —
+this check does not apply, and raw `Html` follows its own placement rules
+(a heading or table cell has its own line-ending rule: see
+[Raw HTML in a heading or table cell](#raw-html-in-a-heading-or-table-cell)).
+
+| Tree (MarkdownPlus) | Markdown | A reader sees |
+|---|---|---|
+| `Disclosure[summary: InlineCode("<em>x</em>")]` | `<details><summary><code>&lt;em&gt;x&lt;/em&gt;</code></summary>`, blank line, body | a summary holding the code `<em>x</em>` |
+| `Disclosure[summary: Text("License "), Emphasis[Text("terms")]]` | `<details><summary>License <em>terms</em></summary>`, … | a summary with `terms` in italics |
+| Columns, left `Paragraph[InlineCode("&copy;")]` | `<div class="columns" …><div class="column" …><p><code>&amp;copy;</code></p></div>…</div>` | the code `&copy;` in the left column |
+| Columns, left `Code("a\n\nb")` | `…<pre><code>a&#10;`, newline, `b</code></pre>…` | a code block with a blank line, inside the column |
+| Disclosure, summary `Html("<script>a;\rb;</script>")` | `<details><summary><script>a;`, CR, `b;</script></summary>`, … | the script exactly as written |
+| Disclosure, summary `Html("<script>a;\n\nb;</script>")` | `Strict`: an error. `Warn`: `<script>a;&#10;`, newline, `b;</script>` plus a diagnostic | a changed script, reported |
+| Progress `Paragraph[Strong[Text("Load")], Text(" 60%")]` | `<span class="progress" … aria-label="Load"><span class="progress-label">Load</span>…` | the label `Load`, without asterisks |
+
+The disclosure body after the summary's blank line, ordinary paragraphs,
+and MarkdownPlus styled spans (`<span style="…">**a**</span>`) are read as
+Markdown, so their content keeps the Markdown spellings above. Plain
+Markdown writes a disclosure as the `::disclosure` directive, columns as
+sequential blocks, and a progress widget as its paragraph text.
+
+```mermaid
+flowchart TD
+    N[node in MarkdownPlus] --> K{kind}
+    K -- disclosure summary --> H[browser renderer HTML]
+    K -- columns --> H
+    K -- progress --> P[plain text of children]
+    K -- anything else --> M[Markdown spellings]
+    H --> B{blank line<br/>inside?}
+    B -- beside generated HTML --> E[that line ending is &#38;#10;]
+    B -- only inside a raw Html payload --> L[lossy: Strict rejects,<br/>Warn reports]
+```
 
 ### Choosing a paragraph's HTML element
 

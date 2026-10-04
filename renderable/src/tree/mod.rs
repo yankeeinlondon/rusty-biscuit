@@ -55,7 +55,7 @@ pub use inherit::InheritedStyle;
 pub use document::{Document, DocumentMetadata, Frontmatter, FrontmatterFormat};
 pub use error::{RenderError, RenderStrictness, Rendered};
 pub use graphics::horizontal_rule_svg;
-pub use node::{ColumnAlign, HeadingDepth, HeadingDepthError, NodeKind, RenderNode};
+pub use node::{ColumnAlign, HeadingDepth, HeadingDepthError, NodeKind, RenderNode, is_html_comment_only};
 pub use render::{
     BrowserDocumentBody, BrowserRenderOptions, CodeRenderer, MarkdownDialect,
     MarkdownRenderOptions, MarkdownStyleOptions, RawHtmlPolicy, render_browser_document,

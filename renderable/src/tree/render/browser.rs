@@ -31,7 +31,8 @@ use crate::browser::feature::{
     resolve_features, serialize_features_head,
 };
 use crate::browser::fragment::{
-    BrowserFragment, ComposableNode, PopoverIdAllocator, PopoverNode, Ready, write_attributes,
+    BrowserFragment, ComposableNode, PopoverIdAllocator, PopoverNode, RawRange, Ready,
+    write_attributes,
 };
 use crate::html::HtmlPage;
 use crate::html::attribute::{ClassDefinition, DomId, HtmlDataAttribute};
@@ -41,7 +42,7 @@ use crate::tree::{HrAlignment, HrKind, HrWeight};
 use crate::tree::diagnostic::{Diagnostic, Severity};
 use crate::tree::document::Document;
 use crate::tree::error::{RenderError, RenderStrictness, Rendered};
-use crate::tree::node::{ColumnAlign, HeadingDepth, NodeKind, RenderNode};
+use crate::tree::node::{ColumnAlign, HeadingDepth, NodeKind, RenderNode, is_html_comment_only};
 use crate::tree::render::CodeRenderer;
 use crate::tree::validate::{ValidationError, ValidationMode, validate};
 
@@ -51,6 +52,10 @@ use crate::tree::validate::{ValidationError, ValidationMode, validate};
 /// from an untrusted source is a script-injection vector, so the renderer
 /// never passes it through verbatim unless the caller explicitly opts in with
 /// [`RawHtmlPolicy::Allow`].
+///
+/// A value that is only HTML comments has no visible content and is exempt
+/// from `Escape` and `Reject`: it renders as nothing, with no diagnostic.
+/// Under `Allow` it is written verbatim like any other raw HTML.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RawHtmlPolicy {
     /// Emit the raw HTML verbatim. The caller vouches for its safety.
@@ -511,6 +516,52 @@ fn assemble_full_document(
     Ok(format!(
         "<!DOCTYPE html><html><head>{head}{feature_head}</head><body>{body}</body></html>"
     ))
+}
+
+/// Lowers `nodes` to the HTML this renderer writes for them, for a Markdown
+/// writer that embeds them where a reader consumes HTML rather than Markdown
+/// (a MarkdownPlus raw HTML block). The caller has already validated the
+/// tree; the returned diagnostics are this writer's own.
+///
+/// Raw [`NodeKind::Html`] is written verbatim, and the byte range of each
+/// such payload is returned so the caller can tell it from the HTML this
+/// writer generated (see [`RawRange`]). A Mermaid block stays a code block:
+/// Markdown output carries no scripts or page features.
+pub(super) fn lower_to_html(
+    nodes: &[RenderNode],
+    strictness: RenderStrictness,
+) -> Result<LoweredHtml, RenderError> {
+    let opts = BrowserRenderOptions {
+        strictness,
+        raw_html: RawHtmlPolicy::Allow,
+        mermaid_mode: crate::tree::BrowserMermaidMode::Code,
+        ..BrowserRenderOptions::default()
+    };
+    let mut writer = Writer {
+        opts: &opts,
+        diagnostics: Vec::new(),
+    };
+    let mut popover_ids = PopoverIdAllocator::default();
+    let mut html = String::new();
+    let mut raw = Vec::new();
+    for node in nodes {
+        writer
+            .render(node)?
+            .write_marking_raw(&mut popover_ids, &mut html, &mut raw);
+    }
+    Ok(LoweredHtml {
+        html,
+        raw,
+        diagnostics: writer.diagnostics,
+    })
+}
+
+/// The result of [`lower_to_html`].
+pub(super) struct LoweredHtml {
+    pub(super) html: String,
+    /// Where each raw [`NodeKind::Html`] payload sits in `html`, in order.
+    pub(super) raw: Vec<RawRange>,
+    pub(super) diagnostics: Vec<Diagnostic>,
 }
 
 /// Validates `node` and builds a [`Writer`], folding (or escalating) every
@@ -1547,16 +1598,25 @@ impl Writer<'_> {
     /// | `Reject` | `RenderError::LossyRejected` | escaped text + diag.* |
     ///
     /// *No diagnostic is recorded under [`RenderStrictness::Lossy`].
+    ///
+    /// A comment-only value ([`is_html_comment_only`]) has nothing to show, so
+    /// outside `Allow` it renders as nothing, with no diagnostic, instead of
+    /// becoming visible escaped text or a rejection. The Markdown renderer
+    /// writes such comments between touching code spans.
     fn render_html(
         &mut self,
         node: &RenderNode,
         value: &str,
         _block: bool,
     ) -> Result<BrowserFragment<Ready>, RenderError> {
+        if self.opts.raw_html != RawHtmlPolicy::Allow && is_html_comment_only(value) {
+            return Ok(text_fragment(""));
+        }
         match self.opts.raw_html {
             RawHtmlPolicy::Allow => Ok(BrowserFragment::new()
                 .define_as_raw_html(value.to_string())
-                .finalize()),
+                .finalize()
+                .mark_raw_source(node.span.clone())),
             RawHtmlPolicy::Escape => {
                 self.note_lossy("raw HTML emitted as escaped text", node);
                 Ok(text_fragment(value))
@@ -2412,6 +2472,10 @@ impl StreamWriter<'_> {
         value: &str,
         _block: bool,
     ) -> Result<(), RenderError> {
+        // See `Writer::render_html`: a comment-only value shows nothing.
+        if self.opts.raw_html != RawHtmlPolicy::Allow && is_html_comment_only(value) {
+            return Ok(());
+        }
         match self.opts.raw_html {
             RawHtmlPolicy::Allow => self.buf.push_str(value),
             RawHtmlPolicy::Escape => {
@@ -2637,8 +2701,9 @@ fn is_inline_node_kind(kind: &NodeKind) -> bool {
 ///
 /// Used to recover a `Progress` widget's accessible label from its paragraph
 /// children without HTML-escaping noise — the collected text is escaped
-/// exactly once, by `progress_html`.
-fn plain_text(nodes: &[RenderNode]) -> String {
+/// exactly once, by `progress_html`. The MarkdownPlus writer uses it for the
+/// same label.
+pub(super) fn plain_text(nodes: &[RenderNode]) -> String {
     fn collect(node: &RenderNode, out: &mut String) {
         match &node.kind {
             NodeKind::Text { value } | NodeKind::InlineCode { value } => out.push_str(value),
@@ -4878,9 +4943,11 @@ mod tests {
     }
 
     /// A paragraph serialized before the block-element attribute existed (no
-    /// `block_element` key) deserializes to the default and renders `<p>`; an
-    /// unknown element name is rejected at deserialization, never mapped to a
-    /// default.
+    /// `block_element` key) deserializes to the default and renders `<p>`;
+    /// every valid element renders as itself, and every other shape of the
+    /// field is rejected at deserialization, never mapped to the default.
+    ///
+    /// Each row applies one edit to the same production-serialized fixture.
     #[test]
     fn paragraph_without_block_element_field_keeps_p() {
         // A default block element is omitted on write, so this serialization
@@ -4892,6 +4959,9 @@ mod tests {
             .insert(crate::tree::DataAttrName::new("role").unwrap(), "note".into());
         let legacy = serde_json::to_string(&para).unwrap();
         assert!(!legacy.contains("block_element"), "{legacy}");
+        let with_field = |raw: &str| {
+            legacy.replacen(r#""data_attrs""#, &format!(r#"{raw},"data_attrs""#), 1)
+        };
 
         let node: RenderNode = serde_json::from_str(&legacy).expect("legacy node");
         assert_eq!(
@@ -4900,16 +4970,65 @@ mod tests {
         );
         assert_eq!(html(&node), r#"<p data-role="note">x</p>"#);
 
-        let explicit = legacy.replace(r#""data_attrs""#, r#""block_element":"div","data_attrs""#);
-        let node: RenderNode = serde_json::from_str(&explicit).expect("explicit element");
-        assert_eq!(html(&node), r#"<div data-role="note">x</div>"#);
+        let accepted = [
+            ("p", "p"),
+            ("div", "div"),
+            ("section", "section"),
+            ("article", "article"),
+            ("aside", "aside"),
+            ("header", "header"),
+            ("footer", "footer"),
+        ];
+        assert_eq!(accepted.len(), crate::tree::BlockElement::ALL.len());
+        for (value, tag) in accepted {
+            let json = with_field(&format!(r#""block_element":"{value}""#));
+            let node: RenderNode = serde_json::from_str(&json)
+                .unwrap_or_else(|err| panic!("{value} rejected: {err}"));
+            assert_eq!(
+                html(&node),
+                format!(r#"<{tag} data-role="note">x</{tag}>"#),
+                "{value}"
+            );
+        }
 
-        let unknown = legacy.replace(r#""data_attrs""#, r#""block_element":"blockquote","data_attrs""#);
-        assert!(serde_json::from_str::<RenderNode>(&unknown).is_err());
-        let wrong_type = legacy.replace(r#""data_attrs""#, r#""block_element":1,"data_attrs""#);
-        assert!(serde_json::from_str::<RenderNode>(&wrong_type).is_err());
+        // serde_json reports any non-string, non-object token for a unit-only
+        // enum (null, number, array) as "expected value", not "invalid type".
+        let rejected = [
+            ("unknown enum", with_field(r#""block_element":"blockquote""#), "unknown variant"),
+            ("explicit null", with_field(r#""block_element":null"#), "expected value"),
+            ("number", with_field(r#""block_element":123"#), "expected value"),
+            ("mixed array", with_field(r#""block_element":["div",123]"#), "expected value"),
+            ("all-invalid array", with_field(r#""block_element":[123]"#), "expected value"),
+            ("empty array", with_field(r#""block_element":[]"#), "expected value"),
+            ("empty object", with_field(r#""block_element":{}"#), "expected value"),
+            ("empty string", with_field(r#""block_element":"""#), "unknown variant"),
+            (
+                "uppercase name",
+                with_field(r#""block_element":"DIV""#),
+                "unknown variant",
+            ),
+            (
+                "duplicate key",
+                with_field(r#""block_element":"div","block_element":"div""#),
+                "duplicate field `block_element`",
+            ),
+            (
+                "trailing content",
+                format!("{} x", with_field(r#""block_element":"div""#)),
+                "trailing characters",
+            ),
+        ];
+        for (row, json, reason) in rejected {
+            let err = serde_json::from_str::<RenderNode>(&json)
+                .map(|node| html(&node))
+                .expect_err(row);
+            assert!(err.to_string().contains(reason), "{row}: {err}");
+            // Locating the error at or after the edited field proves the
+            // rejection comes from that field, not from a malformed fixture.
+            let field_column = json.find(r#""block_element""#).expect(row) + 1;
+            assert!(err.column() > field_column, "{row}: {err}");
+        }
     }
-
 
     /// The `<title>` must fall back to the first `<h1>` text exactly as the
     /// fragment-page path does, including when the heading carries nested

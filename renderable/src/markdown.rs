@@ -27,6 +27,48 @@ pub trait MarkdownRenderable {
     fn render_markdown_plus(&self) -> String;
 }
 
+/// Escapes a literal `value` so it reads back as exactly that text where
+/// Markdown expects inline content: a paragraph, a list item, a heading, a
+/// link label, or an emphasis body.
+///
+/// This is the encoding the render-tree Markdown writer applies to
+/// [`NodeKind::Text`](crate::tree::NodeKind::Text), for code that writes
+/// Markdown by hand. A character is escaped only where a CommonMark/GFM
+/// reader (or darkmatter's `==` mark) could take it as syntax, so ordinary
+/// prose such as `snake_case`, `2 * 3`, `a < b`, or `I <3 you` is unchanged.
+/// A `<` that could open a tag or a URI or email autolink is escaped
+/// (`<3@example.com>` stays text).
+///
+/// Every line of the value is treated as starting a line: block syntax there
+/// is escaped (`#`, `>`, list markers, a table delimiter row), and a leading
+/// space or tab is written as `&#32;`/`&#9;`, so a reader neither strips it
+/// nor reads indentation as code. Trailing whitespace before a line ending
+/// in the value is written the same way; whitespace at the value's very end
+/// is left alone, since the caller decides what follows it. Block syntax the
+/// value would complete only together with text written before it on the
+/// same line is the caller's to avoid.
+///
+/// Inside a GFM table cell, also escape `|` as `\|`, replace line endings,
+/// and encode edge whitespace, which a table reader trims.
+///
+/// ## Examples
+///
+/// ```
+/// use renderable::markdown::escape_text;
+///
+/// assert_eq!(escape_text("**literal**"), r"\*\*literal\*\*");
+/// assert_eq!(escape_text("[docs](https://x.io)"), r"\[docs\](https://x.io)");
+/// assert_eq!(escape_text("&copy; <em>"), r"\&copy; \<em>");
+/// assert_eq!(escape_text("# not a heading"), r"\# not a heading");
+/// assert_eq!(escape_text("<3@example.com>"), r"\<3@example.com>");
+/// assert_eq!(escape_text("    indented"), "&#32;   indented");
+/// assert_eq!(escape_text("snake_case, 2 * 3, a < b"), "snake_case, 2 * 3, a < b");
+/// ```
+#[must_use]
+pub fn escape_text(value: &str) -> String {
+    crate::tree::render::markdown::escape_literal_text(value)
+}
+
 /// Spells `value` as a Markdown code span whose content parses back to
 /// `value`, following the [CommonMark code span] rules.
 ///
