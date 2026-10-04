@@ -31,6 +31,16 @@ docs_updated_during_phase_6: []
 docs_created_during_phase_6: []
 skills_files_updated_during_phase_6:
   - .claude/skills/worktree/testing.md
+source_files_during_phase_7:
+  - worktree/cli/tests/perf_flag.rs
+docs_updated_during_phase_7: []
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7: []
+source_files_during_phase_8:
+  - worktree/cli/tests/list_prs.rs
+docs_updated_during_phase_8: []
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8: []
 packages:
   - sniff
   - worktree
@@ -238,11 +248,11 @@ Wave 4. Depends on P4, P5, P7 (group recording) and, for `RemoteAnswers`, nothin
 
 Wave 2 (independent; may run concurrently with P2/P4). Package: `worktree-cli` (`perf.rs`).
 
-- [ ] **Group API.** `PerfCollector` records a named group with measured elapsed (not a child sum) and ordered children without percentages; `recorded_stages` keeps working for flat stages and flattens group children by name so existing readers resolve `list gather` etc.
-- [ ] **Reconciliation.** Top-level children (including `unattributed`) sum to total; overlapping children are excluded from the top-level sum; no saturating subtraction hiding overlap.
-- [ ] **Rendering.** Biscuit-terminal metrics tree as in the spec example; `remote wait ‖ local gather`, local-only `local gather` without `remote wait`; `regather` group only when needed; `fast-forward` and the affected-checkout status refresh as separate top-level rows; conditional `graph gather`/`verbose gather`.
-- [ ] **Callers.** Wire the group into `run_pipeline` in P6 (this phase only provides and tests the API); update `perf_support/mod.rs` and stage parsers for nested rows.
-- [ ] **Tests (L1).** `perf.rs` unit tests (not snapshot in the double-compiled module; use an integration test for snapshots): reconciliation with nested overlap, conditional rows, local-only, regather only when needed.
+- [x] **Group API.** `PerfCollector` records a named group with measured elapsed (not a child sum) and ordered children without percentages; `recorded_stages` keeps working for flat stages and flattens group children by name so existing readers resolve `list gather` etc.
+- [x] **Reconciliation.** Top-level children (including `unattributed`) sum to total; overlapping children are excluded from the top-level sum; no saturating subtraction hiding overlap.
+- [x] **Rendering.** Biscuit-terminal metrics tree as in the spec example; `remote wait ‖ local gather`, local-only `local gather` without `remote wait`; `regather` group only when needed; `fast-forward` and the affected-checkout status refresh as separate top-level rows; conditional `graph gather`/`verbose gather`.
+- [x] **Callers.** Wire the group into `run_pipeline` in P6 (this phase only provides and tests the API); update `perf_support/mod.rs` and stage parsers for nested rows.
+- [x] **Tests (L1).** `perf.rs` unit tests (not snapshot in the double-compiled module; use an integration test for snapshots): reconciliation with nested overlap, conditional rows, local-only, regather only when needed.
 
 **Checkpoint 7:** `perf.rs` tests and updated `perf_*` integration tests pass.
 
@@ -250,13 +260,13 @@ Wave 2 (independent; may run concurrently with P2/P4). Package: `worktree-cli` (
 
 Wave 4. Depends on P3 (evidence in `WaitEnd`). Package: `worktree-cli` (`list.rs`, `list_table.rs`).
 
-- [ ] **Evidence in `RemoteAnswers`.** Surface head evidence (from `followed_attempt`) and PR evidence (from the accepted publication) with "observed in this listing" vs "cached" distinguished; unknown, cached-only, and post-selection arrivals are not observed-anonymous.
-- [ ] **Choose one line.** Precedence: confirmed head warning, confirmed PR warning, keyless success from either half. A keyed success never hides an anonymous success in the other half; a generic failure in one half does not hide anonymous success in the other; a confirmed warning always outranks.
-- [ ] **Suppression.** None for ignored, unsupported, local-path, changed origin (including successful notices for the old origin), cached-only, unknown. No notice for an anonymous API failure alone.
-- [ ] **Text.** Provider name and variable names from `sniff::credential_env`; "higher rate limits" wording only for providers where the advantage is established, otherwise "set {variables} to authenticate API requests"; names only, no values or raw URLs. Rendered through the existing credentials-line renderer, dim, immediately below the caption.
-- [ ] **Fallback coexistence.** The closing `fallback_notice` is unchanged and may appear with the new line.
-- [ ] **Tests (L1).** Head-only, PR-only, empty PR answer, mixed keyed/anonymous, success during fetch, adoption with different environments, publication before receipt, PR lock contention; warning precedence; cached/unknown/ignored/changed-origin suppression; coexistence with fallback; snapshot of text per provider kind in `cli/tests/list_table.rs` (integration test, per double-compile rule).
-- [ ] **Test (L2).** Extend the existing credentials-line terminal test (dim, below caption, after spinner cleanup) on a windowless backend; no new visible window, no focus.
+- [x] **Evidence in `RemoteAnswers`.** Surface head evidence (from `followed_attempt`) and PR evidence (from the accepted publication) with "observed in this listing" vs "cached" distinguished; unknown, cached-only, and post-selection arrivals are not observed-anonymous.
+- [x] **Choose one line.** Precedence: confirmed head warning, confirmed PR warning, keyless success from either half. A keyed success never hides an anonymous success in the other half; a generic failure in one half does not hide anonymous success in the other; a confirmed warning always outranks.
+- [x] **Suppression.** None for ignored, unsupported, local-path, changed origin (including successful notices for the old origin), cached-only, unknown. No notice for an anonymous API failure alone.
+- [x] **Text.** Provider name and variable names from `sniff::credential_env`; "higher rate limits" wording only for providers where the advantage is established, otherwise "set {variables} to authenticate API requests"; names only, no values or raw URLs. Rendered through the existing credentials-line renderer, dim, immediately below the caption.
+- [x] **Fallback coexistence.** The closing `fallback_notice` is unchanged and may appear with the new line.
+- [x] **Tests (L1).** Head-only, PR-only, empty PR answer, mixed keyed/anonymous, success during fetch, adoption with different environments, publication before receipt, PR lock contention; warning precedence; cached/unknown/ignored/changed-origin suppression; coexistence with fallback; snapshot of text per provider kind in `cli/tests/list_table.rs` (integration test, per double-compile rule).
+- [x] **Test (L2).** Extend the existing credentials-line terminal test (dim, below caption, after spinner cleanup) on a windowless backend; no new visible window, no focus.
 
 **Checkpoint 8:** `just test` and `just test-l2` credential tests green.
 

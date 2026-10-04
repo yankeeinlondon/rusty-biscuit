@@ -31,6 +31,16 @@ docs_updated_during_phase_6: []
 docs_created_during_phase_6: []
 skills_files_updated_during_phase_6:
   - .claude/skills/worktree/testing.md
+source_files_during_phase_7:
+  - worktree/cli/tests/perf_flag.rs
+docs_updated_during_phase_7: []
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7: []
+source_files_during_phase_8:
+  - worktree/cli/tests/list_prs.rs
+docs_updated_during_phase_8: []
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8: []
 packages:
   - sniff
   - worktree
@@ -275,3 +285,59 @@ The files changed in this cycle:
 - OS: no OS-specific code; the tests use Git subprocesses in temp repos and in-process seams, like their neighbors. No cross-check run
 - gates (with `LIBGIT2_NO_PKG_CONFIG=1`): `worktree/` `just test` 952 passed (948 plus 2 new tests × 2 targets), 32 skipped, both before and after the `list_prs.rs` edit; `just lint` exit 0; `just test-l2 list` 14 passed (the first attempt ended on a signal while blocked on Cargo's package-cache lock held by another process, before running any test; the rerun passed); `just check-tier-coverage worktree` 0 stranded; `--test list_prs` 31 passed, and the two edited tests 3 of 3 in isolation. No pre-existing failures observed
 - frontmatter: `packages` unchanged (`worktree-cli` already listed)
+
+## Phase 7
+
+> **phase:** `--perf` nested groups (plan Phase 7), 2026-10-03
+
+- state found: review cycle 1 had already built this phase (`worktree/cli/src/perf.rs`, wired into `gather_listing` in `list.rs`), and the working tree had no change to it. I checked each task against the code and closed one test gap. `perf.rs` and `list.rs` are unchanged; no behavior changed
+- task verification:
+        - group API: `PerfCollector::record_group(name, elapsed, children)` stores the group's own measured span, not a sum or maximum of its children, and keeps the children in order. `to_metric_node` gives children the metrics tree's `—` share, never a percentage. `recorded_stages` (test-only) flattens each group into its name, then its children
+        - reconciliation: `reconcile` sums only top-level rows. `unattributed` is `total − rows` through `checked_sub`, with no `saturating_sub`; any excess appears as the visible `OVER_ATTRIBUTED` row
+        - rendering: the biscuit-terminal `MetricsTree` inside the yellow `BlockQuote`. The group is `remote wait ‖ local gather` when the wait ran (children `remote wait`, `pr reread`, `list gather`, plus `graph gather` or `verbose gather` when gathered), and `local gather` otherwise. The `regather` group (`list regather`, then `graph regather` or `verbose regather`) is recorded only on the regather branch. `fast-forward` and `checkout status refresh` are separate top-level rows
+        - callers: already wired in `gather_listing` (Phase 6). `perf_support::perf_rows` / `stage_from_perf` parse depth and match whole labels at any depth
+- requirement-to-test mapping (L1, `worktree-cli`):
+        - reconciliation with nested overlap → `perf::tests::overlapping_group_children_are_excluded_from_the_top_level_sum`, `rows_beyond_the_elapsed_time_are_surfaced_not_clipped`, `only_top_level_rows_carry_a_share` (existing)
+        - groups beside sequential rows, and the flattening reader → `perf::tests::groups_keep_their_measured_span_and_sit_beside_sequential_rows` (existing)
+        - conditional graph and verbose rows → `list::tests` local-only group assertions, plus `perf_flag::list_perf_non_image_terminal_omits_graph_stages` and `list_perf_non_image_verbose_includes_verbose_gather` (existing)
+        - local-only group with no `remote wait` → `perf_flag::list_perf_reports_a_local_only_group_that_reconciles` (existing; it now uses the shared helpers below)
+        - `regather` only when needed; `fast-forward` and the checkout refresh rows → the `list::tests::pipeline` cases with `assert_perf_reconciles` and `perf_group` (existing)
+        - **added:** the remote group as the shipped binary actually renders it → `perf_flag::list_perf_reports_the_remote_group_from_the_real_renderer` (FakeGitea origin answering an empty PR list; no network). Before this, the parser's view of a `remote wait ‖ local gather` group was checked only against the hand-written `NESTED` string, so renderer drift could go unseen. The test asserts the group children in order (`remote wait`, `pr reread`, `list gather`); `pr gather` at top level; no `local gather`, `regather`, `fast-forward`, or `checkout status refresh` row; `remote wait` ≤ the group; and top-level reconciliation within display rounding
+        - refactor in the same file: the local-only test's reconciliation and group-children code moved into `assert_top_level_reconciles` and `group_children`, which both tests use. The assertions are the same
+- mutation check: recording `pr reread` as a top-level row instead of a group child (applied to a copy of `list.rs`, then restored; `git diff` shows `list.rs` unchanged) fails the new test (`["remote wait", "list gather"]` vs the expected three children)
+- snapshot: none added. The double-compile rule allows one only in an integration test, and row-shape assertions on real output cover the same contract without pinning durations
+- input robustness matrix: not applicable. This phase reads no file format
+- OS: no OS-specific code. The test reuses the `perf_support` stand-ins (`FakeGitea`, `WorkerReaper`) that `list_prs.rs` already runs on every OS. No cross-check was run
+- gates (with `LIBGIT2_NO_PKG_CONFIG=1`): `worktree/` `just test` 953 passed (952 plus the new test, in a single-target integration binary), 32 skipped; `just lint` exit 0; Checkpoint 7 `just test-perf` 32 passed; `--test perf_flag` 11 passed; `just check-tier-coverage worktree` 0 stranded. No pre-existing failures observed
+- frontmatter: `packages` unchanged (`worktree-cli` already listed)
+- skills: no `worktree` skill change needed; `testing.md` already records where perf parser tests go and the stage-reader rule
+
+## Phase 8
+
+> **phase:** keyless notice (plan Phase 8), 2026-10-03
+
+- state found: review cycle 1 had already built this phase (`observed_keyless`, `credential_line`'s third step `CredentialCondition::AnsweredWithoutKey { higher_limits }`, and `keyed_limits_are_higher` in `worktree/cli/src/commands/list.rs`; the line renders through `list_table.rs`), and the working tree had no change to it. I checked each task against the code and closed one test gap. `list.rs`, `list_table.rs`, and `wait.rs` are unchanged; no behavior changed
+- task verification:
+        - evidence in `RemoteAnswers`: head evidence is `followed_attempt(&waited.head)`'s `credentials` (a `Running { last }` attempt is filtered to the followed id, so an earlier run's attempt is never read); PR evidence is `WaitEnd.pr_credentials`, set only by the first publication whose id differs from the one stored before launch. Without a wait (`waited: None`), `observed_keyless` is false, so cached-only answers never count
+        - one line: `credential_line` tries the attempt's confirmed condition, then this run's confirmed PR failure, then the notice. Either half alone is enough, and neither a keyed success nor a generic failure in the other half hides it
+        - suppression: ignored, changed origin (`remote.origin_changed`, or the attempt's `Unavailable` outcome), `unknown` evidence, no wait, and an anonymous API failure alone give no notice. Unsupported and local-path origins have no `credential_env`, so they give no line
+        - text: provider and variables come from `credential_env`; "higher rate limits" only for GitHub, GitLab, and Bitbucket. Names only; the line is the existing dim credentials line beneath the caption
+        - fallback coexistence: `fallback_notice` is unchanged and computed independently
+- requirement-to-test mapping (L1 unless noted):
+        - head only, PR only, empty PR answer, both, mixed keyed/anonymous, generic failure in the other half → `commands::list::tests::…::keyless::either_half_alone_or_both_give_one_notice` (existing)
+        - success while fetching, adopted attempt → `…::keyless::an_answer_still_fetching_or_from_an_adopted_attempt_counts` (existing)
+        - unknown, receipt-only, no wait, anonymous failure alone → `…::keyless::unknown_cached_or_receipt_only_evidence_never_gives_the_notice` (existing)
+        - ignored, changed origin (both forms), unsupported, local path → `…::keyless::ignored_changed_origin_unsupported_and_local_path_remotes_never_give_the_notice` (existing)
+        - warning precedence → `…::keyless::a_confirmed_warning_outranks_the_notice` and `a_confirmed_head_condition_outranks_this_runs_pr_failure` (existing)
+        - provider wording → `…::keyless::the_notice_promises_higher_limits_only_where_the_provider_gives_them` (existing); text snapshot for every provider and condition → `list_table::credential_lines_snapshot_every_condition_for_every_provider`; dim, directly below the caption → `list_table.rs` (existing)
+        - publication before receipt, lock contention, later publication ignored → the Phase 3 `list::wait::tests` (existing)
+        - shipped binary → `list_prs::an_anonymous_pr_answer_with_a_failed_head_check_shows_the_keyless_notice`, `an_anonymous_head_answer_with_a_failed_pr_request_shows_the_keyless_notice_through_the_fetch`, `two_anonymous_answers_show_exactly_one_keyless_line_and_a_key_shows_none` (position beneath the caption, no token in stores or output), `the_keyless_notice_coexists_with_the_closing_fallback_notice` (existing)
+        - **added:** cached and ignored suppression through the shipped binary → `list_prs::stored_anonymous_evidence_from_an_earlier_listing_never_gives_the_notice`. A control listing gives the notice. A second listing, whose own head and PR requests fail with 500 (both re-asked, and the PR store still holds the earlier `anonymous` publication), gives none. On Unix, a third listing with `--ignore-api` asks nothing and gives none (`~/.wt.json` needs `HOME`, as in `list_flags::ignore_api`). Before this, cached suppression was proved only in-process
+        - L2 → `level2_list_verbose::level2_list_keyless_notice_is_a_dim_line_beneath_the_caption_after_the_spinner_in_tmux` (existing; windowless tmux, no focus)
+- mutation check: removing the "publication differs from the one before launch" condition from `Wait::published` (on a copy of `wait.rs`, then restored; `git diff` shows `wait.rs` unchanged) fails the new test at the second listing's no-notice assertion
+- input robustness matrix: not applicable. This phase reads no file format; the stored-evidence matrix is Phase 3's
+- OS: no OS-specific code. The new test's `--ignore-api` step is `#[cfg(unix)]` for the same `HOME` reason as `list_flags::ignore_api`; the rest runs on every OS with the `FakeGitea` stand-in. No cross-check run
+- gates (with `LIBGIT2_NO_PKG_CONFIG=1`): `worktree/` `just test` 954 passed (953 plus the new single-target test), 32 skipped; `just lint` exit 0; `just test-l2 credential` 1 passed and `just test-l2 keyless` 1 passed (tmux, `BISCUIT_TEST_REQUIRED_BACKENDS=tmux`); `just check-tier-coverage worktree` 0 stranded
+- pre-existing flake: one standalone `--test list_prs` run failed `a_detached_workers_answer_replaces_the_stale_one_on_the_next_list` at 11.3 s (load average about 24). It passed alone (3.9 s) and in three more full `list_prs` runs (32 of 32 each), and inside `just test`. This is the same intermittent failure logged in Phases 4 and 6; this phase did not touch that test
+- frontmatter: `packages` unchanged (`worktree-cli` already listed)
+- skills: no `worktree` skill change needed

@@ -69,6 +69,22 @@ message_to_agent: |-
     After phase 6: worktree `just test` 952 passed, `just lint` clean,
     `just test-l2 list` 14 passed. Phase 7 note: `--perf` groups are already wired
     into `gather_listing`; verify against `perf.rs` rather than re-wiring.
+    Phase 7 (`--perf` nested groups) was verified with no change to `perf.rs` or
+    `list.rs`; it added one shipped-binary test,
+    `perf_flag::list_perf_reports_the_remote_group_from_the_real_renderer` (FakeGitea
+    origin; group children `remote wait`, `pr reread`, `list gather`; no regather;
+    top-level reconciliation), and shared helpers `assert_top_level_reconciles` /
+    `group_children` in `perf_flag.rs`. After phase 7: worktree `just test` 953 passed,
+    `just lint` clean, `just test-perf` 32 passed.
+    Phase 8 (keyless notice) was verified with no change to `list.rs`, `list_table.rs`,
+    or `wait.rs`; it added one shipped-binary test,
+    `list_prs::stored_anonymous_evidence_from_an_earlier_listing_never_gives_the_notice`
+    (an earlier listing's stored anonymous publication never gives the notice; on Unix,
+    `--ignore-api` gives none either). After phase 8: worktree `just test` 954 passed,
+    `just lint` clean, `just test-l2 credential` and `just test-l2 keyless` passed.
+    Phase 9 note: `list_prs::a_detached_workers_answer_replaces_the_stale_one_on_the_next_list`
+    failed once more under load (11.3 s, load average about 24) and passed on every rerun;
+    if it fails during full verification, rerun it before treating it as a regression.
 related:
     - 2026-09-27-list-freshness-ux
     - 2026-10-02-fresh-prs
