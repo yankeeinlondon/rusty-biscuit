@@ -20,7 +20,9 @@ just gitnexus
 ```
 
 In an interactive terminal, the recipe starts a background watcher and returns,
-printing the watcher's pid, its log file, and (when an index already exists)
+printing the watcher's pid, its log file, a `kill -- -<pid>` stop command (the
+negative pid stops the whole process group; a plain `kill` during the forced
+build orphans `gitnexus analyze`), and (when an index already exists)
 the `gitnexus status` of the index it is about to replace. Every watcher begins
 with a full `gitnexus analyze --force` and only then runs `gitnexus analyze
 --watch`: the watcher's own startup update is incremental and can leave a stale

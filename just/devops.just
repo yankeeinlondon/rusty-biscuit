@@ -554,6 +554,7 @@ gitnexus:
         IFS= read -r pid < "${pid_file}"
         echo "GitNexus watcher already running (pid ${pid}) for ${repo_root}"
         echo "  Log: $(log_link "${log_file}")"
+        echo "  Stop: kill -- -${pid}"
         echo
 
         # Until the initial forced build finishes, `gitnexus status` describes
@@ -619,7 +620,9 @@ gitnexus:
 
         echo "Started GitNexus watcher (pid ${watcher_pid}) for ${repo_root}"
         echo "  Log: $(log_link "${log_file}")"
-        echo "  Stop: kill ${watcher_pid}"
+        # The negative pid signals the watcher's whole process group; a plain
+        # `kill` during the forced build would orphan `gitnexus analyze`.
+        echo "  Stop: kill -- -${watcher_pid}"
         echo
         if [[ -f "${repo_root}/.gitnexus/gitnexus.json" || -f "${repo_root}/.gitnexus/meta.json" ]]; then
             echo "Index before this build:"
