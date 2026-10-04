@@ -204,7 +204,7 @@ In this example, constraints are added to a string, a number, and an array of st
                 vec![
                     prose_cell(format_constraint_use(c)),
                     prose_cell(format_targets(c.target_types)),
-                    prose_cell(format_constraint_meaning(c)),
+                    rows_cell(format_constraint_meaning(c)),
                 ]
             })
             .collect();
@@ -481,6 +481,11 @@ fn expression_function_signatures_markdown() -> String {
 
 fn prose_cell<T: Into<String>>(text: T) -> TableCellContent {
     InlineProse::new(text.into()).into()
+}
+
+/// A cell whose single newlines start new rows (a summary, then `- ` rows).
+fn rows_cell<T: Into<String>>(text: T) -> TableCellContent {
+    InlineProse::new(text.into()).with_line_breaks(LineBreaks::Hard).into()
 }
 
 fn format_constraint_use(constraint: &SchemaConstraintDescriptor) -> String {

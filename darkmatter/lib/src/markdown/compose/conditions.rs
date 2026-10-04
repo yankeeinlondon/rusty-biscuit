@@ -113,7 +113,7 @@ impl biscuit_terminal::errors::BlockError for ConditionError {
                 StatusBlock::new(StatusState::Error)
                     .error_header(ErrorHeader::new("ConditionError", "evaluation failed"))
                     .body(body)
-                    .hint(format!("Error: {cause}"))
+                    .hint(crate::markdown::errors::hint_rows(&format!("Error: {cause}")))
             }
         }
     }

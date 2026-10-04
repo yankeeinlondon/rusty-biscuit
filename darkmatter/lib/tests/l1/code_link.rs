@@ -139,22 +139,36 @@ fn assert_renders_code_link_everywhere(context: &str, line: &str, label: &str, u
     assert!(visible.contains(label), "{context}: darkmatter terminal {visible:?}");
     assert!(!visible.contains(&format!("`{label}`")), "{context}: no fence when styled {visible:?}");
 
-    // `Prose`, which claudine renders lifecycle messages through. Prose turns a
-    // relative destination into a `file://` URL, so only the path tail of
-    // `url` is compared here.
-    let url_tail = url.trim_start_matches("./");
+    // `Prose`, which claudine renders lifecycle messages through. Its tree,
+    // Markdown, and HTML keep the authored destination; only its terminal
+    // output resolves the path to a `file://` URL for OSC 8.
     let prose = Prose::new(line);
     let tree = prose.render_tree();
-    let (prose_url, prose_label) = code_link_node(tree.children());
-    assert_eq!(prose_label, label, "{context}: Prose tree");
-    assert!(prose_url.ends_with(url_tail), "{context}: Prose destination {prose_url}");
+    assert_eq!(
+        code_link_node(tree.children()),
+        (url.to_string(), label.to_string()),
+        "{context}: Prose tree"
+    );
     let markdown = prose.render_markdown();
-    let prose_link = format!("[`{label}`]({prose_url})");
-    assert!(markdown.contains(&prose_link), "{context}: Prose Markdown {markdown}");
+    assert!(markdown.contains(&markdown_link), "{context}: Prose Markdown {markdown}");
     let html = prose.render_html_fragment().render();
     assert!(html.contains(&html_link), "{context}: Prose HTML {html}");
     let terminal = prose.render(&styled_terminal());
-    assert!(terminal.contains(&format!("\x1b]8;;{prose_url}")), "{context}: Prose OSC 8 {terminal:?}");
+    let url_tail = url.trim_start_matches("./");
+    let prose_url = terminal
+        .split("\x1b]8;;")
+        .nth(1)
+        .and_then(|rest| rest.split_once("\x1b\\"))
+        .map(|(osc_url, _)| osc_url)
+        .unwrap_or_default();
+    if url.contains("://") {
+        assert_eq!(prose_url, url, "{context}: Prose OSC 8 {terminal:?}");
+    } else {
+        assert!(
+            prose_url.starts_with("file://") && prose_url.ends_with(url_tail),
+            "{context}: Prose OSC 8 {terminal:?}"
+        );
+    }
     let visible = strip_escape_codes(terminal);
     assert!(visible.contains(label), "{context}: Prose terminal {visible:?}");
     assert!(!visible.contains(&format!("`{label}`")), "{context}: no fence when styled {visible:?}");

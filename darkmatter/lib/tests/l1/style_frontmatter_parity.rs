@@ -437,7 +437,7 @@ disclosure:
         style,
         body,
         manual_page,
-        "<details><summary>Summary</summary>\n\n\nHidden body text.\n\n</details>",
+        "<details><summary>Summary</summary>\n\nHidden body text.\n</details>",
     );
 }
 

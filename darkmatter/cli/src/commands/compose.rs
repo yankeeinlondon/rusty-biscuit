@@ -616,8 +616,6 @@ pub fn run_compose(
 
     // Emit compose warnings to stderr
     if !report.warnings.is_empty() {
-        use biscuit_terminal::components::renderable::TerminalRenderable;
-        use biscuit_terminal::prelude::{Status, StatusState};
         let term = term_cell.get_or_init(Terminal::default);
         for warning in &report.warnings {
             // A tolerated file-reference failure keeps its stable class row.
@@ -629,8 +627,7 @@ pub fn run_compose(
                 ),
                 None => warning.message.clone(),
             };
-            let status = Status::from_prose(&prose).state(StatusState::Warning);
-            eprintln!("{}", status.render(term));
+            eprintln!("{}", warning_rows(&prose, term));
         }
     }
 
@@ -646,18 +643,16 @@ pub fn run_compose(
         // The view lists errors only; a warning (a missing link inside text an
         // expression inserted) is reported line by line.
         use biscuit_terminal::components::prose::Prose;
-        use biscuit_terminal::prelude::{Status, StatusState};
         use darkmatter::markdown::reference::validate::{ReferenceIssueCode, ReferenceSeverity};
         for issue in report.issues.iter().filter(|i| {
             i.severity == ReferenceSeverity::Warning && i.code == ReferenceIssueCode::MissingLocalTarget
         }) {
-            let status = Status::from_prose(format!(
+            let markup = format!(
                 "{} <dim>(line {}, inside inserted text)</dim>",
                 Prose::escape_text_outside_code_spans(&issue.message),
                 issue.origin.line,
-            ))
-            .state(StatusState::Warning);
-            eprintln!("{}", status.render(term));
+            );
+            eprintln!("{}", warning_rows(&markup, term));
         }
     }
 
@@ -682,6 +677,19 @@ pub fn run_compose(
     drop(options_ctx_ref);
 
     Ok(())
+}
+
+/// A warning status for `markup`, whose further lines (a `hint:` or
+/// `failure:` row) each start a row of their own.
+fn warning_rows(markup: &str, term: &biscuit_terminal::terminal::Terminal) -> String {
+    use biscuit_terminal::components::prose::LineBreaks;
+    use biscuit_terminal::components::renderable::TerminalRenderable;
+    use biscuit_terminal::prelude::{Status, StatusState};
+
+    Status::from_prose(markup)
+        .with_line_breaks(LineBreaks::Hard)
+        .state(StatusState::Warning)
+        .render(term)
 }
 
 fn apply_compose_baseline_schema(
@@ -977,6 +985,23 @@ fn format_compose_perf_report(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn warning_rows_put_each_extra_line_on_a_row_of_its_own() {
+        let term = biscuit_terminal::terminal::Terminal::builder()
+            .width(200)
+            .color_depth(biscuit_terminal::discovery::detection::ColorDepth::None)
+            .build();
+        let rendered = biscuit_terminal::utils::escape_codes::strip_escape_codes(warning_rows(
+            "File not found: a.md\nhint: quote it\n<dim>failure:</dim> no-match",
+            &term,
+        ));
+        let rows: Vec<&str> = rendered.lines().collect();
+        assert_eq!(rows.len(), 3, "{rendered:?}");
+        assert!(rows[0].ends_with("File not found: a.md"), "{rendered:?}");
+        assert_eq!(rows[1], "hint: quote it");
+        assert_eq!(rows[2], "failure: no-match");
+    }
 
     #[test]
     fn parse_compose_setter_rejects_empty_key() {

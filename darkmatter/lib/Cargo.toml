@@ -283,6 +283,8 @@ harness = false
 # The context construction and path lookup guards include darkmatter-cli's
 # shared engines by `#[path]` and spell those files in their tests. The glob implementation guard
 # spells the other packages' files it allowlists, so a changed count runs it.
+# The serialized-code-neighbors suite includes renderable's neighboring-code
+# fixture matrix by `#[path]` and spells it with `include_str!`.
 source-inputs = [
     "biscuit-file/lib/src/file_reference/glob/parse.rs",
     "biscuit-file/lib/src/file_reference/glob/roots.rs",
@@ -291,6 +293,7 @@ source-inputs = [
     "darkmatter/cli/tests/common/source_scan.rs",
     "darkmatter/dmls/src/overlay/schema.rs",
     "darkmatter/dmls/src/workspace/discover.rs",
+    "renderable/tests/support/adjacent_code_matrix.rs",
 ]
 tiers = ["L1", "L2", "browser"]
 features = ["terminal-tests", "browser-tests", "effects-instrumentation"]

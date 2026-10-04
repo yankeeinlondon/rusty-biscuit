@@ -651,3 +651,52 @@ fn schema_about_trigger_grammar_forms_render_literally() {
     }
     assert!(!stdout.contains(r"\["), "a Markdown escape leaked into a code span:\n{stdout}");
 }
+
+/// The constraint table's `Meaning` cell lines for the row whose `Write` cell
+/// is `keyword`, one entry per rendered table line, trimmed.
+fn constraint_row_meaning_lines(plain: &str, keyword: &str) -> Vec<String> {
+    let mut lines = Vec::new();
+    for line in plain.lines() {
+        let Some(after_border) = line.trim_start().strip_prefix('│') else {
+            if lines.is_empty() {
+                continue;
+            }
+            break;
+        };
+        let cells: Vec<&str> = after_border.split('│').collect();
+        let (Some(write), Some(meaning)) = (cells.first(), cells.get(2)) else {
+            continue;
+        };
+        let write = write.trim();
+        if write == keyword || (!lines.is_empty() && write.is_empty()) {
+            lines.push(meaning.trim().to_string());
+        } else if !lines.is_empty() {
+            break;
+        }
+    }
+    lines
+}
+
+#[test]
+fn min_and_max_meanings_start_each_type_on_its_own_row() {
+    let process = CliProcessFixture::new();
+    let output = process
+        .command()
+        .args(["schema", "about"])
+        .output()
+        .expect("run md schema about");
+    assert!(output.status.success());
+    let plain = strip_ansi_codes(&String::from_utf8_lossy(&output.stdout));
+
+    for (keyword, summary) in [("min(number)", "Sets a lower bound."), ("max(number)", "Sets an upper bound.")] {
+        let lines = constraint_row_meaning_lines(&plain, keyword);
+        assert_eq!(lines.first().map(String::as_str), Some(summary), "{keyword}: {lines:#?}");
+        for type_name in ["string", "number", "array"] {
+            assert_eq!(
+                lines.iter().filter(|line| line.starts_with(&format!("- {type_name}:"))).count(),
+                1,
+                "{keyword}: `- {type_name}:` must start a row of its own: {lines:#?}"
+            );
+        }
+    }
+}

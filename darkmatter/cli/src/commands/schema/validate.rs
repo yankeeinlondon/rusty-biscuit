@@ -5,7 +5,7 @@ use crate::commands::schema::assignment::{self, Assignment, PositionalKind};
 use crate::io::{DocumentArgumentError, OpenedArgument, open_argument};
 use crate::request::MdRequest;
 use darkmatter::markdown::errors::resolution_failure_name;
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::errors::BlockError;
 use biscuit_terminal::terminal::Terminal;
@@ -368,8 +368,13 @@ fn emit_problem_bullet(problem: &ValidationProblem, terminal: &Terminal) {
     };
 
     let message = trim_redundant_property_prefix(&problem.message, problem.property.as_deref());
-    let bullet = format!("    - {prefix}{}{location_suffix}", escape_prose(message));
-    println!("{}", Prose::new(bullet).render(terminal));
+    // A message's own `hint:` row stays a row, indented under its bullet.
+    let message = escape_prose(message).replace('\n', "\n      ");
+    let bullet = format!("    - {prefix}{message}{location_suffix}");
+    println!(
+        "{}",
+        Prose::new(bullet).with_line_breaks(LineBreaks::Hard).render(terminal)
+    );
 
     // Surface the declared property description on its own dimmed sub-line,
     // one indent level beneath the bullet (Decision #7). Enrichment already

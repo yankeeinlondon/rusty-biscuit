@@ -103,6 +103,7 @@ mod schemas_required_count_matrix;
 mod schemas_source_projection;
 mod schemas_validate_table;
 mod semantic_results_never_persist;
+mod serialized_code_neighbors;
 mod set_overlay_integration;
 mod shell_block_integration;
 mod shell_expansion_coordinates;

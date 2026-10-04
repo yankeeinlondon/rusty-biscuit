@@ -636,7 +636,10 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
                         "condition evaluation failed",
                     ))
                     .body(body)
-                    .hint(format!("Error: {}", Prose::escape_text_outside_code_spans(&cause.to_string())))
+                    .hint(crate::markdown::errors::hint_rows(&format!(
+                        "Error: {}",
+                        Prose::escape_text_outside_code_spans(&cause.to_string())
+                    )))
             }
 
             TransclusionError::ConditionParse {
@@ -727,7 +730,9 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
             }
 
             TransclusionError::Io(source) => {
-                let mut body = vec![Prose::new(source.to_string())];
+                // A not-found message carries its own `hint:` row.
+                let mut body =
+                    vec![Prose::new(source.to_string()).with_line_breaks(LineBreaks::Hard)];
                 body.extend(self.resolution_failure().map(crate::markdown::errors::resolution_failure_row));
                 StatusBlock::new(StatusState::Error)
                     .error_header(ErrorHeader::new("TransclusionError", "I/O failure"))

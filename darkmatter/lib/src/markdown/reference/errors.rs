@@ -237,7 +237,7 @@ impl biscuit_terminal::errors::BlockError for ReferenceError {
         &self,
         term: &biscuit_terminal::terminal::Terminal,
     ) -> biscuit_terminal::components::status_block::StatusBlock {
-        use biscuit_terminal::components::prose::Prose;
+        use biscuit_terminal::components::prose::{LineBreaks, Prose};
         use biscuit_terminal::components::status::StatusState;
         use biscuit_terminal::components::status_block::StatusBlock;
         use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
@@ -317,14 +317,15 @@ impl biscuit_terminal::errors::BlockError for ReferenceError {
             ReferenceError::FileReference(source) => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("ReferenceError", "file reference failure"))
                 .body(vec![
-                    Prose::new(source.to_string()),
+                    Prose::new(source.to_string()).with_line_breaks(LineBreaks::Hard),
                     crate::markdown::errors::resolution_failure_row(source.resolution_failure()),
                 ])
                 .hint("Check sigil usage: `@` magic, `&` repository root, `^` repository-scoped."),
 
             ReferenceError::Io(source) => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("ReferenceError", "I/O failure"))
-                .body(source.to_string())
+                // A not-found message carries its own `hint:` row.
+                .body(Prose::new(source.to_string()).with_line_breaks(LineBreaks::Hard))
                 .hint("Check file existence and permissions."),
 
             ReferenceError::Url(source) => StatusBlock::new(StatusState::Error)
