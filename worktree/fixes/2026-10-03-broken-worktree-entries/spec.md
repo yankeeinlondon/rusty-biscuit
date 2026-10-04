@@ -45,13 +45,13 @@ human_review_items:
 
     I recommend **A**. The extra effect is a non-destructive restoration that Git itself considers correct, and the spec already warns that repair may change metadata. Widening that wording is cheaper and safer than B's refusals or C's reimplementation.
 message_to_agent: |-
-  Read the "Phase 1" section of implementation-log.md before starting. Key facts from the Git 2.56 spike:
-  (1) Git always prints `prunable <reason>` with a non-empty reason, but still parse a bare `prunable` as Some("").
-  (2) A locked entry whose directory is gone is NOT prunable, and neither is a `.git` file holding garbage. Both reach the ordinary path and must become DirtyStatus::Unknown (`?`), not `✕`.
-  (3) `fast_forward::holder_of` (lib/src/fast_forward.rs:121) parses porcelain itself and ignores `prunable`; Phase 3 must handle it.
-  (4) WorktreeEntry struct literals to fix: lib/src/worktree.rs:145, :170, :1593; lib/src/listing.rs:505; cli/tests/list_table.rs:66.
-  (5) The baseline was green: 958 passed, 32 skipped, lint clean.
-  (6) For Phase 4: GIT_INDEX_FILE pointing at an absent index reads as empty without error, so check presence first. Path comparison should reuse remove::handoff::canonical / same_path (make same_path pub(crate)). R9 (repair is repo-wide) awaits the author; its default is in the log.
+  Phases 1-3 are done; read the "Phase 1" and "Phase 3" sections of implementation-log.md first.
+  (1) R9 (git worktree repair also re-links OTHER unlinked worktrees) still awaits the author; it is in human_review_items and gates the Phase 4 repair engine. If unanswered, use its recorded default (option A) and say "may have changed Git metadata for this or other worktrees".
+  (2) `wt list` notes (cli/src/commands/list_table.rs, `unavailable_note`) already PROMISE Phase 5 behavior: Missing -> "wt remove <arg> checks whether its remaining Git record can be removed safely"; Unlinked -> "wt remove <arg> attempts to restore the link before checking its files". Keep that wording true, or change the note and its snapshots (`unavailable_notes`, `unavailable_note_quoting`) in the same change.
+  (3) Reuse, don't copy: `list_table::shell_word` (one spelling valid in bash/zsh/fish/PowerShell, or None) and `remove_argument` (R6 via resolve_worktree) are private to the CLI's list_table module; if Phase 5 refusal text needs quoted commands, move `shell_word` to a shared CLI module rather than writing a second quoter.
+  (4) `--ff` now refuses a prunable holder with `FfRefusal::UnavailableHolder(path)` (lib/src/fast_forward.rs), only when a move is needed. Do not add repair there.
+  (5) The legend's new entries are on a second Worktree line (a recorded departure: one line was 126 columns). docs/cli/list.md (Phase 6) should describe that layout.
+  (6) Baseline after Phase 3: `just test` 989 passed / 32 skipped; `just lint` clean. `just cross-check` passes its args to a shell unquoted, so use plain test-name filters, never `-E '…(…)'`.
 ---
 
 # Worktrees Git can no longer read: honest listing and safe removal

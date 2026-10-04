@@ -1,7 +1,7 @@
 ---
 total_phases: 6
 created: 2026-10-03
-phase: 1
+phase: 3
 agent: claude/sonnet
 yolo: true
 source_files_during_phase_1: []
@@ -9,8 +9,36 @@ docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1:
   - .claude/skills/worktree/remove.md
+source_files_during_phase_2:
+  - worktree/lib/src/availability.rs
+  - worktree/lib/src/remove/admin_entry.rs
+  - worktree/lib/src/remove/mod.rs
+  - worktree/lib/src/lib.rs
+  - worktree/lib/src/worktree.rs
+  - worktree/lib/src/listing.rs
+  - worktree/cli/src/commands/list_table.rs
+  - worktree/cli/tests/list_table.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/worktree/list.md
+source_files_during_phase_3:
+  - worktree/lib/src/fast_forward.rs
+  - worktree/cli/src/commands/list_table.rs
+  - worktree/cli/src/commands/list.rs
+  - worktree/cli/tests/list_table.rs
+  - worktree/cli/tests/list_output.rs
+  - worktree/cli/tests/snapshots/list_table__closing_notes.snap
+  - worktree/cli/tests/snapshots/list_table__unavailable_and_unknown_rows.snap
+  - worktree/cli/tests/snapshots/list_table__unavailable_notes.snap
+  - worktree/cli/tests/snapshots/list_table__unavailable_note_quoting.snap
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/worktree/list.md
 packages:
   - worktree
+  - worktree-cli
 ---
 
 # Plan: Worktrees Git can no longer read
@@ -177,14 +205,14 @@ and can run concurrently (coordinate on the file; merge `WorktreeEntry` first).
 
 ### Task group A — parsing and classification
 
-- [ ] **Prunable field.** Add `prunable: Option<String>` to `WorktreeEntry`
+- [x] **Prunable field.** Add `prunable: Option<String>` to `WorktreeEntry`
   (`None` = no marker, `Some("")` = marker without reason, else Git's reason).
   - Update `parse_worktree_list` (`lib/src/worktree.rs:129`) so the marker is
     captured and reset for every entry, including the last one flushed after the
     loop; remove the "skip prunable lines" comment and fix drifted docs.
   - Fix every struct literal flagged in the baseline inventory.
   - Do not interpret reason text.
-- [ ] **Availability classifier.** New module (for example `lib/src/availability.rs`
+- [x] **Availability classifier.** New module (for example `lib/src/availability.rs`
   or inside `worktree.rs` if small) exposing `Availability { Healthy, Missing,
   Unlinked, Other(OtherReason) }` and `classify(entry) -> Availability`.
   - Use `symlink_metadata` on the path and on `<path>/.git`; never `Path::exists()`;
@@ -195,20 +223,20 @@ and can run concurrently (coordinate on the file; merge `WorktreeEntry` first).
     a typed reason carrying the observed condition.
   - Inspection goes through a small injectable trait/closure so permission and
     reparse-point cases are testable on every host (R8).
-- [ ] **Input robustness matrix (below)** implemented for the porcelain
+- [x] **Input robustness matrix (below)** implemented for the porcelain
   `prunable` line and the admin `gitdir` back-reference reader.
 
 ### Task group B — `DirtyStatus::Unknown`
 
-- [ ] **Unknown variant.** Add `DirtyStatus::Unknown` (`lib/src/worktree.rs:~35`).
+- [x] **Unknown variant.** Add `DirtyStatus::Unknown` (`lib/src/worktree.rs:~35`).
   `dirty_status` returns `Unknown` on spawn failure and on nonzero exit; update
   its doc comment (it currently promises a `Clean` fallback).
-- [ ] **No status for prunable entries.** The listing path that calls
+- [x] **No status for prunable entries.** The listing path that calls
   `dirty_status` (`worktree.rs:~491`) skips prunable entries and records
   `Unknown` without running Git; availability is carried separately on the
   status record (add `availability` next to `dirty`, computed once per entry per
   run).
-- [ ] **Audit every match/default over dirtiness** found in the baseline,
+- [x] **Audit every match/default over dirtiness** found in the baseline,
   including the graph annotations, the status refresh after `--ff`, and anything
   using `unwrap_or(Clean)`. Unknown must never count as checked-clean nor as
   known source changes.
@@ -242,13 +270,13 @@ injected inspection errors, symlink), and `dirty_status` failure tests pass.
 
 Wave 3 — both tasks are independent.
 
-- [ ] **Markers and legend.** In `cli/src/commands/list_table.rs`
+- [x] **Markers and legend.** In `cli/src/commands/list_table.rs`
   (`dirty_dot` at ~778, row builder ~658, legend ~483): render `✕` for
   unavailable rows, `?` for `Unknown` on available rows. Add
   `✕ git can't read this worktree` and `? couldn't check` to the Worktree legend
   only when they occur; keep the Branch legend; size the table from the
   *rendered* legends.
-- [ ] **Unavailable notes.** One dim note per unavailable entry in table row
+- [x] **Unavailable notes.** One dim note per unavailable entry in table row
   order, appended after existing PR-status/closing notes without reordering them.
   - Text per spec for Missing, Unlinked (with the repair command and base path),
     and Other (observed condition plus Git's reason when present). Do not claim
@@ -258,13 +286,13 @@ Wave 3 — both tasks are independent.
   - Command-name selection per R6; shell-quote suggested commands for the
     caller's shell (reuse an existing quoting helper if present); never execute
     displayed text.
-- [ ] **Comparison cells unchanged.** Ref comparisons keep their meaning;
+- [x] **Comparison cells unchanged.** Ref comparisons keep their meaning;
   nothing derived from dirtiness feeds them. Confirm in the audit.
-- [ ] **`--ff` holder refusal.** In `lib/src/fast_forward.rs` (`holder_of`, ~121)
+- [x] **`--ff` holder refusal.** In `lib/src/fast_forward.rs` (`holder_of`, ~121)
   a prunable holder of the default branch counts as a holder: refuse without
   repair or ref move; healthy-holder behavior unchanged. Listing itself performs
   no repair and no record removal; cache writes and worker behavior are untouched.
-- [ ] **Snapshots and tests.** Rendering snapshots live in
+- [x] **Snapshots and tests.** Rendering snapshots live in
   `cli/tests/list_table.rs`, not in shared CLI unit modules (they compile under
   both the library and binary targets). Cover: `✕`/`?` markers, conditional
   legends, dim notes, stable row order, markup escaping, ordinary comparisons.
@@ -272,7 +300,7 @@ Wave 3 — both tasks are independent.
   status spawn/nonzero failures through the runner `dirty_status` actually uses
   (`git_command_in`) because the existing recorder's failure injection does not
   reach it. Add the `--ff` refusal test (no repair, no ref move).
-- [ ] **Snapshot hygiene.** Review the touched `.snap` files by eye; do not
+- [x] **Snapshot hygiene.** Review the touched `.snap` files by eye; do not
   blind-accept. Include a fixture shaped like `lhg-before` (Unlinked, detached,
   recorded HEAD) and a Missing one.
 
