@@ -164,6 +164,17 @@ When modifying queries or symbol extraction:
    shapes of ten load-bearing snapshot fields are served or recomputed (table in
    `docs/cache-design.md`); a schema change that adds a default or makes a
    field optional must update that row
+7. `lib/tests/fixtures/symbols/multi/` is a 16-language tree (one file per
+   language, some under `nested/`, `Widget` declared in two files) for
+   multi-file, ordering, parallel and golden tests;
+   `symbols_coverage::multi_tree_has_one_clean_file_per_language` guards it.
+   `golden::plain_symbols_over_multi_match_the_golden` (CLI `symbols` binary)
+   pins `hug --plain symbols` over it against
+   `cli/tests/fixtures/golden/symbols.plain`; regenerate with
+   `HUG_UPDATE_GOLDEN=1` only for a deliberate output change. Grammar limits
+   found while writing fixtures: C# rejects an attribute between modifiers,
+   and tree-sitter-zsh rejects a function body brace on the line after the
+   header
 
 The CLI's real-terminal `god-files` test is behind the internal
 `terminal-tests` feature. Ordinary local L1 omits its harness and target;
