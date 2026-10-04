@@ -587,3 +587,58 @@ fn level2_move_first_failures_leave_the_worktree_intact() {
         assert!(scene.branch_exists("feat/x"), "{shell:?}");
     }
 }
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_declining_after_a_repair_keeps_the_restored_link_and_the_files() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+    let scene = Scene::new();
+    let wt = scene.add_worktree("feat/x", "feat-x");
+    fs::write(wt.join("lib.rs"), "fn a() {}\n").unwrap();
+    fs::remove_file(wt.join(".git")).unwrap();
+    let mut harness = fresh_harness();
+
+    let script = scene.script(Shell::Bash, false, &scene.repo(), "wt remove feat-x", "");
+    scene.start(&mut harness, Shell::Bash, &script);
+    let plain = wait_for_text(&mut harness, "Discard the files listed above");
+    assert!(plain.contains("Restored the link for feat-x"), "repair precedes the question:\n{plain}");
+    assert!(plain.contains("lib.rs"), "{plain}");
+    assert_one_blank_line_before(&plain, "Discard the files listed above");
+
+    harness.send_text(b"n\n").unwrap();
+    let outcome = scene.wait_outcome();
+    let plain = harness.capture().unwrap().plain;
+    assert_eq!(outcome.code, 0, "cancelling is a choice:\n{plain}");
+    assert!(plain.contains("was left in place"), "{plain}");
+    assert!(wt.join(".git").is_file(), "no rollback");
+    assert!(wt.join("lib.rs").exists());
+    assert!(scene.branch_exists("feat/x"));
+}
+
+/// Standing in a worktree whose `.git` is gone works only when Git can still
+/// find the repository from there, so this one sits inside the base checkout.
+#[test]
+#[serial(level2_terminal)]
+fn level2_a_repaired_worktree_moves_first_through_the_wrapper() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+    let scene = Scene::new();
+    let wt = scene.repo().join(".nested").join("feat-x");
+    git(&scene.repo(), &["worktree", "add", "-q", "-b", "feat/x", wt.to_str().unwrap(), "main"]);
+    fs::write(wt.join("notes.txt"), "draft\n").unwrap();
+    fs::remove_file(wt.join(".git")).unwrap();
+    let mut harness = fresh_harness();
+
+    let script = scene.script(Shell::Bash, true, &wt, "wt remove feat-x", "");
+    scene.start(&mut harness, Shell::Bash, &script);
+    let plain = wait_for_text(&mut harness, "Discard the files listed above");
+    assert!(plain.contains("Restored the link for feat-x"), "{plain}");
+    harness.send_text(b"y\n").unwrap();
+
+    let outcome = scene.wait_outcome();
+    let plain = harness.capture().unwrap().plain;
+    assert_eq!(outcome.code, 0, "{plain}");
+    assert_eq!(canonical(&outcome.pwd), canonical(&scene.repo()));
+    assert!(plain.contains("Moving you to the base repo"), "{plain}");
+    assert!(plain.contains("Removed worktree"), "{plain}");
+    assert!(!wt.exists());
+}
