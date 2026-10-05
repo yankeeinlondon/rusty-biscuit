@@ -173,8 +173,8 @@ impl Prose {
     /// Escape text so it renders literally in Prose markup.
     ///
     /// Escapes characters that have special meaning in the Prose grammar
-    /// (`<`, `>`, `{`, `*`, `_`, `[`, `]`, `(`, `)`, `\`) by prefixing them
-    /// with a backslash. Use this for any user-controlled string that is
+    /// (`<`, `>`, `{`, `*`, `_`, `[`, `]`, `(`, `)`, `` ` ``, `\`) by
+    /// prefixing them with a backslash. Use this for any user-controlled string that is
     /// interpolated into Prose content, except inside a code span or a fenced
     /// code block: their contents are literal and show the backslashes, so
     /// text placed between backticks or fences must not be escaped.
@@ -245,7 +245,7 @@ impl Prose {
             // jumps within ASCII-only ANSI sequences.
             let ch = s[i..].chars().next().expect("non-empty remainder");
             match ch {
-                '<' | '>' | '{' | '*' | '_' | '[' | ']' | '(' | ')' | '\\' => {
+                '<' | '>' | '{' | '*' | '_' | '[' | ']' | '(' | ')' | '`' | '\\' => {
                     result.push('\\');
                     result.push(ch);
                 }
@@ -277,7 +277,7 @@ impl Prose {
     /// assert_eq!(escaped, r"unknown field `foo_bar`, in a\_b");
     ///
     /// // An unmatched backtick does not open a span.
-    /// assert_eq!(Prose::escape_text_outside_code_spans("a ` b_c"), r"a ` b\_c");
+    /// assert_eq!(Prose::escape_text_outside_code_spans("a ` b_c"), r"a \` b\_c");
     /// ```
     pub fn escape_text_outside_code_spans(s: &str) -> String {
         let mut escaped = String::with_capacity(s.len());

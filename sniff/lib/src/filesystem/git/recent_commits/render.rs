@@ -361,11 +361,11 @@ impl Format {
     }
 }
 
-/// Backslash-escape characters that `format` would read as markup. Only
-/// Markdown escapes backticks: Prose renders the backslash of a lone escaped
-/// backtick, so a backtick pair in Prose output opens a code span, and that
-/// span's contents are copied unescaped because Prose shows a code span's
-/// backslashes. This mirrors biscuit-terminal's
+/// Backslash-escape characters that `format` would read as markup. In Prose
+/// a closed backtick pair is kept as a code span, and that span's contents
+/// are copied unescaped because Prose shows a code span's backslashes; an
+/// unmatched backtick is escaped like any other markup. This mirrors
+/// biscuit-terminal's
 /// `Prose::escape_text_outside_code_spans`, which `sniff` cannot call: the
 /// library does not depend on biscuit-terminal.
 fn escape(text: &str, format: Format) -> String {
@@ -417,8 +417,8 @@ fn escape_chars(text: &str, format: Format) -> String {
     for character in text.chars() {
         // Markdown alone also reads `~` (strikethrough) and `&` (an entity
         // or character reference such as `&copy;`) as markup.
-        let markup = matches!(character, '\\' | '*' | '_' | '[' | ']' | '<' | '>')
-            || (matches!(character, '`' | '~' | '&') && format == Format::Markdown);
+        let markup = matches!(character, '\\' | '*' | '_' | '[' | ']' | '<' | '>' | '`')
+            || (matches!(character, '~' | '&') && format == Format::Markdown);
         if markup {
             escaped.push('\\');
         }
@@ -841,7 +841,7 @@ mod tests {
             );
             assert_eq!(escape("``a`_b`` c_d", Format::Prose), r"``a`_b`` c\_d");
             // An unmatched backtick is text, so what follows it is escaped.
-            assert_eq!(escape("odd ` a_b", Format::Prose), r"odd ` a\_b");
+            assert_eq!(escape("odd ` a_b", Format::Prose), r"odd \` a\_b");
             // Markdown escapes the backticks, so it opens no span.
             assert_eq!(escape("`a_b`", Format::Markdown), r"\`a\_b\`");
         }

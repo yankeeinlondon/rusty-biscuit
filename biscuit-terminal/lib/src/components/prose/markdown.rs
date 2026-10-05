@@ -546,7 +546,7 @@ fn is_fence_line(chars: &[char], start: usize) -> bool {
 pub(super) fn is_escapable(c: char) -> bool {
     matches!(
         c,
-        '*' | '_' | '[' | ']' | '(' | ')' | '<' | '>' | '{' | '\\'
+        '*' | '_' | '[' | ']' | '(' | ')' | '<' | '>' | '{' | '`' | '\\'
     ) || is_sentinel(c)
 }
 

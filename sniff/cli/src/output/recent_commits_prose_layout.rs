@@ -49,7 +49,7 @@ const VISIBLE: &str = "\
 
   Details:
 
-  - bullet one with `code`
+  - bullet one with code
   - bullet two with a long line that should wrap when the terminal is narrow enough to force wrapping
 
   Files Impacted:
@@ -135,7 +135,9 @@ fn colorless_terminal_keeps_every_visible_line() {
     terminal.color_depth = ColorDepth::None;
     terminal.osc_link_support = true;
     let rendered = report_prose().render(&terminal);
-    let expected: Vec<&str> = VISIBLE.lines().collect();
+    // Inline code that cannot be styled keeps its backticks.
+    let visible = VISIBLE.replace("bullet one with code", "bullet one with `code`");
+    let expected: Vec<&str> = visible.lines().collect();
     assert_eq!(visible_lines(&rendered), expected);
 }
 

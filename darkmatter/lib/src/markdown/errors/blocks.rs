@@ -470,7 +470,7 @@ fn push_on_disk_locus(
         SourceRef::Supplied { supplier } => {
             body.push(Prose::new(format!(
                 "The value came from {}, not from the document.",
-                Prose::escape_text(supplier)
+                Prose::escape_text_outside_code_spans(supplier)
             )));
         }
         SourceRef::Effective { .. } => {}
