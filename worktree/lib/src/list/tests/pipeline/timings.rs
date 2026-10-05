@@ -2,7 +2,7 @@
 //! reconciles, that the `git` counts cover the work, and that measuring
 //! changes nothing the listing does. No assertion depends on host speed.
 
-use crate::timing::{ChildrenKind, Scope, Span, Stage, Timings};
+use crate::timing::{ChildrenKind, Scope, Span, Stage, Timings, WorkerReportStatus};
 
 use super::*;
 
@@ -67,6 +67,14 @@ fn a_followed_wait_makes_the_remote_region_with_the_launch_and_the_follow() {
     assert_eq!(children(&run, &[RemoteAndLocal, RefreshWorker]), [WorkerLaunch, WorkerWait]);
     let worker = timings(&run).span(&[RemoteAndLocal, RefreshWorker]).expect("refresh worker");
     assert_eq!(worker.git_calls(), None, "the worker's own work runs in another process: unknown, not zero");
+    // The launched worker was asked for timings, and its report travels
+    // beside the spans, outside every reconciliation.
+    let reports = timings(&run).worker_reports();
+    assert_eq!(reports.len(), 1, "{reports:?}");
+    assert_eq!((reports[0].launch_index, reports[0].status()), (0, WorkerReportStatus::Complete));
+    let halves = reports[0].timings().and_then(|worker| worker.span(&[WorkerHalves])).expect("the halves group");
+    assert_eq!(stages(halves.children()), [PrRefresh, HeadRefresh]);
+    assert_eq!(timings(&run).worker_report_status(), Some(WorkerReportStatus::Complete));
     assert_reconciles(&run, "remote");
 }
 
@@ -79,6 +87,7 @@ fn without_a_worker_the_stored_answers_are_read_inside_the_local_reads() {
 
     assert_eq!(stages(timings(&run).spans()), [ReadWorktrees, OriginLookup, PrepareLocal, LocalReads, Commit]);
     assert_eq!(children(&run, &[LocalReads]), [PrCacheRead, LocalGather, GraphHistory]);
+    assert_eq!(timings(&run).worker_report_status(), None, "no worker followed, no worker section");
     assert_reconciles(&run, "no worker");
 }
 

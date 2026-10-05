@@ -10,8 +10,11 @@
 //!
 //! With [`ListOptions::timings`] the listing also reports where its time went
 //! ([`Listing::timings`], a [`Scope::Library`] document from entry through the
-//! checkout refresh). Without it, no clock is read for timing and no `git`
-//! count scope is opened, so a listing does the same work either way.
+//! checkout refresh). Each launched worker is then asked to measure itself,
+//! and its reports travel beside the spans as diagnostics
+//! ([`Timings::worker_reports`]), never inside them. Without it, no clock is
+//! read for timing, no `git` count scope is opened, and no worker is asked
+//! for timings, so a listing does the same work either way.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -26,12 +29,12 @@ use crate::graph::{self, GatherInput, GraphFacts, VerboseData};
 use crate::listing::{RefSnapshot, RefTips};
 use crate::pull_requests::{CachedPrs, PrListing, origin_digest, origin_url, pr_store_path, select_cached, unix_now};
 use crate::remote_head::{Phase, remote_head_store_path};
-use crate::timing::{self, ChildrenKind, Scope, Span, SpanList, Stage, Timings};
+use crate::timing::{self, ChildrenKind, Scope, Span, SpanList, Stage, Timings, WorkerReport, WorkerReportStatus};
 use crate::worktree::{DirtyStatus, RefFacts, WorktreeList, gather_dirtiness, parse_worktree_state_in};
 
 pub mod wait;
 
-use wait::{FORCED_BUDGET, ORDINARY_BUDGET, StoreEnv, WaitEnd, WaitRequest, WorkerLaunch};
+use wait::{FORCED_BUDGET, HeadEnd, ORDINARY_BUDGET, StoreEnv, WaitEnd, WaitRequest, WorkerLaunch};
 
 /// What one listing gathers and how it reaches the network.
 #[derive(Clone, Copy)]
@@ -211,6 +214,7 @@ fn follow_remote_steps(
         branch: default_branch,
         force: options.forced(),
         budget: if options.forced() { options.forced_budget } else { options.wait_budget },
+        timings: started.is_some(),
     };
     let env = StoreEnv::new(stores.head.to_path_buf(), stores.prs.to_path_buf(), origin.clone());
     on_phase(WaitProgress::Started);
@@ -450,9 +454,34 @@ pub fn gather(
         timing::record(root.as_mut(), Stage::CheckoutRefresh, || list.refresh_dirty_status(checkout));
     }
 
-    let timings = root.zip(started).map(|(root, started)| Timings::new(Scope::Library, started.elapsed(), root));
+    let timings = root.zip(started).map(|(root, started)| {
+        let timings = Timings::new(Scope::Library, started.elapsed(), root);
+        match worker_reports(&remote) {
+            Some((reports, status)) => timings.with_worker_reports(reports, status),
+            None => timings,
+        }
+    });
     let (graph, verbose) = history.unwrap_or((None, None));
     Ok(Listing { list, remote, ff, graph, verbose, main_checkout, head_store, regathered, timings })
+}
+
+/// The worker reports of a timed listing's wait and their summary; `None`
+/// when no worker was followed. A changed `origin` suppresses every report,
+/// as it suppresses the wait's results ([`RemoteAnswers::observed`]).
+fn worker_reports(remote: &RemoteAnswers) -> Option<(Vec<WorkerReport>, WorkerReportStatus)> {
+    let waited = remote.waited.as_ref()?;
+    if remote.origin_changed {
+        return Some((Vec::new(), WorkerReportStatus::OriginChanged));
+    }
+    let followed = match &waited.head {
+        HeadEnd::Finished(attempt) | HeadEnd::Running { last: Some(attempt) } => Some(attempt.id.as_str()),
+        HeadEnd::Running { last: None } | HeadEnd::Unavailable => None,
+    };
+    // Every launch has an entry, so a followed attempt with none is adopted.
+    let adopted = followed.is_some_and(|id| waited.worker_reports.iter().all(|report| report.attempt_id != id));
+    let reports = waited.worker_reports.clone();
+    let status = timing::summarize_worker_reports(&reports, adopted, false);
+    Some((reports, status))
 }
 
 /// Graph and verbose history from `input`, with its span when `timed`.

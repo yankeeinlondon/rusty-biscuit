@@ -47,12 +47,14 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::cache::{atomic_write, repo_cache_file, try_lock_sidecar};
 use crate::error::WorktreeError;
 use crate::live_remote::is_object_id;
 use crate::pull_requests::{FRESHNESS_WINDOW, origin_digest};
 use crate::strict_json;
+use crate::timing::{LaunchReport, WorkerTimings};
 
 /// Format 3 added [`Attempt::credentials`].
 pub const REMOTE_HEAD_FORMAT_VERSION: u32 = 3;
@@ -720,6 +722,12 @@ pub struct Receipt {
     pub finished_at: u64,
     pub head: HeadStatus,
     pub prs: PrStatus,
+    /// The worker's own timings, only for an attempt launched with timing
+    /// on. Read after the outcome is accepted and never part of it: absent
+    /// is [`LaunchReport::Missing`], and anything unreadable is
+    /// [`LaunchReport::Invalid`] beside an intact outcome.
+    #[serde(skip)]
+    pub durations: LaunchReport,
 }
 
 #[derive(Serialize)]
@@ -727,6 +735,10 @@ struct ReceiptFileOut<'a> {
     format_version: u32,
     #[serde(flatten)]
     receipt: &'a Receipt,
+    // The optional `durations` member: an additive field of format 1, which
+    // older readers ignore.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    durations: Option<Value>,
 }
 
 // Spelled out rather than `#[serde(flatten)]`: flattening buffers the input,
@@ -761,12 +773,16 @@ pub fn write_receipt(path: &Path, receipt: &Receipt) -> Result<(), WorktreeError
     if !receipt.is_valid() {
         return Err(invalid("an invalid receipt"));
     }
-    write_json(path, &ReceiptFileOut { format_version: RECEIPT_FORMAT_VERSION, receipt })
+    let durations = receipt.durations.timings().map(WorkerTimings::to_value);
+    write_json(path, &ReceiptFileOut { format_version: RECEIPT_FORMAT_VERSION, receipt, durations })
 }
 
 /// The receipt at `path` for `attempt`: `None` when missing, unreadable,
 /// invalid, for another attempt id, origin, or branch, or finished before
 /// the attempt started.
+///
+/// The `durations` member is decoded only once the outcome is accepted, and
+/// its state never decides whether the receipt is ([`Receipt::durations`]).
 pub fn load_receipt(path: &Path, attempt: &Attempt) -> Option<Receipt> {
     let bytes = fs::read(path).ok()?;
     let file = serde_json::from_slice::<ReceiptFileIn>(&bytes).ok()?;
@@ -777,14 +793,31 @@ pub fn load_receipt(path: &Path, attempt: &Attempt) -> Option<Receipt> {
         finished_at: file.finished_at,
         head: file.head,
         prs: file.prs,
+        durations: LaunchReport::Missing,
     };
-    (file.format_version == RECEIPT_FORMAT_VERSION
+    let accepted = file.format_version == RECEIPT_FORMAT_VERSION
         && receipt.is_valid()
         && receipt.attempt_id == attempt.id
         && receipt.origin_digest == attempt.origin_digest
         && receipt.branch == attempt.branch
-        && receipt.finished_at >= attempt.started_at)
-        .then_some(receipt)
+        && receipt.finished_at >= attempt.started_at;
+    accepted.then(|| Receipt { durations: receipt_durations(&bytes), ..receipt })
+}
+
+/// The report in an accepted receipt's `durations` member.
+fn receipt_durations(bytes: &[u8]) -> LaunchReport {
+    // The outcome reader ignores unknown members, so a repeated
+    // `durations` key reaches this point; it is never read as last-wins.
+    let Some(members) = strict_json::members(bytes) else {
+        return LaunchReport::Invalid;
+    };
+    if !members.contains("durations") {
+        return LaunchReport::Missing;
+    }
+    match members.get::<Value>("durations").map(WorkerTimings::from_value) {
+        Some(Ok(timings)) => LaunchReport::from_worker(timings),
+        Some(Err(_)) | None => LaunchReport::Invalid,
+    }
 }
 
 #[cfg(test)]
@@ -792,6 +825,7 @@ mod tests {
     use super::*;
     use crate::pull_requests::origin_url;
     use crate::remove::test_support::TestRepo;
+    use crate::timing::{Stage, worker_fixture};
 
     const NOW: u64 = 1_790_000_000;
     const SHA: &str = "0123456789abcdef0123456789abcdef01234567";
@@ -1593,6 +1627,7 @@ mod tests {
             finished_at: NOW + 30,
             head: HeadStatus::Ok,
             prs: PrStatus::Failed { failure: PrFailure::CredentialsRejected { key: Some("GITHUB_TOKEN".into()) } },
+            durations: LaunchReport::Missing,
         }
     }
 
@@ -1753,6 +1788,11 @@ mod tests {
                 Self::Set(pointer, value) => {
                     let (parent, key) = pointer.rsplit_once('/').unwrap();
                     let target = if parent.is_empty() { &mut document } else { document.pointer_mut(parent).unwrap() };
+                    if let Some(array) = target.as_array_mut() {
+                        let index: usize = key.parse().unwrap_or_else(|_| panic!("{pointer} indexes an array"));
+                        array[index] = value.clone().unwrap_or_else(|| panic!("{pointer}: replace an element, never remove it"));
+                        return serde_json::to_vec(&document).unwrap();
+                    }
                     let map = target.as_object_mut().unwrap_or_else(|| panic!("{pointer} is not in an object"));
                     match value {
                         Some(value) => {
@@ -1791,7 +1831,7 @@ mod tests {
     /// The receipt matrix's cells for a receipt whose PR half failed with
     /// `failure`: each edit, and the PR half the receipt then reports, `None`
     /// for a missing receipt. The same table is walked through `wt list`'s
-    /// wait in `worktree-cli` (`commands::list::wait::tests`).
+    /// wait (`list::wait::tests::receipt_matrix`).
     fn receipt_cells(failure: &PrFailure) -> Vec<(JsonEdit, Option<PrStatus>)> {
         use serde_json::{Value, json};
         use JsonEdit::*;
@@ -1906,5 +1946,193 @@ mod tests {
         // `ok` with no store publication is still the receipt's answer.
         write_receipt(&path, &Receipt { prs: PrStatus::Ok, ..receipt() }).unwrap();
         assert_eq!(load_receipt(&path, &attempt(NOW)).map(|receipt| receipt.prs), Some(PrStatus::Ok));
+    }
+
+    fn timed(halves: &[Stage]) -> Receipt {
+        Receipt { durations: LaunchReport::from_worker(worker_fixture(halves)), ..receipt() }
+    }
+
+    #[test]
+    fn a_receipt_round_trips_with_and_without_the_workers_durations() {
+        let (dir, _) = temp_store();
+        let path = dir.path().join("abc.refresh-receipt.json");
+
+        let complete = timed(&[Stage::PrRefresh, Stage::HeadRefresh]);
+        assert!(matches!(complete.durations, LaunchReport::Complete(_)), "{complete:?}");
+        write_receipt(&path, &complete).unwrap();
+        assert_eq!(raw_json(&path)["durations"]["format_version"], 1, "its own version, beside the receipt's");
+        assert_eq!(raw_json(&path)["format_version"], RECEIPT_FORMAT_VERSION, "the receipt stays at version 1");
+        assert_eq!(load_receipt(&path, &attempt(NOW)), Some(complete.clone()));
+        // Read, write, and read again: nothing drifts.
+        let reread = load_receipt(&path, &attempt(NOW)).unwrap();
+        write_receipt(&path, &reread).unwrap();
+        assert_eq!(load_receipt(&path, &attempt(NOW)), Some(complete));
+
+        // A half that panicked left no span: partial, still usable.
+        let partial = timed(&[Stage::HeadRefresh]);
+        assert!(matches!(partial.durations, LaunchReport::Partial(_)), "{partial:?}");
+        write_receipt(&path, &partial).unwrap();
+        assert_eq!(load_receipt(&path, &attempt(NOW)), Some(partial));
+
+        // An untimed attempt, and a report with nothing usable, write no member.
+        for durations in [LaunchReport::Missing, LaunchReport::Invalid] {
+            write_receipt(&path, &Receipt { durations, ..receipt() }).unwrap();
+            assert!(raw_json(&path).get("durations").is_none());
+            assert_eq!(load_receipt(&path, &attempt(NOW)), Some(receipt()), "absent is missing");
+        }
+    }
+
+    #[test]
+    fn durations_never_rescue_a_receipt_for_another_attempt_origin_or_branch() {
+        let (dir, _) = temp_store();
+        let path = dir.path().join("abc.refresh-receipt.json");
+        write_receipt(&path, &timed(&[Stage::PrRefresh, Stage::HeadRefresh])).unwrap();
+        let ours = attempt(NOW);
+        assert!(load_receipt(&path, &ours).is_some(), "control");
+
+        for other in [
+            Attempt { id: OTHER_ID.into(), ..ours.clone() },
+            Attempt { origin_digest: "another-digest".into(), ..ours.clone() },
+            Attempt { branch: "trunk".into(), ..ours.clone() },
+            Attempt { started_at: NOW + 31, ..ours.clone() },
+        ] {
+            assert_eq!(load_receipt(&path, &other), None, "{other:?}");
+        }
+    }
+
+    /// The Input Robustness Matrix for the receipt's optional `durations`:
+    /// every load-bearing field of the worker document in every shape, one
+    /// edit per cell from a receipt written with a full report. The outcome
+    /// is the control's in every cell; only the report's state changes, and
+    /// only trailing content (the receipt's own matrix) loses the receipt.
+    #[test]
+    fn the_receipt_durations_walk_the_input_robustness_matrix() {
+        use serde_json::{Value, json};
+        use JsonEdit::*;
+
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        enum Report {
+            Complete,
+            Partial,
+            Missing,
+            Invalid,
+        }
+        let state = |report: &LaunchReport| match report {
+            LaunchReport::Complete(_) => Report::Complete,
+            LaunchReport::Partial(_) => Report::Partial,
+            LaunchReport::Missing => Report::Missing,
+            LaunchReport::Invalid => Report::Invalid,
+        };
+
+        let (dir, _) = temp_store();
+        let path = dir.path().join("abc.refresh-receipt.json");
+        let control = timed(&[Stage::PrRefresh, Stage::HeadRefresh]);
+        write_receipt(&path, &control).unwrap();
+        let written = raw_json(&path);
+        let read = |bytes: &[u8]| {
+            fs::write(&path, bytes).unwrap();
+            load_receipt(&path, &attempt(NOW))
+        };
+        assert_eq!(read(&serde_json::to_vec(&written).unwrap()), Some(control.clone()), "control");
+
+        let set = |pointer: &str, value: Option<Value>| Set(pointer.to_string(), value);
+        // The halves group, and the head check inside the head half.
+        const HALVES: &str = "/durations/spans/1";
+        const CHECK: &str = "/durations/spans/1/children/1/children/0";
+        assert_eq!(written.pointer(&format!("{HALVES}/stage")), Some(&json!("worker_halves")));
+        assert_eq!(written.pointer(&format!("{CHECK}/stage")), Some(&json!("head_check")));
+
+        let mut cells: Vec<(JsonEdit, Report)> = Vec::new();
+        // The member: absent is missing; every other shape is invalid.
+        cells.push((set("/durations", None), Report::Missing));
+        for shape in [Value::Null, json!(1), json!(""), json!([]), json!({}), json!(true)] {
+            cells.push((set("/durations", Some(shape)), Report::Invalid));
+        }
+        cells.push((Dup("/durations".into()), Report::Invalid));
+
+        // Required fields: absent, null, wrong types, a negative or
+        // fractional number, and a repeated key are each invalid.
+        let required = [
+            "/durations/format_version".to_string(),
+            "/durations/total_us".into(),
+            "/durations/spans".into(),
+            "/durations/unattributed_us".into(),
+            "/durations/over_attributed_us".into(),
+            format!("{HALVES}/stage"),
+            format!("{HALVES}/elapsed_us"),
+            format!("{HALVES}/children_kind"),
+            format!("{HALVES}/children"),
+            format!("{HALVES}/unattributed_us"),
+            format!("{HALVES}/over_attributed_us"),
+            format!("{CHECK}/stage"),
+            format!("{CHECK}/elapsed_us"),
+            format!("{CHECK}/children_kind"),
+            format!("{CHECK}/children"),
+        ];
+        for field in &required {
+            let shapes = [None, Some(Value::Null), Some(json!("x")), Some(json!(-1)), Some(json!(1.5)), Some(json!({})), Some(json!(true))];
+            for shape in shapes {
+                cells.push((set(field, shape), Report::Invalid));
+            }
+            if !field.ends_with("/children") {
+                cells.push((set(field, Some(json!([]))), Report::Invalid));
+            }
+            cells.push((Dup(field.clone()), Report::Invalid));
+        }
+
+        // Values of the right type that the decoder still refuses.
+        cells.push((set("/durations/format_version", Some(json!(2))), Report::Invalid));
+        cells.push((set("/durations/format_version", Some(json!("1"))), Report::Invalid));
+        cells.push((set("/durations/total_us", Some(json!(399))), Report::Invalid));
+        cells.push((set(&format!("{CHECK}/stage"), Some(json!(""))), Report::Invalid));
+        cells.push((set(&format!("{CHECK}/stage"), Some(json!("api_request"))), Report::Invalid));
+        cells.push((set(&format!("{HALVES}/children_kind"), Some(json!("parallel"))), Report::Invalid));
+        cells.push((set(&format!("{HALVES}/unattributed_us"), Some(json!(1))), Report::Invalid));
+        cells.push((set(&format!("{HALVES}/stage"), Some(json!("worker_setup"))), Report::Invalid));
+        // Decodes, but without the halves group no worker wrote it.
+        cells.push((set(&format!("{HALVES}/stage"), Some(json!("head_fetch"))), Report::Invalid));
+
+        // `children`: one bad element or every element bad is invalid;
+        // empty, or one half alone, is a partial report.
+        cells.push((set(&format!("{HALVES}/children/0"), Some(json!(1))), Report::Invalid));
+        cells.push((set("/durations/spans", Some(json!([1, 2]))), Report::Invalid));
+        cells.push((set(&format!("{HALVES}/children"), Some(json!([]))), Report::Partial));
+        let head_half = written.pointer(&format!("{HALVES}/children/1")).unwrap().clone();
+        cells.push((set(&format!("{HALVES}/children"), Some(json!([head_half]))), Report::Partial));
+        cells.push((set(&format!("{CHECK}/children"), Some(json!([]))), Report::Complete));
+
+        // `git_calls`: absent is unknown and a count is known; null or any
+        // other type is invalid.
+        cells.push((set(&format!("{HALVES}/git_calls"), Some(json!(3))), Report::Complete));
+        cells.push((set(&format!("{HALVES}/git_calls"), Some(json!(0))), Report::Complete));
+        for shape in [Value::Null, json!("3"), json!(-1), json!(1.5), json!([]), json!({})] {
+            cells.push((set(&format!("{HALVES}/git_calls"), Some(shape)), Report::Invalid));
+        }
+
+        // Unknown fields are ignored at every level.
+        cells.push((set("/durations/extra", Some(json!(1))), Report::Complete));
+        cells.push((set(&format!("{HALVES}/extra"), Some(json!(1))), Report::Complete));
+
+        let outcome = Receipt { durations: LaunchReport::Missing, ..control.clone() };
+        let mut wrong = Vec::new();
+        let mut check = |bytes: Vec<u8>, want: Report| {
+            let got = read(&bytes);
+            let got = got.map(|receipt| (state(&receipt.durations), Receipt { durations: LaunchReport::Missing, ..receipt }));
+            if got != Some((want, outcome.clone())) {
+                wrong.push(format!("{}: {got:?}, expected {want:?} beside the intact outcome", String::from_utf8_lossy(&bytes)));
+            }
+        };
+        let walked = cells.len() + 1;
+        for (edit, want) in cells {
+            check(edit.apply(&written), want);
+        }
+        // A repeated `git_calls` key, once the field is present.
+        let mut counted = written.clone();
+        counted.pointer_mut(HALVES).unwrap().as_object_mut().unwrap().insert("git_calls".into(), json!(3));
+        check(Dup(format!("{HALVES}/git_calls")).apply(&counted), Report::Invalid);
+        assert!(wrong.is_empty(), "{} of {walked} cells read wrong:\n{}", wrong.len(), wrong.join("\n"));
+
+        // Trailing content is the receipt's own matrix: no receipt at all.
+        assert_eq!(read(&Append("garbage").apply(&written)), None);
     }
 }

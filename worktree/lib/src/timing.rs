@@ -577,6 +577,30 @@ impl WorkerTimings {
     pub fn from_json(text: &str) -> Result<Self, TimingsError> {
         decode_worker(strict_value(text.as_bytes())?)
     }
+
+    /// [`WorkerTimings::to_json`] as a value, to embed in a receipt.
+    pub(crate) fn to_value(&self) -> Value {
+        serde_json::to_value(WireWorkerTimings::from(self)).expect("a timings document always serializes")
+    }
+
+    /// [`WorkerTimings::from_json`] for a value already read with no
+    /// repeated key (a receipt's `durations` member).
+    pub(crate) fn from_value(value: Value) -> Result<Self, TimingsError> {
+        decode_worker(value)
+    }
+
+    /// `complete` when both halves were measured, `partial` when one is
+    /// absent (it panicked), and `None` without the halves group, which
+    /// every worker document records.
+    fn status(&self) -> Option<WorkerReportStatus> {
+        let halves = self.span(&[Stage::WorkerHalves])?;
+        let measured = |stage| halves.find(&[stage]).is_some();
+        Some(if measured(Stage::PrRefresh) && measured(Stage::HeadRefresh) {
+            WorkerReportStatus::Complete
+        } else {
+            WorkerReportStatus::Partial
+        })
+    }
 }
 
 /// Whether worker timings are available, for one launch or for the listing.
@@ -587,9 +611,10 @@ pub enum WorkerReportStatus {
     Complete,
     /// Some timings are usable and others are not.
     Partial,
-    /// The receipt carried no timings.
+    /// No timings reached the wait: the receipt carried none, or the wait
+    /// ended before the receipt was written.
     Missing,
-    /// The receipt's timings did not decode.
+    /// The receipt's timings did not decode, or lack the halves group.
     Invalid,
     /// An adopted attempt was followed and no owned report is available.
     Adopted,
@@ -619,21 +644,40 @@ impl WorkerReport {
 
     /// The usable timings, full or partial.
     pub fn timings(&self) -> Option<&WorkerTimings> {
-        match &self.report {
-            LaunchReport::Complete(timings) | LaunchReport::Partial(timings) => Some(timings),
-            LaunchReport::Missing | LaunchReport::Invalid => None,
-        }
+        self.report.timings()
     }
 }
 
 /// What one launch's receipt held.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum LaunchReport {
     Complete(WorkerTimings),
     /// One half's measurements are absent, for example after it panicked.
     Partial(WorkerTimings),
+    #[default]
     Missing,
     Invalid,
+}
+
+impl LaunchReport {
+    /// The report a worker document makes: [`LaunchReport::Complete`] or
+    /// [`LaunchReport::Partial`] by which halves it measured, or
+    /// [`LaunchReport::Invalid`] without the halves group.
+    pub fn from_worker(timings: WorkerTimings) -> Self {
+        match timings.status() {
+            Some(WorkerReportStatus::Complete) => LaunchReport::Complete(timings),
+            Some(_) => LaunchReport::Partial(timings),
+            None => LaunchReport::Invalid,
+        }
+    }
+
+    /// The usable timings, full or partial.
+    pub fn timings(&self) -> Option<&WorkerTimings> {
+        match self {
+            LaunchReport::Complete(timings) | LaunchReport::Partial(timings) => Some(timings),
+            LaunchReport::Missing | LaunchReport::Invalid => None,
+        }
+    }
 }
 
 /// The listing's summary of `reports`, its owned launches in order.
@@ -803,9 +847,7 @@ impl From<&WorkerReport> for WireReport {
             launch_index: report.launch_index,
             attempt_id: report.attempt_id.clone(),
             status: report.status(),
-            report: report
-                .timings()
-                .map(|timings| serde_json::to_value(WireWorkerTimings::from(timings)).expect("a timings document always serializes")),
+            report: report.timings().map(WorkerTimings::to_value),
         }
     }
 }
@@ -877,8 +919,13 @@ fn decode_report(wire: WireReport) -> Result<WorkerReport, TimingsError> {
         return Err(invalid("attempt_id is not an attempt id"));
     }
     let report = match (wire.status, wire.report) {
-        (WorkerReportStatus::Complete, Some(value)) => LaunchReport::Complete(decode_worker(value)?),
-        (WorkerReportStatus::Partial, Some(value)) => LaunchReport::Partial(decode_worker(value)?),
+        (status @ (WorkerReportStatus::Complete | WorkerReportStatus::Partial), Some(value)) => {
+            let timings = decode_worker(value)?;
+            if timings.status() != Some(status) {
+                return Err(invalid("the status does not match the halves the report measured"));
+            }
+            LaunchReport::from_worker(timings)
+        }
         (WorkerReportStatus::Missing, None) => LaunchReport::Missing,
         (WorkerReportStatus::Invalid, None) => LaunchReport::Invalid,
         (WorkerReportStatus::Complete | WorkerReportStatus::Partial, None) => return Err(invalid("a usable status needs a report")),
@@ -907,6 +954,29 @@ fn check_reports(reports: &[WorkerReport], status: Option<WorkerReportStatus>) -
         return Err(TimingsError::InvalidWorkerReports(format!("summary {status:?} does not describe the launches")));
     }
     Ok(())
+}
+
+/// A worker document as a timed worker writes it: setup, then the halves
+/// group holding `halves` (each with one operation inside), all in whole
+/// microseconds so it round-trips exactly.
+#[cfg(test)]
+pub(crate) fn worker_fixture(halves: &[Stage]) -> WorkerTimings {
+    let us = Duration::from_micros;
+    let mut group = SpanList::concurrent();
+    for &half in halves {
+        let inside = match half {
+            Stage::PrRefresh => Stage::PrRequest,
+            Stage::HeadRefresh => Stage::HeadCheck,
+            other => panic!("{other} is not a worker half"),
+        };
+        let mut steps = SpanList::sequential();
+        steps.push(Span::new(inside, us(200)));
+        group.push(Span::new(half, us(300)).with_children(steps));
+    }
+    let mut top = SpanList::sequential();
+    top.push(Span::new(Stage::WorkerSetup, us(40)));
+    top.push(Span::new(Stage::WorkerHalves, us(350)).with_children(group));
+    WorkerTimings::new(us(400), top)
 }
 
 #[cfg(test)]

@@ -127,6 +127,15 @@ fn scripted_launch(main: &Path, args: &LaunchArgs) -> std::io::Result<WorkerHand
         finished_at: unix_now(),
         head: HeadStatus::Ok,
         prs: PrStatus::Unsupported,
+        // As the real worker: only an attempt asked for timings measures itself.
+        durations: if args.timings {
+            crate::timing::LaunchReport::from_worker(crate::timing::worker_fixture(&[
+                crate::timing::Stage::PrRefresh,
+                crate::timing::Stage::HeadRefresh,
+            ]))
+        } else {
+            crate::timing::LaunchReport::Missing
+        },
     };
     write_receipt(&receipt_path_beside(&head_store, &args.attempt).expect("path"), &receipt).expect("receipt");
     Ok(WorkerHandle::new(|| true))

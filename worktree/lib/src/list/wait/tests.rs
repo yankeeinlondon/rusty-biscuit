@@ -65,7 +65,7 @@ fn launches() -> Vec<LaunchArgs> {
 }
 
 fn launched(id: &str) -> LaunchArgs {
-    LaunchArgs { attempt: id.into() }
+    LaunchArgs { attempt: id.into(), timings: false }
 }
 
 type Script<T> = Box<dyn Fn(Duration) -> T>;
@@ -239,6 +239,7 @@ fn receipt(id: &str, head: HeadStatus, prs: PrStatus) -> Receipt {
         finished_at: STARTED + 1,
         head,
         prs,
+        durations: LaunchReport::Missing,
     }
 }
 
@@ -248,11 +249,11 @@ fn receipt_at(at: Duration, prs: PrStatus) -> impl Fn(Duration, &Attempt) -> Opt
 }
 
 fn ended(head: HeadEnd, prs: PrEnd) -> WaitEnd {
-    WaitEnd { head, prs, pr_credentials: CredentialEvidence::Unknown, timed_out: false }
+    WaitEnd { head, prs, pr_credentials: CredentialEvidence::Unknown, timed_out: false, worker_reports: Vec::new() }
 }
 
 fn timed_out(head: HeadEnd, prs: PrEnd) -> WaitEnd {
-    WaitEnd { head, prs, pr_credentials: CredentialEvidence::Unknown, timed_out: true }
+    WaitEnd { head, prs, pr_credentials: CredentialEvidence::Unknown, timed_out: true, worker_reports: Vec::new() }
 }
 
 fn other() -> PrEnd {
@@ -266,6 +267,7 @@ fn request(force: bool) -> WaitRequest<'static> {
         branch: BRANCH,
         force,
         budget: if force { FORCED_BUDGET } else { ORDINARY_BUDGET },
+        timings: false,
     }
 }
 
@@ -1451,6 +1453,7 @@ mod receipt_files {
             finished_at: unix_now(),
             head: HeadStatus::Ok,
             prs: PrStatus::Failed { failure: PrFailure::CredentialsRejected { key: None } },
+            durations: LaunchReport::Missing,
         };
         let spoil = SPOIL.with(|spoil| spoil.borrow().clone());
         if let Some(spoil) = spoil {
@@ -1470,7 +1473,7 @@ mod receipt_files {
         HEAD.with(|stored| *stored.borrow_mut() = Some(head.clone()));
         SPOIL.with(|stored| *stored.borrow_mut() = spoil);
         let digest = origin_digest(ORIGIN);
-        let request = WaitRequest { main: Path::new("/repo"), origin_digest: &digest, branch: BRANCH, force: false, budget: ORDINARY_BUDGET };
+        let request = WaitRequest { main: Path::new("/repo"), origin_digest: &digest, branch: BRANCH, force: false, budget: ORDINARY_BUDGET, timings: false };
         let env = StoreEnv::new(head, dir.path().join("abc.prs.json"), ORIGIN.into());
         let end = wait(request, &env, worker, &mut |_| {});
         let left = std::fs::read_dir(dir.path())
@@ -1733,11 +1736,12 @@ mod overlapping_runs {
             finished_at: unix_now(),
             head,
             prs,
+            durations: LaunchReport::Missing,
         }
     }
 
     fn forced(digest: &str) -> WaitRequest<'_> {
-        WaitRequest { main: Path::new("/repo"), origin_digest: digest, branch: BRANCH, force: true, budget: FORCED_BUDGET }
+        WaitRequest { main: Path::new("/repo"), origin_digest: digest, branch: BRANCH, force: true, budget: FORCED_BUDGET, timings: false }
     }
 
     /// Run A's worker: checks in sync, fails its PR half, writes its receipt;
@@ -1957,7 +1961,7 @@ mod late_receipt {
         let prs = dir.join("abc.prs.json");
         STORES.with(|stores| *stores.borrow_mut() = Some((head.clone(), prs.clone())));
         let digest = origin_digest(stored_prs::ORIGIN);
-        let request = WaitRequest { main: Path::new("/repo"), origin_digest: &digest, branch: BRANCH, force: false, budget: ORDINARY_BUDGET };
+        let request = WaitRequest { main: Path::new("/repo"), origin_digest: &digest, branch: BRANCH, force: false, budget: ORDINARY_BUDGET, timings: false };
         let env = StoreEnv::new(head.clone(), prs, stored_prs::ORIGIN.into());
         (wait(request, &env, worker, &mut |_| {}), head)
     }
@@ -1989,6 +1993,7 @@ fn a_receipt_written_after_an_early_success_is_left_for_the_stale_sweep() {
         finished_at: unix_now(),
         head: HeadStatus::Ok,
         prs: PrStatus::Ok,
+        durations: LaunchReport::Missing,
     };
     write_receipt(&path, &late).expect("receipt");
     assert_eq!(load_receipt(&path, followed), Some(late), "a complete receipt, left behind");
@@ -2017,3 +2022,5 @@ fn a_launched_process_reports_its_exit() {
     assert!(handle.has_exited(), "exit stays reported");
 }
 
+
+mod reports;
