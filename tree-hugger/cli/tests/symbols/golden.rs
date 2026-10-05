@@ -1,5 +1,8 @@
 //! `hug symbols` output goldens over the 16-language `multi/` fixture tree,
-//! and the byte identity of `--json` across thread counts and cache states.
+//! one per output format and view (`--plain` and `--format plain`, `--json`,
+//! `--jsonl`, `--format table`, `--tree`, `--stats`, `--stats --json`,
+//! `--signatures full`), and the byte identity of `--json` across thread
+//! counts and cache states.
 //!
 //! The plain golden was first captured from the binary before the
 //! record-native renderer and regenerated once for the renderer's deliberate
@@ -47,20 +50,33 @@ fn normalized(text: &str, root: &Path) -> String {
     redact_snapshot_text(&strip_ansi_codes(text), root)
 }
 
-#[test]
-fn plain_symbols_over_multi_match_the_golden() {
+const SYMBOLS_TABLE_GOLDEN: &str = include_str!("../fixtures/golden/symbols.table");
+const SYMBOLS_TREE_GOLDEN: &str = include_str!("../fixtures/golden/symbols.tree");
+const SYMBOLS_SIGNATURES_FULL_GOLDEN: &str = include_str!("../fixtures/golden/symbols-signatures-full.plain");
+const SYMBOLS_STATS_GOLDEN: &str = include_str!("../fixtures/golden/symbols.stats");
+const SYMBOLS_STATS_JSON_GOLDEN: &str = include_str!("../fixtures/golden/symbols-stats.json");
+const SYMBOLS_JSONL_GOLDEN: &str = include_str!("../fixtures/golden/symbols.jsonl");
+
+/// Compares `hug args` over multi/ with the text golden `file` (holding
+/// `golden`), after [`normalized`]; `HUG_UPDATE_GOLDEN` rewrites the file.
+fn assert_text_golden(args: &[&str], file: &str, golden: &str) {
     let scratch = Scratch::new(MULTI_FIXTURES);
-    let actual = scratch.stdout(&["--plain", "symbols", "--no-cache"]);
+    let actual = scratch.stdout(args);
 
     if std::env::var_os("HUG_UPDATE_GOLDEN").is_some() {
-        std::fs::write(manifest_dir!().join("tests/fixtures/golden/symbols.plain"), &actual)
-            .expect("write symbols.plain golden");
+        std::fs::write(manifest_dir!().join("tests/fixtures/golden").join(file), &actual)
+            .unwrap_or_else(|error| panic!("write {file} golden: {error}"));
         return;
     }
 
     let root = scratch.repo.path();
     let actual = normalized(&actual, root);
-    let expected = normalized(SYMBOLS_PLAIN_GOLDEN, root);
+    let expected = normalized(golden, root);
+    assert_same(&actual, &expected, &format!("`hug {}`", args.join(" ")), file);
+}
+
+/// Fails with the first differing line of `actual` against the golden `file`.
+fn assert_same(actual: &str, expected: &str, what: &str, file: &str) {
     if actual != expected {
         let first_difference = actual
             .lines()
@@ -68,13 +84,107 @@ fn plain_symbols_over_multi_match_the_golden() {
             .position(|(actual_line, expected_line)| actual_line != expected_line)
             .unwrap_or_else(|| actual.lines().count().min(expected.lines().count()));
         panic!(
-            "`hug --plain symbols` over multi/ differs from tests/fixtures/golden/symbols.plain \
-             at line {}:\n  expected: {:?}\n  actual:   {:?}\n\nfull output:\n{actual}",
+            "{what} over multi/ differs from tests/fixtures/golden/{file} at line {}:\n  \
+             expected: {:?}\n  actual:   {:?}\n\nfull output:\n{actual}",
             first_difference + 1,
             expected.lines().nth(first_difference),
             actual.lines().nth(first_difference),
         );
     }
+}
+
+#[test]
+fn plain_symbols_over_multi_match_the_golden() {
+    assert_text_golden(&["--plain", "symbols", "--no-cache"], "symbols.plain", SYMBOLS_PLAIN_GOLDEN);
+}
+
+/// `--format plain` is the default layout without styles, links or
+/// wrapping: the same text as `--plain`, so it shares that golden.
+#[test]
+fn format_plain_symbols_over_multi_match_the_plain_golden() {
+    let scratch = Scratch::new(MULTI_FIXTURES);
+    let root = scratch.repo.path();
+    let actual = normalized(&scratch.stdout(&["symbols", "--format", "plain", "--no-cache"]), root);
+    let expected = normalized(SYMBOLS_PLAIN_GOLDEN, root);
+    assert_same(&actual, &expected, "`hug symbols --format plain`", "symbols.plain");
+}
+
+#[test]
+fn table_symbols_over_multi_match_the_golden() {
+    assert_text_golden(&["symbols", "--format", "table", "--no-cache"], "symbols.table", SYMBOLS_TABLE_GOLDEN);
+}
+
+#[test]
+fn tree_symbols_over_multi_match_the_golden() {
+    assert_text_golden(&["--plain", "symbols", "--tree", "--no-cache"], "symbols.tree", SYMBOLS_TREE_GOLDEN);
+}
+
+#[test]
+fn full_signature_symbols_over_multi_match_the_golden() {
+    assert_text_golden(
+        &["--plain", "symbols", "--signatures", "full", "--no-cache"],
+        "symbols-signatures-full.plain",
+        SYMBOLS_SIGNATURES_FULL_GOLDEN,
+    );
+}
+
+#[test]
+fn stats_symbols_over_multi_match_the_golden() {
+    assert_text_golden(&["symbols", "--stats", "--no-cache"], "symbols.stats", SYMBOLS_STATS_GOLDEN);
+}
+
+#[test]
+fn stats_json_symbols_over_multi_match_the_golden() {
+    let scratch = Scratch::new(MULTI_FIXTURES);
+    let actual = normalized_json(&scratch.stdout(&["--json", "symbols", "--stats", "--no-cache"]));
+    if std::env::var_os("HUG_UPDATE_GOLDEN").is_some() {
+        std::fs::write(manifest_dir!().join("tests/fixtures/golden/symbols-stats.json"), &actual)
+            .expect("write symbols-stats.json golden");
+        return;
+    }
+    let expected = SYMBOLS_STATS_JSON_GOLDEN.replace("\r\n", "\n");
+    assert_same(&actual, &expected, "`hug --json symbols --stats`", "symbols-stats.json");
+}
+
+/// The JSON Lines golden holds each line canonicalized like the JSON golden
+/// (sorted keys, numbered IDs shared across lines), one blank line apart.
+#[test]
+fn jsonl_symbols_over_multi_match_the_golden() {
+    let scratch = Scratch::new(MULTI_FIXTURES);
+    let stdout = scratch.stdout(&["symbols", "--jsonl", "--no-cache"]);
+    let mut ids = HashMap::new();
+    let mut actual = String::new();
+    for line in stdout.lines() {
+        let value: Value = serde_json::from_str(line).unwrap_or_else(|error| panic!("invalid line ({error}): {line}"));
+        canonical(&value, 0, &mut ids, &mut actual);
+        actual.push_str("\n\n");
+    }
+    if std::env::var_os("HUG_UPDATE_GOLDEN").is_some() {
+        std::fs::write(manifest_dir!().join("tests/fixtures/golden/symbols.jsonl"), &actual)
+            .expect("write symbols.jsonl golden");
+        return;
+    }
+    let expected = SYMBOLS_JSONL_GOLDEN.replace("\r\n", "\n");
+    assert_same(&actual, &expected, "`hug symbols --jsonl`", "symbols.jsonl");
+}
+
+/// `--count` is one decimal integer line: the number of records `--json`
+/// reports, and as many as `--jsonl` writes lines.
+#[test]
+fn count_symbols_over_multi_is_one_integer_line() {
+    let scratch = Scratch::new(MULTI_FIXTURES);
+    let count = scratch.stdout(&["symbols", "--count", "--no-cache"]);
+    let report = json_of(&scratch.stdout(&["--json", "symbols", "--no-cache"]));
+    let records: usize = report["files"]
+        .as_array()
+        .expect("files")
+        .iter()
+        .map(|file| file["symbols"].as_array().expect("symbols").len())
+        .sum();
+    assert!(records > 50, "multi/ declares dozens of symbols: {records}");
+    assert_eq!(count, format!("{records}\n"), "one integer and a newline");
+    let lines = scratch.stdout(&["symbols", "--jsonl", "--no-cache"]).lines().count();
+    assert_eq!(lines, records);
 }
 
 /// Records carry no wall-clock data, so two uncached runs over the same tree
@@ -187,6 +297,7 @@ fn assert_identical_with_one_thread(args: &[&str]) {
 fn json_symbols_over_multi_are_identical_with_one_thread() {
     assert_identical_with_one_thread(&["--json", "symbols", "--no-cache"]);
     assert_identical_with_one_thread(&["--json", "classes", "--no-cache", "--sort", "name"]);
+    assert_identical_with_one_thread(&["symbols", "--jsonl", "--no-cache", "--sort", "kind"]);
 }
 
 #[test]

@@ -1,5 +1,5 @@
-//! The versioned JSON report of the declaration commands (`--json`,
-//! `--json-full`).
+//! The versioned JSON reports of the declaration commands (`--json`,
+//! `--json-full`, and the `--jsonl` line envelope).
 //!
 //! The envelope is written piece by piece so file entries stream as their
 //! files finish, and it always ends with the `errors` array: a report whose
@@ -58,6 +58,31 @@ pub(crate) struct FileEntry<'a> {
     pub(crate) members: Option<&'a BTreeMap<String, Vec<SymbolRecord>>>,
 }
 
+/// One `--jsonl` line: a selected record with its file's context, so a
+/// saved or piped line is usable alone. `report_schema_version` and
+/// `schema_version` mean what they mean in the `--json` envelope.
+#[derive(Debug, Serialize)]
+pub(crate) struct JsonLine<'a> {
+    pub(crate) report_schema_version: u32,
+    pub(crate) schema_version: SchemaVersion,
+    pub(crate) file: &'a str,
+    pub(crate) language: ProgrammingLanguage,
+    pub(crate) completed_passes: &'a [AnalysisPass],
+    pub(crate) completed_capabilities: &'a [Capability],
+    pub(crate) record: &'a SymbolRecord,
+    /// `classes` only: the container's displayed methods and constructors.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) members: Option<&'a [SymbolRecord]>,
+}
+
+impl JsonLine<'_> {
+    /// Writes the line and its newline.
+    pub(crate) fn write(&self, out: &mut dyn Write) -> io::Result<()> {
+        serde_json::to_writer(&mut *out, self)?;
+        out.write_all(b"\n")
+    }
+}
+
 /// A file that could not be analyzed.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct ReportError {
@@ -95,8 +120,9 @@ pub(crate) fn error_kind(error: &TreeHuggerError) -> &'static str {
     }
 }
 
-/// Prepares a record for a default `--json` report: its paths made portable
-/// and scan-root-relative, and the blobs no default report requests dropped:
+/// Prepares a selected record for `--json`, `--jsonl` or `--format table`:
+/// its paths made portable and scan-root-relative, and the blobs none of
+/// them requests dropped:
 /// source text (`declaration_text`, body and source text) and the attached
 /// comments of the docs pass (the raw doc comment stays).
 pub(crate) fn trim_record(record: &mut SymbolRecord, root: &Path) {

@@ -29,18 +29,21 @@ mod classes;
 mod declarations;
 mod import_format;
 mod order;
+mod output;
 mod prelude;
 mod render;
 mod report;
 mod scan;
 mod scanner;
 mod selection;
+mod stats;
 
 use classes::{ClassSelection, MemberFilter};
 use declarations::{DeclarationScan, Declarations, ReportFormat};
 use import_format::*;
 use order::SortOrder;
-use render::{ListingOptions, color_tag_for_kind};
+use output::{GivenOutput, OutputMode, ReportArgs, SignatureMode, StatsOutput};
+use render::{ListingOptions, RenderOptions, color_tag_for_kind};
 use scan::{Analyzer, CacheStats, in_file_order};
 use scanner::*;
 use selection::{ImportSelection, Selection, SelectionArgs, TargetArgs, resolve_file_selectors};
@@ -122,12 +125,12 @@ struct ScanOptions {
 /// Declaration order, accepted only by the declaration commands.
 #[derive(clap::Args, Debug, Clone)]
 struct SortArgs {
-    /// Order of the listed declarations: `file` (by file, then source
-    /// position), `name` (case-sensitive) or `kind`. Ties fall back to file,
-    /// position, kind and ID. JSON keeps one entry per file, in path order,
-    /// and sorts the records within each.
-    #[arg(long, value_enum, value_name = "ORDER", default_value_t = SortOrder::File)]
-    sort: SortOrder,
+    /// Order of the listed declarations: `file` (the default: by file, then
+    /// source position), `name` (case-sensitive) or `kind`. Ties fall back
+    /// to file, position, kind and ID. JSON, JSON Lines, tables and
+    /// outlines keep files in path order and sort within each
+    #[arg(long, value_enum, value_name = "ORDER")]
+    sort: Option<SortOrder>,
 }
 
 /// Arguments of `functions`, `types` and `symbols`.
@@ -138,6 +141,9 @@ struct DeclarationArgs {
 
     #[clap(flatten)]
     order: SortArgs,
+
+    #[clap(flatten)]
+    report: ReportArgs,
 }
 
 impl Cli {
@@ -260,6 +266,9 @@ struct ClassArgs {
 
     #[clap(flatten)]
     order: SortArgs,
+
+    #[clap(flatten)]
+    report: ReportArgs,
 }
 
 /// Arguments for the lint command
@@ -422,11 +431,20 @@ impl Command {
         }
     }
 
-    /// Returns `--sort` of a declaration command.
+    /// Returns `--sort` of a declaration command, when given.
     fn sort(&self) -> Option<SortOrder> {
         match self {
-            Self::Functions(args) | Self::Types(args) | Self::Symbols(args) => Some(args.order.sort),
-            Self::Classes(args) => Some(args.order.sort),
+            Self::Functions(args) | Self::Types(args) | Self::Symbols(args) => args.order.sort,
+            Self::Classes(args) => args.order.sort,
+            Self::Imports(_) | Self::Lint(_) | Self::Completions(_) | Self::GodFiles(_) => None,
+        }
+    }
+
+    /// The report flags of a declaration command.
+    fn report_args(&self) -> Option<&ReportArgs> {
+        match self {
+            Self::Functions(args) | Self::Types(args) | Self::Symbols(args) => Some(&args.report),
+            Self::Classes(args) => Some(&args.report),
             Self::Imports(_) | Self::Lint(_) | Self::Completions(_) | Self::GodFiles(_) => None,
         }
     }
@@ -632,6 +650,21 @@ impl OutputConfig {
     }
 }
 
+/// The width terminal output wraps at, or `None` when stdout is not an
+/// interactive terminal (redirected output never wraps). A positive
+/// `COLUMNS` overrides the detected width, which lets callers and tests fix
+/// the layout; forced color (`CLICOLOR_FORCE`) counts as interactive.
+fn wrap_width() -> Option<u32> {
+    if !(std::io::stdout().is_terminal() || color_forced()) {
+        return None;
+    }
+    let columns = std::env::var("COLUMNS")
+        .ok()
+        .and_then(|value| value.trim().parse::<u32>().ok())
+        .filter(|columns| *columns > 0);
+    Some(columns.unwrap_or_else(biscuit_terminal::discovery::detection::terminal_width))
+}
+
 /// Creates an OSC8 hyperlink for a file path with line number.
 ///
 /// Falls back to undecorated `text` when `path` has no `file://` spelling, so a
@@ -775,6 +808,22 @@ fn main() -> Result<(), TreeHuggerError> {
         return Ok(());
     }
 
+    // Exactly one output mode, checked before any file is read.
+    let output_mode = cli.command.report_args().map(|report| {
+        let given = GivenOutput::new(
+            cli.json,
+            cli.json_full,
+            report,
+            cli.command.sort().is_some(),
+            matches!(cli.command, Command::Classes(_)),
+        );
+        output::resolve(given).unwrap_or_else(|message| {
+            Cli::command()
+                .error(clap::error::ErrorKind::ArgumentConflict, message)
+                .exit()
+        })
+    });
+
     let command_kind = cli.command.kind().expect("completions already handled");
     let analysis_options = AnalysisOptions::from_command(&command_kind);
 
@@ -836,15 +885,34 @@ fn main() -> Result<(), TreeHuggerError> {
         .as_ref()
         .and_then(|selection| declarations_command(&command_kind, selection))
     {
-        let format = if cli.json_full {
-            ReportFormat::JsonFull
-        } else if matches!(output_format, OutputFormat::Json) {
-            ReportFormat::Json
-        } else {
-            ReportFormat::Terminal {
-                styled: output_config.use_colors,
+        // `--plain` and `--format plain` drop styles, links and wrapping;
+        // otherwise interactive output wraps at the terminal width.
+        let render = |plain_format: bool, signatures: SignatureMode| {
+            let plain = plain_format || cli.plain;
+            RenderOptions {
+                styled: !plain && output_config.use_colors,
                 show_comments: scan.comments,
+                width: (!plain).then(wrap_width).flatten(),
+                signatures,
             }
+        };
+        let format = match output_mode.expect("declaration commands carry report flags") {
+            OutputMode::Json => ReportFormat::Json,
+            OutputMode::JsonFull => ReportFormat::JsonFull,
+            OutputMode::JsonLines => ReportFormat::JsonLines,
+            OutputMode::Count => ReportFormat::Count,
+            OutputMode::Stats(StatsOutput::Json) => ReportFormat::Stats(None),
+            OutputMode::Stats(StatsOutput::Terminal { plain }) => {
+                ReportFormat::Stats(Some(render(plain, SignatureMode::default())))
+            }
+            OutputMode::Terminal {
+                view,
+                signatures,
+                plain,
+            } => ReportFormat::Terminal {
+                render: render(plain, signatures),
+                view,
+            },
         };
         let status = declarations::run(
             DeclarationScan {

@@ -136,6 +136,11 @@ impl Report {
         self.rows.iter().map(|row| format!("{}\n", row.plain)).collect()
     }
 
+    /// Each captured row's text, escapes stripped, untrimmed.
+    pub fn lines(&self) -> Vec<&str> {
+        self.rows.iter().map(|row| row.plain.as_str()).collect()
+    }
+
     /// The report's escaped text, one captured row per line.
     pub fn raw(&self) -> String {
         self.rows.iter().map(|row| format!("{}\n", row.raw)).collect()

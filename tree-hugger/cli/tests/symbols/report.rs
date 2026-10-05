@@ -387,7 +387,11 @@ fn a_failed_file_outside_the_root_is_reported_relative_to_it() {
 #[test]
 fn a_closed_stdout_ends_the_run_quietly() {
     let scratch = Scratch::new(MULTI_FIXTURES);
-    for args in [&["--json-full", "symbols", "--no-cache"][..], &["--plain", "symbols", "--no-cache"]] {
+    for args in [
+        &["--json-full", "symbols", "--no-cache"][..],
+        &["--plain", "symbols", "--no-cache"],
+        &["symbols", "--jsonl", "--no-cache"],
+    ] {
         let mut child = scratch
             .process(args)
             .stdin(Stdio::null())
@@ -508,6 +512,17 @@ fn a_failing_stdout_stops_every_streamed_layout_within_two_chunks() {
     let flat = python_copies(1, &[]);
     for command in ["functions", "types", "symbols", "classes"] {
         let args = ["--plain", command, "--no-cache", "--verbose"];
+        assert_stopped_early(&args, &hug_into_closed_pipe(&flat, &args), CHUNK);
+    }
+    // JSON Lines, tables and outlines are written per file as well.
+    for layout in [
+        &["symbols", "--jsonl"][..],
+        &["classes", "--jsonl"],
+        &["--plain", "symbols", "--format", "table"],
+        &["--plain", "symbols", "--tree"],
+    ] {
+        let mut args = layout.to_vec();
+        args.extend(["--no-cache", "--verbose"]);
         assert_stopped_early(&args, &hug_into_closed_pipe(&flat, &args), CHUNK);
     }
 

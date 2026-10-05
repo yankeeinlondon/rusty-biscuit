@@ -201,8 +201,10 @@ fn pretty_symbols_use_the_same_labels_as_plain() {
     for file in ["typescript.ts", "rust.rs"] {
         let plain = scratch.stdout(&["--plain", "symbols", file]);
         let pretty_args = ["symbols", file];
+        // Forced color counts as interactive output, which wraps; a wide
+        // `COLUMNS` keeps every line whole so the text compares with plain.
         let pretty = stdout_of(
-            scratch.hug_with_env(&pretty_args, &[("CLICOLOR_FORCE", "1")]),
+            scratch.hug_with_env(&pretty_args, &[("CLICOLOR_FORCE", "1"), ("COLUMNS", "10000")]),
             &pretty_args,
         );
         assert!(

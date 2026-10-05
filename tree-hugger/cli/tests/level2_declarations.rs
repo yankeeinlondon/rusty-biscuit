@@ -17,6 +17,10 @@
 //! Python declaration far wider than any pane) and `widgets` (a `package.json`
 //! package), so listings that span the tree split into package sections.
 //!
+//! `hug` wraps interactive output at the pane's width, so the layout and
+//! styling checks pin a wide `COLUMNS`; `check_wrapping` and `check_table`
+//! check `hug`'s own wrapping at the pane width and at an injected one.
+//!
 //! Skip-clean: when no terminal harness is available each test prints a skip
 //! notice and passes.
 
@@ -113,19 +117,21 @@ fn shell_word(path: &Path) -> String {
 /// Runs `hug <args>` from the fixture repository and returns only the rows
 /// it printed (see [`terminal_report`]).
 ///
-/// `CLICOLOR_FORCE` and `NO_COLOR` are removed, so styling comes from `hug`
-/// detecting the pane's TTY. The subshell leaves the shared pane's directory
-/// alone.
+/// `CLICOLOR_FORCE`, `NO_COLOR` and `COLUMNS` are removed, so styling and
+/// the wrap width come from `hug` detecting the pane's TTY; `env` (shell
+/// assignments such as `COLUMNS=64`) is set after that. The subshell leaves
+/// the shared pane's directory alone.
 fn run_hug<H: TerminalHarness>(
     harness: &mut H,
     pane: &Pane<H>,
     fixture: &Fixture,
+    env: &str,
     args: &str,
 ) -> Report {
     let config = fixture.home.path().join(".config");
     let command = format!(
-        "(cd {repo} && env -u CLICOLOR_FORCE -u NO_COLOR HOME={home} XDG_CONFIG_HOME={config} \
-         TMPDIR={temp} TMP={temp} TEMP={temp} RAYON_NUM_THREADS=2 {hug} {args})",
+        "(cd {repo} && env -u CLICOLOR_FORCE -u NO_COLOR -u COLUMNS HOME={home} XDG_CONFIG_HOME={config} \
+         TMPDIR={temp} TMP={temp} TEMP={temp} RAYON_NUM_THREADS=2 {env} {hug} {args})",
         repo = shell_word(fixture.repo.path()),
         home = shell_word(fixture.home.path()),
         config = shell_word(&config),
@@ -139,6 +145,8 @@ fn run_hug<H: TerminalHarness>(
 struct Pane<H> {
     /// The capture keeps OSC 8 hyperlinks.
     osc8: bool,
+    /// The pane width in columns.
+    cols: fn(&mut H) -> usize,
     /// The pane width when the capture splits soft-wrapped rows, so the long
     /// row can be rejoined; `None` when the capture returns them whole.
     wrap_cols: fn(&mut H) -> Option<usize>,
@@ -146,14 +154,19 @@ struct Pane<H> {
     capture: fn(&mut H) -> String,
 }
 
+/// A width past every row, so `hug` wraps nothing and the styling checks
+/// see whole rows; wrapping has its own checks.
+const UNWRAPPED: &str = "COLUMNS=10000";
+
 /// Runs the four declaration commands on one pane and checks their layout and
-/// styling, each against only the rows that command printed.
+/// styling, each against only the rows that command printed, then `hug`'s
+/// own wrapping and the table layout.
 fn check_declarations<H: TerminalHarness>(harness: &mut H, pane: &Pane<H>) {
     let fixture = Fixture::new();
 
     // functions: package sections in path order, compact signatures with
     // container suffixes, `path:line:col` locations.
-    let report = run_hug(harness, pane, &fixture, "functions");
+    let report = run_hug(harness, pane, &fixture, UNWRAPPED, "functions");
     const CREATE: &str =
         "- public method create(size: number): Shape [in class Shape] geometry.ts:14:3";
     report.assert_rows_in_order(&[
@@ -165,8 +178,8 @@ fn check_declarations<H: TerminalHarness>(harness: &mut H, pane: &Pane<H>) {
         "widgets",
         "- public function renderWidget(name) widgets/index.js:4:8",
     ]);
-    // The long declaration is one logical row: `hug` pins its width far past
-    // the pane, so only the terminal soft-wraps it.
+    // The long declaration is one logical row: `COLUMNS` is far past the
+    // pane, so only the terminal soft-wraps it.
     let long_row = format!("- {LONG_DECLARATION}");
     let unwrapped = match (pane.wrap_cols)(harness) {
         Some(cols) => report.has_logical_row(&long_row, cols),
@@ -205,7 +218,7 @@ fn check_declarations<H: TerminalHarness>(harness: &mut H, pane: &Pane<H>) {
     // types: only the root package declares any, but the scan spans three,
     // so the others are sections of their own; the declaring keyword is the
     // label.
-    let report = run_hug(harness, pane, &fixture, "types");
+    let report = run_hug(harness, pane, &fixture, UNWRAPPED, "types");
     const SIZED: &str = "- public interface Sized { size: number } geometry.ts:4:8";
     report.assert_rows_in_order(&[
         SIZED,
@@ -231,6 +244,7 @@ fn check_declarations<H: TerminalHarness>(harness: &mut H, pane: &Pane<H>) {
         harness,
         pane,
         &fixture,
+        UNWRAPPED,
         "symbols --all-scopes --group-by-file 'tools/*.py' 'widgets/*.js'",
     );
     const REGIONAL: &str = "- parameter regional_breakdown [5:44]";
@@ -256,7 +270,7 @@ fn check_declarations<H: TerminalHarness>(harness: &mut H, pane: &Pane<H>) {
 
     // functions --group-by-module: a package heading, then its directory
     // heading; the scan root's directory is `(root)`.
-    let report = run_hug(harness, pane, &fixture, "functions --group-by-module");
+    let report = run_hug(harness, pane, &fixture, UNWRAPPED, "functions --group-by-module");
     report.assert_rows_in_order(&[
         "(root)",
         CREATE,
@@ -271,7 +285,7 @@ fn check_declarations<H: TerminalHarness>(harness: &mut H, pane: &Pane<H>) {
 
     // classes: the file header, each container, then its static and instance
     // method and field sections.
-    let report = run_hug(harness, pane, &fixture, "classes geometry.ts");
+    let report = run_hug(harness, pane, &fixture, UNWRAPPED, "classes geometry.ts");
     const HEADER: &str = "geometry.ts (TypeScript)";
     const SHAPE: &str = "class Shape [10:8]";
     const CREATE_MEMBER: &str = "- public create(size: number): Shape [in class Shape] [14:3]";
@@ -319,6 +333,129 @@ fn check_declarations<H: TerminalHarness>(harness: &mut H, pane: &Pane<H>) {
     }
 }
 
+/// `hug` wraps interactive listings itself, with the list's hanging indent:
+/// at the pane's own width, and at an injected narrower `COLUMNS`.
+fn check_wrapping<H: TerminalHarness>(harness: &mut H, pane: &Pane<H>) {
+    let fixture = Fixture::new();
+    let cols = (pane.cols)(harness);
+    let item = format!("- {LONG_DECLARATION}");
+    // A token longer than the space left is hyphenated where it breaks, so
+    // the comparison drops whitespace and hyphens on both sides.
+    let squeezed = |text: &str| -> String {
+        text.chars().filter(|character| !character.is_whitespace() && *character != '-').collect()
+    };
+
+    // The pane's width: no row is wider than the pane, so the terminal never
+    // soft-wraps, and the rows hold exactly the declaration's text.
+    let report = run_hug(harness, pane, &fixture, "", "functions 'tools/*.py'");
+    let lines = report.lines();
+    for line in &lines {
+        assert!(
+            line.chars().count() <= cols,
+            "a row is wider than the {cols}-column pane: {line:?}\nreport:\n{}",
+            report.plain(),
+        );
+    }
+    assert_eq!(squeezed(&lines.concat()), squeezed(&item), "report:\n{}", report.plain());
+
+    // An injected width narrower than any pane: the declaration is broken
+    // into several rows, each continuation under the item's text, and the
+    // location keeps its dim style on the row it lands on.
+    let report = run_hug(harness, pane, &fixture, "COLUMNS=60", "functions 'tools/*.py'");
+    let lines: Vec<&str> = report.lines().into_iter().filter(|line| !line.trim().is_empty()).collect();
+    assert!(lines.len() >= 3, "expected the declaration on several rows.\nreport:\n{}", report.plain());
+    assert!(
+        lines[0].trim_start().starts_with("- function"),
+        "the item starts the report.\nreport:\n{}",
+        report.plain(),
+    );
+    for line in &lines {
+        assert!(line.chars().count() <= 60, "a row is wider than COLUMNS=60: {line:?}");
+    }
+    for line in &lines[1..] {
+        assert!(
+            line.starts_with("    ") && !line.trim_start().starts_with("- "),
+            "a continuation row must hang under the item's text: {line:?}\nreport:\n{}",
+            report.plain(),
+        );
+    }
+    assert_eq!(squeezed(&lines.concat()), squeezed(&item), "report:\n{}", report.plain());
+    let last = lines.last().expect("rows").trim();
+    assert!(last.ends_with("tools/long.py:5:1"), "the location ends the item: {last:?}");
+    let location_row = report.lines().into_iter().find(|line| line.contains("tools/long.py:5:1")).expect("location row");
+    let location_style = report.style_in_row(location_row.trim(), "tools/long.py:5:1");
+    assert!(
+        location_style.as_ref().is_some_and(|style| style.iter().any(|p| p == "2")),
+        "expected a dim location on its wrapped row; found {location_style:?}",
+    );
+}
+
+/// `--format table`: a bordered biscuit-terminal table with the Location,
+/// Kind, Visibility, Name and Signature columns, whose Signature column wraps
+/// inside its cell at a narrow width.
+fn check_table<H: TerminalHarness>(harness: &mut H, pane: &Pane<H>) {
+    let fixture = Fixture::new();
+    let cells = |line: &str| -> Vec<String> {
+        line.trim()
+            .trim_matches('│')
+            .split('│')
+            .map(|cell| cell.trim().to_string())
+            .collect()
+    };
+
+    let report = run_hug(harness, pane, &fixture, UNWRAPPED, "functions --format table geometry.ts");
+    let lines = report.lines();
+    let header = lines.iter().find(|line| line.contains("Location")).expect("header row");
+    assert_eq!(cells(header), ["Location", "Kind", "Visibility", "Name", "Signature"]);
+    let create = lines.iter().find(|line| line.contains("create")).expect("create row");
+    assert_eq!(cells(create), ["geometry.ts:14", "method", "public", "create", "(size: number): Shape"]);
+    if pane.osc8 {
+        // The Location cell is the text of a link to its file and line.
+        assert!(
+            report.raw().contains("/geometry.ts#L14\x1b\\geometry.ts:14"),
+            "expected the location linked to geometry.ts#L14.\nreport:\n{:?}",
+            report.raw(),
+        );
+    }
+
+    // Narrower than the table's natural width but wide enough for its
+    // unwrapped columns: only Signature wraps, every row keeps the table's
+    // width, and a signature continues below its row with an empty Location.
+    let report = run_hug(harness, pane, &fixture, "COLUMNS=70", "functions --format table geometry.ts");
+    let table: Vec<&str> = report
+        .lines()
+        .into_iter()
+        .map(str::trim_end)
+        .filter(|line| line.starts_with(['┌', '│', '├', '└']))
+        .collect();
+    let width = table[0].chars().count();
+    assert!(width <= 70, "the table must fit COLUMNS=70: {width}");
+    for line in &table {
+        assert_eq!(line.chars().count(), width, "rows of one table share its width: {line:?}");
+    }
+    let mut signatures: Vec<(String, String)> = Vec::new();
+    for line in table.iter().filter(|line| line.starts_with('│')).skip(1) {
+        let row = cells(line);
+        if !row[0].is_empty() {
+            signatures.push((row[3].clone(), row[4].clone()));
+        } else if let Some((_, signature)) = signatures.last_mut() {
+            signature.push(' ');
+            signature.push_str(&row[4]);
+        }
+    }
+    let create: String = signatures
+        .iter()
+        .find(|(name, _)| name == "create")
+        .map(|(_, signature)| signature.split_whitespace().collect())
+        .expect("a create row");
+    assert_eq!(create, "(size:number):Shape", "report:\n{}", report.plain());
+    assert!(
+        table.iter().filter(|line| line.starts_with('│')).count() > signatures.len() + 1,
+        "the signatures must wrap onto continuation rows.\nreport:\n{}",
+        report.plain(),
+    );
+}
+
 // ------------------------------------------------------------------
 // tmux — headless; capture keeps SGR but not OSC 8
 // ------------------------------------------------------------------
@@ -329,7 +466,10 @@ fn level2_declarations_in_tmux() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
-    check_declarations(&mut harness, &tmux_pane());
+    let pane = tmux_pane();
+    check_declarations(&mut harness, &pane);
+    check_wrapping(&mut harness, &pane);
+    check_table(&mut harness, &pane);
 }
 
 /// tmux: `-S -` reads the whole history and `-J` rejoins rows tmux
@@ -337,6 +477,7 @@ fn level2_declarations_in_tmux() {
 fn tmux_pane() -> Pane<TmuxHarness> {
     Pane {
         osc8: false,
+        cols: |harness| harness.pane_cols().expect("tmux pane width") as usize,
         wrap_cols: |_| None,
         capture: |harness| {
             let output = std::process::Command::new("tmux")
@@ -362,21 +503,20 @@ fn level2_declarations_in_wezterm() {
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
-    check_declarations(
-        harness,
-        &Pane {
-            osc8: true,
-            wrap_cols: |harness| {
-                Some(harness.pane_size().expect("WezTerm pane size").cols as usize)
-            },
-            capture: |harness| {
-                harness
-                    .capture_scrollback(WEZTERM_HISTORY_ROWS)
-                    .expect("capture failed")
-                    .raw
-            },
+    let pane: Pane<WezTermHarness> = Pane {
+        osc8: true,
+        cols: |harness| harness.pane_size().expect("WezTerm pane size").cols as usize,
+        wrap_cols: |harness| Some(harness.pane_size().expect("WezTerm pane size").cols as usize),
+        capture: |harness| {
+            harness
+                .capture_scrollback(WEZTERM_HISTORY_ROWS)
+                .expect("capture failed")
+                .raw
         },
-    );
+    };
+    check_declarations(harness, &pane);
+    check_wrapping(harness, &pane);
+    check_table(harness, &pane);
 }
 
 // ------------------------------------------------------------------
@@ -391,12 +531,13 @@ fn level2_declarations_in_kitty() {
     let mut guard =
         SHARED_KITTY.get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn Kitty"));
     let harness = guard.as_mut().expect("shared Kitty harness present");
-    check_declarations(
-        harness,
-        &Pane {
-            osc8: true,
-            wrap_cols: |_| None,
-            capture: |harness| harness.capture_extent("all").expect("capture failed").raw,
-        },
-    );
+    let pane: Pane<KittyHarness> = Pane {
+        osc8: true,
+        cols: |harness| harness.pane_cols().expect("Kitty pane width") as usize,
+        wrap_cols: |_| None,
+        capture: |harness| harness.capture_extent("all").expect("capture failed").raw,
+    };
+    check_declarations(harness, &pane);
+    check_wrapping(harness, &pane);
+    check_table(harness, &pane);
 }
