@@ -224,6 +224,8 @@ Now your task is to:
 
 ::end-block
 
+::file "../_finish-before-exit.md"
+
 ::file "../_os.md"
 
 ::file "../_test-tiers.md"

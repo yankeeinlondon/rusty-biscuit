@@ -595,6 +595,7 @@ fn stage_shipped_route(accept: &Acceptance, plan_phase: u32, target_suffix: &str
         "_set_spec_schema.md",
         "_test-tiers.md",
         "_input-robustness.md",
+        "_finish-before-exit.md",
     ] {
         write(
             &accept.path(&format!("prompts/{snippet}")),
