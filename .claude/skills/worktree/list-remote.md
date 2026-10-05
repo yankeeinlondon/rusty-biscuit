@@ -46,6 +46,16 @@ sequenceDiagram
   receipt write leaves the store as the evidence.
 - A repository in `~/.wt.json` makes no provider request in either half
   ([list.md](list.md#--ignore-api-api_preference)).
+- **Worker timings** (`--timings`, passed only when `LaunchArgs::timings`,
+  which `WaitRequest::timings` sets from `ListOptions::timings`). The interval
+  runs from `run`'s entry until both halves join; the receipt's sweep and write
+  are outside it. Each half closure takes `(main, Option<&Steps>)`, and its
+  thread makes its own `Steps` (`Rc<RefCell<SpanList>>`). The library
+  operations are timed by wrapping the injected seams (`TimedPrSource`,
+  `TimedBranchHeads`, `TimedGit`), not by editing `refresh` or `run_attempt`.
+  So an operation is timed only if it goes through those traits: a check's API
+  request and its `ls-remote` fallback both add to `head_check`. A panicked
+  half returns no span, which makes the report `partial`.
 
 ## Request credentials (`remote_head::CredentialEvidence`)
 
@@ -144,6 +154,23 @@ environment lookup: an adopted worker may have inherited another environment.
 - Every worker, before writing its own, deletes this repository's receipts last
   modified more than `ATTEMPT_MAX_AGE` ago (`remove_stale_receipts`; no wait
   outlives that). This also clears the old single `refresh-receipt.json`.
+- **Optional `durations`** (format stays 1). `Receipt::durations` is a
+  `LaunchReport` with `#[serde(skip)]`. `load_receipt` decodes it
+  (`receipt_durations`, through `strict_json::members`) only *after* the
+  outcome is accepted, so it never decides whether a receipt counts. The typed
+  outcome reader ignores unknown members, so a repeated `durations` key gets
+  past it, and the strict pass reads that as `invalid`, never last-wins.
+  Absent is `missing`; anything else unreadable is `invalid`. The reader infers
+  `complete` or `partial` from which halves are present
+  (`LaunchReport::from_worker`). Matrix:
+  `remote_head::tests::the_receipt_durations_walk_the_input_robustness_matrix`.
+- The wait keeps each owned launch's report from the receipt it already polls
+  (`Follow::keep_report`), so the report is captured before the discard and
+  never costs an extra read, poll, or wait. A launch whose receipt was not
+  seen is `missing`. `list::worker_reports` builds the summary: `adopted` when
+  the followed head's id has no entry, and `origin_changed` empties the list.
+  `wait::tests::reports` runs every scripted wait both untimed and timed and
+  asserts the same end, end time, and discards.
 
 ## Live-head half (`remote_update::run_attempt`)
 

@@ -87,6 +87,8 @@ The background process writes a small **receipt** file when both halves have fin
 
 The wait does not always need the receipt, so it can end before the receipt exists: a new PR answer (see below) and a finished check are enough. For example, a listing that sees both at 0.4 s renders at once, and the background process writes its receipt a moment later. A receipt written after the wait ended, whether the wait finished early or ran out of time, stays in the cache directory until a later background process, before writing its own, deletes this repository's receipts older than 75 s. A leftover receipt is harmless: it names its own attempt, and no other listing reads it.
 
+With `--perf`, the listing also asks the background process to time itself, and the receipt carries those timings as an optional extra. They are read only after the receipt's outcome is accepted, so timings that are missing, malformed, or of another version never cost the outcome: the receipt still counts, and only the report says the timings are `missing` or `invalid`. Timings never make the listing wait longer. A listing that ends before the receipt exists (the early finish above, or a timeout) reports that launch's timings as `missing`; it does not wait for them.
+
 ```mermaid
 flowchart LR
     L[wt list] -->|launch, attempt id| W[background wt]
@@ -389,7 +391,7 @@ After a blank line, the output can end with up to six kinds of note, in this ord
 | `--refresh` | `-r` | Wait for the full check, fetch, and PR refresh, up to 75 s instead of 3 s |
 | `--ignore-api` | | Check `origin` with Git only, never the provider API, for this repository from now on |
 | `--fast-forward` | `--ff` | Wait like `--refresh`, then fast-forward the local default branch to `origin/<default>` |
-| `--perf[=human\|json]` | | After the listing, print a per-stage timing report to stderr: a tree for people (`--perf`, `--perf=human`), or one final line `WT_PERF_JSON <document>` (`--perf=json`) for programs. The value needs `=`; an unknown one is a usage error. Work that overlaps the remote wait is one concurrent group ([details](../performance-testing.md#runtime---perf-flag)) |
+| `--perf[=human\|json]` | | After the listing, print a per-stage timing report to stderr: a tree for people (`--perf`, `--perf=human`), or one final line `WT_PERF_JSON <document>` (`--perf=json`) for programs. The value needs `=`; an unknown one is a usage error. Work that overlaps the remote wait is one concurrent group; the background refresh's own timings follow as a separate diagnostic section ([details](../performance-testing.md#runtime---perf-flag)) |
 
 `-r`, `--ignore-api`, and `--ff` are global, so `wt -r` and `wt list -r` are the same. They apply only to listing: `wt create`, `wt go`, and `wt remove` reject them with exit code 2. They can be combined; `wt --ff -r` makes one check, at most one fetch, and one fast-forward.
 

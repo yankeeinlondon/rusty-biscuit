@@ -264,7 +264,9 @@ workaround), and remain until someone clears that clone's `target/release`. Stil
 2026-09-27 (`libthiserror-*.rmeta` and eight more); `worktree-cli --features terminal-tests`
 took the native path green. The `feat-schema-enhancement` clone on `build-linux` showed the
 same failure on 2026-09-27, and the same workaround applies, so check any standing clone for
-these links, not only `fix-wt-ux`. The native path runs the whole suite, `perf_` tests
+these links, not only `fix-wt-ux`. Same again in `fix-wt-skill` on 2026-10-04: for a
+library-only package, any declared feature takes the native path too
+(`just cross-check worktree --os linux --features count-git` ran green). The native path runs the whole suite, `perf_` tests
 included, which the archive (CI) L1 drops, so it can fail on a stale `perf_` expectation that
 the local `just test` never ran: run `just test-perf` for the package too before reading such
 a failure as Linux-specific.
