@@ -15,10 +15,13 @@ reviewed_by: codex/gpt-6.1-sol
 recurrence: true
 created: "2026-10-05T14:37:13-07:00"
 spec: 2026-10-03-symbol-filters-and-reports/spec.md
-implemented: false
+implemented: true
+implemented_by: claude/opus
+log: tree-hugger/features/2026-10-03-symbol-filters-and-reports/log.md
 description: "A **feature** review of `2026-10-03-symbol-filters-and-reports/spec.md`"
 feature: 2026-10-03-symbol-filters-and-reports/review-5.md
 previous: 2026-10-03-symbol-filters-and-reports/review-4.md
+next: 2026-10-03-symbol-filters-and-reports/review-6.md
 ---
 
 The feature is **not production ready**. Review-4's reported Go cases are repaired, but three unblocked documentation findings remain. They change documentation selectors, coverage totals, or deprecation selections. None requires a human design decision.
