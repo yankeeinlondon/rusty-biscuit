@@ -159,7 +159,8 @@ For every finding, before any code changes:
   file the review named (for example: "a load-bearing field's absent, null,
   wrong-type, and invalid-element shapes are coerced to a permissive default")
 - grep for every sibling site: every parser, reader, detector, or projection
-  that handles the same kind of input or makes the same kind of decision
+  that handles the same kind of input or makes the same kind of decision,
+  within the code this spec added or changed and the call sites that reach it
 - fix every instance you find in this cycle and add a test case for each,
   whether or not the review named it
 - log the sweep as one entry:
@@ -168,20 +169,43 @@ For every finding, before any code changes:
 The following are not permitted for anything that is itself a defect against
 the specification: "flagged for the reviewer", "left unchanged", "deliberately
 left tolerant", "out of scope for this finding", "possible follow-up". Either
-fix it in this cycle, or list it as **deferred** under `### Successful
-Completion` with the reason. A deferred defect counts as deferred, not fixed.
+fix it in this cycle, list it as **deferred** under `### Successful
+Completion` with the reason, or **dispute** it (below). A deferred defect
+counts as deferred, not fixed.
+
+### Dispute a finding that has no authority
+
+A high finding must cite its authority: a spec acceptance criterion, decision,
+or sentence it violates, or a regression from the base branch reached by an
+input a real call site, template, fixture, or user produces. When a finding
+cites neither, or its cited authority does not say what the finding claims,
+do not implement it. Log it under `### Successful Completion` as
+**disputed**, with one sentence naming the authority it lacks; the next review
+must cite that authority or drop the finding.
+
+Also dispute, rather than build, a repair that is large next to the harm it
+prevents: a new escaping or protection layer, new syntax in generated output,
+or code that exists only to satisfy synthetic payloads. Propose documenting
+the limitation instead. Each such layer is new surface the next review can
+find an edge in.
+
+Observations and medium or low findings never require a repair; take one only
+when it is a small, surgical change inside the spec's code.
 
 ::block when="review && file_exists(review) && frontmatter(review, 'recurrence') == true"
 **This review reports a recurring finding class.** Its `## Recurrence` section
 names the sibling sites an earlier fix missed. That list is the minimum scope
-for this cycle: fix every site it names, then run your own sweep for any it
-missed. A site left from that list repeats the class a third time.
+for this cycle, apart from any finding you dispute: fix every site it names,
+then run your own sweep for any it missed.
 ::end-block
 
 The repository's surgical-changes rule bounds each change to the defect class.
 It does not bound it to the sentence in the review.
 
 ::file "../_input-robustness.md"
+
+::file "../_headless-orchestration.md"
+
 
 Now your task is to:
 
@@ -202,10 +226,10 @@ Now your task is to:
 3. Write the closing log entries to the log file ({{log}}):
 
     - add a H3 heading of `### Successful Completion\n`
-    - then the following prose: `The implementation of review cycle {{iteration}} has completed successfully in {duration}. During this implementation all {#} review findings were evaluated to see if they could be fixed as a part of this implementation cycle: {fixed} were fixed, {deferred} were deferred (see reasons below):`
+    - then the following prose: `The implementation of review cycle {{iteration}} has completed successfully in {duration}. During this implementation all {#} review findings were evaluated to see if they could be fixed as a part of this implementation cycle: {fixed} were fixed, {deferred} were deferred, {disputed} were disputed (see reasons below):`
         - `{duration}` is the duration that the task took to complete
         - `{#}` is the number of findings/suggestions which the review contained
-        - now list each finding/suggestion that had to be deferred and describe WHY it was deferred
+        - now list each finding/suggestion that had to be deferred and describe WHY it was deferred, then each disputed finding with the authority it lacks
 
             > NOTE: the most common reason for deferring a suggestion is that a performance metric was required but the machine's CPU load did not allow for a legitimate measurement to take place. In this case we should log similarly how we would in any other situation but take two additional measures:
             - set the `deferred_perf_measurement` to `true` on the log file's frontmatter

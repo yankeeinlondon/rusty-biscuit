@@ -40,12 +40,17 @@ pub mod source {
     pub const STYLE: &str = "darkmatter.style";
     /// Shell-policy problems.
     pub const SECURITY: &str = "darkmatter.security";
+    /// The document's file-resolution context could not be built.
+    pub const CONTEXT: &str = "darkmatter.context";
 }
 
 /// Stable diagnostic `code` values (LSP `Diagnostic.code`).
 pub mod code {
     /// A relative link path matched no indexed document.
     pub const BROKEN_PATH: &str = "dm.links.broken_path";
+    /// The document has no file-resolution context, so no file reference in
+    /// it is resolved. Reported once, at the top of the document.
+    pub const CONTEXT_BUILD_FAILURE: &str = "dm.context.build_failure";
     /// A link resolved to a document but the `#fragment`/anchor was missing.
     pub const MISSING_ANCHOR: &str = "dm.links.missing_anchor";
     /// Two or more headings generate the same GitHub anchor slug.
@@ -127,7 +132,7 @@ pub mod code {
     pub const DIRECTIVE_MALFORMED_OPTION: &str = "dm.directive.malformed_option";
     /// A `::disclosure` triple left structurally malformed.
     pub const DIRECTIVE_MALFORMED_DISCLOSURE: &str = "dm.directive.malformed_disclosure";
-    /// A `::file`/`::code`/prologue/epilogue target that matched no file.
+    /// A `::file`/`::code`/`::toc-linking` target that matched no file.
     pub const TRANSCLUSION_BROKEN_PATH: &str = "dm.transclusion.broken_path";
     /// A whole-value directive target that may evaluate to null at runtime.
     pub const TRANSCLUSION_NULLABLE_TARGET: &str = "dm.transclusion.nullable_target";

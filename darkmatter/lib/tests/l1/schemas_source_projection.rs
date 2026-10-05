@@ -412,12 +412,13 @@ fn padded_schema_references_are_classified_and_resolved_as_one_trimmed_string() 
     std::fs::write(schemas.join("post.yaml"), "$schema:\n  title: string(required)\n")
         .expect("write referenced schema");
 
+    let context = biscuit_file::FileResolutionContext::new(dir.path());
     let expected =
-        resolve_schema_with_roots(&serde_json::json!("./schemas/post.yaml"), dir.path(), &[])
+        resolve_schema_with_roots(&serde_json::json!("./schemas/post.yaml"), dir.path(), &[], &context)
             .expect("unpadded reference resolves")
             .json_schema;
     for source in padded_path {
-        let resolved = resolve_schema_with_roots(&serde_json::json!(source), dir.path(), &[])
+        let resolved = resolve_schema_with_roots(&serde_json::json!(source), dir.path(), &[], &context)
             .unwrap_or_else(|error| panic!("padded reference {source:?} must resolve: {error}"))
             .json_schema;
         assert_eq!(resolved, expected, "padded reference {source:?} resolved differently");
@@ -426,7 +427,7 @@ fn padded_schema_references_are_classified_and_resolved_as_one_trimmed_string() 
     // Bare-name resolution against schema roots agrees on the same trimming.
     let roots = [schemas.clone()];
     for source in [" post.yaml", "post.yaml ", " post.yaml ", "\tpost.yaml\n"] {
-        let resolved = resolve_schema_with_roots(&serde_json::json!(source), dir.path(), &roots)
+        let resolved = resolve_schema_with_roots(&serde_json::json!(source), dir.path(), &roots, &context)
             .unwrap_or_else(|error| panic!("padded bare name {source:?} must resolve: {error}"))
             .json_schema;
         assert_eq!(resolved, expected, "padded bare name {source:?} resolved differently");
@@ -434,7 +435,7 @@ fn padded_schema_references_are_classified_and_resolved_as_one_trimmed_string() 
 
     for source in ["", "   ", "\t\n"] {
         assert!(
-            resolve_schema_with_roots(&serde_json::json!(source), dir.path(), &[]).is_err(),
+            resolve_schema_with_roots(&serde_json::json!(source), dir.path(), &[], &context).is_err(),
             "the resolver must reject the empty reference {source:?}",
         );
     }

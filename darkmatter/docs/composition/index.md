@@ -2,6 +2,24 @@
 
 Darkmatter's two biggest tasks are **composition** and **rendering** and this document will provide an overview of what **composition** is and how to take full advantage of it.
 
+## Before the Pipeline: the Request
+
+Every composition runs inside a prepared [compose request](../topics/compose-requests.md).
+Preparing it fixes, once, where file references start: the request directory,
+the home directory, the environment, the repository with its packages, and any
+extra `@` roots. Every stage below, and every transcluded child, resolves file
+references against that one context, and `ctx.*` and `env.*` read the same
+snapshot. `md` prepares the request from the directory you run it in; a
+library caller names its directory in a `RequestSnapshot`.
+
+```mermaid
+flowchart LR
+    S["RequestSnapshot\n(request dir, home, env, @ roots)"] --> B["build_resolution_context\n(discover repo, validate)"]
+    O[ComposeOptions] --> R
+    B --> R[ComposeRequest]
+    R --> P[pre-flight] --> C[pipeline stages]
+```
+
 ## Pipeline Flow
 
 When we talk about composition we talk primarily about:

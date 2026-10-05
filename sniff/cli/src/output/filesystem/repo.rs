@@ -3,7 +3,7 @@ use std::path::Path;
 use std::rc::Rc;
 
 use biscuit_terminal::components::list::UnorderedList;
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{InlineProse, Prose};
 use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
 use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::git::BehindStatus;
@@ -93,13 +93,13 @@ pub(super) fn build_area_hierarchy(
 
 fn append_package_items(items: &mut Vec<RenderableTerminalContent>, pkg: &Package, verbose: u8) {
     let formatted = format_package_items(pkg, verbose);
-    let main = Prose::new(&formatted[0]).render_optimistic(None);
+    let main = InlineProse::new(&formatted[0]).render_optimistic(None);
     items.push(RenderableTerminalContent::String(main));
 
     if formatted.len() > 1 {
         let detail_items: Vec<String> = formatted[1..]
             .iter()
-            .map(|s| Prose::new(s).render_optimistic(None))
+            .map(|s| InlineProse::new(s).render_optimistic(None))
             .collect();
         let detail_list = UnorderedList::new(detail_items).with_bullet("  ");
         items.push(RenderableTerminalContent::Component(Rc::new(detail_list)));
@@ -113,7 +113,7 @@ fn append_area_section(
     area_children: &std::collections::HashMap<String, Vec<String>>,
     verbose: u8,
 ) {
-    let label = Prose::new(format!(
+    let label = InlineProse::new(format!(
         "<blue><b>{}</b></blue>",
         super::package_areas::area_display_label(area)
     ))
@@ -366,7 +366,7 @@ fn render_update_summary(
         let samples = summary
             .sample_transitions
             .iter()
-            .map(|sample| Prose::new(format!("<dim>{}</dim>", sample)).render(term))
+            .map(|sample| InlineProse::new(format!("<dim>{}</dim>", sample)).render(term))
             .collect::<Vec<_>>();
         let list = UnorderedList::new(samples);
         writeln!(out, "{}", list.render(term)).unwrap();
@@ -468,6 +468,31 @@ fn format_package_items(pkg: &sniff::filesystem::repo::Package, verbose: u8) -> 
 
     items
 }
+/// The dimmed indicator legend, preceded by a blank spacing row.
+fn indicator_legend(
+    has_updatable: bool,
+    has_major: bool,
+    has_excluded: bool,
+    terminal: &Terminal,
+) -> String {
+    let mut legend = String::from("<dim>");
+    if has_updatable {
+        legend.push_str("<yellow>*</yellow> dependency updates available");
+        if has_major {
+            legend.push_str("  <red>*</red> major version update available");
+        }
+        if has_excluded {
+            legend.push_str("  ");
+        }
+    }
+    if has_excluded {
+        legend.push_str("packages in <orange>orange</orange> are excluded from the workspace");
+    }
+    legend.push_str("</dim>");
+    // The blank row sits outside the Prose, which trims edge newlines.
+    format!("\n{}\n", Prose::new(&legend).render(terminal))
+}
+
 pub fn render_repo_section(
     repo: &sniff::filesystem::repo::RepoInfo,
     verbose: u8,
@@ -484,8 +509,8 @@ pub fn render_repo_section(
         let title = Prose::new("<b><u>Repository</u></b>");
         writeln!(out, "\n{}\n", title.render(&terminal)).unwrap();
         let items = vec![
-            Prose::new("<b>Type:</b> Single-package").render(&terminal),
-            Prose::new(format!("<b>Root:</b> {}", repo.root.display())).render(&terminal),
+            InlineProse::new("<b>Type:</b> Single-package").render(&terminal),
+            InlineProse::new(format!("<b>Root:</b> {}", repo.root.display())).render(&terminal),
         ];
         let list = UnorderedList::new(items);
         writeln!(out, "{}", list.render(&terminal)).unwrap();
@@ -591,26 +616,11 @@ pub fn render_repo_section(
 
         // Legend for indicators
         if has_updatable || has_excluded {
-            let mut legend = String::from("\n<dim>");
-            if has_updatable {
-                legend.push_str("<yellow>*</yellow> dependency updates available");
-                let has_major = filtered
+            let has_major = has_updatable
+                && filtered
                     .iter()
                     .any(|pkg| pkg.has_major_update == Some(true));
-                if has_major {
-                    legend.push_str("  <red>*</red> major version update available");
-                }
-                if has_excluded {
-                    legend.push_str("  ");
-                }
-            }
-            if has_excluded {
-                legend.push_str(
-                    "packages in <orange>orange</orange> are excluded from the workspace",
-                );
-            }
-            legend.push_str("</dim>");
-            writeln!(out, "{}", Prose::new(&legend).render(&terminal)).unwrap();
+            out.push_str(&indicator_legend(has_updatable, has_major, has_excluded, &terminal));
         }
     } else {
         let summary = format_monorepo_summary(repo);
@@ -960,12 +970,12 @@ pub fn render_filesystem_section(
             for pkg in packages {
                 let package_items = format_package_items(pkg, verbose);
                 items.push(RenderableTerminalContent::String(
-                    Prose::new(&package_items[0]).render_optimistic(None),
+                    InlineProse::new(&package_items[0]).render_optimistic(None),
                 ));
                 if package_items.len() > 1 {
                     let detail_items = package_items[1..]
                         .iter()
-                        .map(|item| Prose::new(item).render_optimistic(None))
+                        .map(|item| InlineProse::new(item).render_optimistic(None))
                         .collect::<Vec<_>>();
                     let detail_list = UnorderedList::new(detail_items).with_bullet("  ");
                     items.push(RenderableTerminalContent::Component(Rc::new(detail_list)));
@@ -1004,4 +1014,24 @@ pub fn render_filesystem_section(
     }
 
     out
+}
+
+#[cfg(test)]
+mod legend_tests {
+    use super::*;
+
+    #[test]
+    fn the_indicator_legend_follows_one_blank_row() {
+        let terminal = Terminal::builder()
+            .width(200)
+            .color_depth(biscuit_terminal::discovery::detection::ColorDepth::None)
+            .build();
+        let legend = indicator_legend(true, true, true, &terminal);
+        let rows: Vec<&str> = legend.split('\n').collect();
+        assert_eq!(rows.len(), 3, "{legend:?}");
+        assert_eq!(rows[0], "", "{legend:?}");
+        assert!(rows[1].starts_with("* dependency updates available"), "{legend:?}");
+        assert!(rows[1].ends_with("are excluded from the workspace"), "{legend:?}");
+        assert_eq!(rows[2], "", "{legend:?}");
+    }
 }

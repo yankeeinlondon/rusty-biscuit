@@ -779,35 +779,27 @@ fn short_label(id: &str) -> String {
 
 // ── Options ─────────────────────────────────────────────────────────
 
-use crate::markdown::compose::ComposeOptions;
-
 /// Options for building a reference graph.
 ///
-/// Use `with_compose()` to supply pre-configured compose options that
-/// share an already-captured context, avoiding redundant capture work.
+/// Built from a prepared [`ComposeRequest`](crate::markdown::compose::ComposeRequest)
+/// with [`with_compose`](Self::with_compose), so the graph resolves through the
+/// request's context and shares its already-captured `ctx.*` values.
 #[derive(Clone)]
 pub struct ReferenceGraphOptions {
-    /// Compose options controlling InlinePre execution, cache settings,
-    /// external state, shell settings, and other pipeline behavior.
-    pub compose: ComposeOptions,
-}
-
-impl Default for ReferenceGraphOptions {
-    /// Creates default options, which eagerly captures runtime context.
-    ///
-    /// Prefer `ReferenceGraphOptions::with_compose()` when a
-    /// `ComposeOptions` (with its captured context) is already available.
-    fn default() -> Self {
-        Self {
-            compose: ComposeOptions::default(),
-        }
-    }
+    /// The request controlling InlinePre execution, cache settings, external
+    /// state, shell settings, file resolution, and other pipeline behavior.
+    pub compose: crate::markdown::compose::ComposeRequest,
 }
 
 impl ReferenceGraphOptions {
-    /// Creates options that share the compose options (and their captured
-    /// context) instead of triggering a new capture.
-    pub fn with_compose(compose: ComposeOptions) -> Self {
+    /// Creates options that resolve through `request`'s options and context
+    /// instead of triggering a new capture.
+    pub fn with_compose(request: &crate::markdown::compose::ComposeRequest) -> Self {
+        Self { compose: request.clone() }
+    }
+
+    /// Options over a request a reference walk already holds.
+    pub(crate) fn from_compose_options(compose: crate::markdown::compose::ComposeRequest) -> Self {
         Self { compose }
     }
 }
@@ -1015,6 +1007,12 @@ impl From<ReferenceRecord> for ImportReference {
 mod tests {
     use super::*;
 
+    fn graph_options() -> ReferenceGraphOptions {
+        ReferenceGraphOptions::with_compose(&crate::markdown::compose::test_request(
+            crate::markdown::compose::ComposeOptions::new(),
+        ))
+    }
+
     #[test]
     fn classify_local_path() {
         let target = classify_target("./file.md");
@@ -1179,7 +1177,7 @@ mod tests {
         };
         let graph = ReferenceGraph::from_build(
             &Markdown::new(""),
-            &ReferenceGraphOptions::default(),
+            &graph_options(),
             ReferenceGraphMode::Full,
             root,
             vec![child],
@@ -1234,7 +1232,7 @@ mod tests {
         };
         let graph = ReferenceGraph::from_build(
             &Markdown::new(""),
-            &ReferenceGraphOptions::default(),
+            &graph_options(),
             ReferenceGraphMode::Full,
             root,
             vec![child],
@@ -1264,7 +1262,7 @@ mod tests {
         };
         ReferenceGraph::from_build(
             &Markdown::new(""),
-            &ReferenceGraphOptions::default(),
+            &graph_options(),
             ReferenceGraphMode::Full,
             root,
             vec![child],

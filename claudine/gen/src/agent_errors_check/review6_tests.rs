@@ -37,7 +37,9 @@ fn empirical_provenance_requires_a_resolvable_scoped_fixture_and_capture_notes()
         fixture: "./_fixtures/capacity.json".into(),
         capture_notes: "Captured from provider v1.2; credentials and IDs removed.".into(),
     }));
-    let report = evaluate_with_fixture_base("codex", None, &valid, Some(topic.path()));
+    let fixture_base =
+        FixtureBase::new(&biscuit_file::FileResolutionContext::new(topic.path()), topic.path());
+    let report = evaluate_with_fixture_base("codex", None, &valid, Some(&fixture_base));
     assert!(provenance_findings(&report).is_empty(), "{:?}", report.findings);
 
     let invalid = [
@@ -57,7 +59,7 @@ fn empirical_provenance_requires_a_resolvable_scoped_fixture_and_capture_notes()
     ];
     for research in invalid {
         let report =
-            evaluate_with_fixture_base("codex", None, &research, Some(topic.path()));
+            evaluate_with_fixture_base("codex", None, &research, Some(&fixture_base));
         assert!(!provenance_findings(&report).is_empty(), "{:?}", report.findings);
     }
 }
@@ -109,8 +111,14 @@ fn empirical_schema_fixture_loads_and_resolves() {
         .parent()
         .expect("gen crate lives under the claudine package area");
     let topic = area.join("docs/research/agent-errors");
+    let context = inputs::area_resolution_context(
+        area,
+        &darkmatter::markdown::compose::RequestSnapshot::new(area),
+    )
+    .expect("area resolution context builds");
     let frontmatter = inputs::load_validated_frontmatter(
         &topic.join("_fixtures/research-shaped.md"),
+        &context,
     )
     .expect("empirical fixture should satisfy the sidecar");
     let research = parse_research("fixture", &frontmatter).expect("typed empirical fixture");
@@ -124,7 +132,7 @@ fn empirical_schema_fixture_loads_and_resolves() {
         Branch::Msg,
         "temporarily unavailable",
         Some(empirical),
-        Some(&topic),
+        Some(&FixtureBase::new(&context, &topic)),
         &mut findings,
     );
     assert!(findings.is_empty(), "{findings:?}");

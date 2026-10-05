@@ -1,5 +1,29 @@
 use super::*;
 
+/// The request inputs these tests state: the authoring document plus the
+/// repository and package-area anchors a request context would carry.
+struct HarnessResolutionContext<'a> {
+    source_path: &'a Path,
+    repo_root: Option<&'a Path>,
+    package_area: Option<&'a Path>,
+}
+
+/// [`super::resolve_harness_path`] through a request context carrying exactly
+/// the anchors `ctx` names, built at the document's directory. A repository
+/// root that does not contain that directory is dropped, as a discovered one
+/// would be.
+fn resolve_harness_path(raw: &str, ctx: &HarnessResolutionContext<'_>) -> Result<PathBuf, HarnessError> {
+    let base_dir = ctx.source_path.parent().unwrap_or_else(|| Path::new("/"));
+    let mut context = FileResolutionContext::new(base_dir);
+    if let Some(root) = ctx.repo_root.filter(|root| base_dir.starts_with(root)) {
+        context = context.with_repository_root(root);
+    }
+    if let Some(package_area) = ctx.package_area {
+        context = context.with_package_area(package_area);
+    }
+    super::resolve_harness_path(raw, ctx.source_path, &context)
+}
+
 /// Absolute paths still classify absolute, but resolution now probes the
 /// filesystem — an existing absolute target resolves to itself.
 #[test]
@@ -44,6 +68,29 @@ fn absolute_missing_path_is_target_missing() {
         ),
         "unexpected variant: {err:?}"
     );
+}
+
+/// A missing target whose text looks like a glob (a proxy or harness source
+/// such as `docs/*.md`) names that file literally, and its message carries
+/// the literal-glob hint; a plain missing name does not.
+#[test]
+fn literal_glob_miss_carries_the_glob_hint() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("run.md");
+    std::fs::write(&source, "x").unwrap();
+    std::fs::create_dir_all(dir.path().join("docs")).unwrap();
+    std::fs::write(dir.path().join("docs/a.md"), "a").unwrap();
+    let ctx = HarnessResolutionContext {
+        source_path: &source,
+        repo_root: None,
+        package_area: None,
+    };
+
+    let glob = resolve_harness_path("./docs/*.md", &ctx).unwrap_err().to_string();
+    assert!(glob.contains("::file-links"), "{glob}");
+    let plain = resolve_harness_path("./docs/missing.md", &ctx).unwrap_err().to_string();
+    assert!(plain.contains("target does not exist") && !plain.contains("::file-links"), "{plain}");
+    assert!(resolve_harness_path("./docs/a.md", &ctx).is_ok());
 }
 
 /// G2: `@foo` is a magic-root search, so the repository root is a search
@@ -406,9 +453,9 @@ fn snapshot_resolver_ignores_later_cwd_and_environment_changes() {
     std::env::set_current_dir(unrelated.path()).unwrap();
 
     let source = nested.join("target.md");
-    let child = resolve_harness_path_in_context("./child.md", &source, &snapshot).unwrap();
-    let home_file = resolve_harness_path_in_context("~/home.md", &source, &snapshot).unwrap();
-    let env_file = resolve_harness_path_in_context(
+    let child = super::resolve_harness_path("./child.md", &source, &snapshot).unwrap();
+    let home_file = super::resolve_harness_path("~/home.md", &source, &snapshot).unwrap();
+    let env_file = super::resolve_harness_path(
         "{{SNAPSHOT_ROOT}}/env.md",
         &source,
         &snapshot,

@@ -103,7 +103,7 @@ impl biscuit_terminal::errors::BlockError for LinkError {
 
             Self::MalformedHtml(message) => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("LinkError", "malformed HTML link"))
-                .body(format!("<dim>Message:</dim> {}", Prose::escape_text(message)))
+                .body(format!("<dim>Message:</dim> {}", Prose::escape_text_outside_code_spans(message)))
                 .hint(
                     "Ensure the link opens with <cyan>\\<a ...\\></cyan> and closes with <cyan>\\</a\\></cyan> and has an <cyan>href</cyan> attribute.",
                 ),
@@ -113,7 +113,7 @@ impl biscuit_terminal::errors::BlockError for LinkError {
                 message,
                 caret,
             } => {
-                let mut body = vec![Prose::new(format!("<dim>Message:</dim> {}", Prose::escape_text(message)))];
+                let mut body = vec![Prose::new(format!("<dim>Message:</dim> {}", Prose::escape_text_outside_code_spans(message)))];
                 body.push(Prose::new("Link parsing failed here:"));
 
                 // Link fragments usually start at line 1 of their own string.

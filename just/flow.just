@@ -4,7 +4,7 @@ import "./util.just"
 _read_config key spec="spec.md":
     #!/usr/bin/env bash
     set -euo pipefail
-    value="$(md get --raw "{{ spec }}" "{{ key }}" 2>/dev/null || true)"
+    value="$(md get --raw "{{ spec }}" "{{ key }}")"
     printf '%s\n' "${value}"
 
 # Write a frontmatter value to the feature spec.
@@ -39,7 +39,7 @@ _has_plan dir:
 _get_flow_iteration spec="spec.md":
     #!/usr/bin/env bash
     set -euo pipefail
-    value="$(md get --raw "{{ spec }}" flow_iteration 2>/dev/null || true)"
+    value="$(md get --raw "{{ spec }}" flow_iteration)"
     if [[ "${value}" =~ ^[0-9]+$ ]]; then
         echo "${value}"
     else
@@ -92,14 +92,15 @@ flow filter="":
         fi
 
         local iteration start_phase plan
-        iteration="$(md get --raw "${spec}" flow_iteration 2>/dev/null || true)"
+        # Runs inside the ERR trap, so a read failure must not abort it.
+        iteration="$(md get --raw "${spec}" flow_iteration || true)"
         [[ "${iteration}" =~ ^[0-9]+$ ]] || iteration=0
         md set --save "${spec}" flow_iteration "${iteration}" >/dev/null 2>&1 || true
 
         if [[ -n "${feature_dir}" ]]; then
             plan="${feature_dir}/plan.md"
             if [[ -f "${plan}" ]]; then
-                start_phase="$(md get --raw "${plan}" start_phase 2>/dev/null || true)"
+                start_phase="$(md get --raw "${plan}" start_phase || true)"
                 [[ "${start_phase}" =~ ^[0-9]+$ ]] || start_phase=1
                 md set --save "${spec}" flow_plan_start_phase "${start_phase}" >/dev/null 2>&1 || true
             fi
@@ -124,7 +125,7 @@ flow filter="":
     }
 
     read_config() {
-        md get --raw "$1" "$2" 2>/dev/null || true
+        md get --raw "$1" "$2"
     }
 
     write_config() {
@@ -205,14 +206,14 @@ flow filter="":
             exit 1
         fi
 
-        phases="$(md get --raw "${plan}" phases 2>/dev/null || true)"
+        phases="$(md get --raw "${plan}" phases)"
         if [[ ! "${phases}" =~ ^[0-9]+$ ]] || (( phases < 1 )); then
             printf '\n%sERROR:%s %s is missing numeric phases frontmatter.\n' "${red}${bold}" "${reset}" "${plan}" >&2
             exit 1
         fi
         total="${phases}"
 
-        current="$(md get --raw "${plan}" start_phase 2>/dev/null || true)"
+        current="$(md get --raw "${plan}" start_phase)"
         [[ "${current}" =~ ^[0-9]+$ ]] || current=1
         if (( current > total )); then
             status_line Implement Skipping "$(artifact_link plan.md "${plan}") is already complete."
@@ -220,7 +221,7 @@ flow filter="":
             return 0
         fi
 
-        memory="$(md get --raw "${plan}" memory 2>/dev/null || true)"
+        memory="$(md get --raw "${plan}" memory)"
         agent="$(read_config "${spec}" implementation_agent)"
         model="$(read_config "${spec}" implementation_model)"
         mapfile -d '' -t model_args < <(model_args_for "${agent}" "${model}")
@@ -247,7 +248,7 @@ flow filter="":
         mapfile -d '' -t review_model_args < <(model_args_for "${agent}" "${model}")
 
         while true; do
-            iteration="$(md get --raw "${spec}" flow_iteration 2>/dev/null || true)"
+            iteration="$(md get --raw "${spec}" flow_iteration)"
             [[ "${iteration}" =~ ^[0-9]+$ ]] || iteration=0
             review_number=$((iteration + 1))
             review="${feature_dir}/review-${review_number}.md"
@@ -256,7 +257,7 @@ flow filter="":
             claudine compose @prompts/review-feature.md "--${agent}" -y dir="${dir_arg}" spec="spec.md" design="design.md" plan="plan.md" iteration="${review_number}" review="review-${review_number}.md" "${review_model_args[@]}"
             mark_progress "review_${review_number}_complete"
 
-            ready="$(md get --raw "${review}" ready 2>/dev/null || true)"
+            ready="$(md get --raw "${review}" ready)"
             if [[ "${ready}" == "true" ]]; then
                 mark_progress complete
                 status_line Flow Complete "$(artifact_link "review-${review_number}.md" "${review}") marked ready."

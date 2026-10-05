@@ -14,11 +14,25 @@ use tempfile::TempDir;
 use super::super::*;
 use crate::markdown::{Markdown, extract_frontmatter_block};
 
+/// The context for a document with no path of its own.
+fn sourceless_context() -> biscuit_file::FileResolutionContext {
+    biscuit_file::FileResolutionContext::new(std::env::temp_dir())
+}
+
+/// The request context a caller builds for a document under `dir`: it
+/// discovers the repository, which anchors trigger-schema discovery.
+fn document_context(dir: &std::path::Path) -> biscuit_file::FileResolutionContext {
+    crate::markdown::compose::build_resolution_context(
+        &crate::markdown::compose::RequestSnapshot::new(dir),
+    )
+    .unwrap()
+}
+
 /// Analyzes `yaml_body` (raw frontmatter text, `$schema` included) against
 /// the effective schema the document itself resolves.
 fn analyze(yaml_body: &str) -> SchemaCleanAnalysis {
     let md = super::md_with_schema(yaml_body);
-    let effective = DarkmatterSchemas::new()
+    let effective = DarkmatterSchemas::new(sourceless_context())
         .effective_for(&md)
         .unwrap()
         .expect("document must resolve an effective schema");
@@ -99,7 +113,7 @@ fn test_repair_span_covers_exact_lexeme() {
 fn test_repair_application_passes_complete_schema() {
     let yaml = "$schema:\n  release: string\nrelease: 1.20\n";
     let md = super::md_with_schema(yaml);
-    let effective = DarkmatterSchemas::new()
+    let effective = DarkmatterSchemas::new(sourceless_context())
         .effective_for(&md)
         .unwrap()
         .unwrap();
@@ -250,7 +264,7 @@ fn test_default_baseline_keys_are_constrained() {
     // The real shipped baseline (`docs/schemas/darkmatter.yaml`) constrains
     // `title` to a string through the normal config-resolution path.
     let analysis = analyze_with(
-        &CleanSchemaConfig::new(),
+        &CleanSchemaConfig::new(sourceless_context()),
         &Markdown::from("---\ntitle: 42\n---\nbody\n"),
         "title: 42\n",
     );
@@ -261,7 +275,7 @@ fn test_default_baseline_keys_are_constrained() {
 #[test]
 fn test_default_baseline_leaves_unknown_keys_unconstrained() {
     let analysis = analyze_with(
-        &CleanSchemaConfig::new(),
+        &CleanSchemaConfig::new(sourceless_context()),
         &Markdown::from("---\nrelease: 1.20\n---\nbody\n"),
         "release: 1.20\n",
     );
@@ -271,7 +285,7 @@ fn test_default_baseline_leaves_unknown_keys_unconstrained() {
 #[test]
 fn test_disabled_baseline_is_silent() {
     let analysis = analyze_with(
-        &CleanSchemaConfig::new().without_baseline_schema(),
+        &CleanSchemaConfig::new(sourceless_context()).without_baseline_schema(),
         &Markdown::from("---\ntitle: 42\n---\nbody\n"),
         "title: 42\n",
     );
@@ -282,7 +296,7 @@ fn test_disabled_baseline_is_silent() {
 fn test_custom_baseline_schema_object() {
     let schema_value = serde_yaml_ng::from_str("release: string").unwrap();
     let schema = parse_yaml_schema(&schema_value).unwrap();
-    let config = CleanSchemaConfig::new()
+    let config = CleanSchemaConfig::new(sourceless_context())
         .without_baseline_schema()
         .with_baseline_schema(schema);
     let analysis = analyze_with(
@@ -298,7 +312,7 @@ fn test_custom_baseline_schema_file() {
     let dir = TempDir::new().unwrap();
     let baseline = dir.path().join("baseline.yaml");
     fs::write(&baseline, "$schema:\n  release: string\n").unwrap();
-    let config = CleanSchemaConfig::new()
+    let config = CleanSchemaConfig::new(sourceless_context())
         .without_baseline_schema()
         .with_baseline_schema_file(&baseline);
     let analysis = analyze_with(
@@ -322,7 +336,7 @@ fn test_referenced_schema_file() {
         .unwrap()
         .yaml
         .to_string();
-    let analysis = analyze_with(&CleanSchemaConfig::new(), &md, &yaml);
+    let analysis = analyze_with(&CleanSchemaConfig::new(document_context(dir.path())), &md, &yaml);
     assert_eq!(proven_repair(&analysis).replacement, "\"1.20\"");
 }
 
@@ -358,7 +372,7 @@ fn test_matching_trigger_constrains_document() {
         "---\nlayout: post\nrelease: 1.20\n---\nbody\n",
     );
     let md = Markdown::try_from(doc_path.as_path()).unwrap();
-    let analysis = analyze_with(&CleanSchemaConfig::new(), &md, "layout: post\nrelease: 1.20\n");
+    let analysis = analyze_with(&CleanSchemaConfig::new(document_context(dir.path())), &md, "layout: post\nrelease: 1.20\n");
     assert_eq!(proven_repair(&analysis).replacement, "\"1.20\"");
 }
 
@@ -372,7 +386,7 @@ fn test_nonmatching_trigger_is_silent() {
         "---\nrelease: 1.20\n---\nbody\n",
     );
     let md = Markdown::try_from(doc_path.as_path()).unwrap();
-    let analysis = analyze_with(&CleanSchemaConfig::new(), &md, "release: 1.20\n");
+    let analysis = analyze_with(&CleanSchemaConfig::new(document_context(dir.path())), &md, "release: 1.20\n");
     assert!(analysis.is_clean());
 }
 
@@ -386,7 +400,7 @@ fn test_disabled_triggers_are_silent() {
         "---\nlayout: post\nrelease: 1.20\n---\nbody\n",
     );
     let md = Markdown::try_from(doc_path.as_path()).unwrap();
-    let config = CleanSchemaConfig::new().with_trigger_schemas(false);
+    let config = CleanSchemaConfig::new(document_context(dir.path())).with_trigger_schemas(false);
     let analysis = analyze_with(&config, &md, "layout: post\nrelease: 1.20\n");
     assert!(analysis.is_clean());
 }
@@ -396,7 +410,7 @@ fn test_schema_override_replaces_document_schema() {
     // The document's own `$schema` constrains nothing; the override does.
     let md = Markdown::from("---\n$schema:\n  title: string\nrelease: 1.20\n---\nbody\n");
     let override_value = serde_json::json!({ "release": "string" });
-    let config = CleanSchemaConfig::new()
+    let config = CleanSchemaConfig::new(sourceless_context())
         .without_baseline_schema()
         .with_trigger_schemas(false)
         .with_schema_override(override_value);
@@ -408,7 +422,7 @@ fn test_schema_override_replaces_document_schema() {
 fn test_stdin_has_no_trigger_discovery() {
     // No document path: trigger discovery is silently inert (D7).
     let analysis = analyze_with(
-        &CleanSchemaConfig::new(),
+        &CleanSchemaConfig::new(sourceless_context()),
         &Markdown::from("---\ntitle: 42\n---\nbody\n"),
         "title: 42\n",
     );
@@ -428,7 +442,7 @@ fn test_unparseable_source_yields_empty_analysis() {
     // The schema-agnostic layer owns unparseable input; the schema layer
     // defers entirely.
     let md = super::md_with_schema("$schema:\n  release: string\nrelease: ok\n");
-    let effective = DarkmatterSchemas::new()
+    let effective = DarkmatterSchemas::new(sourceless_context())
         .effective_for(&md)
         .unwrap()
         .unwrap();
@@ -439,7 +453,7 @@ fn test_unparseable_source_yields_empty_analysis() {
 
 #[test]
 fn test_context_analysis_retains_effective_schema() {
-    let context = CleanSchemaConfig::new().resolve(None).unwrap();
+    let context = CleanSchemaConfig::new(sourceless_context()).resolve(None).unwrap();
     let md = Markdown::from("---\ntitle: 42\n---\nbody\n");
     let analysis = context.analyze(&md, "title: 42\n").unwrap();
     assert!(analysis.effective().is_some());
@@ -448,7 +462,7 @@ fn test_context_analysis_retains_effective_schema() {
 
 #[test]
 fn test_no_effective_schema_means_no_analysis() {
-    let context = CleanSchemaConfig::new()
+    let context = CleanSchemaConfig::new(sourceless_context())
         .without_baseline_schema()
         .with_trigger_schemas(false)
         .resolve(None)
@@ -465,7 +479,7 @@ fn test_s1_schema_result_set_check() {
     // value-identical candidates yield identical result sets; a candidate
     // that changes the schema outcome fails the check.
     let md = super::md_with_schema("$schema:\n  title: string\ntitle: hi\n");
-    let effective = DarkmatterSchemas::new()
+    let effective = DarkmatterSchemas::new(sourceless_context())
         .effective_for(&md)
         .unwrap()
         .unwrap();
@@ -482,7 +496,7 @@ fn test_s1_check_does_not_block_s2_transition() {
     // (one problem → zero); the S1 check must report that difference, not
     // gate it — the caller owns the classification-aware application.
     let md = super::md_with_schema("$schema:\n  release: string\nrelease: 1.20\n");
-    let effective = DarkmatterSchemas::new()
+    let effective = DarkmatterSchemas::new(sourceless_context())
         .effective_for(&md)
         .unwrap()
         .unwrap();
@@ -494,7 +508,7 @@ fn test_s1_check_does_not_block_s2_transition() {
 #[test]
 fn test_s1_check_rejects_unparseable_candidate() {
     let md = super::md_with_schema("$schema:\n  title: string\ntitle: hi\n");
-    let effective = DarkmatterSchemas::new()
+    let effective = DarkmatterSchemas::new(sourceless_context())
         .effective_for(&md)
         .unwrap()
         .unwrap();

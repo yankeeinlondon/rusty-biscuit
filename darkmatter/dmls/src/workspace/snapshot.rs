@@ -77,7 +77,7 @@ mod tests {
 
     #[test]
     fn test_shared_snapshot_store_and_load() {
-        let index = WorkspaceIndex::new();
+        let index = WorkspaceIndex::new(std::sync::Arc::new(crate::graph::NoContexts));
         let shared = SharedSnapshot::new(index.snapshot());
         assert_eq!(shared.generation(), 0);
 

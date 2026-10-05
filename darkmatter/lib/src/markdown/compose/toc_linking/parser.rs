@@ -165,7 +165,6 @@ fn parse_directive_line(
         });
     }
 
-    // Parse target chain: split on `|`, trim, check for trailing `false`
     let (targets, suppress_not_found) = parse_target_chain(&raw_target, line)?;
 
     let mut options = TocLinkingOptions::default();
@@ -198,37 +197,12 @@ fn parse_directive_line(
 }
 
 fn parse_target_chain(raw: &str, line: usize) -> Result<(Vec<String>, bool), TocLinkingError> {
-    let parts: Vec<&str> = raw.split('|').map(|s| s.trim()).collect();
-    let mut targets = Vec::new();
-    let mut suppress = false;
-
-    for (i, part) in parts.iter().enumerate() {
-        if part.is_empty() {
-            continue;
-        }
-        if part.eq_ignore_ascii_case("false") {
-            if i == parts.len() - 1 {
-                suppress = true;
-            } else {
-                return Err(TocLinkingError::ParseDirective {
-                    line,
-                    message: "'false' can only appear as the last item in a fallback chain"
-                        .to_string(),
-                });
-            }
-        } else {
-            targets.push(part.to_string());
-        }
-    }
-
-    if targets.is_empty() && !suppress {
-        return Err(TocLinkingError::ParseDirective {
-            line,
-            message: "No file targets specified".to_string(),
-        });
-    }
-
-    Ok((targets, suppress))
+    let (alternatives, suppress) = crate::markdown::compose::target_chain::split_target_chain(raw)
+        .map_err(|error| TocLinkingError::ParseDirective { line, message: error.0 })?;
+    Ok((
+        alternatives.into_iter().map(|(value, _)| value.to_string()).collect(),
+        suppress,
+    ))
 }
 
 fn apply_toc_linking_option(

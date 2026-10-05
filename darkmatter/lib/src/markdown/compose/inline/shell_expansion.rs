@@ -6,7 +6,7 @@ use super::super::indent;
 use super::super::perf;
 use super::super::body_origin::{BodyProvenance, EditOrigin, apply_replacements_with_edits};
 use super::super::shell_expansion::{self, execute_directive_detailed};
-use super::super::{ComposeOptions, ComposeReport, ShellCommandSpan, redact_shell_command};
+use super::super::{ComposeReport, ShellCommandSpan, redact_shell_command};
 use tracing::debug;
 
 /// Runs Stage 1 shell expansion directives.
@@ -15,7 +15,7 @@ use tracing::debug;
 /// their output is data.
 pub(crate) fn run_stage(
     markdown: &mut Markdown,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
     runtime: &mut shell_expansion::types::PipelineRuntime,
     report: &mut ComposeReport,
     perf: &mut perf::PerfCollector,
@@ -38,7 +38,7 @@ pub(crate) fn run_stage(
     }
 
     let shell_opts = options.shell_options();
-    let policy_paths = shell_expansion::resolve_policy_paths(&shell_opts, &options.source)?;
+    let policy_paths = shell_expansion::resolve_policy_paths(&shell_opts, &options.source, options.resolution_context())?;
     runtime.shell.ensure_loaded(&policy_paths)?;
 
     let mut replacements = Vec::new();

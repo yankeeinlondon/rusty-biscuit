@@ -590,7 +590,7 @@ fn domain_variants_table(
     verbose: bool,
 ) -> Result<()> {
     use biscuit_icon::Icon;
-    use biscuit_terminal::components::prose::Prose;
+    use biscuit_terminal::components::prose::InlineProse;
 
     let data: Vec<Vec<TableCellContent>> = variants
         .iter()
@@ -604,7 +604,7 @@ fn domain_variants_table(
             let icon_cell = biscuit_icon::domain::icon_for_id(v.iconify_id)
                 .map(|icon: Icon| render_table_icon_cell(&icon, term, fmt))
                 .unwrap_or_else(|| {
-                    TableCellContent::StyledProse(Box::new(Prose::new("<dim>—</dim>")))
+                    TableCellContent::from(InlineProse::new("<dim>—</dim>"))
                 });
             row.push(icon_cell);
             if verbose {
@@ -639,7 +639,7 @@ fn domain_variants_table(
 /// 4. Dimmed iconify id (so the user still sees *something* identifying
 ///    the icon, even in a plain xterm without an image protocol)
 fn render_table_icon_cell(icon: &Icon, term: &Terminal, fmt: &Format) -> TableCellContent {
-    use biscuit_terminal::components::prose::Prose;
+    use biscuit_terminal::components::prose::InlineProse;
 
     if icon.unicode_char().is_some()
         || (fmt.nerd && icon.nerd_font_char().is_some())
@@ -659,10 +659,10 @@ fn render_table_icon_cell(icon: &Icon, term: &Terminal, fmt: &Format) -> TableCe
     // informative. The id is also available as a dedicated column with
     // `--verbose`, but losing the visual reference is worse than a hint
     // at the identifier.
-    TableCellContent::StyledProse(Box::new(Prose::new(format!(
+    TableCellContent::from(InlineProse::new(format!(
         "<dim>{}</dim>",
-        Prose::escape_text(icon.id())
-    ))))
+        InlineProse::escape_text(icon.id())
+    )))
 }
 
 fn cache_list(cache: &IconCache, term: &Terminal, nerd: bool) -> Result<()> {

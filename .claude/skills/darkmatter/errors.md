@@ -185,6 +185,11 @@ output fails the build.
   but it must be reviewed against the escape rule above.
 - ❌ Dropping `Arc<str>` cloning by passing `String` everywhere — `Arc<str>`
   is the canonical content type for `SourceContext`.
+- ❌ Reporting a single-file `no-match` without the literal-glob hint, or
+  testing for `*`/`?`/`[` yourself. Build the message with
+  `errors::with_glob_hint(message, failure, reference)` (or push
+  `failure.glob_hint(reference)` as a `hint:` row in a block); the hint is
+  biscuit-file's and appears only for `NoMatch`.
 - ❌ Adding ad-hoc fenced code in error bodies — use
   `SourceContext::excerpt_prose` or `frontmatter_prose` so the gutter and
   frontmatter framing stay consistent.

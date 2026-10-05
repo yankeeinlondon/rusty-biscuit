@@ -131,7 +131,7 @@ use renderable::tree::render::{
 };
 use renderable::tree::{ListMarkerPolicy, NodeKind, RenderNode, RenderStrictness, TreeRenderable};
 
-use crate::components::prose::Prose;
+use crate::components::prose::InlineProse;
 use crate::components::renderable::{BrowserRenderable, TerminalRenderable};
 use crate::terminal::Terminal;
 use crate::utils::block_constraint::{split_at_visible_width, visible_width};
@@ -2089,7 +2089,7 @@ impl FileSystem {
             if is_tty {
                 let display_name = if self.file_links {
                     match file_url(&self.root_path) {
-                        Some(url) => Prose::new(format!("<a href=\"{url}\">{name}</a>"))
+                        Some(url) => InlineProse::new(format!("<a href=\"{url}\">{name}</a>"))
                             .render_optimistic(None),
                         None => name,
                     }
@@ -2108,7 +2108,7 @@ impl FileSystem {
         let target = if self.file_links && is_tty {
             match file_url(&self.root_path) {
                 Some(url) => {
-                    Prose::new(format!("<a href=\"{url}\">{name}</a>")).render_optimistic(None)
+                    InlineProse::new(format!("<a href=\"{url}\">{name}</a>")).render_optimistic(None)
                 }
                 None => name,
             }
@@ -2190,7 +2190,7 @@ impl FileSystem {
             let display_name = if self.file_links && is_tty {
                 let node_path = current_path.join(name);
                 match file_url(&node_path) {
-                    Some(url) => Prose::new(format!("<a href=\"{url}\">{display_name}</a>"))
+                    Some(url) => InlineProse::new(format!("<a href=\"{url}\">{display_name}</a>"))
                         .render_optimistic(None),
                     None => display_name,
                 }

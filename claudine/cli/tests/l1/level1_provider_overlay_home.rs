@@ -190,9 +190,9 @@ fn codex_repo_overlay_uses_codex_home_and_leaves_the_user_home() {
     );
 }
 
-/// The roots the native-Windows L2 launch names, because the known-folder home
-/// ignores its fixture `USERPROFILE`: an explicit `CODEX_HOME` source and a
-/// `CLAUDINE_OVERLAY_DIR` storage parent. Nothing lands under the home.
+/// The roots the native-Windows L2 launch names: an explicit `CODEX_HOME`
+/// source and a `CLAUDINE_OVERLAY_DIR` storage parent. Nothing lands under the
+/// home.
 #[test]
 fn explicit_codex_home_and_overlay_dir_keep_the_overlay_out_of_the_home() {
     let fixture = CliProcessFixture::named("overlay-home-explicit-roots");

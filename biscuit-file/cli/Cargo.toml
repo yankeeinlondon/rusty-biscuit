@@ -21,3 +21,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
 assert_cmd = "2"
 predicates = "3"
+tempfile = "3"
+
+[package.metadata.ci.tests]
+# The path lookup guard includes darkmatter-cli's shared engine by `#[path]`
+# and spells both files in its test.
+source-inputs = ["darkmatter/cli/tests/common/path_lookup_guard.rs", "darkmatter/cli/tests/common/source_scan.rs"]

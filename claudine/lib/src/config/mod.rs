@@ -126,7 +126,7 @@ impl AgentInfo {
 /// as the primary user-level config path; consult the field documentation
 /// on [`crate::provider::ProviderInfo::config_paths`] for the convention.
 pub fn discover_agents_full() -> Vec<AgentInfo> {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("~"));
+    let home = biscuit_file::home_dir().unwrap_or_else(|| PathBuf::from("~"));
     let ai_clients = InstalledAiClients::new();
 
     PROVIDERS_DISPLAY_ORDER
@@ -282,7 +282,7 @@ mod tests {
 
     #[test]
     fn discover_agents_full_primary_config_path_matches_catalog_template() {
-        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("~"));
+        let home = biscuit_file::home_dir().unwrap_or_else(|| PathBuf::from("~"));
         let agents = discover_agents_full();
         for agent in &agents {
             let info = provider_info(agent.provider);

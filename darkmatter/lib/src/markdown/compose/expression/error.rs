@@ -243,6 +243,18 @@ pub enum ExpressionError {
     #[error("{}", display_file_reference(.0))]
     FileReference(FileReferenceDiagnostic),
 
+    /// A builtin that takes a glob reference (`find_files()`) could not
+    /// parse or resolve it. The typed cause carries the pattern and its
+    /// [`ResolutionFailure`](biscuit_file::ResolutionFailure) class.
+    #[error("{function}(): {source}")]
+    GlobReference {
+        /// The builtin's name.
+        function: &'static str,
+        /// Why the glob reference failed.
+        #[source]
+        source: Arc<biscuit_file::GlobReferenceError>,
+    },
+
     /// An unrecognized function name. The sole authoring-fatal variant in
     /// lenient mode — it can never resolve, so it is surfaced rather than left
     /// to leak its literal `{{ … }}` downstream.
@@ -442,7 +454,24 @@ fn display_file_reference(diagnostic: &FileReferenceDiagnostic) -> String {
                 diagnostic.function, diagnostic.reference
             )
         }
-        _ => format!("invalid file path: {}", diagnostic.reference),
+        _ => crate::markdown::errors::with_hint_line(
+            format!("invalid file path: {}", diagnostic.reference),
+            diagnostic.glob_hint(),
+        ),
+    }
+}
+
+impl FileReferenceDiagnostic {
+    /// The literal-glob hint for a clean miss (a [`FileRefFailure::NotFound`]
+    /// with no underlying error) of a reference whose text looks like a glob;
+    /// see [`biscuit_file::ResolutionFailure::glob_hint`].
+    pub fn glob_hint(&self) -> Option<&'static str> {
+        match (self.kind, &self.source) {
+            (FileRefFailure::NotFound, None) => {
+                biscuit_file::ResolutionFailure::NoMatch.glob_hint(&self.reference)
+            }
+            _ => None,
+        }
     }
 }
 
@@ -464,6 +493,11 @@ impl ExpressionError {
     ///   opt a reference out by guarding with `file_exists`/a ternary so no
     ///   resolution is attempted; a reference that is actually evaluated and
     ///   misses is surfaced rather than silently swallowed.
+    ///
+    /// - [`GlobReference`] — a glob reference that cannot be parsed or rooted
+    ///   is an authoring mistake for the same reason, and one whose search
+    ///   cannot read a directory it must enter would otherwise be a silently
+    ///   shorter list.
     ///
     /// - [`Provider`] — a focused provider failure (denied host, missing or
     ///   rejected credentials, rate limit, unsupported capability, incomplete
@@ -498,6 +532,7 @@ impl ExpressionError {
     ///
     /// [`UnknownFunction`]: ExpressionError::UnknownFunction
     /// [`FileReference`]: ExpressionError::FileReference
+    /// [`GlobReference`]: ExpressionError::GlobReference
     /// [`Provider`]: ExpressionError::Provider
     /// [`ContractViolation`]: ExpressionError::ContractViolation
     /// [`ContextNotCaptured`]: ExpressionError::ContextNotCaptured
@@ -514,6 +549,7 @@ impl ExpressionError {
     pub fn is_authoring_fatal(&self) -> bool {
         match self {
             ExpressionError::UnknownFunction { .. } => true,
+            ExpressionError::GlobReference { .. } => true,
             ExpressionError::Provider { .. } => true,
             ExpressionError::ContractViolation { .. } => true,
             ExpressionError::ReservedRootPathUnknown { .. } => true,

@@ -117,7 +117,7 @@ bt prose --no-wrap "Long line without wrapping"
 Grammar:
 - **Block tags**: `<b>`, `<i>`, `<u>`, `<uu>`, `<~>`, `<a href="...">`, `<red>`, `<rgb R,G,B>`, `<bg-rgb R,G,B>`, `<bg-coral>`, `<bg-red-800>`
 - **Markdown subset**: `**bold**`, `_italic_`, `[desc](url)`, fenced code blocks
-- **Color support**: Basic colors, bright colors, web colors, Tailwind colors (foreground and background)
+- **Color support**: basic, bright, web, Tailwind, and RGB foreground colors; web, Tailwind, and RGB background colors (a `bg-blue` tag stays literal text)
 
 Options:
 - `--margin-left` (alias `--ml`): Left margin in characters
@@ -126,6 +126,10 @@ Options:
 - `--margin-bottom` (alias `--mb`): Bottom margin in blank lines
 - `--alignment` (alias `--align`): Text alignment (`left`, `center`, `right`)
 - `--no-wrap`: Disable word wrapping
+
+Content whose render tree fails validation is an error on every target: the
+command prints the validation findings to stderr and exits non-zero, instead
+of printing an in-band error (`--html`) or nothing (`--md`).
 
 ### Block Quote Rendering
 
@@ -649,7 +653,7 @@ echo -e "\x1b[32mGreen\x1b[0m" | xargs bt
 
 ## Environment Variables
 
-- `NO_COLOR`: When set, disables colored output in pretty-print mode
+- `NO_COLOR`: When set, disables colored output in pretty-print mode. `bt prose` and `bt compose` honor it even over `FORCE_COLOR` or `--force-color`, and render as on a colorless terminal, so inline code keeps its backtick fence (`` See `md hash` here ``)
 - `RUST_LOG`: Enables tracing output (e.g., `RUST_LOG=debug bt`)
 
 ## Library Integration

@@ -4,7 +4,7 @@
 //! discriminator (`installed`, `local`, `via_parent`, `not_found`) rather
 //! than the bare `installed: bool` used by the other 8 categories.
 
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{InlineProse, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::{Table as TerminalTable, TableCellContent, TableColumn};
 use biscuit_terminal::terminal::Terminal;
@@ -114,16 +114,16 @@ fn linked_name_cell(name: &str, website: &str, term: &Terminal) -> String {
     if website.is_empty() {
         return name.to_string();
     }
-    Prose::new(format!(r#"<a href="{website}">{name}</a>"#)).render(term)
+    InlineProse::new(format!(r#"<a href="{website}">{name}</a>"#)).render(term)
 }
 
 fn availability_cell(availability: &Availability, term: &Terminal) -> String {
     match availability {
-        Availability::Installed { .. } => Prose::new("<green>installed</green>").render(term),
-        Availability::Local { .. } => Prose::new("<cyan>local</cyan>").render(term),
+        Availability::Installed { .. } => InlineProse::new("<green>installed</green>").render(term),
+        Availability::Local { .. } => InlineProse::new("<cyan>local</cyan>").render(term),
         Availability::ViaParent { parent } => {
-            Prose::new(format!("<yellow>via_parent</yellow> <dim>{parent}</dim>")).render(term)
+            InlineProse::new(format!("<yellow>via_parent</yellow> <dim>{parent}</dim>")).render(term)
         }
-        Availability::NotFound => Prose::new("<dim>not_found</dim>").render(term),
+        Availability::NotFound => InlineProse::new("<dim>not_found</dim>").render(term),
     }
 }

@@ -117,7 +117,9 @@ fn run_gen(area: &Path, args: &[&str]) -> Output {
 /// coverage). `stdin` is closed and stdout is captured (non-TTY).
 fn run_gen_env(area: &Path, args: &[&str], envs: &[(&str, &str)]) -> Output {
     let mut cmd = Command::new(bin_exe!("claudine-gen"));
-    cmd.arg("--area").arg(area).args(args);
+    // Launched inside the real monorepo, the process snapshot would walk
+    // every package of it on each run; the fixture is all the run reads.
+    cmd.current_dir(area).arg("--area").arg(area).args(args);
     // Neutralize any ambient color-forcing so the base case is deterministic.
     cmd.env_remove("FORCE_COLOR")
         .env_remove("CLICOLOR_FORCE")

@@ -205,6 +205,148 @@ mod tests {
         }
     }
 
+    /// The helper's contract for an ordinary existing directory, which also
+    /// holds without `file-reference` (`just test-minimal` runs this module).
+    #[test]
+    fn canonicalize_simplified_yields_a_usable_portable_canonical_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let authored = temp.path().join("docs");
+        std::fs::create_dir(&authored).unwrap();
+
+        let canonical = canonicalize_simplified(&authored).unwrap();
+
+        assert!(canonical.is_absolute(), "{}", canonical.display());
+        std::fs::write(canonical.join("note.md"), b"note").unwrap();
+        assert_eq!(std::fs::read(authored.join("note.md")).unwrap(), b"note");
+        assert!(
+            try_portable_string(&canonical).is_some(),
+            "{} has no portable spelling",
+            canonical.display()
+        );
+        // The real target, not the authored spelling: on macOS the temporary
+        // directory is `/var/...` and its target `/private/var/...`.
+        assert_eq!(
+            std::fs::canonicalize(&canonical).unwrap(),
+            std::fs::canonicalize(&authored).unwrap()
+        );
+        assert_eq!(canonicalize_simplified(&canonical).unwrap(), canonical);
+        #[cfg(not(windows))]
+        assert_eq!(canonical, std::fs::canonicalize(&authored).unwrap());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn canonicalize_simplified_resolves_a_symlink_to_its_target() {
+        let temp = tempfile::tempdir().unwrap();
+        let target = temp.path().join("target");
+        std::fs::create_dir(&target).unwrap();
+        let link = temp.path().join("link");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+
+        let canonical = canonicalize_simplified(&link).unwrap();
+
+        assert_eq!(canonical, canonicalize_simplified(&target).unwrap());
+        assert_ne!(canonical, link);
+    }
+
+    #[test]
+    fn canonicalize_simplified_reports_a_missing_path_as_an_io_error() {
+        let temp = tempfile::tempdir().unwrap();
+
+        let error = canonicalize_simplified(&temp.path().join("missing")).unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn canonicalize_simplified_agrees_for_verbatim_and_legacy_disk_spellings() {
+        let temp = tempfile::tempdir().unwrap();
+        let legacy = std::fs::canonicalize(temp.path()).unwrap();
+        let legacy = dunce::simplified(&legacy).join("docs");
+        std::fs::create_dir(&legacy).unwrap();
+        let verbatim = std::path::PathBuf::from(format!(r"\\?\{}", legacy.display()));
+
+        let from_legacy = canonicalize_simplified(&legacy).unwrap();
+        let from_verbatim = canonicalize_simplified(&verbatim).unwrap();
+
+        assert_eq!(from_legacy, from_verbatim);
+        assert!(
+            !from_legacy.to_string_lossy().starts_with(r"\\?\"),
+            "{} kept its verbatim prefix",
+            from_legacy.display()
+        );
+    }
+
+    /// Needs a Windows volume that generates 8.3 names; many disable
+    /// generation, and then there is no alias to test, so the test reports
+    /// that and returns.
+    #[test]
+    #[cfg(windows)]
+    fn canonicalize_simplified_reaches_one_target_through_a_short_name_alias() {
+        use std::os::windows::process::CommandExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let long = temp.path().join("Long Directory Name");
+        std::fs::create_dir(&long).unwrap();
+        let output = std::process::Command::new("cmd")
+            .raw_arg(format!(r#"/C for %I in ("{}") do @echo %~sI"#, long.display()))
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "cmd failed: {output:?}");
+        let short = std::path::PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+        if short == long {
+            eprintln!("8.3 name generation is disabled for {}; no alias to test", long.display());
+            return;
+        }
+
+        assert_eq!(
+            canonicalize_simplified(&short).unwrap(),
+            canonicalize_simplified(&long).unwrap()
+        );
+    }
+
+    /// A canonical result `dunce` cannot reduce keeps its verbatim prefix;
+    /// handed back to the reference grammar, it is the grammar's explicit
+    /// device-prefix error, never a panic or an accepted path.
+    #[test]
+    #[cfg(feature = "file-reference")]
+    fn an_unsimplifiable_result_fed_back_as_a_reference_is_an_explicit_error() {
+        let long_tail = "a".repeat(300);
+        let over_max_path = format!(r"\\?\C:\repo\{long_tail}");
+        let spellings = vec![
+            over_max_path,
+            r"\\?\C:\CON".to_string(),
+            r"\\?\UNC\server\share\x.md".to_string(),
+        ];
+
+        #[cfg(windows)]
+        let (spellings, _temp) = {
+            // A real result past MAX_PATH, which `dunce` declines to reduce.
+            let mut spellings = spellings;
+            let temp = tempfile::tempdir().unwrap();
+            let mut long = temp.path().to_path_buf();
+            for _ in 0..6 {
+                long.push("a".repeat(60));
+            }
+            std::fs::create_dir_all(&long).unwrap();
+            let canonical = canonicalize_simplified(&long).unwrap();
+            assert!(try_portable_string(&canonical).is_none(), "{}", canonical.display());
+            spellings.push(canonical.to_string_lossy().into_owned());
+            (spellings, temp)
+        };
+
+        for spelling in spellings {
+            match crate::FileReference::new(&spelling) {
+                Err(crate::FileReferenceError::InvalidSyntax(message)) => assert!(
+                    message.contains("device-prefix paths are not supported"),
+                    "{spelling}: {message}"
+                ),
+                other => panic!("{spelling} should be the device-prefix error, got {other:?}"),
+            }
+        }
+    }
+
     /// The predicate and the renderer must never disagree: every consumer
     /// branch built on the decline assumes the fallback is exactly the lossy
     /// native spelling.

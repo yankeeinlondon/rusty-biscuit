@@ -38,6 +38,23 @@ println!("{}", cols.display(&term));
 | `.with_left_percent(f32)` | Set left column as percentage (0.0..=1.0) |
 | `.with_gap(u32)` | Set gap between columns (default: 3) |
 
+### Prose Columns
+
+Each column is a block region, so it takes the block [`Prose`](./prose.md): the Prose's paragraphs and fenced code blocks become the column's blocks, with their inline styling intact on the terminal, browser, and MarkdownPlus targets. A plain string or other inline content is wrapped in one paragraph.
+
+### Markdown Output
+
+Portable Markdown has no side-by-side layout, so `render_markdown` writes the left column's blocks, a blank line, then the right column's. `render_markdown_plus` writes the same flex container the browser renders, as one raw HTML block. A Markdown reader passes that block through without parsing it, so the column bodies are HTML too, exactly as the browser writes them:
+
+```rust
+let cols = TwoColumn::new(Prose::new("`<em>x</em>` and **b**"), Prose::new("right"));
+let markdown = cols.render_markdown_plus();
+// <div class="columns" …><div class="column" …><p><code>&lt;em&gt;x&lt;/em&gt;</code>
+// and <strong>b</strong></p></div><div class="column" …><p>right</p></div></div>
+```
+
+Code stays literal code, and the container holds no blank line, so a reader keeps every block of both columns inside it. A blank line in generated content, such as a code block, is written as `&#10;`. Raw HTML in a column is written byte for byte; raw HTML that itself holds a blank line cannot stay inside the container unchanged, so the renderer treats it as lossy content (rejected under `Strict`, reported under `Warn`).
+
 ### ColumnWidth
 
 | Variant | Description |

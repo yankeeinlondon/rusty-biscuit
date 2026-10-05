@@ -68,12 +68,21 @@ use model::SequenceSource as Source;
 pub type ShellSourceRunner<'a> = &'a dyn Fn(&str) -> Result<String, CompositionError>;
 
 /// Caller-supplied capabilities for sequence-source resolution.
-#[derive(Default, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct SequenceSourceOptions<'a> {
     /// Expander for `$( … )` sources. `None` rejects them.
     pub shell_runner: Option<ShellSourceRunner<'a>>,
-    /// Immutable request snapshot for external file-backed sequence sources.
-    pub file_resolution_context: Option<&'a biscuit_file::FileResolutionContext>,
+    /// The request's file-resolution context, for external file-backed
+    /// sources and source expressions.
+    pub file_resolution_context: &'a biscuit_file::FileResolutionContext,
+}
+
+impl<'a> SequenceSourceOptions<'a> {
+    /// Options resolving through `file_resolution_context`, with no shell
+    /// runner.
+    pub fn new(file_resolution_context: &'a biscuit_file::FileResolutionContext) -> Self {
+        Self { shell_runner: None, file_resolution_context }
+    }
 }
 
 /// Detect and resolve a sequence plan from a resolved composition source.
@@ -88,8 +97,9 @@ pub struct SequenceSourceOptions<'a> {
 /// collisions, or external file load failures.
 pub fn resolve_sequence_plan(
     source: &ResolvedCompositionSource,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
 ) -> Result<Option<SequencePlan>, CompositionError> {
-    resolve_sequence_plan_with(source, SequenceSourceOptions::default())
+    resolve_sequence_plan_with(source, SequenceSourceOptions::new(file_resolution_context))
 }
 
 /// [`resolve_sequence_plan`] with caller-supplied capabilities.
@@ -142,6 +152,7 @@ pub fn resolve_sequence_plan_with(
                 &source.resolved_path,
                 &frontmatter,
                 fail_fast,
+                options.file_resolution_context,
             )?
         }
         SequenceSourceSpec::Inline(items) => normalize::normalize_plan(
@@ -161,23 +172,18 @@ pub fn resolve_sequence_plan_with(
             resolve_shell_source(&command, &options, &source.resolved_path, fail_fast)?
         }
         SequenceSourceSpec::Reference(reference) => {
-            let path = match options.file_resolution_context {
-                Some(context) => source::resolve_sequence_reference_in_context(
-                    &reference.reference,
-                    &source.resolved_path,
-                    context,
-                )?,
-                None => source::resolve_sequence_reference(
-                    &reference.reference,
-                    &source.resolved_path,
-                )?,
-            };
+            let path = source::resolve_sequence_reference(
+                &reference.reference,
+                &source.resolved_path,
+                options.file_resolution_context,
+            )?;
             source::load_referenced_sequence(
                 &reference,
                 &path,
                 &source.resolved_path,
                 &frontmatter,
                 fail_fast,
+                options.file_resolution_context,
             )?
         }
     };
@@ -202,12 +208,10 @@ fn resolve_expression_source(
     expression: &str,
     frontmatter: &Map<String, Value>,
     invocation_path: &Path,
-    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
     fail_fast: bool,
 ) -> Result<SequencePlan, CompositionError> {
-    let base_dir = invocation_path.parent().unwrap_or_else(|| Path::new("."));
-    let lookup = SourceExpressionLookup::new(frontmatter, base_dir)
-        .with_file_resolution_context(file_resolution_context, invocation_path);
+    let lookup = SourceExpressionLookup::new(frontmatter, file_resolution_context, invocation_path);
     let value = expr::evaluate_whole(expression, &lookup)?;
 
     let items = match value {

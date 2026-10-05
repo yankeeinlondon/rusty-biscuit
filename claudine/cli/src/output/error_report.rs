@@ -1,6 +1,6 @@
 use biscuit_terminal::components::compose::Compose;
 use biscuit_terminal::components::list::UnorderedList;
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::status::{Status, StatusState};
 use biscuit_terminal::prelude::StatusBlock;
@@ -445,6 +445,15 @@ impl AgentErrorReport {
     }
 
     pub(crate) fn render(&self, term: &Terminal) {
+        log::message("");
+        log::message(&self.status_block(term).render(term));
+        log::message("");
+    }
+
+    /// The report's block. Every part keeps the rows its text was written
+    /// with: the heading line, the summary, the list, then the footer, detail,
+    /// hint, and suggestions, each starting on a row of its own.
+    fn status_block(&self, term: &Terminal) -> StatusBlock {
         let border_color = match self.category {
             AgentErrorCategory::Configuration => Color::Tailwind(Tailwind::Orange700),
             AgentErrorCategory::AgentNative => Color::Tailwind(Tailwind::Red700),
@@ -463,25 +472,31 @@ impl AgentErrorReport {
 
         let mut compose = Compose::default();
 
-        compose.add_prose(Prose::new(format!(
+        compose.add_prose(rows(format!(
             "<red><bold>{label}</bold></red> <dim>({provider_name}, exit {})</dim>\n{}",
             self.exit_code, self.summary,
         )));
 
+        // Compose concatenates its parts inline, and Prose trims edge
+        // newlines, so each part's leading row break is its own text part.
         if let Some(ref items) = self.body_list {
+            compose.add_text("\n");
             compose.add_unordered_list(UnorderedList::new(items.clone()));
         }
 
         if let Some(ref footer) = self.footer {
-            compose.add_prose(Prose::new(format!("\n{footer}")));
+            compose.add_text("\n");
+            compose.add_prose(rows(footer.as_str()));
         }
 
         if let Some(ref detail) = self.detail {
-            compose.add_prose(Prose::new(format!("\n<dim>{detail}</dim>")));
+            compose.add_text("\n");
+            compose.add_prose(rows(format!("<dim>{detail}</dim>")));
         }
 
         if let Some(ref hint) = self.hint {
-            compose.add_prose(Prose::new(format!("\n<blue>{hint}</blue>")));
+            compose.add_text("\n");
+            compose.add_prose(rows(format!("<blue>{hint}</blue>")));
         }
 
         if let Some(ref suggestions) = self.suggestions
@@ -507,16 +522,19 @@ impl AgentErrorReport {
             }
         }
 
-        let block = StatusBlock::new(StatusState::Error)
-            .body(Prose::new(compose.render(term)))
+        // The composed text is already rendered: its rows must survive the
+        // block's re-parse.
+        StatusBlock::new(StatusState::Error)
+            .body(rows(compose.render(term)))
             .border_color(border_color)
             .left_margin(TargetValue::universal(Length::ch(2)))
-            .right_margin(TargetValue::universal(Length::ch(2)));
-
-        log::message("");
-        log::message(&block.render(term));
-        log::message("");
+            .right_margin(TargetValue::universal(Length::ch(2)))
     }
+}
+
+/// Prose whose single newlines are row breaks.
+fn rows(text: impl Into<String>) -> Prose {
+    Prose::new(text).with_line_breaks(LineBreaks::Hard)
 }
 
 /// The generic report for a classified cause. `detail` is the already

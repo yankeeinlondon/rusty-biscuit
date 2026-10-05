@@ -26,7 +26,7 @@ fn compose_file(dir: &TempDir, root_name: &str, extra_options: Option<ComposeOpt
     let options = extra_options.unwrap_or(base);
     let (composed, _) = Markdown::try_from(root.as_path())
         .unwrap()
-        .compose_with(options)
+        .compose_with(&crate::request_support::request(options))
         .unwrap();
     composed.content().to_string()
 }
@@ -43,7 +43,7 @@ fn compose_file_result(
     let options = extra_options.unwrap_or(base);
     Markdown::try_from(root.as_path())
         .unwrap()
-        .compose_with(options)
+        .compose_with(&crate::request_support::request(options))
         .map(|(md, _)| md.content().to_string())
 }
 
@@ -403,7 +403,7 @@ fn permissive_invalid_assignment_warns_and_keeps_siblings() {
         .with_allow_invalid_frontmatter_assignment(true);
     let (composed, report) = Markdown::try_from(root.as_path())
         .unwrap()
-        .compose_with(options)
+        .compose_with(&crate::request_support::request(options))
         .unwrap();
 
     let output = composed.content().to_string();
@@ -442,7 +442,7 @@ fn permissive_reassigned_property_warns_and_rightmost_wins() {
         .with_allow_reassigned_frontmatter_property(true);
     let (composed, report) = Markdown::try_from(root.as_path())
         .unwrap()
-        .compose_with(options)
+        .compose_with(&crate::request_support::request(options))
         .unwrap();
 
     let output = composed.content().to_string();

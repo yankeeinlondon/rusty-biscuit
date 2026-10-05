@@ -23,7 +23,7 @@ use worktree::worktree::{WorktreeList, parse_worktree_state};
 
 use super::git_graph;
 use super::list_table::{
-    self, CredentialCondition, CredentialLine, FfNotice, FfSuggestion, LastKnown, PrOutcome, RemoteFacts,
+    self, CredentialCondition, CredentialLine, FfNotice, FfSuggestion, GraphOmissions, LastKnown, PrOutcome, RemoteFacts,
     RemoteStatus, Sections, TableFacts,
 };
 use crate::perf;
@@ -679,15 +679,6 @@ fn run_pipeline(
         perf::record(&mut collector, "table render", start.elapsed());
     }
 
-    let badges = facts.badges();
-    let graph = graph_facts.map(|graph_facts| {
-        let t0 = perf.then(Instant::now);
-        let graph = graph_facts.to_git_graph(badges, parsed_width.clone()).render(&image_terminal(terminal));
-        if let Some(start) = t0 {
-            perf::record(&mut collector, "graph image render (biscuit-terminal)", start.elapsed());
-        }
-        graph
-    });
     let verbose_text = verbose_data.map(|data| {
         let t0 = perf.then(Instant::now);
         let text = render_verbose(&data, terminal);
@@ -697,6 +688,35 @@ fn run_pipeline(
         text
     });
     let status = list_table::render_status(&facts, terminal, now);
+    // Everything but the graph is known now, so the graph gets the rows the
+    // rest of the listing leaves (the notes before the graph adds its own).
+    let max_graph_rows = list_table::graph_row_budget(
+        terminal.height(),
+        &[Some(table.as_str()), status.as_deref(), verbose_text.as_deref(), list_table::render_notes(&facts, terminal).as_deref()],
+    );
+    let badges = facts.badges();
+    let graph = graph_facts.and_then(|graph_facts| {
+        let t0 = perf.then(Instant::now);
+        let graph = graph_facts
+            .to_git_graph(badges, parsed_width.clone())
+            .with_max_rows(max_graph_rows)
+            .render_without_notes(&image_terminal(terminal));
+        if let Some(start) = t0 {
+            perf::record(&mut collector, "graph image render (biscuit-terminal)", start.elapsed());
+        }
+        graph.map(|graph| (graph, graph_facts))
+    });
+    let graph = graph.map(|((image, plan), graph_facts)| {
+        facts.graph_omissions = GraphOmissions {
+            hidden_lanes: plan.hidden_lanes,
+            omissions: plan.omissions,
+            history_gap: graph_facts.incomplete,
+            shallow: graph_facts.shallow,
+            merged_elsewhere: graph_facts.merged_elsewhere,
+            forked_off_line: graph_facts.forked_off_line,
+        };
+        image
+    });
     let notes = list_table::render_notes(&facts, terminal);
     eprint!(
         "{}",

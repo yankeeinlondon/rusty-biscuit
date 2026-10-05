@@ -571,6 +571,10 @@ pub struct ComposeWarning {
     /// Root document that consumed the advisory.
     pub consumer: Option<PathBuf>,
 
+    /// The failure class, when the warning reports a file reference that
+    /// failed and was tolerated (a transclusion replaced by a notice).
+    pub resolution_failure: Option<biscuit_file::ResolutionFailure>,
+
     /// Which issue this warning reports, when its family declares one.
     /// Set only by a family's constructor; see [`WarningIdentity`].
     pub(crate) identity: Option<WarningIdentity>,
@@ -649,6 +653,10 @@ impl ComposeWarning {
     /// Code of a lenient expression evaluation failure.
     pub const EXPRESSION_EVALUATION_FAILURE_CODE: &'static str =
         "dm.expression.evaluation_failure";
+    /// Code of the warning for a file symlink a glob reference left out
+    /// because its target lies outside the file tree. Shared by
+    /// `find_files()` and `::file-links`.
+    pub const GLOB_SKIPPED_SYMLINK_CODE: &'static str = "dm.glob.skipped_symlink";
 
     /// Creates a new warning.
     pub fn new(stage: impl Into<String>, message: impl Into<String>) -> Self {
@@ -660,8 +668,17 @@ impl ComposeWarning {
             code: None,
             path: None,
             consumer: None,
+            resolution_failure: None,
             identity: None,
         }
+    }
+
+    /// This warning, reporting a tolerated file-reference failure of class
+    /// `failure`.
+    #[must_use]
+    pub fn with_resolution_failure(mut self, failure: Option<biscuit_file::ResolutionFailure>) -> Self {
+        self.resolution_failure = failure;
+        self
     }
 
     /// Projects a typed schema advisory into the compose warning model.
@@ -669,7 +686,7 @@ impl ComposeWarning {
         advisory: &SchemaAdvisory,
         consumer: impl Into<PathBuf>,
     ) -> Self {
-        let path = std::fs::canonicalize(advisory.path())
+        let path = biscuit_file::canonicalize_simplified(advisory.path())
             .unwrap_or_else(|_| advisory.path().to_path_buf());
         Self {
             stage: "schema_validation".to_string(),
@@ -682,6 +699,7 @@ impl ComposeWarning {
             }),
             path: Some(path),
             consumer: Some(consumer.into()),
+            resolution_failure: None,
         }
     }
 
@@ -749,6 +767,25 @@ impl ComposeWarning {
                 },
             }),
             ..Self::new(stage, message)
+        }
+    }
+
+    /// A file symlink a glob reference matched but left out, because its
+    /// target lies outside the file tree. One per link: the same link reached
+    /// by two globs, or by one glob evaluated twice, is one issue.
+    pub(crate) fn skipped_symlink(stage: impl Into<String>, entry: &biscuit_file::SkippedEntry) -> Self {
+        let link = biscuit_file::to_portable_string(&entry.link);
+        let target = biscuit_file::to_portable_string(&entry.target);
+        Self {
+            code: Some(Self::GLOB_SKIPPED_SYMLINK_CODE.to_string()),
+            identity: Some(WarningIdentity {
+                subject: WarningSubject::Path(entry.link.clone()),
+            }),
+            path: Some(entry.link.clone()),
+            ..Self::new(
+                stage,
+                format!("skipped `{link}`: it links to `{target}`, which is outside the file tree"),
+            )
         }
     }
 
@@ -922,6 +959,7 @@ mod tests {
                 code: Some("dm.schema.missing_simplified_envelope".to_string()),
                 path: Some(PathBuf::from("schema.yaml")),
                 consumer: Some(PathBuf::from(consumer)),
+                resolution_failure: None,
                 identity: Some(WarningIdentity {
                     subject: WarningSubject::Path(PathBuf::from("schema.yaml")),
                 }),

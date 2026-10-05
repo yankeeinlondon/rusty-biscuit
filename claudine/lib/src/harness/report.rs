@@ -5,7 +5,7 @@
 
 use std::path::Path;
 
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use biscuit_terminal::components::status::{Status, StatusState, StatusTheme};
 use biscuit_terminal::prelude::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
@@ -22,12 +22,13 @@ fn emit_status(markup: &str, state: StatusState, term: &Terminal) {
 /// Escape user-controlled text (file references, file names, shell commands,
 /// recovery messages) so Prose renders it exactly as written.
 ///
-/// Delegates to [`Prose::escape_text`], which also neutralizes Markdown
-/// emphasis and code delimiters: a hand-rolled escaper that skipped `_` and `*`
-/// rendered `_draft_.md` as an italic `draft.md`. For an attribute value such
-/// as an `href`, use [`Prose::quoted_attr`] instead.
+/// Delegates to [`Prose::escape_text_outside_code_spans`], which neutralizes
+/// Markdown emphasis and tags (a hand-rolled escaper that skipped `_` and `*`
+/// rendered `_draft_.md` as an italic `draft.md`) while leaving a code span the
+/// text marks with backticks literal. For an attribute value such as an
+/// `href`, use [`Prose::quoted_attr`] instead.
 pub fn prose_escape(s: &str) -> String {
-    Prose::escape_text(s)
+    Prose::escape_text_outside_code_spans(s)
 }
 
 /// Emit the source-file existence status.
@@ -157,8 +158,18 @@ pub fn report_prompt_property(has_prompt: bool, is_non_empty: bool, term: &Termi
 ///
 /// `message` is plain text — often a provider's own diagnostic — and is shown
 /// exactly as written, so a masked secret (`****`) is not read as emphasis.
+/// Its first line is the status line; any further line (such as a `hint:`
+/// row) follows on a row of its own.
 pub fn report_unhandled_failure(message: &str, term: &Terminal) {
-    emit_status(&prose_escape(message), StatusState::Error, term);
+    eprintln!("{}", unhandled_failure_text(message, term));
+}
+
+fn unhandled_failure_text(message: &str, term: &Terminal) -> String {
+    Status::from_prose(prose_escape(message))
+        .with_line_breaks(LineBreaks::Hard)
+        .state(StatusState::Error)
+        .theme(StatusTheme::Circular)
+        .render(term)
 }
 
 #[cfg(test)]
@@ -187,12 +198,17 @@ mod tests {
         for text in [
             "<b>{x}</b> a\\b plain",
             "_draft_.md",
-            "**bold** `code_span` [link](target) *star*",
+            "**bold** [link](target) *star*",
             r#"lifecycle retry: "quoted" _loop_count"#,
             "git log --format=%s *_test*",
         ] {
             assert_eq!(rendered(&prose_escape(text)), text, "{text:?}");
         }
+    }
+
+    #[test]
+    fn a_backtick_code_span_renders_as_code_with_its_contents_literal() {
+        assert_eq!(rendered(&prose_escape("**bold** `code_span *x*`")), "**bold** code_span *x*");
     }
 
     #[test]
@@ -336,6 +352,21 @@ mod tests {
     }
 
     // -- report_unhandled_failure --
+
+    #[test]
+    fn unhandled_failure_keeps_each_further_line_on_its_own_row() {
+        let term = Terminal::builder()
+            .width(200)
+            .color_depth(biscuit_terminal::discovery::detection::ColorDepth::None)
+            .build();
+        let rendered = biscuit_terminal::utils::escape_codes::strip_escape_codes(
+            unhandled_failure_text("file not found: a*.md\nhint: quote it", &term),
+        );
+        let rows: Vec<&str> = rendered.lines().collect();
+        assert_eq!(rows.len(), 2, "{rendered:?}");
+        assert!(rows[0].ends_with("file not found: a*.md"), "{rendered:?}");
+        assert_eq!(rows[1], "hint: quote it", "{rendered:?}");
+    }
 
     #[test]
     fn report_unhandled_failure_renders() {

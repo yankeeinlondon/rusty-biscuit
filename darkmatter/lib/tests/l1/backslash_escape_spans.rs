@@ -6,7 +6,7 @@ use darkmatter::markdown::Markdown;
 fn compose_body(body: &str) -> (String, Vec<String>) {
     let source = format!("---\nx: value\n---\n{body}\n");
     let markdown: Markdown = source.into();
-    let (composed, report) = markdown.compose().expect("compose should succeed");
+    let (composed, report) = markdown.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).expect("compose should succeed");
     let warnings = report.warnings.iter().map(|w| w.message.clone()).collect();
     (composed.content().trim_end().to_string(), warnings)
 }
@@ -56,7 +56,7 @@ fn escaped_foreign_template_examples_produce_no_expression_warnings() {
     // the span is scanned, so the escape below is what keeps it out.
     let example = r#"{{env.VAR | "default"}}"#;
     let unescaped: Markdown = format!("---\nx: value\n---\nOld form: {example}\n").into();
-    let error = unescaped.compose().expect_err("an unparseable body span fails composition");
+    let error = unescaped.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).expect_err("an unparseable body span fails composition");
     assert!(
         error.to_string().contains("Unexpected '|'"),
         "control case should fail to parse: {error}"

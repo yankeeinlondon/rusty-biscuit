@@ -8,15 +8,30 @@
   `file-reference` and used only for repository-root discovery in
   `find_git_root`. It replaces the former `git2`/libgit2 dependency so the
   crate (and its consumers, e.g. `sniff`) carries no C-linked git backend.
-- `dirs` is gated behind `file-reference` and supplies the cross-platform
-  home directory for `home_dir` / `~` (home-pinned) references. It replaces a
-  bare `$HOME` read, which is not a complete contract on native Windows.
+- `globset` is gated behind `file-reference` and compiles the glob half of a
+  `GlobReference` (a file-reference prefix followed by a glob); only the
+  `file_reference/glob/` module names it, and only `glob/parse.rs` builds a
+  matcher (`roots.rs` holds the compiled `GlobMatcher`). Darkmatter already depends on the
+  same `0.4` line, so the workspace gains no new crate. Patterns are built
+  with explicit options, never the crate defaults: `literal_separator(true)`,
+  case-sensitive, and `backslash_escape(false)` on every OS (the default is on
+  for Unix and off for Windows), so a literal `[` or `*` is escaped with
+  character classes (`globset::escape`), which read the same everywhere.
+- `walkdir` is gated behind `file-reference` and walks a `GlobReference`'s
+  search directories (`file_reference/glob/list.rs`), which is also how a
+  recursive `%` reference searches. It is used with `follow_links(false)`, so
+  a directory symlink is never descended; file symlinks are judged
+  separately against the relative boundary.
 - `dunce` is unconditional and reduces a Windows `\\?\` verbatim path to its
   legacy spelling — but only when the legacy spelling is equivalent — at the
-  crate's two boundaries:
+  crate's three boundaries:
+  - `canonicalize_simplified` (unfeatured), the crate's only
+    `dunce::canonicalize` call. Every filesystem canonicalization in
+    biscuit-file, Claudine, and Darkmatter whose result leaves a private
+    comparison goes through it, including the resolver's containment check.
   - `simplify_root` (behind `file-reference`), the resolver's root boundary.
     Anchors reach the resolver in both spellings (`std::fs::canonicalize` yields
-    verbatim; `gix` and `dirs` yield legacy), and Win32 applies no path
+    verbatim; `gix` and an environment-read home usually yield legacy), and Win32 applies no path
     normalization under the verbatim prefix, so a reference's own `/` separators
     would never resolve.
   - `to_portable_string` / `try_portable_string`, the path→text boundary, which

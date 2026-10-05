@@ -265,7 +265,7 @@ fn test_compose_link_transcluded_child() {
         "stdout should contain normalized sibling path relative to parent, got:\n{stdout}"
     );
     // Should not contain absolute path
-    let abs_sibling = std::fs::canonicalize(&sibling_file).unwrap();
+    let abs_sibling = biscuit_file::canonicalize_simplified(&sibling_file).unwrap();
     assert!(
         !stdout.contains(abs_sibling.to_string_lossy().as_ref()),
         "stdout should not contain absolute path, got:\n{stdout}"
@@ -433,12 +433,61 @@ fn compose_env_anchored_child_is_bounded_by_the_variable() {
 
     let escape = compose("escape.md");
     let stdout = String::from_utf8_lossy(&escape.stdout);
-    let stderr = String::from_utf8_lossy(&escape.stderr);
+    let stderr = biscuit_test_harness::strip_ansi(&String::from_utf8_lossy(&escape.stderr));
     let collapsed = stderr.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(!escape.status.success(), "stdout: {stdout}");
     assert!(!stdout.contains("outside-content"), "{stdout}");
     assert!(
-        collapsed.contains("relative reference `../../outside.md` leaves file tree"),
+        collapsed.contains("relative reference ../../outside.md leaves file tree"),
         "{collapsed}"
+    );
+}
+
+/// `md compose` launched from a package directory resolves `&` and `^` in a
+/// document two directories down.
+///
+/// The CLI runs pre-flight before the compose pipeline. When only the
+/// pipeline prepared the repository-aware context, pre-flight's resolver had
+/// no repository root and every `&`/`^` target failed with "requires a
+/// repository containing reference CWD". The `^pkg/...` directive is the
+/// shape of the original report (`^claudine/docs/cli/index.md` from
+/// `claudine/`).
+#[test]
+fn test_compose_repository_sigils_from_a_nested_document() {
+    let fixture = CliProcessFixture::named("test_compose_repository_sigils_from_a_nested_document");
+    let repo = fixture.workspace_path().join("repo");
+    assert!(fixture.initialize_repository_at(&repo));
+    let launch_dir = repo.join("pkg");
+    for (relative, content) in [
+        ("amp-target.md", "AMP-TARGET-BODY\n"),
+        ("caret-target.md", "CARET-TARGET-BODY\n"),
+        ("pkg/docs/cli/index.md", "CLI-INDEX-BODY\n"),
+        (
+            "pkg/docs/guide/doc.md",
+            "# Guide\n\n::file &amp-target.md\n\n::file ^caret-target.md\n\n::file ^pkg/docs/cli/index.md\n",
+        ),
+    ] {
+        common::write(&repo.join(relative), content);
+    }
+
+    let output = fixture
+        .command_builder()
+        .ambient_context(&launch_dir)
+        .build()
+        .arg("compose")
+        .arg("docs/guide/doc.md")
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "compose must succeed\nstdout:\n{stdout}\nstderr:\n{stderr}");
+    for body in ["AMP-TARGET-BODY", "CARET-TARGET-BODY", "CLI-INDEX-BODY"] {
+        assert!(stdout.contains(body), "missing {body} in stdout:\n{stdout}");
+    }
+    assert!(!stdout.contains("::file"), "a directive leaked into stdout:\n{stdout}");
+    assert!(
+        !stderr.contains("requires a repository containing reference CWD"),
+        "stderr:\n{stderr}"
     );
 }

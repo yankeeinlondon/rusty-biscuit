@@ -1,9 +1,9 @@
 //! Committed directory / partial-path handling for the composition completer.
 //!
-//! [`gather_committed`] walks only inside the committed directory relative
-//! to the repo root (or cwd when no repo). High-profile scopes are
-//! intentionally **not** consulted — the spec flips semantics once the
-//! user commits to a subtree.
+//! [`gather_committed`] walks only inside the committed directory under the
+//! roots the shared `FileReference` completion expansion supplies for the
+//! token. High-profile scopes are intentionally **not** consulted — the spec
+//! flips semantics once the user commits to a subtree.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -13,36 +13,50 @@ use biscuit_file::to_portable_string;
 use super::{Candidate, file_name_matches};
 use crate::completion::frontmatter;
 use crate::completion::fuzzy::{self, PartialLen};
-use crate::completion::scopes::{self, ComposeMode, Scope, ScopeContext, ScopeKind};
+use crate::completion::scopes::{ComposeMode, Scope, ScopeKind};
 use crate::completion::walker;
 
-/// CommittedDir / PartialPath: walk only inside the committed directory
-/// relative to the repo root (or cwd when no repo). High-profile scopes
-/// are intentionally **not** consulted — the spec flips semantics once the
-/// user commits to a subtree.
+/// CommittedDir / PartialPath: walk only inside the committed directory.
+///
+/// `roots` are the shared expansion's directories with `dir` already
+/// appended, in resolution order (the launch directory, then the repository
+/// root), so a file offered here is the file that composition resolves for
+/// the same token. An earlier root ranks first, and the final dedup keeps its
+/// candidate when two roots hold the same relative path.
 pub(super) fn gather_committed(
     mode: ComposeMode,
-    ctx: &ScopeContext,
+    roots: &[PathBuf],
     dir: &str,
     active: &str,
 ) -> Vec<Candidate> {
-    let partial_len = PartialLen::classify(active.chars().count());
+    let mut out: Vec<Candidate> = Vec::new();
+    let mut seen: HashSet<PathBuf> = HashSet::new();
+    for (rank, walk_root) in roots.iter().enumerate() {
+        let rank = u8::try_from(rank).unwrap_or(u8::MAX);
+        gather_committed_root(mode, walk_root, rank, dir, active, &mut seen, &mut out);
+    }
+    out
+}
 
-    let base = scopes::effective_repo_root(ctx)
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| ctx.cwd.clone());
-    let walk_root = base.join(dir);
+fn gather_committed_root(
+    mode: ComposeMode,
+    walk_root: &Path,
+    source_rank: u8,
+    dir: &str,
+    active: &str,
+    seen: &mut HashSet<PathBuf>,
+    out: &mut Vec<Candidate>,
+) {
+    let partial_len = PartialLen::classify(active.chars().count());
     if !walk_root.is_dir() {
-        return Vec::new();
+        return;
     }
     let scope = Scope {
         kind: ScopeKind::CommittedDir,
-        path: walk_root.clone(),
+        path: walk_root.to_path_buf(),
         follow_links: true,
     };
     let entries = walker::walk_scope(&scope);
-    let mut out: Vec<Candidate> = Vec::new();
-    let mut seen: HashSet<PathBuf> = HashSet::new();
 
     for entry_path in entries {
         let is_dir = entry_path.is_dir();
@@ -74,7 +88,7 @@ pub(super) fn gather_committed(
                 continue;
             }
         }
-        let rel = match entry_path.strip_prefix(&walk_root) {
+        let rel = match entry_path.strip_prefix(walk_root) {
             Ok(r) => r,
             Err(_) => continue,
         };
@@ -92,8 +106,7 @@ pub(super) fn gather_committed(
         };
         out.push(Candidate {
             insert,
-            source_rank: 0,
+            source_rank,
         });
     }
-    out
 }

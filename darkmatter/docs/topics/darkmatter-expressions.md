@@ -294,7 +294,7 @@ namespace.
 | --- | --- | --- |
 | `doc` / `doc.*` | the **current** document's frontmatter (this document) | eager |
 | `ctx.*` | runtime context (date/time, repo, OS, hardware, …) — see [context variables](state-management/context-variables.md) | eager, captured once per request |
-| `env.*` | process environment variables, from the snapshot frozen at capture | eager |
+| `env.*` | environment variables from the request's snapshot (the same map `{{VAR}}` file references read) | eager |
 | `current.*` | the same keys as `ctx.*`, each observed when the reference is evaluated | lazy |
 | `current_env.*` | the same keys as `env.*`, each reread from the live process environment | lazy |
 
@@ -535,7 +535,7 @@ refresh it after changing the catalog.
 | Filesystem | `markdown_title(file)` | Returns the title from frontmatter or the first H1 heading. | `markdown_title("fixture.md")` ⇒ `Fixture Title` |
 | Filesystem | `validate_schema(file)` | Validates a Markdown document against its declared schema. | `validate_schema("fixture.md")` ⇒ `true` |
 | Filesystem | `validate_schema(file, obj)` | Validates a Markdown document against its declared schema. | `validate_schema("fixture.md", {})` ⇒ `true` |
-| Filesystem | `find_files(pattern)` | Returns every file a glob reference matches (`&dir/**/name.md`), as sorted absolute paths; the path before the first wildcard is the directory searched. | `length(find_files("**/note.md"))` ⇒ `2` |
+| Filesystem | `find_files(pattern)` | Returns every file a glob reference matches (`&dir/**/name.md`, `^docs/*.md`), as absolute paths merged across every root of its prefix in native order (most local root first, then shallowest, then by path component). A bare pattern searches the document's folder, then the repository root. A file symlink a bare, `./`, or `../` pattern matches whose target leaves the file tree is skipped with a `dm.glob.skipped_symlink` warning. A directory the search must enter but cannot read fails the expression with an I/O failure instead of shortening the list. | `length(find_files("**/note.md"))` ⇒ `2` |
 | Filesystem | `is_indexed_file(file)` | Returns true when the filename stem matches the indexed grammar (base-NNN). | `is_indexed_file("review-1.md")` ⇒ `true` |
 | Filesystem | `file_index(file)` | Returns the parsed index suffix, or -1 when non-indexed. | `file_index("review-1.md")` ⇒ `1` |
 | Filesystem | `increment_file_index(file)` | Increments the numeric index suffix, preserving zero-padding width. | `increment_file_index("review-1.md")` ⇒ `review-2.md` |
@@ -550,6 +550,8 @@ refresh it after changing the catalog.
 | Filesystem | `join(left, right)` | Joins two path strings with normalized separators. | `join("sub", "note.md")` ⇒ `sub/note.md` |
 | Filesystem | `link(file)` | Creates a Markdown link to a local file, using its relative path as the link text. |  |
 | Filesystem | `link(target, desc)` | Creates a Markdown link to a local file, using its relative path as the link text. |  |
+| Filesystem | `code_link(file)` | Creates a Markdown link whose text is inline code. Arguments, destinations, and errors match link(); the text is a code span, so brackets and backslashes are kept as written rather than escaped. |  |
+| Filesystem | `code_link(target, desc)` | Creates a Markdown link whose text is inline code. Arguments, destinations, and errors match link(); the text is a code span, so brackets and backslashes are kept as written rather than escaped. |  |
 | Filesystem | `has_command(cmd)` | Returns true when the command is found on PATH or is an existing executable absolute path. |  |
 | Context | `has_skill(name)` | Returns true when a skill directory exists in a user-scoped or local-scoped skill root. |  |
 | Context | `has_local_skill(name)` | Returns true when a skill directory exists in a local-scoped skill root. |  |
@@ -653,6 +655,7 @@ whether a local path exists; they operate on the resolved path shape.
 | `absolute(path)` | the absolute form of a path | **no** |
 | `relative(path)` | a path relative to the base dir | **no** |
 | `has_command(cmd)` | whether a command is runnable on the host | **no** |
+| `find_files(pattern)` | every file a glob reference matches | **no** |
 
 `frontmatter(path, …)` and `markdown_title(path)` decode a stored
 [literal token](../inline/interpolation.md#literal-tokens) to the text it
@@ -678,6 +681,69 @@ intentionally **not** resolved and always return `false` by design:
 
 Both follow the never-error contract — they return `false` rather than raising —
 and can be addressed later without an API change.
+
+#### Finding Files
+
+`find_files(pattern)` lists every file a **glob reference** matches, so a
+document can count, list, or link a set of files it does not name one by one:
+
+```md
+{{ as_unordered_list(find_files("^docs/*.md")) }}
+{{ length(find_files("&**/spec.md")) }} specs in this repository
+```
+
+The pattern is an optional file-reference prefix followed by a glob. The
+prefix picks the folders searched, exactly as it does for a single file
+reference, and the result merges the matches of **every** folder, not just the
+first one that has any:
+
+| Pattern | Folders searched, in order |
+| --- | --- |
+| `*.md` (bare) | the document's folder, then the repository root |
+| `./docs/*.md`, `../x/*.md` | the document's folder only |
+| `&**/spec.md` | the repository root |
+| `^docs/*.md` | the package, the package area, then the repository root |
+| `@prompts/*.md`, `~/notes/*.md`, `/abs/*.md` | the `@` folders, the home directory, the folder as written |
+
+Results are absolute paths, spelled with `/`, in **native order**: the most
+local folder's files first, then within each folder the shallowest files
+first, then by path component. They are not re-sorted alphabetically across
+folders. A file reached from two folders is listed once, under the first.
+
+```mermaid
+flowchart LR
+    P["^docs/*.md"] --> R1["package/docs"]
+    P --> R2["area/docs"]
+    P --> R3["repository/docs"]
+    R1 --> L["one list: package files,<br/>then area files,<br/>then repository files"]
+    R2 --> L
+    R3 --> L
+```
+
+`*` and `?` stay within one path segment and `**` crosses segments. The full
+grammar, including `!` exclusions and escaping, is biscuit-file's
+[Glob References](../../../biscuit-file/docs/topics/file-references.md#glob-references-globreference).
+
+- **Nothing is filtered.** Hidden files, gitignored files, and `_`-prefixed
+  files are listed like any other, so `find_files("&**/*.md")` walks build
+  output such as `target/` too. Narrow the pattern (`&docs/**/*.md`) when that
+  matters.
+- **Symlinks.** Directory symlinks are never followed. A file symlink that a
+  bare, `./`, or `../` pattern matches and whose target leaves the document's
+  file tree is left out, and the compose report gets one
+  `dm.glob.skipped_symlink` warning naming the link and its target.
+- **`null` lists nothing.** `find_files(null)` returns `[]`.
+- **Failures.** A pattern that cannot be used fails the expression, and the
+  error ends with the same `failure:` row a failed file reference shows (see
+  [File Reference Failures](../errors/file-reference-failures.md)):
+
+  | Pattern | Why | Row |
+  | --- | --- | --- |
+  | `../../*.md` in a document at the repository root | a bare, `./`, or `../` glob may not climb out of the file tree (`RelativeTreeEscape`) | `failure: invalid-reference` |
+  | `&**/*.md` or `^*.md` outside a repository | `&` and `^` need a repository (`OutsideRepository`) | `failure: missing-context` |
+  | `[a.md` | the glob syntax is invalid | `failure: invalid-reference` |
+  | `https://example.com/*.md` | a glob reference is local only | `failure: unsupported-remote` |
+  | `docs/**/*.md` where `docs/locked/` cannot be read | the search would have to enter a directory it cannot read; the error names that directory rather than returning a partial list | `failure: io` |
 
 #### Indexed and Path Helpers
 
@@ -742,8 +808,30 @@ merge_status: '$( is_truthy(predict_conflicts("feature/api")) ? "conflicted" : "
   form rejects HTTP(S) URLs because a description is required.
 - `link(target, desc)` — emits `[desc](destination)`. `target` may be a local
   file reference or an HTTP(S) URL; `desc` must be a string. Link text escapes
-  `[` and `]`; destinations that would break CommonMark are wrapped in angle
-  brackets or percent-encoded.
+  `\`, `[`, and `]`; destinations that would break CommonMark (spaces,
+  parentheses, angle brackets, control characters) are wrapped in angle
+  brackets.
+- `code_link(file)` and `code_link(target, desc)` — the same link with the text
+  as inline code. Arguments, null handling, destinations, and errors are
+  `link()`'s; only the text differs.
+
+  ```md
+  The {{code_link(plan)}} _plan_ has been created
+  ```
+
+  With `plan` set to `plans/foo.md`, this composes to
+  `` The [`plans/foo.md`](/abs/plans/foo.md) _plan_ has been created `` and
+  renders as a clickable link with a code-styled label.
+  `{{code_link("https://example.com", "md hash")}}` gives
+  `` [`md hash`](https://example.com) ``.
+
+  Because the text is a code span, it is literal: `[`, `]`, and `\` are kept as
+  written, not escaped, so `code_link(url, "a]b")` gives `` [`a]b`](url) ``. The
+  fence grows past any backtick in the text (`` a`b `` gives
+  ```` [``a`b``](url) ````), line endings become spaces, and an empty text gives
+  the ordinary empty link `[](url)`. Use `code_link()` rather than wrapping
+  `{{link(x)}}` in backticks: a code span around a link shows the literal
+  `[text](url)`.
 
 #### Skill Helpers
 
@@ -992,14 +1080,18 @@ when you have plain JSON data and want a simple boolean result:
 
 ```rust
 use darkmatter::markdown::compose::conditions::evaluate_condition_against;
+use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
 use serde_json::json;
-use std::path::Path;
 
-let data = json!({ "draft": true, "audience": "internal" });
+let snapshot = RequestSnapshot::new("/work/project").with_env(
+    [("AUDIENCE".to_string(), "internal".to_string())].into(),
+);
+let context = build_resolution_context(&snapshot).unwrap();
+let data = json!({ "draft": true });
 let result = evaluate_condition_against(
-    "draft && audience == 'internal'",
+    "draft && env.AUDIENCE == 'internal'",
     &data,
-    Path::new("."),
+    &context,
 ).unwrap();
 assert!(result);
 ```
@@ -1008,19 +1100,19 @@ This shortcut resolves variables in the same order as the compose pipeline:
 
 1. `doc` / `doc.*` against the provided `data` (intercepted first; never falls back to `ctx.doc`).
 2. Top-level and nested paths against the provided `data`.
-3. `env.*` against the system environment.
+3. `env.*` against the context's environment, never the process's.
 4. `ctx.*` via lazy runtime context capture.
 
 A missing unprefixed key is absent (`null`); it never reads `ctx.*`.
 
-The `work_dir` argument supplies the resolution context, so the
-[read-side functions](#read-side-functions) (`file_exists`, `absolute`,
-`relative`, …) resolve against it — a public-API capability for external
-callers. Pass an absolute directory when the expression uses those functions:
-a relative `work_dir` such as `.` is rejected as a relative context directory
-rather than resolved against whatever the process directory is at the time.
-Expressions that read only `data`, `env.*`, or `ctx.*` (like the example
-above) accept any `work_dir`.
+The `context` argument is a built
+[`FileResolutionContext`](../../../biscuit-file/lib/src/file_reference/context.rs):
+the [read-side functions](#read-side-functions) (`file_exists`, `absolute`,
+`relative`, …) resolve through it, and `env.*` reads its environment. Build
+it from a `RequestSnapshot` that names the directory the expression belongs
+to; a binary captures its own process with `RequestSnapshot::from_process()`.
+A snapshot starts with an empty environment, so `env.X` is null unless the
+snapshot carries `X`.
 
 ### `evaluate_condition`
 

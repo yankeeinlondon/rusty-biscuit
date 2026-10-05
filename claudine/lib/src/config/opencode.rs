@@ -252,7 +252,7 @@ fn config_path(config_dir: Option<&Path>) -> PathBuf {
     match config_dir {
         Some(dir) => dir.join("opencode.json"),
         None => {
-            let home = dirs::home_dir().unwrap_or_default();
+            let home = biscuit_file::home_dir().unwrap_or_default();
             home.join(".config").join("opencode").join("opencode.json")
         }
     }
@@ -263,7 +263,7 @@ fn plugin_dir(config_dir: Option<&Path>) -> PathBuf {
     match config_dir {
         Some(dir) => dir.join("plugin"),
         None => {
-            let home = dirs::home_dir().unwrap_or_default();
+            let home = biscuit_file::home_dir().unwrap_or_default();
             home.join(".config").join("opencode").join("plugin")
         }
     }

@@ -17,6 +17,7 @@ mod log;
 mod output;
 mod perf;
 mod provider_values;
+mod request;
 mod shutdown;
 mod steering;
 mod table_utils;
@@ -384,7 +385,8 @@ async fn dispatch(
     } else {
         claudine::child_environment::LaunchDirectoryMode::Ordinary
     };
-    claudine::child_environment::initialize_process_launch_directory(launch_mode)?;
+    let launch_dir = claudine::child_environment::initialize_process_launch_directory(launch_mode)?;
+    request::initialize(launch_dir)?;
     // Attach the partitioned agent tail to the composition command. The tail is
     // captured before clap and never reconstructed from clap matches or argv.
     inject_caller_arguments(&mut cli, caller_arguments);

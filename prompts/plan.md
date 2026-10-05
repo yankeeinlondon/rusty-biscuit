@@ -27,7 +27,7 @@ initialize:
 start:
     message: "🖊️ creating a plan for the `{{ parent_dir(underlying) }}` (**repo:** {{ctx.repo}}, {{ctx.area ? '**area:** ' + ctx.area : ''}}, **when:** {{current.time}})"
 success:
-    stderr: "The `{{link(plan)}}` _plan_ has been created"
+    stderr: "The {{code_link(plan)}} _plan_ has been created"
     message: "✅  the _plan_ for the spec `{{parent_dir(underlying)}}` was created (**repo:** {{ctx.repo}}, {{ctx.area ? '**area:** ' + ctx.area : ''}}, **when:** {{current.time}})"
 failure:
     message: "❌️  failed to create a _plan_ for `{{parent_dir(underlying)}}` (**repo:** {{ctx.repo}}, {{ctx.area ? '**area:** ' + ctx.area : ''}}, **when:** {{current.time}})!"

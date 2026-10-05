@@ -177,10 +177,11 @@ pub fn reject_non_sequence_kind(source: &ResolvedCompositionSource) -> Result<()
 pub fn build_preflight_graph(
     plan: &SequencePlan,
     source: &ResolvedCompositionSource,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
 ) -> Result<PreflightGraph, CompositionError> {
-    let anchor = source.resolved_path.parent().unwrap_or_else(|| Path::new("."));
+    let anchor = source.resolved_path.parent().unwrap_or_else(|| file_resolution_context.cwd());
     let context = ComposeContext::capture_for_document(anchor, &source.markdown);
-    build_preflight_graph_with_context(plan, source, context)
+    build_preflight_graph_with_context(plan, source, context, file_resolution_context)
 }
 
 /// [`build_preflight_graph`] against a caller-supplied `ctx.*`/`env.*` snapshot.
@@ -200,18 +201,9 @@ pub fn build_preflight_graph_with_context(
     plan: &SequencePlan,
     source: &ResolvedCompositionSource,
     context: ComposeContext,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
 ) -> Result<PreflightGraph, CompositionError> {
-    build_preflight_graph_with_context_and_resolution(plan, source, context, None)
-}
-
-/// Builds preflight with both the composition and file-resolution snapshots.
-pub fn build_preflight_graph_with_context_and_resolution(
-    plan: &SequencePlan,
-    source: &ResolvedCompositionSource,
-    context: ComposeContext,
-    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
-) -> Result<PreflightGraph, CompositionError> {
-    let mut loader = Loader::new(source, context, file_resolution_context.cloned());
+    let mut loader = Loader::new(source, context, file_resolution_context.clone());
     loader.walk_plan(plan)?;
     Ok(loader.graph)
 }
@@ -255,7 +247,7 @@ struct Loader<'a> {
     /// Captured once: rebuilding it per shell command would re-probe the
     /// environment for every string in the graph.
     context: ComposeContext,
-    file_resolution_context: Option<biscuit_file::FileResolutionContext>,
+    file_resolution_context: biscuit_file::FileResolutionContext,
     invocation: Option<&'a InvocationContext>,
     source_contexts: HashMap<PathBuf, SourceContext>,
 }
@@ -264,7 +256,7 @@ impl<'a> Loader<'a> {
     fn new(
         source: &'a ResolvedCompositionSource,
         context: ComposeContext,
-        file_resolution_context: Option<biscuit_file::FileResolutionContext>,
+        file_resolution_context: biscuit_file::FileResolutionContext,
     ) -> Self {
         Self {
             graph: PreflightGraph::default(),
@@ -293,7 +285,7 @@ impl<'a> Loader<'a> {
             source,
             source_path: source_path.clone(),
             context,
-            file_resolution_context: Some(source_context.file_resolution_context().clone()),
+            file_resolution_context: source_context.file_resolution_context().clone(),
             invocation: Some(invocation),
             source_contexts: HashMap::from([(source_path, source_context)]),
         }
@@ -950,8 +942,8 @@ impl<'a> Loader<'a> {
         let file_resolution_context = source_context
             .as_ref()
             .map(SourceContext::file_resolution_context)
-            .cloned()
-            .or_else(|| self.file_resolution_context.clone());
+            .unwrap_or(&self.file_resolution_context)
+            .clone();
         if let Some(invocation) = self.invocation {
             let requirements =
                 darkmatter::markdown::compose::ContextRequirements::for_content(raw);
@@ -961,9 +953,9 @@ impl<'a> Loader<'a> {
         let resolution_ctx = super::super::document_expression_resolution_context(
             origin,
             Some(&runtime_context),
-            file_resolution_context.as_ref(),
+            &file_resolution_context,
             None,
-        );
+        )?;
 
         let (view, globals) = runtime_bindings(scope, LifecycleValues::default());
         let composed = SubtreeCompose::new(&Value::String(raw.to_string()), state)
@@ -994,16 +986,9 @@ impl<'a> Loader<'a> {
         let file_resolution_context = source_context
             .as_ref()
             .map(SourceContext::file_resolution_context)
-            .or(self.file_resolution_context.as_ref());
-        match file_resolution_context {
-            Some(context) => source_resolution::resolve_sequence_reference_in_context(
-                reference,
-                origin,
-                context,
-            ),
-            None => source_resolution::resolve_sequence_reference(reference, origin),
-        }
-        .map(|p| canonical(&p))
+            .unwrap_or(&self.file_resolution_context);
+        source_resolution::resolve_sequence_reference(reference, origin, file_resolution_context)
+            .map(|p| canonical(&p))
     }
 
     fn source_context_for(&mut self, origin: &Path) -> Option<SourceContext> {

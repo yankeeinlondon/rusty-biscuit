@@ -55,7 +55,7 @@ fn one_launch_observation_projects_every_existing_context() {
     init_repo(fixture.path());
     write_workspace(fixture.path());
 
-    let invocation = InvocationContext::capture_at(fixture.path());
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), fixture.path()).unwrap();
     let before = invocation.work_snapshot();
     let file_resolution = invocation.launch_file_resolution_context();
     let launch = invocation.launch_context();
@@ -90,7 +90,7 @@ fn captured_process_state_is_immutable_for_later_projections() {
     unsafe {
         std::env::set_var("CLAUDINE_INVOCATION_CONTEXT_TEST", "captured");
     }
-    let invocation = InvocationContext::capture_at(launch.path());
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), launch.path()).unwrap();
     let captured_home = invocation.home_dir().map(Path::to_path_buf);
 
     std::env::set_current_dir(elsewhere.path()).unwrap();
@@ -141,7 +141,7 @@ fn home_and_env_baselines_do_not_follow_a_post_capture_mutation() {
     let moved_home = TempDir::new().unwrap();
     let guards = set_home_variables(launch_home.path());
 
-    let invocation = InvocationContext::capture_at(launch_home.path());
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), launch_home.path()).unwrap();
     let resolved_at_capture = invocation.home_dir().map(Path::to_path_buf);
 
     let moved = set_home_variables(moved_home.path());
@@ -189,7 +189,7 @@ fn an_absent_home_is_captured_as_absent_and_is_not_synthesized() {
     let home = test_toolkit::EnvGuard::remove_safe("HOME");
     let user_profile = test_toolkit::EnvGuard::set_safe("USERPROFILE", profile_home.path());
 
-    let invocation = InvocationContext::capture_at(profile_home.path());
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), profile_home.path()).unwrap();
 
     assert_eq!(invocation.home_baseline().variable("HOME"), None);
     assert_eq!(
@@ -213,7 +213,7 @@ fn an_empty_home_is_captured_as_a_present_empty_value() {
     let fixture = TempDir::new().unwrap();
     let home = test_toolkit::EnvGuard::set_safe("HOME", "");
 
-    let invocation = InvocationContext::capture_at(fixture.path());
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), fixture.path()).unwrap();
 
     assert_eq!(
         invocation.home_baseline().variable("HOME"),
@@ -242,7 +242,7 @@ fn a_non_utf8_home_survives_the_raw_baseline_round_trip() {
     let value = std::ffi::OsString::from_vec(raw);
     let home = test_toolkit::EnvGuard::set_safe("HOME", &value);
 
-    let invocation = InvocationContext::capture_at(fixture.path());
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), fixture.path()).unwrap();
 
     assert_eq!(
         invocation.home_baseline().variable("HOME"),
@@ -269,7 +269,7 @@ fn launch_and_same_repository_source_share_one_topology_probe() {
     let source = fixture.path().join("area/pkg/prompt.md");
     fs::write(&source, "prompt").unwrap();
 
-    let invocation = InvocationContext::capture_at(fixture.path());
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), fixture.path()).unwrap();
     let source_context = invocation.derive_source(&source).unwrap();
 
     assert_eq!(source_context.repository_root(), Some(fixture.path()));
@@ -303,8 +303,11 @@ fn standalone_darkmatter_and_claudine_file_plans_have_scope_parity() {
     let original_cwd = std::env::current_dir().unwrap();
     std::env::set_current_dir(&package).unwrap();
 
-    let standalone = darkmatter::markdown::compose::capture_file_resolution_context(&package);
-    let invocation = InvocationContext::capture_at(&package);
+    let standalone = darkmatter::markdown::compose::build_resolution_context(
+        &darkmatter::markdown::compose::RequestSnapshot::from_process().unwrap().at_request_dir(&package),
+    )
+    .unwrap();
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), &package).unwrap();
     let claudine = invocation.launch_file_resolution_context();
 
     let paths = |reference: &str, context: &FileResolutionContext| {
@@ -361,7 +364,7 @@ fn nested_sources_keep_launch_at_conventions_while_reanchoring_source_scopes() {
     fs::write(&alpha, "alpha").unwrap();
     fs::write(&beta, "beta").unwrap();
     // Launched from alpha/lib: the launch `@` scope selects alpha's package.
-    let invocation = InvocationContext::capture_at(fixture.path().join("alpha/lib").as_path());
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), fixture.path().join("alpha/lib").as_path()).unwrap();
 
     let alpha_context = invocation.derive_source(&alpha).unwrap();
     let beta_context = invocation.derive_source(&beta).unwrap();
@@ -412,7 +415,7 @@ fn same_repository_serial_sources_stay_within_launch_work_bounds() {
     fs::write(&first, "first").unwrap();
     fs::write(&second, "second").unwrap();
 
-    let invocation = InvocationContext::capture_at(fixture.path());
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), fixture.path()).unwrap();
     let first_context = invocation.derive_source(&first).unwrap();
     let second_context = invocation.derive_source(&second).unwrap();
 
@@ -436,7 +439,7 @@ fn same_repository_parallel_sources_stay_within_launch_work_bounds() {
     fs::write(&first, "first").unwrap();
     fs::write(&second, "second").unwrap();
 
-    let invocation = InvocationContext::capture_at(fixture.path());
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), fixture.path()).unwrap();
     std::thread::scope(|scope| {
         let left = invocation.clone();
         let right = invocation.clone();
@@ -454,7 +457,7 @@ fn same_repository_parallel_sources_stay_within_launch_work_bounds() {
 #[test]
 fn prepared_context_consumer_accounting_is_concurrency_safe() {
     let fixture = TempDir::new().unwrap();
-    let invocation = InvocationContext::capture_at(fixture.path());
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), fixture.path()).unwrap();
     let consumers = [
         PreparedContextConsumer::Preflight,
         PreparedContextConsumer::Body,
@@ -489,7 +492,7 @@ fn prepared_context_consumer_accounting_is_concurrency_safe() {
 #[test]
 fn document_epoch_tokens_isolate_overlapping_work() {
     let fixture = TempDir::new().unwrap();
-    let invocation = InvocationContext::capture_at(fixture.path());
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), fixture.path()).unwrap();
     let left = invocation.begin_document_epoch();
     let right = invocation.begin_document_epoch();
     let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
@@ -551,7 +554,7 @@ fn document_epoch_tokens_isolate_overlapping_work() {
 #[test]
 fn document_epoch_delta_keeps_exact_consumer_counts() {
     let fixture = TempDir::new().unwrap();
-    let invocation = InvocationContext::capture_at(fixture.path());
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), fixture.path()).unwrap();
     invocation.record_prepared_context_consumer(PreparedContextConsumer::Preflight);
     let before = invocation.work_snapshot();
 
@@ -592,7 +595,7 @@ fn sibling_repository_serial_sources_add_one_repository_observation() {
     fs::write(&first, "first").unwrap();
     fs::write(&second, "second").unwrap();
 
-    let invocation = InvocationContext::capture_at(&launch);
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), &launch).unwrap();
     let first_context = invocation.derive_source(&first).unwrap();
     let second_context = invocation.derive_source(&second).unwrap();
 
@@ -615,7 +618,7 @@ fn repeated_derivation_for_retry_resume_and_jit_reuses_invocation_evidence() {
     let requirements =
         darkmatter::markdown::compose::ContextRequirements::for_content("{{ ctx.repo_root }}");
 
-    let invocation = InvocationContext::capture_at(fixture.path());
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), fixture.path()).unwrap();
     for revision in 0..6 {
         fs::write(&source, format!("revision {revision}")).unwrap();
         let source_context = invocation.derive_source(&source).unwrap();
@@ -658,7 +661,7 @@ fn repeated_requests_in_one_run_observe_volatile_evidence_once() {
     let requirements =
         darkmatter::markdown::compose::ContextRequirements::for_content("{{ ctx.dirty_files }}");
 
-    let invocation = InvocationContext::capture_at(fixture.path());
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), fixture.path()).unwrap();
     let run = RunEvidence::default();
     let first_context = invocation.derive_source(&first).unwrap();
     let _ = invocation.runtime_evidence(&run, &first_context, &requirements);
@@ -689,7 +692,7 @@ fn supplied_os_evidence_matches_ambient_os_capture() {
     fs::write(&source, content).unwrap();
     let requirements = darkmatter::markdown::compose::ContextRequirements::for_content(content);
 
-    let invocation = InvocationContext::capture_at(fixture.path());
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), fixture.path()).unwrap();
     let source_context = invocation.derive_source(&source).unwrap();
     let evidence = invocation.runtime_evidence(&RunEvidence::default(), &source_context, &requirements);
     let supplied = darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
@@ -734,7 +737,7 @@ fn non_repository_sources_cache_exact_absence_without_topology() {
     let source = fixture.path().join("prompt.md");
     fs::write(&source, "prompt").unwrap();
 
-    let invocation = InvocationContext::capture_at(fixture.path());
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), fixture.path()).unwrap();
     let first = invocation.derive_source(&source).unwrap();
     let second = invocation.derive_source(&source).unwrap();
 
@@ -761,7 +764,7 @@ fn nested_repository_gets_a_distinct_observation() {
     let source = nested.join("prompt.md");
     fs::write(&source, "prompt").unwrap();
 
-    let invocation = InvocationContext::capture_at(fixture.path());
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), fixture.path()).unwrap();
     let source_context = invocation.derive_source(&source).unwrap();
 
     assert_eq!(source_context.repository_root(), Some(nested.as_path()));
@@ -815,7 +818,7 @@ fn linked_worktrees_keep_distinct_repository_keys() {
     let source = linked.join("prompt.md");
     fs::write(&source, "prompt").unwrap();
 
-    let invocation = InvocationContext::capture_at(&main);
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), &main).unwrap();
     let source_context = invocation.derive_source(&source).unwrap();
     let launch_identity = invocation
         .launch_repository()
@@ -845,7 +848,7 @@ fn retained_launch_failure_projects_without_retry() {
     init_repo(fixture.path());
     fs::write(fixture.path().join(".git/config"), "[core\n").unwrap();
 
-    let invocation = InvocationContext::capture_at(fixture.path());
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), fixture.path()).unwrap();
     let first = invocation.launch_repository();
     let first_message = first.failure().expect("typed failure").to_string();
     assert!(first.diagnostic().is_some());
@@ -873,7 +876,7 @@ fn parallel_sources_in_one_unseen_repository_are_single_flight() {
     fs::write(&first, "first").unwrap();
     fs::write(&second, "second").unwrap();
 
-    let invocation = InvocationContext::capture_at(&launch);
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), &launch).unwrap();
     std::thread::scope(|scope| {
         let left = invocation.clone();
         let right = invocation.clone();
@@ -905,7 +908,7 @@ fn symlinked_launch_ancestor_reuses_one_observation_and_authored_root() {
     let source = aliased.join("area/pkg/prompt.md");
     fs::write(&source, "prompt").unwrap();
 
-    let invocation = InvocationContext::capture_at(&aliased);
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), &aliased).unwrap();
     let source_context = invocation.derive_source(&source).unwrap();
 
     assert_eq!(source_context.repository_root(), Some(aliased.as_path()));
@@ -940,7 +943,7 @@ fn symlinked_launch_ancestor_still_separates_nested_repositories() {
     let source = aliased.join("nested/prompt.md");
     fs::write(&source, "prompt").unwrap();
 
-    let invocation = InvocationContext::capture_at(&aliased);
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), &aliased).unwrap();
     let source_context = invocation.derive_source(&source).unwrap();
 
     assert_eq!(
@@ -997,7 +1000,7 @@ fn repository_only_context_retains_git_identity() {
         .status()
         .unwrap()
         .success());
-    let invocation = InvocationContext::capture_at(fixture.path());
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), fixture.path()).unwrap();
     let before = invocation.work_snapshot();
     let requirements = ContextRequirements::for_content(
         "git commits in the **{{ctx.repo}}** repo has completed; area={{ctx.area}}",
@@ -1020,7 +1023,7 @@ fn repository_dependent_groups_receive_complete_evidence() {
     let fixture = TempDir::new().unwrap();
     init_repo(fixture.path());
     write_workspace(fixture.path());
-    let invocation = InvocationContext::capture_at(fixture.path());
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), fixture.path()).unwrap();
     for content in ["{{ctx.staged_files}}", "{{ctx.programming_language}}", "{{ctx.docs_readme}}"] {
         let requirements = ContextRequirements::for_content(content);
         assert!(!requirements.contains(ContextGroup::Git));
@@ -1056,7 +1059,7 @@ fn launch_capture_reports_the_launch_area_not_the_source_area() {
     let source = opposing.join("prompt.md");
     fs::write(&source, "prompt").unwrap();
 
-    let invocation = InvocationContext::capture_at(&launch_dir);
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), &launch_dir).unwrap();
     let context = invocation.capture_launch_context(&repo_area_requirements());
 
     assert_eq!(
@@ -1089,7 +1092,7 @@ fn launch_capture_keeps_the_launch_repository_for_external_sources() {
     let source = external_repo.join("prompt.md");
     fs::write(&source, "prompt").unwrap();
 
-    let invocation = InvocationContext::capture_at(&launch_repo);
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), &launch_repo).unwrap();
     let context = invocation.capture_launch_context(&repo_area_requirements());
 
     assert_eq!(
@@ -1113,7 +1116,7 @@ fn launch_capture_outside_any_repository_reports_no_repository_facts() {
     let source = repo.join("area/pkg/prompt.md");
     fs::write(&source, "prompt").unwrap();
 
-    let invocation = InvocationContext::capture_at(&outside);
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), &outside).unwrap();
     let source_context = invocation.derive_source(&source).unwrap();
     assert_eq!(
         source_context.repository_root(),
@@ -1156,7 +1159,7 @@ fn repeated_launch_projections_reuse_retained_evidence() {
     .unwrap();
     let launch_dir = fixture.path().join("area/pkg");
 
-    let invocation = InvocationContext::capture_at(&launch_dir);
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), &launch_dir).unwrap();
     let baseline = invocation.work_snapshot();
     for _ in 0..4 {
         let context = invocation.capture_launch_context(&repo_area_requirements());
@@ -1185,7 +1188,7 @@ fn launch_extension_projects_missing_groups_without_reanchoring() {
     write_workspace(fixture.path());
     let launch_dir = fixture.path().join("area/pkg");
 
-    let invocation = InvocationContext::capture_at(&launch_dir);
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), &launch_dir).unwrap();
     let base_requirements = darkmatter::markdown::compose::ContextRequirements::for_content(
         "{{ ctx.repo_root }}",
     );
@@ -1261,7 +1264,7 @@ fn current_branch_observes_a_branch_switched_after_launch() {
     init_repo(fixture.path());
     commit_all(fixture.path(), "fixture");
 
-    let invocation = InvocationContext::capture_at(fixture.path());
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), fixture.path()).unwrap();
     let provider = invocation.current_provider();
 
     assert_eq!(observed(provider.refresh("branch")), serde_json::json!("main"));
@@ -1294,7 +1297,7 @@ fn refreshing_current_performs_no_repository_discovery() {
     write_workspace(fixture.path());
     commit_all(fixture.path(), "fixture");
 
-    let invocation = InvocationContext::capture_at(fixture.path());
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), fixture.path()).unwrap();
     let provider = invocation.current_provider();
     let before = invocation.work_snapshot();
 
@@ -1319,7 +1322,7 @@ fn refreshing_current_performs_no_repository_discovery() {
 #[test]
 fn an_observed_absence_is_not_the_same_answer_as_an_unheld_capability() {
     let fixture = TempDir::new().unwrap();
-    let invocation = InvocationContext::capture_at(fixture.path());
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), fixture.path()).unwrap();
     let provider = invocation.current_provider();
 
     assert_eq!(
@@ -1365,7 +1368,7 @@ fn every_scope_position_projects_through_supplied_launch_evidence() {
     commit_all(fixture.path(), "fixture");
 
     let scope_at = |dir: &Path| {
-        let invocation = InvocationContext::capture_at(dir);
+        let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), dir).unwrap();
         let requirements = darkmatter::markdown::compose::ContextRequirements::for_content(
             "{{ ctx.area }} {{ ctx.current_package }} {{ ctx.current_package_area }}",
         );
@@ -1465,7 +1468,7 @@ fn each_run_observes_volatile_evidence_once_and_keeps_stable_evidence() {
     let requirements = darkmatter::markdown::compose::ContextRequirements::for_content(
         "{{ ctx.staged_files }} {{ ctx.repo_root }} {{ ctx.cwd }}",
     );
-    let invocation = InvocationContext::capture_at(fixture.path());
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), fixture.path()).unwrap();
     let before = invocation.work_snapshot();
 
     let first = invocation.begin_document_epoch();
@@ -1511,7 +1514,7 @@ fn first_mention_does_not_decide_a_later_runs_value() {
 
     let observed_later = |earlier: &darkmatter::markdown::compose::ContextRequirements| {
         let fixture = repo_with_unstaged_change();
-        let invocation = InvocationContext::capture_at(fixture.path());
+        let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), fixture.path()).unwrap();
         let _ = invocation.begin_document_epoch().capture_launch_context(earlier);
         git(fixture.path(), &["add", "tracked.txt"]);
         staged_count(&invocation.begin_document_epoch().capture_launch_context(&staged))
@@ -1528,7 +1531,7 @@ fn a_branch_change_between_runs_is_observed_by_the_later_run() {
     let fixture = repo_with_unstaged_change();
     let requirements =
         darkmatter::markdown::compose::ContextRequirements::for_content("{{ ctx.branch }}");
-    let invocation = InvocationContext::capture_at(fixture.path());
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), fixture.path()).unwrap();
 
     let first = invocation.begin_document_epoch();
     let first_context = first.capture_launch_context(&requirements);
@@ -1552,7 +1555,7 @@ fn epochs_joining_one_run_share_its_observation() {
     let requirements = darkmatter::markdown::compose::ContextRequirements::for_content(
         "{{ ctx.staged_files }} {{ ctx.branch }}",
     );
-    let invocation = InvocationContext::capture_at(fixture.path());
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), fixture.path()).unwrap();
     let group = RunEvidence::default();
 
     // The group's own capture, taken before any sibling starts.
@@ -1582,7 +1585,7 @@ fn runs_that_name_no_git_fact_observe_no_git_state() {
     let requirements = darkmatter::markdown::compose::ContextRequirements::for_content(
         "{{ ctx.repo_root }} {{ ctx.repo }} {{ ctx.cwd }}",
     );
-    let invocation = InvocationContext::capture_at(fixture.path());
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), fixture.path()).unwrap();
 
     for _ in 0..3 {
         let _ = invocation.begin_document_epoch().capture_launch_context(&requirements);
@@ -1600,7 +1603,7 @@ fn each_run_constructs_one_context_and_rediscovers_no_stable_evidence() {
     let requirements = darkmatter::markdown::compose::ContextRequirements::for_content(
         "{{ ctx.os }} {{ ctx.cpu_cores }} {{ ctx.staged_files }} {{ ctx.repo_root }}",
     );
-    let invocation = InvocationContext::capture_at(fixture.path());
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), fixture.path()).unwrap();
     let before = invocation.work_snapshot();
 
     let runs: Vec<_> = (0..3)
@@ -1638,7 +1641,7 @@ fn siblings_sharing_one_run_keep_their_own_target_identity() {
     let requirements = darkmatter::markdown::compose::ContextRequirements::for_content(
         "{{ ctx.staged_files }} {{ ctx.agent }} {{ ctx.model }}",
     );
-    let invocation = InvocationContext::capture_at(fixture.path());
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), fixture.path()).unwrap();
     let group = RunEvidence::default();
     let _ = invocation.begin_document_epoch_in(&group).capture_launch_context(&requirements);
     git(fixture.path(), &["add", "tracked.txt"]);
@@ -1681,7 +1684,7 @@ fn an_external_prompt_opened_through_home_takes_home_as_its_tree_root() {
         launch.path().file_name().unwrap().to_string_lossy()
     );
 
-    let invocation = InvocationContext::capture_at(launch.path());
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), launch.path()).unwrap();
     let source = crate::composition::resolve_composition_source_in_context(
         "~/.claudine/prompts/x.md",
         invocation.launch_file_resolution_context(),

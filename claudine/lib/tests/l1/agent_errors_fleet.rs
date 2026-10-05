@@ -249,6 +249,7 @@ fn exhausted_remediation_fails_finalize_and_preserves_findings() {
         repo: None,
     };
     let source_path = dir.path().join("_fleet.md");
+    let file_resolution_context = biscuit_file::FileResolutionContext::new(dir.path());
     let context = |signal| StackExecutionContext {
         signal,
         scope: None,
@@ -262,7 +263,7 @@ fn exhausted_remediation_fails_finalize_and_preserves_findings() {
         base_dir: Some(dir.path()),
         ctx_base_dir: Some(dir.path()),
         prepared_context: None,
-        file_resolution_context: None,
+        file_resolution_context: &file_resolution_context,
         effect_engine: &effect_engine,
         shell_runner: &gate,
         emitter: &emitter,

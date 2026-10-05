@@ -79,6 +79,9 @@ You are responsible for acting as an orchestrator to complete the plan listed ab
 
 ::file ../_test-tiers.md
 
+::file "../_headless-orchestration.md"
+
+
 ::block when="!design"
 - this plan was based on implementing everything described in the specification file listed above
 - you must implement this plan and you are not done until you've successfully completed all phases but also implemented the requirements found in the specification document

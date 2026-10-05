@@ -155,7 +155,7 @@ impl LifecycleCause {
                 MarkdownError::Interpolation { cause, .. } => Some(cause),
                 _ => None,
             },
-            LifecycleExprError::Prose(_) => None,
+            LifecycleExprError::Prose(_) | LifecycleExprError::Context(_) => None,
         }
     }
 }
@@ -179,6 +179,7 @@ impl StdError for LifecycleCause {
         match self.0.as_ref() {
             LifecycleExprError::Evaluate(error) => Some(error.as_ref()),
             LifecycleExprError::Compose(error) => Some(error.as_ref()),
+            LifecycleExprError::Context(error) => Some(error),
             LifecycleExprError::Prose(_) => None,
         }
     }

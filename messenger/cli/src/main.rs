@@ -381,7 +381,10 @@ async fn main() -> Result<()> {
             })?;
         }
         Commands::Research(args) => {
-            std::process::exit(research::run(args));
+            // The binary's one read of its process state (directory, home,
+            // environment); everything below works from this snapshot.
+            let snapshot = darkmatter::markdown::compose::RequestSnapshot::from_process();
+            std::process::exit(research::run(args, snapshot));
         }
         Commands::Completions => {
             print!("{}", COMPLETIONS_HELP.trim_start());

@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use biscuit_terminal::terminal::Terminal;
+use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
 use messenger::research::generate::generate;
 use messenger::research::model::{Date, PlatformId};
 use messenger::research::publish::{Options, Point};
@@ -19,6 +20,14 @@ use tempfile::TempDir;
 
 fn cli_dir() -> PathBuf {
     biscuit_test_harness::manifest_dir!()
+}
+
+/// A loader whose context is built for the workspace root from a snapshot
+/// that reads nothing from the test process.
+fn research_loader(workspace: Workspace) -> Loader {
+    let snapshot = RequestSnapshot::new(workspace.repo_root());
+    let context = build_resolution_context(&snapshot).expect("research root context builds");
+    Loader::new(workspace, context)
 }
 
 fn repo_root() -> PathBuf {
@@ -194,6 +203,95 @@ fn validate_accepts_the_fleet_fixture() {
     assert_eq!(code(&output), 0, "{}", stdout(&output));
 }
 
+/// A relative document argument is taken from the directory `messenger` was
+/// launched in, which the binary captures once in its request snapshot.
+#[test]
+fn validate_takes_a_relative_document_from_the_launch_directory() {
+    let fleet = Fleet::new();
+    let launch = fleet.path("messenger/docs/research/platforms");
+    let mut command = Command::new(biscuit_test_harness::bin_exe!("messenger"));
+    // `--root` is relative too, so both spellings come from the launch
+    // directory (macOS temp directories are reached through a symlink).
+    command
+        .current_dir(&launch)
+        .args(["research", "--root", "../../../.."])
+        .args(["--today", "2026-09-17", "validate", "--json", "discord.md"])
+        .env_remove("COMPLETE")
+        .env("NO_COLOR", "1");
+    let output = command.output().expect("run messenger");
+    assert_eq!(code(&output), 0, "{}", stdout(&output));
+    assert_eq!(json(&output)["valid"], true);
+
+    let mut missing = Command::new(biscuit_test_harness::bin_exe!("messenger"));
+    missing
+        .current_dir(fleet.root())
+        .args(["research", "--root", "."])
+        .args(["--today", "2026-09-17", "validate", "--json", "discord.md"])
+        .env_remove("COMPLETE")
+        .env("NO_COLOR", "1");
+    let output = missing.output().expect("run messenger");
+    assert_ne!(code(&output), 0, "`discord.md` does not exist in the fleet root:\n{}", stdout(&output));
+}
+
+/// A document argument is a file reference: `&` and `^` reach the document
+/// from a nested launch directory, and malformed reserved syntax or a relative
+/// path leaving the repository is refused as `invalid-reference` even when a
+/// file of that literal name exists.
+#[test]
+fn validate_resolves_document_arguments_through_the_reference_grammar() {
+    let fleet = Fleet::new();
+    for dir in [".git/objects", ".git/refs/heads"] {
+        fs::create_dir_all(fleet.path(dir)).expect("mkdir");
+    }
+    fleet.write(".git/HEAD", "ref: refs/heads/main\n");
+    let platforms = "messenger/docs/research/platforms";
+    let discord = fleet.text(&format!("{platforms}/discord.md"));
+    for name in ["@", "&", "^", "!legacy.md"] {
+        fleet.write(&format!("{platforms}/{name}"), &discord);
+    }
+    let launch = fleet.path(platforms);
+    let validate = |document: &str| {
+        let mut command = Command::new(biscuit_test_harness::bin_exe!("messenger"));
+        command
+            .current_dir(&launch)
+            .args(["research", "--root", "../../../.."])
+            .args(["--today", "2026-09-17", "validate", "--json", document])
+            .env_remove("COMPLETE")
+            .env("NO_COLOR", "1");
+        command.output().expect("run messenger")
+    };
+
+    for document in ["&messenger/docs/research/platforms/discord.md", "^messenger/docs/research/platforms/discord.md", "./@"] {
+        let output = validate(document);
+        assert_eq!(code(&output), 0, "{document}: {}", stdout(&output));
+        assert_eq!(json(&output)["valid"], true, "{document}");
+    }
+    for document in ["@", "&", "^", "!legacy.md", "../../../../../outside.md"] {
+        let output = validate(document);
+        assert_ne!(code(&output), 0, "{document}: {}", stdout(&output));
+        let error = json(&output)["error"].as_str().unwrap_or_default().to_string();
+        assert!(error.contains("failure: invalid-reference"), "{document}: {error}");
+    }
+
+    // The human-readable error keeps the `failure:` class on a row of its own.
+    let output = Command::new(biscuit_test_harness::bin_exe!("messenger"))
+        .current_dir(&launch)
+        .args(["research", "--root", "../../../.."])
+        .args(["--today", "2026-09-17", "validate", "@"])
+        .env_remove("COMPLETE")
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run messenger");
+    assert_ne!(code(&output), 0);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let rows: Vec<&str> = stderr.lines().filter(|row| !row.trim().is_empty()).collect();
+    let at = rows
+        .iter()
+        .position(|row| row.starts_with("error: document `@` did not resolve to a file:"))
+        .unwrap_or_else(|| panic!("error row: {stderr}"));
+    assert_eq!(rows.get(at + 1).copied(), Some("failure: invalid-reference"), "{stderr}");
+}
+
 /// End to end over the real shipped artifacts: the accepted documents are
 /// still legacy prose without a bound schema, so the fleet is not yet valid.
 #[test]
@@ -297,7 +395,7 @@ fn an_interrupted_generation_requires_explicit_recovery() {
     assert_eq!(code(&fleet.research(&["generate"])), 0);
     let published = fleet.docs();
 
-    let loader = Loader::new(Workspace::new(fleet.root()).expect("absolute"));
+    let loader = research_loader(Workspace::new(fleet.root()).expect("absolute"));
     let discord = fleet.text("messenger/docs/research/platforms/discord.md").replacen("  value: 2000\n", "  value: 4000\n", 1);
     let updates = BTreeMap::from([(PlatformId::Discord, discord)]);
     let today = Date::parse("2026-09-17").unwrap();

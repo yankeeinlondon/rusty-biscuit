@@ -1,6 +1,6 @@
 # Table
 
-Columnar data display component with support for typed cell content, automatic column width calculation, alignment, word wrapping, and ANSI-aware rendering. Handles text, integers (with thousands separators), floats, currency values, and inline [Prose](./prose.md) content.
+Columnar data display component with support for typed cell content, automatic column width calculation, alignment, word wrapping, and ANSI-aware rendering. Handles text, integers (with thousands separators), floats, currency values, and styled [`InlineProse`](./prose.md) content.
 
 ## Programmatic Use
 
@@ -23,8 +23,8 @@ let table = Table::new()
 let styled = Table::new()
     .with_columns(vec![TableColumn::new("Feature"), TableColumn::new("Status")])
     .with_data(vec![vec![
-        Prose::new("**Bold** feature").into(),
-        Prose::new("[docs](https://example.com) — _ready_").into(),
+        InlineProse::new("**Bold** feature").into(),
+        InlineProse::new("[docs](https://example.com) — _ready_").into(),
     ]]);
 
 let term = Terminal::default();
@@ -39,9 +39,21 @@ println!("{}", table.display(&term));
 | `Integer(i64)` | `1234567` | `1,234,567` |
 | `Float(f64)` | `12345.678` | `12,345.68` |
 | `Currency(Currency, f64)` | `(USD, 1234.56)` | `$1,234.56` |
-| `StyledProse(Box<Prose>)` | `Prose::new("<b>Bold</b>")` | `Bold` (styled) |
+| `StyledInlineProse(Box<InlineProse>)` | `InlineProse::new("<b>Bold</b>")` | `Bold` (styled) |
 
-Convenience `From` implementations allow using `&str`, `String`, `i64`, `f64`, and `Prose` directly. A `StyledProse` cell embeds capability-aware inline Prose; the cell hint records `kind == "styled_prose"` with a null `raw_value`. The tree path projects Prose's semantic inline nodes (Terminal/Browser/Markdown); the terminal bespoke path resolves every styled cell to `Text(prose.render(term))` exactly once before width planning. Prose's own `Layout` is intentionally not applied — the table owns cell geometry. See [Prose in table cells](./prose.md#prose-in-table-cells) for details.
+Convenience `From` implementations allow using `&str`, `String`, `i64`, `f64`, and `InlineProse` directly. A table cell is phrasing content, so it takes `InlineProse`, not the block `Prose`. Strings stay literal `Text` cells; markup in them is not parsed.
+
+A `StyledInlineProse` cell embeds capability-aware inline content; the cell hint records `kind == "styled_inline_prose"` with a null `raw_value`. The tree path projects the cell's semantic inline nodes (Terminal/Browser/Markdown); the terminal bespoke path resolves every styled cell to `Text(prose.render(term))` exactly once before width planning. The cell keeps everything on its own row:
+
+- a code span or a fenced block becomes inline code — a fence is one code value with its line endings turned into spaces and no language hint;
+- a single newline is a soft break (a space); call `.with_line_breaks(LineBreaks::Hard)` when each `\n` should start a new line inside the cell.
+
+```rust
+let cell: TableCellContent = InlineProse::new("run\n```sh\nmd hash\n```").into();
+// renders as: run `md hash`   (the backticks appear only on an unstyled terminal)
+```
+
+A layout set on the `InlineProse` is never applied — the table owns cell geometry. Header labels are `InlineProse` too (`TableColumn::header_prose`). See [InlineProse in table cells](./prose.md#inlineprose-in-table-cells) for details.
 
 ### Key API
 

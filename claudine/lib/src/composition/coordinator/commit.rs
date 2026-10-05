@@ -6,9 +6,8 @@
 
 //! The one place a proxy request becomes a committed handoff.
 //!
-//! [`commit_proxy`] and [`commit_proxy_in_context`] are the sole *committing*
-//! callers of the proxy resolvers and the
-//! sole route to a [`HopApproval`], so resolution and hop/cycle validation
+//! [`commit_proxy`] is the sole *committing* caller of the proxy resolver and
+//! the sole route to a [`HopApproval`], so resolution and hop/cycle validation
 //! happen exactly once per hop, in one order, for every proxy producer. A
 //! downstream layer receives a [`ProxyHandoff`] whose target is already
 //! resolved and already approved, and has no entry point to resolve a target
@@ -20,7 +19,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::composition::error::CompositionError;
-use crate::composition::{resolve_proxy_target, resolve_proxy_target_in_context};
+use crate::composition::resolve_proxy_target;
 use super::handoff::{EvaluatedProxyRequest, ProxyHandoff, ResolvedProxyTarget};
 use super::invocation::RunLedger;
 
@@ -77,39 +76,11 @@ impl std::error::Error for ProxyCommitError {
     }
 }
 
-/// Resolve, approve, and commit `request` against `ledger`.
-///
-/// On success the ledger has recorded the hop and the transition, and the
-/// returned handoff carries the resolved target the ledger approved — not
-/// whatever the request's own string would resolve to on a second attempt.
-///
-/// ## Errors
-///
-/// Returns [`ProxyCommitError::Resolution`] when the authored target does not
-/// name an existing document, and [`ProxyCommitError::Rejected`] when the hop
-/// would revisit a document already in the chain or exceed
-/// [`MAX_PROXY_HOPS`][crate::composition::MAX_PROXY_HOPS]. In both cases the
-/// ledger is left unchanged: a refused hand-off never half-activates a target.
-pub fn commit_proxy(
-    ledger: &mut RunLedger,
-    request: EvaluatedProxyRequest,
-    repo_root: Option<&Path>,
-) -> Result<ProxyHandoff, ProxyCommitError> {
-    let source_path = request.provenance().source_path().to_path_buf();
-    let event = request.provenance().signal().property_name();
-    let target = request.target().to_string();
-    let resolved = resolve_proxy_target(&target, &source_path, repo_root).map_err(|source| {
-        proxy_resolution_error(&target, &source_path, event, source)
-    })?;
-    commit_resolved_proxy(ledger, request, source_path, resolved)
-}
-
 /// Resolve and commit a proxy using the invocation's immutable file context.
 ///
-/// Canonical Claudine orchestration uses this entry point so proxy resolution
-/// cannot re-read process CWD, HOME, environment, or repository topology.
-/// [`commit_proxy`] remains the ambient compatibility API.
-pub fn commit_proxy_in_context(
+/// Proxy resolution cannot re-read process CWD, HOME, environment, or
+/// repository topology: every input comes from `request_context`.
+pub fn commit_proxy(
     ledger: &mut RunLedger,
     request: EvaluatedProxyRequest,
     request_context: &biscuit_file::FileResolutionContext,
@@ -117,12 +88,8 @@ pub fn commit_proxy_in_context(
     let source_path = request.provenance().source_path().to_path_buf();
     let event = request.provenance().signal().property_name();
     let target = request.target().to_string();
-    let resolved = resolve_proxy_target_in_context(
-        &target,
-        &source_path,
-        request_context,
-    )
-    .map_err(|source| proxy_resolution_error(&target, &source_path, event, source))?;
+    let resolved = resolve_proxy_target(&target, &source_path, request_context)
+        .map_err(|source| proxy_resolution_error(&target, &source_path, event, source))?;
     commit_resolved_proxy(ledger, request, source_path, resolved)
 }
 

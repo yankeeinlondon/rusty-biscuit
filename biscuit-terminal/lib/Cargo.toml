@@ -32,8 +32,9 @@ base64 = "0.22"
 biscuit-visualized = { path = "../../biscuit-visualized/src", features = ["clap"], optional = true }
 # Structured config parsing for app-metadata value extraction. Normalizes
 # TOML/YAML/JSON5 to `serde_json::Value`; the underlying parsers stay indirect.
-# `default-features = false` keeps the heavy PDF/gix tree out.
-biscuit-file = { path = "../../biscuit-file/lib", default-features = false, features = ["toml", "yaml", "json5"] }
+# `file-reference` resolves Prose link destinations for terminal OSC 8 links
+# (it brings in gix). `default-features = false` keeps the PDF tree out.
+biscuit-file = { path = "../../biscuit-file/lib", default-features = false, features = ["toml", "yaml", "json5", "file-reference"] }
 ignore = "0.4"
 image = "0.25"
 renderable = { path = "../../renderable" }
@@ -89,6 +90,9 @@ expectrl = "0.8.0"
 insta = "1.46"
 predicates = "3"
 proptest = "1.5"
+# An independent CommonMark reader: `tests/l1/prose_markdown_escaping.rs` parses
+# the components' Markdown back to check visible text and break kinds.
+pulldown-cmark = { version = "0.13", default-features = false }
 serial_test = "3"
 tempfile = "3"
 tracing-test = "0.2"

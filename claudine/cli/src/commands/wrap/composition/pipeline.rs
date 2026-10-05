@@ -4,13 +4,13 @@ use color_eyre::eyre::WrapErr;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use super::preflight::{PreflightBlockedOutcome, emit_preflight_blocked_and_finalize_in_context};
+use super::preflight::{PreflightBlockedOutcome, emit_preflight_blocked_and_finalize};
 use super::*;
 use claudine::composition::{
     DocumentTransition, EvaluatedProxyRequest, LifecycleCatchProtocol, LifecycleCatchResult,
     LifecycleCatchState, LifecycleErrorInfo, LifecycleTransitionAbort, LifecycleTransitionDecision,
     LifecycleTransitionError, LifecycleTransitionInput, ProxyProvenance, SurfacedHandoff,
-    commit_proxy, commit_proxy_in_context, decide_lifecycle_transition,
+    commit_proxy, decide_lifecycle_transition,
 };
 
 pub(super) enum CompositionPhaseResult<T> {
@@ -330,7 +330,7 @@ fn resolve_selection_and_launch(
         let last_checkpoint = &mut attempt.last_checkpoint;
         let launch_cwd = match request.invocation_context.as_ref() {
             Some(invocation) => invocation.launch_cwd().to_path_buf(),
-            None => std::env::current_dir()?,
+            None => crate::request::snapshot().request_dir().to_path_buf(),
         };
         let detail_requested = verbose > 0;
         let silent = request.silent;
@@ -471,7 +471,7 @@ fn prepare_environment_and_mcp(
         };
         let home_baseline = match request.invocation_context.as_ref() {
             Some(invocation) => invocation.home_baseline().clone(),
-            None => claudine::invocation_context::HomeBaseline::capture(),
+            None => claudine::invocation_context::HomeBaseline::capture(crate::request::snapshot()),
         };
         let overlay_reasons = crate::commands::wrap::provider_overlay::overlay_reasons(
             provider,
@@ -972,6 +972,7 @@ fn construct_argv_and_system_prompt(
                 &request.system_prompt_args,
                 &launch_context,
                 effective_non_interactive,
+                crate::request::snapshot(),
             )?,
         };
 
@@ -1757,11 +1758,10 @@ fn provider_run_handoff(
         base_dir,
         ctx_base_dir: Some(launch_workspace.launch_cwd.as_path()),
         prepared_context: Some(lifecycle_context),
-        file_resolution_context: request
+        file_resolution_context: &request
             .prepared
             .input_layers
-            .file_resolution_context
-            .as_ref(),
+            .file_resolution_context,
         effect_engine: lifecycle_effect_engine,
         shell_runner: &SystemShellRunner,
         emitter,
@@ -1834,7 +1834,6 @@ fn provider_run_handoff(
                 &mut guard,
                 ledger,
                 handoff,
-                request.invocation_context.as_ref(),
                 &InitializeCatchSurface {
                     effect_engine: lifecycle_effect_engine,
                     emitter,
@@ -1845,11 +1844,10 @@ fn provider_run_handoff(
                     repo_root: effective_repo_root,
                     launch_area: launch_workspace.launch_cwd.as_path(),
                     context: lifecycle_context,
-                    file_resolution_context: request
+                    file_resolution_context: &request
                         .prepared
                         .input_layers
-                        .file_resolution_context
-                        .as_ref(),
+                        .file_resolution_context,
                     current: lifecycle_current.clone(),
                     frontmatter: fm_map.unwrap_or(&empty_frontmatter),
                     document_start,
@@ -1883,7 +1881,7 @@ pub(super) struct InitializeCatchSurface<'a> {
     pub repo_root: Option<&'a Path>,
     pub launch_area: &'a Path,
     pub context: &'a darkmatter::markdown::compose::ComposeContext,
-    pub file_resolution_context: Option<&'a biscuit_file::FileResolutionContext>,
+    pub file_resolution_context: &'a biscuit_file::FileResolutionContext,
     /// The invocation's refresh authority for the lazy `current`/`current_env`
     /// roots; `None` when there is no invocation, so every read fails closed.
     pub current: Option<darkmatter::markdown::compose::CurrentAuthority>,
@@ -1899,7 +1897,7 @@ impl InitializeCatchSurface<'_> {
         guard: &mut LifecycleRunGuard<'_>,
         info: LifecycleErrorInfo,
     ) -> PreflightBlockedOutcome {
-        emit_preflight_blocked_and_finalize_in_context(
+        emit_preflight_blocked_and_finalize(
             guard,
             self.effect_engine,
             self.emitter,
@@ -1936,26 +1934,13 @@ pub(super) fn commit_initialize_proxy(
     guard: &mut LifecycleRunGuard<'_>,
     ledger: &claudine::composition::SharedRunLedger,
     handoff: EvaluatedProxyRequest,
-    invocation: Option<&claudine::invocation_context::InvocationContext>,
     surface: &InitializeCatchSurface<'_>,
 ) -> Result<SurfacedHandoff> {
-    let commit = match surface.file_resolution_context {
-        Some(context) => commit_proxy_in_context(
-            &mut ledger.lock().expect("run ledger mutex poisoned"),
-            handoff,
-            context,
-        ),
-        None => {
-            if let Some(invocation) = invocation {
-                invocation.record_ambient_fallback();
-            }
-            commit_proxy(
-                &mut ledger.lock().expect("run ledger mutex poisoned"),
-                handoff,
-                surface.repo_root,
-            )
-        }
-    };
+    let commit = commit_proxy(
+        &mut ledger.lock().expect("run ledger mutex poisoned"),
+        handoff,
+        surface.file_resolution_context,
+    );
     match commit {
         Ok(committed) => Ok(SurfacedHandoff::Committed(Box::new(committed))),
         Err(commit_error) => {

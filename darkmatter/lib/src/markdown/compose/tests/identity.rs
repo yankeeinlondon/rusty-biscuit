@@ -9,7 +9,7 @@ use crate::markdown::compose::expression::ExpressionError;
 const FAILURE: &str = "entropy exhausted (test seam)";
 
 fn compose(document: &str) -> MarkdownResult<(Markdown, ComposeReport)> {
-    Markdown::from(document).compose_with(ComposeOptions::new())
+    Markdown::from(document).compose_with(&crate::markdown::compose::test_request(ComposeOptions::new()))
 }
 
 /// The `name=[value]` probe on the composed text.

@@ -22,7 +22,7 @@ fn options(hosts: &[&str], log: &ProbeLog, outcomes: Vec<Result<sniff::network::
 
 fn compose(document: &str, options: ComposeOptions) -> (Markdown, ComposeReport) {
     Markdown::from(document)
-        .compose_with(options)
+        .compose_with(&crate::markdown::compose::test_request(options))
         .unwrap_or_else(|error| panic!("compose must succeed: {error}"))
 }
 
@@ -79,7 +79,7 @@ fn ac6_preflight_lists_a_planned_ping_without_sending_it() {
     let document = Markdown::from("Reachable: {{ ping(\"10.9.9.9\", 250) }}\n");
     let options = options(&["10.1.0.0/16"], &log, vec![reply(4)]);
 
-    let report = document.compose_preflight(&options).expect("preflight succeeds");
+    let report = document.compose_preflight(&crate::markdown::compose::test_request(options.clone())).expect("preflight succeeds");
 
     assert_eq!(log.count(), 0, "preflight must not send ICMP");
     assert_eq!(report.icmp_probes.len(), 1, "{:?}", report.icmp_probes);
@@ -104,7 +104,7 @@ fn ac32_preflight_is_condition_blind_and_records_the_grant_verdict() {
     );
 
     let report = document
-        .compose_preflight(&options(&["10.1.0.0/16"], &log, vec![reply(4)]))
+        .compose_preflight(&crate::markdown::compose::test_request(options(&["10.1.0.0/16"], &log, vec![reply(4)])))
         .expect("preflight succeeds");
 
     // Discovery order follows the interpolation walk, which is not source
@@ -135,7 +135,7 @@ fn ac32_a_nested_ping_appears_in_root_preflight_and_inherits_root_consent() {
     let document = Markdown::from("{{ as_markdown(\"Nested: {{ ping(\\\"10.1.2.3\\\") }}\") }}\n");
 
     let report = document
-        .compose_preflight(&options(&["10.1.0.0/16"], &log, vec![reply(4)]))
+        .compose_preflight(&crate::markdown::compose::test_request(options(&["10.1.0.0/16"], &log, vec![reply(4)])))
         .expect("preflight succeeds");
     assert_eq!(log.count(), 0);
     assert_eq!(

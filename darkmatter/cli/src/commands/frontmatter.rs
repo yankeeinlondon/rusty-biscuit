@@ -1,13 +1,15 @@
 //! `md get` / `md set` / `md rm` / `md edit` frontmatter subcommand implementations.
 
 use crate::args::Cli;
-use crate::io::{load_markdown, resolve_file_path};
+use crate::io::{DocumentArgumentError, load_markdown, parse_argument, resolve_file_path};
+use crate::request::MdRequest;
 use color_eyre::eyre::{Context, Result, eyre};
 use std::path::PathBuf;
 use tracing::instrument;
 
 /// Get frontmatter properties from a markdown document.
 #[instrument(skip_all)]
+#[allow(clippy::too_many_arguments)]
 pub fn run_get(
     input: &PathBuf,
     props: &[String],
@@ -16,8 +18,9 @@ pub fn run_get(
     toml: bool,
     raw: bool,
     compact: bool,
+    request: &MdRequest,
 ) -> Result<()> {
-    let md = load_markdown(Some(input))?;
+    let md = load_markdown(Some(input), request)?;
     let fm = md.frontmatter();
 
     let value = if props.len() == 1 {
@@ -52,7 +55,13 @@ pub fn run_get(
 /// source file. With `--save` the file is updated in place and nothing is
 /// printed.
 #[instrument(skip_all)]
-pub fn run_set(input: &PathBuf, prop: &str, raw_value: &str, save: bool) -> Result<()> {
+pub fn run_set(
+    input: &PathBuf,
+    prop: &str,
+    raw_value: &str,
+    save: bool,
+    request: &MdRequest,
+) -> Result<()> {
     let is_stdin = input.to_str() == Some("-");
 
     if save && is_stdin {
@@ -61,7 +70,7 @@ pub fn run_set(input: &PathBuf, prop: &str, raw_value: &str, save: bool) -> Resu
         ));
     }
 
-    let mut md = load_markdown(Some(input))?;
+    let mut md = load_markdown(Some(input), request)?;
 
     let value: serde_json::Value = serde_json::from_str(raw_value)
         .unwrap_or_else(|_| serde_json::Value::String(raw_value.to_string()));
@@ -70,7 +79,7 @@ pub fn run_set(input: &PathBuf, prop: &str, raw_value: &str, save: bool) -> Resu
         .map_err(|e| eyre!("Failed to set frontmatter property: {e}"))?;
 
     if save {
-        let resolved = resolve_file_path(input)?;
+        let resolved = resolve_file_path(input, request.launch_context()?)?;
         std::fs::write(&resolved, md.as_string())
             .wrap_err_with(|| format!("Failed to write to {:?}", resolved))?;
     } else {
@@ -86,9 +95,15 @@ pub fn run_set(input: &PathBuf, prop: &str, raw_value: &str, save: bool) -> Resu
 /// With `-v`, prints a human-readable summary. With `--json`, outputs
 /// structured JSON.
 #[instrument(skip_all)]
-pub fn run_rm(input: &PathBuf, props: &[String], json: bool, cli: &Cli) -> Result<()> {
-    let resolved = resolve_file_path(input)?;
-    let mut md = load_markdown(Some(input))?;
+pub fn run_rm(
+    input: &PathBuf,
+    props: &[String],
+    json: bool,
+    cli: &Cli,
+    request: &MdRequest,
+) -> Result<()> {
+    let resolved = resolve_file_path(input, request.launch_context()?)?;
+    let mut md = load_markdown(Some(input), request)?;
     let fm = md.frontmatter_mut().as_map_mut();
 
     let mut removed = Vec::new();
@@ -244,41 +259,30 @@ fn format_raw(value: &serde_json::Value) -> String {
 
 /// Open a file in the user's preferred editor, blocking until the editor exits.
 ///
-/// Resolves the file path using biscuit-file's `FileReference` system. Creates the
-/// file if it doesn't exist. After the editor exits, validates that the file exists
-/// and is non-empty (after trimming whitespace). Prints the fully qualified path on
-/// success.
-pub fn run_edit(raw_file: &str) -> Result<()> {
-    use biscuit_file::FileReference;
-
-    // --- Resolve the file path ---
-    let path = match FileReference::new(raw_file) {
-        Ok(file_ref) => {
-            let resolved = file_ref
-                .resolve()
-                .wrap_err("Failed to resolve file reference")?;
-            match resolved {
-                Some(p) => p,
-                None => {
-                    // FileReference couldn't resolve it — treat raw input as a
-                    // relative path (may not exist yet, which is fine).
-                    std::env::current_dir()
-                        .wrap_err("Failed to get current directory")?
-                        .join(raw_file)
-                }
-            }
-        }
-        Err(_) => {
-            // Not a valid file reference syntax — treat as plain path.
-            let p = PathBuf::from(raw_file);
-            if p.is_absolute() {
-                p
-            } else {
-                std::env::current_dir()
-                    .wrap_err("Failed to get current directory")?
-                    .join(raw_file)
-            }
-        }
+/// The argument is a file reference resolved in the request's launch context
+/// ([`parse_argument`] then `resolve_in_context`): malformed reference syntax
+/// and a relative reference that climbs out of the launch repository are
+/// refused before any file is created or editor launched. A reference that
+/// matches no file names a new file at its first candidate location (the
+/// launch directory for a relative path, the repository root for `&`, and so
+/// on); a recursive (`%`) reference that matches nothing is an error. Creates
+/// the file if it doesn't exist. After the editor exits, validates that the
+/// file exists and is non-empty (after trimming whitespace). Prints the fully
+/// qualified path on success.
+pub fn run_edit(raw_file: &str, request: &MdRequest) -> Result<()> {
+    let argument = std::path::Path::new(raw_file);
+    let reference = parse_argument(argument)?;
+    let context = request.launch_context()?;
+    let path = match reference.resolve_in_context(context) {
+        Ok(Some(path)) => path,
+        Ok(None) if !reference.class().recursive => reference
+            .candidate_plan(context)
+            .map_err(|source| DocumentArgumentError::new(raw_file.to_string(), source))?
+            .first()
+            .map(|candidate| candidate.path().to_path_buf())
+            .ok_or_else(|| DocumentArgumentError::no_match(raw_file.to_string()))?,
+        Ok(None) => return Err(DocumentArgumentError::no_match(raw_file.to_string()).into()),
+        Err(source) => return Err(DocumentArgumentError::new(raw_file.to_string(), source).into()),
     };
 
     // Ensure parent directory exists
@@ -296,8 +300,9 @@ pub fn run_edit(raw_file: &str) -> Result<()> {
     }
 
     // --- Launch the editor ---
-    let canonical = path
-        .canonicalize()
+    // `canonicalize_simplified`: the printed path must not carry a Windows
+    // verbatim `\\?\` prefix.
+    let canonical = biscuit_file::canonicalize_simplified(&path)
         .wrap_err_with(|| format!("Failed to canonicalize path: {}", path.display()))?;
     darkmatter::editor::launch_editor_on_path(&canonical)?;
 

@@ -19,9 +19,7 @@ fn loop_iterations_share_one_exact_document_epoch() {
         ],
         "body={{ ctx.os }}",
     );
-    let invocation = crate::invocation_context::InvocationContext::capture_at(
-        source.resolved_path.parent().unwrap(),
-    );
+    let invocation = crate::invocation_context::InvocationContext::capture_at(&crate::test_support::snapshot(), source.resolved_path.parent().unwrap()).unwrap();
     let requirements =
         darkmatter::markdown::compose::ContextRequirements::for_document(&source.markdown);
     let document_epoch = invocation.begin_document_epoch();
@@ -30,7 +28,7 @@ fn loop_iterations_share_one_exact_document_epoch() {
         invocation_context: Some(invocation.clone()),
         document_epoch: Some(document_epoch.clone()),
         prepared_context: Some(prepared_context.clone()),
-        ..PrepareOptions::default()
+        ..PrepareOptions::new(crate::test_support::context())
     };
     crate::composition::preflight_document_shell(
         &source,
@@ -79,7 +77,7 @@ fn loop_iterations_share_one_exact_document_epoch() {
         &effect_engine,
         &crate::composition::lifecycle_executor::SystemShellRunner,
         &crate::composition::DefaultLifecycleEmitter,
-        None,
+        crate::test_support::process_context(),
         Some(&document_epoch),
         |_ctx, _guard| {
             let prepared = crate::composition::prepare_direct(&source, prepare_options.clone())?;

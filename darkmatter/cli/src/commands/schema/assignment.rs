@@ -426,7 +426,8 @@ mod tests {
     fn effective_for(yaml_body: &str) -> darkmatter::markdown::schemas::EffectiveSchema {
         let md_text = format!("---\n{yaml_body}\n---\n");
         let md: Markdown = md_text.as_str().into();
-        DarkmatterSchemas::new()
+        let context = biscuit_file::FileResolutionContext::new(std::env::temp_dir());
+        DarkmatterSchemas::new(context)
             .effective_for(&md)
             .expect("effective_for")
             .expect("schema present")

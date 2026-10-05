@@ -5,9 +5,8 @@
 //! dereferences it with `frontmatter(spec, ...)`, and the accepted identity must
 //! survive a proxy handoff. The fixture lives in `common::review_router`, which
 //! seeds the shipped `prompts/review.md` router, its proxy target, spec
-//! candidates under the `packages/example` launch area, and a same-substring
-//! decoy at the repository root that only a mis-anchored candidate scope would
-//! find.
+//! candidates under the `packages/example` launch area, and a decoy spec at
+//! the repository root that the supplied partial filters out.
 //!
 //! These tests prove ordering and data flow through manufactured bytes; what a
 //! terminal emulator draws for the same flow is
@@ -167,40 +166,42 @@ fn level1_review_router_partial_yolo_confirms_before_initialize_and_survives_pro
         0,
     );
     let prompt = fs::read_to_string(fixture.home().join("provider-prompt")).unwrap();
-    assert!(!prompt.contains("local-decoy"), "prompt: {prompt}");
+    assert!(!prompt.contains("remote-decoy"), "prompt: {prompt}");
 }
 
-/// Companion to the confirmation test above: the same fixture, launched from the
-/// repository root instead of `packages/example`, must see both candidates.
-///
-/// Without this variant the decoy could be unreachable for a reason other than
-/// launch-area anchoring (an ignore rule, a glob that never leaves the router's
-/// directory), and the confirmation assertion would pass vacuously.
+/// Companion to the confirmation test above: the router's bare
+/// `match(**/*spec*.md)` searches the launch directory and then the repository
+/// root, so a repository-root spec that matches the partial is offered too,
+/// after the launch area's (native order, not a sort on the path text), and
+/// its identity survives the proxy hop.
 #[test]
 #[serial_test::serial(pty)]
-fn level1_review_router_partial_repo_root_launch_widens_candidates_to_the_chooser() {
+fn level1_review_router_partial_offers_a_repository_root_spec_after_the_launch_area() {
     expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
     let (fixture, router) = review_router_fixture(false);
-    let repo_root = fixture.cwd().to_path_buf();
-    let mut session = review_router_session_in(&fixture, &router, &repo_root);
+    common::write(
+        &fixture.cwd().join("fixes/2026-09-10-local-root/spec.md"),
+        "---\nreviewed: true\nmarker: root\n---\nRepository-root specification.\n",
+    );
+    let mut session = review_router_session(&fixture, &router);
     let pre = wait_for_marker(
         &mut session,
         "did not match a file directly",
         Duration::from_secs(15),
     );
-    // Raw mode proves the chooser rendered, and the chooser is only reached with
-    // more than one candidate. `fixes/` sorts before `packages/`, so Enter takes
-    // the decoy — the candidate the package-area launch could not see.
+    // Raw mode proves the chooser rendered, which needs more than one
+    // candidate. The launch area's spec is first, so Down then Enter takes
+    // the repository-root spec.
     let transcript = wait_for_raw_mode(&mut session, pre, Duration::from_secs(10));
     assert!(!fixture.home().join("provider-prompt").exists());
-    session.write_all(b"\r").unwrap();
+    session.write_all(b"\x1b[B\r").unwrap();
     session.flush().unwrap();
     assert_review_router_completed(
         &mut session,
         &fixture,
         transcript,
-        "decoy",
-        "2026-09-10-local-decoy/spec.md",
+        "root",
+        "2026-09-10-local-root/spec.md",
         1,
     );
 }

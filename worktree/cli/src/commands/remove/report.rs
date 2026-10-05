@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use biscuit_terminal::components::list::UnorderedList;
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable as _;
 use biscuit_terminal::terminal::Terminal;
 use worktree::remove::Inventory;
@@ -18,8 +18,10 @@ use crate::commands::dirty_tree;
 /// Above this many entries a list becomes a count.
 pub const LIST_LIMIT: usize = 10;
 
+/// Escape text for Prose markup, leaving the code spans it marks with
+/// backticks literal.
 fn esc(text: &str) -> String {
-    Prose::escape_text(text)
+    Prose::escape_text_outside_code_spans(text)
 }
 
 pub fn visible_include_path(path: &Path) -> String {
@@ -36,6 +38,8 @@ pub struct ReportInput<'a> {
     /// `Some` when the directory is gone: [`missing_markup`] replaces the
     /// files block, since `inventory` then holds nothing that was checked.
     pub missing: Option<&'a MissingCheckout>,
+    /// The `.git` file was missing and `wt` restored it to check the files.
+    pub relinked: bool,
     /// `None` for a detached worktree.
     pub safety: Option<&'a BranchSafety>,
     pub has_origin: bool,
@@ -43,15 +47,21 @@ pub struct ReportInput<'a> {
     pub remote: Option<&'a RemoteState>,
 }
 
-/// The whole report, rendered. It ends without a blank line, so each question
-/// can start after exactly one.
+/// The whole report, rendered. It starts with a blank line and ends without
+/// one, so each question can start after exactly one.
 pub fn render(terminal: &Terminal, input: &ReportInput<'_>) -> String {
-    let mut blocks = vec![Prose::new(heading_markup(input)).render(terminal)];
+    // The markup builders lay their text out one line per `\n`.
+    let lines = |markup: String| Prose::new(markup).with_line_breaks(LineBreaks::Hard).render(terminal);
+    let mut heading = heading_markup(input);
+    if input.relinked {
+        heading.push_str(&format!("\n{RELINKED_MARKUP}"));
+    }
+    let mut blocks = vec![lines(heading)];
     let files = match input.missing {
         Some(missing) => missing_markup(missing),
         None => files_markup(input.inventory),
     };
-    blocks.push(Prose::new(files).render(terminal));
+    blocks.push(lines(files));
     match (input.branch, input.safety) {
         (Some(branch), Some(safety)) => {
             let mut block = Prose::new(format!("<b>Branch</b> <blue>{}</blue>", esc(branch)))
@@ -65,13 +75,14 @@ pub fn render(terminal: &Terminal, input: &ReportInput<'_>) -> String {
         ),
     }
     if let Some(remote) = input.remote {
-        blocks.push(Prose::new(remote_markup(remote)).render(terminal));
+        blocks.push(lines(remote_markup(remote)));
     }
-    blocks
+    let report = blocks
         .iter()
         .map(|block| block.trim_end_matches('\n'))
         .collect::<Vec<_>>()
-        .join("\n\n")
+        .join("\n\n");
+    format!("\n{report}")
 }
 
 fn render_list(terminal: &Terminal, items: Vec<String>) -> String {
@@ -84,11 +95,17 @@ fn render_list(terminal: &Terminal, items: Vec<String>) -> String {
 
 pub fn heading_markup(input: &ReportInput<'_>) -> String {
     format!(
-        "\n<b>Removing</b> worktree <blue>{}</blue> <dim>at {}</dim>",
+        "<b>Removing</b> worktree <blue>{}</blue> <dim>at {}</dim>",
         esc(input.display_name),
         esc(&input.path.display().to_string())
     )
 }
+
+/// The line under the heading for a worktree whose `.git` file was missing.
+/// `git worktree repair` also restores other worktrees' broken links, so the
+/// line does not claim to have touched only this one.
+pub const RELINKED_MARKUP: &str = "<yellow>Its .git file was missing</yellow><dim>; wt restored it to check the \
+    files (Git may restore other worktrees' broken links too).</dim>";
 
 /// Dirty and protected included files, then disposable ignored names.
 pub fn files_markup(inventory: &Inventory) -> String {
@@ -582,6 +599,7 @@ mod tests {
             branch: Some("feat/x"),
             inventory: &inventory,
             missing: None,
+            relinked: true,
             safety: Some(&facts),
             has_origin: false,
             remote: None,
@@ -590,5 +608,6 @@ mod tests {
         assert!(!text.ends_with('\n'), "{text:?}");
         assert!(text.contains("Uncommitted files"));
         assert!(text.contains("Not safe"));
+        assert!(text.contains("Its .git file was missing"), "{text}");
     }
 }

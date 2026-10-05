@@ -15,6 +15,11 @@ with a path in the message. Processes and the environment are in
    spellings outright. Route through `biscuit_file::canonicalize_simplified`
    (dunce-backed). Raw `canonicalize` is only safe inside a closed key space
    that never leaves the process.
+   In biscuit-file, Claudine, and Darkmatter a source guard
+   (`darkmatter/cli/tests/common/path_lookup_guard.rs`) fails on a new direct
+   call; a private comparison stays only as a listed exception naming its
+   invariant. The same guard rejects direct `dirs::home_dir` /
+   `std::env::home_dir` in Claudine (trap 2).
 
    Two concrete instances live in `cargo nextest`'s own argument grammar
    (found 2026-09-14, `scripts/ci-build-archive.rs`): `--tool-config-file` is
@@ -31,22 +36,37 @@ with a path in the message. Processes and the environment are in
    `ls-files --exclude-from=`. The include resolver uses
    `biscuit_file::canonicalize_simplified` for that argument. Raw canonical
    paths remain inside the copy record's identity comparison.
+   A "closed key space" is not one whose values are ever printed: Darkmatter's
+   reference-graph node ids (`source_to_id`) and `md edit`'s printed path used
+   raw `canonicalize`, so `md validate refs --graph mermaid` node ids and
+   `md edit` output carried `\\?\C:` on Windows only (found 2026-10-02 by
+   the `md` route parity matrix). Both now use `canonicalize_simplified`.
    `reflink-copy` reports an unsupported block clone on NTFS as an HRESULT
    shaped `io::Error` (`0x80070001`, "Incorrect function"), not raw error 1.
    The worktree copy fallback recognizes that form and byte-copies instead.
 2. **`dirs::home_dir()` on Windows uses the known-folder API and ignores
    `USERPROFILE` and `HOME`.** Hermetic test homes silently do not apply, so
-   a Windows test reads the machine's real `~/.claudine`. Use
-   `std::env::home_dir()` (un-deprecated, environment-first on Rust ≥ 1.97).
+   a Windows test reads the machine's real `~/.claudine`. In biscuit-file,
+   Claudine, and Darkmatter use `biscuit_file::home_dir()`, which is
+   `std::env::home_dir()` (un-deprecated, environment-first on Rust ≥ 1.97:
+   `USERPROFILE`, then the profile API; never `HOME`) filtered to absolute
+   paths. A Windows fixture relocates home with `USERPROFILE`.
    Python's `Path.home()` is environment-first but reads `USERPROFILE` on
    Windows and ignores `HOME` (which native Windows does not set outside Git
    Bash), so a fixture that relocates the home for a Python tool such as
    `scripts/ci/constraints.py` must set both `HOME` and `USERPROFILE`; a
    shell `$HOME` literal is a Unix-only spelling.
-   Claudine's provider overlay still resolves through the known folder, so a
-   Windows launch test names its roots instead: the provider selector (e.g.
-   `CODEX_HOME`) for the source and `CLAUDINE_OVERLAY_DIR` for overlay
-   storage (`level2_provider_overlay_capture.rs`, 2026-09-16).
+   Since 2026-10-03 every home read in Claudine and Darkmatter, including
+   `RequestSnapshot::from_process()` and Claudine's overlays, config, logs,
+   and MCP state, goes through `biscuit_file::home_dir()`, so a
+   `CliProcessFixture` child's `USERPROFILE` is its `~`, its `@` home tier,
+   and its `~/.claudine`. Tests once gated `cfg(unix)` / `cfg(not(windows))`
+   "because the fixture home cannot replace the known folder" were re-enabled
+   then; do not add that gate again. A test helper that spawns a child with
+   only `HOME` set (no `USERPROFILE`) still reaches the real profile on
+   Windows: set both. Before that date, `biscuit_file::home_dir()` asked the
+   known folder, which is why older notes and logs report Windows-only
+   real-profile reads (2026-10-01, 11 CLI tests on build-win-native).
    `dirs::cache_dir()` is the same (`%LOCALAPPDATA%` from the known folder),
    so a Windows test that seeds a cache file writes to the real per-user
    path, keyed by its temporary repository, and deletes what it seeded
@@ -59,7 +79,10 @@ with a path in the message. Processes and the environment are in
    `/var` symlink) and keeps the raw path on Windows.
 4. **`Path::join("a/b")` keeps the literal `/`.** A native-spelling needle
    built from it has mixed separators and matches nothing. Re-join through
-   `.components().collect::<PathBuf>()` to normalize.
+   `.components().collect::<PathBuf>()` to normalize. A context's
+   `package_root()` from the repository scope catalog arrives this way
+   (`C:\…\cwd\area/pkg`), so a path printed to a user from it needs the same
+   re-join (`darkmatter` schema roots, 2026-10-02).
 5. **Windows temp dirs contain a dot-initial segment (`\.tmpXXXX`).** Any
    Markdown round-trip that resolves CommonMark backslash escapes will eat
    the `\` before `.`, `-`, or `_`. Darkmatter's compose Cleanup phase now
@@ -145,6 +168,30 @@ Compare against that, never against `to_string_lossy()`.
     Likewise, never write a `..` loop that calls `Vec::pop` on components:
     it pops the `RootDir` or drive prefix and makes `/../a` relative.
     Confirmed 2026-10-01 on `build-win-native`.
+14. **A rootless `/w/...` test path is relative on Windows**, so a
+    `FileResolutionContext` built over it fails `validate()` with
+    `RelativeContextDirectory` and resolves nothing. Lexical unit tests that
+    used `/w` paths with a hand-rolled join pass everywhere; the same tests
+    moved onto a context fail only on Windows, silently, as "no target".
+    Give such tests a drive (DMLS's `context::test_support::abs` maps `/w/x`
+    to `C:/w/x`) or use a real temporary directory. Found 2026-10-01 on
+    `build-win-native` (DMLS frontmatter navigation tests).
+15. **A `/`-rooted file *reference* is `ForeignAbsolutePath` on Windows**,
+    not a lookup. A Darkmatter expression that concatenates onto an empty
+    `dirname(…)` (a bare `spec.md` that no schema stage made absolute)
+    builds `/review-2.md`; on Unix that is a real, wrong path a loose
+    `ends_with` assertion accepts, and on Windows the read-side function
+    fails as `Malformed`. When a test passes only on Unix, print the value
+    and assert the exact path. Found 2026-10-01 on `build-win-native`
+    (`schema_number_increment_survives_quoted_persistence_round_trips`).
+16. **`metadata`/`symlink_metadata` on a name holding `*` or `?` fails with
+    `ErrorKind::InvalidFilename` (OS error 123), not `NotFound`.** Code that
+    treats only `NotFound` as "absent" turns a plain miss into an `Io`
+    failure on Windows alone. biscuit-file's candidate probe and
+    `deepest_existing_ancestor` treat `InvalidFilename` as absent, so
+    `FileReference::new("docs/*.md")` is a `NoMatch` on every OS. Found
+    2026-10-02 on `build-win-native`
+    (`glob_reference::literal::a_literal_miss_that_looks_like_a_glob_hints_at_glob_references`).
 
 
 ## Worktree include links and junctions

@@ -105,6 +105,41 @@ pub struct GraphFacts {
     /// Local history could not establish something the graph would show (a
     /// shallow clone, a failed git command): the graph carries the notice.
     pub incomplete: bool,
+    /// The repository is verifiably a shallow clone, which is what usually
+    /// leaves a connection unestablished.
+    pub shallow: bool,
+    /// Branches whose tip reached another lane only through some other
+    /// branch's merge. Their lanes are drawn without a merge, and that is
+    /// complete history, not a gap.
+    pub merged_elsewhere: Vec<MergedElsewhere>,
+    /// Branches whose fork commit is not on any drawn lane, so `GitGraph`
+    /// leaves their lane unconnected, with the merge that brought the fork
+    /// into the lane it was expected on.
+    pub forked_off_line: Vec<ForkedOffLine>,
+}
+
+/// A branch that forked from a commit its expected lane holds only through
+/// a merge: `fork` is not on `into`'s own line of commits, `merge` is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForkedOffLine {
+    pub branch: String,
+    pub fork: String,
+    /// The lane's name, as in [`MergedElsewhere::into`].
+    pub into: String,
+    pub merge: String,
+}
+
+/// A branch whose commits are all on `into`, brought there by another
+/// branch's merge rather than one of its own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MergedElsewhere {
+    pub branch: String,
+    pub tip: String,
+    /// The lane's name: a branch, the default branch, or `origin/<default>`.
+    pub into: String,
+    /// The drawn branch whose merge brought it in; `None` when no drawn
+    /// branch was merged at that commit.
+    pub through: Option<String>,
 }
 
 impl GraphFacts {
@@ -118,6 +153,17 @@ impl GraphFacts {
         }
         for (name, sha) in &self.refs {
             graph = graph.with_ref(name.clone(), sha.clone());
+        }
+        // A tip that reached a lane only through another branch's merge has
+        // no merge line of its own; the tag says it is merged anyway. Only a
+        // drawn tip gets one, so it never becomes an undrawn-label omission.
+        for merged in &self.merged_elsewhere {
+            let tip_drawn = self.lines.iter().any(|line| {
+                line.branch == merged.branch && line.entries.iter().any(|entry| matches!(entry, LaneEntry::Commit(sha) if *sha == merged.tip))
+            });
+            if tip_drawn {
+                graph = graph.with_ref(format!("in {}", merged.into), merged.tip.clone());
+            }
         }
         let mut drawn = HashSet::new();
         for line in &self.lines {
@@ -260,9 +306,10 @@ pub fn gather(input: &GatherInput, needs_graph: bool, needs_verbose: bool) -> (O
         return (None, None);
     };
     let gap = history_gap || tips_gap;
+    let shallow = history.is_shallow() && !history_gap;
 
     if input.is_base_view() {
-        let graph = needs_graph.then(|| base_view(input, &history, &tips, gap));
+        let graph = needs_graph.then(|| GraphFacts { shallow, ..base_view(input, &history, &tips, gap) });
         return (graph, None);
     }
 
@@ -279,7 +326,7 @@ pub fn gather(input: &GatherInput, needs_graph: bool, needs_verbose: bool) -> (O
         }),
         _ => None,
     };
-    let graph = needs_graph.then(|| focused_view(input, &history, &tips, gap, current, current_tip, base));
+    let graph = needs_graph.then(|| GraphFacts { shallow, ..focused_view(input, &history, &tips, gap, current, current_tip, base) });
     (graph, verbose)
 }
 
@@ -312,36 +359,78 @@ fn focused_view(
     default_base: Result<Option<String>, GatherGap>,
 ) -> GraphFacts {
     let parent = recorded_parent(input, current, |_| true);
-    let mut selected = Vec::new();
-    let mut refs = tips.refs(&input.default_branch);
-    if let Some((parent, parent_tip)) = parent {
+    // Branches drawn beyond the current one and its parent, because a drawn
+    // lane forked from a commit only their line holds.
+    let mut holders: Vec<&str> = Vec::new();
+    loop {
+        let mut drawn: HashSet<&str> = holders.iter().copied().collect();
+        drawn.extend(parent.map(|(parent, _)| parent));
+        drawn.insert(current);
+        let mut selected = Vec::new();
+        let mut refs = tips.refs(&input.default_branch);
+        for branch in holders.iter().copied().chain(parent.map(|(parent, _)| parent)) {
+            let Some(tip) = input.refs.local(branch) else {
+                continue;
+            };
+            selected.push(Selected {
+                branch,
+                tip,
+                parent: recorded_parent(input, branch, |recorded| drawn.contains(recorded)),
+                default_base: None,
+            });
+            refs.push((branch.to_string(), tip.to_string()));
+        }
         selected.push(Selected {
-            branch: parent,
-            tip: parent_tip,
-            parent: None,
-            default_base: None,
+            branch: current,
+            tip: current_tip,
+            parent,
+            default_base: parent.is_none().then_some(default_base.clone()),
         });
-        refs.push((parent.to_string(), parent_tip.to_string()));
+        let facts = assemble(
+            input,
+            history,
+            tips,
+            &selected,
+            DefaultLane {
+                window: LINE_WINDOW,
+                cap_window: true,
+            },
+            refs,
+            current,
+            gap,
+        );
+        let added: Vec<&str> = facts
+            .forked_off_line
+            .iter()
+            .filter_map(|off| fork_holder(input, history, off, &drawn))
+            .collect();
+        if added.is_empty() {
+            return facts;
+        }
+        for branch in added {
+            if !holders.contains(&branch) {
+                holders.insert(0, branch);
+            }
+        }
     }
-    selected.push(Selected {
-        branch: current,
-        tip: current_tip,
-        parent,
-        default_base: parent.is_none().then_some(default_base),
-    });
-    assemble(
-        input,
-        history,
-        tips,
-        &selected,
-        DefaultLane {
-            window: LINE_WINDOW,
-            cap_window: true,
-        },
-        refs,
-        current,
-        gap,
-    )
+}
+
+/// An undrawn worktree branch whose own line (first-parent chain) holds
+/// `off`'s fork commit: the branch's recorded parent when it does, else the
+/// first such branch in listing order.
+fn fork_holder<'a>(input: &'a GatherInput, history: &History, off: &ForkedOffLine, drawn: &HashSet<&str>) -> Option<&'a str> {
+    let holds = |branch: &str| {
+        input.refs.local(branch).is_some_and(|tip| {
+            matches!(history.classify(&off.fork, &[tip]), Ok(Integration::NoSeparateHistory { .. }))
+        })
+    };
+    let recorded = input.forks.get(&off.branch).map(|origin| origin.base_branch.as_str());
+    let candidates = recorded.into_iter().chain(input.branch_names.iter().map(String::as_str));
+    let undrawn = |branch: &&str| *branch != input.default_branch && !drawn.contains(branch);
+    candidates
+        .filter(undrawn)
+        .find(|branch| holds(branch))
+        .and_then(|branch| input.branch_names.iter().find(|name| name.as_str() == branch).map(String::as_str))
 }
 
 /// The default lane's newest commits and one line per worktree branch, each
@@ -436,9 +525,22 @@ struct Placement {
     shape: Shape,
     /// Classification or the fork was unknown.
     gap: bool,
+    /// The other branch's merge that brought the tip into this lane, when
+    /// the tip was [`Integration::IntegratedOtherwise`].
+    merged_through: Option<(String, LaneId)>,
 }
 
 impl Placement {
+    /// Whether `merge` is one of this branch's own drawn merges.
+    fn merges_at(&self, merge: &str) -> bool {
+        match &self.shape {
+            Shape::Lane { earlier, merge: own, .. } => {
+                own.as_ref().is_some_and(|(sha, _)| sha == merge) || earlier.iter().any(|edge| edge.merge == merge)
+            }
+            Shape::Label(_) => false,
+        }
+    }
+
     /// The commits this branch needs drawn on other lanes.
     fn anchors(&self) -> Vec<(LaneId, String)> {
         match &self.shape {
@@ -495,7 +597,16 @@ struct Extension {
 
 /// Classifies one selected branch against its recorded parent's lane,
 /// the default lane, and a diverged `origin/<default>` line, in that order.
-fn place(history: &History, classifications: &Classifications, tips: &DefaultTips, selected: &Selected, record: Option<&str>) -> Placement {
+/// `others` is every selected branch and its tip, for merges into a lane
+/// other than the ones the branch is classified against.
+fn place(
+    history: &History,
+    classifications: &Classifications,
+    tips: &DefaultTips,
+    selected: &Selected,
+    record: Option<&str>,
+    others: &[(&str, &str)],
+) -> Placement {
     let tip = selected.tip;
     let mut candidates: Vec<(LaneId, &str)> = Vec::new();
     if let Some((parent, parent_tip)) = selected.parent {
@@ -524,11 +635,12 @@ fn place(history: &History, classifications: &Classifications, tips: &DefaultTip
                 parent: selected.parent.map(|(parent, _)| parent.to_string()),
                 shape: Shape::Label(candidates[*candidate].0.clone()),
                 gap: false,
+                merged_through: None,
             };
         }
         Ok(
             integration @ (Integration::MergedDirectly { candidate, first_parent, .. }
-            | Integration::IntegratedOtherwise { candidate, first_parent }),
+            | Integration::IntegratedOtherwise { candidate, first_parent, .. }),
         ) => {
             let into = &candidates[*candidate].0;
             // A tip that contains the branch is its own merge base with it,
@@ -543,8 +655,9 @@ fn place(history: &History, classifications: &Classifications, tips: &DefaultTip
                 Integration::MergedDirectly { merge, .. } => Some((merge.clone(), into.clone())),
                 _ => None,
             };
-            let indirect = merge.is_none();
-            (stop, Fork::Against(parent_elsewhere.unwrap_or(first_parent), into.clone()), merge, indirect)
+            // An indirect integration is a verified answer with no merge of
+            // its own to draw, not a gap; `merged_elsewhere` reports it.
+            (stop, Fork::Against(parent_elsewhere.unwrap_or(first_parent), into.clone()), merge, false)
         }
         classified @ (Ok(Integration::Unmerged) | Err(GatherGap)) => {
             let fork = match (&selected.default_base, parent_tip) {
@@ -566,6 +679,16 @@ fn place(history: &History, classifications: &Classifications, tips: &DefaultTip
         (None, Fork::Known(fork, gap)) => (fork, gap),
         (None, Fork::Against(against, lane)) => fork_of(against, tip, &lane),
     };
+    // Only the parent, default, and origin lanes are classified against. A
+    // tip merged directly into another drawn lane (a child or a sibling)
+    // still gets that merge, keeping the fork and line found above: measuring
+    // the fork from that lane would hang this one from it.
+    let merge = merge.or_else(|| match &classified {
+        Ok(Integration::Unmerged | Integration::IntegratedOtherwise { .. }) => {
+            direct_merge_elsewhere(history, classifications, selected, others)
+        }
+        _ => None,
+    });
     let shape = Shape::Lane {
         window: extension.window,
         fork,
@@ -573,13 +696,38 @@ fn place(history: &History, classifications: &Classifications, tips: &DefaultTip
         merge,
     };
     let gap = classified_gap || fork_gap || extension.gap;
+    let merged_through = match &classified {
+        Ok(Integration::IntegratedOtherwise { candidate, merge, .. }) => Some((merge.clone(), candidates[*candidate].0.clone())),
+        _ => None,
+    };
     Placement {
         branch: selected.branch.to_string(),
         tip: tip.to_string(),
         parent: selected.parent.map(|(parent, _)| parent.to_string()),
         shape,
         gap,
+        merged_through,
     }
+}
+
+/// The first other selected branch (not this one, not its recorded parent)
+/// whose line merged `selected`'s tip directly, as its merge's second parent.
+/// A tip merely on that lane's line (`NoSeparateHistory`, as when a child
+/// forked at it) is no merge.
+fn direct_merge_elsewhere(
+    history: &History,
+    classifications: &Classifications,
+    selected: &Selected,
+    others: &[(&str, &str)],
+) -> Option<(String, LaneId)> {
+    let parent = selected.parent.map(|(parent, _)| parent);
+    others
+        .iter()
+        .filter(|(branch, _)| *branch != selected.branch && Some(*branch) != parent)
+        .find_map(|(branch, other_tip)| match classifications.classify(history, selected.tip, &[other_tip]) {
+            Ok(Integration::MergedDirectly { merge, .. }) => Some((merge, LaneId::Branch(branch.to_string()))),
+            _ => None,
+        })
 }
 
 /// Walks a lane's boundaries backward and extends it past each one that a
@@ -721,7 +869,9 @@ fn assemble(
 ) -> GraphFacts {
     let classifications = Classifications::default();
     let record = |branch: &str| input.forks.get(branch).map(|origin| origin.base_sha.as_str());
-    let placements: Vec<Placement> = parallel(selected, |selected| place(history, &classifications, tips, selected, record(selected.branch)))
+    let others: Vec<(&str, &str)> = selected.iter().map(|selected| (selected.branch, selected.tip)).collect();
+    let placements: Vec<Placement> =
+        parallel(selected, |selected| place(history, &classifications, tips, selected, record(selected.branch), &others))
         .into_iter()
         .filter_map(|placement| {
             incomplete |= placement.is_none();
@@ -838,6 +988,54 @@ fn assemble(
         lines.push(line);
     }
 
+    // A fork no lane drew leaves `GitGraph` an unconnected lane. When the
+    // expected lane contains the fork, the commit that brought it in says why.
+    let on = |built: &LaneHistory, sha: &str| {
+        built.placed.contains(sha) || built.entries.iter().any(|entry| matches!(entry, LaneEntry::Commit(commit) if commit == sha))
+    };
+    let drawn = |sha: &str| on(&default_built, sha) || lanes.values().any(|built| on(built, sha));
+    let tip_of = |lane: &LaneId| -> Option<&str> {
+        match lane {
+            LaneId::Default => Some(tips.lane_tip.as_str()),
+            LaneId::Origin => diverged.map(|(_, tip)| tip),
+            LaneId::Branch(branch) => placements.iter().find(|placement| &placement.branch == branch).map(|placement| placement.tip.as_str()),
+        }
+    };
+    let forked_off_line = placements
+        .iter()
+        .filter_map(|placement| {
+            let Shape::Lane { fork: Some((fork, lane)), .. } = &placement.shape else {
+                return None;
+            };
+            if drawn(fork) {
+                return None;
+            }
+            let merge = match classifications.classify(history, fork, &[tip_of(lane)?]) {
+                Ok(Integration::MergedDirectly { merge, .. } | Integration::IntegratedOtherwise { merge, .. }) => merge,
+                _ => return None,
+            };
+            Some(ForkedOffLine {
+                branch: placement.branch.clone(),
+                fork: fork.clone(),
+                into: lane_name(input, tips, lane),
+                merge,
+            })
+        })
+        .collect();
+
+    let merged_elsewhere = placements
+        .iter()
+        .filter_map(|placement| {
+            let (merge, into) = placement.merged_through.as_ref()?;
+            Some(MergedElsewhere {
+                branch: placement.branch.clone(),
+                tip: placement.tip.clone(),
+                into: lane_name(input, tips, into),
+                through: placements.iter().find(|other| other.merges_at(merge)).map(|other| other.branch.clone()),
+            })
+        })
+        .collect();
+
     GraphFacts {
         default_branch: input.default_branch.clone(),
         default_entries: default_built.entries,
@@ -845,6 +1043,21 @@ fn assemble(
         refs,
         current_branch: current_branch.to_string(),
         incomplete,
+        shallow: false,
+        merged_elsewhere,
+        forked_off_line,
+    }
+}
+
+/// The name a reader knows `lane` by: the default lane is the local default
+/// branch unless `origin/<default>` is ahead of it and so is its tip.
+fn lane_name(input: &GatherInput, tips: &DefaultTips, lane: &LaneId) -> String {
+    let origin = || format!("origin/{}", input.default_branch);
+    match lane {
+        LaneId::Branch(branch) => branch.clone(),
+        LaneId::Origin => origin(),
+        LaneId::Default if tips.local.as_deref() == Some(tips.lane_tip.as_str()) => input.default_branch.clone(),
+        LaneId::Default => origin(),
     }
 }
 

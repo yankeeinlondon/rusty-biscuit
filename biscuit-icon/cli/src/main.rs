@@ -74,11 +74,21 @@ fn init_tracing(debug: u8) {
 ///
 /// With `--verbose`, the cause chain is deduplicated and appended.
 fn render_error(err: &color_eyre::eyre::Report, verbose: u8) {
-    use biscuit_terminal::components::prose::Prose;
-    use biscuit_terminal::components::renderable::TerminalRenderable;
     use biscuit_terminal::terminal::Terminal;
 
-    let term = Terminal::new();
+    eprintln!("{}", format_error(err, verbose, &Terminal::new()));
+}
+
+/// Formats `err` for `term`; each cause sits on its own line below the
+/// `Caused by:` heading.
+fn format_error(
+    err: &color_eyre::eyre::Report,
+    verbose: u8,
+    term: &biscuit_terminal::terminal::Terminal,
+) -> String {
+    use biscuit_terminal::components::prose::{LineBreaks, Prose};
+    use biscuit_terminal::components::renderable::TerminalRenderable;
+
     let mut message = format!("<red><b>Error:</b></red> {err}");
 
     if verbose > 0 {
@@ -97,6 +107,41 @@ fn render_error(err: &color_eyre::eyre::Report, verbose: u8) {
         }
     }
 
-    let prose = Prose::new(message);
-    eprintln!("{}", prose.render(&term));
+    // The message is assembled line by line, so each `\n` is a line break.
+    Prose::new(message)
+        .with_line_breaks(LineBreaks::Hard)
+        .render(term)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use biscuit_terminal::discovery::detection::ColorDepth;
+    use biscuit_terminal::prelude::strip_escape_codes;
+    use biscuit_terminal::terminal::Terminal;
+    use color_eyre::eyre::eyre;
+
+    #[test]
+    fn verbose_error_keeps_each_cause_on_its_own_line() {
+        // Arrange
+        let err = eyre!("cache file is locked").wrap_err("could not open icon cache");
+        let term = Terminal::builder()
+            .is_tty(false)
+            .color_depth(ColorDepth::None)
+            .osc_link_support(false)
+            .build();
+
+        // Act
+        let rendered = strip_escape_codes(format_error(&err, 1, &term));
+
+        // Assert
+        assert_eq!(
+            rendered.lines().collect::<Vec<_>>(),
+            vec![
+                "Error: could not open icon cache",
+                "Caused by:",
+                "  - cache file is locked",
+            ],
+        );
+    }
 }

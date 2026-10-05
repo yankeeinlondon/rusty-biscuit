@@ -227,7 +227,9 @@ must call it before any inventory.
   fingerprint before an approved discard (exit 3 on any difference). The
   handoff record carries that report-time fingerprint, not one taken after the
   questions.
-- After `Repaired`, every refusal and cancellation appends
+- After `Repaired`, the report says the `.git` file was missing right under
+  its heading (`ReportInput::relinked`, `report::RELINKED_MARKUP`); there is
+  no separate message before it. Every refusal and cancellation appends
   `Facts::kept_link_note`, and a failed inventory says the link was left in
   place. Never print "nothing was changed" there.
 - Bare Git errors go through `in_context(error, operation)`, which prefixes

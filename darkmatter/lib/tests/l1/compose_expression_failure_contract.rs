@@ -47,7 +47,7 @@ fn failures_with(content: &str, configure: impl Fn(ComposeOptions) -> ComposeOpt
             let dir = TempDir::new().unwrap();
             let path = write(dir.path(), "doc.md", content);
             let markdown = Markdown::try_from(path.as_path()).unwrap();
-            let error = match markdown.compose_with(configure(options(dir.path(), &path, fail_fast))) {
+            let error = match markdown.compose_with(&crate::request_support::request(configure(options(dir.path(), &path, fail_fast)))) {
                 Ok((composed, report)) => panic!(
                     "fail_fast={fail_fast}: composed {:?} with warnings {:?}",
                     composed.content(),
@@ -157,7 +157,7 @@ fn a_body_failure_after_text_replacement_keeps_its_authored_span() {
 #[test]
 fn replacement_output_is_data_and_never_fails() {
     let markdown: Markdown = "---\nnote: \"call {{{ f( }}}\"\n---\nsee {{ note }}\n".into();
-    let (composed, report) = markdown.compose().expect("inserted text is never parsed");
+    let (composed, report) = markdown.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).expect("inserted text is never parsed");
     assert_eq!(composed.content().trim(), "see call {{ f( }}");
     assert!(report.warnings.is_empty(), "{:?}", report.warnings);
 }
@@ -407,7 +407,7 @@ fn a_transclusion_condition_failure_stays_fatal() {
         let path = write(dir.path(), "doc.md", "root\n\n::file ./child.md when=\"min(1)\"\n");
         let error = Markdown::try_from(path.as_path())
             .unwrap()
-            .compose_with(options(dir.path(), &path, fail_fast))
+            .compose_with(&crate::request_support::request(options(dir.path(), &path, fail_fast)))
             .expect_err("a bad transclusion condition fails the document");
         assert!(matches!(error, MarkdownError::Transclusion(_)), "{error:?}");
     }
@@ -433,7 +433,7 @@ fn shell_ternary_condition_and_branch_failures_stay_fatal() {
             });
             Markdown::try_from(path.as_path())
                 .unwrap()
-                .compose_with(options)
+                .compose_with(&crate::request_support::request(options))
                 .expect_err("a bad `$()` ternary fails the document");
         }
     }
@@ -456,7 +456,7 @@ fn subtree_compose_fails_on_real_expression_failures_only() {
     let compose = |text: &str| {
         darkmatter::markdown::compose::subtree::SubtreeCompose::new(&json!(text), &state)
             .with_resolution_context(darkmatter::markdown::compose::expression::ResolutionContext::new(
-                dir.path().to_path_buf(),
+                biscuit_file::FileResolutionContext::new(dir.path()),
             ))
             .compose()
     };
@@ -524,7 +524,7 @@ fn preflight_discovery_tolerates_what_composition_rejects() {
 
     let commands = darkmatter::markdown::compose::collect_shell_commands(
         &markdown,
-        &options(dir.path(), &path, false).with_shell(shell.clone()),
+        &crate::request_support::request(options(dir.path(), &path, false).with_shell(shell.clone())),
     )
     .expect("preflight discovery tolerates the bad mixed-text span");
     assert!(
@@ -534,7 +534,7 @@ fn preflight_discovery_tolerates_what_composition_rejects() {
 
     let approved = HashSet::from(["git rev-parse HEAD".to_string()]);
     markdown
-        .compose_with(options(dir.path(), &path, false).with_shell(shell).with_pre_approved_commands(approved))
+        .compose_with(&crate::request_support::request(options(dir.path(), &path, false).with_shell(shell).with_pre_approved_commands(approved)))
         .expect_err("the real composition rejects the bad span");
 }
 
@@ -554,15 +554,15 @@ fn preflight_discovery_does_not_fail_on_a_region_composition_removes() {
 
     let commands = darkmatter::markdown::compose::collect_shell_commands(
         &markdown,
-        &options(dir.path(), &path, false).with_shell(shell.clone()),
+        &crate::request_support::request(options(dir.path(), &path, false).with_shell(shell.clone())),
     )
     .expect("discovery tolerates a failure inside a removed region");
     assert!(commands.iter().any(|entry| entry.normalized == "git rev-parse HEAD"), "{commands:?}");
 
     let (composed, _) = markdown
         .compose_with(
-            options(dir.path(), &path, false)
-                .only(&[ComposeOperation::FrontmatterInterpolation, ComposeOperation::PageBlocks, ComposeOperation::Interpolation]),
+            &crate::request_support::request(options(dir.path(), &path, false)
+                .only(&[ComposeOperation::FrontmatterInterpolation, ComposeOperation::PageBlocks, ComposeOperation::Interpolation])),
         )
         .expect("the removed region is never evaluated");
     assert_eq!(composed.content().trim(), "kept");

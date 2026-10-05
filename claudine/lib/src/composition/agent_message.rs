@@ -11,12 +11,21 @@
 //! These helpers return Prose **markup** (e.g. `<red>…</red>`), not
 //! terminal-rendered strings: each caller renders with its own
 //! [`biscuit_terminal::terminal::Terminal`] so terminal-capability downgrades
-//! (no-color, no-OSC8) are honored at the call site.
+//! (no-color, no-OSC8) are honored at the call site. A single newline in the
+//! markup separates display rows (a heading and its `- agent` rows), so wrap
+//! it with [`agent_message_prose`] rather than a default [`Prose`], which
+//! would join the rows.
 
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{LineBreaks, Prose};
 
 use super::types::AgentResolutionState;
 use crate::provider::Provider;
+
+/// Wrap agent-message markup from this module as [`Prose`] whose single
+/// newlines stay row breaks.
+pub fn agent_message_prose(markup: impl Into<String>) -> Prose {
+    Prose::new(markup).with_line_breaks(LineBreaks::Hard)
+}
 
 /// Render the multi-line breakdown for an agent-resolution state as Prose
 /// markup.
@@ -59,7 +68,7 @@ pub fn agent_state_breakdown(state: &AgentResolutionState) -> String {
 /// document; the Prose layer downgrades it to plain text when the terminal
 /// does not support OSC8.
 pub fn invalid_agent_message(hint: &str, file_link: &str) -> String {
-    let hint = Prose::escape_text(hint);
+    let hint = Prose::escape_text_outside_code_spans(hint);
     format!(
         "<red><b>Invalid Agent:</b></red> the {file_link} references an invalid Agent provider \
          '{hint}'. Choose from the installed agents on this host:"
@@ -76,7 +85,7 @@ fn invalid_suggestions_trailer(invalid: &[String]) -> String {
         "\nThe following agents were suggested but are <b><red>NOT</red></b> valid Agents:\n",
     );
     for hint in invalid {
-        out.push_str(&format!("- {}\n", Prose::escape_text(hint)));
+        out.push_str(&format!("- {}\n", Prose::escape_text_outside_code_spans(hint)));
     }
     out
 }
@@ -90,7 +99,7 @@ fn no_agent_breakdown() -> String {
 }
 
 fn single_invalid_breakdown(hint: &str) -> String {
-    let hint = Prose::escape_text(hint);
+    let hint = Prose::escape_text_outside_code_spans(hint);
     format!(
         "<red><b>Invalid Agent</b></red>(<dim>{hint}</dim>) <i>defined in Markdown's \
          <inverse>agent</inverse> Frontmatter! Caller will be prompted to choose a valid Agent \

@@ -96,9 +96,9 @@ fn outside_repo_only_user_scope_is_set() {
     assert!(set.package_area.is_none());
     assert!(set.package.is_none());
     assert!(set.extras.is_empty());
-    // user_claudine depends on dirs::home_dir(); assert only when
+    // user_claudine depends on biscuit_file::home_dir(); assert only when
     // $HOME is resolvable, otherwise the field is None.
-    if dirs::home_dir().is_some() {
+    if biscuit_file::home_dir().is_some() {
         assert!(set.user_claudine.is_some());
     }
 }
@@ -225,7 +225,7 @@ fn completion_file_context_uses_projected_intrinsic_scopes_once() {
     let package = tmp.path().join("claudine/cli");
     let ctx = test_ctx(&package);
 
-    let resolution = file_resolution_context(&ctx);
+    let resolution = file_resolution_context(&ctx).unwrap();
     assert_eq!(resolution.package_root(), Some(package.as_path()));
     assert_eq!(
         resolution.package_area(),

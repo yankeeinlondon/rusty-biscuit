@@ -73,11 +73,11 @@ fn compose_parent(
     let parent = work.join("parent.md");
     write(&parent, body);
     let options = ComposeOptions::new()
-        .with_file_resolution_context(snapshot)
         .with_source_file(&parent)
         .with_fail_fast(fail_fast)
         .only(&[ComposeOperation::BlockTransclusion]);
-    Markdown::try_from(parent.as_path()).unwrap().compose_with(options)
+    let request = darkmatter::markdown::compose::ComposeRequest::with_context(options, snapshot).unwrap();
+    Markdown::try_from(parent.as_path()).unwrap().compose_with(&request)
 }
 
 fn composed(work: &Path, snapshot: FileResolutionContext, body: &str) -> String {

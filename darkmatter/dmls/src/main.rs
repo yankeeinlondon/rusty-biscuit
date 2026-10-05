@@ -7,6 +7,7 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use darkmatter::markdown::compose::RequestSnapshot;
 use lsp_server::Connection;
 use tracing_subscriber::EnvFilter;
 
@@ -129,13 +130,23 @@ fn main() -> ExitCode {
     if let Some((tier_name, dir)) = &args.gen_corpus {
         return run_gen_corpus(tier_name, dir);
     }
+    // The only read of process state: `HOME`, the environment, and the
+    // current directory every file-resolution context is built from.
+    let snapshot = match RequestSnapshot::from_process() {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            eprintln!("error: cannot read the current directory: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
     if let Some(dir) = &args.bench_index {
-        return run_bench_index(dir, args.json);
+        return run_bench_index(dir, args.json, snapshot);
     }
 
     let (connection, io_threads) = Connection::stdio();
     let options = dmls::RunOptions {
         config_path: args.config,
+        snapshot,
     };
     let outcome = dmls::run_server(connection, options);
     let joined = io_threads.join();
@@ -156,12 +167,12 @@ fn main() -> ExitCode {
 /// Runs `--bench-index`: index a directory and print timings, then exit.
 ///
 /// Bench output goes to stdout (there is no LSP session in this mode).
-fn run_bench_index(dir: &Path, json: bool) -> ExitCode {
+fn run_bench_index(dir: &Path, json: bool, snapshot: RequestSnapshot) -> ExitCode {
     if !dir.is_dir() {
         eprintln!("error: --bench-index path is not a directory: {}", dir.display());
         return ExitCode::from(2);
     }
-    let report = dmls::bench_index(dir);
+    let report = dmls::bench_index(dir, &dmls::context::RepositoryContexts::new(snapshot));
     if json {
         println!("{}", report.to_json());
     } else {

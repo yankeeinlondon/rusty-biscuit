@@ -501,7 +501,7 @@ pub const TRIGGER_GRAMMAR_DESCRIPTORS: &[TriggerGrammarDescriptor] = &[
     TriggerGrammarDescriptor {
         name: "$path",
         form: "$path: glob | [glob, ...]",
-        description: "Matches the case-sensitive, boundary-relative path with `/` separators. Basename globs match in any directory and `!` patterns exclude.",
+        description: "Matches the document's path with glob references (`&`, `^`, `~`, absolute, or bare, read from the trigger's folder). Case-sensitive; a glob naming no folder matches that file name at any depth, and `!` patterns exclude. `@`, `%`, `vault:`, and `{{VAR}}` are refused.",
     },
     TriggerGrammarDescriptor {
         name: "all",

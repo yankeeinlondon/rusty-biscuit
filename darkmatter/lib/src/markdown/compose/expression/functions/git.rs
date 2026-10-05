@@ -294,7 +294,7 @@ mod tests {
             let parents: Vec<_> = parent.iter().collect();
             repo.commit(Some("HEAD"), &signature, &signature, name, &tree, &parents).unwrap();
         };
-        let context = ResolutionContext::new(temp.path().to_path_buf()).with_repository_root(temp.path());
+        let context = ResolutionContext::at(temp.path().to_path_buf()).with_repository_root(temp.path());
 
         // An unborn repository has no history.
         assert_eq!(call(&[json!(5)], &context).unwrap(), json!([]));
@@ -311,7 +311,7 @@ mod tests {
     #[test]
     fn a_captured_root_that_is_not_a_repository_is_an_error() {
         let temp = tempfile::tempdir().unwrap();
-        let context = ResolutionContext::new(temp.path().to_path_buf()).with_repository_root(temp.path());
+        let context = ResolutionContext::at(temp.path().to_path_buf()).with_repository_root(temp.path());
         let error = call(&[json!(1)], &context).unwrap_err();
         assert!(error.to_string().contains("failed to read history"), "{error}");
     }

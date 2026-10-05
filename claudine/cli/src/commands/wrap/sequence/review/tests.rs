@@ -148,7 +148,7 @@ fn shipped_review_loop_hides_exactly_its_stage_steps() {
         original_text: REVIEW_LOOP.to_string(),
         markdown: REVIEW_LOOP.to_string().into(),
     };
-    let plan = resolve_sequence_plan(&source)
+    let plan = resolve_sequence_plan(&source, &crate::request::test_context())
         .expect("review-loop.md normalizes")
         .expect("review-loop.md declares a sequence");
     assert_eq!(plan.steps.len(), 22);

@@ -929,7 +929,14 @@ pub(super) fn run_file_links_in_pane(name: &str) -> Option<(CapturedFrame, tempf
     }
 
     let dir = tempdir().unwrap();
-    fs::create_dir(dir.path().join(".git")).unwrap();
+    // A real repository: the prepared request context, not a `.git` probe,
+    // decides the repository root icon.
+    let status = std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(dir.path())
+        .status()
+        .expect("run git");
+    assert!(status.success(), "git init");
     let topics = dir.path().join("docs").join("topics");
     fs::create_dir_all(&topics).unwrap();
     // Representative document extensions (distinct Unicode glyphs), a dotfile
@@ -965,7 +972,13 @@ pub(super) fn run_file_links_in_pane(name: &str) -> Option<(CapturedFrame, tempf
 
     let md = Markdown::try_from(root.as_path()).unwrap();
     let (composed, _report) = md
-        .compose_with(ComposeOptions::new().with_source_file(&root))
+        .compose_with(
+            &darkmatter::markdown::compose::ComposeRequest::prepare(
+                ComposeOptions::new().with_source_file(&root),
+                &darkmatter::markdown::compose::RequestSnapshot::new(root.parent().unwrap()),
+            )
+            .unwrap(),
+        )
         .expect("compose ::file-links");
 
     // `TerminalOptions` is `#[non_exhaustive]`; build from the default and force

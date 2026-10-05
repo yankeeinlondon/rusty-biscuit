@@ -27,7 +27,7 @@ use darkmatter::markdown::compose::ComposeSource;
 use crate::args::{Cli, Commands};
 use crate::argv::{OwnedFlags, normalize_for_completion, partition_composition_tail};
 use crate::commands::compose::ownership::candidates;
-use crate::completion::schema_completion::resolve_prompt_path;
+use crate::completion::schema_completion::CommittedPrompt;
 use crate::completion::scopes::ScopeContext;
 
 /// Whether Claudine owns the word at `current_index` of `argv`, and the words
@@ -120,9 +120,10 @@ fn last_owner(
         _ => return Err(Undecided),
     };
     let file = words.iter().find(|word| setter_key(word).is_none()).ok_or(Undecided)?;
-    let source = authored_source(file, &ScopeContext::discover()).ok_or(Undecided)?;
+    let prompt = CommittedPrompt::resolve(file, &ScopeContext::discover()).ok_or(Undecided)?;
+    let source = authored_source(file, &prompt).ok_or(Undecided)?;
     let schema = if tokens.iter().any(|token| setter_key(token).is_some()) {
-        authored_schema_parameters(&source, None, None).map_err(|_| Undecided)?
+        authored_schema_parameters(&source, None, &prompt.context).map_err(|_| Undecided)?
     } else {
         SchemaParameters::NoSchema
     };
@@ -131,8 +132,8 @@ fn last_owner(
 
 /// The composition file as authored, resolved the way the setter completers
 /// resolve it.
-fn authored_source(file: &str, ctx: &ScopeContext) -> Option<ResolvedCompositionSource> {
-    let resolved_path = resolve_prompt_path(file, ctx)?;
+fn authored_source(file: &str, prompt: &CommittedPrompt) -> Option<ResolvedCompositionSource> {
+    let resolved_path = prompt.path.clone();
     let original_text = std::fs::read_to_string(&resolved_path).ok()?;
     let markdown =
         Markdown::from(original_text.clone()).with_source(ComposeSource::infer_from_path(&resolved_path));

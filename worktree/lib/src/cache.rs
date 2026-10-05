@@ -36,6 +36,19 @@ pub struct CacheValue {
     pub behind: usize,
     /// Whether merging the branch into the target would not conflict.
     pub is_clean: bool,
+    /// The target's own line from the branch tip, recorded only for the
+    /// caption's comparison when it is behind (see `listing::line_steps`).
+    /// Absent from older files, which still load.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<LineSteps>,
+}
+
+/// Commits on a branch's own line (first-parent chain), and how many of them
+/// are merges.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LineSteps {
+    pub commits: usize,
+    pub merges: usize,
 }
 
 #[derive(Debug, Default)]
@@ -242,6 +255,7 @@ mod tests {
             ahead: 2,
             behind: 1,
             is_clean: true,
+            line: Some(LineSteps { commits: 1, merges: 1 }),
         }
     }
 

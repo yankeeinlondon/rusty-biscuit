@@ -254,7 +254,7 @@ fn config_path(config_dir: Option<&Path>) -> PathBuf {
     match config_dir {
         Some(dir) => dir.join("kilo.jsonc"),
         None => {
-            let home = dirs::home_dir().unwrap_or_default();
+            let home = biscuit_file::home_dir().unwrap_or_default();
             home.join(".config").join("kilo").join("kilo.jsonc")
         }
     }
@@ -265,7 +265,7 @@ fn plugin_dir(config_dir: Option<&Path>) -> PathBuf {
     match config_dir {
         Some(dir) => dir.join("plugin"),
         None => {
-            let home = dirs::home_dir().unwrap_or_default();
+            let home = biscuit_file::home_dir().unwrap_or_default();
             home.join(".config").join("kilo").join("plugin")
         }
     }

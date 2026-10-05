@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::env;
 use std::fmt;
 
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::errors::SourceContext;
 use serde::{Deserialize, Serialize};
@@ -132,7 +132,7 @@ impl biscuit_terminal::errors::BlockError for ImageRefError {
 
             Self::MalformedHtml(message) => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("ImageRefError", "malformed HTML image"))
-                .body(format!("<dim>Message:</dim> {}", Prose::escape_text(message)))
+                .body(format!("<dim>Message:</dim> {}", Prose::escape_text_outside_code_spans(message)))
                 .hint(
                     "Ensure the tag starts with <cyan>\\<img</cyan> and ends with <cyan>\\></cyan> (self-closing is allowed).",
                 ),
@@ -142,7 +142,7 @@ impl biscuit_terminal::errors::BlockError for ImageRefError {
                 message,
                 caret,
             } => {
-                let mut body = vec![Prose::new(format!("<dim>Message:</dim> {}", Prose::escape_text(message)))];
+                let mut body = vec![Prose::new(format!("<dim>Message:</dim> {}", Prose::escape_text_outside_code_spans(message)))];
                 body.push(Prose::new("Image parsing failed here:"));
 
                 // Image fragments usually start at line 1 of their own string.
@@ -200,7 +200,7 @@ impl biscuit_terminal::errors::BlockError for ImageRefError {
                         "ImageRefError",
                         "invalid referrer policy",
                     ))
-                    .body(body)
+                    .body(Prose::new(body).with_line_breaks(LineBreaks::Hard))
                     .hint(
                         "Accepted values: <cyan>no-referrer</cyan>, <cyan>no-referrer-when-downgrade</cyan>, <cyan>origin</cyan>, <cyan>origin-when-cross-origin</cyan>, <cyan>same-origin</cyan>, <cyan>strict-origin</cyan>, <cyan>strict-origin-when-cross-origin</cyan>, <cyan>unsafe-url</cyan>.",
                     )

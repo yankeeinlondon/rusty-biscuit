@@ -87,7 +87,7 @@ fn prelude_exports_validation_report_view() {
 
     let md = Markdown::new("# Doc with no references");
     let report = md
-        .validate_references(ReferenceValidationOptions::default())
+        .validate_references(ReferenceValidationOptions::with_graph(darkmatter::markdown::reference::ReferenceGraphOptions::with_compose(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new()))))
         .expect("validation should succeed");
     let view = ValidationReportView::new(report);
     let term = biscuit_terminal::terminal::Terminal::default();
@@ -109,7 +109,7 @@ fn prelude_exports_file_tree() {
     // Construct from an already-loaded Markdown so the test does not depend
     // on filesystem layout outside the crate.
     let md = Markdown::new("# Heading\n\n::file ./peer.md\n\nBody");
-    let tree = FileTree::from_markdown(md);
+    let tree = FileTree::from_markdown(md, &crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new()));
     let term = biscuit_terminal::terminal::Terminal::default();
 
     let output = tree.render(&term);
