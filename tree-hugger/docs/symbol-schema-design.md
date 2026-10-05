@@ -155,8 +155,10 @@ pub struct MetricsFacet {
 Inside a present `metrics` facet both keys are required: `null` means the
 metric is unsupported, and an absent key is malformed. An absent facet means
 "not requested". `parameters` is the length of the declaration's own
-parameter list without a Rust `self` (a Go receiver has its own list), one
-variadic parameter counting once; it is `null` for a declaration that is not
+parameter list (every list of a curried Scala `def`), counting a parameter
+bound by a pattern (`(a, b): (u32, u32)`, `_`, `{x}`) like a named one,
+without a Rust `self` (a Go receiver has its own list), one variadic
+parameter counting once; it is `null` for a declaration that is not
 a function, one with no parameter list (`def area: Int` in Scala), and in
 Perl, Bash and Zsh. `has_docs` is whether `docs.raw_doc` is present; it is
 `null` in Lua, Perl, Bash and Zsh, which have no doc-comment detection. A
@@ -292,6 +294,15 @@ example a Rust `impl` for a type declared in another file:
   "keyword": "fn"
 }
 ```
+
+`container_name` is a display name and may be shared by several records (two
+`Boxed` structs in different Rust `mod`s). The containment link
+(`relations.parent`, `relations.container`, the owner's `relations.members`)
+identifies the owner by record ID: the smallest same-named declaration
+around the member, else the same-named record of `container_kind` whose
+qualified name qualifies the member's (`right::Boxed` for
+`right::Boxed::work`), else the only such record; with several and none
+qualifying, the member has no parent.
 
 `keyword` is the grammar token that introduces the declaration, such as `fn`,
 `struct`, `def`, `func`, `const`, `let`, `var`, `class`, `protocol`, `sub`,

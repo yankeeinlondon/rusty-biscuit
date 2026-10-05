@@ -469,6 +469,9 @@ selected containers only.
 Doc coverage: 4 of 78 documented (5.1%); 15 unavailable
 ```
 
+A terminal narrower than a table gets that table at its natural width,
+which the terminal then wraps; the tables are never replaced by a notice.
+
 **Doc coverage** counts `documented` declarations (`metrics.has_docs` true)
 over `total` (declarations whose `has_docs` is known). Lua, Perl, Bash and
 Zsh have no doc-comment detection: their declarations are counted as

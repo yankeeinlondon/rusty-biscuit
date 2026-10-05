@@ -263,7 +263,7 @@ flowchart TD
     P -- yes --> WR["WidenedCapabilities { parsed: false }:<br/>run those passes over the records,<br/>rewrite the entry"]
     P -- no --> WP["WidenedCapabilities { parsed: true }:<br/>parse, analyze for the union,<br/>rewrite the entry"]
     M & WK & H & WR & WP --> N["narrow the result to exactly<br/>what was requested"]
-    N --> F["finish: prefix qualified names,<br/>apply the predicates"]
+    N --> F["finish: apply the file-wide test rules,<br/>prefix qualified names,<br/>apply the predicates"]
 ```
 
 The passes that work from stored records alone are the docs pass, the
@@ -306,6 +306,39 @@ entry record:         "qualified_name": "Square::area"
 scan root repo/:      src/shapes.rs#Square::area
 scan root repo/src/:  shapes.rs#Square::area        (same entry, a Hit, same ID)
 ```
+
+### Test flags: source facts are stored, file-wide rules are not
+
+`visibility.is_test` has two kinds of input, and only one of them is in the
+cache:
+
+| Input | Example | Stored in the entry? |
+|---|---|---|
+| A test attribute on the declaration | Rust `#[test]`, Java `@Test`, C# `[Fact]` | yes |
+| Rust `#[cfg(test)]` / `#![cfg(test)]` containment | `mod tests { fn helper() {} }` | yes |
+| A test file name | Go `*_test.go`, Python `test_*.py`, JS/TS `*.spec.ts` | no |
+| A Rust file below its package's `tests/` | `tests/sample.rs` with a `Cargo.toml` above it | no |
+
+The first two come from the source, which the key hashes. The Rust package
+rule depends on which directory above the file holds the nearest
+`Cargo.toml`, and that can change while the file and its entry do not: add a
+manifest above an unchanged `tests/sample.rs` and its declarations become
+tests; add `tests/Cargo.toml` and `tests/` becomes a package of its own, so
+they stop being tests. A stored flag would keep the old answer on every hit.
+So `finish` applies the file-wide rules to every flagged result, cached or
+not, before the predicates (`--tests-only`, `--exclude-tests`) read the flag:
+
+```text
+entry record (tests/sample.rs):  "is_test": false     (no attribute, no cfg(test))
+no Cargo.toml above:             helper  is_test false   (Hit)
+Cargo.toml added at the root:    helper  is_test true    (Hit, same entry)
+tests/Cargo.toml added too:      helper  is_test false   (Hit, same entry)
+```
+
+The name rules depend only on the path, which is a key input, so storing them
+would be correct; they are applied after lookup with the Rust rule because
+they are one classification. The rule costs one file-name check and, for
+Rust, one `Cargo.toml` probe per directory above the file, once per result.
 
 ## Writes are atomic
 

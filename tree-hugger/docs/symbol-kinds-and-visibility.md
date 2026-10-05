@@ -290,7 +290,22 @@ M.size = 1                       -- Variable, container M, kind Variable
   function.
 - A Lua container is the table expression as written (`a.b` for
   `function a.b.c()`). Its kind is the kind of the file-level declaration of
-  that name, and absent when there is none or they disagree.
+  that name, and absent when there is none or they disagree. When two tables
+  share a name (`local M = {}` in two `do … end` blocks), a member is linked
+  to the nearest one declared before it.
+
+### Swift extension members
+
+A member of an extension names the extended type as written as its
+container, and is linked to that type's record when the file declares it,
+by qualified name, so same-named nested types stay apart:
+
+```swift
+class Left { class Repeated {} }
+class Right { class Repeated {} }
+extension Left.Repeated { func a() {} }    // Left.Repeated.a -> Left.Repeated
+extension Right.Repeated { func b() {} }   // Right.Repeated.b -> Right.Repeated
+```
 
 ### Rust `impl` members
 
@@ -312,9 +327,23 @@ impl Foreign { fn f(&self) {} }                  // container Foreign, no kind
   arguments.
 - The container kind is that type's own kind when it is declared in the same
   file (Type for a struct or union, Enum for an enum), and absent otherwise.
-- The lookup is by name, so two same-named types in different `mod`s of one
-  file share a container name, and `hug classes` may merge their members. If
-  those declarations disagree on kind, the container kind is left absent.
+- Two same-named types in different `mod`s of one file share a container
+  name, but each member is linked (`relations.parent`, the owner's
+  `relations.members`, `hug classes`, `--tree`) to the type its qualified
+  name names, by record ID. The qualified name keeps the `impl`'s path and
+  module, so the owner is never just the first type of that name:
+
+  ```rust
+  mod left { pub struct Boxed; impl Boxed { pub fn work(&self) {} } }   // left::Boxed::work -> left::Boxed
+  mod right { pub struct Boxed; impl Boxed { pub fn work(&self) {} } }  // right::Boxed::work -> right::Boxed
+  impl right::Boxed { fn more(&self) {} }                               // right::Boxed::more -> right::Boxed
+  impl Boxed { fn guess(&self) {} }                                     // Boxed::guess -> no owner
+  ```
+
+  A member whose qualified name names none of several same-named types (the
+  last line) has no owner; with only one type of that name in the file, that
+  type is the owner. If the same-named declarations disagree on kind, the
+  container kind is left absent.
 - The trait of a trait impl is not part of the container. Each member of
   `impl Trait for Type` records it in `relations.implements`: one entry named
   after the trait's last path segment (`Display` above), whose `id` is the
@@ -420,8 +449,11 @@ What becomes a segment:
 - extracted functions, types, enum variants, modules and namespaces around
   the declaration; a local's name includes its function (`Shape.area.self`),
   and a Rust struct-variant field its variant (`Shape::Circle::radius`)
-- a Rust `impl` block's implemented type (last path segment), a Go receiver's
-  base type and a Lua table, written in the declaration
+- a Rust `impl` block's implemented type as its path is written, without
+  generic arguments (`impl right::Repeated` qualifies `right::Repeated::second`;
+  a leading `super` climbs one enclosing `mod`, `crate` starts at the file,
+  `self` is dropped), a Go receiver's base type and a Lua table, written in
+  the declaration
 - a TypeScript `namespace`, a Swift extension's type and a named function that
   is not extracted itself (a Java or C# constructor:
   `com.example.Point.Point.x`)
@@ -431,7 +463,10 @@ What becomes a segment:
 **Explicit namespaces root the name.** A Java, Scala or Go `package`, a C# or
 PHP `namespace` (file-scoped or block), a named C++ `namespace` and a Perl
 `package` start the name, and `identity.is_namespace_rooted` is `true`
-(`com.example.symbols.PublicWidget`). A Rust inline `mod`, a TypeScript
+(`com.example.symbols.PublicWidget`). Consecutive file-level Scala package
+clauses nest (`package outer` then `package inner` gives
+`outer.inner.PackageProbe.work`); a later PHP `namespace X;` or Perl
+`package X;` replaces an earlier one. A Rust inline `mod`, a TypeScript
 `namespace` and a type qualify the name but do not root it: `schema::Record`
 is not complete without its file. A Perl package name is absolute wherever it
 is written.
@@ -509,7 +544,7 @@ the docstring instead.
 | Java, JavaScript, TypeScript, PHP, Scala | `/** … */` |
 | C#, Swift | `///` and `/** … */` |
 | C, C++ | Doxygen's `///`, `//!`, `/** … */` and `/*! … */` |
-| Python | the string that is the first statement of a `def` or `class` body |
+| Python | the docstring: a first statement of a `def` or `class` body that is a string constant (see below) |
 | Lua, Perl, Bash, Zsh | none: these languages have no doc-comment detection |
 
 ```ts
@@ -524,6 +559,31 @@ A declaration wrapped in `export`, a JavaScript or TypeScript variable
 statement or a C++ `template<…>` header is documented before the wrapper. A
 doc comment that is empty after its delimiters are removed is no
 documentation.
+
+**A Python docstring is a string constant, as Python decides it.** The first
+statement of the body must be one ordinary string literal, with no prefix or
+an `r`/`u` prefix and any quoting, or several of them written next to each
+other (adjacent literals are one constant), optionally in parentheses. A
+bytes literal (`b"…"`, `rb"…"`) or a formatted one (`f"…"`, `rf"…"`, `t"…"`)
+is an expression, not a docstring, and so is a concatenation with one in it.
+The text is the literals' content as written, joined and trimmed; escapes are
+never evaluated, so `"\u0041"` documents and `""`, `"" ""` or a
+whitespace-only string do not.
+
+```python
+def plain():
+    "Documented."                # has_docs = true
+def joined():
+    "Docu" "mented."             # has_docs = true: one constant
+def formatted():
+    f"Not a docstring."          # has_docs = false
+def raw_bytes():
+    b"Not a docstring."          # has_docs = false
+```
+
+A doc comment is recognized by its opening delimiter alone: `/**/` and
+`/***/` are ordinary block comments, and `////` is an ordinary line
+comment.
 
 ## Deprecation and test flags
 
@@ -540,16 +600,29 @@ leaves it `false`:
 | Rust | `#[deprecated]`, with or without arguments |
 | Java | `@Deprecated` (or `@java.lang.Deprecated`), or a doc line that starts with the `@deprecated` tag |
 | C# | `[Obsolete]`, also qualified (`System.Obsolete`) or with the `Attribute` suffix |
-| JavaScript, TypeScript, PHP | a doc line that starts with the `@deprecated` tag (`@deprecated use load()` counts; `@deprecatedSoon` or a mid-line mention does not) |
-| Go | a doc paragraph that starts with `Deprecated:` |
-| Swift | `@available(*, deprecated…)` (a single-platform `@available(iOS, deprecated: 13)` does not count) |
+| JavaScript, TypeScript, PHP | a doc line that starts with the `@deprecated` tag (`@deprecated use load()` counts; `@deprecatedSoon`, a mid-line mention, a quoted or backticked `@deprecated` and a line inside a fenced code block do not) |
+| Go | a doc paragraph that starts with `Deprecated:`, in `//` or `/* */` docs alike (a blank line starts a paragraph) |
+| Swift | `@available(*, deprecated…)`: a top-level `deprecated` argument (a single-platform `@available(iOS, deprecated: 13)` and the word inside `message: "…"` do not count) |
 | Scala | `@deprecated` (or `@scala.deprecated`) |
 | C++ | `[[deprecated]]` (a vendor form such as `[[gnu::deprecated]]` does not count) |
 | Python | the `@deprecated` decorator, bare or as `typing_extensions.deprecated` or `warnings.deprecated` |
 
+Attributes are read from the syntax tree, not their text: a comment inside
+an attribute is ignored (`#[deprecated /* why */]`, `[Obsolete /* why */]`
+and `@java.lang. /* why */ Deprecated` count), and the marker word inside a
+string argument or another attribute's arguments never counts
+(`[[nodiscard("deprecated")]]`, `@nowarn("deprecated")`). A Python
+decorator is read through parentheses (`@(deprecated)`).
+
 ```go
 // Deprecated: use NewPoint.      <- doc paragraph: is_deprecated = true
 func MakePoint() {}
+
+/* OldPoint makes a point.
+
+Deprecated: use NewPoint.         <- block doc paragraph: is_deprecated = true
+*/
+func OldPoint() {}
 
 func run() {
     // this path is deprecated      <- ordinary comment: no effect
@@ -562,12 +635,16 @@ func run() {
   `test_*.py`, `*_test.py` and `conftest.py`; JavaScript and TypeScript
   `*.test.*` and `*.spec.*`; Rust files below the `tests/` directory of the
   nearest enclosing Cargo package (the nearest directory holding a
-  `Cargo.toml`; with none, the rule does not apply);
+  `Cargo.toml`; with none, the rule does not apply). The package layout is
+  read on every query, cached or not, so adding, moving or removing a
+  manifest changes the answer without touching the file (see
+  [Cache Design](./cache-design.md#test-flags-source-facts-are-stored-file-wide-rules-are-not));
 - a declaration with a test attribute: Rust `#[test]` and `#[<path>::test]`
   (`#[tokio::test]`), Java `@Test` (also qualified, `@org.junit.Test`), C#
   `[Test]`, `[Fact]` and `[TestMethod]`;
 - everything inside a Rust item marked `#[cfg(test)]`, or a module or file
   whose inner attributes say `#![cfg(test)]`, nested declarations included.
+  The predicate is read as tokens, so `#[cfg(/* why */ test)]` counts.
 
 ```rust
 #[cfg(test)]
@@ -615,13 +692,25 @@ undocumented (see [Symbol Reports](./symbol-reports.md)).
 
 | Metric | Definition | `null` when |
 |---|---|---|
-| `parameters` | the declared parameters of a function, method or constructor: its own parameter list, without a Rust `self` (a Go receiver is a separate list and never counted); a variadic parameter counts once; unnamed C, C++ and Go parameters count; `(void)` and `()` are `0` | the declaration is not a function, it has no parameter list (`def area: Int` in Scala), or the language is Perl, Bash or Zsh, whose parameters are not extracted |
-| `has_docs` | whether the declaration has [documentation](#documentation): a doc comment or docstring that is not empty once its delimiters are removed; ordinary comments do not count | the language is Lua, Perl, Bash or Zsh, which have no doc-comment detection |
+| `parameters` | the declared parameters of a function, method or constructor: its own parameter list (every list of a curried Scala `def`), whatever binds each parameter (a name, a destructuring pattern or `_`), without a receiver (a Rust `self`, a Java `Type this` or a TypeScript `this: T`; a Go receiver is a separate list and never counted); a variadic parameter counts once; unnamed C, C++ and Go parameters count; `(void)` and `()` are `0` | the declaration is not a function, it has no parameter list (`def area: Int` in Scala), or the language is Perl, Bash or Zsh, whose parameters are not extracted |
+| `has_docs` | whether the declaration has [documentation](#documentation): a doc comment that is not empty once its delimiters are removed, or a nonempty Python docstring (a string constant; bytes and formatted literals do not count); ordinary comments do not count | the language is Lua, Perl, Bash or Zsh, which have no doc-comment detection |
 
 ```python
 class Receiver:
     def with_receiver(self, only):   # parameters = 2: `self` is an ordinary
         """Documented."""            # parameter in Python; has_docs = true
+```
+
+A parameter bound by a pattern is listed in the signature under the pattern
+as written, with its declared type, so `--param-type` sees that type:
+
+```rust
+pub fn patterned((a, b): (u32, u32), _: String) {} // parameters = 2:
+// `(a, b)` of type `(u32, u32)` and `_` of type `String`
+```
+
+```scala
+def patterned(a: Int)(b: String): Int = a // parameters = 2, both lists
 ```
 
 ## Visibility
