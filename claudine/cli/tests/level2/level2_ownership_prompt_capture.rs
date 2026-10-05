@@ -228,7 +228,7 @@ fn level2_tmux_ambiguity_chooser_decides_ownership_for_every_entrypoint() {
             let question = flattened(&run.chooser);
             for phrase in [
                 "Resolving how the arguments after the composition file are read",
-                "read the word after `-c` differently",
+                "read the word after -c differently",
                 QUESTION,
                 "(This decides how the arguments are read, not which agent runs.)",
             ] {
