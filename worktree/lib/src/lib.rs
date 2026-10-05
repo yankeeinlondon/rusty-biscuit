@@ -17,6 +17,7 @@ pub mod remote_head;
 pub mod remote_update;
 pub mod remove;
 mod strict_json;
+pub mod timing;
 pub mod util;
 pub mod worktree;
 
