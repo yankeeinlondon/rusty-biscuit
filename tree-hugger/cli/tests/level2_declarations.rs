@@ -21,6 +21,10 @@
 //! styling checks pin a wide `COLUMNS`; `check_wrapping` and `check_table`
 //! check `hug`'s own wrapping at the pane width and at an injected one.
 //!
+//! The report views (`--tree`, `--stats`, `--signatures full|none`, and
+//! `classes --format table`) are compared row for row, indentation included,
+//! so those checks need a pane at least 80 columns wide.
+//!
 //! Skip-clean: when no terminal harness is available each test prints a skip
 //! notice and passes.
 
@@ -456,6 +460,369 @@ fn check_table<H: TerminalHarness>(harness: &mut H, pane: &Pane<H>) {
     );
 }
 
+/// The rows a report shows, indentation kept, trailing blanks trimmed and
+/// blank rows dropped, so a layout compares as exact text.
+///
+/// The pane's interactive bash intermittently reports `bash: child setpgid
+/// (…): Operation not permitted` when it forks the command's subshell. Bash
+/// prints it in the child before any redirection applies, so it lands
+/// between the markers; it is the shell's, not `hug`'s, and is dropped.
+fn shown_rows(report: &Report) -> Vec<&str> {
+    report
+        .lines()
+        .into_iter()
+        .map(str::trim_end)
+        .filter(|line| !line.is_empty() && !(line.starts_with("bash: child setpgid (") && line.ends_with("not permitted")))
+        .collect()
+}
+
+/// The exact-layout checks compare whole rows, so the pane must show each
+/// on one row of its own: a narrower pane soft-wraps them, and some backends
+/// capture the wrapped pieces as separate rows.
+fn assert_pane_fits<H: TerminalHarness>(harness: &mut H, pane: &Pane<H>, width: usize) {
+    let cols = (pane.cols)(harness);
+    assert!(cols >= width, "the exact-layout checks need a pane at least {width} columns wide; this one is {cols}");
+}
+
+/// Asserts that `text` in the row `row` carries every SGR parameter in
+/// `with` and none in `without`.
+fn assert_style(report: &Report, row: &str, text: &str, with: &[&str], without: &[&str], what: &str) {
+    let style = report.style_in_row(row, text);
+    assert!(
+        style.as_ref().is_some_and(|style| with.iter().all(|want| style.iter().any(|p| p == want))
+            && without.iter().all(|unwanted| style.iter().all(|p| p != unwanted))),
+        "expected {what} (SGR {with:?}, without {without:?}) on {text:?} in row {row:?}; found {style:?}.\nrow:\n{:?}",
+        report.row(row).raw,
+    );
+}
+
+/// `--tree`: members nest under their container; a member whose container
+/// the command did not select sits under a dim contextual heading, never a
+/// record; `--group-by-module` adds directory headings and `--sort name`
+/// orders containers and, separately, each container's members; a wrapped
+/// member row hangs under its own text.
+fn check_outline<H: TerminalHarness>(harness: &mut H, pane: &Pane<H>) {
+    let fixture = Fixture::new();
+    assert_pane_fits(harness, pane, 80);
+
+    // `functions` selects no type, so `Shape`'s methods sit under a
+    // contextual heading.
+    let report = run_hug(harness, pane, &fixture, UNWRAPPED, "functions --tree geometry.ts widgets/index.js");
+    const CONTEXT: &str = "[in class Shape]";
+    const CREATE: &str = "public method create(size: number): Shape [14:3]";
+    assert_eq!(
+        shown_rows(&report),
+        [
+            "geometry.ts",
+            "  [in class Shape]",
+            "    public method create(size: number): Shape [14:3]",
+            "    public method area(scale: number): Area [18:3]",
+            "  public function buildShape(): Shape [23:8]",
+            "widgets/index.js",
+            "  public function renderWidget(name) [4:8]",
+        ],
+        "report:\n{}",
+        report.plain(),
+    );
+    assert_style(&report, "geometry.ts", "geometry.ts", &["1"], &["2"], "a bold file heading");
+    assert_style(&report, CONTEXT, CONTEXT, &["2"], &["1", "35"], "a dim, unlabeled contextual heading");
+    assert_style(&report, CREATE, "public", &["3"], &[], "italic visibility");
+    assert_style(&report, CREATE, "method", &["32"], &[], "a green callable label");
+    assert_style(&report, CREATE, "create(size: number): Shape", &["1"], &["2"], "a bold name and signature");
+    assert_style(&report, CREATE, "[14:3]", &["2"], &["1"], "a dim location");
+    if pane.osc8 {
+        let row = report.row(CREATE);
+        assert!(
+            row.raw.contains("/geometry.ts#L14\x1b\\[14:3]"),
+            "expected the member location linked to geometry.ts#L14.\nrow:\n{:?}",
+            row.raw,
+        );
+    }
+
+    // Selected parents, module headings and name order.
+    let report = run_hug(
+        harness,
+        pane,
+        &fixture,
+        UNWRAPPED,
+        "symbols --tree --sort name --group-by-module geometry.ts widgets/index.js",
+    );
+    const SHAPE: &str = "public class Shape { count: number, size: number } [10:8]";
+    assert_eq!(
+        shown_rows(&report),
+        [
+            "(root)",
+            "geometry.ts",
+            "  public type alias Area [8:8]",
+            "  public class Shape { count: number, size: number } [10:8]",
+            "    public method area(scale: number): Area [18:3]",
+            "    public property count [11:3]",
+            "    public method create(size: number): Shape [14:3]",
+            "    public property size [12:3]",
+            "  public interface Sized { size: number } [4:8]",
+            "    public property size [5:3]",
+            "  public function buildShape(): Shape [23:8]",
+            "widgets",
+            "widgets/index.js",
+            "  public function renderWidget(name) [4:8]",
+        ],
+        "report:\n{}",
+        report.plain(),
+    );
+    assert_style(&report, "(root)", "(root)", &["1"], &[], "a bold module heading");
+    assert_style(&report, "widgets", "widgets", &["1"], &[], "a bold module heading");
+    assert_style(&report, SHAPE, "class", &["35"], &["2"], "a magenta label on a selected parent");
+    assert_style(&report, SHAPE, "Shape { count: number, size: number }", &["1"], &["2"], "a bold selected parent");
+
+    // Narrow: each member wraps under its own text, four columns past the
+    // member's indent, and keeps its styles on the continuation row.
+    let report = run_hug(harness, pane, &fixture, "COLUMNS=36", "functions --tree geometry.ts");
+    assert_eq!(
+        shown_rows(&report),
+        [
+            "geometry.ts",
+            "  [in class Shape]",
+            "    public method create(size:",
+            "        number): Shape [14:3]",
+            "    public method area(scale:",
+            "        number): Area [18:3]",
+            "  public function buildShape():",
+            "      Shape [23:8]",
+        ],
+        "report:\n{}",
+        report.plain(),
+    );
+    assert_style(&report, CONTEXT, CONTEXT, &["2"], &["1"], "a dim contextual heading");
+    assert_style(&report, "number): Shape [14:3]", "number): Shape", &["1"], &["2"], "a bold wrapped signature");
+    assert_style(&report, "number): Shape [14:3]", "[14:3]", &["2"], &["1"], "a dim location on the wrapped row");
+}
+
+/// `--stats`: three bordered count tables (kind, visibility, language) and
+/// the doc-coverage line with its `unavailable` count, the same at the
+/// pane's width and at a width narrower than every table, where each table
+/// keeps its natural width rather than being replaced by a notice.
+fn check_stats<H: TerminalHarness>(harness: &mut H, pane: &Pane<H>) {
+    let fixture = Fixture::new();
+    assert_pane_fits(harness, pane, 80);
+    // Lua has no doc-comment detection, so its declaration is `unavailable`.
+    std::fs::write(
+        fixture.repo.path().join("tools/helper.lua"),
+        "-- Formats a label.\nlocal function label(name)\n  return name\nend\n\nreturn { label = label }\n",
+    )
+    .expect("write the Lua fixture");
+    let expected = [
+        "┌────────────┬───────┐",
+        "│ Kind       │ Count │",
+        "├────────────┼───────┤",
+        "│ class      │     1 │",
+        "│ function   │     4 │",
+        "│ interface  │     1 │",
+        "│ method     │     2 │",
+        "│ property   │     3 │",
+        "│ type alias │     1 │",
+        "└────────────┴───────┘",
+        "┌────────────────┬───────┐",
+        "│ Visibility     │ Count │",
+        "├────────────────┼───────┤",
+        "│ module-private │     1 │",
+        "│ public         │    10 │",
+        "│ unknown        │     1 │",
+        "└────────────────┴───────┘",
+        "┌────────────┬───────┐",
+        "│ Language   │ Count │",
+        "├────────────┼───────┤",
+        "│ JavaScript │     1 │",
+        "│ Lua        │     1 │",
+        "│ Python     │     1 │",
+        "│ TypeScript │     9 │",
+        "└────────────┴───────┘",
+        "Doc coverage: 0 of 11 documented (0.0%); 1 unavailable",
+    ];
+    for env in ["", "COLUMNS=20"] {
+        let report = run_hug(harness, pane, &fixture, env, "symbols --stats");
+        assert_eq!(shown_rows(&report), expected, "`{env} hug symbols --stats`, report:\n{}", report.plain());
+        // A blank row separates each table from what follows it.
+        let lines: Vec<&str> = report.lines().into_iter().map(str::trim_end).collect();
+        for (index, line) in lines.iter().enumerate() {
+            if line.starts_with('└') {
+                assert_eq!(lines.get(index + 1).copied(), Some(""), "a blank row after each table: {lines:?}");
+            }
+        }
+    }
+}
+
+/// `--signatures full` shows the declaration header as written in place of
+/// visibility and label, and `--signatures none` only names; both in styled
+/// lists, wrapped with the list's hanging indent, and in `--format table`.
+fn check_signature_modes<H: TerminalHarness>(harness: &mut H, pane: &Pane<H>) {
+    let fixture = Fixture::new();
+    assert_pane_fits(harness, pane, 80);
+
+    let report = run_hug(harness, pane, &fixture, UNWRAPPED, "functions --signatures full geometry.ts");
+    const FULL: &str = "- static create(size: number): Shape [in class Shape] geometry.ts:14:3";
+    assert_eq!(
+        shown_rows(&report),
+        [
+            "  - static create(size: number): Shape [in class Shape] geometry.ts:14:3",
+            "  - area(scale: number): Area [in class Shape] geometry.ts:18:3",
+            "  - function buildShape(): Shape geometry.ts:23:8",
+        ],
+        "report:\n{}",
+        report.plain(),
+    );
+    assert_style(&report, FULL, "static create(size: number): Shape", &["1"], &["3", "32"], "a bold header, no label");
+    assert_style(&report, FULL, "geometry.ts:14:3", &["2"], &["1"], "a dim location");
+    if pane.osc8 {
+        assert!(
+            report.row(FULL).raw.contains("/geometry.ts#L14\x1b\\geometry.ts:14:3"),
+            "expected the location linked to geometry.ts#L14.\nrow:\n{:?}",
+            report.row(FULL).raw,
+        );
+    }
+
+    let report = run_hug(harness, pane, &fixture, UNWRAPPED, "functions --signatures none geometry.ts");
+    const NONE: &str = "- public method create [in class Shape] geometry.ts:14:3";
+    assert_eq!(
+        shown_rows(&report),
+        [
+            "  - public method create [in class Shape] geometry.ts:14:3",
+            "  - public method area [in class Shape] geometry.ts:18:3",
+            "  - public function buildShape geometry.ts:23:8",
+        ],
+        "report:\n{}",
+        report.plain(),
+    );
+    assert_style(&report, NONE, "public", &["3"], &[], "italic visibility");
+    assert_style(&report, NONE, "method", &["32"], &[], "a green callable label");
+    assert_style(&report, NONE, "create", &["1"], &[], "a bold name");
+    assert_style(&report, NONE, "geometry.ts:14:3", &["2"], &["1"], "a dim location");
+
+    // A long full header wraps under the item's text, hyphenating the token
+    // that does not fit, and the location moves to a row of its own.
+    let report = run_hug(harness, pane, &fixture, "COLUMNS=50", "functions --signatures full 'tools/*.py'");
+    const CONTINUED: &str = "onal_breakdown: dict[str, list[float]],";
+    assert_eq!(
+        shown_rows(&report),
+        [
+            "  - def",
+            "    summarize_quarterly_revenue_projection(regi-",
+            "    onal_breakdown: dict[str, list[float]],",
+            "    currency_conversion_table: dict[str,",
+            "    float]) -> dict[str, float]",
+            "    tools/long.py:5:1",
+        ],
+        "report:\n{}",
+        report.plain(),
+    );
+    assert_style(&report, CONTINUED, CONTINUED, &["1"], &["2"], "the bold header on a continuation row");
+    assert_style(&report, "tools/long.py:5:1", "tools/long.py:5:1", &["2"], &["1"], "a dim location");
+
+    let report = run_hug(harness, pane, &fixture, "COLUMNS=50", "functions --signatures none 'tools/*.py'");
+    assert_eq!(
+        shown_rows(&report),
+        ["  - function", "    summarize_quarterly_revenue_projection", "    tools/long.py:5:1"],
+        "report:\n{}",
+        report.plain(),
+    );
+    assert_style(
+        &report,
+        "summarize_quarterly_revenue_projection",
+        "summarize",
+        &["1"],
+        &["2"],
+        "a bold name on its own row",
+    );
+
+    // Tables: the full header wraps inside the Signature cell; `none` drops
+    // the column.
+    let report = run_hug(
+        harness,
+        pane,
+        &fixture,
+        "COLUMNS=80",
+        "functions --format table --signatures full geometry.ts",
+    );
+    assert_eq!(
+        shown_rows(&report),
+        [
+            "┌────────────────┬──────────┬────────────┬────────────┬────────────────────────┐",
+            "│ Location       │ Kind     │ Visibility │ Name       │ Signature              │",
+            "├────────────────┼──────────┼────────────┼────────────┼────────────────────────┤",
+            "│ geometry.ts:14 │ method   │ public     │ create     │ static create(size:    │",
+            "│                │          │            │            │ number): Shape         │",
+            "│ geometry.ts:18 │ method   │ public     │ area       │ area(scale: number):   │",
+            "│                │          │            │            │ Area                   │",
+            "│ geometry.ts:23 │ function │ public     │ buildShape │ function               │",
+            "│                │          │            │            │ buildShape(): Shape    │",
+            "└────────────────┴──────────┴────────────┴────────────┴────────────────────────┘",
+        ],
+        "report:\n{}",
+        report.plain(),
+    );
+
+    let report = run_hug(
+        harness,
+        pane,
+        &fixture,
+        UNWRAPPED,
+        "functions --format table --signatures none geometry.ts",
+    );
+    assert_eq!(
+        shown_rows(&report),
+        [
+            "┌────────────────┬──────────┬────────────┬────────────┐",
+            "│ Location       │ Kind     │ Visibility │ Name       │",
+            "├────────────────┼──────────┼────────────┼────────────┤",
+            "│ geometry.ts:14 │ method   │ public     │ create     │",
+            "│ geometry.ts:18 │ method   │ public     │ area       │",
+            "│ geometry.ts:23 │ function │ public     │ buildShape │",
+            "└────────────────┴──────────┴────────────┴────────────┘",
+        ],
+        "report:\n{}",
+        report.plain(),
+    );
+    if pane.osc8 {
+        assert!(
+            report.raw().contains("/geometry.ts#L14\x1b\\geometry.ts:14"),
+            "expected the location linked to geometry.ts#L14.\nreport:\n{:?}",
+            report.raw(),
+        );
+    }
+}
+
+/// `classes --format table`: each container row followed by its displayed
+/// members, the Signature cell wrapping at a narrow width.
+fn check_classes_table<H: TerminalHarness>(harness: &mut H, pane: &Pane<H>) {
+    let fixture = Fixture::new();
+    assert_pane_fits(harness, pane, 80);
+    let report = run_hug(harness, pane, &fixture, "COLUMNS=72", "classes --format table geometry.ts");
+    assert_eq!(
+        shown_rows(&report),
+        [
+            "┌────────────────┬───────────┬────────────┬────────┬───────────────────┐",
+            "│ Location       │ Kind      │ Visibility │ Name   │ Signature         │",
+            "├────────────────┼───────────┼────────────┼────────┼───────────────────┤",
+            "│ geometry.ts:4  │ interface │ public     │ Sized  │ { size: number }  │",
+            "│ geometry.ts:10 │ class     │ public     │ Shape  │ { count: number,  │",
+            "│                │           │            │        │ size: number }    │",
+            "│ geometry.ts:14 │ method    │ public     │ create │ (size: number):   │",
+            "│                │           │            │        │ Shape             │",
+            "│ geometry.ts:18 │ method    │ public     │ area   │ (scale: number):  │",
+            "│                │           │            │        │ Area              │",
+            "└────────────────┴───────────┴────────────┴────────┴───────────────────┘",
+        ],
+        "report:\n{}",
+        report.plain(),
+    );
+    if pane.osc8 {
+        assert!(
+            report.raw().contains("/geometry.ts#L10\x1b\\geometry.ts:10"),
+            "expected the container location linked to geometry.ts#L10.\nreport:\n{:?}",
+            report.raw(),
+        );
+    }
+}
+
 // ------------------------------------------------------------------
 // tmux — headless; capture keeps SGR but not OSC 8
 // ------------------------------------------------------------------
@@ -470,6 +837,10 @@ fn level2_declarations_in_tmux() {
     check_declarations(&mut harness, &pane);
     check_wrapping(&mut harness, &pane);
     check_table(&mut harness, &pane);
+    check_outline(&mut harness, &pane);
+    check_stats(&mut harness, &pane);
+    check_signature_modes(&mut harness, &pane);
+    check_classes_table(&mut harness, &pane);
 }
 
 /// tmux: `-S -` reads the whole history and `-J` rejoins rows tmux
@@ -517,6 +888,10 @@ fn level2_declarations_in_wezterm() {
     check_declarations(harness, &pane);
     check_wrapping(harness, &pane);
     check_table(harness, &pane);
+    check_outline(harness, &pane);
+    check_stats(harness, &pane);
+    check_signature_modes(harness, &pane);
+    check_classes_table(harness, &pane);
 }
 
 // ------------------------------------------------------------------
@@ -540,4 +915,8 @@ fn level2_declarations_in_kitty() {
     check_declarations(harness, &pane);
     check_wrapping(harness, &pane);
     check_table(harness, &pane);
+    check_outline(harness, &pane);
+    check_stats(harness, &pane);
+    check_signature_modes(harness, &pane);
+    check_classes_table(harness, &pane);
 }

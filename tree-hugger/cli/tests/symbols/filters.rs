@@ -505,3 +505,88 @@ fn selectors_never_reach_the_cache_entry() {
     }
     assert_eq!(crate::cache_entries(scratch.temp.path()).len(), 1, "one entry");
 }
+
+/// Parameters bound by a pattern (Rust tuple and `_`, TypeScript and
+/// JavaScript object and array patterns) or spread over curried Scala lists
+/// are counted by `--min-params` and typed for `--param-type`: each
+/// selection keeps `patterned`.
+#[test]
+fn signature_filters_select_patterned_and_curried_parameters() {
+    let scratch = Scratch::new(&[
+        ("patterned.rs", "pub fn patterned((a, b): (u32, u32), _: String) {}\n"),
+        ("patterned.ts", "export function patterned({x}: {x:number}, [a,b]: number[]) {}\n"),
+        ("patterned.js", "export function patterned({x}, [a,b]) {}\n"),
+        ("patterned.scala", "object O {\n  def patterned(a: Int)(b: String): Int = a\n}\n"),
+    ]);
+    let cases: &[(&str, &[&str])] = &[
+        ("patterned.rs", &["--min-params", "2"]),
+        ("patterned.rs", &["--param-type", "(u32, u32)"]),
+        ("patterned.rs", &["--param-type", "String"]),
+        ("patterned.ts", &["--min-params", "2"]),
+        ("patterned.ts", &["--param-type", "number[]"]),
+        ("patterned.js", &["--min-params", "2"]),
+        ("patterned.scala", &["--min-params", "2"]),
+        ("patterned.scala", &["--param-type", "String"]),
+    ];
+    for (file, selector) in cases {
+        let mut args = vec!["functions", "--file", file, "--name", "patterned"];
+        args.extend_from_slice(selector);
+        args.extend_from_slice(&["--count", "--no-cache"]);
+        assert_eq!(scratch.stdout(&args), "1\n", "hug {args:?}");
+    }
+}
+
+/// `--deprecated` and `--tests-only` select by syntax-read markers: a marker
+/// word inside a Swift `message:` string selects nothing, while a `cfg(test)`
+/// with a comment in it and a Go block doc whose `Deprecated:` paragraph
+/// follows a blank line are selected.
+#[test]
+fn marker_filters_follow_source_boundaries() {
+    let scratch = Scratch::new(&[
+        (
+            "markers.swift",
+            "@available(*, message: \"hello, deprecated, world\")\nfunc decoy() {}\n",
+        ),
+        ("markers.rs", "#[cfg(/* rationale */ test)]\nmod checks {\n    pub fn helper() {}\n}\n"),
+        (
+            "probe.go",
+            "package p\n\n/* OldBlock documents OldBlock.\n\nDeprecated: use New.\n*/\nfunc OldBlock() {}\n",
+        ),
+    ]);
+    let cases: [(&[&str], &str); 3] = [
+        (&["functions", "--file", "markers.swift", "--deprecated", "--name", "decoy"], "0"),
+        (&["symbols", "--file", "markers.rs", "--tests-only", "--name", "checks"], "1"),
+        (&["functions", "--file", "probe.go", "--deprecated", "--name", "OldBlock"], "1"),
+    ];
+    for (selection, expected) in cases {
+        let args: Vec<&str> = selection.iter().copied().chain(["--count", "--no-cache"]).collect();
+        assert_eq!(scratch.stdout(&args).trim(), expected, "hug {}", args.join(" "));
+    }
+}
+
+/// Only a nonempty `str` constant is a Python docstring: a formatted or a
+/// bytes literal leaves its function undocumented, while an adjacent
+/// concatenation of ordinary literals documents it, both for
+/// `--undocumented` and for the doc coverage of `--stats`.
+#[test]
+fn python_docstrings_are_string_constants_for_undocumented_and_stats() {
+    let scratch = Scratch::new(&[(
+        "docs.py",
+        concat!(
+            "def plain():\n    \"docs\"\n",
+            "def formatted():\n    f\"docs\"\n",
+            "def bytestring():\n    b\"docs\"\n",
+            "def concatenated():\n    \"doc\" \"umented\"\n",
+            "def escaped():\n    \"\\u0041\"\n",
+        ),
+    )]);
+    assert_eq!(
+        names(&scratch, &["functions", "--file", "docs.py", "--undocumented", "--no-cache"]),
+        ["bytestring", "formatted"]
+    );
+    let stats = json_of(&scratch.stdout(&["functions", "--file", "docs.py", "--stats", "--json", "--no-cache"]));
+    let coverage = &stats["stats"]["doc_coverage"];
+    assert_eq!(coverage["documented"], 3, "{coverage}");
+    assert_eq!(coverage["total"], 5, "{coverage}");
+    assert_eq!(coverage["ratio"].as_f64(), Some(0.6), "{coverage}");
+}

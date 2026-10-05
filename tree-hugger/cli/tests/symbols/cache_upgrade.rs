@@ -704,3 +704,44 @@ fn entry_from_extractor_revision_eight_is_not_served_after_the_repairs() {
         },
     });
 }
+
+const PATTERNED_RUST: &str = "\npub fn patterned((a, b): (u32, u32), _: String) {}\n";
+
+/// The names of `patterned`'s parameters in a `hug --json-full` report.
+fn patterned_parameter_names(output: &Value) -> Value {
+    let records: Vec<&Value> = output["indexes"]
+        .as_array()
+        .expect("indexes")
+        .iter()
+        .flat_map(|index| index["symbols"].as_array().expect("index symbols"))
+        .filter(|record| record["identity"]["name"] == "patterned")
+        .collect();
+    assert_eq!(records.len(), 1, "expected one `patterned` record");
+    // An empty list is not serialized.
+    let names: Vec<Value> = records[0]["kind_data"]["data"]["parameters"]
+        .as_array()
+        .map(|parameters| parameters.iter().map(|parameter| parameter["name"].clone()).collect())
+        .unwrap_or_default();
+    Value::from(names)
+}
+
+/// Revision 9 listed only parameters bound by an identifier, so a Rust
+/// tuple or `_` pattern vanished from the signature and from the count;
+/// revision 10 lists each parameter under its pattern as written.
+#[test]
+fn entry_from_extractor_revision_nine_is_not_served_after_the_repairs() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "9",
+        key: OldKey::Computed,
+        file: "rust.rs",
+        language: "rust",
+        source: format!("{RUST_FIXTURE}{PATTERNED_RUST}"),
+        sentinel: "public_function",
+        probe: patterned_parameter_names,
+        repaired: Value::from(vec!["(a, b)", "_"]),
+        stale: Value::from(Vec::<Value>::new()),
+        revert: |snapshot| {
+            record_named(snapshot, "patterned")["kind_data"]["data"]["parameters"] = Value::from(Vec::<Value>::new());
+        },
+    });
+}

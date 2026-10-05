@@ -19,6 +19,7 @@ use biscuit_terminal::prelude::{
 use serde::Serialize;
 use tree_hugger::{SymbolKind, SymbolRecord, Visibility, VisibilityLevel};
 
+use crate::render::table_terminal;
 use crate::report::{REPORT_SCHEMA_VERSION, ReportError};
 
 /// The aggregate of one run's selected declarations.
@@ -114,7 +115,8 @@ impl Stats {
     }
 
     /// Writes the three tables (by kind, visibility and language) and the
-    /// doc-coverage line. `term` decides styling and width.
+    /// doc-coverage line. `term` decides styling and width; a table too wide
+    /// for it keeps its natural width (see [`table_terminal`]).
     pub(crate) fn write_terminal(&self, out: &mut dyn Write, term: &Terminal, plain: bool) -> io::Result<()> {
         for (title, counts) in [
             ("Kind", &self.by_kind),
@@ -134,7 +136,7 @@ impl Stats {
                     TableColumn::new("Count").with_type(ColumnType::Integer),
                 ])
                 .with_data(rows);
-            write_rendered(out, &table.render(term), plain)?;
+            write_rendered(out, &table.render(&table_terminal(&table, term)), plain)?;
             writeln!(out)?;
         }
         let coverage = &self.doc_coverage;

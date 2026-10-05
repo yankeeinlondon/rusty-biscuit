@@ -385,6 +385,12 @@ fn stats_terminal_tables_compose_with_formats() {
     );
     assert!(!plain.contains('\u{1b}'), "--format plain has no escapes: {plain:?}");
     assert_eq!(visible(&styled), plain, "the same tables and line");
+
+    // Narrower than every table: each keeps its natural width (the terminal
+    // wraps it) rather than being replaced by a "could not be rendered" notice.
+    let narrow = [("CLICOLOR_FORCE", "1"), ("COLUMNS", "12")];
+    let narrow = stdout_of(scratch.hug_with_env(&["symbols", "--stats"], &narrow), &["symbols", "--stats"]);
+    assert_eq!(visible(&narrow), plain, "natural-width tables at COLUMNS=12");
 }
 
 #[test]
@@ -473,6 +479,27 @@ fn tree_nests_members_under_their_container() {
 
     let empty = scratch.stdout(&["--plain", "symbols", "--tree", "--name", "nothing_matches_this"]);
     assert_eq!(empty, "(no symbols)\n");
+}
+
+/// Each `work` sits under its own `Boxed`, not under the first `Boxed`.
+#[test]
+fn tree_nests_methods_under_their_own_same_named_type() {
+    let scratch = Scratch::new(&[("repeat.rs", crate::classes::REPEATED_OWNERS)]);
+    let tree = scratch.stdout(&["symbols", "--file", "repeat.rs", "--tree", "--format", "plain", "--no-cache"]);
+    let rows: Vec<&str> = tree.trim_end().lines().collect();
+    assert_eq!(
+        rows,
+        [
+            "repeat.rs",
+            "  private module left [1:1]",
+            "    public struct Boxed [1:12]",
+            "      public method work(self) [1:43]",
+            "  private module right [2:1]",
+            "    public struct Boxed [2:13]",
+            "      public method work(self) [2:44]",
+        ],
+        "{tree}"
+    );
 }
 
 #[test]

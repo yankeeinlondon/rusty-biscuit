@@ -124,3 +124,45 @@ fn container_fields_keep_access_and_static_without_member_records() {
     assert!(compared >= 8, "too few fields compared ({compared})");
     assert!(with_access >= 4, "too few fields with access or static ({with_access})");
 }
+
+/// Two modules each declare `Boxed` with its own `impl`: every class
+/// projection lists each `work` under its own `Boxed`, by container ID.
+#[test]
+fn same_named_types_in_two_modules_keep_their_own_methods() {
+    let scratch = Scratch::new(&[("repeat.rs", REPEATED_OWNERS)]);
+
+    let json = json_of(&scratch.stdout(&["classes", "--file", "repeat.rs", "--in", "*right::Boxed", "--json", "--no-cache"]));
+    let file = &json["files"][0];
+    let containers = file["symbols"].as_array().expect("symbols");
+    assert_eq!(containers.len(), 1, "{json}");
+    assert_eq!(containers[0]["identity"]["qualified_name"], "repeat.rs#right::Boxed");
+    let members = file["members"][containers[0]["id"].as_str().expect("id")].as_array().expect("members of right::Boxed");
+    let names: Vec<&str> = members.iter().map(|member| member["identity"]["qualified_name"].as_str().expect("name")).collect();
+    assert_eq!(names, ["repeat.rs#right::Boxed::work"]);
+    assert_eq!(members[0]["relations"]["container"]["id"], containers[0]["id"]);
+
+    let lines = scratch.stdout(&["classes", "--file", "repeat.rs", "--jsonl", "--no-cache"]);
+    let mut seen = 0;
+    for line in lines.lines() {
+        let envelope = json_of(line);
+        let owner = envelope["record"]["identity"]["qualified_name"].as_str().expect("owner name");
+        let members: Vec<&str> = envelope["members"]
+            .as_array()
+            .expect("members list")
+            .iter()
+            .map(|member| member["identity"]["qualified_name"].as_str().expect("member name"))
+            .collect();
+        assert_eq!(members, [format!("{owner}::work")], "{line}");
+        seen += 1;
+    }
+    assert_eq!(seen, 2, "{lines}");
+
+    let terminal = scratch.stdout(&["--plain", "classes", "--file", "repeat.rs", "--no-cache"]);
+    assert_eq!(terminal.matches("work(self)").count(), 2, "{terminal}");
+    for section in terminal.split("  type Boxed [").skip(1) {
+        assert_eq!(section.matches("work(self)").count(), 1, "one method per Boxed:\n{terminal}");
+    }
+}
+
+pub const REPEATED_OWNERS: &str = "mod left { pub struct Boxed; impl Boxed { pub fn work(&self) {} } }\n\
+                                   mod right { pub struct Boxed; impl Boxed { pub fn work(&self) {} } }\n";

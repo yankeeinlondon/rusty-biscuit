@@ -13,6 +13,7 @@
 //! report reader the `level2_*` terminal tests share.
 
 mod cache_lookup;
+mod cache_package_boundaries;
 mod cache_robustness;
 mod cache_upgrade;
 mod classes;

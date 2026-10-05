@@ -314,17 +314,7 @@ impl Renderer {
             })
             .collect();
         let table = Table::new().with_columns(columns).with_data(rows);
-        // Too narrow a terminal for the unwrapped columns: the table keeps
-        // its natural width and the terminal wraps it, rather than failing.
-        let term = match table.plan_widths(self.term.width()) {
-            Ok(_) => Cow::Borrowed(&self.term),
-            Err(_) => {
-                let mut term = self.term.clone();
-                term.fixed_width = Some(NO_WRAP_WIDTH);
-                Cow::Owned(term)
-            }
-        };
-        self.write_indented(out, 0, &table.render(&term))?;
+        self.write_indented(out, 0, &table.render(&table_terminal(&table, &self.term)))?;
         writeln!(out)
     }
 
@@ -593,6 +583,22 @@ pub(crate) struct ListingStream<'r> {
     current: Option<OpenPackage>,
     /// Flat output only: whether any declaration was written.
     wrote_any: bool,
+}
+
+/// The terminal `table` renders on: `term`, or, when `term` is too narrow for
+/// the table's non-wrapping columns, `term` without a width limit, so the
+/// table keeps its natural width and the terminal wraps it. Rendering at the
+/// narrow width would print biscuit-terminal's "could not be rendered" notice
+/// in place of the table.
+pub(crate) fn table_terminal<'a>(table: &Table, term: &'a Terminal) -> Cow<'a, Terminal> {
+    match table.plan_widths(term.width()) {
+        Ok(_) => Cow::Borrowed(term),
+        Err(_) => {
+            let mut term = term.clone();
+            term.fixed_width = Some(NO_WRAP_WIDTH);
+            Cow::Owned(term)
+        }
+    }
 }
 
 struct OpenPackage {
