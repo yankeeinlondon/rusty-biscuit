@@ -109,6 +109,12 @@ or a fix; a rule that needs an example to be understood is not a rule yet.
   sub-agent must refuse if the staged diff and the body disagree. A
   sub-agent that "completes the job" by editing beyond the staged snapshot
   commits a tree the message does not describe.
+- The developer's own flow may commit a staged group while the batch runs.
+  Re-run `git status --short -- <paths>` immediately before `--only`; if the
+  paths are no longer staged, `--only` commits only their live working-tree
+  edits under a message describing the whole group. Check that
+  `git show --stat <hash>` matches the brief right after committing, and undo
+  a mismatch with the `update-ref` compare-and-swap below.
 - An empty sub-agent report is not success. Verify each agent's commit by
   hash while its pathspec is still in context.
 
