@@ -13,10 +13,13 @@ reviewed_by: codex/gpt-6.1-sol
 recurrence: true
 created: "2026-10-05T13:27:54-07:00"
 spec: 2026-10-03-symbol-filters-and-reports/spec.md
-implemented: false
+implemented: true
+implemented_by: claude/opus
+log: tree-hugger/features/2026-10-03-symbol-filters-and-reports/log.md
 description: "A **feature** review of `2026-10-03-symbol-filters-and-reports/spec.md`"
 feature: 2026-10-03-symbol-filters-and-reports/review-2.md
 previous: 2026-10-03-symbol-filters-and-reports/review-1.md
+next: 2026-10-03-symbol-filters-and-reports/review-3.md
 ---
 
 The feature is **not production ready**. The six original reproductions are repaired, but two sibling cases remain in the ownership and test-classification repairs. Both can be fixed without a human design decision. This review changes review documents and metadata only.
