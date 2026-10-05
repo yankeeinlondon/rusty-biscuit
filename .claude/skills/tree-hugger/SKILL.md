@@ -37,6 +37,9 @@ Rust, TypeScript, JavaScript, Go, Python, Java, C#, C, C++, Swift, Scala, PHP, P
 | `god-files [DIR]` | Identify oversized source files ripe for refactoring |
 | `god-files --high-risk` | Show only high-risk files |
 | `completions` | Generate shell completions (Bash, Zsh, Fish, PowerShell) |
+| `<declaration cmd> --sort file\|name\|kind` | Order (default `file`: path, then position); only `functions`/`types`/`symbols`/`classes` accept it |
+| `--json-full` | Complete per-file indexes (declaration commands only; symbol selectors rejected) |
+| `--verbose` | Cache stats line (hits / partial / misses, parses, captures, diagnostics runs) and cache failures on stderr |
 
 ### Library API (`TreeFile`)
 
@@ -97,6 +100,7 @@ Access lives on `SymbolInfo::visibility` (`None` = Unknown), not on the signatur
 - **Query caching**: Global `OnceLock<QueryCache>` for thread-safe caching
 - **Builtin database**: Per-language builtin lists to avoid false positive undefined-symbol/undefined-module errors
 - **Schema v2 module, schema version 4.0**: `shared/schema_v2` with facet-based `SymbolRecord` and staged `FileSymbolIndex`; records, file indexes, CLI envelopes and analyzer fingerprints emit `SchemaVersion::V4_0` (the module keeps its historical `v2` name). Records carry no timestamps, so output and cache entries are byte-identical across runs; the container is `identity.container_name`
+- **CLI declaration reports** (`cli/src/`: `declarations.rs` drives, `order.rs`, `report.rs`, `render.rs`, `classes.rs`, `scan.rs`, `prelude.rs`; `main.rs` only wires): `Declarations::query` is each command's fixed kind set with only the capabilities it shows (`classes` adds containment; no listing runs references, semantics, docs or diagnostics); `--json-full` asks `complete_index()`. `scan::in_file_order` runs rayon chunks of `4 × threads` and delivers results in file order, so `--json` is byte-identical across thread counts and cold/warm. The JSON envelope is written piece by piece with `errors` always last; records are projected (`report::trim_record`: scan-root-relative `file_path` and stable-key path segment, no `declaration_text`/source text/attached comments; IDs untouched). The one renderer (`render::Renderer`) is `Prose` items in `UnorderedList`s with `term.fixed_width` pinned huge so nothing wraps; labels come from `identity.keyword` only for Type/Variable/Field/Constant, else the kind. `--prelude` analyzes the prelude and its targets with an every-kind query first and the scan reuses them via `SymbolQueryResult::narrowed` (one parse per file); prelude exports are synthetic records (`visibility.is_synthetic`/`is_reexported`, own ID from the prelude file). A failed file is stderr + `errors` + exit 1; a broken pipe exits 0 quietly.
 - **CLI filters**: `hug <subcommand> <filter...>` with all-files default scan for symbol commands. A pathless scan honors `.gitignore` and skips test-data dirs by default (`**/fixtures/**`, `**/__fixtures__/**`, `**/snapshots/**`, `**/testdata/**`); an explicit path/glob re-includes a targeted file. `lint` scans hide clean files (single-file lint still shows `(no diagnostics)`).
 
 ## Detailed Documentation
@@ -165,20 +169,34 @@ When modifying queries or symbol extraction:
    schema-2 literal key and the analyzer key formula for each earlier
    extractor revision (`revision_key`, with that revision's record
    schema: `3.0` through revision 4, `4.0` from revision 5); keep them
-   unchanged when the current key changes, and add a `StaleRevision` case for
-   the revision a bump retires (revision 6 is current; the next bump adds
-   revision 6's case). `cache_robustness` pins which malformed
-   shapes of twelve load-bearing snapshot fields are served or recomputed (table in
-   `docs/cache-design.md`); a schema change that adds a default or makes a
-   field optional must update that row
+   unchanged. That formula was retired with revision 6 by the computed
+   `SymbolCache` key, which cannot be hard-coded in a test (it digests the
+   grammar and query text), so a later bump adds no `StaleRevision` case:
+   `symbols_cache::each_key_input_and_stored_identity_decides_a_miss` pins
+   the revision as a fingerprint input. `cache_robustness` pins which malformed
+   shapes of seven entry fields and twelve record fields are served or
+   recomputed (tables in `docs/cache-design.md`); a schema change that adds a default or makes a
+   field optional must update that row. The cache tests probe through
+   `hug --json-full` (the complete index), since `--json` reports only the
+   command's records. `Scratch` pins `RAYON_NUM_THREADS=2` so concurrent
+   test processes do not each start a worker per core (tests that compare
+   thread counts set it explicitly); `Scratch::process` gives a raw
+   `std::process::Command` for pipe tests. `--verbose`'s stats line is how a
+   CLI test proves work counts (`parsed N files, … 0 diagnostics runs`)
 7. `lib/tests/fixtures/symbols/multi/` is a 16-language tree (one file per
    language, some under `nested/`, `Widget` declared in two files) for
    multi-file, ordering, parallel and golden tests;
    `symbols_coverage::multi_tree_has_one_clean_file_per_language` guards it.
    `golden::plain_symbols_over_multi_match_the_golden` (CLI `symbols` binary)
    pins `hug --plain symbols` over it against
-   `cli/tests/fixtures/golden/symbols.plain`; regenerate with
-   `HUG_UPDATE_GOLDEN=1` only for a deliberate output change. Grammar limits
+   `cli/tests/fixtures/golden/symbols.plain`, and
+   `golden::json_symbols_over_multi_match_the_golden` pins `--json symbols`
+   against `symbols.json` (keys sorted, `root_dir` and every 64-hex record ID
+   normalized, since IDs hash the absolute path); regenerate with
+   `HUG_UPDATE_GOLDEN=1` only for a deliberate output change. `order.rs`
+   builds its oracle from the JSON records (add a root `Cargo.toml` to a
+   scratch tree, or every manifest-less directory is its own package and the
+   listing splits). Grammar limits
    found while writing fixtures: C# rejects an attribute between modifiers,
    and tree-sitter-zsh rejects a function body brace on the line after the
    header
@@ -237,48 +255,40 @@ The `corpus` module provides infrastructure for measuring rule precision against
 
 High-confidence syntax rules require `Threshold::Zero` corpus false positives. Experimental semantic rules use `Threshold::Unlimited` until resolver-backed precision is proven.
 
-## Caching (Phase 5)
+## Persistent Symbol Cache
 
-The `cache` module provides multi-tier caching for parse trees, symbol indexes, and diagnostics:
+`cache::SymbolCache` (`cache/symbol_cache.rs`) is the only cache `hug` uses
+(`--no-cache` skips it); full design and the robustness table are in
+[`docs/cache-design.md`](../../../tree-hugger/docs/cache-design.md).
 
-### Pass-Specific Fingerprints
-
-`PassFingerprint` includes all inputs that affect a pass output:
-- Schema version, tree-hugger version, grammar version/id
-- Query hash, rule metadata hash, enabled rules hash, config hash
-- External tool version (for adapter-backed passes)
-
-### Cache Units
-
-Cache entries are split by analysis stage for granular invalidation:
-- `Parse`: Source text and grammar fingerprint
-- `Symbols`: Symbol records from parse pass
-- `Imports` / `Exports`: Relation records from bind pass
-- `References`: Identifier usages
-- `Diagnostics`: Lint and syntax diagnostics
-- `Comments`: Ignore directives
-- `ProjectGraph`: Project-level structures
-
-### In-Process Cache
-
-`InProcessCache` stores parsed file snapshots and symbol indexes in memory for the duration of a command:
-- `get_parse_tree()` / `put_parse_tree()` — reuse parse trees
-- `get_symbol_index()` / `put_symbol_index()` — reuse symbol indexes
-- `record_hit()` / `stats()` / `hit_history()` — cache hit/miss tracking with timing
-
-### Persistent Cache
-
-`PersistentCache` stores serialized entries on disk under a tool-owned temp directory:
-- Enabled by default; disabled with `--no-cache`
-- Recomputes on any fingerprint mismatch or corrupt entry
-- `invalidate()` for single entries, `invalidate_all()` for full cache clear
-
-### Cache Invalidation Reasons
-
-`CacheInvalidationReason` identifies why a cache entry was rejected:
-- `SourceChanged`, `QueryChanged`, `GrammarChanged`
-- `RuleMetadataChanged`, `ConfigChanged`, `ExternalToolChanged`
-- `CorruptEntry`, `PassOptionsChanged`, `CacheDisabled`
+- **One entry per file.** Key = `canonical_digest` (length-prefixed BLAKE3)
+  of path (`/` separators), source xxHash, forced language or `detected`,
+  and the records `PassFingerprint` (schema, `<crate>+rev.<EXTRACTOR_REVISION>`,
+  grammar identity read from the `Language`, effective `locals`/`imports`/
+  `references` text). Kinds and capabilities are **not** key inputs; the
+  entry records `covered_kinds` (`"all"` or a non-empty ascending list) and
+  `completed_capabilities`.
+- **Diagnostics carry their own fingerprint inside the entry** (lint +
+  comments text, rule metadata, `experimental_semantics`); a mismatch makes
+  the diagnostics "not computed", never a key change.
+- **Lookup**: `Hit` (no parse) / `WidenedCapabilities { parsed }` (docs,
+  semantics-with-references and containment-over-all-kinds run on stored
+  records; references and diagnostics re-parse) / `WidenedKinds` (one
+  analysis for the union) / `Miss(CacheMiss)`. Every result goes through
+  `analysis::coverage::project`, which narrows a wider entry to exactly the
+  uncached result; a new pass that changes records must be reflected there
+  (`symbols_cache::projected_results_*` fail otherwise).
+- **Reader**: `deny_unknown_fields`, no defaults on entry fields, custom
+  visitors for the coverage lists; failures are `CacheMiss::Malformed(serde
+  message)` / `Mismatched` / `Inconsistent`, never an empty result. Extend
+  `cli/tests/symbols/cache_robustness.rs` (entry and record columns) for a
+  new load-bearing field, and assert `CacheLookup::Hit` (not just equal
+  output) in any warm-run test: a silently undecodable entry still produces
+  equal output.
+- **Writes** are temp file + rename (`PersistentCache::put`); last rename
+  wins. Query text is injectable for tests (`SymbolCache::with_query_text`).
+- `InProcessCache`, `InMemorySymbolCache`, `SymbolSnapshot`,
+  `AnalyzerFingerprint` remain as library types but no CLI path uses them.
 
 ## Neovim Query Reuse (Phase 6)
 

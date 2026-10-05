@@ -76,8 +76,14 @@ unreadable or non-UTF-8 files, `UnsupportedLanguage`, `ParseFailed`).
 ```rust
 let source = SourceFile::read("src/lib.rs")?;          // or read_with_language(path, Some(lang))
 source.hash(); source.language(); source.source();
+source.forced_language();                               // Some(lang) only when given (a cache key input)
+let source = source.experimental_semantics(true);       // carried into the parsed TreeFile
 let tree_file: TreeFile = source.parse()?;              // consumes the SourceFile
 let result = SourceFile::read("src/lib.rs")?.query(&query)?;
+// Same result through the persistent cache (parses only when the entry lacks
+// a requested kind or capability):
+let cached = SymbolCache::new(PersistentCache::default_cache("project", true))
+    .query(SourceFile::read("src/lib.rs")?, &query)?;   // cached.result, cached.lookup, cached.write_error
 ```
 
 ### SymbolQuery and Capability
@@ -92,7 +98,9 @@ SymbolQuery::for_passes(&[AnalysisPass::Bind]);         // what symbol_index_wit
 pub struct SymbolQueryResult {
     pub index: FileSymbolIndex,                         // selected records only
     pub completed_capabilities: Vec<Capability>,        // canonical order
+    pub selected_kinds: Option<Vec<SymbolKindV2>>,      // None = every kind
 }
+result.narrowed(&narrower_query);  // Some(exactly the narrower result) or None if not covered
 ```
 
 | Capability | Implies | Work |
@@ -227,8 +235,8 @@ is carried by the v1 adapter.
 
 `tree_hugger::EXTRACTOR_REVISION` names the extraction rules; bump it in any
 change that alters extracted records, unreleased branches included. It is stamped into
-`provenance.extractor_version` (`<crate version>+rev.<revision>`) and the CLI's
-persistent-cache `query_fingerprint`, so a warm cache never serves records
+`provenance.extractor_version` (`<crate version>+rev.<revision>`) and the
+persistent cache's records fingerprint, so a warm cache never serves records
 produced by older rules.
 
 ### SymbolKind
