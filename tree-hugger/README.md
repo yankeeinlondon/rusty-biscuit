@@ -23,14 +23,14 @@ tree-hugger
 | Rust       | Yes       | Yes   | Yes     | Yes     | struct, enum, trait                    |
 | TypeScript | Yes       | Yes   | Yes     | Yes     | type, interface, enum, class           |
 | JavaScript | Yes       | Yes   | Yes     | Yes     | class                                  |
-| Go         | Yes       | Yes   | Yes     | -       | type (struct/interface)                |
+| Go         | Yes       | Yes   | Yes     | -       | type (struct/interface), alias         |
 | Python     | Yes       | Yes   | Yes     | -       | class                                  |
 | Java       | Yes       | Yes   | Yes     | -       | class, interface, enum, record         |
 | C#         | Yes       | Yes   | -       | -       | class, struct, interface, enum, record |
 | C          | Yes       | Yes   | -       | -       | struct, union, enum, typedef alias     |
 | C++        | Yes       | Yes   | -       | -       | class, struct, union, enum, alias      |
-| Swift      | Yes       | Yes   | Yes     | -       | type, interface (protocol)             |
-| Scala      | Yes       | Yes   | -       | -       | class, trait, module, enum             |
+| Swift      | Yes       | Yes   | Yes     | -       | type, interface (protocol), alias      |
+| Scala      | Yes       | Yes   | -       | -       | class, trait, module, enum, alias      |
 | PHP        | Yes       | Yes   | -       | -       | class, interface, trait, enum          |
 | Perl       | Yes       | -     | -       | -       | package (module)                       |
 | Bash       | Yes       | -     | -       | -       | -                                      |
@@ -42,7 +42,7 @@ tree-hugger
 Tree Hugger distinguishes between different kinds of type definitions where the language supports it:
 
 - **Type** - Generic type definition (structs and unions in Rust/C/C++, Swift types, Go types, Java and C# records)
-- **TypeAlias** - Type aliases (TypeScript and Rust `type`, C `typedef`, C++ `typedef`/`using`)
+- **TypeAlias** - Type aliases (TypeScript, Rust and Scala `type`, Go `type A = B`, Swift `typealias`, C `typedef`, C++ `typedef`/`using`)
 - **Class** - Class definitions (TypeScript, JavaScript, C#, C++, Scala, PHP, Python, Java)
 - **Interface** - Interface/protocol definitions (TypeScript, Java, C#, Swift, PHP)
 - **Enum** - Enumeration types (Rust, TypeScript, Java, C#, C/C++, Swift, Scala, PHP)
@@ -251,6 +251,7 @@ Tree Hugger vendors `nvim-treesitter` query files in `tree-hugger/lib/queries/ve
 |-------------------------------|------------|
 | `@local.definition.function`  | Function   |
 | `@local.definition.method`    | Method     |
+| `@local.definition.constructor` | Constructor |
 | `@local.definition.type`      | Type       |
 | `@local.definition.type_alias` | TypeAlias |
 | `@local.definition.class`     | Class      |
@@ -260,6 +261,7 @@ Tree Hugger vendors `nvim-treesitter` query files in `tree-hugger/lib/queries/ve
 | `@local.definition.module`    | Module     |
 | `@local.definition.namespace` | Namespace  |
 | `@local.definition.enum_variant` | EnumVariant |
+| `@local.definition.field`     | Field      |
 | `@local.definition.property`  | Property   |
 | `@local.definition.import`    | (imports)  |
 

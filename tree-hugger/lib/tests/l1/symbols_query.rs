@@ -15,6 +15,7 @@ use tree_hugger::{
 };
 
 use crate::symbols_fixtures::{all_fixtures, display_name, multi_fixtures};
+use crate::symbols_kinds::deferred_kind_sources;
 
 const FUNCTION_KINDS: [SymbolKindV2; 3] = [
     SymbolKindV2::Function,
@@ -459,6 +460,71 @@ fn narrow_queries_equal_the_filtered_records_of_a_full_query() {
         classes_fields_with_access > 20,
         "classes keep field access and `static` without Field/Property/Constant selected ({classes_fields_with_access})"
     );
+}
+
+/// The kinds the deferred declarations report.
+const DEFERRED_KINDS: [SymbolKindV2; 5] = [
+    SymbolKindV2::Constructor,
+    SymbolKindV2::EnumVariant,
+    SymbolKindV2::TypeAlias,
+    SymbolKindV2::Field,
+    SymbolKindV2::Namespace,
+];
+
+/// For every source of the deferred kind matrix, a query of one deferred
+/// kind returns exactly that kind's records of a full query with the same
+/// capabilities. Each narrow query runs one definitions capture, no parse and
+/// no diagnostics; without a capability that needs them it binds no
+/// references and computes no semantics.
+#[test]
+fn deferred_kind_queries_equal_the_same_kind_of_a_full_query() {
+    let capability_sets: [&[Capability]; 3] = [
+        &[Capability::Declarations],
+        &[Capability::Containment, Capability::Flags, Capability::Metrics],
+        &[Capability::Semantics, Capability::StructuredDocs],
+    ];
+    let dir = TempDir::new().expect("tempdir");
+    let mut compared = [0usize; DEFERRED_KINDS.len()];
+    for (ordinal, (language, source)) in deferred_kind_sources().into_iter().enumerate() {
+        let path = write(&dir, &format!("deferred_{ordinal}.{}", language.extensions()[0]), source);
+        let label = format!("{language:?} {source:?}");
+        let tree_file = TreeFile::new(&path).expect("parse");
+        for capabilities in capability_sets {
+            let full = tree_file
+                .query(&SymbolQuery::new().capabilities(capabilities.iter().copied()))
+                .expect("full query");
+            for (kind_idx, kind) in DEFERRED_KINDS.into_iter().enumerate() {
+                let query = SymbolQuery::new().kinds([kind]).capabilities(capabilities.iter().copied());
+                let (narrow, work) = counted(|| tree_file.query(&query).expect("narrow query"));
+                let expected: Vec<SymbolRecord> =
+                    full.index.symbols.iter().filter(|record| record.kind == kind).cloned().collect();
+                assert_eq!(
+                    as_values(&narrow.index.symbols),
+                    as_values(&expected),
+                    "{label}: {kind:?} with {capabilities:?}"
+                );
+                assert_eq!(narrow.index.completed_passes, full.index.completed_passes, "{label}: {kind:?}");
+                assert_eq!(narrow.completed_capabilities, full.completed_capabilities, "{label}: {kind:?}");
+                assert_eq!(
+                    (work.parser_constructions, work.definition_captures, work.diagnostics_runs),
+                    (0, 1, 0),
+                    "{label}: {kind:?} with {capabilities:?}: parses, captures, diagnostics"
+                );
+                if capabilities == [Capability::Declarations] {
+                    assert_eq!(narrow.index.completed_passes, [AnalysisPass::Parse], "{label}: {kind:?}");
+                    for record in &narrow.index.symbols {
+                        assert!(record.relations.references.is_empty(), "{label}: {kind:?} bound references");
+                        assert_eq!(record.semantics.is_recursive, None, "{label}: {kind:?} computed semantics");
+                        assert!(record.docs.parsed.is_none(), "{label}: {kind:?} parsed docs");
+                    }
+                }
+                compared[kind_idx] += expected.len();
+            }
+        }
+    }
+    for (kind, count) in DEFERRED_KINDS.iter().zip(compared) {
+        assert!(count > 0, "{kind:?}: no record was compared");
+    }
 }
 
 #[test]

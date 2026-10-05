@@ -144,7 +144,7 @@ fn async_forms_outside_the_fixtures() {
         (
             "protocol P { func required() async }\nclass C { init() async {} func plain() {} }\n",
             "swift",
-            &["required"],
+            &["required", "init"],
             &["plain"],
         ),
     ];

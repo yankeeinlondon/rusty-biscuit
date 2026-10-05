@@ -27,9 +27,9 @@ impl MetadataSelection {
     pub(crate) const ALL: Self = Self { kinds: None };
 
     /// Selects `kinds` (`None`: every kind), widened by the members whose
-    /// access and `static` flags a selected type's field list copies
-    /// ([`align_field_metadata`]) and whose doc comments a selected type's
-    /// variant list copies ([`align_variant_metadata`]).
+    /// access, `static` flags and doc comments a selected type's field list
+    /// copies ([`align_field_metadata`]), and by the enum variants a selected
+    /// enum's variant list is completed from ([`align_variant_metadata`]).
     pub(crate) fn for_kinds(kinds: Option<Vec<SymbolKindV2>>) -> Self {
         let Some(kinds) = kinds else {
             return Self::ALL;

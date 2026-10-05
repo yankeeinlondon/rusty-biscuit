@@ -341,7 +341,7 @@ pub enum SymbolKind {
     EnumVariant,  // Enum members / cases
     Trait,        // Traits (Rust, Scala, PHP)
     Module,       // Rust `mod`, Perl `package`, Scala `object`
-    Namespace,    // Go/Java `package`, C#/C++ `namespace` (not unified with Module)
+    Namespace,    // Go/Java `package`, C#/C++/TS/PHP `namespace` (not unified with Module)
     Variable,     // Variables
     Parameter,    // Function parameters
     Field,        // Struct/class fields
@@ -409,6 +409,7 @@ pub struct VariantInfo {
     pub name: String,
     pub tuple_fields: Vec<String>,        // Variant(T1, T2)
     pub struct_fields: Vec<FieldInfo>,    // Variant { field: T }
+    pub discriminant: Option<String>,     // `2` in `B = 2`, as written
     pub doc_comment: Option<String>,
 }
 ```

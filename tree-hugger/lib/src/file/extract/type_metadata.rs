@@ -618,7 +618,9 @@ pub(crate) fn extract_go_struct_fields(node: Node<'_>, source: &str) -> Vec<Fiel
     fields
 }
 
-/// Extracts method signatures from Go interface_type.
+/// Lists a Go `interface_type`'s `method_spec` children as field entries.
+/// tree-sitter-go 0.25 names an interface method `method_elem`, so with the
+/// pinned grammar this returns nothing and a Go interface has no list.
 pub(crate) fn extract_go_interface_methods(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
     let mut fields = Vec::new();
     let mut cursor = node.walk();

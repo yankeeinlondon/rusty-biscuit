@@ -341,6 +341,59 @@ fn count_and_stats_apply_every_filter() {
     }
 }
 
+/// For each deferred kind and the commands that list it, `--count`, the
+/// `--stats` totals, the `--json` records and the `--jsonl` envelopes report
+/// the same records, and the table and plain views show each of them.
+#[test]
+fn reports_consume_the_same_deferred_kind_records() {
+    let scratch = Scratch::new(crate::filters::DEFERRED_FILES);
+    let selections: [(&[&str], &str, usize); 7] = [
+        (&["functions", "--kind", "constructor"], "Constructor", 4),
+        (&["symbols", "--kind", "constructor"], "Constructor", 4),
+        (&["symbols", "--kind", "enum_variant"], "EnumVariant", 7),
+        (&["types", "--kind", "type_alias"], "TypeAlias", 3),
+        (&["symbols", "--kind", "field"], "Field", 6),
+        // Go's package clause is a namespace too.
+        (&["symbols", "--kind", "namespace"], "Namespace", 3),
+        (&["symbols", "--kind", "namespace", "--scope", "member"], "Namespace", 0),
+    ];
+    for (selection, kind, expected) in selections {
+        let with = |mode: &[&'static str]| -> Vec<&'static str> {
+            let mut args = selection.to_vec();
+            args.extend_from_slice(mode);
+            args
+        };
+        let mut json_args = vec!["--json"];
+        json_args.extend(with(&[]));
+        let records = json_records(&json_of(&scratch.stdout(&json_args)));
+        assert_eq!(records.len(), expected, "--json {selection:?}");
+        assert!(records.iter().all(|record| record["kind"] == kind), "--json {selection:?}");
+
+        assert_eq!(scratch.stdout(&with(&["--count"])), format!("{expected}\n"), "--count {selection:?}");
+
+        let mut stats_args = vec!["--json"];
+        stats_args.extend(with(&["--stats"]));
+        let stats = json_of(&scratch.stdout(&stats_args));
+        let by_kind = if expected == 0 { serde_json::json!({}) } else { serde_json::json!({ kind: expected }) };
+        assert_eq!(stats["stats"]["by_kind"], by_kind, "--stats {selection:?}");
+
+        let envelopes = lines_of(&scratch.stdout(&with(&["--jsonl"])));
+        let ids = |records: Vec<&Value>| -> Vec<Value> { records.into_iter().map(|record| record["id"].clone()).collect() };
+        assert_eq!(
+            ids(envelopes.iter().map(|envelope| &envelope["record"]).collect()),
+            ids(records.iter().collect()),
+            "--jsonl {selection:?}"
+        );
+
+        for format in ["table", "plain"] {
+            let view = visible(&scratch.stdout(&with(&["--format", format])));
+            for name in names(&records) {
+                assert!(view.contains(&name), "--format {format} {selection:?}: `{name}` in\n{view}");
+            }
+        }
+    }
+}
+
 #[test]
 fn classes_count_and_stats_count_containers_only() {
     let scratch = scratch();

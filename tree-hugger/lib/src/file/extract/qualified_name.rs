@@ -33,9 +33,9 @@ pub(crate) struct QualifiedName {
 /// extracted function, type, enum variant, module or namespace (whose own
 /// qualified name is reused), a Rust `impl` block (its self type's path as
 /// written, see [`rust_impl_prefix`]), a named
-/// node that is not extracted (a TypeScript `namespace`, a Java or C#
-/// constructor), or a container the extractor knows but does not list as a
-/// symbol (a Swift extension). The
+/// node that is not extracted (a C# static constructor, a Java compact
+/// record constructor), or a container the extractor knows but does not list
+/// as a symbol (a Swift extension). The
 /// walk ends at an unnamed owner (anonymous class, object literal, class
 /// expression, Scala `given … with`), as the container search does, and at
 /// the file root, where a file-level `package` or `namespace` statement
@@ -225,8 +225,9 @@ impl<'tree> Builder<'_, 'tree> {
     }
 
     /// The name of a declaration that encloses others but is not extracted
-    /// as a symbol: a TypeScript `namespace` (`internal_module`), or a named
-    /// function-like node such as a Java or C# constructor.
+    /// as a symbol: a named function-like node such as a C# static
+    /// constructor. A TypeScript `namespace` (`internal_module`) is extracted
+    /// and reaches this only if its capture is missing.
     fn unextracted_name(&self, node: Node<'tree>) -> Option<String> {
         let names_its_body = node.kind() == "internal_module" || is_function_node_kind(node.kind());
         if !names_its_body {

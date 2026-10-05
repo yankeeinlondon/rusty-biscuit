@@ -74,17 +74,17 @@ Unknown. No construct in the test fixtures of any language reports `Unknown`.
 | Language | Function / method | Types | Members | Modules |
 |---|---|---|---|---|
 | Rust | `fn` → Function; `fn` in an `impl` or trait → Method (with or without `self`, with or without a body) | `struct`, `union` → Type; `enum` → Enum; `trait` → Trait; `type` and associated `type` → TypeAlias | field → Field; variant → EnumVariant; `const` → Constant; `static`, `static mut` → Variable | `mod` → Module |
-| TypeScript | function → Function; class, abstract and interface method signatures (also `#private`) → Method; `constructor` in a class body → Constructor (an object literal's `constructor()` is a Method) | `class`, `abstract class` → Class; `interface` → Interface; `enum` → Enum; `type` → TypeAlias | class-body property (also `#private`, quoted `"label"` and numeric names; a quoted name is reported without its quotes) and interface property signature → Property | `namespace` is not yet reported |
+| TypeScript | function → Function; class, abstract and interface method signatures (also `#private`) → Method; `constructor` in a class body → Constructor (an object literal's `constructor()` is a Method) | `class`, `abstract class` → Class; `interface` → Interface; `enum` (also `const enum`) → Enum; `type` → TypeAlias | class-body property (also `#private`, quoted `"label"` and numeric names; a quoted name is reported without its quotes) and interface property signature → Property; enum member (`Red`, `Blue = 2`, quoted `"x y" = 1`) → EnumVariant | `namespace` and `module` (also `declare namespace`, and dotted `namespace A.B` as one record named `A.B`) → Namespace |
 | JavaScript | function → Function; class method → Method; `constructor` in a class body → Constructor (an object literal's `constructor()` is a Method) | `class` → Class | class-body field (`x = 1;`, `static y;`, `#z`, `"quoted" = 1;`) → Property | — |
-| Go | `func` → Function; method with a receiver → Method | every `type` declaration (struct and interface alike) → Type | not yet reported | `package` → Namespace |
-| Python | `def` → Function; `def` in a class body (also `@staticmethod`, `@classmethod`) → Method | `class` → Class | class-body attribute, every target of a chained (`a = b = 0`) or one-level tuple/list (`a, b = …`) assignment → Field | — |
-| Java | method → Method (constructors are not yet distinguished) | `class` → Class; `interface` → Interface; `enum` → Enum; `record` → Type | field and interface constant → Field | `package` → Namespace |
-| C# | method → Method (constructors are not yet distinguished); local function → Function | `class` → Class; `interface` → Interface; `enum` → Enum; `struct`, `record` → Type | field and `event` field → Field; property → Property (in classes, structs, records and interfaces) | `namespace` (block and file-scoped) → Namespace |
-| C | function → Function | named `struct`/`union` tag → Type; `enum` → Enum; `typedef` → TypeAlias (also `typedef int *P;`, `typedef int (*Fn)(int);`) | struct or union field, under any pointer, array, function-pointer or attributed declarator (`**p`, `a[3]`, `(*cb)(int)`, `x [[maybe_unused]]`), and the members of an anonymous `struct`/`union` → Field | — |
-| C++ | function → Function; function declared or defined in a class body, whatever its return declarators (`int (*m(int))(long);`) → Method | `class` → Class; `struct`, `union` → Type; `enum` → Enum; `typedef` (also behind a declarator), `using` → TypeAlias | data member, under any pointer, array, reference, function-pointer or attributed declarator, also a variable template (`template<class T> static T cache[3];`) and an anonymous union's members → Field | `namespace` → Namespace |
-| Swift | `func` → Function; `func` in a type, extension or protocol (requirements too) → Method | `struct`, `class` and `enum` all → Type; `protocol` → Interface | stored property (every binding of `var a = 1, b = 2`) and protocol property requirement → Field; `case` → EnumVariant | — |
-| Scala | `def` → Function; `def` in a class, trait, enum, object, anonymous class (`new T { … }`) or `given … with` instance → Method; an `extension` method belongs to the type around the block (a Function at top level); a `package object`'s `def` stays a Function with no container | `class`, `case class` → Class; `trait` → Trait; `enum` → Enum (its `case` entries are not yet reported) | not yet reported | `object` → Module |
-| PHP | function → Function; method (also in a trait) → Method | `class` → Class; `interface` → Interface; `trait` → Trait; `enum` → Enum | property → Field; `const` → Constant (members and top-level) | `namespace` is not yet reported |
+| Go | `func` → Function; method with a receiver → Method | every `type` declaration (struct and interface alike) → Type; `type A = B` (alone, grouped or generic) → TypeAlias | each named field of a named struct type (`X, Y int` is two Fields) → Field | `package` → Namespace |
+| Python | `def` → Function; `def` in a class body (also `@staticmethod`, `@classmethod`) → Method; `__init__` in a class body (also decorated) → Constructor | `class` → Class | class-body attribute, every target of a chained (`a = b = 0`) or one-level tuple/list (`a, b = …`) assignment → Field | — |
+| Java | method → Method; explicit constructor (also in an enum or record) → Constructor | `class` → Class; `interface` → Interface; `enum` → Enum; `record` → Type | field and interface constant → Field; enum constant (`RED`, `MERCURY(1.0)`, `BLUE { … }`) → EnumVariant | `package` → Namespace |
+| C# | method → Method; explicit instance constructor (block or `=>` body, also in a struct or record, with or without `: this(…)`) → Constructor; local function → Function | `class` → Class; `interface` → Interface; `enum` → Enum; `struct`, `record` → Type | field and `event` field → Field; property → Property (in classes, structs, records and interfaces); enum member → EnumVariant | `namespace` (block and file-scoped) → Namespace |
+| C | function → Function | named `struct`/`union` tag → Type; `enum` → Enum; `typedef` → TypeAlias (also `typedef int *P;`, `typedef int (*Fn)(int);`) | struct or union field, under any pointer, array, function-pointer or attributed declarator (`**p`, `a[3]`, `(*cb)(int)`, `x [[maybe_unused]]`), and the members of an anonymous `struct`/`union` → Field; enumerator of a named, anonymous or `typedef`'d enum → EnumVariant | — |
+| C++ | function → Function; function declared or defined in a class body, whatever its return declarators (`int (*m(int))(long);`) → Method; constructor declared or defined in a class body (`C();`, `explicit C(int);`, `C() = default;`, `C(C&&) = delete;`, under `template<…>`) → Constructor | `class` → Class; `struct`, `union` → Type; `enum` → Enum; `typedef` (also behind a declarator), `using` → TypeAlias | data member, under any pointer, array, reference, function-pointer or attributed declarator, also a variable template (`template<class T> static T cache[3];`) and an anonymous union's members → Field; enumerator of a scoped or unscoped enum → EnumVariant | `namespace` → Namespace |
+| Swift | `func` → Function; `func` in a type, extension or protocol (requirements too) → Method; `init`, `init?` and `init!` in a type, extension or protocol → Constructor, named `init` | `struct`, `class` and `enum` all → Type; `protocol` → Interface; `typealias` → TypeAlias | stored property (every binding of `var a = 1, b = 2`) and protocol property requirement → Field; `case` → EnumVariant | — |
+| Scala | `def` → Function; `def` in a class, trait, enum, object, anonymous class (`new T { … }`) or `given … with` instance → Method; an `extension` method belongs to the type around the block (a Function at top level); a `package object`'s `def` stays a Function with no container | `class`, `case class` → Class; `trait` → Trait; `enum` → Enum; `type A = B` (also generic) → TypeAlias | `val`, `var` and `lazy val`, defined or only declared, directly in a class, trait, object or enum body → Field; enum `case` (`case Red, Blue`, `case Value(x: Int)`) → EnumVariant | `object` → Module |
+| PHP | function → Function; method (also in a trait) → Method; a method named `__construct`, in any letter case → Constructor | `class` → Class; `interface` → Interface; `trait` → Trait; `enum` → Enum | property → Field; `const` → Constant (members and top-level); enum `case` (unit or backed) → EnumVariant | named `namespace`, semicolon or braced → Namespace |
 | Lua | `function` and `M.f` → Function; `function M:m()` → Method | — | — | — |
 | Perl | named `sub` → Function | — | `my`, `our`, `state` names → Variable | `package` → Module |
 | Bash, Zsh | function → Function | — | — | — |
@@ -165,6 +165,55 @@ members after it in the same branch; an `#else` branch does not inherit one
 from the branch it replaces, and members after `#endif` take the nearest
 section outside the conditional.
 
+### Constructors
+
+A constructor is an explicit instance constructor written in its type's
+body. It is recognized from the declaration's syntax, never by comparing its
+name with the type's: only Python `__init__` and PHP `__construct` are
+recognized by name, and only once the declaration is known to be a method.
+
+| Language | Constructor | Stays what it was |
+|---|---|---|
+| TypeScript, JavaScript | `constructor(…)` in a class body | an object literal's `constructor()`: Method |
+| Python | `def __init__(self, …)` in a class body, decorated or not | top-level or function-local `__init__`: Function; `__new__`: Method |
+| Java | `C(int x) {}` in a class, enum or record | `void C() {}`: Method; a compact record constructor `R { … }` and initializer blocks: not reported |
+| C# | `public C(int x) {}`, `S(int x) => X = x;` | `int C()`: Method; `static C() {}`, `~C() {}` and a primary constructor `class P(int x)`: not reported (`x` is a Parameter) |
+| C++ | `C();`, `C(int x) {}`, `C() = default;` in a class body | `~C();` and `operator bool()`: not reported; out-of-class `C::C() {}`: Function with no container |
+| Swift | `init`, `init?`, `init!` in a type, extension or protocol | `deinit`: not reported; `static func make()`: Method |
+| PHP | `function __construct()`, any letter case | a legacy `function Legacy()` in `class Legacy`: Method; a top-level `__construct`: Function |
+
+A constructor's record keeps the declared name (`init`, `__init__`,
+`__construct`, or the class name), its parameters with their defaults, and
+the type as container. It is never `static`, and it has no return type, since
+none is written:
+
+```java
+class Counter {
+    Counter(int start) {}   // Constructor, container Counter, parameter start
+    void tick() {}          // Method
+}
+```
+
+Overloads are separate records, each with its own parameters and ID. No
+constructor is synthesized: a class without one has none.
+
+### Enum variants
+
+Each named member of an enum is an EnumVariant whose container is the enum.
+A declaration that declares several names (`case Red, Blue`) gives one record
+per name. A use of a member is never a variant:
+
+```c
+enum Color { RED, BLUE = 2 };   // RED, BLUE: EnumVariant, container Color
+enum { ANON_A };                // ANON_A: EnumVariant, no container
+int x = RED;                    // x: Variable; RED is a use, not a variant
+```
+
+A variant record has no payload of its own (its `kind_data` is `Unknown`).
+Its value and fields are in the enum's variant list
+([Field lists](#field-lists)). Java constant bodies (`BLUE { void f() {} }`)
+are unnamed owners, so `f` has no container.
+
 ### Module or Namespace
 
 The two kinds are deliberately not unified; each language keeps the kind that
@@ -172,9 +221,34 @@ matches its own vocabulary:
 
 | Module | Namespace |
 |---|---|
-| Rust `mod`, Perl `package`, Scala `object` | Go `package`, Java `package`, C# `namespace`, C++ `namespace` |
+| Rust `mod`, Perl `package`, Scala `object` | Go `package`, Java `package`, C# `namespace`, C++ `namespace`, TypeScript `namespace`/`module`, PHP `namespace` |
 
-TypeScript `namespace` and PHP `namespace` are not yet reported.
+A namespace record carries the full name as written, and the names of its
+members are prefixed with it once:
+
+```typescript
+namespace Space {
+  export function inside() {}   // Space.inside, container Space
+}
+export namespace A.B {          // one Namespace named A.B
+  export const v = 1;           // A.B.v
+}
+```
+
+```php
+<?php
+namespace App;                  // Namespace App
+function inside() {}            // App\inside, no container
+namespace App\Braced {          // Namespace App\Braced
+    function inside() {}        // App\Braced\inside, container App\Braced
+}
+```
+
+A PHP semicolon namespace has no body, so the declarations after it are not
+its members and have no container; their names still start with it. Neither
+a PHP global `namespace { … }` nor a TypeScript string-named
+`declare module "x" { … }` declares a named namespace, so neither has a
+record. A TypeScript or PHP `use`/`import` of a namespace declares nothing.
 
 ### Interface and protocol members that are not methods
 
@@ -462,9 +536,9 @@ What becomes a segment:
   a leading `super` climbs one enclosing `mod`, `crate` starts at the file,
   `self` is dropped), a Go receiver's base type and a Lua table, written in
   the declaration
-- a TypeScript `namespace`, a Swift extension's type and a named function that
-  is not extracted itself (a Java or C# constructor:
-  `com.example.Point.Point.x`)
+- a Swift extension's type and a named function that is not extracted
+  itself (a C# static constructor or a Java compact record constructor:
+  `C.C.k` for a local `k`)
 - nothing past an unnamed owner: a member of an anonymous class is qualified
   by its own name alone
 
@@ -525,7 +599,7 @@ A declaration written `async` carries `Modifier::Async` (`SymbolInfo::is_async`)
 | JavaScript, TypeScript | `async` functions, methods, function expressions and arrow functions, and a name bound to one (`const f = async () => …`, a class field holding one) |
 | Python | `async def`, decorated or not |
 | C# | `async` methods and local functions |
-| Swift | functions, methods and protocol requirements written `async` (an `init` is not reported as a symbol, so it carries no flag) |
+| Swift | functions, methods, initializers (`init() async`) and protocol requirements written `async` |
 
 The flag is read from the declaration's own `async` keyword, never from its
 body or its return type. A JavaScript or TypeScript name bound to a function
@@ -806,16 +880,16 @@ method never makes its public class private.
 | Language | Keyword → level | No keyword → level |
 |---|---|---|
 | Rust | `pub` → Public; `pub(crate)`, `pub(super)`, `pub(in path)` → Crate; `pub(self)` → Private | Private for items and fields. Trait items and enum variants (and their fields) take the trait's or enum's level. Trait-impl items: see below. `macro_rules!` → Unknown |
-| TypeScript | `public`, `protected`, `private`; `#name` → Private; top-level `export` → Public | class and interface members → Public; unexported top-level → ModulePrivate in a module file, Unknown in a script |
+| TypeScript | `public`, `protected`, `private`; `#name` → Private; top-level `export` → Public | class and interface members → Public; enum members → the enum's level; unexported top-level (a `namespace` too) → ModulePrivate in a module file, Unknown in a script |
 | JavaScript | `#name` → Private; top-level `export` → Public | class members → Public; unexported top-level → ModulePrivate in a module file, Unknown in a script |
 | Go | uppercase initial (any Unicode uppercase) → Public | Package; the `package` clause itself → Unknown |
-| Java | `public`, `protected`, `private` | Package; interface members → Public; `package` declaration → Unknown |
-| C# | `public`, `protected`, `private`, `internal`, `protected internal`, `private protected`; `file` → ModulePrivate | class/struct/record members → Private; top-level types → Internal; interface members → Public |
+| Java | `public`, `protected`, `private` | Package; interface members and enum constants → Public; an enum's constructor → Private; `package` declaration → Unknown |
+| C# | `public`, `protected`, `private`, `internal`, `protected internal`, `private protected`; `file` → ModulePrivate | class/struct/record members (constructors too) → Private; top-level types → Internal; interface members and enum members → Public |
 | C | — | file-scope functions and variables → Public unless the linkage rule makes them ModulePrivate; types, tags, fields, enumerators, macros → Unknown |
-| C++ | `public:`, `protected:`, `private:` sections | `class` members → Private; `struct`/`union` members → Public; namespace-scope functions and variables → linkage rule |
+| C++ | `public:`, `protected:`, `private:` sections | `class` members → Private; `struct`/`union` members → Public; namespace-scope functions and variables → linkage rule; enumerators → Unknown |
 | Swift | `open`, `public` → Public; `package` → Package; `internal` → Internal; `fileprivate` → ModulePrivate; `private` → Private | Internal, with the member rules below |
-| Scala | `private`, `protected`, qualified forms below | Public |
-| PHP | `public`, `protected`, `private` | Public; namespaces → Unknown |
+| Scala | `private`, `protected`, qualified forms below | Public; an enum `case` → the enum's level |
+| PHP | `public`, `protected`, `private` | Public (enum cases too); namespaces → Unknown |
 | Lua | — | global → Public; chunk-level `local` → ModulePrivate; `local` inside a block → Unknown; table fields (`M.f`, `M:m`) → Unknown |
 | Python, Perl, Bash, Zsh | — | Unknown. Privacy is only a naming convention (`_name`) or does not exist, and a guess would be reported as fact. |
 
@@ -1158,6 +1232,11 @@ No other supported language makes a member static without a keyword: a C++
 Scala `let`/`readonly`/`val` members are instance members unless declared
 `static` (or, in Scala, in an `object`).
 
+Constructors and enum variants are never static. A constructor has no
+receiver parameter in most languages, and an enum constant behaves like a
+static value, but neither says `static`; a Scala enum `case` is owned by its
+enum, not by an object.
+
 ```csharp
 class Limits {
     public const int Max = 1;    // Static Fields
@@ -1269,9 +1348,19 @@ members the type declares in its own body, in source order:
   the type, with that symbol's access and member `static`, so a member is in
   `hug classes` exactly when `hug symbols` reports it inside the type;
 - members that have no standalone symbol: Java and C# record components (they
-  are Parameters), Rust tuple-struct positions (`0`, `1`), Go struct fields
-  and Scala class parameters. Their access and `static` are read from the
-  declaration.
+  are Parameters), Rust tuple-struct positions (`0`, `1`) and Scala class
+  parameters. Their access and `static` are read from the declaration.
+
+Each entry appears once, whichever source listed it. A Go field and a Scala
+body `val`/`var` are both a standalone Field and an entry of the list, and
+the entry keeps the type written in the source:
+
+```scala
+class Box(p: Int) {
+  val width: Int = 1   // Field; list entry width: Int
+  var height = 2       // Field; list entry height (no written type)
+}                      // p: Parameter; list entry p, no Field record
+```
 
 ```mermaid
 flowchart LR
@@ -1307,7 +1396,13 @@ struct Fields {
 
 Two owners keep a narrower list:
 
-- an **enum** lists its variants, not fields (`hug classes` lists no enums);
+- an **enum** lists its variants, not fields (`hug classes` lists no enums).
+  The variant list and the standalone EnumVariant records name the same
+  variants, once each and in source order. A variant's value is the list
+  entry's `discriminant` (`BLUE = 2` gives `2`), since a variant record has
+  no payload of its own. Only an Enum has a variant list: a Swift `enum` is
+  reported as Type and lists none, though its `case` records are still
+  EnumVariants;
 - a **Rust `impl`** is not the type's body, so its associated constants are
   not in the struct's field list (its methods appear in `hug classes` through
   the type's members). A trait's associated constants are in the trait's
@@ -1435,13 +1530,17 @@ multi-line header are kept.
 | `const twice = (value: number): number => value * 2;` | `(value: number): number` (the arrow function is the declaration) |
 | `type Point struct { X int }` | `type Point struct` |
 | `local function helper() end` (Lua, empty body) | `local function helper()` |
+| `type ( A struct{ … }; B int )` (Go group, for `B`) | `B int` (each spec is its own declaration) |
+| `public init(x: Int, y: Int = 2) {}` (Swift) | `public init(x: Int, y: Int = 2)` (a parameter default is not an initializer) |
+| `X, y int` (Go struct fields, for both) | `X, y int` |
+| `enum E { RED, BLUE = 2 };` (C, for `BLUE`) | `BLUE` |
+| `case Value(x: Int)` (Scala) | `Value(x: Int)`; `case`, which one group `case A, B` shares, is the keyword but not in the header |
 
 The header is omitted when no contiguous part names the symbol by itself:
 
 | Declaration | Why `signature_text` is omitted |
 |---|---|
 | `typedef struct { int x; } Point;` | the alias name follows the struct body |
-| `type ( A struct{ … }; B int )` (Go group) | one header would span several types |
 | `int a = 1, b = 2;` (for `b`) | `a`'s initializer ends the header before `b` |
 | `first = second = 0` (Python, for `second`) | `first`'s `=` ends the header before `second` |
 
@@ -1458,17 +1557,17 @@ construct the extractor does not report as a symbol (see
 | Language | Keywords reported | No keyword |
 |---|---|---|
 | Rust | `fn`, `struct`, `union`, `enum`, `trait`, `type`, `mod`, `const`, `static`, `let`, `macro_rules!` | fields, enum variants, parameters |
-| Go | `func`, `type`, `const`, `var`, `package` | `:=` locals, parameters, struct fields |
-| Swift | `class`, `struct`, `enum`, `actor`, `protocol`, `func`, `case`, `var`, `let` | parameters |
-| Scala | `def`, `val`, `var`, `class`, `object`, `trait`, `enum`; `val`/`var` on a class parameter | plain class and method parameters |
-| TypeScript | `function`, `class`, `interface`, `enum`, `type`, `const`, `let`, `var` | methods, fields, constructors, arrow functions, parameters |
+| Go | `func`, `type` (also on a type alias), `const`, `var`, `package` | `:=` locals, parameters, struct fields |
+| Swift | `class`, `struct`, `enum`, `actor`, `protocol`, `func`, `init`, `typealias`, `case`, `var`, `let` | parameters |
+| Scala | `def`, `val`, `var`, `class`, `object`, `trait`, `enum`, `type`, `case` (enum cases); `val`/`var` on a class parameter | plain class and method parameters |
+| TypeScript | `function`, `class`, `interface`, `enum`, `type`, `namespace`, `module`, `const`, `let`, `var` | methods, fields, constructors, enum members, arrow functions, parameters |
 | JavaScript | `function`, `class`, `const`, `let`, `var` | methods, fields, constructors, arrow functions, parameters |
-| Java | `class`, `interface`, `enum`, `record`, `package` | methods, constructors, fields, locals, parameters |
-| C# | `class`, `struct`, `interface`, `enum`, `record`, `namespace`, `event` | methods, properties, fields (`const` is a modifier), locals, parameters |
+| Java | `class`, `interface`, `enum`, `record`, `package` | methods, constructors, fields, enum constants, locals, parameters |
+| C# | `class`, `struct`, `interface`, `enum`, `record`, `namespace`, `event` | methods, constructors, properties, fields (`const` is a modifier), enum members, locals, parameters |
 | C | `struct`, `union`, `enum`, `typedef`, `#define` | functions, variables, fields, enumerators, parameters |
-| C++ | C's, plus `class`, `namespace`, `using`, and `class`/`typename` template parameters | as C, plus methods |
-| PHP | `function`, `class`, `interface`, `trait`, `enum`, `const`, legacy `var` properties | typed properties, parameters |
-| Python | `def`, `class` | assignments, parameters |
+| C++ | C's, plus `class`, `namespace`, `using`, and `class`/`typename` template parameters | as C, plus methods and constructors |
+| PHP | `function` (also on a constructor), `class`, `interface`, `trait`, `enum`, `case`, `namespace`, `const`, legacy `var` properties | typed properties, parameters |
+| Python | `def` (also on `__init__`), `class` | assignments, parameters |
 | Perl | `sub`, `package`, `my`, `our`, `state` | — |
 | Lua | `function`, `local` | global assignments, parameters |
 | Bash, Zsh | `function`; `local`, `declare`, `typeset`, `export`, `readonly` (and Zsh `integer`, `float`) on a variable | `name()` functions, plain assignments |
@@ -1493,26 +1592,42 @@ kind, and a record without a keyword, is labeled with its kind (`function`,
 
 ## Current limitations
 
-These are limits of the extractor today, not of the grammars:
+These are limits of the extractor today, not of the grammars, except the
+one [grammar limit](#grammar-limits) below:
 
-- **Swift** structs, classes and enums all report Type.
-- **Go** structs and interfaces both report Type; `type A = B` aliases are
-  not reported at all; struct fields are not reported as symbols.
-- **Constructors** are reported only for TypeScript and JavaScript. Python,
-  Java, C#, C++, Swift and PHP constructors are Methods or are absent.
-- **Enum variants** are reported only for Rust and Swift.
-- **TypeScript and PHP namespaces** are not reported as symbols (they still
-  qualify the names inside them).
+- **Swift** structs, classes and enums all report Type, and **Go** structs
+  and interfaces both report Type. So a Go field's or a Swift initializer's
+  container kind is Type (`[in type Point]`), and a Swift enum has no variant
+  list.
+- **Constructors beyond explicit instance constructors** keep their old
+  kind or stay unreported: Java compact record constructors, C# static and
+  primary constructors and destructors are not reported; a C++
+  out-of-class `C::C() {}` is a Function with no container (its class is
+  not resolved by name); PHP legacy class-name constructors and Python
+  `__new__` are Methods.
+- **Go struct members**: an embedded field (`type S struct { Base }`) and
+  the fields of an anonymous struct type (`Inner` in
+  `anon struct{ Inner int }`) are not reported; `anon` itself is. Go
+  interface method elements (`M()` in `interface{ M() }`) are reported
+  neither as symbols nor as entries of the interface's list.
+- **Scala abstract type members** (`type Element`, with no `=`) are not
+  reported; they declare no alias.
+- **TypeScript `declare namespace D {}`** reports Unknown access, like every
+  other `declare` declaration.
+- **A standalone Field record's payload** (`kind_data`) has no type text,
+  and its `is_mutable`/`is_readonly` are fixed at true/false whatever the
+  declaration says; the type and the written annotation are in the owning
+  type's field list.
+- **C++ `= default;` and `= delete;` members** keep the clause in their
+  header, terminator included (`C(const C&) = default;`).
 - **Qualified names of out-of-class C++ definitions** do not include the
   class or namespace written in the definition's name (`void ns::W::f() {}`
   qualifies its locals as `k`, not `ns::W::f::k`).
-- **Scala** fields are not reported.
-- **Swift and Scala type aliases** (`typealias Alias = Int`, `type Alias =
-  Int`) are not reported, and neither is a Swift `init`.
 - **Destructuring members**: a Python class-body target nested more than one
-  pattern deep or starred (`a, (b, c) = …`, `a, *rest = …`) and a Swift
-  tuple-pattern property (`let (a, b) = (1, 2)`) are not reported, as
-  symbols or field-list entries.
+  pattern deep or starred (`a, (b, c) = …`, `a, *rest = …`), a Swift
+  tuple-pattern property (`let (a, b) = (1, 2)`) and a Scala tuple-pattern
+  member (`val (a, b) = (1, 2)`) are not reported, as symbols or field-list
+  entries.
 - **C and C++ field types** list the base type only: `int *ptrs[2]` is
   `ptrs: int`. Parameter and return types do the same: `char **argv` has
   type `char`, and `int (*f(int))(long)` returns `int`.
@@ -1546,3 +1661,15 @@ These are limits of the extractor today, not of the grammars:
 - **Adapter gaps**: converting a `SymbolInfo` to a record drops
   `TypeMetadata::type_parameters` and a TypeAlias's field metadata (C
   `typedef struct { … } Alias`).
+
+### Grammar limits
+
+One form cannot be represented by the pinned grammar, so it cannot be
+reported correctly until the grammar changes:
+
+| Snippet | Grammar | Observed | What is reported |
+|---|---|---|---|
+| `object W { private enum Hidden { case H } }` (also `protected`, also at the top level) | tree-sitter-scala 0.24.0 | `ERROR(access_modifier)` followed by a separate `enum_definition`; the file has a parse error | `Hidden` is an Enum with access Public (the modifier is lost), and its case `H` an EnumVariant with the same Public access |
+
+A Scala enum written without an access modifier is parsed and reported
+normally, and its cases take the enum's access.

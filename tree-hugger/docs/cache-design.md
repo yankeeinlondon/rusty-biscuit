@@ -154,6 +154,18 @@ qualified name, so one file in one checkout has the same IDs whichever
 spelling named it and whichever scan root reached it. They are not equal across checkouts in
 different directories, since the identity is absolute.
 
+**IDs follow the kind and the qualified name.** The stable key is
+`{language}::{file}::{kind}::{qualified name}::{ordinal}`, so an extractor
+change that reclassifies a declaration gives its record a new ID, and so does
+one that changes a name segment above it. When an extractor revision began
+reporting Python `__init__` as a Constructor instead of a Method, its ID
+changed; a constructor parameter kept its own, because its kind and
+qualified name (`C.__init__.value`) did not change. Records that did not
+change keep their IDs, including the members of a namespace that became a
+record of its own (`App\inside` stays `App\inside`). Old IDs are never
+kept as aliases: anything that stored an ID across an extractor upgrade must
+look it up again.
+
 The same identity is used everywhere `hug` compares files:
 
 - `scanner::collect_files` and `collect_selected_files` (which adds the
@@ -182,14 +194,16 @@ file's records, imports, exports and every analysis pass but diagnostics:
 | Input | Where it comes from | Changes when |
 |---|---|---|
 | schema version | `SchemaVersion::V4_0` | the record shape changes |
-| implementation version | crate version and `EXTRACTOR_REVISION` (`0.1.0+rev.9`) | extraction code changes |
+| implementation version | crate version and `EXTRACTOR_REVISION` (`0.1.0+rev.14`) | extraction code changes |
 | grammar identity | the compiled grammar: name, declared version (if any), ABI, node-kind, field and parse-state counts | a grammar crate is upgraded |
 | grammar ID | the grammar variant (`typescript` or `tsx`, …) | the file's grammar variant differs |
 | query text | the effective `locals`, `imports` and `references` query text, with inherited vendored queries and overlays resolved | a `.scm` file the analysis compiles changes |
 
 A change to Rust extraction code cannot be seen in query text, so
 `EXTRACTOR_REVISION` must still be bumped with any change to extracted
-records, including a repair on an unreleased branch.
+records, including a repair on an unreleased branch. After a bump, every
+entry written by the earlier revision is a miss and is recomputed on first
+use; nothing is migrated.
 
 Diagnostics depend on more inputs, which only diagnostics use. They have
 their own fingerprint, stored **inside** the entry rather than in the key:
@@ -493,5 +507,7 @@ visited once per run, so they only added copies.
 | Concurrent writers (threads and processes) | `concurrent_writers_leave_a_readable_entry_whose_coverage_matches`, `cli/tests/symbols/cache_lookup.rs`, `lib/tests/l1/cache_tests.rs` |
 | Entry and record field shapes | `cli/tests/symbols/cache_robustness.rs` |
 | Old extractor revisions and records of other schema versions are never served | `cli/tests/symbols/cache_upgrade.rs` |
+| A kind-narrowed entry never claims complete coverage; widening to every kind and capability, then a warm `Hit` with zero work counters, equals an uncached run | `deferred_kind_entries_never_claim_complete_coverage_and_warm_hits_do_no_work` |
+| A reclassified record gets the ID of its new kind; unchanged records and namespace members keep theirs | `reclassified_records_get_new_ids_and_unrelated_ids_stay` |
 | Relative, absolute, `.`/`..`, symlinked-file and symlinked-directory spellings read under one identity, key, record set and entry; missing files keep the given spelling | `lib/tests/l1/file_identity.rs` |
 | The CLI shares one entry across spellings, lists a file once, and `--prelude` reuses it under any spelling | `cli/tests/symbols/spelling.rs`, `cli/tests/symbols/prelude.rs` `prelude_reuse_holds_for_every_spelling_of_an_explicit_file` |

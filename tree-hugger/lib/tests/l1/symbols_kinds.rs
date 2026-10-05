@@ -372,6 +372,18 @@ pub const DEFERRED_KIND_ROWS: &[InlineKindRow] = &[
     (L::Php, "<?php\nnamespace App\\Braced {\n    function inside() {}\n}\n", "inside", K::Function, Some("App\\Braced"), Some(K::Namespace)),
 ];
 
+/// Each distinct `(language, source)` of [`DEFERRED_KIND_ROWS`], in table
+/// order: the corpus the selective-query and cache tests run over.
+pub fn deferred_kind_sources() -> Vec<(ProgrammingLanguage, &'static str)> {
+    let mut sources: Vec<(ProgrammingLanguage, &'static str)> = Vec::new();
+    for &(language, source, ..) in DEFERRED_KIND_ROWS {
+        if !sources.contains(&(language, source)) {
+            sources.push((language, source));
+        }
+    }
+    sources
+}
+
 /// Counterexamples of the deferred kinds, one section per language: uses,
 /// imports and look-alike declarations that keep their kinds.
 pub const DEFERRED_KIND_NEGATIVES: &[InlineNegativeRow] = &[

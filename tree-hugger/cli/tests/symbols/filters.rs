@@ -362,6 +362,139 @@ fn kind_selection_narrows_the_command_set_and_rejects_unknown_kinds() {
     assert_argument_error(&scratch, &["symbols", "--visibility", "exported"], "possible values");
 }
 
+/// One file per language with a declaration of a kind that was deferred:
+/// constructors (Java, PHP, Python, Swift), enum variants (Java, PHP, Scala,
+/// TypeScript), aliases (Go, Scala, Swift), fields (Go, Scala) and
+/// namespaces (PHP, TypeScript).
+pub(crate) const DEFERRED_FILES: &[(&str, &str)] = &[
+    ("Shapes.java", "class Counter {\n    Counter(int start) {}\n    void tick() {}\n}\n\nenum Color { RED, BLUE }\n"),
+    ("shapes.go", "package shapes\n\ntype Alias = int\n\ntype Point struct {\n\tX, Y int\n\tlabel string\n}\n"),
+    (
+        "model.scala",
+        "class Box {\n  val width: Int = 1\n  var height = 2\n  def area(): Int = width\n}\n\nobject Registry {\n  val count = 0\n  type Key = String\n}\n\nenum Tone {\n  case Low, High\n}\n",
+    ),
+    ("space.ts", "namespace Space {\n  export function inside() {}\n}\n\nenum Mode { On, Off = 2 }\n"),
+    (
+        "app.php",
+        "<?php\nnamespace App;\n\nclass Service {\n    public function __construct($x) {}\n}\n\nenum Suit {\n    case Hearts;\n}\n",
+    ),
+    ("s.swift", "struct S {\n    init(v: Int) {}\n}\n\ntypealias Alias = Int\n"),
+    ("c.py", "class C:\n    def __init__(self, v):\n        pass\n"),
+];
+
+/// `(file, displayed qualified name, kind)` of every record of `hug --json
+/// <args>`, sorted.
+fn listed(scratch: &Scratch, args: &[&str]) -> Vec<(String, String, String)> {
+    let mut all = vec!["--json"];
+    all.extend_from_slice(args);
+    let json = json_of(&scratch.stdout(&all));
+    let mut listed: Vec<(String, String, String)> = json["files"]
+        .as_array()
+        .expect("files")
+        .iter()
+        .flat_map(|file| {
+            let path = file["file"].as_str().expect("file").to_string();
+            file["symbols"]
+                .as_array()
+                .expect("symbols")
+                .iter()
+                .map(move |record| {
+                    (
+                        path.clone(),
+                        record["identity"]["qualified_name"].as_str().expect("name").to_string(),
+                        record["kind"].as_str().expect("kind").to_string(),
+                    )
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    listed.sort();
+    listed
+}
+
+fn rows(expected: &[(&str, &str, &str)]) -> Vec<(String, String, String)> {
+    let mut rows: Vec<_> = expected
+        .iter()
+        .map(|(file, name, kind)| (file.to_string(), name.to_string(), kind.to_string()))
+        .collect();
+    rows.sort();
+    rows
+}
+
+/// The deferred kinds join their commands: `functions --kind constructor`
+/// selects constructors and `--kind method` excludes them, `types` lists
+/// aliases, and `symbols` lists namespaces as items and variants and fields
+/// as members under its default scopes.
+#[test]
+fn deferred_kinds_join_their_commands_and_kind_selectors() {
+    let scratch = Scratch::new(DEFERRED_FILES);
+    assert_eq!(
+        listed(&scratch, &["functions", "--kind", "constructor"]),
+        rows(&[
+            ("Shapes.java", "Shapes.java#Counter.Counter", "Constructor"),
+            ("app.php", "App\\Service::__construct", "Constructor"),
+            ("c.py", "c.py#C.__init__", "Constructor"),
+            ("s.swift", "s.swift#S.init", "Constructor"),
+        ])
+    );
+    assert_eq!(
+        listed(&scratch, &["functions", "Shapes.java", "--kind", "method"]),
+        rows(&[("Shapes.java", "Shapes.java#Counter.tick", "Method")]),
+        "`--kind method` excludes the Java constructor"
+    );
+    assert_eq!(
+        listed(&scratch, &["functions", "Shapes.java"]),
+        rows(&[
+            ("Shapes.java", "Shapes.java#Counter.Counter", "Constructor"),
+            ("Shapes.java", "Shapes.java#Counter.tick", "Method"),
+        ])
+    );
+    let aliases = rows(&[
+        ("model.scala", "model.scala#Registry.Key", "TypeAlias"),
+        ("s.swift", "s.swift#Alias", "TypeAlias"),
+        ("shapes.go", "shapes.Alias", "TypeAlias"),
+    ]);
+    assert_eq!(listed(&scratch, &["types", "--kind", "type_alias"]), aliases);
+    let types = listed(&scratch, &["types"]);
+    assert!(aliases.iter().all(|alias| types.contains(alias)), "`types` lists aliases: {types:?}");
+
+    let symbols = listed(&scratch, &["symbols"]);
+    let namespaces = rows(&[
+        ("app.php", "App", "Namespace"),
+        ("space.ts", "space.ts#Space", "Namespace"),
+    ]);
+    let variants = rows(&[
+        ("Shapes.java", "Shapes.java#Color.BLUE", "EnumVariant"),
+        ("Shapes.java", "Shapes.java#Color.RED", "EnumVariant"),
+        ("app.php", "App\\Suit::Hearts", "EnumVariant"),
+        ("model.scala", "model.scala#Tone.High", "EnumVariant"),
+        ("model.scala", "model.scala#Tone.Low", "EnumVariant"),
+        ("space.ts", "space.ts#Mode.Off", "EnumVariant"),
+        ("space.ts", "space.ts#Mode.On", "EnumVariant"),
+    ]);
+    let fields = rows(&[
+        ("model.scala", "model.scala#Box.height", "Field"),
+        ("model.scala", "model.scala#Box.width", "Field"),
+        ("model.scala", "model.scala#Registry.count", "Field"),
+        ("shapes.go", "shapes.Point.X", "Field"),
+        ("shapes.go", "shapes.Point.Y", "Field"),
+        ("shapes.go", "shapes.Point.label", "Field"),
+    ]);
+    for expected in [&namespaces, &variants, &fields] {
+        assert!(expected.iter().all(|row| symbols.contains(row)), "`symbols` lists {expected:?}: {symbols:?}");
+    }
+    // Go's package clause was already a namespace.
+    let mut every_namespace = namespaces.clone();
+    every_namespace.extend(rows(&[("shapes.go", "shapes", "Namespace")]));
+    every_namespace.sort();
+    assert_eq!(listed(&scratch, &["symbols", "--kind", "namespace"]), every_namespace);
+    assert_eq!(listed(&scratch, &["symbols", "--kind", "enum_variant"]), variants);
+    assert_eq!(listed(&scratch, &["symbols", "--kind", "field"]), fields);
+    assert_eq!(listed(&scratch, &["symbols", "--scope", "item", "--kind", "enum_variant", "--kind", "field"]), []);
+    assert_eq!(listed(&scratch, &["symbols", "--scope", "member", "--kind", "namespace"]), []);
+    assert_eq!(listed(&scratch, &["functions", "--kind", "enum_variant"]), [], "`--kind` never widens a command");
+}
+
 #[test]
 fn imports_match_an_alias_or_an_original_name_and_keep_positional_files() {
     let scratch = scratch();

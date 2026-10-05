@@ -13,7 +13,9 @@ use biscuit_hash::{blake3_hash, xx_hash};
 use serde_json::Value;
 use tempfile::TempDir;
 use tree_hugger::cache::{FingerprintInputs, canonical_digest};
-use tree_hugger::{EXTRACTOR_REVISION, ProgrammingLanguage, SourceFile};
+use tree_hugger::{
+    EXTRACTOR_REVISION, ProgrammingLanguage, SourceFile, SymbolKindV2, stable_symbol_key, symbol_id_from_stable_key,
+};
 
 use crate::{PYTHON_FIXTURE, RUST_FIXTURE, Scratch, TYPESCRIPT_FIXTURE, cache_entries, json_of, stdout_of};
 
@@ -872,6 +874,61 @@ fn entry_from_extractor_revision_twelve_is_not_served_after_the_repairs() {
         revert: |snapshot| {
             record_named(snapshot, "ReviewLiteral")["visibility"]["is_deprecated"] = Value::from(true);
             record_named(snapshot, "ReviewBlockStar")["metrics"]["has_docs"] = Value::from(false);
+        },
+    });
+}
+
+const UPGRADE_PROBE_PY: &str = "\n\nclass UpgradeProbe:\n    def __init__(self, seed):\n        pass\n";
+
+/// The stable key of `UpgradeProbe.__init__` in `deferred.py` when it reports
+/// `kind`; the record's ID digests it.
+fn upgrade_probe_key(kind: SymbolKindV2) -> String {
+    stable_symbol_key(ProgrammingLanguage::Python, Path::new("deferred.py"), kind, "UpgradeProbe.__init__", 0)
+}
+
+/// The kind and stable key of `UpgradeProbe.__init__` in a `hug --json-full`
+/// report.
+fn upgrade_probe_identity(output: &Value) -> Value {
+    let records: Vec<&Value> = output["indexes"][0]["symbols"]
+        .as_array()
+        .expect("indexes[0].symbols")
+        .iter()
+        .filter(|record| record["identity"]["qualified_name"] == "deferred.py#UpgradeProbe.__init__")
+        .collect();
+    assert_eq!(records.len(), 1, "expected one `UpgradeProbe.__init__` record");
+    Value::from(vec![records[0]["kind"].clone(), records[0]["identity"]["stable_key"].clone()])
+}
+
+/// Revision 13 reported a Python `__init__` as a `Method`, so its stable key
+/// and ID digested that kind; revision 14 reports a `Constructor`. The stale
+/// entry carries the old kind, key and a Method-derived ID, which its
+/// parameters' relations point at.
+#[test]
+fn entry_from_extractor_revision_thirteen_is_not_served_after_the_repairs() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "13",
+        key: OldKey::Computed,
+        file: "deferred.py",
+        language: "python",
+        source: format!("{PYTHON_FIXTURE}{UPGRADE_PROBE_PY}"),
+        sentinel: "UpgradeProbe",
+        probe: upgrade_probe_identity,
+        repaired: Value::from(vec!["Constructor".to_string(), upgrade_probe_key(SymbolKindV2::Constructor)]),
+        stale: Value::from(vec!["Method".to_string(), upgrade_probe_key(SymbolKindV2::Method)]),
+        revert: |snapshot| {
+            let records = snapshot["records"].as_array_mut().expect("entry records");
+            let probe = records
+                .iter_mut()
+                .find(|record| record["identity"]["qualified_name"] == "UpgradeProbe.__init__")
+                .expect("the entry holds `UpgradeProbe.__init__`");
+            let current_id = probe["id"].as_str().expect("id").to_string();
+            let stale_key = upgrade_probe_key(SymbolKindV2::Method);
+            probe["kind"] = Value::from("Method");
+            probe["identity"]["stable_key"] = Value::from(stale_key.as_str());
+            let text = serde_json::to_string(snapshot)
+                .expect("serialize snapshot")
+                .replace(&current_id, &symbol_id_from_stable_key(&stale_key).0);
+            *snapshot = serde_json::from_str(&text).expect("snapshot JSON");
         },
     });
 }

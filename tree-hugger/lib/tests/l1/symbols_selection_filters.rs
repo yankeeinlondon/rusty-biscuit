@@ -16,7 +16,7 @@ use std::collections::BTreeSet;
 
 use tempfile::TempDir;
 use tree_hugger::{
-    NamePattern, ProgrammingLanguage, SourceFile, SymbolQuery, SymbolRecord, SymbolScope,
+    NamePattern, ProgrammingLanguage, SourceFile, SymbolKindV2, SymbolQuery, SymbolRecord, SymbolScope,
     VisibilityLevel,
 };
 
@@ -609,4 +609,114 @@ fn signature_predicates_select_patterned_and_curried_parameters() {
         }
     }
     assert!(failures.is_empty(), "patterned selections:\n{}", failures.join("\n"));
+}
+
+/// `(extension, source, kinds, predicates, in-file names kept)`: one
+/// selection over declarations the deferred kinds report. Names are sorted;
+/// a repeated name is a separate declaration (an overload).
+type DeferredCell = (
+    &'static str,
+    &'static str,
+    &'static [SymbolKindV2],
+    &'static [Predicate],
+    &'static [&'static str],
+);
+
+const JAVA_DEFERRED: &str = "class Counter {\n    Counter(int start) {}\n    private Counter() {}\n    void tick() {}\n}\n\nenum Color { RED, BLUE }\n";
+const CSHARP_DEFERRED: &str = "class C {\n    public C(int x) {}\n    private C() {}\n}\n\nenum E { Red, Blue = 2 }\n";
+const CPP_DEFERRED: &str = "class W {\npublic:\n    W(int x);\nprivate:\n    W();\n};\n\nenum class E { A, B };\n";
+const PYTHON_DEFERRED: &str = "class Box:\n    def __init__(self, width, height=1):\n        pass\n";
+const SWIFT_DEFERRED: &str = "struct S {\n    init(v: Int) {}\n    private init() {}\n}\n\ntypealias Alias = Int\n";
+const PHP_DEFERRED: &str = "<?php\nnamespace App;\n\nclass Service {\n    public function __construct(int $x) {}\n}\n\nenum Suit {\n    case Hearts;\n}\n";
+const TS_DEFERRED: &str = "export enum Mode { On, Off = 2 }\nenum Hidden { H }\nnamespace Space {}\n";
+const GO_DEFERRED: &str = "package p\n\ntype Alias = int\n\ntype Point struct {\n\tX, Y int\n\tlabel string\n}\n";
+const SCALA_DEFERRED: &str = "object Registry {\n  val count = 0\n  type Key = String\n}\n\nclass Box {\n  private val width: Int = 1\n  var height = 2\n}\n\nenum Tone {\n  case Low, High\n}\n";
+const C_DEFERRED: &str = "enum E { RED, BLUE = 2 };\n";
+
+const CONSTRUCTOR: &[SymbolKindV2] = &[SymbolKindV2::Constructor];
+const FUNCTIONS: &[SymbolKindV2] = &[SymbolKindV2::Function, SymbolKindV2::Method, SymbolKindV2::Constructor];
+const VARIANT: &[SymbolKindV2] = &[SymbolKindV2::EnumVariant];
+const ALIAS: &[SymbolKindV2] = &[SymbolKindV2::TypeAlias];
+const FIELD: &[SymbolKindV2] = &[SymbolKindV2::Field];
+const NAMESPACE: &[SymbolKindV2] = &[SymbolKindV2::Namespace];
+
+const DEFERRED_CELLS: &[DeferredCell] = &[
+    // Java: an explicit constructor without a keyword is package access.
+    ("java", JAVA_DEFERRED, CONSTRUCTOR, &[], &["Counter.Counter", "Counter.Counter"]),
+    ("java", JAVA_DEFERRED, &[SymbolKindV2::Method], &[], &["Counter.tick"]),
+    ("java", JAVA_DEFERRED, CONSTRUCTOR, &[P::Visibility(V::Private)], &["Counter.Counter"]),
+    ("java", JAVA_DEFERRED, FUNCTIONS, &[P::MinParams(1)], &["Counter.Counter"]),
+    ("java", JAVA_DEFERRED, FUNCTIONS, &[P::ParamType("int")], &["Counter.Counter"]),
+    ("java", JAVA_DEFERRED, FUNCTIONS, &[P::Returns("*")], &["Counter.tick"]),
+    ("java", JAVA_DEFERRED, CONSTRUCTOR, &[P::Scope(S::Member)], &["Counter.Counter", "Counter.Counter"]),
+    ("java", JAVA_DEFERRED, CONSTRUCTOR, &[P::Scope(S::Item)], &[]),
+    ("java", JAVA_DEFERRED, VARIANT, &[P::Visibility(V::Public), P::In("Color")], &["Color.BLUE", "Color.RED"]),
+    // C#
+    ("cs", CSHARP_DEFERRED, CONSTRUCTOR, &[P::Visibility(V::Public)], &["C.C"]),
+    ("cs", CSHARP_DEFERRED, CONSTRUCTOR, &[P::MinParams(1)], &["C.C"]),
+    ("cs", CSHARP_DEFERRED, VARIANT, &[P::Visibility(V::Public)], &["E.Blue", "E.Red"]),
+    // C++: access follows the class's access sections; enumerators are Unknown.
+    ("cpp", CPP_DEFERRED, CONSTRUCTOR, &[P::Visibility(V::Public)], &["W::W"]),
+    ("cpp", CPP_DEFERRED, CONSTRUCTOR, &[P::ParamType("int")], &["W::W"]),
+    ("cpp", CPP_DEFERRED, VARIANT, &[P::In("E")], &["E::A", "E::B"]),
+    ("cpp", CPP_DEFERRED, VARIANT, &[P::Visibility(V::Public)], &[]),
+    // Python: `self` is a parameter.
+    ("py", PYTHON_DEFERRED, CONSTRUCTOR, &[P::MinParams(3)], &["Box.__init__"]),
+    ("py", PYTHON_DEFERRED, CONSTRUCTOR, &[P::MinParams(4)], &[]),
+    ("py", PYTHON_DEFERRED, FUNCTIONS, &[P::Returns("*")], &[]),
+    // Swift
+    ("swift", SWIFT_DEFERRED, CONSTRUCTOR, &[P::Visibility(V::Private)], &["S.init"]),
+    ("swift", SWIFT_DEFERRED, CONSTRUCTOR, &[P::ParamType("Int")], &["S.init"]),
+    ("swift", SWIFT_DEFERRED, ALIAS, &[P::Scope(S::Item)], &["Alias"]),
+    // PHP: namespace-rooted names carry no file prefix.
+    ("php", PHP_DEFERRED, CONSTRUCTOR, &[P::Visibility(V::Public), P::MinParams(1)], &["App\\Service::__construct"]),
+    ("php", PHP_DEFERRED, VARIANT, &[P::In("Suit")], &["App\\Suit::Hearts"]),
+    ("php", PHP_DEFERRED, NAMESPACE, &[P::Scope(S::Item)], &["App"]),
+    ("php", PHP_DEFERRED, NAMESPACE, &[P::Scope(S::Member)], &[]),
+    // TypeScript: members take their enum's access.
+    ("ts", TS_DEFERRED, VARIANT, &[P::Visibility(V::Public)], &["Mode.Off", "Mode.On"]),
+    ("ts", TS_DEFERRED, VARIANT, &[P::In("Hidden")], &["Hidden.H"]),
+    ("ts", TS_DEFERRED, NAMESPACE, &[P::Name("Space")], &["Space"]),
+    // Go: field access follows the name's case.
+    ("go", GO_DEFERRED, FIELD, &[P::Visibility(V::Public)], &["p.Point.X", "p.Point.Y"]),
+    ("go", GO_DEFERRED, FIELD, &[P::In("Point")], &["p.Point.X", "p.Point.Y", "p.Point.label"]),
+    ("go", GO_DEFERRED, ALIAS, &[], &["p.Alias"]),
+    // Scala
+    ("scala", SCALA_DEFERRED, FIELD, &[P::Visibility(V::Private)], &["Box.width"]),
+    ("scala", SCALA_DEFERRED, FIELD, &[P::Visibility(V::Public)], &["Box.height", "Registry.count"]),
+    ("scala", SCALA_DEFERRED, ALIAS, &[P::In("Registry")], &["Registry.Key"]),
+    ("scala", SCALA_DEFERRED, VARIANT, &[P::Visibility(V::Public)], &["Tone.High", "Tone.Low"]),
+    // C
+    ("c", C_DEFERRED, VARIANT, &[P::In("E"), P::Scope(S::Member)], &["E.BLUE", "E.RED"]),
+];
+
+/// Every selector applies to the records the deferred kinds report: a kind
+/// selection, access, scope, container and signature-shape predicates keep
+/// exactly the expected declarations, and a constructor never gains a
+/// return type for `returns` to match.
+#[test]
+fn selectors_apply_to_deferred_kind_records() {
+    let mut failures = Vec::new();
+    let dir = TempDir::new().expect("temp dir");
+    for (ordinal, (extension, source, kinds, predicates, expected)) in DEFERRED_CELLS.iter().enumerate() {
+        let path = dir.path().join(format!("deferred_{ordinal}.{extension}"));
+        std::fs::write(&path, source).expect("write snippet");
+        let query = predicates
+            .iter()
+            .fold(SymbolQuery::new().kinds(kinds.iter().copied()), |query, predicate| predicate.apply(query));
+        let mut actual: Vec<String> = SourceFile::read(&path)
+            .expect("read snippet")
+            .query(&query)
+            .expect("query")
+            .index
+            .symbols
+            .iter()
+            .map(|record| in_file_name(record).to_string())
+            .collect();
+        actual.sort();
+        if actual != *expected {
+            failures.push(format!(".{extension} {kinds:?} {predicates:?}: got {actual:?}, want {expected:?}"));
+        }
+    }
+    assert!(failures.is_empty(), "deferred selections:\n{}", failures.join("\n"));
 }

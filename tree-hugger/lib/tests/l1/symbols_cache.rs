@@ -19,11 +19,13 @@ use tree_hugger::cache::{
 };
 use tree_hugger::queries::QueryKind;
 use tree_hugger::{
-    Capability, EXTRACTOR_REVISION, ProgrammingLanguage, SourceFile, SymbolKindV2, SymbolQuery,
-    SymbolQueryResult, TreeFile, WorkCounters, work_counters,
+    Capability, EXTRACTOR_REVISION, NamePattern, ProgrammingLanguage, SourceFile, SymbolKindV2,
+    SymbolQuery, SymbolQueryResult, TreeFile, WorkCounters, stable_symbol_key,
+    symbol_id_from_stable_key, work_counters,
 };
 
-use crate::symbols_fixtures::{all_fixtures, display_name, multi_fixtures, primary_fixture};
+use crate::symbols_fixtures::{all_fixtures, display_name, in_file_name, multi_fixtures, primary_fixture};
+use crate::symbols_kinds::deferred_kind_sources;
 
 const FUNCTION_KINDS: [SymbolKindV2; 3] = [
     SymbolKindV2::Function,
@@ -807,6 +809,152 @@ fn a_disabled_store_neither_reads_nor_writes() {
         assert_eq!(served, uncached(&path, &query));
     }
     assert!(files_with_extension(dir.path(), "json").is_empty());
+}
+
+/// The kinds the deferred declarations report.
+const DEFERRED_KINDS: [SymbolKindV2; 5] = [
+    SymbolKindV2::Constructor,
+    SymbolKindV2::EnumVariant,
+    SymbolKindV2::TypeAlias,
+    SymbolKindV2::Field,
+    SymbolKindV2::Namespace,
+];
+
+/// The IDs of a serialized result's records, in order.
+fn record_ids(result: &Value) -> Vec<Value> {
+    result["index"]["symbols"]
+        .as_array()
+        .expect("symbols")
+        .iter()
+        .map(|record| record["id"].clone())
+        .collect()
+}
+
+/// For every source of the deferred kind matrix: a filtered query of the
+/// deferred kinds stores every record of those kinds and records only those
+/// kinds as its coverage, never the whole file; the unfiltered query is then
+/// a hit, an every-kind query widens the kinds once, and a containment query
+/// widens the capabilities without diagnostics. Afterwards each deferred kind,
+/// with and without containment, is a hit that does no work and equals an
+/// uncached query.
+#[test]
+fn deferred_kind_entries_never_claim_complete_coverage_and_warm_hits_do_no_work() {
+    let deferred = SymbolQuery::new().kinds(DEFERRED_KINDS);
+    let filtered = deferred.clone().name(NamePattern::new("no_declaration_has_this_name"));
+    let mut sorted_kinds = DEFERRED_KINDS.to_vec();
+    sorted_kinds.sort();
+    let sources = TempDir::new().expect("sources");
+    let (mut stored_records, mut warm_records) = (0, 0);
+    for (ordinal, (language, source)) in deferred_kind_sources().into_iter().enumerate() {
+        let path = sources.path().join(format!("deferred_{ordinal}.{}", language.extensions()[0]));
+        std::fs::write(&path, source).expect("write source");
+        let label = format!("{language:?} {source:?}");
+        let dir = TempDir::new().expect("temp");
+        let cache = cache_in(&dir);
+
+        let (lookup, served, _) = cached(&cache, read(&path), &filtered);
+        assert_eq!(lookup, CacheLookup::Miss(CacheMiss::Absent), "{label}");
+        assert_eq!(served, uncached(&path, &filtered), "{label}: filtered");
+        assert_eq!(served["index"]["symbols"], json!([]), "{label}: the name filter keeps nothing");
+        let entry = read_entry(&only_entry(&dir));
+        assert_eq!(entry["covered_kinds"], json!(sorted_kinds), "{label}: the entry covers the deferred kinds only");
+        let stored: Vec<Value> = entry["records"].as_array().expect("records").iter().map(|record| record["id"].clone()).collect();
+        assert_eq!(stored, record_ids(&uncached(&path, &deferred)), "{label}: every deferred-kind record is stored");
+        stored_records += stored.len();
+
+        let (lookup, served, work) = cached(&cache, read(&path), &deferred);
+        assert_eq!(lookup, CacheLookup::Hit, "{label}: unfiltered");
+        assert_eq!(work, WorkCounters::default(), "{label}: unfiltered");
+        assert_eq!(served, uncached(&path, &deferred), "{label}: unfiltered");
+
+        let every_kind = SymbolQuery::new();
+        let (lookup, served, work) = cached(&cache, read(&path), &every_kind);
+        assert_eq!(lookup, CacheLookup::WidenedKinds, "{label}: a narrow entry cannot answer every kind");
+        assert_eq!(served, uncached(&path, &every_kind), "{label}: every kind");
+        assert_eq!(
+            (work.parser_constructions, work.definition_captures, work.diagnostics_runs),
+            (1, 1, 0),
+            "{label}: one re-extraction for the union"
+        );
+        assert_eq!(read_entry(&only_entry(&dir))["covered_kinds"], "all", "{label}");
+
+        let contained = |kind: SymbolKindV2| SymbolQuery::new().kinds([kind]).capabilities([Capability::Containment]);
+        let (lookup, served, work) = cached(&cache, read(&path), &contained(SymbolKindV2::Constructor));
+        assert!(matches!(lookup, CacheLookup::WidenedCapabilities { .. }), "{label}: {lookup:?}");
+        assert_eq!(served, uncached(&path, &contained(SymbolKindV2::Constructor)), "{label}: containment");
+        assert!(work.definition_captures <= 1 && work.diagnostics_runs == 0, "{label}: {work:?}");
+
+        for kind in DEFERRED_KINDS {
+            for query in [SymbolQuery::new().kinds([kind]), contained(kind)] {
+                let (lookup, served, work) = cached(&cache, read(&path), &query);
+                assert_eq!(lookup, CacheLookup::Hit, "{label}: {query:?}");
+                assert_eq!(work, WorkCounters::default(), "{label}: {query:?}");
+                assert_eq!(served, uncached(&path, &query), "{label}: {query:?}");
+                warm_records += record_ids(&served).len();
+            }
+        }
+    }
+    assert!(stored_records > 50, "too few stored records ({stored_records})");
+    assert!(warm_records > 100, "too few warm records ({warm_records})");
+}
+
+/// `(language, source, name, qualified name, kind before the deferred
+/// kinds landed, kind now)`.
+type IdentityRow = (ProgrammingLanguage, &'static str, &'static str, &'static str, SymbolKindV2, SymbolKindV2);
+
+/// A record's ID digests its kind and qualified name, so a reclassified
+/// declaration gets a new ID while its parameters, a namespace's members and
+/// unrelated records keep theirs: a captured namespace renames nothing. The
+/// earlier kinds and names are what extractor revision 13 reported.
+#[test]
+fn reclassified_records_get_new_ids_and_unrelated_ids_stay() {
+    use ProgrammingLanguage as L;
+    use SymbolKindV2 as K;
+    const PY: &str = "class C:\n    def __init__(self, value):\n        pass\n";
+    const CPP: &str = "class W {\npublic:\n    W(int x);\n};\n";
+    const PHP_CLASS: &str = "<?php\nclass P {\n    public function __construct($x) {}\n}\n";
+    const PHP_NAMESPACE: &str = "<?php\nnamespace App;\n\nfunction inside() {}\n";
+    const TS: &str = "namespace Space {\n  export function inside() {}\n}\n";
+    const SCALA: &str = "class K {\n  val width = 1\n}\n";
+    const C: &str = "enum E { RED };\n";
+    const GO: &str = "package p\n\ntype S struct {\n\tX int\n}\n";
+    let rows: &[IdentityRow] = &[
+        (L::Python, PY, "__init__", "C.__init__", K::Method, K::Constructor),
+        (L::Python, PY, "value", "C.__init__.value", K::Parameter, K::Parameter),
+        (L::Python, PY, "C", "C", K::Class, K::Class),
+        (L::Cpp, CPP, "W", "W::W", K::Method, K::Constructor),
+        (L::Cpp, CPP, "x", "W::W::x", K::Parameter, K::Parameter),
+        (L::Php, PHP_CLASS, "__construct", "P::__construct", K::Method, K::Constructor),
+        (L::Php, PHP_NAMESPACE, "inside", "App\\inside", K::Function, K::Function),
+        (L::TypeScript, TS, "inside", "Space.inside", K::Function, K::Function),
+        (L::Scala, SCALA, "width", "K.width", K::Variable, K::Field),
+        (L::C, C, "RED", "E.RED", K::Variable, K::EnumVariant),
+        (L::Go, GO, "S", "p.S", K::Type, K::Type),
+    ];
+    let dir = TempDir::new().expect("temp");
+    for (ordinal, &(language, source, name, qualified_name, before, now)) in rows.iter().enumerate() {
+        let path = dir.path().join(format!("identity_{ordinal}.{}", language.extensions()[0]));
+        std::fs::write(&path, source).expect("write source");
+        let index = TreeFile::new(&path).expect("parse").symbol_index_v2().expect("index");
+        let label = format!("{language:?} `{qualified_name}`");
+        // The name is unchanged: exactly one `name` is called `qualified_name`.
+        let matching: Vec<_> = index
+            .symbols
+            .iter()
+            .filter(|record| record.identity.name == name && in_file_name(record) == qualified_name)
+            .collect();
+        assert_eq!(matching.len(), 1, "{label} in {source:?}");
+        let record = matching[0];
+        assert_eq!(record.kind, now, "{label}");
+        let id_as = |kind: SymbolKindV2| {
+            symbol_id_from_stable_key(&stable_symbol_key(language, &record.source.file_path, kind, qualified_name, 0))
+        };
+        // For an unrelated record `before == now`: the revision-13 ID.
+        assert_eq!(record.id, id_as(now), "{label}: the ID digests the kind and name");
+        if before != now {
+            assert_ne!(record.id, id_as(before), "{label}: a reclassified record gets a new ID");
+        }
+    }
 }
 
 trait UnionForTest {

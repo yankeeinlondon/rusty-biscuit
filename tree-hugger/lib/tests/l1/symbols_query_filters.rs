@@ -20,6 +20,7 @@ use tree_hugger::{
 };
 
 use crate::symbols_fixtures::{display_name, multi_fixtures};
+use crate::symbols_kinds::deferred_kind_sources;
 
 const FUNCTION_KINDS: [SymbolKindV2; 3] = [
     SymbolKindV2::Function,
@@ -234,6 +235,86 @@ fn constructor_kind_is_settled_before_kind_selection() {
         );
         assert_eq!(kinds_of(&methods), [(String::from("render"), SymbolKindV2::Method)], "{capabilities:?}");
     }
+}
+
+/// The kinds the deferred declarations report.
+const DEFERRED_KINDS: [SymbolKindV2; 5] = [
+    SymbolKindV2::Constructor,
+    SymbolKindV2::EnumVariant,
+    SymbolKindV2::TypeAlias,
+    SymbolKindV2::Field,
+    SymbolKindV2::Namespace,
+];
+
+/// For every source of the deferred kind matrix, a wide result narrows to
+/// each deferred kind (alone, re-rooted, and with scope and name predicates)
+/// exactly as an uncached run of that query.
+#[test]
+fn a_wide_result_narrows_to_each_deferred_kind() {
+    let dir = TempDir::new().expect("tempdir");
+    let mut compared = [0usize; DEFERRED_KINDS.len()];
+    for (ordinal, (language, source)) in deferred_kind_sources().into_iter().enumerate() {
+        let path = write(dir.path(), &format!("src/deferred_{ordinal}.{}", language.extensions()[0]), source);
+        let label = format!("{language:?} {source:?}");
+        let wide = query(&path, &SymbolQuery::new().capabilities([Capability::Containment]));
+        for (kind_idx, kind) in DEFERRED_KINDS.into_iter().enumerate() {
+            let queries = [
+                SymbolQuery::new().kinds([kind]),
+                SymbolQuery::new().kinds([kind]).scan_root(dir.path()),
+                SymbolQuery::new()
+                    .kinds([kind])
+                    .scopes([SymbolScope::Item, SymbolScope::Member])
+                    .exclude_name(NamePattern::new("no_declaration_has_this_name"))
+                    .capabilities([Capability::Containment]),
+            ];
+            for narrow in queries {
+                let narrowed = wide
+                    .clone()
+                    .narrowed(&narrow)
+                    .unwrap_or_else(|| panic!("{label}: {narrow:?} is covered"));
+                let uncached = query(&path, &narrow);
+                assert_eq!(
+                    serde_json::to_value(&narrowed.index).expect("serialize"),
+                    serde_json::to_value(&uncached.index).expect("serialize"),
+                    "{label}: {narrow:?}"
+                );
+                assert_eq!(narrowed.name_prefix(), uncached.name_prefix(), "{label}: {narrow:?}");
+                compared[kind_idx] += uncached.index.symbols.len();
+            }
+        }
+    }
+    for (kind, count) in DEFERRED_KINDS.iter().zip(compared) {
+        assert!(count > 0, "{kind:?}: no record was compared");
+    }
+}
+
+/// A captured namespace is named and selected like any other declaration:
+/// a PHP namespace and its members are namespace-rooted (no file prefix,
+/// `App` never doubled), a TypeScript one is file-qualified, and `--in`
+/// selects a namespace's members by its name.
+#[test]
+fn captured_namespaces_keep_their_members_names_under_a_scan_root() {
+    let dir = TempDir::new().expect("tempdir");
+    let php = write(dir.path(), "repo/src/app.php", "<?php\nnamespace App;\n\nfunction inside() {}\n");
+    let braced = write(dir.path(), "repo/src/braced.php", "<?php\nnamespace App\\Braced {\n    function inside() {}\n}\n");
+    let ts = write(dir.path(), "repo/src/space.ts", "namespace Space {\n  export function inside() {}\n}\n");
+    let root = dir.path().join("repo");
+    let rooted = || SymbolQuery::new().scan_root(&root);
+
+    assert_eq!(names(&query(&php, &rooted())), set(&["App", "App\\inside"]));
+    assert_eq!(names(&query(&braced, &rooted())), set(&["App\\Braced", "App\\Braced\\inside"]));
+    assert_eq!(names(&query(&ts, &rooted())), set(&["src/space.ts#Space", "src/space.ts#Space.inside"]));
+
+    let namespaces = rooted().kinds([SymbolKindV2::Namespace]);
+    assert_eq!(names(&query(&php, &namespaces)), set(&["App"]));
+    assert_eq!(names(&query(&ts, &namespaces)), set(&["src/space.ts#Space"]));
+
+    // Containment links a braced namespace's members; a semicolon namespace
+    // contains nothing, and neither is its own container.
+    let members_of = |path: &Path, pattern: &str| names(&query(path, &rooted().in_container(NamePattern::new(pattern))));
+    assert_eq!(members_of(&ts, "Space"), set(&["src/space.ts#Space.inside"]));
+    assert_eq!(members_of(&braced, "App\\Braced"), set(&["App\\Braced\\inside"]));
+    assert_eq!(members_of(&php, "App"), set(&[]));
 }
 
 /// A wide result narrows to a filtered, re-rooted query exactly as an

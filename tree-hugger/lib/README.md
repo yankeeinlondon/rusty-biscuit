@@ -64,16 +64,16 @@ The v1 `SymbolKind` and the schema `SymbolKindV2` have the same variants:
 pub enum SymbolKind {
     Function,    // Free functions
     Method,      // Functions declared directly in a type, trait, impl, protocol or extension body
-    Constructor, // TypeScript/JavaScript `constructor`
+    Constructor, // Explicit constructors and initializers (`constructor`, `__init__`, `init`, …)
     Type,        // Structs, unions, records, Go types, Swift types
     TypeAlias,   // `type`/`typedef`/`using` aliases
     Class,       // Class definitions
     Interface,   // Interfaces, protocols
     Enum,        // Enumeration types
-    EnumVariant, // Rust variants, Swift `case`
+    EnumVariant, // Enum members, variants and cases
     Trait,       // Traits (Rust, Scala, PHP)
     Module,      // Rust `mod`, Perl `package`, Scala `object`
-    Namespace,   // Go/Java `package`, C#/C++ `namespace`
+    Namespace,   // Go/Java `package`, C#/C++/TypeScript/PHP `namespace`
     Variable,    // Variables, locals, Rust `static` items
     Parameter,   // Function parameters
     Field,       // Struct/class fields
@@ -96,10 +96,10 @@ pub enum SymbolKind {
 | C# | struct, record | class | interface | enum | - | - |
 | C | struct, union | - | - | enum | - | `typedef` |
 | C++ | struct, union | class | - | enum | - | `typedef`, `using` |
-| Swift | struct, class, enum* | - | protocol | - | - | - |
-| Scala | - | class | - | enum | trait | - |
+| Swift | struct, class, enum* | - | protocol | - | - | `typealias` |
+| Scala | - | class | - | enum | trait | `type` |
 | PHP | - | class | interface | enum | trait | - |
-| Go | type | - | - | - | - | - |
+| Go | type | - | - | - | - | `type A = B` |
 | Python | - | class | - | - | - | - |
 
 \* Swift structs, classes and enums are all captured as Type; see Known Limitations.
@@ -424,8 +424,8 @@ Swift's tree-sitter grammar uses a single `class_declaration` node for struct, c
 
 Go uses a single `type_declaration` for both struct and interface types. The library captures all as `SymbolKind::Type` since Go's type system treats them uniformly.
 
-`type A = B` aliases are not reported, and struct fields are not reported as
-standalone symbols.
+Named struct fields are Field symbols; embedded fields, the fields of an
+anonymous struct type and interface method elements are not reported.
 
 ### Unreported Instance Attributes
 

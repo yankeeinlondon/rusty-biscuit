@@ -992,10 +992,11 @@ pub(crate) fn extract_csharp_return_type(node: Node<'_>, source: &str) -> Option
 // Swift extraction functions
 // =============================================================================
 
-/// Extracts Swift parameters from a function_declaration.
+/// Extracts Swift parameters from a `function_declaration`,
+/// `init_declaration` or `protocol_function_declaration`.
 ///
 /// Swift has a unique AST structure where parameters are direct children
-/// of function_declaration rather than in a separate parameters node:
+/// of the declaration rather than in a separate parameters node:
 /// ```text
 /// function_declaration
 ///   func

@@ -137,8 +137,10 @@ fn classify_symbol_kind(
     }
 }
 
-/// Whether a function or method declaration is its type's constructor: the
-/// one place a captured function-like declaration becomes `Constructor`.
+/// Whether a declaration captured as a function or method is its type's
+/// constructor (JavaScript/TypeScript, Python, PHP, C++). Java, C# and Swift
+/// constructors are captured as constructors by their queries and never
+/// reach this.
 ///
 /// Membership is established first, from the declaration's place in a type
 /// body ([`is_direct_member`], except where an arm says otherwise); only then

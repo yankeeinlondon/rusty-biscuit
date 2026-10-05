@@ -81,7 +81,9 @@ The capture is only the starting kind. `refine_symbol_kind`
 (`file/extract/classify.rs`) decides the final kind from the declaration node:
 node-kind rules (TS `constructor` → Constructor, class fields → Property,
 `type_alias_declaration` / Rust `type_item` → TypeAlias, Rust `enum_variant` →
-EnumVariant, `mod_item` → Module, `static_item` → Variable) outrank the capture;
+EnumVariant, `mod_item` → Module, `static_item` → Variable; Python `__init__`
+and PHP `__construct` methods and C++ in-class constructors → Constructor;
+Scala type-body `val`/`var` → Field) outrank the capture;
 a function declared directly in a class/struct/enum/trait/interface/protocol/
 object/`impl`/extension body becomes Method; a `var` capture becomes Parameter,
 Field or Constant only from the path between the name and its own declaration

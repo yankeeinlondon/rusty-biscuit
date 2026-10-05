@@ -6,7 +6,7 @@
 //! (Perl `scope`, Swift `value_binding_pattern`), a marker node that stands
 //! for the keyword (PHP `var_modifier`), or a
 //! direct child of the statement that wraps the declaration (Go `const`/`var`
-//! specs, Lua and shell `local`). Only anonymous tokens are read, so a comment
+//! specs, Scala enum cases, Lua and shell `local`). Only anonymous tokens are read, so a comment
 //! that names a keyword can never supply one, and the token's kind is the
 //! keyword, whatever its spelling in the source (PHP keywords are
 //! case-insensitive).

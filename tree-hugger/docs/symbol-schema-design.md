@@ -225,6 +225,21 @@ pub struct ParameterSymbolData {
 }
 ```
 
+The payload follows the kind. Function, Method and Constructor carry
+`Function`; Enum carries `Enum` (with its variant list); TypeAlias carries
+`TypeAlias`; Field carries `Field`. An EnumVariant and a Namespace carry the
+`Unknown` payload, which only means "no payload": it is not the Unknown
+kind. A variant's value and fields are entries of its enum's
+`EnumData.variants`, never a payload of the variant record:
+
+```json
+{ "kind": "EnumVariant", "identity": { "name": "Off", "container_name": "Mode" },
+  "kind_data": { "kind_data_type": "Unknown" } }
+{ "kind": "Enum", "identity": { "name": "Mode" },
+  "kind_data": { "kind_data_type": "Enum",
+                 "data": { "variants": [ { "name": "On" }, { "name": "Off", "discriminant": "2" } ] } } }
+```
+
 ## Facets
 
 ### Identity Facet
@@ -373,7 +388,8 @@ reader needs to recognize the symbol. It is always a contiguous part of
 - each type of a grouped Go `type ( … )` block is declared by its own spec,
   so `Second` in `type ( First struct{ a int }; Second int )` has the
   declaration text, header and span `Second int`; the `type` keyword is
-  still its `keyword`
+  still its `keyword`. A grouped alias is cut at its `=` like every alias:
+  `grouped = map[string]int` has the header `grouped`
 
 The three fields have distinct contracts: `declaration_text` is evidence,
 `signature_text` is display, and `keyword` comes from the syntax tree rather
@@ -736,7 +752,12 @@ pub struct FunctionData {
 `return_info.type_text` and each parameter's `type_text` are the type text
 the source declares, never an inferred one: a Rust function without `->` and
 a Go function without a result have no return type text (before revision 9,
-Rust reported `()` and a Go method its own parameter list).
+Rust reported `()` and a Go method its own parameter list). A constructor
+has none either: its type is never written in as a return type.
+
+A parameter's `default_value` is the default as written. Swift's grammar
+places `= 2` beside the parameter rather than inside it, and it is still
+read: `init(x: Int, y: Int = 2)` gives `y` the default `2`.
 
 ### Type/Class/Interface/Trait Data
 
@@ -770,6 +791,17 @@ pub struct TypeData {
 }
 ```
 
+`TypeData.fields` lists each member the type declares in its own body once,
+in source order: a reader's entry is paired with the standalone Field,
+Property or Constant record of the same name, keeps the type written in the
+source, and takes the record's access and `static` flag (and its doc
+comment when the reader found none); a record no reader listed is added without a type. A Go struct field or Scala
+body `val` is therefore both a Field record and a typed list entry. The
+standalone Field record's own `FieldData` is thinner: it has no `type_text`,
+and `is_mutable`/`is_readonly` are always `true`/`false`, so read a field's
+type from its owner's list. `constructors` is not filled; a type's
+constructors are the Constructor records whose container is the type.
+
 ### Enum and Type Alias Data
 
 ```rust
@@ -795,6 +827,24 @@ pub struct TypeAliasData {
     pub is_recursive: bool,
 }
 ```
+
+`EnumData.variants` and the enum's standalone EnumVariant records name the
+same variants, once each, in source order: a reader's entry is paired with
+the record of the same name (the k-th entry with the k-th record), a record
+no reader listed is added at its position, and the entry takes the record's
+doc comment and value only when the reader had none. `discriminant` is the
+member's `value` as written (Rust, C, C++, C#, TypeScript, PHP: `Off = 2`
+gives `2`). Arguments are not a value: Java `MERCURY(1.0)` and Scala
+`case Value(x: Int)` list `MERCURY` and `Value` alone, and Scala's `x` is a
+Parameter record (`Color.Value.x`). Only an Enum has a list; a Swift `enum`
+is a Type, whose `TypeData` holds no variants.
+
+`aliased_type_text` is the alias's right-hand side as written, generics
+included (Go `type GenAlias[T any] = []T` gives `[]T`, Swift
+`typealias G<T> = Array<T>` gives `Array<T>`). It is never resolved, and the
+target's fields are never copied onto the alias. An abstract Scala
+`type Element` and a Swift `associatedtype` declare no alias and have no
+record.
 
 ### Module and Variable Data
 
@@ -984,8 +1034,11 @@ binding. A selected method therefore keeps its unselected class as
 `relations.parent`, and its references resolve exactly as in a full query.
 When a type kind is selected, its Field, Property and Constant members keep
 their metadata too, because the type's field list copies their access and
-`static` flags. A narrow query's records equal the same records of a full
-query with the same capabilities.
+`static` flags; when Enum is selected, its EnumVariant members keep theirs,
+because the variant list is completed from them. A narrow query's records
+equal the same records of a full query with the same capabilities, for every
+kind: `hug functions --kind constructor` returns exactly the Constructor
+records of a complete index.
 
 ### Work done once per file
 

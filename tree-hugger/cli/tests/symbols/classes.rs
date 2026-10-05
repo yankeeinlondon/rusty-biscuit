@@ -2,8 +2,11 @@
 //! instance sections, its JSON `members`, and the field metadata it keeps
 //! without selecting Field, Property or Constant records.
 
+use std::collections::BTreeSet;
+
 use serde_json::Value;
 
+use crate::filters::DEFERRED_FILES;
 use crate::golden::MULTI_FIXTURES;
 use crate::{JAVA_FIXTURE, Scratch, json_of};
 
@@ -123,6 +126,105 @@ fn container_fields_keep_access_and_static_without_member_records() {
     }
     assert!(compared >= 8, "too few fields compared ({compared})");
     assert!(with_access >= 4, "too few fields with access or static ({with_access})");
+}
+
+/// `(name, kind)` of each member `hug --json classes` lists under the
+/// container called `container`.
+fn members_of(report: &Value, container: &str) -> Vec<(String, String)> {
+    for file in report["files"].as_array().expect("files") {
+        for record in file["symbols"].as_array().expect("symbols") {
+            if record["identity"]["name"] == container {
+                return file["members"][record["id"].as_str().expect("id")]
+                    .as_array()
+                    .expect("members")
+                    .iter()
+                    .map(|member| {
+                        (
+                            member["identity"]["name"].as_str().expect("name").to_string(),
+                            member["kind"].as_str().expect("kind").to_string(),
+                        )
+                    })
+                    .collect();
+            }
+        }
+    }
+    panic!("no `{container}` container in {report}");
+}
+
+fn pairs(expected: &[(&str, &str)]) -> Vec<(String, String)> {
+    expected.iter().map(|(name, kind)| (name.to_string(), kind.to_string())).collect()
+}
+
+/// Constructors are listed with methods, in source order, in every
+/// language whose constructors were deferred, and in the terminal report.
+#[test]
+fn class_summaries_list_constructors_with_methods() {
+    let scratch = Scratch::new(DEFERRED_FILES);
+    let report = json_of(&scratch.stdout(&["--json", "classes"]));
+    assert_eq!(members_of(&report, "Counter"), pairs(&[("Counter", "Constructor"), ("tick", "Method")]));
+    assert_eq!(members_of(&report, "Service"), pairs(&[("__construct", "Constructor")]));
+    assert_eq!(members_of(&report, "C"), pairs(&[("__init__", "Constructor")]));
+    assert_eq!(members_of(&report, "S"), pairs(&[("init", "Constructor")]));
+    assert_eq!(members_of(&report, "Box"), pairs(&[("area", "Method")]), "fields are not members");
+
+    let terminal = scratch.stdout(&["--plain", "classes", "Shapes.java"]);
+    assert!(terminal.contains("Instance Methods (2)"), "{terminal}");
+    assert!(terminal.contains("Counter(start: int)"), "{terminal}");
+}
+
+/// The field list of a Go struct and a Scala class names the same fields as
+/// the standalone Field records that container owns; the list keeps each field's written type and the terminal
+/// shows it.
+#[test]
+fn go_and_scala_field_lists_agree_with_field_records() {
+    let scratch = Scratch::new(DEFERRED_FILES);
+    let classes = json_of(&scratch.stdout(&["--json", "classes", "shapes.go", "model.scala"]));
+    let field_records = json_of(&scratch.stdout(&["--json", "symbols", "--kind", "field", "shapes.go", "model.scala"]));
+    let records: Vec<&Value> = field_records["files"]
+        .as_array()
+        .expect("files")
+        .iter()
+        .flat_map(|file| file["symbols"].as_array().expect("symbols"))
+        .collect();
+    let mut compared = Vec::new();
+    for file in classes["files"].as_array().expect("files") {
+        for container in file["symbols"].as_array().expect("symbols") {
+            let name = container["identity"]["name"].as_str().expect("name").to_string();
+            let listed: Vec<(String, Value)> = container["kind_data"]["data"]["fields"]
+                .as_array()
+                .expect("a field list")
+                .iter()
+                .map(|field| (field["name"].as_str().expect("field name").to_string(), field["type_text"].clone()))
+                .collect();
+            // Compared as sets: `X, Y int` gives both records one
+            // declaration span, so `symbols` orders them by the record-ID
+            // tie-breaker, while the field list keeps source order.
+            let standalone: BTreeSet<String> = records
+                .iter()
+                .filter(|record| record["identity"]["container_name"] == container["identity"]["name"])
+                .map(|record| record["identity"]["name"].as_str().expect("name").to_string())
+                .collect();
+            let listed_names: BTreeSet<String> = listed.iter().map(|(field, _)| field.clone()).collect();
+            assert_eq!(listed_names, standalone, "`{name}`: field list and Field records");
+            compared.push((name, listed));
+        }
+    }
+    let typed = |pairs: &[(&str, Option<&str>)]| -> Vec<(String, Value)> {
+        pairs.iter().map(|(name, ty)| (name.to_string(), ty.map_or(Value::Null, Value::from))).collect()
+    };
+    compared.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(
+        compared,
+        [
+            ("Box".to_string(), typed(&[("width", Some("Int")), ("height", None)])),
+            ("Point".to_string(), typed(&[("X", Some("int")), ("Y", Some("int")), ("label", Some("string"))])),
+        ]
+    );
+
+    let terminal = scratch.stdout(&["--plain", "classes", "shapes.go", "model.scala"]);
+    for line in ["- public width: Int", "- public height", "- public X int", "- public Y int", "- package label string"] {
+        assert!(terminal.contains(line), "`{line}` in:\n{terminal}");
+    }
 }
 
 /// Two modules each declare `Boxed` with its own `impl`: every class
