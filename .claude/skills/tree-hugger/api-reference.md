@@ -7,7 +7,7 @@
 The primary API for file-level operations.
 
 ```rust
-use tree_hugger_lib::TreeFile;
+use tree_hugger::TreeFile;
 
 // Create from file path (auto-detects language)
 let file = TreeFile::new("src/lib.rs")?;
@@ -45,6 +45,77 @@ fn referenced_symbols(&self) -> Result<Vec<ReferencedSymbol>, TreeHuggerError>
 fn reexported_symbols(&self) -> Result<Vec<ImportSymbol>, TreeHuggerError>
 ```
 
+#### Staged Analysis (schema v2 records)
+
+```rust
+// Parse-pass records only
+fn symbol_records(&self) -> Result<Vec<SymbolRecord>, TreeHuggerError>
+
+// Complete index: parse, bind, semantic, docs AND diagnostics
+fn symbol_index_v2(&self) -> Result<FileSymbolIndex, TreeHuggerError>
+
+// Requested passes after their prerequisites (parse -> bind -> semantic;
+// parse -> docs; parse -> diagnostics), each once; diagnostics only when
+// AnalysisPass::Diagnostics is requested
+fn symbol_index_with_passes(&self, passes: &[AnalysisPass]) -> Result<FileSymbolIndex, TreeHuggerError>
+
+// Selected kinds and capabilities through the same planner
+fn query(&self, query: &SymbolQuery) -> Result<SymbolQueryResult, TreeHuggerError>
+```
+
+`completed_passes` lists only passes that ran: no `Diagnostics` entry means
+diagnostics were not computed, not that the file is clean.
+
+### SourceFile
+
+Bytes read once, hashed, parsed only on demand; `hash()` always describes the
+text `parse()` parses (the file is never reread). `TreeFile::new` /
+`with_language` are wrappers over it and keep their error contract (`Io` for
+unreadable or non-UTF-8 files, `UnsupportedLanguage`, `ParseFailed`).
+
+```rust
+let source = SourceFile::read("src/lib.rs")?;          // or read_with_language(path, Some(lang))
+source.hash(); source.language(); source.source();
+let tree_file: TreeFile = source.parse()?;              // consumes the SourceFile
+let result = SourceFile::read("src/lib.rs")?.query(&query)?;
+```
+
+### SymbolQuery and Capability
+
+```rust
+let query = SymbolQuery::new()                          // every kind, Declarations only
+    .kinds([SymbolKindV2::Function, SymbolKindV2::Method])
+    .capabilities([Capability::Containment]);
+SymbolQuery::complete_index();                          // what symbol_index_v2() runs
+SymbolQuery::for_passes(&[AnalysisPass::Bind]);         // what symbol_index_with_passes runs
+
+pub struct SymbolQueryResult {
+    pub index: FileSymbolIndex,                         // selected records only
+    pub completed_capabilities: Vec<Capability>,        // canonical order
+}
+```
+
+| Capability | Implies | Work |
+|---|---|---|
+| `Declarations` | (always on) | parse pass: records, cheap metadata, imports, exports |
+| `Containment` | Declarations | parent/container/members only, no reference query |
+| `References` | Containment | full bind pass |
+| `Semantics` | References | semantic pass |
+| `StructuredDocs` | Declarations | docs pass |
+| `Diagnostics` | Declarations | diagnostics pass |
+
+Unselected kinds are still extracted light (identity, spans, container) and
+bound, then dropped; their metadata is skipped. Selecting a type kind keeps
+Field/Property/Constant metadata (`align_field_metadata` needs it). A narrow
+query's records equal the same records of a full query with the same
+capabilities (`symbols_query::narrow_queries_equal_the_filtered_records_of_a_full_query`).
+
+### Work Counters
+
+`work_counters()` returns process-wide atomic counts (`diagnostics_runs`,
+`parser_constructions`, `definition_captures`); diff two snapshots with
+`WorkCounters::since`. Tests rely on nextest's process-per-test isolation.
+
 #### Diagnostics
 
 ```rust
@@ -75,7 +146,7 @@ fn dead_code(&self) -> Vec<CodeBlock>
 Package-level operations across multiple files.
 
 ```rust
-use tree_hugger_lib::{TreePackage, TreePackageConfig};
+use tree_hugger::{TreePackage, TreePackageConfig};
 
 // Create with defaults (auto-detect git root)
 let package = TreePackage::new(".")?;
@@ -333,7 +404,7 @@ pub enum DiagnosticSeverity {
 ### Builtins
 
 ```rust
-use tree_hugger_lib::{is_builtin, ProgrammingLanguage};
+use tree_hugger::{is_builtin, ProgrammingLanguage};
 
 // Check if identifier is a language builtin
 is_builtin(ProgrammingLanguage::Rust, "Option")      // true
@@ -344,7 +415,7 @@ is_builtin(ProgrammingLanguage::JavaScript, "Array") // true
 ### Dead Code Detection
 
 ```rust
-use tree_hugger_lib::{is_terminal_statement, find_dead_code_after};
+use tree_hugger::{is_terminal_statement, find_dead_code_after};
 
 // Check if a statement is terminal (never returns)
 is_terminal_statement(node, ProgrammingLanguage::Rust, source)
@@ -356,7 +427,7 @@ find_dead_code_after(terminal_node, ProgrammingLanguage::Rust)
 ### Ignore Directives
 
 ```rust
-use tree_hugger_lib::IgnoreDirectives;
+use tree_hugger::IgnoreDirectives;
 
 // Tree-sitter-based parsing (preferred)
 let directives = IgnoreDirectives::parse_with_tree(&source, &tree, language);

@@ -46,7 +46,9 @@ file.source();              // Source text of the parsed file
 file.comment_ranges()?;     // Byte ranges of comment nodes
 file.symbols()?;            // All symbols
 file.symbol_records()?;     // v2 parse records
-file.symbol_index_v2()?;    // v2 parse->bind->semantic->docs pipeline output
+file.symbol_index_v2()?;    // complete index: every pass, diagnostics included
+file.query(&SymbolQuery::new().kinds([..]).capabilities([..]))?; // selective
+SourceFile::read(path)?.query(&query)?; // read+hash once, parse on demand
 file.imported_symbols()?;   // Imports
 file.exported_symbols()?;   // Exports
 file.local_symbols()?;      // Local definitions
@@ -72,6 +74,7 @@ extracted records, including repairs on an unreleased branch. See [Query System]
 
 Access lives on `SymbolInfo::visibility` (`None` = Unknown), not on the signature; `is_static` (member without an instance) and `is_static_storage` (storage/linkage `static`) are separate flags. The v1↔v2 adapter round-trips all of them plus `container_kind`; see [API Reference](./api-reference.md#symbolinfo). It does not round-trip `TypeMetadata::type_parameters` (no `TypeData` slot) or a `TypeAlias`'s field metadata (C `typedef struct {…} Alias`; `TypeAliasData` holds only the aliased type); `symbols_adapter::every_fixture_symbol_round_trips_through_the_record` pins both.
 
+- **Selective analysis** (`analysis/mod.rs`, `file/query.rs`, `file/source_file.rs`, `file/tree_file/definitions.rs`): one planner serves `symbol_index_with_passes`, `symbol_index_v2` (= `SymbolQuery::complete_index()`) and `query`; passes run once after prerequisites (parse → bind → semantic; parse → docs; parse → diagnostics) and `completed_passes` lists only what ran. `Capability::Containment` links parents/members without the reference query. `TreeFile::definitions(&MetadataSelection)` runs the locals query **once** per analysis; records, exports, references and semantic lint all take that result (`*_from` methods) — never call `symbols()`/`exported_symbols()` inside the pipeline. De-duplication happens before metadata: the winner supplies each field, later equal-priority captures only fill what it lacks (while no signature is known, a later capture's signature, visibility and `static` flags replace the current ones together). Unselected kinds stay light (name, kind, span, container) and are bound, then dropped; selecting a type kind also selects Field/Property/Constant. Binding is by name through `NameIndex` (first record of the name); `RefSet` dedupes resolved refs by ID and unresolved ones by name + qualified name. `semantics.is_recursive` is always `Unknown` when the semantic pass runs. `work_counters()` (atomics) proves skipped work in tests; `symbols_query` is the L1 file to extend.
 - **Readers get a `DeclarationContext`** (`declaration.rs`): language, source, final kind, `is_local`, the captured `name` node (one declaration can name several things: `int a, *b;`, Swift `case east, west`), the file `root` (same-file lookups: Rust trait level, earlier C/C++ `static` prototype, Scala `package` segments) and `is_ecma_module` (computed once per JS/TS file by `is_ecma_module_file`). Add a field here rather than re-scanning the file per symbol.
 - **The C/C++ earlier-`static` scan matches only the same function** (`visibility/c.rs`). `declared_functions` (`c_declarators.rs`) takes the `function_declarator` nearest the name with only parentheses between, so a returned function-pointer, function-reference or array-pointer type is never the function; an unqualified C++ declaration has exactly its enclosing namespace; a qualified one resolves its first qualifier against the file's `namespace` blocks, nearest enclosing first; a function template (under `template<…>` or abbreviated with an `auto` parameter) also compares its header, leading and trailing return type, and the `requires` clause after the header and after the parameters (`TemplateSignature`; never `noexcept`). Whatever cannot be established is a miss, never a match. `symbols_visibility::earlier_static_linkage_matrix_holds_for_c_and_cpp` is the row table to extend.
 - **C/C++ signatures read the named function's own declarator** (`signatures.rs`). `extract_signature` gets the captured name; `declared_function_named` (`c_declarators.rs`, shared with linkage) picks that function's `parameter_list`, so a pointer/reference/array return keeps its parameters and a returned callback's never replace them. Each parameter (`parameter_declaration`, `optional_parameter_declaration` with its default, `variadic_parameter_declaration` pack, C `variadic_parameter` and the C++ `...` token) is named by `declarator_name`, which follows a function declarator only through its `declarator` field. `symbols_signatures::c_and_cpp_signatures_read_the_named_functions_own_parameters` is the row table to extend.
@@ -159,10 +162,12 @@ When modifying queries or symbol extraction:
    `TMPDIR`/`TMP`/`TEMP`, which is where the persistent cache lives. `hug`
    will not scan files under the repo's own `fixtures/` directories, so CLI
    checks always need that copy. The cache-upgrade tests hard-code the
-   schema-2 literal key and the schema-3 key formula for each earlier
-   extractor revision (`revision_key`); keep them unchanged when the current
-   key changes, and add a `StaleRevision` case for the revision a bump
-   retires. `cache_robustness` pins which malformed
+   schema-2 literal key and the analyzer key formula for each earlier
+   extractor revision (`revision_key`, with that revision's record
+   schema: `3.0` through revision 4, `4.0` from revision 5); keep them
+   unchanged when the current key changes, and add a `StaleRevision` case for
+   the revision a bump retires (revision 6 is current; the next bump adds
+   revision 6's case). `cache_robustness` pins which malformed
    shapes of twelve load-bearing snapshot fields are served or recomputed (table in
    `docs/cache-design.md`); a schema change that adds a default or makes a
    field optional must update that row
