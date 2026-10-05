@@ -82,7 +82,9 @@ flowchart TD
   the library total), then its render stages, and builds a `Scope::Command`
   document ending after the listing's write; `cli/src/perf.rs` only renders
   (`human_report`, `json_record`). Stage ids are the contract; labels are
-  display only and no test reads them.
+  display only and no test reads them. biscuit-terminal's `MetricsTree`
+  always prints `100%` on its root row, whatever `MetricShare` it is given, so
+  the worker section's heading shows `100%` although its rows show none.
 - Pipeline shape: `read_worktrees`, `origin_lookup`, `prepare_local`, then a
   concurrent region, `remote_and_local` **only when a wait ran** (else
   `local_reads`), holding `refresh_worker` (`worker_launch`, `worker_wait`;

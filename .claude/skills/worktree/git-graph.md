@@ -6,11 +6,18 @@ this page holds the implementation facts and traps.
 
 ## Division of labor
 
-- `commands/git_graph.rs` only **gathers** `GraphFacts` (full SHAs, fork points,
-  merge commits, refs, `incomplete`) and builds a biscuit-terminal `GitGraph`.
-- `GitGraph` owns lanes, tags, merges, trimming, and sizing.
-- It filters PRs by source repository first, because `GitGraph` matches by
-  branch name alone.
+- `worktree::graph` (library) only **gathers** `GraphFacts` (full SHAs, fork
+  points, merge commits, refs, `incomplete`) in library-owned types
+  (`GraphLine`, `LaneEntry`, `LaneMerge`). The library must not depend on
+  biscuit-terminal, so never reuse the terminal component's types there.
+- `cli/src/commands/git_graph.rs::to_git_graph` maps those facts onto a
+  biscuit-terminal `GitGraph`; `GitGraph` owns lanes, tags, merges, trimming,
+  and sizing.
+- `to_git_graph` filters PRs by source repository first, because `GitGraph`
+  matches by branch name alone.
+- Fact tests live in `lib/src/graph/tests.rs`; tests that need the resulting
+  `GitGraph` (merges in the Mermaid text, layout) stay in
+  `cli/src/commands/git_graph/tests.rs`.
 - There is no minimum terminal width for the graph.
 
 ## Gathering (`lib/src/graph.rs`, `lib/src/graph/topology.rs`)

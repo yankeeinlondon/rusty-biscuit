@@ -180,22 +180,24 @@ Measurements: `worktree/docs/performance-testing.md`.
 - Run `wt list --perf=json` and read it with `perf_support::perf_timings`
   (the final nonempty stderr line, LF or CRLF, prefix `WT_PERF_JSON `; never
   earlier text), then `stage_at(&timings, &[Stage::…])` or `local_gather`.
-  Never read the human report: labels are display only. The old scrapers
-  (`perf_rows`, `stage_from_perf`, `list_gather_from_perf`) have no
-  consumers left and are due for deletion.
-- An L1 test that bounds how long a held worker keeps `wt list` waiting reads
-  `[RemoteAndLocal, RefreshWorker]`, not the whole command's elapsed time. The local
-  gather overlaps the wait and may outlast it, so a whole-command bound fails
-  under suite load without a wait regression (`list_prs.rs` held-request
-  tests). Whether the command returned while the worker is still held, that is,
-  never joined it, is proven by `.output()` returning, not by a duration.
-- `perf_support`'s own unit tests sit under a `perf_`-prefixed module, so they
-  run only in `just test-perf`; the L1 parser and report-shape tests are in
-  `cli/tests/perf_flag.rs`.
+  Never read the human report: labels are display only.
+- **Functional tests never pass `--perf` or read a stage.** `list_prs.rs`'s
+  `list_with` runs plain `wt list`. A held worker's budget is proven twice
+  elsewhere: with a scripted clock in `lib/src/list/wait/tests.rs`
+  (`the_budget_ends_the_wait_…`), and by the real `[RemoteAndLocal,
+  RefreshWorker]` bound in `perf_pr_request.rs`. Do not add a whole-command
+  bound: the local gather overlaps the wait and outlasts it under suite load.
+  That the command returned without joining a held worker is proven by
+  `.output()` returning, not by a duration.
+- The reader's own tests (final line only, LF/CRLF, decoy records, a commit
+  subject that resembles the prefix, a pty capture) are L1 in
+  `cli/tests/perf_flag.rs`. Never put a `#[cfg(test)]` module in
+  `perf_support`: it compiles into every test binary that declares the
+  module, and its `perf_` path segment strands it in `just test-perf`.
 
 - `perf_pr_request::perf_list_meets_sla_with_a_stale_answer_and_a_failing_refresh`
   is the stale timing gate: reseeds a stale store per sample and asserts every
-  sample's foreground PR reads (`pr gather` + `pr reread`) < 300 ms (the 1 s full-command bound alone would hide a
+  sample's foreground PR reads (`origin_lookup` + `pr_cache_read`) < 300 ms (the 1 s full-command bound alone would hide a
   reintroduced wait).
 - `perf_a_held_live_head_check_costs_the_listing_only_its_wait`,
   `perf_a_held_fetch_costs_the_listing_only_its_wait`, and
