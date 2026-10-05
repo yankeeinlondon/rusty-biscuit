@@ -8,7 +8,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use super::*;
-use crate::remote_head::{StoreState, read_store};
+use crate::remote_head::{CredentialEvidence, StoreState, read_store};
 use crate::remove::test_support::TestRepo;
 
 const ID: &str = "0123456789abcdef0123456789abcdef";
@@ -40,7 +40,8 @@ type Hook<'a> = Box<dyn Fn() + 'a>;
 struct Api<'a> {
     answers: RefCell<VecDeque<Result<String, PrUnavailable>>>,
     hooks: RefCell<VecDeque<Hook<'a>>>,
-    key: Option<String>,
+    /// What every successful request reports it was sent with.
+    credentials: CredentialEvidence,
     takes: Duration,
     clock: &'a Clock,
     calls: Cell<usize>,
@@ -51,7 +52,7 @@ impl<'a> Api<'a> {
         Self {
             answers: RefCell::new(answers.into_iter().collect()),
             hooks: RefCell::new(VecDeque::new()),
-            key: None,
+            credentials: CredentialEvidence::Anonymous,
             takes: Duration::ZERO,
             clock,
             calls: Cell::new(0),
@@ -70,18 +71,15 @@ impl<'a> Api<'a> {
 }
 
 impl BranchHeadSource for Api<'_> {
-    fn branch_head(&self, _origin: &str, _branch: &str, deadline: Duration) -> Result<String, PrUnavailable> {
+    fn branch_head(&self, _origin: &str, _branch: &str, deadline: Duration) -> Result<ApiHead, PrUnavailable> {
         assert_eq!(deadline, REMOTE_HEAD_REFRESH_DEADLINE, "the API call starts the budget");
         self.calls.set(self.calls.get() + 1);
         if let Some(hook) = self.hooks.borrow_mut().pop_front() {
             hook();
         }
         self.clock.advance(self.takes);
-        self.answers.borrow_mut().pop_front().expect("an unscripted API request")
-    }
-
-    fn key_in_use(&self, _origin: &str) -> Option<String> {
-        self.key.clone()
+        let answer = self.answers.borrow_mut().pop_front().expect("an unscripted API request");
+        answer.map(|sha| ApiHead { sha, credentials: self.credentials.clone() })
     }
 }
 
@@ -350,53 +348,52 @@ fn an_unsupported_remote_is_checked_by_ls_remote_in_phase_checking() {
 #[test]
 fn each_fallback_reason_and_condition_is_recorded() {
     let key = || "GITHUB_TOKEN".to_string();
-    let not_found = || PrUnavailable::NotFoundOrNotPermitted { message: "404".into() };
+    // The 404's key is the one its own request sent, as sniff reports it.
+    let not_found = |key| PrUnavailable::NotFoundOrNotPermitted { message: "404".into(), key };
     let note = |condition, key: Option<String>| Some(ApiNote { condition, key, fallback_answered: true });
-    let cases: Vec<(PrUnavailable, Option<String>, FallbackReason, Option<ApiNote>)> = vec![
+    let cases: Vec<(PrUnavailable, FallbackReason, Option<ApiNote>)> = vec![
         (
             PrUnavailable::CredentialsRequired { key: None },
-            None,
             FallbackReason::NoKey,
             note(ApiCondition::CredentialsRequired, None),
         ),
-        (not_found(), None, FallbackReason::NotVisible, note(ApiCondition::NotFoundOrNotPermitted, None)),
-        (not_found(), Some(key()), FallbackReason::Other, note(ApiCondition::NotFoundOrNotPermitted, Some(key()))),
+        (not_found(None), FallbackReason::NotVisible, note(ApiCondition::NotFoundOrNotPermitted, None)),
+        (
+            not_found(Some("SNIFF_GITHUB_GIT_2E_EXAMPLE_TOKEN".into())),
+            FallbackReason::Other,
+            note(ApiCondition::NotFoundOrNotPermitted, Some("SNIFF_GITHUB_GIT_2E_EXAMPLE_TOKEN".into())),
+        ),
         (
             PrUnavailable::RateLimited { authenticated: false, key: None },
-            None,
             FallbackReason::RateLimited,
             note(ApiCondition::RateLimited { authenticated: false }, None),
         ),
         (
             PrUnavailable::RateLimited { authenticated: true, key: Some(key()) },
-            Some(key()),
             FallbackReason::RateLimited,
             note(ApiCondition::RateLimited { authenticated: true }, Some(key())),
         ),
         (
             PrUnavailable::CredentialsRejected { key: key() },
-            Some(key()),
             FallbackReason::Rejected,
             note(ApiCondition::CredentialsRejected, Some(key())),
         ),
         (
             PrUnavailable::CredentialsInsufficient { key: key() },
-            Some(key()),
             FallbackReason::Rejected,
             note(ApiCondition::CredentialsInsufficient, Some(key())),
         ),
-        (PrUnavailable::Timeout { deadline: Duration::from_secs(1) }, None, FallbackReason::Other, None),
-        (PrUnavailable::Network { message: "reset".into() }, None, FallbackReason::Other, None),
-        (PrUnavailable::Other { message: "odd".into() }, None, FallbackReason::Other, None),
+        (PrUnavailable::Timeout { deadline: Duration::from_secs(1) }, FallbackReason::Other, None),
+        (PrUnavailable::Network { message: "reset".into() }, FallbackReason::Other, None),
+        (PrUnavailable::Other { message: "odd".into() }, FallbackReason::Other, None),
     ];
-    for (error, key_in_use, reason, expected_note) in cases {
+    for (error, reason, expected_note) in cases {
         let repo = TestRepo::with_origin();
         let clock = Clock::new();
         let label = format!("{error:?}");
         // The phase is written before the fallback's request.
         let seen = RefCell::new(None);
-        let mut api = Api::new(&clock, [Err(error)]);
-        api.key = key_in_use;
+        let api = Api::new(&clock, [Err(error)]);
         let git = Git::real(&repo.path());
         let store_path = store(&repo);
         let wrapped = WatchPhase { git: &git, store: &store_path, seen: &seen };
@@ -454,7 +451,7 @@ fn only_ls_remote_proves_absence() {
     let tracking = repo.sha("origin/main");
     repo.git_in(&repo.origin_path(), &["update-ref", "-d", "refs/heads/main"]);
     let clock = Clock::new();
-    let api = Api::new(&clock, [Err(PrUnavailable::NotFoundOrNotPermitted { message: "404".into() })]);
+    let api = Api::new(&clock, [Err(PrUnavailable::NotFoundOrNotPermitted { message: "404".into(), key: None })]);
     let git = Git::real(&repo.path());
 
     assert_eq!(run(&repo, &api, &git, &clock), AttemptEnd::Finished(Outcome::Absent));
@@ -466,7 +463,7 @@ fn only_ls_remote_proves_absence() {
     // A 404 whose fallback fails too is a failed check, never an absence.
     let repo = TestRepo::with_origin();
     let old = seed_old_answer(&repo);
-    let api = Api::new(&clock, [Err(PrUnavailable::NotFoundOrNotPermitted { message: "404".into() })]);
+    let api = Api::new(&clock, [Err(PrUnavailable::NotFoundOrNotPermitted { message: "404".into(), key: None })]);
     let git = Git::real(&repo.path()).live(Err(GitFailure::Other));
     assert_eq!(
         run(&repo, &api, &git, &clock),
@@ -585,17 +582,14 @@ struct RecheckApi<'a> {
 }
 
 impl BranchHeadSource for RecheckApi<'_> {
-    fn branch_head(&self, _origin: &str, _branch: &str, _deadline: Duration) -> Result<String, PrUnavailable> {
+    fn branch_head(&self, _origin: &str, _branch: &str, _deadline: Duration) -> Result<ApiHead, PrUnavailable> {
         let newer = self.newer.borrow().clone();
+        let head = |sha| Ok(ApiHead { sha, credentials: CredentialEvidence::Anonymous });
         if newer.is_empty() {
-            return Ok(self.first.clone());
+            return head(self.first.clone());
         }
         *self.recheck.borrow_mut() = Some(newer.clone());
-        Ok(newer)
-    }
-
-    fn key_in_use(&self, _origin: &str) -> Option<String> {
-        None
+        head(newer)
     }
 }
 
@@ -766,4 +760,62 @@ fn an_unauthorized_origin_fails_the_check_fast_as_credentials_and_keeps_the_answ
     assert!(started.elapsed() < FAST, "took {:?}", started.elapsed());
     assert!(server.accepted() >= 1, "git reached the origin");
     assert_eq!(stored(&repo).answer, Some(old));
+}
+
+fn credentials(repo: &TestRepo) -> CredentialEvidence {
+    stored(repo).attempt.expect("an attempt record").credentials
+}
+
+#[test]
+fn an_api_answer_records_its_credentials_before_the_answer_and_through_the_fetch() {
+    let repo = TestRepo::with_origin();
+    let pushed = repo.push_commit_to_origin("main", "upstream.txt");
+    let clock = Clock::new();
+    let mut api = Api::new(&clock, [Ok(pushed.clone())]);
+    api.credentials = CredentialEvidence::Keyed { variables: vec!["SNIFF_GITHUB_GIT_2E_EXAMPLE_TOKEN".into()] };
+    let during_fetch = RefCell::new(None);
+    let git = Git::real(&repo.path()).before_fetch(|| *during_fetch.borrow_mut() = stored(&repo).attempt);
+
+    assert_eq!(run(&repo, &api, &git, &clock), AttemptEnd::Finished(Outcome::Fetched));
+
+    let fetching = during_fetch.borrow().clone().expect("the attempt while fetching");
+    assert_eq!(fetching.phase, Phase::Fetching);
+    assert_eq!(fetching.credentials, api.credentials, "already recorded while fetching");
+    let state = stored(&repo);
+    assert_eq!(state.answer.unwrap().source, AnswerSource::Fetch, "a `source: fetch` answer ...");
+    assert_eq!(state.attempt.unwrap().credentials, api.credentials, "... keeps the API result's credentials");
+}
+
+#[test]
+fn an_anonymous_api_answer_survives_a_fetch_failure_or_timeout() {
+    for failure in [GitFailure::Timeout, GitFailure::Other] {
+        let repo = TestRepo::with_origin();
+        let pushed = repo.push_commit_to_origin("main", "upstream.txt");
+        let clock = Clock::new();
+        let api = Api::new(&clock, [Ok(pushed)]);
+        let git = Git::real(&repo.path()).fetch_fails(failure);
+
+        assert!(matches!(run(&repo, &api, &git, &clock), AttemptEnd::Finished(Outcome::FetchFailed { .. })));
+
+        assert_eq!(credentials(&repo), CredentialEvidence::Anonymous, "{failure:?}");
+    }
+}
+
+#[test]
+fn a_check_the_api_did_not_answer_has_unknown_credentials() {
+    // The fallback answered, the provider was unsupported, the repository is
+    // ignored: no successful API request, so nothing to claim.
+    let repo = TestRepo::with_origin();
+    let clock = Clock::new();
+    let api = Api::new(&clock, [Err(PrUnavailable::CredentialsRequired { key: None })]);
+    assert_eq!(run(&repo, &api, &Git::real(&repo.path()), &clock), AttemptEnd::Finished(Outcome::InSync));
+    assert_eq!(credentials(&repo), CredentialEvidence::Unknown, "fallback");
+
+    let api = Api::unsupported(&clock);
+    assert_eq!(run(&repo, &api, &Git::real(&repo.path()), &clock), AttemptEnd::Finished(Outcome::InSync));
+    assert_eq!(credentials(&repo), CredentialEvidence::Unknown, "unsupported");
+
+    let api = Api::new(&clock, []);
+    assert_eq!(run_with(&repo, &api, &Git::real(&repo.path()), &clock, true), AttemptEnd::Finished(Outcome::InSync));
+    assert_eq!(credentials(&repo), CredentialEvidence::Unknown, "ignored");
 }

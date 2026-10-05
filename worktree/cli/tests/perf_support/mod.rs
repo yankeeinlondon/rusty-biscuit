@@ -39,7 +39,7 @@ use std::time::{Duration, Instant};
 
 use assert_cmd::cargo::cargo_bin;
 use worktree::pull_requests::{
-    OpenPrSource, OpenPullRequest, PrRequestError, RefreshOutcome, SniffOpenPrSource, pr_lock_path, refresh, unix_now,
+    FetchedPrs, OpenPrSource, PrRequestError, RefreshOutcome, SniffOpenPrSource, pr_lock_path, refresh, unix_now,
 };
 use worktree::remote_head::{PrFailure, refresh_lock_held, remote_head_lock_path, remote_head_store_path};
 
@@ -378,6 +378,8 @@ impl MixedFixture {
                 "source_branch": branch,
                 "target_branch": "main",
             }],
+            // A seeded answer: nothing is known of how it was asked.
+            "credentials": { "state": "unknown" },
         });
         fs::write(&store, serde_json::to_vec(&json).expect("serialize")).expect("write store");
     }
@@ -397,6 +399,8 @@ impl MixedFixture {
             "publication": worktree::remote_head::new_attempt_id().expect("a publication id"),
             "source_repo": source_repo,
             "pull_requests": [],
+            // A seeded answer: nothing is known of how it was asked.
+            "credentials": { "state": "unknown" },
         });
         fs::write(&store, serde_json::to_vec(&json).expect("serialize")).expect("write store");
     }
@@ -659,7 +663,7 @@ impl OpenPrSource for NoRequest {
     fn source_repo(&self) -> Option<String> {
         None
     }
-    fn fetch(&self) -> Result<Vec<OpenPullRequest>, PrRequestError> {
+    fn fetch(&self) -> Result<FetchedPrs, PrRequestError> {
         Err(PrFailure::Other.into())
     }
 }
@@ -789,11 +793,48 @@ pub fn list_gather_from_perf(stderr: &str) -> Option<Duration> {
     stage_from_perf(stderr, "list gather")
 }
 
-/// Extract a stage's duration from rendered `--perf` output.
+/// One row of a rendered `--perf` report.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PerfRow {
+    /// 0 for the `Performance` root, 1 for a top-level stage or group, 2 for
+    /// a group's child.
+    pub depth: usize,
+    pub label: String,
+    pub duration: Duration,
+}
+
+/// Every report row in rendered `--perf` output, in order. Lines that are not
+/// report rows (the listing above the report) are skipped.
+pub fn perf_rows(stderr: &str) -> Vec<PerfRow> {
+    strip_ansi(stderr).lines().filter_map(perf_row).collect()
+}
+
+/// A report row: the quote border, then tree connectors (three columns per
+/// level), the label, and the duration as the first token that parses as one.
+fn perf_row(line: &str) -> Option<PerfRow> {
+    let body = line.trim_start().strip_prefix('▌')?.trim_start_matches(' ');
+    let connectors = body.chars().take_while(|c| matches!(c, '│' | '├' | '└' | '─' | ' ')).count();
+    let rest: String = body.chars().skip(connectors).collect();
+    let tokens: Vec<&str> = rest.split_whitespace().collect();
+    let at = tokens.iter().position(|token| parse_perf_duration(token).is_some())?;
+    (at > 0).then(|| PerfRow {
+        depth: connectors.div_ceil(3),
+        label: tokens[..at].join(" "),
+        duration: parse_perf_duration(tokens[at]).expect("position found a duration"),
+    })
+}
+
+/// The duration of the one row labeled exactly `stage`, at any depth.
+///
+/// Labels are matched whole, so a group such as `remote wait ‖ local gather`
+/// is never read as its `remote wait` child. Panics when two rows share the
+/// label, rather than picking one.
 pub fn stage_from_perf(stderr: &str, stage: &str) -> Option<Duration> {
-    let clean = strip_ansi(stderr);
-    let line = clean.lines().find(|line| line.contains(stage))?;
-    line.split_whitespace().find_map(parse_perf_duration)
+    let rows = perf_rows(stderr);
+    let mut matching = rows.iter().filter(|row| row.label == stage);
+    let found = matching.next()?;
+    assert!(matching.next().is_none(), "two `{stage}` rows in the --perf report:\n{rows:#?}");
+    Some(found.duration)
 }
 
 /// A local stand-in for an HTTPS proxy, so a PR request never leaves the host.
@@ -1039,6 +1080,8 @@ struct GiteaState {
     requests: usize,
     branch_requests: usize,
     branch_status: u16,
+    /// With status 200, the head a branch-head request answers.
+    branch_head: Option<String>,
     git_requests: usize,
     git_waiting: usize,
     git_hold: GitHold,
@@ -1088,6 +1131,7 @@ impl FakeGitea {
                 requests: 0,
                 branch_requests: 0,
                 branch_status: 404,
+                branch_head: None,
                 git_requests: 0,
                 git_waiting: 0,
                 git_hold: GitHold::None,
@@ -1132,6 +1176,14 @@ impl FakeGitea {
     /// rate limit).
     pub fn answer_branch_heads_with(&self, status: u16) {
         self.state().branch_status = status;
+    }
+
+    /// Answers branch-head requests 200 with `sha` as the head, the way
+    /// Gitea's branch API does: a successful API check.
+    pub fn answer_branch_heads_at(&self, sha: &str) {
+        let mut state = self.state();
+        state.branch_status = 200;
+        state.branch_head = Some(sha.to_string());
     }
 
     /// Serves git's smart-HTTP requests for `/<namespace>/<repo>.git` from
@@ -1260,8 +1312,11 @@ fn serve(mut stream: TcpStream, shared: &(Mutex<GiteaState>, Condvar), before_re
             state = changed.wait_timeout(state, left).unwrap_or_else(|poisoned| poisoned.into_inner()).0;
         }
         let status = state.branch_status;
+        let body = match (&state.branch_head, status) {
+            (Some(sha), 200) => serde_json::json!({ "name": "main", "commit": { "id": sha } }).to_string(),
+            _ => r#"{"message":"branch not found"}"#.to_string(),
+        };
         drop(state);
-        let body = r#"{"message":"branch not found"}"#;
         let response = format!(
             "HTTP/1.1 {status} Fake\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
             body.len()

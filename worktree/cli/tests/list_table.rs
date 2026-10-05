@@ -11,6 +11,7 @@ use std::path::PathBuf;
 
 use biscuit_terminal::discovery::detection::{ColorDepth, ColorMode};
 use biscuit_terminal::terminal::Terminal;
+use worktree::availability::{Availability, OtherCondition};
 use worktree::default_target::DefaultTarget;
 use worktree::fork_origin::{ForkOrigin, ForkOriginStore};
 use worktree::listing::{
@@ -69,8 +70,10 @@ fn status(dir: &str, branch: Option<&str>, is_main: bool, is_current: bool, dirt
             head_sha: Some("a1b2c3d4e5f60718293a4b5c6d7e8f9012345678".to_string()),
             is_main,
             is_current,
+            prunable: None,
         },
         dirty,
+        availability: Availability::Healthy,
     }
 }
 
@@ -1016,6 +1019,16 @@ fn credential_lines_snapshot_every_condition_for_every_provider() {
         ("the key lacks rights", CredentialCondition::Insufficient, Some("used")),
         ("rate limited without a key", CredentialCondition::RateLimited { authenticated: false }, None),
         ("rate limited with a key", CredentialCondition::RateLimited { authenticated: true }, Some("used")),
+        (
+            "answered without a key, higher limits with one",
+            CredentialCondition::AnsweredWithoutKey { higher_limits: true },
+            None,
+        ),
+        (
+            "answered without a key, no established limit",
+            CredentialCondition::AnsweredWithoutKey { higher_limits: false },
+            None,
+        ),
     ];
     let mut cases = Vec::new();
     for (provider, accepted) in PROVIDERS {
@@ -1055,6 +1068,18 @@ fn the_credentials_line_is_dim_and_directly_follows_the_caption() {
     };
     let plain = list_table::render(&facts, &plain_terminal(), NOW);
     assert!(plain.lines().nth(1).unwrap().contains("didn't accept"), "{plain}");
+
+    // The keyless notice is the same dim line in the same place.
+    let line = CredentialLine {
+        provider: "GitHub".into(),
+        key: "GH_TOKEN or GITHUB_TOKEN".into(),
+        condition: CredentialCondition::AnsweredWithoutKey { higher_limits: true },
+    };
+    let facts = TableFacts { credential_line: Some(line), ..example.facts() };
+    let colored = list_table::render(&facts, &color_terminal(), NOW);
+    let lines: Vec<&str> = colored.lines().collect();
+    assert!(lines[1].contains("origin/main"), "the caption: {colored}");
+    assert!(lines[2].contains("\u{1b}[2m") && lines[2].contains("GitHub answered without an API key"), "{colored}");
 }
 
 // The hint (§6), the closing notes (§8, §9, `--ff`), and the order of all
@@ -1106,6 +1131,7 @@ fn closing_notes_snapshot() {
         ("missing tracking ref", FfNotice::Missing("origin/main".into())),
         ("changed while waiting", FfNotice::Changed),
         ("git failed", FfNotice::Failed),
+        ("holder unavailable", FfNotice::UnavailableHolder(PathBuf::from("/code/wts/main-checkout"))),
     ] {
         cases.push((format!("--ff refused: {label}"), notes(TableFacts { ff_notice: Some(notice), ..example.facts() })));
     }
@@ -1166,4 +1192,574 @@ fn output_order_snapshot() {
             ("without a graph, with --verbose".into(), assemble(None, Some(verbose))),
         ])
     );
+}
+
+/// Worktrees Git can't read, beside healthy ones: one row per availability,
+/// plus a readable row whose status check failed. `lhg-before` has the shape
+/// of the observed case: detached at a recorded HEAD, its `.git` file gone.
+struct Unavailable {
+    statuses: Vec<WorktreeStatus>,
+    tree: Vec<TreeRow>,
+    comparisons: HashMap<String, BranchComparisons>,
+    target: DefaultTarget,
+    prs: PrListing,
+}
+
+const GIT_REASON: &str = "gitdir file points to non-existent location";
+
+fn unavailable(dir: &str, branch: Option<&str>, availability: Availability, reason: &str) -> WorktreeStatus {
+    let mut status = status(dir, branch, false, false, DirtyStatus::Unknown);
+    status.entry.prunable = Some(reason.to_string());
+    status.availability = availability;
+    status
+}
+
+impl Unavailable {
+    fn new() -> Self {
+        Self::with(vec![
+            status("rusty-biscuit", Some("main"), true, true, DirtyStatus::Clean),
+            status("feat-ok", Some("feat/ok"), false, false, DirtyStatus::Clean),
+            unavailable("lhg-before", None, Availability::Unlinked, GIT_REASON),
+            unavailable("feat-gone", Some("feat/gone"), Availability::Missing, GIT_REASON),
+            unavailable("feat-link", Some("feat/link"), Availability::Other(OtherCondition::Link), GIT_REASON),
+            unavailable("feat-file", Some("feat/file"), Availability::Other(OtherCondition::NotADirectory), ""),
+            unavailable(
+                "feat-locked",
+                Some("feat/locked"),
+                Availability::Other(OtherCondition::PathUninspectable("Permission denied (os error 13)".into())),
+                GIT_REASON,
+            ),
+            unavailable(
+                "feat-gitdir",
+                Some("feat/gitdir"),
+                Availability::Other(OtherCondition::GitEntryUninspectable("Permission denied (os error 13)".into())),
+                GIT_REASON,
+            ),
+            unavailable("feat-broken", Some("feat/broken"), Availability::Other(OtherCondition::GitEntryPresent), GIT_REASON),
+            status("feat-unknown", Some("feat/unknown"), false, false, DirtyStatus::Unknown),
+        ])
+    }
+
+    fn with(statuses: Vec<WorktreeStatus>) -> Self {
+        let local: BTreeMap<String, String> = statuses
+            .iter()
+            .filter_map(|status| status.entry.branch.clone())
+            .map(|branch| (branch, "0".repeat(40)))
+            .collect();
+        let entries: Vec<WorktreeEntry> = statuses.iter().map(|s| s.entry.clone()).collect();
+        let tree = build_tree(&entries, "main", &local, &ForkOriginStore::default());
+        let comparisons = local
+            .keys()
+            .filter(|branch| *branch != "main")
+            .map(|branch| {
+                (branch.clone(), BranchComparisons { target: Some(CLEAN), parent: ParentComparison::NotApplicable })
+            })
+            .collect();
+        Self {
+            statuses,
+            tree,
+            comparisons,
+            target: DefaultTarget { reference: "main".to_string(), sha: "f".repeat(40), diverged: false },
+            prs: PrListing { source_repo: None, pull_requests: Vec::new(), fetched_at: None },
+        }
+    }
+
+    fn facts(&self) -> TableFacts<'_> {
+        TableFacts {
+            default_branch: "main",
+            target: Some(&self.target),
+            caption: None,
+            tree: &self.tree,
+            statuses: &self.statuses,
+            comparisons: &self.comparisons,
+            prs: &self.prs,
+            remote: None,
+            credential_line: None,
+            pr_outcome: None,
+            timed_out: false,
+            ff_suggestion: None,
+            ff_notice: None,
+            fallback_notice: None,
+        }
+    }
+
+    fn table(&self) -> String {
+        list_table::render(&self.facts(), &plain_terminal(), NOW)
+    }
+
+    fn notes(&self) -> String {
+        list_table::render_notes(&self.facts(), &terminal_at(400, false)).expect("notes")
+    }
+}
+
+/// The Worktree cell of the row for directory `dir`.
+fn worktree_cell(rendered: &str, dir: &str) -> String {
+    let line = rendered
+        .lines()
+        .find(|line| line.split('│').nth(1).is_some_and(|cell| cell.trim().ends_with(dir)))
+        .unwrap_or_else(|| panic!("no row for {dir:?} in:\n{rendered}"));
+    line.split('│').nth(1).unwrap().trim().to_string()
+}
+
+#[test]
+fn unavailable_and_unknown_rows_snapshot() {
+    insta::assert_snapshot!("unavailable_and_unknown_rows", Unavailable::new().table());
+}
+
+#[test]
+fn a_row_git_cannot_read_is_a_cross_never_clean() {
+    let rendered = Unavailable::new().table();
+    for dir in ["lhg-before", "feat-gone", "feat-link", "feat-file", "feat-locked", "feat-gitdir", "feat-broken"] {
+        assert_eq!(worktree_cell(&rendered, dir), format!("✕ {dir}"), "in:\n{rendered}");
+    }
+    assert_eq!(worktree_cell(&rendered, "feat-unknown"), "? feat-unknown");
+    assert_eq!(worktree_cell(&rendered, "feat-ok"), "○ feat-ok");
+}
+
+#[test]
+fn unavailability_outranks_any_dirtiness() {
+    for dirty in [DirtyStatus::Clean, DirtyStatus::DirtyNonSource, DirtyStatus::DirtySource, DirtyStatus::Unknown] {
+        let mut row = unavailable("feat-gone", Some("feat/gone"), Availability::Missing, GIT_REASON);
+        row.dirty = dirty;
+        let example = Unavailable::with(vec![status("repo", Some("main"), true, true, DirtyStatus::Clean), row]);
+        let rendered = example.table();
+        assert_eq!(worktree_cell(&rendered, "feat-gone"), "✕ feat-gone", "{dirty:?}");
+        assert!(!rendered.contains("couldn't check"), "a ✕ row adds no ? legend entry: {dirty:?}");
+    }
+}
+
+#[test]
+fn the_cross_is_red_and_the_question_mark_dim() {
+    let example = Unavailable::new();
+    let colored = list_table::render(&example.facts(), &color_terminal(), NOW);
+    assert!(row(&colored, "lhg-before").contains("\u{1b}[31m✕"), "{colored:?}");
+    assert!(row(&colored, "feat-unknown").contains("\u{1b}[2m?"), "{colored:?}");
+}
+
+#[test]
+fn legend_entries_appear_only_for_markers_in_the_table() {
+    let base = || status("repo", Some("main"), true, true, DirtyStatus::Clean);
+    let legend = |statuses: Vec<WorktreeStatus>| {
+        let rendered = Unavailable::with(statuses).table();
+        let start = rendered.lines().position(|line| line.starts_with(" Worktree ")).expect("legend");
+        rendered.lines().skip(start).map(str::trim_end).collect::<Vec<_>>().join("\n")
+    };
+    let healthy = " Worktree   ○ clean    ● uncommitted files    ● uncommitted source files";
+    let branch = " Branch     └─ merges cleanly into parent     └─ conflicts with parent    └┄ parent deleted";
+
+    assert_eq!(legend(vec![base()]), format!("{healthy}\n{branch}"));
+    assert_eq!(
+        legend(vec![base(), unavailable("gone", Some("gone"), Availability::Missing, GIT_REASON)]),
+        format!("{healthy}\n            ✕ git can't read this worktree\n{branch}")
+    );
+    assert_eq!(
+        legend(vec![base(), status("odd", Some("odd"), false, false, DirtyStatus::Unknown)]),
+        format!("{healthy}\n            ? couldn't check\n{branch}")
+    );
+    assert_eq!(
+        legend(vec![
+            base(),
+            status("odd", Some("odd"), false, false, DirtyStatus::Unknown),
+            unavailable("gone", Some("gone"), Availability::Unlinked, GIT_REASON),
+        ]),
+        format!("{healthy}\n            ✕ git can't read this worktree    ? couldn't check\n{branch}")
+    );
+}
+
+/// Git reads a checkout through a link that replaced it and does not mark it
+/// `prunable`; the row is `✕`, and nothing claims Git can't read it.
+#[test]
+fn a_readable_replacement_link_is_unavailable_without_claiming_git_cant_read_it() {
+    let replaced = || {
+        let mut row = unavailable("feat-link", Some("feat/link"), Availability::Other(OtherCondition::Link), "");
+        row.entry.prunable = None;
+        row
+    };
+    let base = || status("repo", Some("main"), true, true, DirtyStatus::Clean);
+    let legend_line = |statuses: Vec<WorktreeStatus>| {
+        let rendered = Unavailable::with(statuses).table();
+        rendered.lines().find(|line| line.trim_start().starts_with('✕')).map(|line| line.trim().to_string())
+    };
+
+    let table = Unavailable::with(vec![base(), replaced()]).table();
+    assert!(table.lines().any(|line| line.contains("✕ feat-link")), "{table}");
+    assert_eq!(legend_line(vec![base(), replaced()]).as_deref(), Some("✕ its path is a link"));
+    assert_eq!(
+        legend_line(vec![base(), replaced(), unavailable("gone", Some("gone"), Availability::Missing, GIT_REASON)]).as_deref(),
+        Some("✕ git can't read this worktree, or its path is a link")
+    );
+    let note = note_for(replaced(), vec![]);
+    let words = note.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        words.contains("feat-link: /code/wts/feat-link is a link, which may have replaced the original checkout."),
+        "{words}"
+    );
+    assert!(!words.contains("Git can't read"), "{words}");
+}
+
+#[test]
+fn a_narrow_table_is_as_wide_as_its_widest_legend_line() {
+    let example = Unavailable::with(vec![
+        status("repo", Some("main"), true, true, DirtyStatus::Clean),
+        status("odd", Some("odd"), false, false, DirtyStatus::Unknown),
+        unavailable("gone", Some("gone"), Availability::Missing, GIT_REASON),
+    ]);
+    let rendered = example.table();
+    let width = |line: &str| line.trim_end().chars().count();
+    let legend_start = rendered.lines().position(|line| line.starts_with(" Worktree ")).expect("legend");
+    let widest = rendered.lines().skip(legend_start).map(width).max().unwrap();
+    let table_lines: Vec<&str> = rendered.lines().filter(|line| line.starts_with(['┌', '│', '├', '└'])).collect();
+    assert_eq!(table_lines.len(), 7, "{rendered}");
+    for line in table_lines {
+        assert_eq!(width(line), widest, "{line:?} in:\n{rendered}");
+    }
+}
+
+#[test]
+fn comparisons_of_unavailable_rows_keep_their_meaning() {
+    let rendered = Unavailable::new().table();
+    let cells = |dir: &str| -> Vec<String> {
+        let line = rendered.lines().find(|line| line.contains(dir)).expect("row");
+        line.split('│').skip(3).map(|cell| cell.trim().to_string()).collect()
+    };
+    let healthy = cells("feat-ok");
+    assert!(healthy[0].starts_with("clean"), "{rendered}");
+    for dir in ["lhg-before", "feat-gone", "feat-link", "feat-unknown"] {
+        let expected = if dir == "lhg-before" { vec!["—".to_string(), "—".to_string(), String::new()] } else { healthy.clone() };
+        assert_eq!(cells(dir), expected, "comparisons come from refs alone: {dir}");
+    }
+}
+
+#[test]
+fn unavailable_notes_snapshot() {
+    insta::assert_snapshot!("unavailable_notes", Unavailable::new().notes());
+}
+
+#[test]
+fn unavailable_notes_follow_the_existing_notes_in_table_row_order() {
+    let example = Unavailable::new();
+    let facts = TableFacts {
+        ff_notice: Some(FfNotice::Diverged),
+        fallback_notice: Some(vec!["GH_TOKEN".to_string()]),
+        ..example.facts()
+    };
+    let notes = list_table::render_notes(&facts, &terminal_at(400, false)).expect("notes");
+    let starts: Vec<&str> = notes
+        .lines()
+        .filter_map(|line| line.trim_start().strip_prefix("- "))
+        .map(|line| line.split([':', ' ']).next().unwrap())
+        .collect();
+    let table = example.table();
+    let row_order: Vec<&str> = table
+        .lines()
+        .filter_map(|line| line.split('│').nth(1))
+        .map(str::trim)
+        .filter_map(|cell| cell.strip_prefix("✕ "))
+        .collect();
+    assert_eq!(row_order.len(), 7, "{table}");
+    let mut expected = vec!["main", "Git", "Set"];
+    expected.extend(row_order);
+    assert_eq!(starts, expected, "{notes}");
+}
+
+#[test]
+fn unavailable_notes_are_dim() {
+    let example = Unavailable::new();
+    let colored = list_table::render_notes(&example.facts(), &terminal_at(400, true)).expect("notes");
+    for line in colored.lines().filter(|line| line.contains("feat-gone") || line.contains("lhg-before")) {
+        assert!(line.contains("\u{1b}[2m"), "dim: {line:?}");
+    }
+    assert!(colored.contains("\u{1b}[7m wt remove lhg-before "), "commands in reverse video: {colored:?}");
+}
+
+#[test]
+fn healthy_listings_have_no_unavailable_notes() {
+    let example = Example::new();
+    assert_eq!(list_table::render_notes(&example.facts(), &terminal_at(400, false)), None);
+    let example = Unavailable::with(vec![
+        status("repo", Some("main"), true, true, DirtyStatus::Clean),
+        status("odd", Some("odd"), false, false, DirtyStatus::Unknown),
+    ]);
+    assert_eq!(list_table::render_notes(&example.facts(), &terminal_at(400, false)), None, "? needs no note");
+}
+
+/// One note, for a single unavailable worktree at `path` beside the base.
+fn note_for(entry: WorktreeStatus, others: Vec<WorktreeStatus>) -> String {
+    let mut statuses = vec![status("repo", Some("main"), true, true, DirtyStatus::Clean)];
+    statuses.extend(others);
+    statuses.push(entry);
+    Unavailable::with(statuses).notes()
+}
+
+fn at(path: &str, branch: Option<&str>, availability: Availability, reason: &str) -> WorktreeStatus {
+    let mut status = unavailable("x", branch, availability, reason);
+    status.entry.path = PathBuf::from(path);
+    status
+}
+
+#[test]
+fn notes_quote_names_and_paths_for_every_shell_or_suggest_no_command() {
+    let unlinked = |path: &str, branch: Option<&str>| note_for(at(path, branch, Availability::Unlinked, GIT_REASON), vec![]);
+    // Windows spellings go on the base path, which is shown whole on every
+    // host; a target's basename would differ between hosts.
+    let unlinked_from_base = |base: &str| {
+        let mut main = status("repo", Some("main"), true, true, DirtyStatus::Clean);
+        main.entry.path = PathBuf::from(base);
+        Unavailable::with(vec![main, at("/code/wts/plain", None, Availability::Unlinked, GIT_REASON)]).notes()
+    };
+    insta::assert_snapshot!(
+        "unavailable_note_quoting",
+        labeled(vec![
+            ("plain".into(), unlinked("/code/wts/plain", Some("feat/plain"))),
+            ("spaces in the path".into(), unlinked("/code/wts/my work", None)),
+            ("a single quote in the path".into(), unlinked("/code/wts/it's", None)),
+            ("a PowerShell quote in the path".into(), unlinked("/code/wts/it\u{2019}s", None)),
+            ("shell metacharacters".into(), unlinked("/code/wts/$(rm -rf ~);x", None)),
+            ("a leading dash".into(), unlinked("/code/wts/-n", None)),
+            ("a Windows base path".into(), unlinked_from_base("C:\\code\\wts\\repo")),
+            ("a UNC base path".into(), unlinked_from_base("\\\\server\\share\\repo")),
+            ("a base path ending in a backslash".into(), unlinked_from_base("C:\\repo\\")),
+        ])
+    );
+}
+
+#[test]
+fn notes_never_suggest_a_name_that_selects_another_worktree() {
+    // Two worktrees share the basename `dup`, and the target's branch is
+    // another worktree's directory name.
+    let target = at("/code/a/dup", Some("other"), Availability::Missing, GIT_REASON);
+    let others = vec![
+        {
+            let mut status = status("dup", Some("feat/dup"), false, false, DirtyStatus::Clean);
+            status.entry.path = PathBuf::from("/code/b/dup");
+            status
+        },
+        status("other", Some("feat/other"), false, false, DirtyStatus::Clean),
+    ];
+    let note = note_for(target, others);
+    assert!(!note.contains("wt remove dup") && !note.contains("wt remove other"), "{note}");
+    assert!(note.contains("No name selects it for wt remove"), "{note}");
+    assert!(note.contains("dup also matches /code/b/dup"), "{note}");
+    assert!(note.contains("other also matches /code/wts/other"), "{note}");
+
+    // The branch is preferred when it alone selects the row.
+    let note = note_for(at("/code/a/dup", Some("feat/unique"), Availability::Missing, GIT_REASON), vec![]);
+    assert!(note.contains("wt remove feat/unique"), "{note}");
+    // A detached row falls back to its directory name.
+    let note = note_for(at("/code/a/lone", None, Availability::Missing, GIT_REASON), vec![]);
+    assert!(note.contains("wt remove lone"), "{note}");
+}
+
+/// Paths and commands in the notes are copied by users, so a narrow wrap
+/// never breaks them: one that fits moves to the next line whole, and one
+/// longer than a line gets a line of its own for the terminal to soft-wrap,
+/// never a forced break with an inserted `-`.
+#[test]
+fn notes_keep_paths_and_commands_whole_at_a_narrow_width() {
+    let width = 60;
+    let long_dir = format!("/private/var/folders/xy/{}/T/.tmpAbCdEf", "q".repeat(40));
+    let long = |name: &str| format!("{long_dir}/{name}");
+    let mut base = status("repo", Some("main"), true, true, DirtyStatus::Clean);
+    base.entry.path = PathBuf::from(long("main-repo"));
+    let mut link = at(&long("wt-moved"), Some("moved"), Availability::Other(OtherCondition::Link), "");
+    link.entry.prunable = None;
+    let short = at("/code/wts/feat-short-name", None, Availability::Unlinked, GIT_REASON);
+    let rows = vec![
+        base,
+        at(&long("wt-unlinked"), Some("unlinked"), Availability::Unlinked, GIT_REASON),
+        link,
+        short,
+        at("/code/wts/wt-gone", Some("feature/a-rather-long-branch-name"), Availability::Missing, GIT_REASON),
+    ];
+    let example = Unavailable::with(rows);
+    let facts = TableFacts {
+        ff_notice: Some(FfNotice::UnavailableHolder(PathBuf::from(long("holder-checkout")))),
+        ..example.facts()
+    };
+
+    let notes = list_table::render_notes(&facts, &terminal_at(width, false)).expect("notes");
+
+    for copyable in [
+        long("wt-moved"),
+        long("holder-checkout"),
+        format!("git -C {} worktree repair {}", long("main-repo"), long("wt-unlinked")),
+        format!("git -C {} worktree repair /code/wts/feat-short-name", long("main-repo")),
+        "wt remove feature/a-rather-long-branch-name".to_string(),
+    ] {
+        assert!(notes.contains(&copyable), "{copyable:?} whole in:\n{notes}");
+    }
+    for line in notes.lines() {
+        let fits = line.chars().count() <= width as usize;
+        assert!(fits || line.contains(&long_dir), "only a line holding an overlong run is wider: {line:?}\n{notes}");
+    }
+    // The wrap only moved text to new lines: nothing, such as an inserted
+    // `-`, was added to it.
+    let unwrapped = list_table::render_notes(&facts, &terminal_at(1000, false)).expect("notes");
+    let squeezed = |text: &str| text.split_whitespace().collect::<String>();
+    assert_eq!(squeezed(&notes), squeezed(&unwrapped), "{notes}");
+    assert!(!notes.chars().any(|ch| ('\u{FDD0}'..='\u{FDD4}').contains(&ch)), "no stand-in survives: {notes:?}");
+}
+
+#[test]
+fn names_paths_and_reasons_never_become_markup() {
+    let hostile = "<red>boom</red>";
+    let mut row = at(&format!("/code/wts/{hostile}"), None, Availability::Other(OtherCondition::Link), hostile);
+    row.entry.branch = Some(format!("feat/{hostile}"));
+    let example = Unavailable::with(vec![status("repo", Some("main"), true, true, DirtyStatus::Clean), row]);
+
+    let notes = list_table::render_notes(&example.facts(), &terminal_at(400, true)).expect("notes");
+    assert!(notes.contains(hostile), "shown literally: {notes:?}");
+    assert!(!notes.contains("\u{1b}[31mboom"), "never styled red: {notes:?}");
+    let table = list_table::render(&example.facts(), &color_terminal(), NOW);
+    assert!(table.contains(hostile), "{table:?}");
+}
+
+/// One external field projected into the closing notes, and the literal
+/// text the notes must show for it.
+struct Projection {
+    name: &'static str,
+    example: Unavailable,
+    default_branch: String,
+    ff_notice: Option<FfNotice>,
+    fallback_notice: Option<Vec<String>>,
+    shown: Vec<String>,
+}
+
+fn projections(long_dir: &str, odd: &str) -> Vec<Projection> {
+    let base = || status("repo", Some("main"), true, true, DirtyStatus::Clean);
+    let detached = |path: String, availability: Availability, reason: &str| at(&path, None, availability, reason);
+    let projection = |name, rows: Vec<WorktreeStatus>, shown: Vec<String>| Projection {
+        name,
+        example: Unavailable::with([vec![base()], rows].concat()),
+        default_branch: "main".to_string(),
+        ff_notice: None,
+        fallback_notice: None,
+        shown,
+    };
+    let mut unlinked_base = base();
+    unlinked_base.entry.path = PathBuf::from(format!("{long_dir}/base{odd}"));
+    let mut link = detached(format!("{long_dir}/link{odd}"), Availability::Other(OtherCondition::Link), "");
+    link.entry.prunable = None;
+    let mut competing = status("dup", Some("feat/dup"), false, false, DirtyStatus::Clean);
+    competing.entry.path = PathBuf::from(format!("{long_dir}/b{odd}/dup"));
+    let other = |condition: OtherCondition, reason: &str| {
+        vec![detached("/code/wts/x".to_string(), Availability::Other(condition), reason)]
+    };
+    let ff = |name, default_branch: String, notice: Option<FfNotice>, keys: Option<Vec<String>>, shown| Projection {
+        default_branch,
+        ff_notice: notice,
+        fallback_notice: keys,
+        ..projection(name, vec![], shown)
+    };
+    vec![
+        projection(
+            "missing-entry removal command and worktree label",
+            vec![detached(format!("/code/wts/target{odd}"), Availability::Missing, GIT_REASON)],
+            vec![format!("- target{odd}:"), format!("wt remove 'target{odd}'")],
+        ),
+        Projection {
+            example: Unavailable::with(vec![
+                unlinked_base,
+                detached(format!("{long_dir}/unlinked{odd}"), Availability::Unlinked, GIT_REASON),
+            ]),
+            ..projection(
+                "unlinked repair command target and base paths",
+                vec![],
+                vec![format!("git -C '{long_dir}/base{odd}' worktree repair '{long_dir}/unlinked{odd}'")],
+            )
+        },
+        projection("other-unavailable observed path", vec![link], vec![format!("{long_dir}/link{odd}")]),
+        projection(
+            "name-conflict competing path",
+            vec![competing, at("/code/a/dup", None, Availability::Missing, GIT_REASON)],
+            vec![format!("{long_dir}/b{odd}/dup")],
+        ),
+        ff(
+            "fast-forward refusal holder path",
+            "main".to_string(),
+            Some(FfNotice::UnavailableHolder(PathBuf::from(format!("{long_dir}/holder{odd}")))),
+            None,
+            vec![format!("{long_dir}/holder{odd}")],
+        ),
+        projection(
+            "Git reason",
+            other(OtherCondition::GitEntryPresent, &format!("gone{odd}")),
+            vec![format!("reports: gone{odd}")],
+        ),
+        projection(
+            "path inspection error",
+            other(OtherCondition::PathUninspectable(format!("denied{odd}")), GIT_REASON),
+            vec![format!("(denied{odd})")],
+        ),
+        projection(
+            ".git inspection error",
+            other(OtherCondition::GitEntryUninspectable(format!("denied{odd}")), GIT_REASON),
+            vec![format!("(denied{odd})")],
+        ),
+        ff(
+            "default-branch note",
+            format!("main{odd}"),
+            Some(FfNotice::Diverged),
+            None,
+            vec![format!("main{odd}"), format!("origin/main{odd},")],
+        ),
+        ff(
+            "missing-ref note",
+            "main".to_string(),
+            Some(FfNotice::Missing(format!("origin/main{odd}"))),
+            None,
+            vec![format!("fast-forwarded: origin/main{odd}")],
+        ),
+        ff(
+            "fallback-key note",
+            "main".to_string(),
+            None,
+            Some(vec![format!("GITHUB_TOKEN{odd}"), format!("GH{odd}")]),
+            vec![format!("GITHUB_TOKEN{odd}"), format!("GH{odd}")],
+        ),
+    ]
+}
+
+/// Every external field the closing notes show, holding ordinary markup or
+/// that markup behind any of U+FDD0..U+FDD4 (characters an earlier renderer
+/// used as its own delimiters), renders literally at a wide and a narrow
+/// width: markup is never styled, and copyable paths and commands are never
+/// broken.
+#[test]
+fn every_external_field_in_the_notes_is_shown_literally() {
+    let long_dir = format!("/private/var/folders/xy/{}/T", "q".repeat(40));
+    for injected in ["", "\u{FDD0}", "\u{FDD1}", "\u{FDD2}", "\u{FDD3}", "\u{FDD4}"] {
+        let odd = format!("{injected}<red>INJECTED");
+        for width in [400, 60] {
+            for case in projections(&long_dir, &odd) {
+                let facts = TableFacts {
+                    default_branch: &case.default_branch,
+                    ff_notice: case.ff_notice.clone(),
+                    fallback_notice: case.fallback_notice.clone(),
+                    ..case.example.facts()
+                };
+                let colored = list_table::render_notes(&facts, &terminal_at(width, true)).expect("notes");
+                let notes = biscuit_test_harness::strip_ansi(&colored);
+                let context = format!("{} with {injected:?} at {width} columns:\n{notes}", case.name);
+                for shown in &case.shown {
+                    assert!(notes.contains(shown.as_str()), "{shown:?} whole in {context}");
+                }
+                if injected.is_empty() {
+                    assert!(!notes.chars().any(|ch| ('\u{FDD0}'..='\u{FDD4}').contains(&ch)), "{context}");
+                }
+                for line in notes.lines() {
+                    let fits = line.chars().count() <= width as usize;
+                    assert!(fits || line.contains(&long_dir), "only an overlong run is wider: {line:?} in {context}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_note_claims_a_missing_git_file_only_for_an_unlinked_row() {
+    let notes = Unavailable::new().notes();
+    let claims: Vec<&str> = notes.lines().filter(|line| line.contains(".git file is missing")).collect();
+    assert_eq!(claims.len(), 1, "{notes}");
+    assert!(claims[0].contains("lhg-before"), "{notes}");
 }

@@ -11,6 +11,7 @@
 //! timeout.
 
 use std::future::Future;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use biscuit_file::FetchPolicy;
@@ -19,7 +20,7 @@ use crate::SniffError;
 use crate::filesystem::git::commit_links::parse_remote_identity;
 use crate::filesystem::git::{ApiFlavor, GitHostingProvider, ResolvedRemote};
 
-use super::focused::INSUFFICIENT_CREDENTIALS_MESSAGE;
+use super::focused::{INSUFFICIENT_CREDENTIALS_MESSAGE, SentLog, SentWith};
 use super::types::optional_timestamp_order;
 use super::{FocusedProviderClient, PullRequestInfo};
 
@@ -75,11 +76,61 @@ pub struct PrSummary {
     pub target_branch: Option<String>,
 }
 
+/// Every open PR against a repository, and the credentials the lookup's
+/// requests were sent with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenPullRequests {
+    /// In the provider's order.
+    pub pull_requests: Vec<PrSummary>,
+    /// Covers every page and auxiliary request of the lookup.
+    pub credentials: RequestCredentials,
+}
+
 /// The commit a provider reports at the tip of one branch.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BranchHead {
     /// Full object ID: 40 (SHA-1) or 64 (SHA-256) lowercase hex digits.
     pub sha: String,
+    /// The credentials the request was sent with.
+    pub credentials: RequestCredentials,
+}
+
+/// Which credentials a successful lookup's requests were sent with.
+///
+/// Built from the selection the client made for each request as it sent it,
+/// so it describes what was sent, including a host-bound `SNIFF_*_TOKEN`
+/// override, rather than what a later look at the environment would find.
+/// It holds variable *names*, never token values.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum RequestCredentials {
+    /// Every request was sent without a token.
+    Anonymous,
+    /// At least one request carried a token. `variables` names each variable
+    /// a request read its token from, in first-use order, without repeats;
+    /// it is never empty.
+    Keyed { variables: Vec<String> },
+    /// No request is known to have been sent, so nothing can be claimed.
+    Unknown,
+}
+
+impl RequestCredentials {
+    /// Folds per-request selections: anonymous only when every request was.
+    fn from_sent(sent: &[SentWith]) -> Self {
+        let mut variables: Vec<String> = Vec::new();
+        for request in sent {
+            if let SentWith::Key(name) = request
+                && !variables.contains(name)
+            {
+                variables.push(name.clone());
+            }
+        }
+        match (sent.is_empty(), variables.is_empty()) {
+            (true, _) => Self::Unknown,
+            (false, true) => Self::Anonymous,
+            (false, false) => Self::Keyed { variables },
+        }
+    }
 }
 
 /// The environment variables a provider's blocking lookups read a token from.
@@ -88,7 +139,7 @@ pub struct CredentialEnv {
     /// Provider display name, such as `GitHub`.
     pub provider: String,
     /// Variable names in the order lookups consult them; the first one set
-    /// is sent.
+    /// to a nonempty value is sent.
     pub variables: Vec<String>,
 }
 
@@ -126,9 +177,14 @@ pub enum PrUnavailable {
     /// A 404, or a 403 whose response establishes neither rate limiting nor
     /// a credentials denial. Providers answer a private repository the caller
     /// may not see this way, so it is a permission failure as much as an
-    /// absence, whether or not a token was sent.
+    /// absence, whether or not a token was sent. `key` names the variable
+    /// whose token the failing request sent, and is `None` when it was sent
+    /// without one.
     #[error("repository not found or not permitted: {message}")]
-    NotFoundOrNotPermitted { message: String },
+    NotFoundOrNotPermitted {
+        message: String,
+        key: Option<String>,
+    },
     /// A 429, or a 403 carrying a spent `x-ratelimit-remaining` or a
     /// rate-limit body. `authenticated` is whether the token in `key` was
     /// sent.
@@ -195,14 +251,15 @@ pub fn pull_request_for_branch_with(
     branch: &str,
     deadline: Duration,
 ) -> Result<Option<PrEvidence>, PrUnavailable> {
-    let candidates = run_with_deadline(client, deadline, |client| async move {
+    let (candidates, _) = run_with_deadline(client, deadline, |client| async move {
         client.branch_pull_requests(source_repo, branch).await
     })?;
     Ok(select_evidence(candidates, source_repo))
 }
 
 /// Lists every open PR against the repository at `remote_url`, in the
-/// provider's order.
+/// provider's order, with the credentials its requests were sent with
+/// ([`RequestCredentials`]: anonymous only when every page was).
 ///
 /// Pages are followed up to the focused client's page bound. A match against
 /// a local branch must compare both [`PrSummary::source_repo`] and
@@ -225,7 +282,7 @@ pub fn pull_request_for_branch_with(
 pub fn open_pull_requests(
     remote_url: &str,
     deadline: Duration,
-) -> Result<Vec<PrSummary>, PrUnavailable> {
+) -> Result<OpenPullRequests, PrUnavailable> {
     let client = client_for_url(remote_url)?;
     open_pull_requests_with(&client, deadline)
 }
@@ -241,11 +298,11 @@ pub fn open_pull_requests(
 pub fn open_pull_requests_with(
     client: &FocusedProviderClient,
     deadline: Duration,
-) -> Result<Vec<PrSummary>, PrUnavailable> {
-    let records = run_with_deadline(client, deadline, |client| async move {
+) -> Result<OpenPullRequests, PrUnavailable> {
+    let (records, credentials) = run_with_deadline(client, deadline, |client| async move {
         client.open_pull_requests().await
     })?;
-    Ok(records
+    let pull_requests = records
         .into_iter()
         .map(|record| PrSummary {
             number: record.number,
@@ -254,16 +311,21 @@ pub fn open_pull_requests_with(
             source_branch: record.source_branch,
             target_branch: record.target_branch,
         })
-        .collect())
+        .collect();
+    Ok(OpenPullRequests {
+        pull_requests,
+        credentials,
+    })
 }
 
-/// The head commit of `branch` in the repository at `remote_url`.
+/// The head commit of `branch` in the repository at `remote_url`, with the
+/// credentials the request was sent with.
 ///
 /// `remote_url` should be the remote's *fetch* URL, since a separate push URL
 /// may name another repository. `branch` is sent as one percent-encoded path
 /// segment, so no branch name can change the repository path or the query.
 ///
-/// A request is authenticated with the first set variable of
+/// A request is authenticated with the first set, nonempty variable of
 /// [`credential_env`], and anonymous when none is set. A rejected or
 /// insufficient token is reported, not retried anonymously, as for
 /// [`open_pull_requests`].
@@ -301,7 +363,7 @@ pub fn branch_head_with(
     branch: &str,
     deadline: Duration,
 ) -> Result<BranchHead, PrUnavailable> {
-    let sha = run_with_deadline(client, deadline, |client| async move {
+    let (sha, credentials) = run_with_deadline(client, deadline, |client| async move {
         client.branch_head(branch).await
     })?;
     let object_id = matches!(sha.len(), 40 | 64)
@@ -313,7 +375,7 @@ pub fn branch_head_with(
             message: "provider sent a branch head that is not a full object ID".to_string(),
         });
     }
-    Ok(BranchHead { sha })
+    Ok(BranchHead { sha, credentials })
 }
 
 /// The provider display name and token variables for the repository at
@@ -338,11 +400,15 @@ pub fn credential_env(remote_url: &str) -> Option<CredentialEnv> {
 
 /// Runs one focused-client operation on a fresh current-thread runtime, with
 /// every request bounded by `deadline` from now, and classifies its failure.
+///
+/// A success comes with the credentials of every request the operation sent.
+/// A failure's `key` is the variable the last request sent, never a fresh
+/// look at the environment.
 fn run_with_deadline<T, F, Fut>(
     client: &FocusedProviderClient,
     deadline: Duration,
     operation: F,
-) -> Result<T, PrUnavailable>
+) -> Result<(T, RequestCredentials), PrUnavailable>
 where
     F: FnOnce(FocusedProviderClient) -> Fut,
     Fut: Future<Output = Result<T, SniffError>>,
@@ -363,10 +429,26 @@ where
         .ok_or_else(|| PrUnavailable::Other {
             message: format!("deadline {deadline:?} is out of range"),
         })?;
-    let key = client.credential_key();
-    runtime
-        .block_on(operation(client.with_deadline(expires)))
-        .map_err(|error| classify(error, Some((expires, deadline)), key))
+    let log = SentLog::default();
+    let result = runtime.block_on(operation(
+        client.with_deadline(expires).with_sent_log(Arc::clone(&log)),
+    ));
+    // The log is pushed to only between two awaits, so it cannot be poisoned
+    // in practice; if it were, nothing would be known about what was sent.
+    let sent = match log.lock() {
+        Ok(sent) => sent.clone(),
+        Err(_) => Vec::new(),
+    };
+    match result {
+        Ok(value) => Ok((value, RequestCredentials::from_sent(&sent))),
+        Err(error) => {
+            let key = match sent.last() {
+                Some(SentWith::Key(name)) => Some(name.clone()),
+                Some(SentWith::Anonymous) | None => None,
+            };
+            Err(classify(error, Some((expires, deadline)), key))
+        }
+    }
 }
 
 fn client_for_url(remote_url: &str) -> Result<FocusedProviderClient, PrUnavailable> {
@@ -431,12 +513,12 @@ fn classify(
             ..
         } if denial == INSUFFICIENT_CREDENTIALS_MESSAGE => match key {
             Some(key) => PrUnavailable::CredentialsInsufficient { key },
-            None => PrUnavailable::NotFoundOrNotPermitted { message },
+            None => PrUnavailable::NotFoundOrNotPermitted { message, key: None },
         },
         SniffError::RemoteForbidden { .. }
         | SniffError::RemoteApi {
             status: 403 | 404, ..
-        } => PrUnavailable::NotFoundOrNotPermitted { message },
+        } => PrUnavailable::NotFoundOrNotPermitted { message, key },
         SniffError::RateLimited { .. } | SniffError::RemoteApi { status: 429, .. } => {
             PrUnavailable::RateLimited {
                 authenticated: key.is_some(),
@@ -573,8 +655,39 @@ mod tests {
         );
         assert!(matches!(
             classify(list_404, None, Some("GH_TOKEN".to_string())),
-            PrUnavailable::NotFoundOrNotPermitted { .. }
+            PrUnavailable::NotFoundOrNotPermitted { key: Some(key), .. } if key == "GH_TOKEN"
         ));
+    }
+
+    #[test]
+    fn request_credentials_are_anonymous_only_when_every_request_was() {
+        let key = |name: &str| SentWith::Key(name.to_string());
+        let keyed = |names: &[&str]| RequestCredentials::Keyed {
+            variables: names.iter().map(|name| (*name).to_string()).collect(),
+        };
+        let cases = [
+            (vec![], RequestCredentials::Unknown),
+            (vec![SentWith::Anonymous], RequestCredentials::Anonymous),
+            (
+                vec![SentWith::Anonymous, SentWith::Anonymous],
+                RequestCredentials::Anonymous,
+            ),
+            (
+                vec![SentWith::Anonymous, key("GH_TOKEN")],
+                keyed(&["GH_TOKEN"]),
+            ),
+            (
+                vec![key("GH_TOKEN"), SentWith::Anonymous],
+                keyed(&["GH_TOKEN"]),
+            ),
+            (
+                vec![key("GH_TOKEN"), key("GITHUB_TOKEN"), key("GH_TOKEN")],
+                keyed(&["GH_TOKEN", "GITHUB_TOKEN"]),
+            ),
+        ];
+        for (sent, expected) in cases {
+            assert_eq!(RequestCredentials::from_sent(&sent), expected, "{sent:?}");
+        }
     }
 
     #[test]

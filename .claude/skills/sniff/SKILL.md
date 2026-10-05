@@ -139,7 +139,11 @@ entry point for "which PR came from this branch", and
 them is an error, not "no PR" or "no branch". Credentials failures are split
 into `CredentialsRequired`, `CredentialsRejected`, `CredentialsInsufficient`,
 and `RateLimited { authenticated, key }`; `key` is a variable name, never a
-value. `credential_env` lists the variables those lookups read.
+value. `credential_env` lists the variables those lookups read. A successful
+`branch_head` or `open_pull_requests` carries `RequestCredentials` (anonymous,
+keyed with variable names, or unknown), recorded per request by the sending
+client, host-bound overrides included; never re-derive it from the
+environment.
 
 Read [remote-and-repository.md](remote-and-repository.md) for topology,
 worktree, aggregate, and remote details.

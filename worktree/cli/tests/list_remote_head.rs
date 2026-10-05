@@ -387,6 +387,8 @@ fn seed_fresh_answers(fixture: &Fixture, head: &str) {
         "publication": worktree::remote_head::new_attempt_id().expect("a publication id"),
         "source_repo": null,
         "pull_requests": [],
+        // A seeded answer: nothing is known of how it was asked.
+        "credentials": { "state": "unknown" },
     });
     fs::write(&pr_store, serde_json::to_vec(&prs).expect("json")).expect("write PR store");
     let head_store = fixture.head_store();

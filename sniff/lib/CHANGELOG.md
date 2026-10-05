@@ -16,10 +16,14 @@ All notable changes to this project will be documented in this file.
 - `sniff::remote::blocking::{open_pull_requests, open_pull_requests_with, PrSummary}`: a deadline-bound, runtime-free listing of a repository's open PRs with number, URL, source repository, source branch, and target branch. Pages are followed to the focused client's bound; 401/403 and a list 404 are typed `PrUnavailable` errors, never an empty list.
 - `sniff::remote::blocking::{branch_head, branch_head_with, BranchHead}`: a deadline-bound, runtime-free lookup of one branch's head commit, sent as one percent-encoded path segment and validated as a 40- or 64-hex object ID. A 404 is `NotFoundOrNotPermitted`, never absence.
 - `sniff::remote::blocking::{credential_env, CredentialEnv}`: the provider display name and token variable names the blocking lookups read, in lookup order; `None` for unsupported remotes.
+- `sniff::remote::blocking::RequestCredentials` (`Anonymous`, `Keyed { variables }`, `Unknown`): what a successful `branch_head` or `open_pull_requests` was sent with, recorded by the client per request (host-bound `SNIFF_*_TOKEN` overrides included; a paginated answer is anonymous only when every page was). Variable names only, never values.
 - `sniff::filesystem::git::{remote_identity, RemoteIdentity}` (also re-exported from `sniff::filesystem`): a remote URL's raw scheme, lowercased host without userinfo, spelled port, and `namespace/repository` path.
 - **Breaking (source):** `PullRequestInfo::{source_repo, source_repo_is_target, source_head_sha}`, filled by every Stage-1 provider and the focused client. The head SHA is stored exactly as received (Bitbucket Cloud sends 12 characters). Adding the fields is a source break for struct-literal callers.
 
 ### Changed
+
+- **Breaking:** `BranchHead` gains `credentials`, `open_pull_requests{,_with}` return `OpenPullRequests { pull_requests, credentials }` instead of `Vec<PrSummary>`, and `PrUnavailable::NotFoundOrNotPermitted` gains `key` (the variable the failing request sent). A failure's `key` now comes from the request actually sent rather than a lookup before it.
+- A provider token variable set to the empty string is treated as unset: the request is sent without it (or with the next candidate) instead of with an empty token.
 
 - **Breaking:** `PrUnavailable::Auth` is replaced by `CredentialsRequired { key }`, `CredentialsRejected { key }`, and `CredentialsInsufficient { key }`, and `RateLimited { message }` becomes `RateLimited { authenticated, key }`. `key` names the variable whose token was sent, never its value. A 403 is `CredentialsInsufficient` only when a token was sent and the body names a missing permission or scope, `RateLimited` with `x-ratelimit-remaining: 0` or a rate-limit body, and `NotFoundOrNotPermitted` otherwise.
 - `FocusedProviderClient` reports a 403 carrying `x-ratelimit-remaining: 0` or a rate-limit body as `SniffError::RateLimited` instead of `RemoteForbidden`.

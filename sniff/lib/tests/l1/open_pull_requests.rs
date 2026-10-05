@@ -8,20 +8,27 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 use serial_test::serial;
 use sniff::filesystem::git::ApiFlavor;
-use sniff::remote::blocking::{PrSummary, PrUnavailable, open_pull_requests_with};
+use sniff::remote::blocking::{
+    OpenPullRequests, PrSummary, PrUnavailable, open_pull_requests_with,
+};
 use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, ResponseTemplate};
 
 use super::pr_for_branch::{
-    FLAVORS, Lifecycle, Provider, SHA, TARGET, check_credential_cases, list_body, pr,
+    FLAVORS, Lifecycle, Provider, SECRET, SHA, TARGET, check_credential_cases, list_body, pr,
     without_tokens,
 };
 
 const FORK: &str = "forker/project";
 
 impl Provider {
-    fn open_within(&self, deadline: Duration) -> Result<Vec<PrSummary>, PrUnavailable> {
+    fn answer_within(&self, deadline: Duration) -> Result<OpenPullRequests, PrUnavailable> {
         open_pull_requests_with(&self.client(), deadline)
+    }
+
+    fn open_within(&self, deadline: Duration) -> Result<Vec<PrSummary>, PrUnavailable> {
+        self.answer_within(deadline)
+            .map(|answer| answer.pull_requests)
     }
 
     fn open(&self) -> Result<Vec<PrSummary>, PrUnavailable> {
@@ -348,5 +355,117 @@ fn a_response_slower_than_the_deadline_times_out() {
             "{flavor:?}"
         );
         assert!(started.elapsed() < Duration::from_secs(3), "{flavor:?}");
+    }
+}
+
+/// Serves two Gitea pages (a full first page, then one row); `on_first` runs
+/// as the first page is answered, before the second request is sent.
+fn serve_two_gitea_pages(provider: &Provider, on_first: impl Fn() + Send + Sync + 'static) {
+    let first_page = (100..150)
+        .map(|number| open_pr(ApiFlavor::Gitea, number, TARGET, &format!("b{number}")))
+        .collect::<Vec<_>>();
+    provider.mount(
+        Mock::given(method("GET"))
+            .and(path("/api/repos/acme/project/pulls"))
+            .and(query_param("page", "1"))
+            .respond_with(move |_: &wiremock::Request| {
+                on_first();
+                ResponseTemplate::new(200).set_body_json(Value::Array(first_page.clone()))
+            }),
+    );
+    provider.mount(
+        Mock::given(method("GET"))
+            .and(path("/api/repos/acme/project/pulls"))
+            .and(query_param("page", "2"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([open_pr(
+                ApiFlavor::Gitea,
+                7,
+                TARGET,
+                "last"
+            )]))),
+    );
+}
+
+#[test]
+#[serial]
+fn a_paginated_answer_is_anonymous_only_when_every_page_was() {
+    use sniff::remote::blocking::RequestCredentials;
+    use std::sync::{Arc, Mutex};
+    use test_toolkit::EnvGuard;
+
+    let keyed = || RequestCredentials::Keyed {
+        variables: vec!["GITEA_TOKEN".to_string()],
+    };
+    let _tokens = without_tokens();
+
+    // Every page anonymous.
+    let provider = Provider::start(ApiFlavor::Gitea);
+    serve_two_gitea_pages(&provider, || {});
+    let answer = provider.answer_within(Duration::from_secs(5)).unwrap();
+    assert_eq!(answer.credentials, RequestCredentials::Anonymous);
+    assert_eq!((answer.pull_requests.len(), provider.received_queries().len()), (51, 2));
+
+    // Every page keyed.
+    {
+        let _token = EnvGuard::set_safe("GITEA_TOKEN", SECRET);
+        let provider = Provider::start(ApiFlavor::Gitea);
+        serve_two_gitea_pages(&provider, || {});
+        let answer = provider.answer_within(Duration::from_secs(5)).unwrap();
+        assert_eq!(answer.credentials, keyed());
+        assert_eq!(provider.received_queries().len(), 2);
+        assert!(!format!("{answer:?}").contains(SECRET));
+    }
+
+    // The key appears between the pages: one keyed page makes it keyed.
+    let guards: Arc<Mutex<Vec<EnvGuard>>> = Arc::default();
+    let provider = Provider::start(ApiFlavor::Gitea);
+    let set_later = Arc::clone(&guards);
+    serve_two_gitea_pages(&provider, move || {
+        set_later
+            .lock()
+            .unwrap()
+            .push(EnvGuard::set_safe("GITEA_TOKEN", SECRET));
+    });
+    let answer = provider.answer_within(Duration::from_secs(5)).unwrap();
+    assert_eq!(answer.credentials, keyed());
+    let requests = provider.received_requests();
+    assert_eq!(requests.len(), 2, "no extra request");
+    assert!(!requests[0].headers.contains_key("authorization"));
+    assert!(requests[1].headers.contains_key("authorization"));
+    guards.lock().unwrap().clear();
+
+    // The key disappears between the pages: still keyed, never anonymous.
+    let guards: Arc<Mutex<Vec<EnvGuard>>> = Arc::default();
+    let _token = EnvGuard::set_safe("GITEA_TOKEN", SECRET);
+    let provider = Provider::start(ApiFlavor::Gitea);
+    let remove_later = Arc::clone(&guards);
+    serve_two_gitea_pages(&provider, move || {
+        remove_later
+            .lock()
+            .unwrap()
+            .push(EnvGuard::remove_safe("GITEA_TOKEN"));
+    });
+    let answer = provider.answer_within(Duration::from_secs(5)).unwrap();
+    assert_eq!(answer.credentials, keyed());
+    assert_eq!(provider.received_requests().len(), 2);
+    guards.lock().unwrap().clear();
+}
+
+#[test]
+#[serial]
+fn an_empty_list_reports_its_requests_credentials() {
+    use sniff::remote::blocking::RequestCredentials;
+    let _tokens = without_tokens();
+    for flavor in FLAVORS {
+        let provider = Provider::start(flavor);
+        provider.serve_list(Vec::new());
+
+        let answer = provider.answer_within(Duration::from_secs(5)).unwrap();
+
+        assert_eq!(
+            (answer.pull_requests.len(), answer.credentials),
+            (0, RequestCredentials::Anonymous),
+            "{flavor:?}"
+        );
     }
 }

@@ -104,3 +104,4 @@ Named device routes (`{name}` = device name from `~/homey.json`):
 
 - [Sony JSON-RPC Quirks](sony-quirks.md) — Response format gotchas, ghost methods, field inconsistencies
 - [Architecture](architecture.md) — Library, CLI, and server design details
+- [Proxmox](proxmox.md) -- detailed on Proxmox PVE

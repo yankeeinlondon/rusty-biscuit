@@ -434,6 +434,96 @@ fn graph_and_verbose_share_one_merge_base() {
     assert_eq!(verbose.branch_commits.len(), 1);
 }
 
+/// Verbose labels describe the snapshot the listing accepted, not Git's live
+/// branch refs; tags, which the snapshot does not capture, stay live.
+#[test]
+#[serial_test::serial]
+fn verbose_labels_follow_the_snapshot_and_keep_live_tags() {
+    let repo = branches();
+    let _guard = DirGuard::enter(&repo.path);
+    run_git(&repo.path, &["config", "tag.gpgsign", "false"]);
+    run_git(&repo.path, &["update-ref", "refs/remotes/origin/main", &repo.c2]);
+    run_git(&repo.path, &["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"]);
+    run_git(&repo.path, &["tag", "v1", &repo.c2]);
+    let snapshot = input("feature-a", &["main", "feature-a"], ForkOriginStore::default());
+    let labels = |verbose: &VerboseData| {
+        (
+            verbose.merge_base.as_ref().map(|commit| commit.refs.clone()),
+            verbose.branch_commits.iter().map(|commit| commit.refs.clone()).collect::<Vec<_>>(),
+        )
+    };
+
+    let (_, unmoved) = gather(&snapshot, false, true);
+    let live = git_output(&repo.path, &["log", "-1", "--format=%D", &repo.c2]);
+    assert_eq!(live, "tag: v1, origin/main, origin/HEAD", "Git's own spelling, in its order");
+    assert_eq!(labels(&unmoved.expect("verbose")), (Some(live), vec!["HEAD -> feature-a".to_string()]));
+
+    // A fetch and a new branch after the snapshot; a new tag is live.
+    run_git(&repo.path, &["update-ref", "refs/remotes/origin/main", &repo.c3]);
+    run_git(&repo.path, &["branch", "late", &repo.a1]);
+    run_git(&repo.path, &["tag", "v2", &repo.a1]);
+    let (_, moved) = gather(&snapshot, false, true);
+
+    assert_eq!(
+        labels(&moved.expect("verbose")),
+        (Some("tag: v1, origin/main, origin/HEAD".to_string()), vec!["HEAD -> feature-a, tag: v2".to_string()]),
+        "origin/main and origin/HEAD stay at the snapshot's tip; `late` is not in it"
+    );
+}
+
+/// A gather reads history only through the snapshot's object IDs, so refs
+/// that advance, appear, or disappear after it was captured change nothing
+/// it returns, in the focused and the base view alike.
+#[test]
+#[serial_test::serial]
+fn refs_moved_after_the_snapshot_leave_the_gather_unchanged() {
+    let repo = branches();
+    let _guard = DirGuard::enter(&repo.path);
+    run_git(&repo.path, &["update-ref", "refs/remotes/origin/main", &repo.c2]);
+    let names = ["main", "feature-a", "feature-b"];
+    let focused = input("feature-a", &names, ForkOriginStore::default());
+    let base = input("main", &names, ForkOriginStore::default());
+    let verbose_shape = |verbose: Option<VerboseData>| {
+        let verbose = verbose.expect("verbose");
+        let detail = |commit: &CommitDetail| (commit.short_sha.clone(), commit.message.clone(), commit.refs.clone());
+        (verbose.merge_base.as_ref().map(detail), verbose.branch_commits.iter().map(detail).collect::<Vec<_>>())
+    };
+
+    let (focused_graph, focused_verbose) = gather(&focused, true, true);
+    let (base_graph, _) = gather(&base, true, false);
+    let (focused_verbose, focused_graph, base_graph) =
+        (verbose_shape(focused_verbose), focused_graph.expect("focused view"), base_graph.expect("base view"));
+
+    // Every kind of move: both branches of the focused view advance,
+    // origin/main is fetched forward, one branch is deleted, one created.
+    run_git(&repo.path, &["checkout", "-q", "feature-a"]);
+    commit(&repo.path, "a2");
+    run_git(&repo.path, &["checkout", "-q", "main"]);
+    let c4 = commit(&repo.path, "c4");
+    run_git(&repo.path, &["update-ref", "refs/remotes/origin/main", &c4]);
+    run_git(&repo.path, &["branch", "-q", "-D", "feature-b"]);
+    run_git(&repo.path, &["branch", "late", &repo.a1]);
+
+    recorder::start_recording();
+    let (moved_focused_graph, moved_focused_verbose) = gather(&focused, true, true);
+    let (moved_base_graph, _) = gather(&base, true, false);
+    let calls = recorder::finish_recording();
+
+    assert_eq!(moved_focused_graph.expect("focused view"), focused_graph);
+    assert_eq!(verbose_shape(moved_focused_verbose), focused_verbose);
+    assert_eq!(moved_base_graph.expect("base view"), base_graph);
+    let ref_names = ["HEAD", "main", "feature-a", "feature-b", "late", "origin/main", "origin/HEAD"];
+    let named: Vec<&Vec<String>> = calls
+        .iter()
+        .filter(|args| {
+            args.iter()
+                .flat_map(|arg| arg.split(".."))
+                .any(|part| ref_names.contains(&part.trim_start_matches('.')))
+        })
+        .collect();
+    assert!(!calls.is_empty() && named.is_empty(), "every revision is an object ID; named: {named:?}");
+}
+
 #[test]
 #[serial_test::serial]
 fn nothing_is_gathered_when_detached_or_not_needed() {
@@ -3003,4 +3093,26 @@ fn the_observed_graph_keeps_recent_commits_on_every_lane_at_200x60() {
     }
     let sniff_start = first_on_lane(&geometry, "fix/sniff");
     assert!(repo.w1().starts_with(sniff_start.parents[0].as_str()), "fix/sniff forks at W1: {sniff_start:?}\n{context}");
+}
+
+/// Commit messages, scopes, and ref names are Git data, so the verbose
+/// section shows them literally rather than as Prose markup.
+#[test]
+fn verbose_commit_lines_show_messages_and_refs_literally() {
+    use biscuit_terminal::components::renderable::TerminalRenderable as _;
+    let render = |message: &str, refs: &str| {
+        let commit = CommitDetail {
+            short_sha: "abc1234".to_string(),
+            message: message.to_string(),
+            timestamp: Local::now(),
+            refs: refs.to_string(),
+        };
+        biscuit_test_harness::strip_ansi(&Prose::new(format_commit(&commit)).render_optimistic(Some(400)))
+    };
+    let conventional = render("fix(<red>s</red>): a_b_c <red>d</red>", "HEAD -> feat/<b>x, tag: v_1_, origin/<i>y");
+    for literal in ["<red>s</red>", "a_b_c <red>d</red>", "feat/<b>x", "v_1_", "origin/<i>y"] {
+        assert!(conventional.contains(literal), "{literal:?} in {conventional:?}");
+    }
+    let plain = render("<red>plain</red> *message*", "");
+    assert!(plain.contains("<red>plain</red> *message*"), "{plain:?}");
 }
