@@ -8,7 +8,6 @@ use biscuit_terminal::terminal::Terminal;
 use worktree::git::recorder;
 use worktree::worktree::{list_worktrees, parse_worktree_state};
 
-use crate::commands::git_graph;
 use crate::perf::PerfCollector;
 
 mod pipeline;
@@ -624,10 +623,10 @@ fn perf_subprocess_counts_meet_sla() {
     // one more `--is-ancestor` and one first-parent chain (`rev-list`) when
     // the boundary is an ordinary fork.
     let parsed = parse_worktree_state().expect("parse");
-    let input = git_graph::GatherInput::from_list(&parsed, parsed.refs());
+    let input = worktree::graph::GatherInput::from_list(&parsed, parsed.refs());
     recorder::start_recording();
     let t0 = Instant::now();
-    let (graph, verbose) = git_graph::gather(&input, true, false);
+    let (graph, verbose) = worktree::graph::gather(&input, true, false);
     let base_elapsed = t0.elapsed();
     let base_calls = recorder::finish_recording();
 

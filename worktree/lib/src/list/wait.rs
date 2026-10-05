@@ -36,16 +36,16 @@
 //! without a receipt leaves it standing.
 //!
 //! The core ([`wait`]) is pure over [`WaitEnv`], so tests script the stores,
-//! the receipt, the locks, and the clock.
+//! the receipt, the locks, and the clock. It draws nothing: a caller shows
+//! progress through the `on_phase` callback.
 
 use std::path::{Path, PathBuf};
 use std::process::Child;
 use std::time::{Duration, Instant};
 
-use biscuit_terminal::components::spinner::{Spinner, SpinnerHandle};
-use worktree::pull_requests::{StoredPublication, pr_lock_held, stored_publication, unix_now};
-use worktree::remote_head::{
-    ATTEMPT_MAX_AGE, Attempt, CredentialEvidence, FallbackReason, HeadStatus, Phase, PrFailure, PrStatus, Receipt, StoreState,
+use crate::pull_requests::{StoredPublication, pr_lock_held, stored_publication, unix_now};
+use crate::remote_head::{
+    ATTEMPT_MAX_AGE, Attempt, CredentialEvidence, HeadStatus, Phase, PrFailure, PrStatus, Receipt, StoreState,
     load_receipt, new_attempt_id, read_store, receipt_path_beside, refresh_lock_held,
 };
 
@@ -55,8 +55,6 @@ pub const ORDINARY_BUDGET: Duration = Duration::from_secs(3);
 /// fetch, and publication allowance.
 pub const FORCED_BUDGET: Duration = ATTEMPT_MAX_AGE;
 const POLL_INTERVAL: Duration = Duration::from_millis(25);
-/// The spinner stays hidden this long, so a quick answer never flashes it.
-const SPINNER_DELAY: Duration = Duration::from_millis(150);
 
 /// What the launched worker is asked to do.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -519,46 +517,6 @@ fn reported(status: &PrStatus) -> Option<PrEnd> {
         PrStatus::Ignored => Some(PrEnd::Ignored),
         PrStatus::Unsupported => Some(PrEnd::Unsupported),
         PrStatus::Contended => None,
-    }
-}
-
-/// The spinner's text for `phase`.
-pub fn phase_text(phase: Phase) -> &'static str {
-    match phase {
-        Phase::CheckingFallback { reason: FallbackReason::NoKey | FallbackReason::NotVisible } => {
-            "no API key, using fallback method"
-        }
-        Phase::CheckingFallback { reason: FallbackReason::RateLimited } => "rate limited, using fallback method",
-        Phase::Fetching => "pulling remote updates",
-        Phase::Checking | Phase::CheckingFallback { .. } => "updating",
-    }
-}
-
-/// The spinner shown while waiting; it draws only when its output is a
-/// terminal, after [`SPINNER_DELAY`].
-pub struct Progress {
-    spinner: SpinnerHandle,
-}
-
-impl Progress {
-    pub fn on_stderr() -> Self {
-        Self { spinner: Spinner::new(phase_text(Phase::Checking)).with_delay(SPINNER_DELAY).start_on_stderr() }
-    }
-
-    #[cfg(test)]
-    pub fn on(writer: impl std::io::Write + Send + 'static, is_terminal: bool) -> Self {
-        Self {
-            spinner: Spinner::new(phase_text(Phase::Checking)).with_delay(SPINNER_DELAY).start_on(writer, is_terminal),
-        }
-    }
-
-    pub fn show(&self, phase: Phase) {
-        self.spinner.set_text(phase_text(phase));
-    }
-
-    /// Clears the spinner's line, if it drew one.
-    pub fn finish(self) {
-        self.spinner.finish();
     }
 }
 

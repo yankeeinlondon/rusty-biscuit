@@ -28,10 +28,11 @@ use super::list_table::{
 };
 use crate::perf;
 
-mod wait;
+mod progress;
 
-pub use wait::{FORCED_BUDGET, LaunchArgs, ORDINARY_BUDGET, WorkerHandle, WorkerLaunch};
-use wait::{HeadEnd, PrEnd, Progress, StoreEnv, WaitEnd, WaitRequest};
+use progress::Progress;
+use worktree::list::wait::{self, HeadEnd, PrEnd, StoreEnv, WaitEnd, WaitRequest};
+pub use worktree::list::wait::{FORCED_BUDGET, LaunchArgs, ORDINARY_BUDGET, WorkerHandle, WorkerLaunch};
 
 /// The flags that apply only to listing (spec §7–§9).
 #[derive(Debug, Clone, Copy, Default)]
@@ -448,14 +449,14 @@ struct Listing {
     remote: RemoteAnswers,
     ff: Option<FfResult>,
     /// Gathered from the same accepted snapshot as `list`.
-    graph: Option<git_graph::GraphFacts>,
-    verbose: Option<git_graph::VerboseData>,
+    graph: Option<worktree::graph::GraphFacts>,
+    verbose: Option<worktree::graph::VerboseData>,
     main_checkout: Option<PathBuf>,
     head_store: Option<PathBuf>,
 }
 
 /// Graph and verbose data from one snapshot, with how long the gather took.
-type History = ((Option<git_graph::GraphFacts>, Option<git_graph::VerboseData>), Duration);
+type History = ((Option<worktree::graph::GraphFacts>, Option<worktree::graph::VerboseData>), Duration);
 
 /// Everything `wt list` shows, gathered while the refresh worker runs.
 ///
@@ -499,7 +500,7 @@ fn gather_listing(
     let needs_graph = image_support != ImageSupport::None;
     let initial = list.ref_snapshot().clone();
     let cache = list.load_comparison_cache();
-    let first_input = git_graph::GatherInput::from_list(&list, initial.tips());
+    let first_input = worktree::graph::GatherInput::from_list(&list, initial.tips());
     let needs_verbose = verbose && first_input.has_verbose();
     let needs_history = needs_graph || needs_verbose;
 
@@ -514,7 +515,7 @@ fn gather_listing(
                 #[cfg(test)]
                 tests::overlap::arrive(tests::overlap::Gather::Graph);
                 let t0 = Instant::now();
-                let data = git_graph::gather(&first_input, needs_graph, needs_verbose);
+                let data = worktree::graph::gather(&first_input, needs_graph, needs_verbose);
                 #[cfg(test)]
                 tests::overlap::finished(tests::overlap::Gather::Graph);
                 (data, t0.elapsed())
@@ -573,12 +574,12 @@ fn gather_listing(
         (first_facts, first_history.map(|(data, _)| data))
     } else {
         let t0 = Instant::now();
-        let final_input = git_graph::GatherInput::from_list(&list, accepted_refs.tips());
+        let final_input = worktree::graph::GatherInput::from_list(&list, accepted_refs.tips());
         let ((facts, facts_elapsed), history) = std::thread::scope(|scope| {
             let history = needs_history.then(|| {
                 scope.spawn(|| {
                     let t0 = Instant::now();
-                    (git_graph::gather(&final_input, needs_graph, needs_verbose), t0.elapsed())
+                    (worktree::graph::gather(&final_input, needs_graph, needs_verbose), t0.elapsed())
                 })
             });
             let t0 = Instant::now();
@@ -697,8 +698,7 @@ fn run_pipeline(
     let badges = facts.badges();
     let graph = graph_facts.and_then(|graph_facts| {
         let t0 = perf.then(Instant::now);
-        let graph = graph_facts
-            .to_git_graph(badges, parsed_width.clone())
+        let graph = git_graph::to_git_graph(&graph_facts, badges, parsed_width.clone())
             .with_max_rows(max_graph_rows)
             .render_without_notes(&image_terminal(terminal));
         if let Some(start) = t0 {
@@ -732,7 +732,7 @@ fn run_pipeline(
     Ok(collector)
 }
 
-fn render_verbose(data: &git_graph::VerboseData, terminal: &Terminal) -> String {
+fn render_verbose(data: &worktree::graph::VerboseData, terminal: &Terminal) -> String {
     let default_branch = Prose::escape_text(&data.default_branch);
     let branch = Prose::escape_text(&data.branch);
     let mut out = String::new();
