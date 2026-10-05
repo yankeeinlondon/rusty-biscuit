@@ -76,8 +76,10 @@ unreadable or non-UTF-8 files, `UnsupportedLanguage`, `ParseFailed`).
 resolved via `canonicalize_simplified`), not the spelling read: every
 spelling of one file has the same path, records, IDs, cache key and entry,
 and a symlink is its target. Detection reads the identity; `Io` and
-`UnsupportedLanguage` name the spelling given. `scanner::collect_files`
-returns identities, and `hug` canonicalizes its working directory so roots
+`UnsupportedLanguage` name the spelling given. `scanner::collect_files` and
+`scanner::collect_selected_files` (plus caller-resolved explicit files, listed
+whatever `.gitignore`/fixture exclusions say, still subject to
+`excluded_files`; with no inputs only they are listed) return identities, and `hug` canonicalizes its working directory so roots
 match (Windows 8.3 short names). `tree-hugger/docs/cache-design.md#file-identity`.
 
 ```rust
@@ -102,13 +104,54 @@ let query = SymbolQuery::new()                          // every kind, Declarati
 SymbolQuery::complete_index();                          // what symbol_index_v2() runs
 SymbolQuery::for_passes(&[AnalysisPass::Bind]);         // what symbol_index_with_passes runs
 
+// Predicates and naming inputs: applied after analysis and the cache
+let query = SymbolQuery::new()
+    .scopes([SymbolScope::Item, SymbolScope::Member])
+    .visibility(VisibilityLevel::Public)                // repeatable, exact level
+    .exported(true)
+    .exclude_tests(true)                                // or .tests_only(true); last wins
+    .undocumented(true)                                 // has_docs == Some(false)
+    .deprecated(true)
+    .is_async(true)
+    .returns("Result<*")                                // glob_match: whole, case-sensitive
+    .param_type("&str")
+    .min_params(2)
+    .in_container(NamePattern::new("TreeFile"))         // repeatable
+    .name(NamePattern::new("parse"))                    // repeatable, smart case
+    .exclude_name(NamePattern::exact("parse_all"))      // wins over inclusions
+    .scan_root("tree-hugger")                           // prefix `lib/src/x.rs#`
+    .naming_context(NamingContext::new("src", "crate")); // prefix `crate::x::`
+query.matches(&record);                                 // the one record filter
+
 pub struct SymbolQueryResult {
-    pub index: FileSymbolIndex,                         // selected records only
+    pub index: FileSymbolIndex,                         // selected records passing the predicates
     pub completed_capabilities: Vec<Capability>,        // canonical order
     pub selected_kinds: Option<Vec<SymbolKindV2>>,      // None = every kind
+    // private: the applied prefix and predicates
 }
+result.name_prefix();              // prefix on every name not namespace-rooted
 result.narrowed(&narrower_query);  // Some(exactly the narrower result) or None if not covered
 ```
+
+Predicates push down only what they read (`file/filter.rs::RecordFilter`,
+`SymbolQuery::settle`): a shape predicate (`is_async`, `returns`,
+`param_type`, `min_params`) intersects the kinds with Function/Method/
+Constructor, test/deprecation predicates add `Flags`, `undocumented` and
+`min_params` add `Metrics`; the effective kinds/capabilities are what the
+planner and cache see, whatever the builder order. `run_query`,
+`coverage::project` and `SourceFile::analyze` return **unfinished** results
+(in-file names, no predicate); `SymbolQueryResult::finish` (called by
+`TreeFile::query`, `SymbolCache::query` and `narrowed`) applies the prefix
+once, then the predicates. The cache stores only unfinished indexes, so an
+entry never depends on a predicate or scan root. A filtered result narrows
+only to the same predicates under the same prefix; an unfiltered one is
+re-prefixed (`without_prefix`). `NamePattern` (`file/pattern.rs`): smart case,
+substring unless `*` (whole-string glob) or exact (`exact`/trailing `!`, `*`
+literal); qualified when it holds `#` or the language's separator, then it
+matches the displayed `qualified_name` (anchored at the file prefix). A
+qualified `in_container` pattern matches the record's qualified name minus
+its own name. `portable_relative` (`file/naming.rs`) is the one path
+projection, shared by the prefix and the CLI.
 
 | Capability | Implies | Work |
 |---|---|---|
