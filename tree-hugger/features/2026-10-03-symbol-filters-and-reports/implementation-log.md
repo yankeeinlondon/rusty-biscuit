@@ -244,9 +244,163 @@ docs_updated_during_phase_6:
 docs_created_during_phase_6: []
 skills_files_updated_during_phase_6:
   - .claude/skills/tree-hugger/SKILL.md
+source_files_during_phase_7:
+  - tree-hugger/cli/src/render.rs
+  - tree-hugger/cli/src/scanner.rs
+  - tree-hugger/cli/src/selection.rs
+  - tree-hugger/cli/tests/symbols/reports.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/tests.rs
+  - tree-hugger/lib/src/file/extract/classify.rs
+  - tree-hugger/lib/src/file/extract/metrics.rs
+  - tree-hugger/lib/src/file/extract/mod.rs
+  - tree-hugger/lib/src/file/extract/qualified_name.rs
+  - tree-hugger/lib/src/file/extract/signatures.rs
+  - tree-hugger/lib/src/file/naming.rs
+  - tree-hugger/lib/src/file/query.rs
+  - tree-hugger/lib/src/file/tree_file/definitions.rs
+  - tree-hugger/lib/src/shared/schema_v2/facets.rs
+docs_updated_during_phase_7:
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+  - tree-hugger/docs/symbol-reports.md
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/README.md
+  - tree-hugger/cli/README.md
+  - tree-hugger/features/_unscheduled/symbol-type-relations/spec.md
+  - tree-hugger/features/_unscheduled/stats-package-grouping/spec.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+  - .claude/skills/tree-hugger/SKILL.md
 packages:
   - tree-hugger
   - tree-hugger-cli
+source_code:
+  - tree-hugger/lib/src/file/extract/mod.rs
+  - tree-hugger/lib/src/file/extract/declaration.rs
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/symbols_coverage.rs
+  - tree-hugger/lib/tests/l1/symbols_fixtures.rs
+  - tree-hugger/lib/tests/l1/symbols_report_matrices.rs
+  - tree-hugger/lib/tests/fixtures/symbols/test_files/go/point_test.go
+  - tree-hugger/lib/tests/fixtures/symbols/test_files/python/test_point.py
+  - tree-hugger/lib/tests/fixtures/symbols/test_files/python/point_test.py
+  - tree-hugger/lib/tests/fixtures/symbols/test_files/python/conftest.py
+  - tree-hugger/lib/tests/fixtures/symbols/test_files/javascript/point.test.js
+  - tree-hugger/lib/tests/fixtures/symbols/test_files/javascript/point.spec.js
+  - tree-hugger/lib/tests/fixtures/symbols/test_files/typescript/point.test.ts
+  - tree-hugger/lib/tests/fixtures/symbols/test_files/typescript/point.spec.ts
+  - tree-hugger/lib/tests/fixtures/symbols/test_files/rust/tests/point.rs
+  - tree-hugger/lib/src/shared/schema_v2/kinds.rs
+  - tree-hugger/lib/src/shared/schema_v2/facets.rs
+  - tree-hugger/lib/src/shared/schema_v2/mod.rs
+  - tree-hugger/lib/src/shared/symbol.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/tree_file/definitions.rs
+  - tree-hugger/lib/src/file/extract/scope.rs
+  - tree-hugger/lib/src/file/extract/qualified_name.rs
+  - tree-hugger/lib/src/file/extract/modifiers.rs
+  - tree-hugger/lib/src/file/extract/classify.rs
+  - tree-hugger/lib/src/file/extract/static_flags/mod.rs
+  - tree-hugger/lib/src/file/extract/visibility/mod.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/tests.rs
+  - tree-hugger/lib/src/cache/symbol_cache.rs
+  - tree-hugger/lib/src/god_files/analysis.rs
+  - tree-hugger/lib/tests/l1/symbols_adapter.rs
+  - tree-hugger/lib/tests/l1/symbols_async.rs
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
+  - tree-hugger/lib/tests/l1/symbols_containment.rs
+  - tree-hugger/lib/tests/l1/symbols_header.rs
+  - tree-hugger/lib/tests/l1/symbols_kinds.rs
+  - tree-hugger/lib/tests/l1/symbols_qualified_names.rs
+  - tree-hugger/lib/tests/l1/symbols_scope.rs
+  - tree-hugger/lib/tests/l1/symbols_visibility.rs
+  - tree-hugger/lib/tests/fixtures/symbols/bash.sh
+  - tree-hugger/lib/tests/fixtures/symbols/c_sharp.cs
+  - tree-hugger/lib/tests/fixtures/symbols/cpp.cpp
+  - tree-hugger/lib/tests/fixtures/symbols/go.go
+  - tree-hugger/lib/tests/fixtures/symbols/java.java
+  - tree-hugger/lib/tests/fixtures/symbols/javascript.js
+  - tree-hugger/lib/tests/fixtures/symbols/lua.lua
+  - tree-hugger/lib/tests/fixtures/symbols/python.py
+  - tree-hugger/lib/tests/fixtures/symbols/rust.rs
+  - tree-hugger/lib/tests/fixtures/symbols/scala.scala
+  - tree-hugger/lib/tests/fixtures/symbols/swift.swift
+  - tree-hugger/lib/tests/fixtures/symbols/typescript.ts
+  - tree-hugger/lib/tests/fixtures/symbols/zsh.zsh
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/src/prelude.rs
+  - tree-hugger/cli/src/report.rs
+  - tree-hugger/cli/tests/symbols/cache_lookup.rs
+  - tree-hugger/cli/tests/symbols/cache_robustness.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.plain
+  - tree-hugger/lib/src/file/query.rs
+  - tree-hugger/lib/src/file/extract/attributes.rs
+  - tree-hugger/lib/src/file/extract/flags.rs
+  - tree-hugger/lib/src/file/extract/metrics.rs
+  - tree-hugger/lib/src/file/extract/doc_comments.rs
+  - tree-hugger/lib/src/file/extract/signatures.rs
+  - tree-hugger/lib/src/analysis/coverage.rs
+  - tree-hugger/lib/tests/l1/symbols_flags.rs
+  - tree-hugger/lib/tests/l1/symbols_metrics.rs
+  - tree-hugger/lib/tests/l1/symbols_kind_coverage.rs
+  - tree-hugger/lib/tests/l1/symbols_query.rs
+  - tree-hugger/lib/tests/fixtures/symbols/c.c
+  - tree-hugger/lib/tests/fixtures/symbols/perl.pl
+  - tree-hugger/lib/tests/fixtures/symbols/php.php
+  - tree-hugger/cli/src/declarations.rs
+  - tree-hugger/cli/tests/symbols/report.rs
+  - tree-hugger/lib/src/file/pattern.rs
+  - tree-hugger/lib/src/file/naming.rs
+  - tree-hugger/lib/src/file/filter.rs
+  - tree-hugger/lib/src/file/source_file.rs
+  - tree-hugger/lib/src/file/extract/visibility/ecma.rs
+  - tree-hugger/lib/src/lib.rs
+  - tree-hugger/lib/tests/l1/symbols_export.rs
+  - tree-hugger/lib/tests/l1/symbols_query_filters.rs
+  - tree-hugger/lib/tests/l1/symbols_selection_filters.rs
+  - tree-hugger/cli/src/scanner.rs
+  - tree-hugger/cli/tests/symbols/order.rs
+  - tree-hugger/cli/tests/symbols/wiring.rs
+  - tree-hugger/lib/src/scanner.rs
+  - tree-hugger/cli/src/selection.rs
+  - tree-hugger/cli/src/classes.rs
+  - tree-hugger/cli/tests/symbols/filters.rs
+  - tree-hugger/cli/tests/symbols/main.rs
+  - tree-hugger/cli/tests/symbols/prelude.rs
+  - tree-hugger/cli/tests/symbols/classes.rs
+  - tree-hugger/cli/tests/cli.rs
+  - tree-hugger/cli/tests/level2_declarations.rs
+  - tree-hugger/cli/src/output.rs
+  - tree-hugger/cli/src/stats.rs
+  - tree-hugger/cli/src/render.rs
+  - tree-hugger/cli/tests/symbols/reports.rs
+  - tree-hugger/cli/tests/symbols/golden.rs
+  - tree-hugger/cli/tests/support/terminal_report.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.table
+  - tree-hugger/cli/tests/fixtures/golden/symbols.tree
+  - tree-hugger/cli/tests/fixtures/golden/symbols.stats
+  - tree-hugger/cli/tests/fixtures/golden/symbols-stats.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.jsonl
+  - tree-hugger/cli/tests/fixtures/golden/symbols-signatures-full.plain
+documentation:
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/docs/symbol-reports.md
+  - tree-hugger/lib/README.md
+  - tree-hugger/features/_unscheduled/deferred-kind-precision/spec.md
+  - tree-hugger/README.md
+  - tree-hugger/cli/README.md
+  - tree-hugger/features/2026-10-03-symbol-filters-and-reports/scope-dump.md
+  - tree-hugger/features/_unscheduled/symbol-type-relations/spec.md
+  - tree-hugger/features/_unscheduled/stats-package-grouping/spec.md
+completed_phase: 7
+implemented: true
 ---
 
 # Implementation Log for 2026-10-03-symbol-filters-and-reports (7 phases)
@@ -1508,3 +1662,66 @@ qualified-name walk above dominate.
 `hug symbols` in `tree-hugger/`: 4,635 lines by default, 16,681 with
 `--all-scopes` (= `hug-post`'s 16,681): 28% remain. The release notes quote
 these two figures.
+
+### Phase 7 close-out (7.7 and 7.9), 2026-10-05
+
+The Phase 7 run ended before 7.7 and 7.9 finished. Its agent had started the
+7.7 drift review as a background subagent and `just test-l2` in the
+background. It then called `ScheduleWakeup` and ended its turn, expecting to
+be resumed when they reported. In a non-interactive `claudine compose` run,
+ending the turn ends the session, so nothing resumed it. The success stack
+committed the partial work (`a13123339`), and the plan, log and spec were left
+without their completion flags. The implement prompts now carry a rule
+against ending a turn with work pending (`prompts/_finish-before-exit.md`),
+and `implement-plan`'s success stack warns when a final phase exits without
+`implemented: true`.
+
+**7.7 Comment drift pass.** The interrupted run had already fixed some
+comments (the `74fce8453` library drift and the table-link fix it found).
+This close-out reviewed every changed symbol in the feature's 43 source files
+(`git diff 99a9b9324 HEAD`) in three disjoint passes, about 205 symbols in
+all. It found 8 drifts and resolved each one, code winning:
+
+- `lib/src/file/extract/signatures.rs` `declared_parameters`: the doc cited
+  `x => x` as having no parameter list, but the code returns one parameter.
+  The example was removed.
+- `signatures.rs` `extract_csharp_parameter`: the doc omitted the `params`
+  variadic case. Added.
+- `lib/src/file/extract/classify.rs` `ContainerLookup::SameFileTable`: Lua
+  `M.x` was missing beside `M.f`/`M:m`. Added.
+- `lib/src/file/extract/qualified_name.rs` `qualified_names`: the doc omitted
+  enum variants and unextracted named nodes (a TS `namespace`, Java/C#
+  constructors). Added.
+- `lib/src/file/naming.rs` `portable_relative`: the doc said both paths are
+  canonicalized before comparing. The code tries the written path first, and
+  only then resolves `root` and the parent directory of `path`. Rewritten.
+- `lib/src/shared/schema_v2/facets.rs` `IdentityFacet::qualified_name`: the
+  doc said the name never depends on the scan root, but finished query results
+  carry the prefix and only cache entries and IDs do not. Clarified.
+- `cli/src/scanner.rs`: an inline comment still said "symbol glob" after
+  `normalize_symbol_glob` was removed. Now "symbol name".
+- `cli/src/selection.rs` `--name` help (user-visible): it claimed qualified
+  patterns match "from its start", but only `*` patterns are anchored. The
+  wording was corrected.
+
+Two pieces of help text are incomplete but not wrong, and were left as they
+are: `--plain` does not mention that it disables wrapping, and
+`--signatures short` does not mention enum variant lists. Every edit is
+comment-only: `git diff -U0` shows no changed non-comment line.
+
+**7.9 Final validation**, in `tree-hugger/` after the drift edits:
+
+- `just test`: 929 passed, 0 skipped.
+- `just test-l2`: 6 passed.
+- `just lint`: clean.
+- `just cross-check tree-hugger --os linux`: 680 passed.
+- `just cross-check tree-hugger-cli --os linux`: 249 passed, 6 L2 skipped.
+- Windows: `just cross-check tree-hugger-cli --os windows` failed
+  `_storage_preflight` on `build-win-native` (15.2 GiB free, the sweep freed
+  0), the same as Phases 4–6. No Windows evidence was produced; per the CI
+  schedule, the Windows leg runs on the push to `main`.
+- `git status`: no stray files. The only tree-hugger changes are the seven
+  comment edits above.
+
+`cargo fmt` was not run, nothing was committed, and the feature stays out of
+`_completed`. Terminal state: implementation complete, ready for review.

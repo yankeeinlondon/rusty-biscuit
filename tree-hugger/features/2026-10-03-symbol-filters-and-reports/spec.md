@@ -11,6 +11,8 @@ reviewed_on: 2026-10-04
 review_note: "the clarification process served as a review"
 review_iterations: 0
 needs_rulings: false
+implemented: true
+implemented_by: \"claude/opus\"
 $schema:
   status: |-
     enum(

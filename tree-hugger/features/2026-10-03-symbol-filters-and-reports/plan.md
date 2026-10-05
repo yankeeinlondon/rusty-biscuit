@@ -248,9 +248,163 @@ docs_updated_during_phase_6:
 docs_created_during_phase_6: []
 skills_files_updated_during_phase_6:
   - .claude/skills/tree-hugger/SKILL.md
+source_files_during_phase_7:
+  - tree-hugger/cli/src/render.rs
+  - tree-hugger/cli/src/scanner.rs
+  - tree-hugger/cli/src/selection.rs
+  - tree-hugger/cli/tests/symbols/reports.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/tests.rs
+  - tree-hugger/lib/src/file/extract/classify.rs
+  - tree-hugger/lib/src/file/extract/metrics.rs
+  - tree-hugger/lib/src/file/extract/mod.rs
+  - tree-hugger/lib/src/file/extract/qualified_name.rs
+  - tree-hugger/lib/src/file/extract/signatures.rs
+  - tree-hugger/lib/src/file/naming.rs
+  - tree-hugger/lib/src/file/query.rs
+  - tree-hugger/lib/src/file/tree_file/definitions.rs
+  - tree-hugger/lib/src/shared/schema_v2/facets.rs
+docs_updated_during_phase_7:
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+  - tree-hugger/docs/symbol-reports.md
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/README.md
+  - tree-hugger/cli/README.md
+  - tree-hugger/features/_unscheduled/symbol-type-relations/spec.md
+  - tree-hugger/features/_unscheduled/stats-package-grouping/spec.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+  - .claude/skills/tree-hugger/SKILL.md
 packages:
   - tree-hugger
   - tree-hugger-cli
+source_code:
+  - tree-hugger/lib/src/file/extract/mod.rs
+  - tree-hugger/lib/src/file/extract/declaration.rs
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/symbols_coverage.rs
+  - tree-hugger/lib/tests/l1/symbols_fixtures.rs
+  - tree-hugger/lib/tests/l1/symbols_report_matrices.rs
+  - tree-hugger/lib/tests/fixtures/symbols/test_files/go/point_test.go
+  - tree-hugger/lib/tests/fixtures/symbols/test_files/python/test_point.py
+  - tree-hugger/lib/tests/fixtures/symbols/test_files/python/point_test.py
+  - tree-hugger/lib/tests/fixtures/symbols/test_files/python/conftest.py
+  - tree-hugger/lib/tests/fixtures/symbols/test_files/javascript/point.test.js
+  - tree-hugger/lib/tests/fixtures/symbols/test_files/javascript/point.spec.js
+  - tree-hugger/lib/tests/fixtures/symbols/test_files/typescript/point.test.ts
+  - tree-hugger/lib/tests/fixtures/symbols/test_files/typescript/point.spec.ts
+  - tree-hugger/lib/tests/fixtures/symbols/test_files/rust/tests/point.rs
+  - tree-hugger/lib/src/shared/schema_v2/kinds.rs
+  - tree-hugger/lib/src/shared/schema_v2/facets.rs
+  - tree-hugger/lib/src/shared/schema_v2/mod.rs
+  - tree-hugger/lib/src/shared/symbol.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/tree_file/definitions.rs
+  - tree-hugger/lib/src/file/extract/scope.rs
+  - tree-hugger/lib/src/file/extract/qualified_name.rs
+  - tree-hugger/lib/src/file/extract/modifiers.rs
+  - tree-hugger/lib/src/file/extract/classify.rs
+  - tree-hugger/lib/src/file/extract/static_flags/mod.rs
+  - tree-hugger/lib/src/file/extract/visibility/mod.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/tests.rs
+  - tree-hugger/lib/src/cache/symbol_cache.rs
+  - tree-hugger/lib/src/god_files/analysis.rs
+  - tree-hugger/lib/tests/l1/symbols_adapter.rs
+  - tree-hugger/lib/tests/l1/symbols_async.rs
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
+  - tree-hugger/lib/tests/l1/symbols_containment.rs
+  - tree-hugger/lib/tests/l1/symbols_header.rs
+  - tree-hugger/lib/tests/l1/symbols_kinds.rs
+  - tree-hugger/lib/tests/l1/symbols_qualified_names.rs
+  - tree-hugger/lib/tests/l1/symbols_scope.rs
+  - tree-hugger/lib/tests/l1/symbols_visibility.rs
+  - tree-hugger/lib/tests/fixtures/symbols/bash.sh
+  - tree-hugger/lib/tests/fixtures/symbols/c_sharp.cs
+  - tree-hugger/lib/tests/fixtures/symbols/cpp.cpp
+  - tree-hugger/lib/tests/fixtures/symbols/go.go
+  - tree-hugger/lib/tests/fixtures/symbols/java.java
+  - tree-hugger/lib/tests/fixtures/symbols/javascript.js
+  - tree-hugger/lib/tests/fixtures/symbols/lua.lua
+  - tree-hugger/lib/tests/fixtures/symbols/python.py
+  - tree-hugger/lib/tests/fixtures/symbols/rust.rs
+  - tree-hugger/lib/tests/fixtures/symbols/scala.scala
+  - tree-hugger/lib/tests/fixtures/symbols/swift.swift
+  - tree-hugger/lib/tests/fixtures/symbols/typescript.ts
+  - tree-hugger/lib/tests/fixtures/symbols/zsh.zsh
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/src/prelude.rs
+  - tree-hugger/cli/src/report.rs
+  - tree-hugger/cli/tests/symbols/cache_lookup.rs
+  - tree-hugger/cli/tests/symbols/cache_robustness.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.plain
+  - tree-hugger/lib/src/file/query.rs
+  - tree-hugger/lib/src/file/extract/attributes.rs
+  - tree-hugger/lib/src/file/extract/flags.rs
+  - tree-hugger/lib/src/file/extract/metrics.rs
+  - tree-hugger/lib/src/file/extract/doc_comments.rs
+  - tree-hugger/lib/src/file/extract/signatures.rs
+  - tree-hugger/lib/src/analysis/coverage.rs
+  - tree-hugger/lib/tests/l1/symbols_flags.rs
+  - tree-hugger/lib/tests/l1/symbols_metrics.rs
+  - tree-hugger/lib/tests/l1/symbols_kind_coverage.rs
+  - tree-hugger/lib/tests/l1/symbols_query.rs
+  - tree-hugger/lib/tests/fixtures/symbols/c.c
+  - tree-hugger/lib/tests/fixtures/symbols/perl.pl
+  - tree-hugger/lib/tests/fixtures/symbols/php.php
+  - tree-hugger/cli/src/declarations.rs
+  - tree-hugger/cli/tests/symbols/report.rs
+  - tree-hugger/lib/src/file/pattern.rs
+  - tree-hugger/lib/src/file/naming.rs
+  - tree-hugger/lib/src/file/filter.rs
+  - tree-hugger/lib/src/file/source_file.rs
+  - tree-hugger/lib/src/file/extract/visibility/ecma.rs
+  - tree-hugger/lib/src/lib.rs
+  - tree-hugger/lib/tests/l1/symbols_export.rs
+  - tree-hugger/lib/tests/l1/symbols_query_filters.rs
+  - tree-hugger/lib/tests/l1/symbols_selection_filters.rs
+  - tree-hugger/cli/src/scanner.rs
+  - tree-hugger/cli/tests/symbols/order.rs
+  - tree-hugger/cli/tests/symbols/wiring.rs
+  - tree-hugger/lib/src/scanner.rs
+  - tree-hugger/cli/src/selection.rs
+  - tree-hugger/cli/src/classes.rs
+  - tree-hugger/cli/tests/symbols/filters.rs
+  - tree-hugger/cli/tests/symbols/main.rs
+  - tree-hugger/cli/tests/symbols/prelude.rs
+  - tree-hugger/cli/tests/symbols/classes.rs
+  - tree-hugger/cli/tests/cli.rs
+  - tree-hugger/cli/tests/level2_declarations.rs
+  - tree-hugger/cli/src/output.rs
+  - tree-hugger/cli/src/stats.rs
+  - tree-hugger/cli/src/render.rs
+  - tree-hugger/cli/tests/symbols/reports.rs
+  - tree-hugger/cli/tests/symbols/golden.rs
+  - tree-hugger/cli/tests/support/terminal_report.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.table
+  - tree-hugger/cli/tests/fixtures/golden/symbols.tree
+  - tree-hugger/cli/tests/fixtures/golden/symbols.stats
+  - tree-hugger/cli/tests/fixtures/golden/symbols-stats.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.jsonl
+  - tree-hugger/cli/tests/fixtures/golden/symbols-signatures-full.plain
+documentation:
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/docs/symbol-reports.md
+  - tree-hugger/lib/README.md
+  - tree-hugger/features/_unscheduled/deferred-kind-precision/spec.md
+  - tree-hugger/README.md
+  - tree-hugger/cli/README.md
+  - tree-hugger/features/2026-10-03-symbol-filters-and-reports/scope-dump.md
+  - tree-hugger/features/_unscheduled/symbol-type-relations/spec.md
+  - tree-hugger/features/_unscheduled/stats-package-grouping/spec.md
+completed_phase: 7
+implemented: true
 ---
 
 # Plan: precise, filterable symbol reports
@@ -784,7 +938,7 @@ injected-width tests).
       that this feature's decisions made stale (for example the `lines`
       metric now belonging to `symbol-type-relations`). Check
       `docs/dependencies.md` only if a dependency declaration changed.
-- [ ] **7.7 Comment drift pass**: every behavior-changing symbol gets its
+- [x] **7.7 Comment drift pass**: every behavior-changing symbol gets its
       `///`/`//!` and inline comments reviewed; report any drift found and how
       it was resolved.
 
@@ -796,7 +950,7 @@ injected-width tests).
       bytes, peak RSS, build and cache state in `implementation-log.md`. No
       hard gate; record any regression with its cause. Nothing wider (ruling
       9).
-- [ ] **7.9 Final validation**
+- [x] **7.9 Final validation**
     - `just test`, `just test-l2`, `just lint` in `tree-hugger/`; run the
       `os` skill's checks for path and width tests; verify `git status` shows
       no stray files. Do not run `cargo fmt`, do not commit, do not move the
