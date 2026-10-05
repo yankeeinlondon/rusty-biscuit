@@ -42,7 +42,7 @@ pub(crate) fn extract_parameters(
 
 /// The parameters of the declaration's own parameter list, or `None` when
 /// no parameter list was found: the declaration has none (a JavaScript
-/// `x => x` or a name bound to a function value), or the language's
+/// name bound to a function value), or the language's
 /// parameters are not extracted (Perl, Bash, Zsh). `Some` of an empty list
 /// is a known empty list.
 pub(crate) fn declared_parameters(
@@ -843,9 +843,10 @@ pub(crate) fn extract_c_return_type(node: Node<'_>, source: &str) -> Option<Stri
 // C# extraction functions
 // =============================================================================
 
-/// Extracts a C# parameter from a parameter node.
+/// Extracts a C# parameter from a `parameter` node, or a `params` array
+/// from its `params` token.
 ///
-/// C# AST structure:
+/// C# AST structure of a `parameter`:
 /// ```text
 /// parameter
 ///   predefined_type (string/int/etc.) or type_identifier

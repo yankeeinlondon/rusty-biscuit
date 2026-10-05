@@ -133,11 +133,12 @@ impl Naming {
 /// `path` relative to `root`, `/`-separated, for display and portable
 /// reports: `src/lib.rs` beneath the root, `../vendor/x.rs` beside it.
 ///
-/// Both are resolved through symlinks before comparing (so a temp directory
-/// reached as `/var/…` and `/private/var/…` agrees), a relative `path` is
-/// taken from the working directory, and a path with no relative route from
-/// `root` (another Windows drive or share) keeps its absolute spelling,
-/// `/`-separated.
+/// A `path` not lexically beneath `root`, or spelled with `..`, is compared
+/// with `root` and the directory of `path` resolved through symlinks (so a
+/// temp directory reached as `/var/…` and `/private/var/…` agrees; the file
+/// name is kept as spelled). A relative `path` is taken from the working directory, and a
+/// path with no relative route from `root` (another Windows drive or share)
+/// keeps its absolute spelling, `/`-separated.
 pub fn portable_relative(path: &Path, root: &Path) -> String {
     let absolute = if path.is_absolute() {
         path.to_path_buf()

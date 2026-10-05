@@ -136,7 +136,8 @@ pub(crate) struct TargetArgs {
 
     /// Keep symbols whose name matches PATTERN (repeatable; any may match).
     /// Lowercase matches any case; `*` matches any run; a pattern with `#`
-    /// or the language's separator matches the qualified name from its start
+    /// or the language's separator matches the qualified name, which usually
+    /// starts with the file's path (`src/lib.rs#Type::name`)
     #[arg(long = "name", short = 'n', value_name = "PATTERN", display_order = 21)]
     pub(crate) names: Vec<String>,
 

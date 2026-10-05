@@ -30,9 +30,11 @@ pub(crate) struct QualifiedName {
 /// Builds the qualified name of every symbol in `symbols`, in order.
 ///
 /// A symbol's prefix is its nearest enclosing *naming* declaration: another
-/// extracted function, type, module or namespace (whose own qualified name is
-/// reused), a Rust `impl` block (its self type), or a container the
-/// extractor knows but does not list as a symbol (a Swift extension). The
+/// extracted function, type, enum variant, module or namespace (whose own
+/// qualified name is reused), a Rust `impl` block (its self type), a named
+/// node that is not extracted (a TypeScript `namespace`, a Java or C#
+/// constructor), or a container the extractor knows but does not list as a
+/// symbol (a Swift extension). The
 /// walk ends at an unnamed owner (anonymous class, object literal, class
 /// expression, Scala `given … with`), as the container search does, and at
 /// the file root, where a file-level `package` or `namespace` statement

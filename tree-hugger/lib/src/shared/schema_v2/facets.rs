@@ -14,7 +14,9 @@ pub struct IdentityFacet {
     /// (namespaces, packages, modules, types, `impl` targets, functions)
     /// joined with the language's own separators, ending in `name`. Never
     /// empty, and built from this file's source alone, so it does not depend
-    /// on where the file is read from.
+    /// on where the file is read from. A query result prefixes it unless
+    /// `is_namespace_rooted` ([`SymbolQueryResult::name_prefix`](crate::SymbolQueryResult::name_prefix));
+    /// cache entries and symbol IDs keep the in-file form.
     #[serde(deserialize_with = "non_empty_string")]
     pub qualified_name: String,
     /// `qualified_name` starts at a namespace or package the source declares

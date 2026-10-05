@@ -395,7 +395,7 @@ pub(crate) enum ContainerLookup<'tree> {
     /// A Rust `impl` member or a Go receiver method: the implemented type,
     /// found by name among the file's type declarations.
     SameFileType,
-    /// A Lua `M.f` / `M:m`: the table, found by name among the file's
+    /// A Lua `M.f` / `M:m` / `M.x`: the table, found by name among the file's
     /// item-scoped declarations.
     SameFileTable,
 }
