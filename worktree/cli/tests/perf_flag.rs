@@ -208,7 +208,7 @@ fn the_json_record_is_the_final_line_after_the_listing() {
 fn decoy_record() -> String {
     let mut spans = SpanList::sequential();
     spans.push(Span::new(Stage::Startup, Duration::from_micros(3)));
-    format!("WT_PERF_JSON {}", Timings::new(Scope::Command, Duration::from_micros(7), spans).to_json())
+    format!("WT_PERF_JSON {}", Timings::new(Scope::Command, Duration::from_micros(7), spans).unwrap().to_json())
 }
 
 /// Whether [`perf_timings`] refuses `output`.

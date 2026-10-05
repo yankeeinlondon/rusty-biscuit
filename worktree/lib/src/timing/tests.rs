@@ -31,7 +31,7 @@ fn worker_timings() -> WorkerTimings {
     let pr_refresh = leaf(Stage::PrRefresh, 300).with_children(list(ChildrenKind::Sequential, [leaf(Stage::PrRequest, 250)]));
     let head_refresh = leaf(Stage::HeadRefresh, 100).with_children(list(ChildrenKind::Sequential, [leaf(Stage::HeadCheck, 80)]));
     let halves = leaf(Stage::WorkerHalves, 350).with_children(list(ChildrenKind::Concurrent, [pr_refresh, head_refresh]));
-    WorkerTimings::new(us(380), list(ChildrenKind::Sequential, [leaf(Stage::WorkerSetup, 20), halves]))
+    WorkerTimings::new(us(380), list(ChildrenKind::Sequential, [leaf(Stage::WorkerSetup, 20), halves])).unwrap()
 }
 
 /// A command document shaped like a remote listing with a forced retry: the
@@ -62,6 +62,7 @@ fn fixture() -> Timings {
         us(1000),
         list(ChildrenKind::Sequential, [leaf(Stage::Startup, 10), remote, regather, leaf(Stage::WriteOutput, 50)]),
     )
+    .unwrap()
     .with_worker_reports(reports, WorkerReportStatus::Partial)
 }
 
@@ -89,7 +90,7 @@ fn every_stage_id_round_trips_and_ids_and_labels_are_unique() {
 
 #[test]
 fn sequential_spans_and_unattributed_reconcile_exactly_to_the_total() {
-    let timings = Timings::new(Scope::Library, us(100), list(ChildrenKind::Sequential, [leaf(Stage::ReadWorktrees, 30), leaf(Stage::Commit, 45)]));
+    let timings = Timings::new(Scope::Library, us(100), list(ChildrenKind::Sequential, [leaf(Stage::ReadWorktrees, 30), leaf(Stage::Commit, 45)])).unwrap();
 
     assert_eq!((timings.unattributed(), timings.over_attributed()), (us(25), us(0)));
     let doc: Value = serde_json::from_str(&timings.to_json()).unwrap();
@@ -101,7 +102,7 @@ fn sequential_spans_and_unattributed_reconcile_exactly_to_the_total() {
 fn over_attribution_is_surfaced_at_every_sequential_level() {
     let nested = leaf(Stage::GraphHistory, 50)
         .with_children(list(ChildrenKind::Sequential, [leaf(Stage::DefaultTips, 40), leaf(Stage::LaneAssembly, 30)]));
-    let timings = Timings::new(Scope::Library, us(60), list(ChildrenKind::Sequential, [nested, leaf(Stage::Commit, 20)]));
+    let timings = Timings::new(Scope::Library, us(60), list(ChildrenKind::Sequential, [nested, leaf(Stage::Commit, 20)])).unwrap();
 
     assert_eq!((timings.unattributed(), timings.over_attributed()), (us(0), us(10)), "70 of 60 at the root");
     let graph = timings.span(&[Stage::GraphHistory]).unwrap();
@@ -119,7 +120,7 @@ fn over_attribution_is_surfaced_at_every_sequential_level() {
 fn concurrent_children_never_enter_a_sum() {
     let group = leaf(Stage::LocalGather, 40)
         .with_children(list(ChildrenKind::Concurrent, [leaf(Stage::WorktreeStatus, 40), leaf(Stage::BranchComparisons, 35)]));
-    let timings = Timings::new(Scope::Library, us(100), list(ChildrenKind::Sequential, [group]));
+    let timings = Timings::new(Scope::Library, us(100), list(ChildrenKind::Sequential, [group])).unwrap();
 
     let group = timings.span(&[Stage::LocalGather]).unwrap();
     assert_eq!((group.unattributed(), group.over_attributed()), (us(0), us(0)), "75 of 40 is overlap, not over-attribution");
@@ -201,7 +202,8 @@ fn durations_become_whole_microseconds_before_remainders_are_computed() {
         Scope::Library,
         nanos(3_000),
         list(ChildrenKind::Sequential, [Span::new(Stage::ReadWorktrees, nanos(1_500)), Span::new(Stage::Commit, nanos(1_500))]),
-    );
+    )
+    .unwrap();
 
     assert_eq!((timings.unattributed(), timings.over_attributed()), (us(1), us(0)));
     let doc: Value = serde_json::from_str(&timings.to_json()).unwrap();
@@ -210,9 +212,91 @@ fn durations_become_whole_microseconds_before_remainders_are_computed() {
     let decoded = Timings::from_json(&timings.to_json()).expect("the rounded document reconciles");
     assert_eq!(decoded.span(&[Stage::Commit]).unwrap().elapsed(), us(1));
 
-    let sub_micro = Timings::new(Scope::Library, nanos(999), list(ChildrenKind::Sequential, [Span::new(Stage::Commit, nanos(999))]));
+    let sub_micro = Timings::new(Scope::Library, nanos(999), list(ChildrenKind::Sequential, [Span::new(Stage::Commit, nanos(999))])).unwrap();
     assert_eq!((sub_micro.unattributed(), sub_micro.over_attributed()), (us(0), us(0)));
     assert!(Timings::from_json(&sub_micro.to_json()).is_ok());
+}
+
+#[test]
+fn construction_rejects_what_the_document_cannot_state_exactly() {
+    use ChildrenKind::{Concurrent, Sequential};
+    let max = us(u64::MAX);
+    let unrepresentable = |path: &[Stage]| Err(TimingsError::Unrepresentable(path.to_vec()));
+
+    let two_at_max = || list(Sequential, [Span::new(Stage::ReadWorktrees, max), Span::new(Stage::Commit, max)]);
+    assert_eq!(Timings::new(Scope::Library, us(10), two_at_max()), unrepresentable(&[]), "the root's excess");
+    let graph = leaf(Stage::GraphHistory, 10).with_children(list(Sequential, [Span::new(Stage::DefaultTips, max), Span::new(Stage::LaneAssembly, max)]));
+    assert_eq!(
+        Timings::new(Scope::Library, us(10), list(Sequential, [graph])),
+        unrepresentable(&[Stage::GraphHistory]),
+        "a sequential parent's excess"
+    );
+    assert_eq!(Timings::new(Scope::Library, Duration::MAX, list(Sequential, [])), unrepresentable(&[]), "a total past the range");
+    // Under a concurrent parent, so no excess is rejected first.
+    let overlapping = |children: SpanList| list(Sequential, [leaf(Stage::LocalGather, 5).with_children(children)]);
+    assert_eq!(
+        Timings::new(Scope::Library, us(5), overlapping(list(Concurrent, [Span::new(Stage::WorktreeStatus, Duration::MAX)]))),
+        unrepresentable(&[Stage::LocalGather, Stage::WorktreeStatus]),
+        "a span past the range"
+    );
+    let repeated = list(Concurrent, [Span::new(Stage::WorktreeStatus, max), Span::new(Stage::WorktreeStatus, max)]);
+    assert_eq!(
+        Timings::new(Scope::Library, us(5), overlapping(repeated)),
+        unrepresentable(&[Stage::LocalGather, Stage::WorktreeStatus]),
+        "an accumulated stage is not clamped"
+    );
+    let worker = list(Sequential, [Span::new(Stage::WorkerSetup, max), Span::new(Stage::WorkerHalves, max)]);
+    assert_eq!(WorkerTimings::new(us(10), worker), Err(TimingsError::Unrepresentable(vec![])), "a worker root");
+
+    // Controls: the largest excess a field holds is written exactly and read
+    // back, and concurrent children far beyond their parent are overlap.
+    let edge = Timings::new(Scope::Library, us(0), list(Sequential, [Span::new(Stage::Commit, max)])).unwrap();
+    assert_eq!((edge.unattributed(), edge.over_attributed()), (us(0), max));
+    let doc: Value = serde_json::from_str(&edge.to_json()).unwrap();
+    assert_eq!(doc["over_attributed_us"], json!(u64::MAX));
+    assert_eq!(Timings::from_json(&edge.to_json()), Ok(edge));
+    let group = leaf(Stage::LocalGather, 5)
+        .with_children(list(Concurrent, [Span::new(Stage::WorktreeStatus, max), Span::new(Stage::BranchComparisons, max)]));
+    let overlapping = Timings::new(Scope::Library, us(5), list(Sequential, [group])).unwrap();
+    assert_eq!(Timings::from_json(&overlapping.to_json()), Ok(overlapping));
+}
+
+#[test]
+fn a_worker_document_rejects_an_excess_no_field_holds() {
+    const MAX: u64 = u64::MAX;
+    let text = worker_timings().to_json();
+    let decode = |edits: &[(&str, Value)]| {
+        let mut doc: Value = serde_json::from_str(&text).unwrap();
+        for (pointer, value) in edits {
+            *doc.pointer_mut(pointer).unwrap_or_else(|| panic!("the fixture has {pointer}")) = value.clone();
+        }
+        WorkerTimings::from_json(&doc.to_string())
+    };
+    let inconsistent = |path: &[Stage]| Err(TimingsError::InconsistentReconciliation(path.to_vec()));
+    assert_eq!(decode(&[]), Ok(worker_timings()), "control: the unedited fixture decodes");
+
+    let root = [
+        ("/spans/0/elapsed_us", json!(MAX)),
+        ("/spans/1/elapsed_us", json!(MAX)),
+        ("/unattributed_us", json!(0)),
+        ("/over_attributed_us", json!(MAX)),
+    ];
+    assert_eq!(decode(&root), inconsistent(&[]), "the worker root");
+
+    const HEAD: &str = "/spans/1/children/1";
+    let step = |stage: &str| {
+        json!({"stage": stage, "elapsed_us": MAX, "children_kind": "sequential", "children": [], "unattributed_us": 0, "over_attributed_us": 0})
+    };
+    let head = [
+        (&*format!("{HEAD}/children"), json!([step("head_check"), step("head_fetch")])),
+        (&*format!("{HEAD}/unattributed_us"), json!(0)),
+        (&*format!("{HEAD}/over_attributed_us"), json!(MAX)),
+    ];
+    assert_eq!(decode(&head), inconsistent(&[Stage::WorkerHalves, Stage::HeadRefresh]), "the sequential head half");
+
+    // 20 + 350 of 380 µs, with the setup at the maximum.
+    let fits = [("/spans/0/elapsed_us", json!(MAX)), ("/unattributed_us", json!(0)), ("/over_attributed_us", json!(MAX - 30))];
+    assert_eq!(decode(&fits).map(|worker| worker.over_attributed()), Ok(us(MAX - 30)), "the largest excess that fits");
 }
 
 #[test]
@@ -348,6 +432,8 @@ enum Edit {
     /// Writes the key twice with its own value.
     Repeat(Target, &'static str),
     Append(&'static str),
+    /// Replaces the value at a JSON pointer.
+    SetAt(String, Value),
 }
 
 #[derive(Clone, Copy)]
@@ -374,6 +460,7 @@ impl Target {
 
 enum Outcome {
     Reject,
+    RejectAs(TimingsError),
     Accept(fn(&Timings)),
 }
 
@@ -395,6 +482,9 @@ fn apply(edits: &[Edit]) -> String {
                 *object = json!("@@repeated@@");
             }
             Edit::Append(text) => suffix = text,
+            Edit::SetAt(pointer, value) => {
+                *doc.pointer_mut(pointer).unwrap_or_else(|| panic!("the fixture has {pointer}")) = value.clone();
+            }
         }
     }
     let mut text = doc.to_string();
@@ -406,8 +496,8 @@ fn apply(edits: &[Edit]) -> String {
 
 #[test]
 fn the_decoder_matrix_rejects_every_malformed_cell() {
-    use Edit::{Append, Remove, Repeat, Set};
-    use Outcome::{Accept, Reject};
+    use Edit::{Append, Remove, Repeat, Set, SetAt};
+    use Outcome::{Accept, Reject, RejectAs};
     use Target::{Graph, Launch, Regather, Root};
 
     let graph_path = [Stage::RemoteAndLocal, Stage::GraphHistory];
@@ -499,22 +589,107 @@ fn the_decoder_matrix_rejects_every_malformed_cell() {
         vec![Set(Graph, "note", json!({"anything": [1]})), Set(Root, "extra", json!(true))],
         Accept(|timings| assert_eq!(timings, &fixture())),
     ));
+    unrepresentable_excess_cells(&mut cells);
 
     let mut failures = Vec::new();
     for (name, edits, outcome) in &cells {
         let text = apply(edits);
         let field = match &edits[0] {
-            Remove(_, key) | Set(_, key, _) | Repeat(_, key) => key,
-            Append(_) => &"document",
+            Remove(_, key) | Set(_, key, _) | Repeat(_, key) => *key,
+            Append(_) => "document",
+            SetAt(pointer, _) => pointer.as_str(),
         };
         match (Timings::from_json(&text), outcome) {
-            (Ok(_), Reject) => failures.push(format!("{field} / {name}: accepted")),
+            (Ok(_), Reject | RejectAs(_)) => failures.push(format!("{field} / {name}: accepted")),
             (Err(error), Accept(_)) => failures.push(format!("{field} / {name}: rejected ({error})")),
+            (Err(error), RejectAs(want)) if error != *want => {
+                failures.push(format!("{field} / {name}: rejected as {error:?}, expected {want:?}"));
+            }
             (Ok(timings), Accept(check)) => check(&timings),
-            (Err(_), Reject) => {}
+            (Err(_), Reject | RejectAs(_)) => {}
         }
     }
     assert!(failures.is_empty(), "{} matrix cells failed:\n{}", failures.len(), failures.join("\n"));
+}
+
+/// Valid unsigned values whose exact excess over their sequential parent no
+/// 64-bit field holds, stating the largest excess that does; the largest
+/// excess that fits, and concurrent children far beyond their parent, are the
+/// controls.
+fn unrepresentable_excess_cells(cells: &mut Vec<(&str, Vec<Edit>, Outcome)>) {
+    use Outcome::{Accept, RejectAs};
+    const MAX: u64 = u64::MAX;
+    let inconsistent = |path: &[Stage]| RejectAs(TimingsError::InconsistentReconciliation(path.to_vec()));
+    let at = |pointer: &str, value: Value| Edit::SetAt(pointer.to_string(), value);
+    // `edits`, then the largest excess a field holds stated at `parent`.
+    let with = |mut edits: Vec<Edit>, parent: &str| {
+        edits.push(at(&format!("{parent}/unattributed_us"), json!(0)));
+        edits.push(at(&format!("{parent}/over_attributed_us"), json!(MAX)));
+        edits
+    };
+    let step = |stage: &str| json!({"stage": stage, "elapsed_us": MAX, "children_kind": "sequential", "children": [], "unattributed_us": 0, "over_attributed_us": 0});
+
+    cells.push((
+        "command root",
+        with(vec![at("/spans/0/elapsed_us", json!(MAX)), at("/spans/3/elapsed_us", json!(MAX))], ""),
+        inconsistent(&[]),
+    ));
+    cells.push((
+        "sequential refresh_worker",
+        with(
+            vec![at("/spans/1/children/0/children/0/elapsed_us", json!(MAX)), at("/spans/1/children/0/children/1/elapsed_us", json!(MAX))],
+            "/spans/1/children/0",
+        ),
+        inconsistent(&[Stage::RemoteAndLocal, Stage::RefreshWorker]),
+    ));
+    cells.push((
+        "embedded worker root",
+        with(
+            vec![at("/worker_reports/1/report/spans/0/elapsed_us", json!(MAX)), at("/worker_reports/1/report/spans/1/elapsed_us", json!(MAX))],
+            "/worker_reports/1/report",
+        ),
+        inconsistent(&[]),
+    ));
+    cells.push((
+        "embedded worker root under a partial launch",
+        with(
+            vec![
+                at("/worker_reports/1/status", json!("partial")),
+                at("/worker_reports/1/report/spans/1/children", json!([])),
+                at("/worker_reports/1/report/spans/0/elapsed_us", json!(MAX)),
+                at("/worker_reports/1/report/spans/1/elapsed_us", json!(MAX)),
+            ],
+            "/worker_reports/1/report",
+        ),
+        inconsistent(&[]),
+    ));
+    cells.push((
+        "embedded sequential head half",
+        with(
+            vec![at("/worker_reports/1/report/spans/1/children/1/children", json!([step("head_check"), step("head_fetch")]))],
+            "/worker_reports/1/report/spans/1/children/1",
+        ),
+        inconsistent(&[Stage::WorkerHalves, Stage::HeadRefresh]),
+    ));
+    // 10 + 500 + 100 + 50 of 1000 µs, with the startup at the maximum.
+    cells.push((
+        "the largest excess that fits",
+        vec![at("/spans/0/elapsed_us", json!(MAX)), at("/unattributed_us", json!(0)), at("/over_attributed_us", json!(MAX - 350))],
+        Accept(|timings| {
+            assert_eq!((timings.unattributed(), timings.over_attributed()), (us(0), us(u64::MAX - 350)));
+        }),
+    ));
+    cells.push((
+        "concurrent children far beyond their parent",
+        vec![
+            at("/spans/1/children/1/children/0/elapsed_us", json!(MAX)),
+            at("/spans/1/children/1/children/1/elapsed_us", json!(MAX)),
+        ],
+        Accept(|timings| {
+            let group = timings.span(&[Stage::RemoteAndLocal, Stage::LocalGather]).unwrap();
+            assert_eq!((group.unattributed(), group.over_attributed()), (us(0), us(0)));
+        }),
+    ));
 }
 
 /// The fixture's array at `key` with its first element replaced by a number.

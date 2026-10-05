@@ -41,7 +41,7 @@ use worktree::remote_update::{
     ApiHead, AttemptEnd, AttemptRequest, BranchHeadSource, GitRemote, GitTransport, Seams, SniffBranchHeads,
     run_attempt,
 };
-use worktree::timing::{LaunchReport, Span, SpanList, Stage, WorkerTimings};
+use worktree::timing::{LaunchReport, Span, SpanList, Stage, TimingsError, WorkerTimings};
 use worktree::worktree::default_branch_in;
 
 use super::list::{LaunchArgs, WorkerHandle};
@@ -157,8 +157,13 @@ fn timed_half<T>(timed: bool, stage: Stage, half: impl FnOnce(Option<&Steps>) ->
 
 /// The worker's report: setup, then the halves group over `halves` with
 /// each half that returned a span; `total` runs from entry to the halves'
-/// end.
-fn worker_timings(clock: WorkerClock, halves: Duration, total: Duration, spans: [Option<Span>; 2]) -> WorkerTimings {
+/// end. An error when the measurements cannot be stated exactly.
+fn worker_timings(
+    clock: WorkerClock,
+    halves: Duration,
+    total: Duration,
+    spans: [Option<Span>; 2],
+) -> Result<WorkerTimings, TimingsError> {
     let mut children = SpanList::concurrent();
     for span in spans.into_iter().flatten() {
         children.push(span);
@@ -195,7 +200,8 @@ fn receipt_target(main: &Path, id: &str, origin: Option<&str>) -> Option<Receipt
 ///
 /// With `clock` the receipt carries the worker's durations, measured until
 /// both halves are done, so the receipt's own sweep and write are outside
-/// them. Each half gets the steps to record into, or `None` untimed.
+/// them. Each half gets the steps to record into, or `None` untimed; an
+/// untimed attempt reads no clock.
 fn run_and_record(
     main: &Path,
     receipt: Option<&ReceiptTarget>,
@@ -204,16 +210,16 @@ fn run_and_record(
     head: impl FnOnce(&Path, Option<&Steps>) -> HeadStatus + Send,
 ) {
     let timed = clock.is_some();
-    let halves_started = Instant::now();
+    let halves_started = timed.then(Instant::now);
     let (prs, head) = run_halves(
         main,
         |main| timed_half(timed, Stage::PrRefresh, |steps| pr(main, steps)),
         |main| timed_half(timed, Stage::HeadRefresh, |steps| head(main, steps)),
     );
-    let durations = clock.map(|clock| {
+    let durations = clock.zip(halves_started).map(|(clock, halves_started)| {
         let (halves, total) = (halves_started.elapsed(), clock.entry.elapsed());
         let spans = [prs.as_ref().and_then(|(_, span)| span.clone()), head.as_ref().and_then(|(_, span)| span.clone())];
-        LaunchReport::from_worker(worker_timings(clock, halves, total, spans))
+        worker_timings(clock, halves, total, spans).map_or(LaunchReport::Invalid, LaunchReport::from_worker)
     });
     let (prs, head) = (prs.map(|(status, _)| status), head.map(|(status, _)| status));
     if let Some(target) = receipt {
@@ -941,24 +947,33 @@ mod tests {
 
     /// A timed attempt through the real halves: the receipt carries setup,
     /// then both halves as concurrent children with the library operations
-    /// that ran inside each, and its outcome is the untimed attempt's.
+    /// that ran inside each, and its outcome is the untimed attempt's. The
+    /// untimed attempt hands neither half a step list to record into.
     #[test]
     fn a_timed_attempt_measures_itself_into_its_receipt() {
         let run = |clock: Option<WorkerClock>| {
             let fixture = Fixture::new();
+            let given_steps = std::sync::Mutex::new(Vec::new());
             run_and_record(
                 &fixture.main(),
                 Some(&fixture.receipt_target()),
                 clock,
-                |main, steps| fixture.refresh_prs_timed(main, Pr::Answer, steps),
-                |main, steps| fixture.refresh_head_timed(main, &present(), &NoGit, steps).head_status(),
+                |main, steps| {
+                    given_steps.lock().unwrap().push(steps.is_some());
+                    fixture.refresh_prs_timed(main, Pr::Answer, steps)
+                },
+                |main, steps| {
+                    given_steps.lock().unwrap().push(steps.is_some());
+                    fixture.refresh_head_timed(main, &present(), &NoGit, steps).head_status()
+                },
             );
             let raw = std::fs::read_to_string(&fixture.receipt_target().path).expect("a receipt");
-            (fixture.receipt().expect("a valid receipt"), raw)
+            (fixture.receipt().expect("a valid receipt"), raw, given_steps.into_inner().unwrap())
         };
-        let (untimed, untimed_raw) = run(None);
-        let (timed, raw) = run(Some(clock()));
+        let (untimed, untimed_raw, untimed_steps) = run(None);
+        let (timed, raw, timed_steps) = run(Some(clock()));
 
+        assert_eq!((untimed_steps, timed_steps), (vec![false, false], vec![true, true]));
         assert_eq!(untimed.durations, LaunchReport::Missing);
         assert!(!untimed_raw.contains("durations"), "an untimed attempt writes no member: {untimed_raw}");
         assert_eq!((timed.head, &timed.prs), (untimed.head, &untimed.prs), "timing changes no outcome");

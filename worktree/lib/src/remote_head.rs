@@ -2113,6 +2113,43 @@ mod tests {
         cells.push((set("/durations/extra", Some(json!(1))), Report::Complete));
         cells.push((set(&format!("{HALVES}/extra"), Some(json!(1))), Report::Complete));
 
+        // Valid unsigned values whose exact excess no 64-bit field holds: the
+        // largest stated excess never stands in for it.
+        const MAX: u64 = u64::MAX;
+        let durations = |edits: &[(&str, u64)]| {
+            let mut durations = written["durations"].clone();
+            for (pointer, value) in edits {
+                *durations.pointer_mut(pointer).unwrap_or_else(|| panic!("{pointer} exists")) = json!(value);
+            }
+            set("/durations", Some(durations))
+        };
+        let head_half = "/spans/1/children/1";
+        let mut fetching = written.pointer(CHECK).unwrap().clone();
+        fetching["stage"] = json!("head_fetch");
+        let mut two_steps = written["durations"].clone();
+        two_steps.pointer_mut(&format!("{head_half}/children")).unwrap().as_array_mut().unwrap().push(fetching);
+        cells.push((
+            durations(&[("/spans/0/elapsed_us", MAX), ("/spans/1/elapsed_us", MAX), ("/unattributed_us", 0), ("/over_attributed_us", MAX)]),
+            Report::Invalid,
+        ));
+        let mut head = two_steps.clone();
+        for (pointer, value) in [("/children/0/elapsed_us", MAX), ("/children/1/elapsed_us", MAX), ("/unattributed_us", 0), ("/over_attributed_us", MAX)] {
+            *head.pointer_mut(&format!("{head_half}{pointer}")).unwrap() = json!(value);
+        }
+        cells.push((set("/durations", Some(head)), Report::Invalid));
+        // Controls: the largest excess that fits reconciles, and concurrent
+        // halves far beyond their group are overlap, not excess.
+        cells.push((durations(&[("/spans/0/elapsed_us", MAX), ("/unattributed_us", 0), ("/over_attributed_us", MAX - 50)]), Report::Complete));
+        cells.push((
+            durations(&[
+                ("/spans/1/children/0/elapsed_us", MAX),
+                ("/spans/1/children/0/unattributed_us", MAX - 200),
+                ("/spans/1/children/1/elapsed_us", MAX),
+                ("/spans/1/children/1/unattributed_us", MAX - 200),
+            ]),
+            Report::Complete,
+        ));
+
         let outcome = Receipt { durations: LaunchReport::Missing, ..control.clone() };
         let mut wrong = Vec::new();
         let mut check = |bytes: Vec<u8>, want: Report| {

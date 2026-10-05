@@ -461,13 +461,15 @@ fn run_pipeline(
         );
     });
 
-    Ok(steps.map(|steps| {
-        let timings = Timings::new(Scope::Command, process_start.elapsed(), steps);
-        match worker_reports {
-            Some((reports, status)) => timings.with_worker_reports(reports, status),
-            None => timings,
-        }
-    }))
+    steps
+        .map(|steps| {
+            let timings = Timings::new(Scope::Command, process_start.elapsed(), steps)?;
+            Ok(match worker_reports {
+                Some((reports, status)) => timings.with_worker_reports(reports, status),
+                None => timings,
+            })
+        })
+        .transpose()
 }
 
 fn render_verbose(data: &worktree::graph::VerboseData, terminal: &Terminal) -> String {

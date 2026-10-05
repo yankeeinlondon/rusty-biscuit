@@ -336,6 +336,9 @@ type History = (Option<GraphFacts>, Option<VerboseData>);
 ///
 /// A wait budget limits only the wait: a longer local gather is waited for.
 /// `on_phase` is called on this thread only, during the wait.
+///
+/// With [`ListOptions::timings`], measurements the timings document cannot
+/// state exactly are [`WorktreeError::Timings`] rather than clamped values.
 pub fn gather(
     repo: &Path,
     options: &ListOptions,
@@ -454,13 +457,16 @@ pub fn gather(
         timing::record(root.as_mut(), Stage::CheckoutRefresh, || list.refresh_dirty_status(checkout));
     }
 
-    let timings = root.zip(started).map(|(root, started)| {
-        let timings = Timings::new(Scope::Library, started.elapsed(), root);
-        match worker_reports(&remote) {
-            Some((reports, status)) => timings.with_worker_reports(reports, status),
-            None => timings,
-        }
-    });
+    let timings = root
+        .zip(started)
+        .map(|(root, started)| {
+            let timings = Timings::new(Scope::Library, started.elapsed(), root)?;
+            Ok::<_, WorktreeError>(match worker_reports(&remote) {
+                Some((reports, status)) => timings.with_worker_reports(reports, status),
+                None => timings,
+            })
+        })
+        .transpose()?;
     let (graph, verbose) = history.unwrap_or((None, None));
     Ok(Listing { list, remote, ff, graph, verbose, main_checkout, head_store, regathered, timings })
 }

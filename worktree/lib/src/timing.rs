@@ -14,6 +14,12 @@
 //! where at most one of the two remainders is nonzero. A span with concurrent
 //! children, or with none, carries zero remainders.
 //!
+//! Every duration and remainder is an unsigned 64-bit count of microseconds,
+//! and the equation holds exactly, never against a clamped value:
+//! [`Timings::new`] and [`WorkerTimings::new`] reject a tree that does not
+//! fit ([`TimingsError::Unrepresentable`]), so every value of those types is
+//! a document [`Timings::to_json`] writes exactly.
+//!
 //! [`Timings::to_json`] writes the version-1 document; [`Timings::from_json`]
 //! is its only reader and rejects anything that does not reconcile. The
 //! document is the contract of `wt list --perf=json`; see
@@ -275,17 +281,31 @@ impl Span {
     }
 
     /// The part of a sequential parent's elapsed time no child covers.
+    ///
+    /// ## Panics
+    ///
+    /// When the remainder exceeds `u64::MAX` microseconds, which no span of a
+    /// [`Timings`] or [`WorkerTimings`] does.
     pub fn unattributed(&self) -> Duration {
-        Duration::from_micros(self.remainders_us().0)
+        Duration::from_micros(self.representable_remainders().0)
     }
 
     /// How far a sequential parent's children exceed its elapsed time.
+    ///
+    /// ## Panics
+    ///
+    /// As [`Span::unattributed`].
     pub fn over_attributed(&self) -> Duration {
-        Duration::from_micros(self.remainders_us().1)
+        Duration::from_micros(self.representable_remainders().1)
     }
 
-    fn remainders_us(&self) -> (u64, u64) {
+    /// `None` when either exact remainder exceeds the document's range.
+    fn remainders_us(&self) -> Option<(u64, u64)> {
         span_remainders(self.children_kind, micros(self.elapsed), self.children.iter().map(|child| micros(child.elapsed)))
+    }
+
+    fn representable_remainders(&self) -> (u64, u64) {
+        self.remainders_us().expect("the remainder exceeds u64::MAX microseconds")
     }
 
     /// Folds a later, non-overlapping invocation of the same stage into this
@@ -422,9 +442,16 @@ pub struct Timings {
 impl Timings {
     /// Top-level spans are sequential parts of `total`; `spans` must be a
     /// [`SpanList::sequential`] list.
-    pub fn new(scope: Scope, total: Duration, spans: SpanList) -> Self {
+    ///
+    /// ## Errors
+    ///
+    /// [`TimingsError::Unrepresentable`] when a duration, or the exact
+    /// remainder of the root or of a sequential parent, exceeds `u64::MAX`
+    /// microseconds: the document could not state it exactly.
+    pub fn new(scope: Scope, total: Duration, spans: SpanList) -> Result<Self, TimingsError> {
         debug_assert_eq!(spans.kind, ChildrenKind::Sequential, "top-level spans are sequential");
-        Self { scope, total, spans: spans.spans, worker_reports: Vec::new(), worker_report_status: None }
+        check_representable(total, &spans.spans)?;
+        Ok(Self { scope, total, spans: spans.spans, worker_reports: Vec::new(), worker_report_status: None })
     }
 
     /// Attaches the worker's reports, one per owned launch, as diagnostics
@@ -472,7 +499,7 @@ impl Timings {
     }
 
     fn root_remainders_us(&self) -> (u64, u64) {
-        reconcile(micros(self.total), self.spans.iter().map(|span| micros(span.elapsed)))
+        root_remainders(self.total, &self.spans)
     }
 
     /// The compact version-1 document.
@@ -486,7 +513,9 @@ impl Timings {
     ///
     /// Rejects a document that is not one JSON object, repeats a key, has
     /// another `format_version`, names an unknown stage, repeats a sibling
-    /// stage, or states remainders that do not reconcile.
+    /// stage, or states remainders that do not reconcile exactly. Children
+    /// whose exact excess over their parent exceeds `u64::MAX` microseconds
+    /// never reconcile, whatever remainder the document states.
     pub fn from_json(text: &str) -> Result<Self, TimingsError> {
         let value = strict_value(text.as_bytes())?;
         check_version(&value)?;
@@ -510,7 +539,7 @@ impl Serialize for Timings {
         WireTimings {
             format_version: FORMAT_VERSION,
             scope: self.scope,
-            total_us: micros(self.total),
+            total_us: wire_micros(self.total),
             spans: self.spans.iter().map(WireSpan::from).collect(),
             unattributed_us,
             over_attributed_us,
@@ -532,9 +561,14 @@ pub struct WorkerTimings {
 #[allow(missing_docs)]
 impl WorkerTimings {
     /// `spans` must be a [`SpanList::sequential`] list.
-    pub fn new(total: Duration, spans: SpanList) -> Self {
+    ///
+    /// ## Errors
+    ///
+    /// As [`Timings::new`].
+    pub fn new(total: Duration, spans: SpanList) -> Result<Self, TimingsError> {
         debug_assert_eq!(spans.kind, ChildrenKind::Sequential, "top-level spans are sequential");
-        Self { total, spans: spans.spans }
+        check_representable(total, &spans.spans)?;
+        Ok(Self { total, spans: spans.spans })
     }
 
     pub fn total(&self) -> Duration {
@@ -560,7 +594,7 @@ impl WorkerTimings {
     }
 
     fn root_remainders_us(&self) -> (u64, u64) {
-        reconcile(micros(self.total), self.spans.iter().map(|span| micros(span.elapsed)))
+        root_remainders(self.total, &self.spans)
     }
 
     /// The compact version-1 worker document (the receipt's `durations`).
@@ -614,7 +648,8 @@ pub enum WorkerReportStatus {
     /// No timings reached the wait: the receipt carried none, or the wait
     /// ended before the receipt was written.
     Missing,
-    /// The receipt's timings did not decode, or lack the halves group.
+    /// The receipt's timings did not decode or lack the halves group, or the
+    /// worker's measurements could not be represented.
     Invalid,
     /// An adopted attempt was followed and no owned report is available.
     Adopted,
@@ -716,6 +751,10 @@ pub enum TimingsError {
     DuplicateSibling(Vec<Stage>),
     #[error("remainders of {} do not reconcile", display_path(.0))]
     InconsistentReconciliation(Vec<Stage>),
+    /// A duration, or a remainder that reconciles it exactly, exceeds
+    /// `u64::MAX` microseconds.
+    #[error("{} exceeds the document's microsecond range", display_path(.0))]
+    Unrepresentable(Vec<Stage>),
     #[error("invalid worker reports: {0}")]
     InvalidWorkerReports(String),
 }
@@ -728,26 +767,65 @@ fn display_path(path: &[Stage]) -> String {
     path.iter().map(|stage| stage.id()).collect::<Vec<_>>().join("/")
 }
 
-fn micros(duration: Duration) -> u64 {
-    u64::try_from(duration.as_micros()).unwrap_or(u64::MAX)
+/// Whole microseconds, truncated but never clamped.
+fn micros(duration: Duration) -> u128 {
+    duration.as_micros()
 }
 
-/// The `(unattributed, over_attributed)` remainders, in microseconds, of a
-/// sequential parent of `total` whose children took `children`.
-fn reconcile(total: u64, children: impl Iterator<Item = u64>) -> (u64, u64) {
-    let attributed: u128 = children.map(u128::from).sum();
-    let total = u128::from(total);
-    let clamp = |value: u128| u64::try_from(value).unwrap_or(u64::MAX);
-    if attributed <= total { (clamp(total - attributed), 0) } else { (0, clamp(attributed - total)) }
+/// [`micros`] as the document's field.
+///
+/// ## Panics
+///
+/// Beyond `u64::MAX` microseconds, which [`check_representable`] rejects
+/// before any value reaches a serializer.
+fn wire_micros(duration: Duration) -> u64 {
+    u64::try_from(micros(duration)).expect("a constructed duration fits the document")
+}
+
+/// The exact `(unattributed, over_attributed)` remainders, in microseconds, of
+/// a sequential parent of `total` whose children took `children`; `None` when
+/// the sum or either remainder does not fit, since no stated pair of
+/// unsigned 64-bit fields could then satisfy the equation.
+fn reconcile(total: u128, mut children: impl Iterator<Item = u128>) -> Option<(u64, u64)> {
+    let attributed = children.try_fold(0u128, u128::checked_add)?;
+    let (unattributed, over_attributed) =
+        if attributed <= total { (total - attributed, 0) } else { (0, attributed - total) };
+    Some((u64::try_from(unattributed).ok()?, u64::try_from(over_attributed).ok()?))
 }
 
 /// [`reconcile`] for a span: only a span with sequential children is a
 /// parent that reconciles.
-fn span_remainders(kind: ChildrenKind, elapsed: u64, children: impl ExactSizeIterator<Item = u64>) -> (u64, u64) {
+fn span_remainders(kind: ChildrenKind, elapsed: u128, children: impl ExactSizeIterator<Item = u128>) -> Option<(u64, u64)> {
     if kind == ChildrenKind::Concurrent || children.len() == 0 {
-        return (0, 0);
+        return Some((0, 0));
     }
     reconcile(elapsed, children)
+}
+
+/// The root's remainders, for a tree [`check_representable`] accepted.
+fn root_remainders(total: Duration, spans: &[Span]) -> (u64, u64) {
+    reconcile(micros(total), spans.iter().map(|span| micros(span.elapsed))).expect("checked at construction")
+}
+
+/// Every duration under `total`, and every remainder of the root and of each
+/// sequential parent, fits the document's unsigned 64-bit field.
+fn check_representable(total: Duration, spans: &[Span]) -> Result<(), TimingsError> {
+    let fits = |duration: Duration| u64::try_from(micros(duration)).is_ok();
+    if !fits(total) || reconcile(micros(total), spans.iter().map(|span| micros(span.elapsed))).is_none() {
+        return Err(TimingsError::Unrepresentable(Vec::new()));
+    }
+    fn walk(spans: &[Span], path: &mut Vec<Stage>, fits: &impl Fn(Duration) -> bool) -> Result<(), TimingsError> {
+        for span in spans {
+            path.push(span.stage);
+            if !fits(span.elapsed) || span.remainders_us().is_none() {
+                return Err(TimingsError::Unrepresentable(path.clone()));
+            }
+            walk(&span.children, path, fits)?;
+            path.pop();
+        }
+        Ok(())
+    }
+    walk(spans, &mut Vec::new(), &fits)
 }
 
 // --- The version-1 wire format ---------------------------------------------
@@ -815,10 +893,10 @@ fn present<'de, D: Deserializer<'de>, T: serde::de::DeserializeOwned>(deserializ
 
 impl From<&Span> for WireSpan {
     fn from(span: &Span) -> Self {
-        let (unattributed_us, over_attributed_us) = span.remainders_us();
+        let (unattributed_us, over_attributed_us) = span.representable_remainders();
         Self {
             stage: span.stage.id().to_string(),
-            elapsed_us: micros(span.elapsed),
+            elapsed_us: wire_micros(span.elapsed),
             git_calls: span.git_calls,
             children_kind: span.children_kind,
             children: span.children.iter().map(WireSpan::from).collect(),
@@ -833,7 +911,7 @@ impl From<&WorkerTimings> for WireWorkerTimings {
         let (unattributed_us, over_attributed_us) = timings.root_remainders_us();
         Self {
             format_version: FORMAT_VERSION,
-            total_us: micros(timings.total),
+            total_us: wire_micros(timings.total),
             spans: timings.spans.iter().map(WireSpan::from).collect(),
             unattributed_us,
             over_attributed_us,
@@ -881,8 +959,8 @@ fn decode_worker(value: Value) -> Result<WorkerTimings, TimingsError> {
 
 fn decode_root(total_us: u64, spans: Vec<WireSpan>, unattributed_us: u64, over_attributed_us: u64) -> Result<Vec<Span>, TimingsError> {
     let spans = decode_spans(spans, &mut Vec::new())?;
-    let expected = reconcile(total_us, spans.iter().map(|span| micros(span.elapsed)));
-    if expected != (unattributed_us, over_attributed_us) {
+    let expected = reconcile(u128::from(total_us), spans.iter().map(|span| micros(span.elapsed)));
+    if expected != Some((unattributed_us, over_attributed_us)) {
         return Err(TimingsError::InconsistentReconciliation(Vec::new()));
     }
     Ok(spans)
@@ -904,7 +982,7 @@ fn decode_spans(wires: Vec<WireSpan>, path: &mut Vec<Stage>) -> Result<Vec<Span>
             children_kind: wire.children_kind,
             children,
         };
-        if span.remainders_us() != (wire.unattributed_us, wire.over_attributed_us) {
+        if span.remainders_us() != Some((wire.unattributed_us, wire.over_attributed_us)) {
             return Err(TimingsError::InconsistentReconciliation(path.clone()));
         }
         path.pop();
@@ -976,7 +1054,7 @@ pub(crate) fn worker_fixture(halves: &[Stage]) -> WorkerTimings {
     let mut top = SpanList::sequential();
     top.push(Span::new(Stage::WorkerSetup, us(40)));
     top.push(Span::new(Stage::WorkerHalves, us(350)).with_children(group));
-    WorkerTimings::new(us(400), top)
+    WorkerTimings::new(us(400), top).expect("the fixture is representable")
 }
 
 #[cfg(test)]

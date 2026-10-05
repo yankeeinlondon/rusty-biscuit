@@ -6,8 +6,9 @@
 //! siblings. Each sequential parent gets a generated `unattributed` row (hidden
 //! under [`UNATTRIBUTED_FLOOR`]) or an `over-attributed` row (always shown),
 //! so every level visibly reconciles. Worker reports are a separate,
-//! labeled diagnostic section with no shares: they were measured in another
-//! process and are not part of the foreground total.
+//! labeled diagnostic section with no shares, its heading included: they were
+//! measured in another process and are not part of the foreground total. Their
+//! sequential parents reconcile the same way, with share-less remainder rows.
 
 use std::time::Duration;
 
@@ -44,12 +45,15 @@ pub(crate) fn json_record(timings: &Timings) -> String {
 
 /// The human report, sized to the terminal.
 pub(crate) fn human_report(timings: &Timings) -> String {
-    let term_width = Terminal::default().width();
+    human_report_at(timings, Terminal::default().width())
+}
+
+fn human_report_at(timings: &Timings, term_width: u32) -> String {
     let inner_width = term_width.saturating_sub(2);
     let mut rendered = MetricsTree::new(report_tree(timings)).render_optimistic(Some(inner_width));
     if let Some(workers) = worker_tree(timings) {
         rendered.push('\n');
-        rendered.push_str(&MetricsTree::new(workers).render_optimistic(Some(inner_width)));
+        rendered.push_str(&MetricsTree::new(workers).with_given_root_share().render_optimistic(Some(inner_width)));
     }
     let mut block = BlockQuote::from(rendered)
         .with_left_block_color(Color::Tailwind(Tailwind::Yellow400))
@@ -65,22 +69,38 @@ pub(crate) fn human_report(timings: &Timings) -> String {
 /// root's remainder row.
 pub(crate) fn report_tree(timings: &Timings) -> MetricNode {
     let total = timings.total();
-    let mut rows: Vec<MetricNode> = timings.spans().iter().map(|span| span_node(span, Some(total))).collect();
-    rows.extend(remainder_row(timings.unattributed(), timings.over_attributed(), total));
+    let mut rows: Vec<MetricNode> =
+        timings.spans().iter().map(|span| span_node(span, Some(total), Shares::Shown)).collect();
+    rows.extend(remainder_row(timings.unattributed(), timings.over_attributed(), total, Shares::Shown));
     MetricNode::branch("Performance", MetricValue::Duration(total), MetricShare::Full, rows).emphasized()
+}
+
+/// Whether a projected row shows its share of its sequential parent.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Shares {
+    Shown,
+    /// Worker rows: they are not part of the foreground total.
+    Hidden,
+}
+
+/// `part`'s share of a sequential parent of `parent` elapsed.
+fn share_of(part: Duration, parent: Duration, shares: Shares) -> MetricShare {
+    if shares == Shares::Hidden || parent.is_zero() {
+        MetricShare::Unknown
+    } else {
+        MetricShare::Of(part.as_secs_f64() / parent.as_secs_f64())
+    }
 }
 
 /// `span`'s row; `parent` is the elapsed time of a sequential parent, `None`
 /// under a concurrent one.
-fn span_node(span: &Span, parent: Option<Duration>) -> MetricNode {
-    let share = match parent {
-        Some(parent) if !parent.is_zero() => MetricShare::Of(span.elapsed().as_secs_f64() / parent.as_secs_f64()),
-        _ => MetricShare::Unknown,
-    };
+fn span_node(span: &Span, parent: Option<Duration>, shares: Shares) -> MetricNode {
+    let share = parent.map_or(MetricShare::Unknown, |parent| share_of(span.elapsed(), parent, shares));
     let own = (span.children_kind() == ChildrenKind::Sequential).then_some(span.elapsed());
-    let mut children: Vec<MetricNode> = span.children().iter().map(|child| span_node(child, own)).collect();
+    let mut children: Vec<MetricNode> =
+        span.children().iter().map(|child| span_node(child, own, shares)).collect();
     if own.is_some() && !span.children().is_empty() {
-        children.extend(remainder_row(span.unattributed(), span.over_attributed(), span.elapsed()));
+        children.extend(remainder_row(span.unattributed(), span.over_attributed(), span.elapsed(), shares));
     }
     MetricNode::branch(span_label(span), MetricValue::Duration(span.elapsed()), share, children)
 }
@@ -94,10 +114,13 @@ pub(crate) fn span_label(span: &Span) -> String {
 }
 
 /// The generated row reconciling a sequential parent of `parent` elapsed.
-fn remainder_row(unattributed: Duration, over_attributed: Duration, parent: Duration) -> Option<MetricNode> {
-    let share = |part: Duration| {
-        if parent.is_zero() { MetricShare::Unknown } else { MetricShare::Of(part.as_secs_f64() / parent.as_secs_f64()) }
-    };
+fn remainder_row(
+    unattributed: Duration,
+    over_attributed: Duration,
+    parent: Duration,
+    shares: Shares,
+) -> Option<MetricNode> {
+    let share = |part: Duration| share_of(part, parent, shares);
     if !over_attributed.is_zero() {
         return Some(MetricNode::leaf(OVER_ATTRIBUTED, MetricValue::Duration(over_attributed), share(over_attributed)));
     }
@@ -105,8 +128,8 @@ fn remainder_row(unattributed: Duration, over_attributed: Duration, parent: Dura
         .then(|| MetricNode::leaf(UNATTRIBUTED, MetricValue::Duration(unattributed), share(unattributed)))
 }
 
-/// The worker section: one row per owned launch, with no shares; `None`
-/// when no worker was followed.
+/// The worker section: one row per owned launch, reconciled like the
+/// foreground but with no shares; `None` when no worker was followed.
 pub(crate) fn worker_tree(timings: &Timings) -> Option<MetricNode> {
     let status = timings.worker_report_status()?;
     let launches = timings
@@ -116,9 +139,11 @@ pub(crate) fn worker_tree(timings: &Timings) -> Option<MetricNode> {
             let label = format!("launch {} ({})", report.launch_index, status_text(report.status()));
             match &report.report {
                 LaunchReport::Complete(worker) | LaunchReport::Partial(worker) => {
-                    let mut rows: Vec<MetricNode> = worker.spans().iter().map(unshared).collect();
-                    rows.extend(remainder_row(worker.unattributed(), worker.over_attributed(), Duration::ZERO));
-                    MetricNode::branch(label, MetricValue::Duration(worker.total()), MetricShare::Unknown, rows)
+                    let total = worker.total();
+                    let mut rows: Vec<MetricNode> =
+                        worker.spans().iter().map(|span| span_node(span, Some(total), Shares::Hidden)).collect();
+                    rows.extend(remainder_row(worker.unattributed(), worker.over_attributed(), total, Shares::Hidden));
+                    MetricNode::branch(label, MetricValue::Duration(total), MetricShare::Unknown, rows)
                 }
                 LaunchReport::Missing | LaunchReport::Invalid => {
                     MetricNode::leaf(label, MetricValue::Placeholder, MetricShare::Unknown)
@@ -132,12 +157,6 @@ pub(crate) fn worker_tree(timings: &Timings) -> Option<MetricNode> {
         MetricShare::Unknown,
         launches,
     ))
-}
-
-/// A worker span and its children, all without shares.
-fn unshared(span: &Span) -> MetricNode {
-    let children = span.children().iter().map(unshared).collect();
-    MetricNode::branch(span_label(span), MetricValue::Duration(span.elapsed()), MetricShare::Unknown, children)
 }
 
 fn status_text(status: WorkerReportStatus) -> &'static str {
