@@ -39,12 +39,11 @@ use std::time::{Duration, Instant};
 
 use perf_support::{
     FakeGitea, GiteaReply, HoldingOrigin, KillOnDrop, MANUFACTURED_FAILURE, MixedFixture, ProxyStub, WorkerReaper,
-    assert_manufactured_failure, perf_timings, process_running, refresh_workers, stage_at, wait_for_refresh_workers,
+    assert_manufactured_failure, process_running, refresh_workers, wait_for_refresh_workers,
 };
 use serial_test::serial;
 use worktree::pull_requests::{CachedPrs, RefreshOutcome, pr_lock_path, select_cached, unix_now};
 use worktree::remote_head::{AnswerSource, CheckFailure, Outcome, Phase, read_store, remote_head_lock_path};
-use worktree::timing::Stage;
 
 /// How long a test waits for the detached worker to act before failing.
 const WORKER_WAIT: Duration = Duration::from_secs(20);
@@ -55,7 +54,7 @@ fn list(fixture: &MixedFixture, proxy: &ProxyStub) -> (Output, String) {
 
 fn list_with(mut command: Command) -> (Output, String) {
     let output = command
-        .args(["list", "--perf=json"])
+        .arg("list")
         .env("NO_COLOR", "1")
         .output()
         .expect("wt list should run");
@@ -523,13 +522,11 @@ fn a_held_live_head_check_holds_the_listing_only_until_its_deadline() {
 
     // `.output()` returns only once every holder of stdout and stderr has
     // exited, so it returning while `origin` still holds the worker's
-    // request proves `wt list` did not join it. The budget limits only the
-    // wait, not the local gather overlapping it, so the bound reads the wait.
+    // request proves `wt list` did not join it. The wait's budget is proven
+    // with a scripted clock (`list::wait::tests::the_budget_ends_the_wait_
+    // with_the_last_phase_seen`) and its real bound by `perf_pr_request.rs`.
     let (_, stderr) = list_with(fixture.wt_command_direct());
-    let waited = stage_at(&perf_timings(&stderr), &[Stage::RemoteAndLocal, Stage::RefreshWorker])
-        .expect("refresh_worker stage");
 
-    assert!(waited < Duration::from_secs(5), "{waited:?}");
     assert!(origin.wait_for_requests(1, WORKER_WAIT), "the worker never asked origin");
     assert!(fixture.head_lock_held(), "the request is still held");
     assert_eq!(refresh_workers(fixture.main()).len(), 1, "one worker");
@@ -604,13 +601,12 @@ fn a_held_pr_request_with_nothing_stored_ends_at_the_budget_with_only_the_hint()
     gitea.hold();
     let _reaper = WorkerReaper::new(&fixture, &gitea);
 
+    // The budget's expiry is proven with a scripted clock (`list::wait::
+    // tests::the_budget_ends_the_wait_with_the_head_finished_and_the_pr_half_
+    // running`) and its real bound by `perf_pr_request.rs`.
     let (_, stderr) = list_with(fixture.wt_command_via_gitea(&gitea));
-    // The budget limits only the wait, not the local gather overlapping it.
-    let waited = stage_at(&perf_timings(&stderr), &[Stage::RemoteAndLocal, Stage::RefreshWorker])
-        .expect("refresh_worker stage");
 
     assert!(gitea.wait_for_waiting(1, Duration::ZERO), "the PR request is still held");
-    assert!(waited >= Duration::from_secs(3) && waited < Duration::from_secs(5), "{waited:?}");
     let text = collapsed(&stderr);
     assert!(text.contains("running this command again"), "the wait timed out:\n{stderr}");
     for item in ["PRs as of", "couldn't refresh", "couldn't get open PRs"] {
