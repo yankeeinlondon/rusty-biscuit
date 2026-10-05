@@ -359,7 +359,7 @@ This is a Rust workspace with the following modules:
 - `unchained-ai/lib/Cargo.toml` - LLM pipeline primitives and provider integrations
 - `unchained-ai/gen/Cargo.toml` - Provider model enum generator (`gen-models`)
 - `unchained-ai/cli/Cargo.toml` - Future AI CLI (`unchained`)
-- `worktree/lib/Cargo.toml` - Git worktree business logic (git subprocess orchestration, SHA-pair status cache)
+- `worktree/lib/Cargo.toml` - Git worktree business logic (git subprocess orchestration, SHA-pair status cache, the `wt list` pipeline, graph gathering, and `--perf` timings; no terminal dependency)
 - `worktree/cli/Cargo.toml` - Worktree CLI (`wt`)
 - `tools/test-toolkit/Cargo.toml` - Shared test lifecycle helpers
 - `biscuit-test-harness/Cargo.toml` - Real-terminal test harness (WezTerm, Kitty, tmux, Apple Terminal)
