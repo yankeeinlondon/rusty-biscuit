@@ -23,8 +23,39 @@ docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
   - .claude/skills/worktree/SKILL.md
   - .claude/skills/worktree/testing.md
+source_files_during_phase_4:
+  - worktree/lib/src/timing.rs
+  - worktree/lib/src/graph.rs
+  - worktree/lib/src/list.rs
+  - worktree/lib/src/list/wait.rs
+  - worktree/lib/src/list/tests/pipeline.rs
+  - worktree/lib/src/list/tests/pipeline/timings.rs
+  - worktree/cli/src/args.rs
+  - worktree/cli/src/lib.rs
+  - worktree/cli/src/perf.rs
+  - worktree/cli/src/perf/tests.rs
+  - worktree/cli/src/commands/list.rs
+  - worktree/cli/src/commands/list/tests.rs
+  - worktree/cli/src/commands/list/tests/pipeline.rs
+  - worktree/cli/tests/perf_support/mod.rs
+  - worktree/cli/tests/perf_flag.rs
+  - worktree/cli/tests/perf_pr_request.rs
+  - worktree/cli/tests/perf_graph_stages.rs
+  - worktree/cli/tests/list_prs.rs
+  - worktree/cli/tests/cache_warm_path.rs
+  - worktree/cli/tests/cache_cold_path.rs
+  - worktree/cli/tests/snapshots/list_flags__global_flag_completions.snap
+docs_updated_during_phase_4:
+  - worktree/docs/cli/list.md
+  - worktree/README.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/worktree/list.md
+  - .claude/skills/worktree/testing.md
+  - .claude/skills/worktree/git-graph.md
 packages:
   - worktree
+  - worktree-cli
 ---
 
 # Implementation Log for 2026-10-04-list-perf-instrumentation (7 phases)
@@ -317,3 +348,240 @@ Input Robustness Matrix: not applicable (no parser or format reader changed).
   `CreateProcessW` rejects the directory). Pull-request CI runs Linux, and a
   push to `main` runs Windows.
 - `just check-tier-coverage`: not needed; no tier-marked tests added.
+
+## Phase 4
+
+### Starting state: Phase 3 was only partly done
+
+At the start of this phase, Phase 3's commits had moved the graph gather and
+the wait core into the library and added `worktree::list::gather`, but the
+CLI still ran its own copy of the pipeline (`gather_listing`,
+`prepare_remote`, `follow_remote`, `RemoteAnswers`, …) and never called the
+library. Its old pipeline tests (`cli/src/commands/list/tests/pipeline.rs`)
+were still present beside the library copies. Phase 3's "CLI thin adapter",
+"Move pipeline tests", "pipeline entry", "graph gather", and "Benchmark"
+boxes and both Checkpoint 3 boxes were unchecked. Phase 4 adds spans to the
+library pipeline, which needs the CLI to use it, so I finished the adapter
+first:
+
+- `cli/src/commands/list.rs` now builds `ListOptions` from the flags, calls
+  `worktree::list::gather(&current_dir, ..)`, drives the spinner from
+  `on_phase` (`WaitProgress::Started` creates it, `Phase` updates it,
+  `Finished` clears it), and renders. Its duplicate pipeline, `Stores`,
+  `RemoteAnswers`, `RemotePlan`, `Observed`, `Listing`, `prepare_remote`,
+  `follow_remote`, and `record_ignore_api` are deleted. The request-notice
+  and caption projections stay in the CLI and read the library's
+  `RemoteAnswers`/`Observed`.
+- I deleted `cli/src/commands/list/tests/pipeline.rs`, because every test in
+  it has a library copy in `lib/src/list/tests/pipeline.rs` (diffed by name:
+  the library has the same 9 tests plus 5 more). I also deleted the CLI
+  overlap seam and the `run_pipeline_*` stage-name tests. The CLI's
+  remote-stage tests (`list::tests::gather`) now call the library's
+  `prepare_remote` and `follow_remote`.
+- I verified the graph gather, pipeline entry, and benchmark items and
+  checked them off: `cargo tree -p worktree -e normal` has no
+  biscuit-terminal, and `lib/benches/list_status.rs` uses `gather` with
+  `ListOptions::default()` (timings off).
+- **Phase 3 test fixed:**
+  `list::tests::pipeline::concurrent_listings_of_two_repositories_stay_apart_and_leave_the_cwd_alone`
+  failed on macOS. Git reports the `/private/var/...` realpath of a temp
+  directory, and the test compared it with the `/var/...` spelling. It now
+  compares canonical paths (the macOS symlinked-temp trap in the `os` skill).
+
+### Library spans (`lib/src/list.rs`, `lib/src/graph.rs`, `lib/src/timing.rs`)
+
+- New crate-private helpers in `timing.rs`:
+  - `measure(stage, work)` returns the span: elapsed time plus `git_calls`
+    from a `CallScope`.
+  - `record(steps: Option<&mut SpanList>, stage, work)` records into a list,
+    or with `None` only runs `work`, reading no clock and opening no scope.
+  - `record_parent(steps, stage, kind, work)` does the same for a parent;
+    `work` gets the child list.
+
+  Every library step goes through these, so the disabled path is one
+  `Option` check.
+- `ListOptions::timings`, `Listing::timings: Option<Timings>` (a
+  `Scope::Library` document). The Phase 3 `Durations`/`RegatherDurations`
+  struct and the `pr_reread`/`remote_wait`/`pr_gather` fields are removed.
+- Stages recorded, as spec §3 lays them out: `read_worktrees` (parse plus
+  store paths), `origin_lookup`, `prepare_local` (snapshot clone, cache
+  load, graph input), the concurrent region, `fast_forward`, `ref_reread`,
+  `regather`, `commit`, and `checkout_refresh`. The region is
+  `remote_and_local` when `remote.waited.is_some()` and `local_reads`
+  otherwise (R9). Its children are `refresh_worker`, `pr_cache_read`,
+  `local_gather`, and `graph_history`/`verbose_history`.
+- **`refresh_worker`:** `wait::wait` now takes
+  `impl FnMut(&Path, &LaunchArgs) -> io::Result<WorkerHandle>` instead of
+  the `WorkerLaunch` fn pointer. Existing callers that pass a fn item are
+  unchanged. `follow_remote` wraps the launch in a `LaunchClock` that times
+  each launch on the foreground monotonic clock only when timing is on.
+  `worker_launch` is the sum of every launch attempt (a retry or a failed
+  spawn included; the launches do not overlap). `worker_wait` is the `wait`
+  call's elapsed time minus that sum. The span has **no `git_calls`**: the
+  worker's Git runs in another process, so the count is unknown, not zero.
+- **`pr_cache_read`:** the origin recheck plus the store read after the wait.
+  With no worker (`ListOptions::worker: None`) it is the stored-answer read
+  inside `local_reads`.
+- **`local_gather`:** when timed, the list module runs `gather_dirtiness` on
+  a counted task beside `gather_ref_facts`, the same split as
+  `WorktreeList::gather_local`, which is still used when untimed. Children
+  are `worktree_status` ∥ `branch_comparisons`, both concurrent.
+- **Graph:** `graph::gather_timed` returns `GraphHistory` (graph needed) or
+  `VerboseHistory` (verbose only), with sequential steps that each carry
+  counts: `shallow_check` (graph only), `default_tips`, `focused_merge_base`
+  (focused view), `verbose_details`, and `lane_assembly`, which covers the
+  whole `focused_view`/`base_view` loop. `graph::gather` is unchanged and
+  untimed.
+- **Regather ruling (gap in R1/R2):** spec §3 asks for "input preparation
+  and the concurrent `branch_comparisons` and history steps" under
+  `regather`, but the closed stage list has no id for that concurrent group.
+  I reused `local_reads`: `regather` (sequential) → `prepare_local`, then
+  `local_reads` (concurrent) → `branch_comparisons` ∥
+  `graph_history`/`verbose_history`. Dirtiness is never repeated.
+- **Counting:** the region's `CallScope` is entered before
+  `TaskHandle::current()` is taken, so every task counts into it. Each task
+  opens its own nested scopes inside `handle.run`. Every library span except
+  `refresh_worker` and its children has a complete count.
+
+### CLI (`cli/src/perf.rs`, `cli/src/commands/list.rs`, `cli/src/args.rs`)
+
+- `perf.rs` only renders now: `report_tree`/`human_report` (a metrics tree
+  with `Stage::label()`, `[n git]` suffixes, shares only under sequential
+  parents, a generated `unattributed` row hidden under 1 ms, an
+  `over-attributed` row always shown), `worker_tree` (a separate section
+  titled "Refresh worker (diagnostic, measured in the worker): <status>",
+  one row per launch, no shares; it renders whatever `worker_reports`
+  carries, which stays empty until Phase 5), and `json_record`
+  (`\nWT_PERF_JSON <doc>\n`). `PerfCollector` is gone.
+- `run_pipeline` builds a `Scope::Command` document: `startup` (process
+  start to pipeline entry), then the library's top-level spans cloned in
+  order (no span for the library total), then `caption_status`,
+  `display_facts`, `table_render`, `verbose_render`, `notes_render` (status
+  plus preliminary notes), `graph_budget`, `graph_render`,
+  `final_notes_render`, and `write_output` (assemble plus `eprint!`). The
+  total is read right after the write; rendering and writing the report
+  happen afterward, so they are excluded. A listing error returns before
+  any report.
+- `--perf[=human|json]`: `Option<PerfFormat>`, with `num_args = 0..=1`,
+  `require_equals`, `default_missing_value = "human"`, and `value_enum`. The
+  variants carry `//` comments rather than `///` docs, because a documented
+  variant gives `--perf` a long help, which changed `-h` output and the
+  completion snapshot. Accepted snapshot change: the `--perf` completion
+  description.
+
+### Phase 6 work pulled forward to keep `just test` and `just test-perf` green
+
+Renaming the rows broke seven L1 integration tests and every `perf_` test
+that scraped labels. Instead of patching label strings that Phase 6 deletes
+anyway, I added the Phase 6 reader and migrated every consumer:
+
+- `perf_support`: `perf_timings(output)` (final nonempty line, LF or CRLF,
+  prefix stripped, strict decode, panics on a missing or malformed record),
+  `stage_at(&timings, path)`, and `local_gather(&timings)` (under either
+  region). `MixedFixture::list_gather_duration` reads `local_gather` from
+  `--perf=json`.
+- Migrated with the spec's mapping: `perf_pr_request.rs` (`list gather` →
+  `local_gather`, `pr gather` → `origin_lookup`, `pr reread` →
+  `pr_cache_read`, `remote wait` → `[remote_and_local, refresh_worker]`),
+  `perf_graph_stages.rs` (`graph_history` under either region, and
+  `graph_render`, both read from `--perf=json` in the pty),
+  `cache_warm_path.rs`/`cache_cold_path.rs` (comments; the helper does the
+  reading), `list_prs.rs` (`--perf=json`; the two held-request tests read
+  `refresh_worker`), and `perf_flag.rs` (the real-report tests read stage
+  paths).
+- **Left for Phase 6:** deleting `perf_rows`, `stage_from_perf`,
+  `list_gather_from_perf`, and their self-tests (`perf_flag.rs` `NESTED`
+  tests and `perf_support::tests`), which have no other consumers now. Also
+  left: removing `--perf` and the `refresh_worker` bound from the
+  `list_prs.rs` functional tests (the plan's scripted-clock replacement),
+  and the rest of the `perf_flag.rs` feature list.
+- I checked off "Migrate perf consumers". The "Perf helper" item stays
+  unchecked until the deletion is done.
+
+### Requirement → test mapping
+
+| Requirement (plan Phase 4 / spec) | Test |
+| --- | --- |
+| Stage paths per path: no origin | `list::tests::pipeline::timings::without_an_origin_the_local_reads_hold_the_gathers_and_the_graph_steps` |
+| remote (wait ran → `remote_and_local`; launch + follow; unknown worker count) | `…::a_followed_wait_makes_the_remote_region_with_the_launch_and_the_follow` |
+| no worker (origin, no launch → `local_reads` with `pr_cache_read`) | `…::without_a_worker_the_stored_answers_are_read_inside_the_local_reads` |
+| regather (input + `local_reads` group, no dirtiness; graph and `-v` gathered once) | `…::a_regather_records_its_input_and_its_reads_but_never_dirtiness_again` |
+| `--ff` moving a checkout | `…::a_fast_forward_that_moves_a_checkout_records_its_refresh` |
+| `-v` without image (`verbose_history`, no `shallow_check`) | `…::verbose_details_alone_are_a_verbose_history_with_no_shallow_check` |
+| exact reconciliation of every library document | each test above decodes through `Timings::from_json` (strict) and compares the re-encoded JSON |
+| `git_calls` complete: top-level counts sum to the recorder; history steps sum to `graph_history`; status count = walks | `…::the_git_counts_cover_every_call_once` |
+| disabled mode: same Git calls and facts; no document | `…::timings_on_and_off_do_the_same_work_and_show_the_same_facts` |
+| command composition (startup, library spans in place, render stages; reconciles) | `commands::list::tests::a_command_report_holds_the_library_spans_between_startup_and_the_render_stages` |
+| renderer: shares only under sequential parents; `[n git]`; remainder rows | `perf::tests::sequential_rows_carry_a_share_and_concurrent_rows_none`, `…::a_sequential_parent_shows_its_steps_with_git_counts_and_its_own_remainder` |
+| `unattributed` hidden under 1 ms; over-attribution always shown, at each level | `perf::tests::an_unattributed_remainder_under_a_millisecond_is_hidden`, `…::over_attribution_is_shown_at_every_sequential_level_however_small` |
+| worker reports: separate section, no shares, never in the foreground tree | `perf::tests::worker_reports_are_a_separate_section_without_shares` |
+| JSON record: one framed line, no ESC/CR, decodes to the same document; human and JSON describe one tree | `perf::tests::the_json_record_is_one_framed_line_that_decodes_to_the_same_document`, `…::the_human_report_names_the_stages_and_both_renderers_describe_one_tree` |
+| `--perf` needs `=`; `--perf json` leaves `json` as a subcommand (exit 2); unknown value exit 2 | `perf_flag::the_perf_value_needs_an_equals_sign_and_a_known_format` |
+| record follows the listing, final line, stdout empty | `perf_flag::the_json_record_is_the_final_line_after_the_listing` |
+| no report on listing errors (both forms) | `perf_flag::list_perf_error_path_emits_no_report` |
+| graph is still gathered on a narrow image terminal; none without image or `-v` (recorder, not stage names) | `commands::list::tests::run_pipeline_gathers_the_graph_on_a_narrow_image_terminal`, `…::run_pipeline_without_image_support_or_verbose_gathers_no_graph` |
+
+All new tests are L1 (no tier marker in any path segment; `perf::tests` is
+not `perf_`). `cargo nextest list` with the `just test` filter selects all 26
+instances (CLI unit tests compile twice). Input Robustness Matrix: no new
+reader. The record is read by Phase 1's decoder, whose matrix test already
+covers it.
+
+### Gates
+
+- `just lint` (worktree): clean.
+- `just test` (worktree): 1043/1043 passed, 32 skipped.
+- `just test-perf`: 32/32 passed, including the migrated
+  `perf_graph_stages`, `perf_pr_request`, and cache SLA tests.
+- `just test-l2`: 39/39 passed. Five Kitty pixel sub-checks reported
+  "unavailable" because the Kitty window was covered by another window, a
+  host condition the test reports rather than fails.
+- Cross-OS: `just cross-check worktree --os linux` **did not run**, for the
+  same host problem as Phase 2 (`build-linux` cannot write dependency
+  `.rmeta` files in its target directory). The new code is `std` only, with
+  no `cfg` branches. `perf_timings` splits CRLF, and the macOS path fix uses
+  `canonicalize` on both sides, which is also consistent on Windows (both
+  sides get `\\?\`). Windows was not attempted (Phase 2 recorded its storage
+  preflight refusal).
+
+### Checkpoint 4: three warm `wt list --perf` runs on this checkout
+
+Debug build (`target/debug/wt`) from `fix-wt-skill`, non-image terminal
+(captured stderr), one warm-up run first, read from `--perf=json`:
+
+| Run | Total | Top-level `unattributed` | Human row |
+| --- | --- | --- | --- |
+| 1 | 565.0 ms | 153 µs | hidden (< 1 ms) |
+| 2 | 559.1 ms | 156 µs | hidden |
+| 3 | 564.3 ms | 146 µs | hidden |
+
+The rest is pure bookkeeping between steps (for example the `tracking_tip`
+computation the facts borrow, which is outside `display_facts` because of
+that borrow). On every run the region was ≈470 ms, of which
+`refresh_worker` was ≈460 ms (`worker_launch` ≈1 ms). `local_gather` was
+≈273–307 ms, almost all `worktree_status` (10 `git status` walks); `commit`
+took ≈17–20 ms.
+
+An extra run in a pty with `TERM_PROGRAM=ghostty` showed `graph_history`
+1160.8 ms [40 git] = `shallow_check` [1] + `default_tips` [0] +
+`focused_merge_base` [1] + `lane_assembly` [38], with an 18.3 ms remainder
+under `graph_history`. That run was a loaded debug build with a 5.6 s
+`graph_render`. The remainder is time between the recorded steps on the
+graph thread (no Git runs there), most likely scheduling while 10 status
+walks ran beside it. It is an observation, not a gate.
+
+### Comment and doc drift
+
+- Rewrote the stale docs on the CLI pipeline (the deleted `gather_listing`
+  doc described the old `--perf` groups). The library `list` module docs now
+  describe `timings`, and `wait::wait` documents the closure launch.
+- Updated `worktree/docs/cli/list.md` (the `--perf[=human|json]` row) and the
+  `worktree/README.md` `--perf` paragraph. **Not updated:**
+  `worktree/docs/performance-testing.md` still describes the old rows and
+  `stage_from_perf` (54 mentions). It needs the full rewrite Phase 7
+  schedules.
+- Skill: `list.md` (the pipeline is now the library's; timing shape and
+  helpers; the count-scope ordering trap; round-trip precision),
+  `testing.md` (the overlap seam is in the library; assert through
+  `regathered`; read perf with `perf_timings`/`stage_at`), and
+  `git-graph.md` (gather paths moved in Phase 3; graph timing stages).

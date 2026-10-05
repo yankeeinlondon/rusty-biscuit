@@ -28,33 +28,34 @@ clarified: false
 implemented: false
 human_review: false
 message_to_agent: |-
-    Phase 1 added `worktree::timing` (lib/src/timing.rs; tests in lib/src/timing/tests.rs). Nothing calls it yet.
-    Builder API for Phases 3-5: build children with `SpanList::sequential()` / `SpanList::concurrent()`,
-    `push(Span::new(stage, elapsed).with_git_calls(n).with_children(list))`, or `time(stage, f)` /
-    `time_parent(stage, kind, |children| ..)`. Concurrent tasks return their durations and the caller
-    pushes them after joining. Pushing a stage that is already a sibling ADDS into it, so only push
-    non-overlapping repeats. Finish with `Timings::new(Scope::Library | Scope::Command, total, root_list)`
-    (root list must be sequential) and `.with_worker_reports(reports, summarize_worker_reports(..))`.
-    Worker receipts (Phase 5) should use `WorkerTimings::to_json` / `WorkerTimings::from_json` for the
-    `durations` object; a decode error there maps to `LaunchReport::Invalid`, absence to `LaunchReport::Missing`.
-    Rulings: a span with no children or with concurrent children carries zero remainders;
-    `launch_index` is 0-based and listed 0..n; `worker_report_status` is present only when a worker was
-    followed. Spike S1 chose a thread-local counter stack where spawned tasks open their own scope only
-    if the spawner had one, return their count, and the spawner adds it after joining (no Arc/atomics).
-    The implementation log lists every thread-spawn site Phase 2-4 must propagate the scope through,
-    including ones inside the library (listing.rs, worktree.rs), and notes that `git_rev_parse` spawns
-    Git without the recorder but must still be counted.
-    Phase 2 (done): `worktree::git::calls` counts started Git processes per thread. Open a scope with
-    `let scope = calls::CallScope::enter();` and read `scope.finish()`. Every library Git helper is
-    already hooked (git.rs helpers, `fast_forward::merge_ff_only`, `live_remote::run_transport`), and
-    the library spawn sites (`compare_live`, `gather_dirtiness`, `compare_tree`, `gather_local`)
-    already pass the scope to their threads. For EVERY thread you move or add in Phase 3 (cli list.rs
-    511/577, git_graph.rs 1071, topology.rs 439): take `let handle = calls::TaskHandle::current();`
-    before spawning, run the body as `handle.run(|| ..)`, and wrap each join in `calls::joined(..)`.
-    Otherwise those calls silently drop out of the count. Guard test:
-    `listing::repo_tests::a_counting_scope_sees_every_call_of_a_threaded_local_gather` (count equals
-    recorder length); add an equivalent for the moved graph and pipeline gathers. Note that
-    `run_transport` starts 2 processes (a `config` read plus the transport).
+    Phase 4 (done). Phase 3 had left the CLI running its own copy of the pipeline; Phase 4 finished
+    that: `cli/src/commands/list.rs` now calls `worktree::list::gather(&current_dir, &ListOptions, on_phase)`
+    and only renders, and the old CLI pipeline tests are deleted (the library has copies).
+    Timing API used by the pipeline (crate-private, in `lib/src/timing.rs`): `timing::measure(stage, f)`
+    returns `(T, Span)` with `git_calls` from a CallScope; `timing::record(steps: Option<&mut SpanList>, stage, f)`
+    records or, with None, only runs f (no clock, no scope); `timing::record_parent(steps, stage, kind, |children| ..)`.
+    Library document = `Listing::timings` (Scope::Library), on only with `ListOptions::timings`.
+    Region is `remote_and_local` only when `remote.waited.is_some()`, else `local_reads`; regather is
+    `prepare_local` then a `local_reads` concurrent group (`branch_comparisons` + history) - a ruling, logged.
+    For Phase 5: `wait::wait` now takes `impl FnMut(&Path, &LaunchArgs) -> io::Result<WorkerHandle>`
+    (fn items still work); `follow_remote_steps` wraps the launch in `LaunchClock` (lib/src/list.rs), which
+    times launches only when timing is on. The opt-in worker timing flag belongs in `LaunchArgs`
+    (set from `ListOptions::timings`), and `WaitEnd` is where the per-launch reports should travel; after
+    the wait, attach them with `Timings::with_worker_reports` where `gather` builds the document (the
+    end of `gather` in lib/src/list.rs). The CLI copies the library spans into its command document
+    in `run_pipeline` (cli/src/commands/list.rs) - copy the worker reports there too
+    (`Timings::with_worker_reports` on the command document). `cli/src/perf.rs::worker_tree` already
+    renders a worker section (no shares) from `worker_reports`/`worker_report_status`; it has unit tests in
+    cli/src/perf/tests.rs with a synthetic report.
+    For Phase 6: `perf_support::perf_timings`/`stage_at`/`local_gather` exist and EVERY consumer is
+    migrated to `--perf=json` already. Still to do there: delete `perf_rows`, `stage_from_perf`,
+    `list_gather_from_perf` and their self-tests (`perf_flag.rs` NESTED tests, `perf_support::tests`, which
+    run only in test-perf because the module name starts `perf_`), drop `--perf=json` and the
+    refresh_worker bound from the two `list_prs.rs` held-request functional tests (scripted wait clock
+    instead), and the remaining `perf_flag.rs` feature list (CRLF pty, misleading prefix in a commit message).
+    For Phase 7: `worktree/docs/performance-testing.md` still documents the old rows and `stage_from_perf`
+    (README and docs/cli/list.md `--perf` text are already updated). Plan/log frontmatter has no
+    `*_during_phase_3` keys (Phase 3 was never closed out); Phase 3's work is described in the Phase 4 log.
 related:
     - 2026-06-14-perf-measurement
     - 2026-10-03-list-overlap-and-keyless-notice

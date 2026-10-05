@@ -24,8 +24,39 @@ docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
   - .claude/skills/worktree/SKILL.md
   - .claude/skills/worktree/testing.md
+source_files_during_phase_4:
+  - worktree/lib/src/timing.rs
+  - worktree/lib/src/graph.rs
+  - worktree/lib/src/list.rs
+  - worktree/lib/src/list/wait.rs
+  - worktree/lib/src/list/tests/pipeline.rs
+  - worktree/lib/src/list/tests/pipeline/timings.rs
+  - worktree/cli/src/args.rs
+  - worktree/cli/src/lib.rs
+  - worktree/cli/src/perf.rs
+  - worktree/cli/src/perf/tests.rs
+  - worktree/cli/src/commands/list.rs
+  - worktree/cli/src/commands/list/tests.rs
+  - worktree/cli/src/commands/list/tests/pipeline.rs
+  - worktree/cli/tests/perf_support/mod.rs
+  - worktree/cli/tests/perf_flag.rs
+  - worktree/cli/tests/perf_pr_request.rs
+  - worktree/cli/tests/perf_graph_stages.rs
+  - worktree/cli/tests/list_prs.rs
+  - worktree/cli/tests/cache_warm_path.rs
+  - worktree/cli/tests/cache_cold_path.rs
+  - worktree/cli/tests/snapshots/list_flags__global_flag_completions.snap
+docs_updated_during_phase_4:
+  - worktree/docs/cli/list.md
+  - worktree/README.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/worktree/list.md
+  - .claude/skills/worktree/testing.md
+  - .claude/skills/worktree/git-graph.md
 packages:
   - worktree
+  - worktree-cli
 ---
 
 # Plan: `wt list --perf` as a library option that names real work
@@ -149,7 +180,7 @@ Goal: pure relocation with behavior unchanged and every existing test green, **b
 
 ### Wave 1 (two agents in parallel; disjoint files)
 
-- [ ] **Graph gather → `worktree::graph`** (agent A)
+- [x] **Graph gather → `worktree::graph`** (agent A)
   - Move the gathering half of `cli/src/commands/git_graph.rs` and `git_graph/topology.rs` (history reads, classification, lane facts, verbose commit details) to `lib/src/graph/`.
   - Replace biscuit-terminal `LaneEntry`/`GraphLine` with library-owned data types. The CLI keeps layout, row budget, terminal capability decisions, and the conversion (`GraphFacts::to_git_graph`) as a CLI adapter function (not an inherent method, since `GraphFacts` is now foreign).
   - Do not change algorithms (lane placement, repeated assembly, holder search).
@@ -161,31 +192,31 @@ Goal: pure relocation with behavior unchanged and every existing test green, **b
 
 ### Wave 2 (after Wave 1; single agent, same files)
 
-- [ ] **`worktree::list` pipeline entry**
+- [x] **`worktree::list` pipeline entry**
   - Move `gather_listing`, `prepare_remote`, `follow_remote`, accept-or-regather, and the commit step into `lib/src/list/`. Entry: `gather(repo_path, ListOptions, on_phase)`; `ListOptions` holds today's flags, budgets, worker launch (`Option<WorkerLaunch>`; `None` = read cached remote data, no spawn, no wait), graph/verbose needs as booleans, and `timings: bool`.
   - Never `set_current_dir`; thread the repo path explicitly (audit the moved code for implicit-cwd git calls).
   - Add `Listing.regathered: bool`, set by the accept-or-regather decision.
   - `WorkerLaunch` stays an injected seam; the CLI supplies its launcher on every ordinary listing.
   - Preserve contracts: object IDs from the accepted ref snapshot; budgets bound only the wait; at most one ref-dependent regather; cache save and pruning once; only a checkout moved by `--ff` gets another status read; origin-change guard; ignored/unsupported/local-origin behavior; retry/adoption; receipt cleanup; no printing and no foreground network.
-- [ ] **CLI thin adapter**: `cli/src/commands/list.rs` calls the library, then does render and write. Remove timing literals later (Phase 4), not now.
-- [ ] **Move pipeline tests** from `cli/src/commands/list/tests.rs` and `list/tests/pipeline.rs` to the library, functional assertions only: `Listing` facts, `regathered`, the git-call recorder. Replace `stages.contains("regather")` with `regathered`. Remove stage-name proofs from `run_pipeline_*`; the recorder already proves the work.
-- [ ] **Benchmark**: point `lib/benches/list_status.rs` at the new entry with `timings: false`, no launcher, no `--ff`, no API preference writes; state this scope in its docs comment.
+- [x] **CLI thin adapter**: `cli/src/commands/list.rs` calls the library, then does render and write. Remove timing literals later (Phase 4), not now.
+- [x] **Move pipeline tests** from `cli/src/commands/list/tests.rs` and `list/tests/pipeline.rs` to the library, functional assertions only: `Listing` facts, `regathered`, the git-call recorder. Replace `stages.contains("regather")` with `regathered`. Remove stage-name proofs from `run_pipeline_*`; the recorder already proves the work.
+- [x] **Benchmark**: point `lib/benches/list_status.rs` at the new entry with `timings: false`, no launcher, no `--ff`, no API preference writes; state this scope in its docs comment.
 
 ### Checkpoint 3
 
-- [ ] `just test`, `just test-l2`, `just lint`, and the existing `just test-perf` all pass unchanged in `worktree/`. A concurrency test shows two simultaneous library calls with different repo paths leave cwd untouched.
-- [ ] `cargo tree -p worktree` shows no biscuit-terminal.
+- [x] `just test`, `just test-l2`, `just lint`, and the existing `just test-perf` all pass unchanged in `worktree/`. A concurrency test shows two simultaneous library calls with different repo paths leave cwd untouched.
+- [x] `cargo tree -p worktree` shows no biscuit-terminal.
 
 ## Phase 4: Thread spans through the pipeline and build the report
 
 ### Wave 1 (parallel; disjoint modules)
 
-- [ ] **Library spans** (agent A, `lib/src/list/`, `lib/src/graph/`)
+- [x] **Library spans** (agent A, `lib/src/list/`, `lib/src/graph/`)
   - With `timings: true`, record the stages of spec §3 for `read_worktrees`, `origin_lookup`, `prepare_local`, `remote_and_local` or `local_reads`, `refresh_worker` (`worker_launch` with the foreground monotonic clock, `worker_wait`), `pr_cache_read`, `local_gather` (`worktree_status` ‖ `branch_comparisons`), `graph_history` / `verbose_history` (sub-steps with `git_calls`; `lane_assembly` aggregates the whole repeated loop; omit `shallow_check` on the verbose-only path; with both, gather once), `fast_forward`, `ref_reread`, `regather` (no repeated dirtiness), `commit`, `checkout_refresh`.
   - Use `remote_and_local` only when a wait ran. Record attempted steps even if they return nothing or fail recoverably; omit steps that did not run.
   - Graph tasks return scoped counts; aggregate after join. `git_calls` is reported only when coverage is complete.
   - **Disabled mode**: no tree, no clock reads, no counter scopes, no worker timing request, no new global state. A test asserts identical listing facts and identical git-call recorder output with timings on and off.
-- [ ] **CLI renderer** (agent B, `cli/src/perf.rs`, `cli/src/commands/list.rs`)
+- [x] **CLI renderer** (agent B, `cli/src/perf.rs`, `cli/src/commands/list.rs`)
   - `cli/src/perf.rs` becomes render-only: `Timings` → `MetricsTree` using `Stage::label`, sequential children with shares, concurrent children without, generated `unattributed` rows (hidden under 1 ms; over-attribution always shown), `[n git]` suffixes, and a labeled diagnostic section for worker reports with no percentages.
   - CLI stages `startup`, `caption_status`, `display_facts`, `table_render`, `verbose_render`, `notes_render`, `graph_budget`, `graph_render`, `final_notes_render`, `write_output` appended after the library spans.
   - Compose: CLI interval starts at the process-start instant and ends after the listing stderr write; rebase library spans into it (no extra top-level span for the library total); finalize once; exclude rendering/serializing/writing the report itself.
@@ -194,13 +225,13 @@ Agents A and B coordinate on the `Timings` builder API fixed in Phase 1; if it n
 
 ### Wave 2 (after Wave 1)
 
-- [ ] **`--perf[=human|json]`** in clap with `num_args = 0..=1`, `require_equals = true`, `default_missing_value = "human"`, a `ValueEnum` for the value; invalid value → usage error exit 2; `--perf json` must not consume a subcommand; behavior on other commands unchanged.
-- [ ] **JSON emission**: after a successful listing write, print `\n` then exactly one compact `WT_PERF_JSON <doc>` line ending in `\n`, on stderr, `scope: command`. Listing errors emit no report. Stdout stays empty. No ANSI, CR, labels, or image bytes in the JSON.
-- [ ] **Shape tests per path** (library, no host-speed thresholds): no origin, remote, regather, `--ff`, `-v` without image: assert expected stage paths and exact reconciliation.
+- [x] **`--perf[=human|json]`** in clap with `num_args = 0..=1`, `require_equals = true`, `default_missing_value = "human"`, a `ValueEnum` for the value; invalid value → usage error exit 2; `--perf json` must not consume a subcommand; behavior on other commands unchanged.
+- [x] **JSON emission**: after a successful listing write, print `\n` then exactly one compact `WT_PERF_JSON <doc>` line ending in `\n`, on stderr, `scope: command`. Listing errors emit no report. Stdout stays empty. No ANSI, CR, labels, or image bytes in the JSON.
+- [x] **Shape tests per path** (library, no host-speed thresholds): no origin, remote, regather, `--ff`, `-v` without image: assert expected stage paths and exact reconciliation.
 
 ### Checkpoint 4
 
-- [ ] `just test`, `just lint`; run `wt list --perf` three times warm on this repo and record the `unattributed` row (hidden, or named work) for the implementation log. Note any residual cause.
+- [x] `just test`, `just lint`; run `wt list --perf` three times warm on this repo and record the `unattributed` row (hidden, or named work) for the implementation log. Note any residual cause.
 
 ## Phase 5: Worker durations in the receipt
 
@@ -234,7 +265,7 @@ Depends on Phases 1 and 3 (wait core in library). Disjoint from Phase 4's render
 ### Wave 1 (parallel by file group)
 
 - [ ] **Perf helper** (`cli/tests/perf_support/mod.rs`): add a helper that runs `wt list --perf=json`, selects the final nonempty line (splitting CRLF as well as LF), strips `WT_PERF_JSON `, and deserializes into `worktree::timing::Timings`; reject a missing or malformed final record; never search earlier text. Add a path-lookup convenience. Delete `perf_rows`, `stage_from_perf`, `list_gather_from_perf`.
-- [ ] **Migrate perf consumers** (split among agents): `perf_graph_stages.rs`, `perf_pr_request.rs`, `cache_warm_path.rs`, `cache_cold_path.rs` (their `perf_` tests), `perf_flag.rs`, and `list_prs.rs` perf tests. Mapping: `list gather` → `local_gather`; `remote wait` → `refresh_worker`; `pr gather` → `origin_lookup`; graph gather/render keep their boundaries. Bounds and sampling unchanged; never sum concurrent children as an old elapsed span.
+- [x] **Migrate perf consumers** (split among agents): `perf_graph_stages.rs`, `perf_pr_request.rs`, `cache_warm_path.rs`, `cache_cold_path.rs` (their `perf_` tests), `perf_flag.rs`, and `list_prs.rs` perf tests. Mapping: `list gather` → `local_gather`; `remote wait` → `refresh_worker`; `pr gather` → `origin_lookup`; graph gather/render keep their boundaries. Bounds and sampling unchanged; never sum concurrent children as an old elapsed span.
 - [ ] **Functional test cleanups**
   - `list_prs::a_held_live_head_check_holds_the_listing_only_until_its_deadline`: keep `.output()` returning while the request and worker lock stay held plus the timeout presentation; drop the `remote wait` row bound; prove the budget with the scripted wait clock in library tests (add if missing); rely on existing `perf_` held-check tests for the real bound; add no whole-command bound.
   - `list_prs::a_held_pr_request_with_nothing_stored_ends_at_the_budget_with_only_the_hint`: keep held-request and hint assertions; scripted clock proves expiry.
