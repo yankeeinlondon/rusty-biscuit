@@ -211,10 +211,16 @@ fn a_traversal_only_ancestor_does_not_approve_a_mismatched_absolute_directory() 
     let ctx = ctx(&fx);
     let wrong = absolute(&fx.repo, "locked/anchor/DOCS/*.md");
     let right = absolute(&fx.repo, "locked/anchor/docs/*.md");
+    // Probed on the fixture's filesystem: where `DOCS` does not open `docs`
+    // (a case-sensitive one) the directory is merely absent, and an absent
+    // root is still a root.
+    let aliased = locked.join("anchor/DOCS").is_dir();
 
     let check = |state: &str| {
         assert_rejects(&wrong, &file, &ctx);
-        assert!(glob(&[&wrong]).roots(&ctx).is_empty(), "{state}: `{wrong}` exposes no root");
+        if aliased {
+            assert!(glob(&[&wrong]).roots(&ctx).is_empty(), "{state}: `{wrong}` exposes no root");
+        }
         assert!(!glob(&[&wrong]).matches_without_context(&file), "{state}: `{wrong}` detached");
         assert_admits(&right, &file, &ctx);
         assert!(glob(&[&right]).matches_without_context(&file), "{state}: `{right}` detached");
