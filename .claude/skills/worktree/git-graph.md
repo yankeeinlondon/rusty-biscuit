@@ -1,7 +1,7 @@
 # `wt list` Git Graph: Gathering, Layout, Tests
 
-Load before changing `cli/src/commands/git_graph.rs`, `git_graph/topology.rs`,
-or graph tests. The behavior a user sees is in `worktree/docs/git-graph.md`;
+Load before changing `lib/src/graph.rs` (gathering), `lib/src/graph/topology.rs`,
+`cli/src/commands/git_graph.rs` (conversion and rendering), or graph tests. The behavior a user sees is in `worktree/docs/git-graph.md`;
 this page holds the implementation facts and traps.
 
 ## Division of labor
@@ -13,7 +13,7 @@ this page holds the implementation facts and traps.
   branch name alone.
 - There is no minimum terminal width for the graph.
 
-## Gathering (`git_graph/topology.rs`)
+## Gathering (`lib/src/graph.rs`, `lib/src/graph/topology.rs`)
 
 Two stages on scoped threads.
 
@@ -215,12 +215,16 @@ Other L1 facts:
 
 ### Graph-stage timings (`cli/tests/perf_graph_stages.rs`, Unix only)
 
-- `graph gather` and `graph image render (biscuit-terminal)` exist only when
-  stderr is a terminal and `TERM_PROGRAM` names an image emulator, so a captured
-  `wt list --perf` never reports them. `graph gather` is a child of the
-  `remote wait ‖ local gather` (or `local gather`) group and overlaps the
-  wait, so it is not part of the total; the render is a top-level row.
-- The test runs `wt list --perf` through `script` in a 120×40 pty over
+- `graph_history` and `graph_render` exist only when stderr is a terminal and
+  `TERM_PROGRAM` names an image emulator, so a captured `wt list --perf`
+  never reports them. `graph_history` is a concurrent child of
+  `remote_and_local` (or `local_reads`) and overlaps the wait, so it is not
+  part of the total; its sequential steps (`shallow_check`, `default_tips`,
+  `focused_merge_base`, `verbose_details`, `lane_assembly`) carry `git_calls`
+  that add up to its own. `graph::gather_timed` records them; the whole
+  assembly loop, repeats and fork-holder searches included, is one
+  `lane_assembly` step. The render is a top-level span.
+- The test runs `wt list --perf=json` through `script` in a 120×40 pty over
   `perf_support::graph::GraphFixture` (floor, ordinary, older essential
   connections, multiple selected branches; built by `git fast-import`), and
   separately at 200×60 over `GraphFixture::observed_sparse_lanes()`, printing
@@ -232,8 +236,8 @@ Other L1 facts:
   `git_graph::tests::observed_sparse_lanes()` and in Kitty by
   `Fixture::sparse_lanes()`.
 - It emulates **Ghostty**, because every other Kitty-protocol emulator waits out
-  a 1 s cursor-position query in an unanswering pty, and `--perf` prints
-  durations of 1 s or more in tenths of a second, which hides every difference.
+  a 1 s cursor-position query in an unanswering pty, which would swamp the
+  render stage.
 - The floor row measures the remaining fixed cost (about 350 ms).
 - Record with
   `WT_GRAPH_PERF_SAMPLES=10 just test-perf perf_graph --cargo-profile release`.
@@ -251,7 +255,7 @@ Other L1 facts:
   used to keep only the current branch and its parent, so a holder `wt`
   passed was silently dropped and its fork reported as undrawn. It now keeps
   the parent chain and any lane holding an in-view lane's fork.
-- `GraphFacts::to_git_graph` tags each `MergedElsewhere` tip `in <into>`
+- `git_graph::to_git_graph` (a CLI function; `GraphFacts` is the library's) tags each `MergedElsewhere` tip `in <into>`
   (`with_ref`), only when that tip is one of the branch line's drawn
   entries: an undrawn ref would come back as a `GraphOmission::Tag` note.
 

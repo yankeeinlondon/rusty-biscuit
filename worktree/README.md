@@ -197,7 +197,7 @@ cmd.exe has no wrapper.
 
 ### Runtime diagnostic
 
-Run `wt list --perf` to emit a per-stage timing report to stderr after the command completes. The report is rendered as a reconciling tree: the top-level rows plus an `unattributed` row sum to the total wall-clock time. Work that runs at the same time is one measured group (`remote wait ‖ local gather`, or `local gather` without an `origin`; `regather` when the tips moved), whose children show their own durations with no share and are not added to the total. Only stages that actually ran are shown, so on a non-image terminal the graph-related stages are omitted.
+Run `wt list --perf` to emit a per-stage timing report to stderr after the listing. The report is a reconciling tree of named steps (for example `read worktrees and refs`, `graph history`, `table render`): each level's sequential steps plus a generated `unattributed` row (hidden under 1 ms) or `over-attributed` row sum to their parent, and a step that starts `git` shows its count, as in `[12 git]`. Work that runs at the same time is one concurrent group (`refresh worker ‖ local reads`, or `local reads` when no wait ran), whose children show their own durations with no share. Only steps that actually ran are shown. `wt list --perf=json` instead ends stderr with one line, `WT_PERF_JSON ` followed by the same report as a versioned JSON document, for scripts and tests.
 
 ### Dev-time benchmarks
 

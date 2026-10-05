@@ -97,16 +97,16 @@ The variable turns a missing-backend skip into a failure.
 - `seed_empty_pr_store(age)` isolates the live-head path from PR requests;
   `isolated_cache_file(home, xdg, real)` resolves a store path the way `wt` will.
 
-### The pipeline overlap seam (`list/tests.rs`, `list/tests/pipeline.rs`)
+### The pipeline overlap seam (`lib/src/list/tests.rs`, `lib/src/list/tests/pipeline.rs`)
 
-- `tests::overlap` is a `#[cfg(test)]` seam inside `gather_listing`: each
+- `tests::overlap` is a `#[cfg(test)]` seam inside `worktree::list::gather`: each
   local gather reports `arrive`/`finished`, the calling thread
   `remote_finished`. Without `overlap::Installed` it does nothing. Modes:
   `Rendezvous` (list and graph each wait for the other to start), `Observe`
   (record only), `HoldListUntilRemote` (the list gather starts after the
   wait). Every wait is bounded (10 s), so a non-overlapping pipeline fails
   instead of hanging; no sleeps or elapsed-time asserts.
-- `pipeline.rs` drives `gather_listing` with a **scripted launch**: it runs on
+- `pipeline.rs` drives `gather` with a **scripted launch**: it runs on
   the calling thread inside the wait, so blocking in it (on
   `overlap::await_both_started` / `await_both_finished`) holds the worker's
   outcome. Released, it runs its ref `moves` (as a fetch would), then records
@@ -114,11 +114,10 @@ The variable turns a missing-backend skip into a failure.
   (`finishes: false`) for timeout cases. `Repo` removes every
   `<repo hash>.*` cache file on drop.
 - Assert through the returned `Listing` and counters: `git status` walks,
-  `for-each-ref` reads, `merge-tree` calls (via `recorder`), and the
-  `regather` / `checkout status refresh` perf stage names. Report shape is
-  asserted with `tests::perf_shape` / `perf_group` and
-  `tests::assert_perf_reconciles` (exact sum, no child longer than its
-  group) over `PerfCollector::build_perf_tree`.
+  `for-each-ref` reads, `merge-tree` calls (via `recorder`), and
+  `Listing::regathered`; never a timing. The timing shape per path, the
+  `git_calls` coverage, and timings on/off doing the same work live in
+  `pipeline/timings.rs` (stage paths, decoded through `Timings::from_json`).
   `assert_describes_the_final_state` compares caption, target, tree, counts,
   dirtiness, graph, and verbose labels with a from-scratch gather after the
   run.
@@ -178,13 +177,14 @@ worker is gone.
 
 Measurements: `worktree/docs/performance-testing.md`.
 
-- Read `--perf` rows with `perf_support::stage_from_perf` (whole-label match
-  at any depth; panics on a duplicate label) or `perf_rows` (label, depth,
-  duration). Never substring-match a row: the group
-  `remote wait ‖ local gather` contains its child's name. Give a new row a
-  label no other row shares.
+- Run `wt list --perf=json` and read it with `perf_support::perf_timings`
+  (the final nonempty stderr line, LF or CRLF, prefix `WT_PERF_JSON `; never
+  earlier text), then `stage_at(&timings, &[Stage::…])` or `local_gather`.
+  Never read the human report: labels are display only. The old scrapers
+  (`perf_rows`, `stage_from_perf`, `list_gather_from_perf`) have no
+  consumers left and are due for deletion.
 - An L1 test that bounds how long a held worker keeps `wt list` waiting reads
-  the `remote wait` row, not the whole command's elapsed time. The local
+  `[RemoteAndLocal, RefreshWorker]`, not the whole command's elapsed time. The local
   gather overlaps the wait and may outlast it, so a whole-command bound fails
   under suite load without a wait regression (`list_prs.rs` held-request
   tests). Whether the command returned while the worker is still held, that is,

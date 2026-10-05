@@ -389,7 +389,7 @@ After a blank line, the output can end with up to six kinds of note, in this ord
 | `--refresh` | `-r` | Wait for the full check, fetch, and PR refresh, up to 75 s instead of 3 s |
 | `--ignore-api` | | Check `origin` with Git only, never the provider API, for this repository from now on |
 | `--fast-forward` | `--ff` | Wait like `--refresh`, then fast-forward the local default branch to `origin/<default>` |
-| `--perf` | | Print a per-stage timing report to stderr; work that overlaps the remote wait is one measured group ([details](../performance-testing.md#runtime---perf-flag)) |
+| `--perf[=human\|json]` | | After the listing, print a per-stage timing report to stderr: a tree for people (`--perf`, `--perf=human`), or one final line `WT_PERF_JSON <document>` (`--perf=json`) for programs. The value needs `=`; an unknown one is a usage error. Work that overlaps the remote wait is one concurrent group ([details](../performance-testing.md#runtime---perf-flag)) |
 
 `-r`, `--ignore-api`, and `--ff` are global, so `wt -r` and `wt list -r` are the same. They apply only to listing: `wt create`, `wt go`, and `wt remove` reject them with exit code 2. They can be combined; `wt --ff -r` makes one check, at most one fetch, and one fast-forward.
 
