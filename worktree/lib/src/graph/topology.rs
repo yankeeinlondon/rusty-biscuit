@@ -6,9 +6,10 @@
 //! same as a real "no", so there it is a gap.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::path::Path;
 
-use biscuit_terminal::components::git_graph::LaneEntry;
-use worktree::git::{git_command, git_command_allow_no_match};
+use super::LaneEntry;
+use crate::git::{calls, git_command_in, git_command_in_allow_no_match};
 
 /// History local Git could not establish. The caller draws what it verified
 /// and reports the rest as incomplete.
@@ -101,20 +102,22 @@ pub(super) struct LaneHistory {
     pub gap: bool,
 }
 
-/// One gathering pass's view of the repository's history.
+/// One gathering pass's view of the history of the repository at `repo`,
+/// where every Git call runs.
 #[derive(Debug, Clone, Copy)]
-pub(super) struct History {
+pub(super) struct History<'a> {
     shallow: bool,
+    repo: &'a Path,
 }
 
-impl History {
+impl<'a> History<'a> {
     /// Reads whether the repository is shallow. A failed read is a gap, and
     /// the history is then treated as shallow.
-    pub fn read() -> (Self, Result<(), GatherGap>) {
-        match git_command(&["rev-parse", "--is-shallow-repository"]).as_deref().map(str::trim) {
-            Ok("false") => (Self { shallow: false }, Ok(())),
-            Ok("true") => (Self { shallow: true }, Ok(())),
-            _ => (Self { shallow: true }, Err(GatherGap)),
+    pub fn read(repo: &'a Path) -> (Self, Result<(), GatherGap>) {
+        match git_command_in(repo, &["rev-parse", "--is-shallow-repository"]).as_deref().map(str::trim) {
+            Ok("false") => (Self { shallow: false, repo }, Ok(())),
+            Ok("true") => (Self { shallow: true, repo }, Ok(())),
+            _ => (Self { shallow: true, repo }, Err(GatherGap)),
         }
     }
 
@@ -125,13 +128,13 @@ impl History {
     }
 
     /// History assumed complete, for gathering that makes no graph.
-    pub fn complete() -> Self {
-        Self { shallow: false }
+    pub fn complete(repo: &'a Path) -> Self {
+        Self { shallow: false, repo }
     }
 
     /// Whether `ancestor` is reachable from `descendant` (or is it).
     pub fn is_ancestor(&self, ancestor: &str, descendant: &str) -> Result<bool, GatherGap> {
-        match git_command_allow_no_match(&["merge-base", "--is-ancestor", ancestor, descendant]) {
+        match git_command_in_allow_no_match(self.repo, &["merge-base", "--is-ancestor", ancestor, descendant]) {
             Ok(Some(_)) => Ok(true),
             Ok(None) if !self.shallow => Ok(false),
             _ => Err(GatherGap),
@@ -140,7 +143,7 @@ impl History {
 
     /// The best common ancestor; `Ok(None)` for unrelated histories.
     pub fn merge_base(&self, a: &str, b: &str) -> Result<Option<String>, GatherGap> {
-        match git_command_allow_no_match(&["merge-base", a, b]) {
+        match git_command_in_allow_no_match(self.repo, &["merge-base", a, b]) {
             Ok(Some(sha)) if is_object_id(&sha) => Ok(Some(sha)),
             Ok(None) if !self.shallow => Ok(None),
             _ => Err(GatherGap),
@@ -191,7 +194,7 @@ impl History {
             return Ok(None);
         }
         let range = format!("{tip}..{lane_tip}");
-        let chain = parse_parent_lines(&git_command(&["rev-list", "--first-parent", "--parents", &range, "--"]).map_err(|_| GatherGap)?)?;
+        let chain = parse_parent_lines(&git_command_in(self.repo, &["rev-list", "--first-parent", "--parents", &range, "--"]).map_err(|_| GatherGap)?)?;
         if chain.is_empty() {
             // `T..X` is empty only when `T` is `X`; a shallow walk can
             // also come back empty, so there it proves nothing.
@@ -207,7 +210,7 @@ impl History {
             return Ok(Some(Integration::NoSeparateHistory { candidate }));
         }
         let descendants: HashSet<String> = parse_object_ids(
-            &git_command(&["rev-list", "--ancestry-path", &range, "--"]).map_err(|_| GatherGap)?,
+            &git_command_in(self.repo, &["rev-list", "--ancestry-path", &range, "--"]).map_err(|_| GatherGap)?,
         )?
         .into_iter()
         .collect();
@@ -283,7 +286,7 @@ impl History {
         let may_be_beyond = !matches!(length, Some(length) if length <= shown.len());
         let unplaced: Vec<&str> = anchors.iter().copied().filter(|anchor| !placed.contains_key(*anchor)).collect();
         if may_be_beyond && !unplaced.is_empty() {
-            let (verified, failed) = Self::locate(tip, &unplaced, shown.len(), length);
+            let (verified, failed) = self.locate(tip, &unplaced, shown.len(), length);
             gap |= failed;
             for (anchor, commit, position) in verified {
                 placed.insert(anchor, position);
@@ -341,7 +344,7 @@ impl History {
         let (length, counted) = if shown.len() < window {
             (shown.len(), true)
         } else {
-            match count_first_parent(tip, stop) {
+            match count_first_parent(self.repo, tip, stop) {
                 Some(count) => (count.max(shown.len()), true),
                 None => (shown.len(), false),
             }
@@ -372,7 +375,7 @@ impl History {
             lane.shown.last().and_then(|oldest| oldest.first_parent.clone())
         } else {
             let oldest = format!("{tip}~{}", lane.length - 1);
-            let output = git_command(&["log", "--no-walk=unsorted", "--ignore-missing", "--format=%H %P", &oldest, "--"]).map_err(|_| GatherGap)?;
+            let output = git_command_in(self.repo, &["log", "--no-walk=unsorted", "--ignore-missing", "--format=%H %P", &oldest, "--"]).map_err(|_| GatherGap)?;
             let mut lines = parse_parent_lines(&output)?.into_iter();
             let (_, parents) = lines.next().ok_or(GatherGap)?;
             parents.into_iter().next()
@@ -398,20 +401,20 @@ impl History {
         }
         // `--ignore-missing` makes an unknown `recorded` count the whole
         // chain instead of failing, so a failure here is a real one.
-        let distance: usize = git_command(&["rev-list", "--first-parent", "--count", "--ignore-missing", tip, "--not", recorded, "--"])
+        let distance: usize = git_command_in(self.repo, &["rev-list", "--first-parent", "--count", "--ignore-missing", tip, "--not", recorded, "--"])
             .map_err(|_| GatherGap)?
             .trim()
             .parse()
             .map_err(|_| GatherGap)?;
         let at = format!("{tip}~{distance}");
-        let found = git_command(&["log", "--no-walk=unsorted", "--ignore-missing", "--format=%H", &at, "--"]).map_err(|_| GatherGap)?;
+        let found = git_command_in(self.repo, &["log", "--no-walk=unsorted", "--ignore-missing", "--format=%H", &at, "--"]).map_err(|_| GatherGap)?;
         if found.trim() == recorded {
             return Ok(Some(distance));
         }
         if !self.shallow {
             return Ok(None);
         }
-        match git_command_allow_no_match(&["cat-file", "-e", recorded]) {
+        match git_command_in_allow_no_match(self.repo, &["cat-file", "-e", recorded]) {
             Ok(Some(_)) => Ok(None),
             _ => Err(GatherGap),
         }
@@ -427,28 +430,32 @@ impl History {
             args.extend_from_slice(stop);
         }
         args.push("--");
-        let output = git_command(&args).map_err(|_| GatherGap)?;
+        let output = git_command_in(self.repo, &args).map_err(|_| GatherGap)?;
         output.lines().filter(|line| !line.is_empty()).map(parse_commit_line).collect()
     }
 
     /// Positions (at or past `from`, and before `length` when bounded) of the
     /// anchors on `tip`'s first-parent chain. Also returns whether a distance
     /// could not be read. An anchor that is on no drawn lane needs no report
-    /// here: `GitGraph` accounts for every undrawn fork, merge, and label.
-    fn locate(tip: &str, anchors: &[&str], from: usize, length: Option<usize>) -> (Vec<(String, Commit, usize)>, bool) {
+    /// here: the rendered graph accounts for every undrawn fork, merge, and label.
+    fn locate(&self, tip: &str, anchors: &[&str], from: usize, length: Option<usize>) -> (Vec<(String, Commit, usize)>, bool) {
+        let repo = self.repo;
+        let task = calls::TaskHandle::current();
         let distances: Vec<Option<usize>> = std::thread::scope(|scope| {
             let handles: Vec<_> = anchors
                 .iter()
                 .map(|anchor| {
                     scope.spawn(move || {
-                        let range = format!("{anchor}..{tip}");
-                        git_command(&["rev-list", "--first-parent", "--count", &range, "--"])
-                            .ok()
-                            .and_then(|count| count.trim().parse::<usize>().ok())
+                        task.run(|| {
+                            let range = format!("{anchor}..{tip}");
+                            git_command_in(repo, &["rev-list", "--first-parent", "--count", &range, "--"])
+                                .ok()
+                                .and_then(|count| count.trim().parse::<usize>().ok())
+                        })
                     })
                 })
                 .collect();
-            handles.into_iter().map(|handle| handle.join().ok().flatten()).collect()
+            handles.into_iter().map(|handle| handle.join().ok().and_then(calls::joined)).collect()
         });
         let failed = distances.iter().any(Option::is_none);
         let candidates: Vec<(&str, usize)> = anchors
@@ -468,7 +475,7 @@ impl History {
         let mut args = vec!["log", "--no-walk=unsorted", "--ignore-missing", "--format=%H %P"];
         args.extend(revisions.iter().map(String::as_str));
         args.push("--");
-        let found: HashMap<String, Option<String>> = match git_command(&args) {
+        let found: HashMap<String, Option<String>> = match git_command_in(self.repo, &args) {
             Ok(output) => output
                 .lines()
                 .filter_map(|line| {
@@ -507,15 +514,15 @@ struct Commit {
     first_parent: Option<String>,
 }
 
-/// `rev-list --first-parent --count tip --not stop`.
-fn count_first_parent(tip: &str, stop: &[&str]) -> Option<usize> {
+/// `rev-list --first-parent --count tip --not stop`, in `repo`.
+fn count_first_parent(repo: &Path, tip: &str, stop: &[&str]) -> Option<usize> {
     let mut args = vec!["rev-list", "--first-parent", "--count", tip];
     if !stop.is_empty() {
         args.push("--not");
         args.extend_from_slice(stop);
     }
     args.push("--");
-    git_command(&args).ok()?.trim().parse().ok()
+    git_command_in(repo, &args).ok()?.trim().parse().ok()
 }
 
 /// Entries oldest first from commits by position (0 = tip). The gaps between

@@ -9,6 +9,7 @@ pub mod error;
 pub mod fast_forward;
 pub mod fork_origin;
 pub mod git;
+pub mod graph;
 pub mod include;
 pub mod listing;
 pub mod live_remote;
