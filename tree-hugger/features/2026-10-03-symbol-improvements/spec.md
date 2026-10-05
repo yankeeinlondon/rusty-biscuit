@@ -41,40 +41,48 @@ related:
   - 2026-10-03-symbol-filters-and-reports
 human_review: false
 message_to_agent: |-
-  Phases 1 and 2 are done; read the "## Phase 2" section of
-  implementation-log.md before starting Phase 3. Points that affect later
+  Phases 1-3 are done; read the "## Phase 3" section of
+  implementation-log.md before starting Phase 4. Points that affect later
   phases:
 
-  - Records are schema 4.0 (`SchemaVersion::V4_0`), `EXTRACTOR_REVISION` is
-    "5". The next revision bump must add a `StaleRevision` case for revision 5
-    in `cli/tests/symbols/cache_upgrade.rs` (revision 4's case exists).
-  - `identity.keyword` and `source.signature_text` are computed in
-    `TreeFile::symbol_records()` from the same `declaration` node as
-    `declaration_text`, via `file/extract/header/` (`declaration_keyword`,
-    `signature_text`). They are the "cheap metadata" the spec's SymbolQuery
-    table requires for basic functions/types/symbols queries, so Phase 3's
-    lazy metadata and kind push-down must keep computing them for selected
-    kinds (once per winning capture, after de-duplication).
-  - Ruling 4 is revised: records already have `visibility.is_synthetic`; use
-    it for Phase 5's synthetic prelude records. No `provenance.synthetic`
-    field was added.
-  - All timestamps are gone, including `SymbolSnapshot::created_at_epoch_ms`
-    (the cache entry) and the public `now_epoch_ms()`. Phase 4's entry format
-    starts from a timestamp-free snapshot.
-  - `cache_robustness` now has twelve columns (added `identity.keyword` and
-    `source.signature_text`, same outcome row as `declaration_text`); extend
-    it in Phase 4 rather than duplicating it. Its timestamp-normalizing helper
-    was deleted: cached and uncached JSON are compared byte for byte.
-  - `identity.qualified_name` is still populated as `container::name` by the
-    v1->v2 adapter (pre-existing); it was deliberately left alone.
-  - Phase 2 changed no plain output; the plain golden was not regenerated.
+  - `EXTRACTOR_REVISION` is "6". The next bump must add a `StaleRevision`
+    case for revision 6 in `cli/tests/symbols/cache_upgrade.rs`;
+    `revision_key(schema, revision, ..)` now takes the revision's record
+    schema ("4.0" for revisions 5 and 6).
+  - The library API Phase 4 and 5 build on: `SourceFile::read` /
+    `read_with_language` (bytes read and hashed once; `hash()`), `.parse()`,
+    `.query(&SymbolQuery)`; `TreeFile::query`; `SymbolQuery::new()` (all
+    kinds, Declarations), `.kinds(..)`, `.capabilities(..)` (closed under
+    prerequisites), `complete_index()`, `for_passes()`, `selected_kinds()`,
+    `required_capabilities()`, `selects()`, `requires()`.
+    `SymbolQueryResult { index, completed_capabilities }`; `index.symbols`
+    holds only the selected kinds. `Capability` serializes snake_case and
+    `SymbolKindV2` now derives `Ord`, so both have a canonical order for
+    the cache coverage record.
+  - Coverage for Phase 4: a query result's coverage is (selected kinds,
+    `completed_capabilities`). `Containment` without `References` does not
+    add `Bind` to `completed_passes`, so store capabilities, not passes, as
+    coverage. Imports and exports always come with `Declarations`.
+  - Work counters: `tree_hugger::work_counters()` and `WorkCounters::since`
+    (atomics: `diagnostics_runs`, `parser_constructions`,
+    `definition_captures`). A "complete warm hit records zero parser
+    constructions" test can use them in-process. The CLI runs in a separate
+    process, so a CLI-level counter test needs the CLI to report them (for
+    example under `--verbose` or a test-only environment variable); nothing
+    does that yet.
+  - The CLI still analyzes through `symbol_index_v2()` (Phase 5 switches it
+    to queries). Its cached entry now drops `Diagnostics` from
+    `completed_passes` (diagnostics are never stored) and
+    `hydrate_diagnostics` adds the pass back.
+    `cache_robustness::the_cache_entry_claims_only_the_passes_it_holds` pins
+    that; Phase 4 replaces the entry format and should keep the rule that
+    recorded coverage matches contents.
   - Shell gotcha (still true): `cd` is a zoxide alias here and can jump to
     /Volumes/coding/personal/rusty-biscuit. Use absolute paths.
-  - Cross-checks: Linux passed for the new tests. The Windows rig
-    (build-win-native) is reachable now but its build volume is below the
-    50 GiB storage preflight (16.4 GiB free, sweep freed nothing), so Windows
-    could not be checked locally; someone needs to free space there (see the
-    `storage-strategy` skill) before relying on it.
+  - Cross-checks: Linux passed. The Windows rig (build-win-native) still
+    fails its Cargo storage preflight (automatic reclaim cannot restore the
+    headroom), so Windows could not be checked locally; someone needs to free
+    space there (see the `storage-strategy` skill).
 ---
 
 # Fast, deterministic symbol reports on v2 records
@@ -326,9 +334,11 @@ has one persistent entry; the entry records the kinds and capabilities it
 covers. The fingerprint includes schema, grammar version/identity, actual effective query
 text (including inherited queries and overlays), relevant configuration, and
 extractor implementation revision. Rules and external-tool versions affect
-only passes that use them. Any later input that changes records, such as the
-naming context `2026-10-03-symbol-filters-and-reports` introduces for
-qualified names, joins the key in the change that introduces it.
+only passes that use them. Any later input that changes cached records joins
+the key in the change that introduces it. (Superseded example, 2026-10-04:
+`2026-10-03-symbol-filters-and-reports` applies its naming context after
+cache lookup, so it does not join the key; cached records and IDs never
+depend on the scan root.)
 
 **Reader's note:** hashing query text cannot detect a change to Rust extraction
 code. Keep `EXTRACTOR_REVISION` as one fingerprint input until a reproducible
@@ -794,7 +804,8 @@ Decided by the author on 2026-10-03:
   `2026-10-03-symbol-filters-and-reports` stays additive (4.x).
 - **Naming context joins the cache key in
   `2026-10-03-symbol-filters-and-reports`.** That feature introduces the
-  input, so it extends the key.
+  input, so it extends the key. *Superseded 2026-10-04:* that feature
+  applies its naming context after cache lookup instead of keying on it.
 
 Decided by the author on 2026-10-04:
 

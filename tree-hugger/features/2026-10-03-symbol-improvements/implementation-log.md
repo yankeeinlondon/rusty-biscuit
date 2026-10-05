@@ -84,6 +84,32 @@ docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
   - .claude/skills/tree-hugger/SKILL.md
   - .claude/skills/tree-hugger/api-reference.md
+source_files_during_phase_3:
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/counters.rs
+  - tree-hugger/lib/src/analysis/tests.rs
+  - tree-hugger/lib/src/cache/mod.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/src/file/query.rs
+  - tree-hugger/lib/src/file/source_file.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/tree_file/definitions.rs
+  - tree-hugger/lib/src/lib.rs
+  - tree-hugger/lib/src/shared/schema_v2/kinds.rs
+  - tree-hugger/lib/src/shared/schema_v2/types.rs
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/symbols_query.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/tests/symbols/cache_robustness.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+docs_updated_during_phase_3:
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/lib/README.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
 packages:
   - tree-hugger
   - tree-hugger-cli
@@ -525,3 +551,194 @@ Phase 4 matrix (coverage fields) is where absent-vs-null must differ.
   multi-line `\n` expectations hold on a Windows checkout.
 - `just test-l2` not run: Phase 2 adds no L2 test and does not touch the
   `god-files` terminal path the L2 test exercises.
+
+## Phase 3
+
+Selective analysis in the library. Every Phase 3 task and validation
+checkpoint 3 is complete. `EXTRACTOR_REVISION` is now `"6"`.
+
+### What was built
+
+- **`AnalysisPass::Diagnostics` and one planner** (`analysis/mod.rs`).
+  `parse_pass` no longer calls `try_diagnostics`. `analyze_file(passes)`,
+  `TreeFile::symbol_index_with_passes`, `TreeFile::symbol_index_v2` and the
+  new `TreeFile::query` all go through `run_query`, which builds a `PassPlan`
+  from the query's (prerequisite-closed) capabilities and runs each pass once
+  in the order parse → bind → semantic → docs → diagnostics.
+  `completed_passes` is the plan, so it lists only what ran (previously it
+  listed passes in request order; now it is always canonical order).
+  `symbol_index_v2()` = `SymbolQuery::complete_index()` and still includes
+  diagnostics; `symbol_index_with_passes(&[Parse, Bind, Semantic, Docs])` no
+  longer does (documented on the method).
+- **`Capability`, `SymbolQuery`, `SymbolQueryResult`** (`file/query.rs`).
+  Kinds are an `Option<BTreeSet<SymbolKindV2>>` (`None` = all; `SymbolKindV2`
+  now derives `Ord` for a canonical order); capabilities are closed under
+  prerequisites (References ⇒ Containment, Semantics ⇒ References, all ⇒
+  Declarations). The result is `{ index: FileSymbolIndex (selected records
+  only), completed_capabilities }`. `Containment` without `References` runs
+  `link_containers` only (no reference query) and does not claim the Bind
+  pass.
+- **`SourceFile`** (`file/source_file.rs`): `read`, `read_with_language`,
+  `hash`, `language`, `source`, `parse(self)`, `query(self, &q)`.
+  `TreeFile::with_language` is now `SourceFile::read_with_language(..)?.parse()`
+  (same error variants in the same order: read → detect → grammar → parse);
+  `TreeFile::from_parts` is crate-private.
+- **One definition capture per analysis.** Definition capture moved from
+  `tree_file.rs` into `file/tree_file/definitions.rs`
+  (`TreeFile::definitions(&MetadataSelection)`, `ExtractedSymbol`,
+  `align_field_metadata`, `resolve_container_kind`). Records
+  (`records_from`), exports (`exports_from`), the reference filter
+  (`references_from`) and semantic lint (`lint_diagnostics_from`,
+  `diagnostics_from`) take that one result. The public v1 methods each
+  capture once too: `try_diagnostics()` and `try_lint_diagnostics()` went
+  from 3 locals-query runs to 1, `symbol_index_v2()` from 6 to 1.
+- **Lazy metadata after de-duplication.** Captures are grouped by
+  `(start, end, name)` keeping the winner (highest priority, first of equal)
+  and the later equal-priority captures; metadata is read from the winner and
+  from a later capture only for a missing field. The old merge's quirk is
+  kept on purpose: while no signature is known, a later capture's signature,
+  visibility and `static` flags replace the current ones together. Container
+  lookup now runs only for winners. No vendored query was edited.
+- **Kind push-down.** `MetadataSelection::for_kinds` skips visibility,
+  `static` flags, signature, type metadata, doc comment, header texts,
+  keyword, type-alias target and implemented trait for unselected kinds;
+  they keep name, kind, span, container, ID and export status, are bound, and
+  are dropped after binding. A selected owner kind (type or class, not enum)
+  widens the selection by Field/Property/Constant, so `align_field_metadata`
+  keeps their access and `static` flags (the spec's `classes` rule,
+  generalized to any type selection).
+- **Indexed binding.** `NameIndex` (`HashMap<String, Vec<usize>>`, buckets in
+  record order) replaces the full scans in `find_reference_target` (first of
+  the bucket), and also in `find_container_symbol` and `find_export_target`
+  (same filter over the bucket instead of every record; same choice, since
+  bucket order is record order). `push_unique_ref` became `RefSet`: resolved
+  by ID, unresolved by (name, qualified name).
+- **Honest `is_recursive`**: `Some(Unknown)` for every function and method
+  when the semantic pass runs, `None` otherwise.
+- **Work counters** (`analysis/counters.rs`, re-exported as
+  `tree_hugger::{work_counters, WorkCounters}`): process-wide atomics for
+  lint-diagnostics runs (counted in `lint_diagnostics` and
+  `lint_diagnostics_from`, which every fallible path reaches), parser
+  constructions (`SourceFile::parse`) and definition captures
+  (`TreeFile::definitions`).
+
+### Decisions and departures
+
+| Decision | Choice | Why |
+|---|---|---|
+| Where imports belong | Always computed with `Declarations`; no separate capability | Keeps one meaning per pass (`Parse` always carried imports), and the spec lists exactly six capabilities. Phase 6's perf sample decides whether an imports capability is worth adding |
+| Where to count "diagnostics passes" | Every lint-diagnostics run, not only the pipeline pass | Lets a test see that `lint`, `try_diagnostics()` and `symbol_index_v2()` still run diagnostics |
+| `push_unique_ref` dedupe | Strict spec rule (ID for resolved refs; name + qualified name for unresolved) | Old code collapsed every pair of ID-less refs (`None == None`), so an owner kept one import reference; it also merged resolved refs with different IDs but the same name |
+| Name index scope | Also used for container and export targets | Same scans, same choice, no extra structure |
+| Cached CLI entry | `symbol_cache_index` drops `Diagnostics` from `completed_passes`; `hydrate_diagnostics` adds it back with the fresh list | Without it the entry claimed a pass it does not hold (it never stores diagnostics), which Phase 4's coverage rule forbids. Cold and warm JSON are still identical |
+| v1 adapter and `is_recursive` | Nothing to map | v1 `SymbolInfo` has no recursion field; the adapter drops `semantics` entirely. The schema doc now says so instead of "v1 maps it to `false`" |
+| CLI | Still calls `symbol_index_v2()` | The CLI moves to queries in Phase 5; Phase 3 changed only the cache-coverage honesty above |
+
+Drift corrected on the way: `lib/README.md` and the skill's
+`api-reference.md` imported from `tree_hugger_lib`; the crate is
+`tree_hugger`. Fixed in those two files (the skill's `diagnostics.md` still
+says `tree_hugger_lib`, untouched).
+
+### Equivalence evidence (before writing the new tests)
+
+The Phase 2 `hug` binary (built 16:18, before the Phase 2 log closed) was
+copied before rebuilding. Both binaries ran `hug --json symbols --no-cache`
+over every symbol fixture (21 files plus the 16 `multi/` files, in a scratch
+Git repo). Apart from `provenance.extractor_version`, the only differences
+were the intended ones:
+
+- every index's `completed_passes` gained `Diagnostics`
+- 273 function/method records: `is_recursive` `No`→`Unknown` (272) and
+  `Yes`→`Unknown` (1)
+
+Every other record field, relation, import, export and diagnostic matched
+byte for byte. The fixtures have no owner with two ID-less references; the
+regression case below was confirmed against the Phase 2 binary: `run` in
+`two_imports.py` reported references `[path]` and `is_recursive: No` before,
+`[path, argv]` and `Unknown` after.
+
+### Tests added
+
+- `lib/tests/l1/symbols_query.rs` (declared in `tests/l1/main.rs`, L1):
+  - `a_symbol_query_over_multi_runs_no_diagnostics_and_one_capture_per_file`
+    (0 diagnostics runs, 16 parser constructions, 16 captures for 16 files;
+    `[Parse]`, `[Declarations]`, only selected kinds)
+  - `the_complete_index_and_lint_still_run_diagnostics_from_one_capture`
+    (`symbol_index_v2`: 1 diagnostics run, 1 capture, `dead-code` +
+    `unused-import`, equal to `try_diagnostics()`; `lint_diagnostics()` runs
+    them; four passes without `Diagnostics` → empty list, no pass entry)
+  - `passes_run_once_after_their_prerequisites` (six request rows incl.
+    duplicates and out-of-order; capability closure)
+  - `containment_alone_links_members_without_binding_references`
+  - `source_file_parses_the_bytes_it_hashed` (file edited between read and
+    parse; hash and records follow the read bytes)
+  - `source_file_and_tree_file_report_the_same_errors` (missing → `Io
+    NotFound`, unknown extension → `UnsupportedLanguage`, non-UTF-8 → `Io
+    InvalidData`, for both constructors; forced language)
+  - `narrow_queries_equal_the_filtered_records_of_a_full_query` (every
+    fixture × 6 kind sets × 3 capability sets, whole serialized records;
+    counts selected methods with an unselected parent and classes-set fields
+    with access/`static`, so the check is not vacuous)
+  - `distinct_unresolved_references_are_all_kept` (the regression input)
+  - `is_recursive_is_unknown_when_semantics_run_and_absent_otherwise`
+- `lib/src/analysis/tests.rs` (unit): `name_index_selects_the_same_targets_as_a_full_scan`
+  keeps the three previous full scans as reference implementations and
+  compares every reference name, symbol name, container and export over every
+  fixture (1,261 / 427 / 45 lookups);
+  `name_index_keeps_the_first_of_equal_candidates`;
+  `ref_set_keeps_distinct_unresolved_references_and_dedupes_resolved_ones_by_id`.
+  `pipeline_marks_completed_passes` now asserts the exact ordered list.
+- `cli/tests/symbols/cache_upgrade.rs`:
+  `entry_from_extractor_revision_five_is_not_served_after_the_repairs`
+  (probe `module_function`'s `is_recursive`: stale `No`, repaired
+  `Unknown`). `revision_key` now takes the revision's record schema; the four
+  older cases pass `"3.0"`, so their keys are unchanged.
+- `cli/tests/symbols/cache_robustness.rs`:
+  `the_cache_entry_claims_only_the_passes_it_holds`.
+
+Mutation checks (each reverted, verified with `cmp`): dropping the
+Field/Property/Constant widening failed the narrow-vs-full test; collapsing
+unresolved `RefSet` keys failed `distinct_unresolved_references_are_all_kept`;
+always computing references and diagnostics failed the three counter tests;
+removing the CLI's `retain` failed the cache-pass test.
+
+Input Robustness Matrix: not applicable. Phase 3 adds no reader of a file
+format. The only persisted change is which passes a cache entry lists, and
+`cache_robustness` already walks the snapshot reader.
+
+### Requirement → test mapping (Phase 3)
+
+| Requirement | Test(s) |
+|---|---|
+| Symbol listing runs no diagnostics; one capture and one parse per file | `symbols_query::a_symbol_query_over_multi_runs_no_diagnostics_and_one_capture_per_file` |
+| `symbol_index_v2()` and lint still run diagnostics | `symbols_query::the_complete_index_and_lint_still_run_diagnostics_from_one_capture`, all existing `lint` CLI tests |
+| Planner dedupes and orders prerequisites; `completed_passes` = work done | `symbols_query::passes_run_once_after_their_prerequisites`, `analysis::tests::pipeline_marks_completed_passes` |
+| Capabilities distinguish empty from not computed | `symbols_query::containment_alone_links_members_without_binding_references`, `…is_recursive_is_unknown_…` |
+| `SourceFile` never rereads; error contract kept | `symbols_query::source_file_parses_the_bytes_it_hashed`, `…report_the_same_errors` |
+| Lazy metadata output identical | whole-output comparison above; every existing `symbols_*` matrix (750 L1 green); `golden::plain_symbols_over_multi_match_the_golden` |
+| Kind push-down keeps containers, resolution and field access | `symbols_query::narrow_queries_equal_the_filtered_records_of_a_full_query` |
+| Name index picks the same targets | `analysis::tests::name_index_selects_the_same_targets_as_a_full_scan`, `…keeps_the_first_of_equal_candidates` |
+| Distinct unresolved references kept | `symbols_query::distinct_unresolved_references_are_all_kept`, `analysis::tests::ref_set_…` |
+| `is_recursive` `Unknown` / `None` | `symbols_query::is_recursive_is_unknown_when_semantics_run_and_absent_otherwise`, `cache_upgrade::entry_from_extractor_revision_five_…` |
+| Cache entry coverage matches contents | `cache_robustness::the_cache_entry_claims_only_the_passes_it_holds` |
+
+### Gates run
+
+- `just test` (tree-hugger + tree-hugger-cli L1): **750/750 passed** (736 at
+  Phase 2 close + 9 `symbols_query` + 3 analysis unit tests + 1
+  `cache_upgrade` + 1 `cache_robustness`).
+- `just lint`: clean (one `field_reassign_with_default` in `semantic_pass`
+  fixed with a struct literal; the now-unused `revision_key` wrapper folded
+  into one function).
+- `just check-tier-coverage tree-hugger`: 0 stranded.
+- `just cross-check tree-hugger --os linux symbols_query`: pass (9/9).
+- `just cross-check tree-hugger --os windows symbols_query`: **not run**. The
+  Cargo storage preflight on build-win-native refused again: the automatic
+  reclaim did not restore the required headroom. The guard was not overridden
+  and nothing was deleted on the shared host. Phase 3 adds no path, process or
+  console code. The one OS-sensitive assertion is the `io::ErrorKind` of a
+  missing (`NotFound`) or non-UTF-8 (`InvalidData`) file, which std reports
+  the same way on Windows. Windows CI on `main` runs these tests.
+- `just test-l2` not run: Phase 3 adds no L2 test and does not touch the
+  `god-files` terminal path.
+- No pre-existing failures.

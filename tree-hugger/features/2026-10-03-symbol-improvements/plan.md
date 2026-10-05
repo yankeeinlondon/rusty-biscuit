@@ -4,7 +4,7 @@ feature: symbol-improvements
 spec: spec.md
 total_phases: 6
 created: 2026-10-04
-phase: 2
+phase: 3
 agent: claude/sonnet
 yolo: true
 source_files_during_phase_1:
@@ -86,6 +86,32 @@ docs_updated_during_phase_2:
   - tree-hugger/cli/README.md
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
+source_files_during_phase_3:
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/counters.rs
+  - tree-hugger/lib/src/analysis/tests.rs
+  - tree-hugger/lib/src/cache/mod.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/src/file/query.rs
+  - tree-hugger/lib/src/file/source_file.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/tree_file/definitions.rs
+  - tree-hugger/lib/src/lib.rs
+  - tree-hugger/lib/src/shared/schema_v2/kinds.rs
+  - tree-hugger/lib/src/shared/schema_v2/types.rs
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/symbols_query.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/tests/symbols/cache_robustness.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+docs_updated_during_phase_3:
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/lib/README.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
   - .claude/skills/tree-hugger/SKILL.md
   - .claude/skills/tree-hugger/api-reference.md
 packages:
@@ -386,21 +412,21 @@ completeness contract defined here.
 
 ### Tests (parallel with Wave 3, separate test files)
 
-- [ ] Counter tests: symbol query over `multi/` → zero diagnostics passes; one
+- [x] Counter tests: symbol query over `multi/` → zero diagnostics passes; one
       definition capture per file cold; `symbol_index_v2` and `lint` still run
       diagnostics.
-- [ ] Binding equivalence tests: new index selects the same targets as the
+- [x] Binding equivalence tests: new index selects the same targets as the
       previous full scan (keep a reference scan in the test); `push_unique_ref`
       keeps distinct unresolved references with missing IDs; `is_recursive`
       states.
-- [ ] Narrow-vs-full equivalence: for every language, records for a narrow query
+- [x] Narrow-vs-full equivalence: for every language, records for a narrow query
       equal the filtered records of a full query (identity/span/container).
 
 ### Validation checkpoint 3
 
-- [ ] `just test`, `just lint` green; v1 API tests untouched or only changed for
+- [x] `just test`, `just lint` green; v1 API tests untouched or only changed for
       the container rename.
-- [ ] `docs/symbol-schema-design.md` documents explicit pass dependencies,
+- [x] `docs/symbol-schema-design.md` documents explicit pass dependencies,
       `is_recursive`, retained v1 adapters.
 
 ---
