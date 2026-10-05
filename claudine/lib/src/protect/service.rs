@@ -142,11 +142,12 @@ impl ProtectService {
 
     fn evaluate_single_write_path(&self, path: &str, cwd: Option<&str>) -> ProtectDecision {
         // Resolve relative paths against cwd
+        let home = self.path_checker.home_dir();
         let resolved = match cwd {
             Some(cwd) if !path.starts_with('/') && !path.starts_with('~') => {
-                normalize_path(&format!("{cwd}/{path}"))
+                normalize_path(&format!("{cwd}/{path}"), home)
             }
-            _ => normalize_path(path),
+            _ => normalize_path(path, home),
         };
 
         // Canonicalize existing ancestors to resolve symlinks

@@ -15,13 +15,13 @@ use worktree::availability::{Availability, OtherCondition};
 use worktree::default_target::DefaultTarget;
 use worktree::fork_origin::{ForkOrigin, ForkOriginStore};
 use worktree::listing::{
-    BranchComparisons, Caption, Comparison, ParentComparison, TreeRow, build_tree,
+    BranchComparisons, Caption, Comparison, LineSteps, ParentComparison, TreeRow, build_tree,
 };
 use worktree::pull_requests::{OpenPullRequest, PrListing};
 use worktree::remote_head::{CheckFailure, FetchFailure};
 use worktree::worktree::{DirtyStatus, WorktreeEntry, WorktreeStatus};
 use worktree_cli::commands::list_table::{
-    self, CredentialCondition, CredentialLine, FfNotice, FfSuggestion, LastKnown, PrOutcome, RemoteFacts,
+    self, CredentialCondition, CredentialLine, FfNotice, FfSuggestion, ForkedOffLine, GraphOmission, GraphOmissions, LastKnown, MergedElsewhere, PrOutcome, RemoteFacts,
     RemoteStatus, Sections, TableFacts,
 };
 
@@ -166,6 +166,7 @@ impl Example {
                 tracking_sha: "f".repeat(40),
                 ahead: 0,
                 behind: 7,
+                behind_on_line: None,
             },
             prs: PrListing {
                 source_repo: Some("owner/repo".to_string()),
@@ -201,6 +202,7 @@ impl Example {
             ff_suggestion: None,
             ff_notice: None,
             fallback_notice: None,
+            graph_omissions: GraphOmissions::default(),
         }
     }
 }
@@ -427,7 +429,7 @@ fn the_legend_explains_both_columns() {
     );
     assert_eq!(
         lines[legend + 1].trim_end(),
-        " Branch     └─ merges cleanly into parent     └─ conflicts with parent    └┄ parent deleted"
+        " Branch     └─ merges cleanly into parent     └─ conflicts with parent      └┄ parent deleted"
     );
 }
 
@@ -728,6 +730,7 @@ fn comparison(ahead: usize, behind: usize) -> Caption {
         tracking_sha: TRACKING_TIP.to_string(),
         ahead,
         behind,
+        behind_on_line: None,
     }
 }
 
@@ -959,6 +962,7 @@ fn caption_snapshot_trunk_default_branch() {
         tracking_sha: TRACKING_TIP.to_string(),
         ahead: 2,
         behind: 5,
+        behind_on_line: None,
     };
     let cases = every_row()
         .into_iter()
@@ -1007,8 +1011,8 @@ const PROVIDERS: [(&str, &str); 4] = [
 fn with_credentials(line: CredentialLine) -> String {
     let example = Example::new();
     let facts = TableFacts { credential_line: Some(line), ..example.facts() };
-    let rendered = list_table::render(&facts, &terminal_at(400, false), NOW);
-    rendered.lines().nth(2).expect("the line after the caption").trim().to_string()
+    let notes = list_table::render_notes(&facts, &terminal_at(400, false)).expect("notes");
+    notes.trim().strip_prefix("- ").expect("one note").to_string()
 }
 
 #[test]
@@ -1044,42 +1048,28 @@ fn credential_lines_snapshot_every_condition_for_every_provider() {
     insta::assert_snapshot!("credential_lines_every_condition_for_every_provider", labeled(cases));
 }
 
+/// Every §5 line, warning or keyless notice, is an undimmed closing note
+/// after the `--ff` suggestion; nothing about credentials is printed above
+/// the table.
 #[test]
-fn the_credentials_line_is_dim_and_directly_follows_the_caption() {
+fn the_credentials_line_is_a_closing_note() {
     let example = Example::new();
-    let line = CredentialLine {
-        provider: "GitHub".into(),
-        key: "GITHUB_TOKEN".into(),
-        condition: CredentialCondition::Rejected,
-    };
-    let facts = TableFacts { credential_line: Some(line), ..example.facts() };
-    let colored = list_table::render(&facts, &color_terminal(), NOW);
-    let lines: Vec<&str> = colored.lines().collect();
-    assert!(lines[1].contains("origin/main"), "the caption: {colored}");
-    assert!(lines[2].contains("\u{1b}[2m") && lines[2].contains("didn't accept GITHUB_TOKEN"), "{colored}");
-    assert!(lines[3].trim().is_empty(), "then the blank line before the table: {colored}");
-
-    // Without a caption paragraph the line still opens the output.
-    let facts = TableFacts {
-        credential_line: facts.credential_line.clone(),
-        remote: None,
-        caption: None,
-        ..example.facts()
-    };
-    let plain = list_table::render(&facts, &plain_terminal(), NOW);
-    assert!(plain.lines().nth(1).unwrap().contains("didn't accept"), "{plain}");
-
-    // The keyless notice is the same dim line in the same place.
-    let line = CredentialLine {
-        provider: "GitHub".into(),
-        key: "GH_TOKEN or GITHUB_TOKEN".into(),
-        condition: CredentialCondition::AnsweredWithoutKey { higher_limits: true },
-    };
-    let facts = TableFacts { credential_line: Some(line), ..example.facts() };
-    let colored = list_table::render(&facts, &color_terminal(), NOW);
-    let lines: Vec<&str> = colored.lines().collect();
-    assert!(lines[1].contains("origin/main"), "the caption: {colored}");
-    assert!(lines[2].contains("\u{1b}[2m") && lines[2].contains("GitHub answered without an API key"), "{colored}");
+    for condition in [CredentialCondition::Rejected, CredentialCondition::AnsweredWithoutKey { higher_limits: true }] {
+        let line = CredentialLine { provider: "GitHub".into(), key: "GITHUB_TOKEN".into(), condition };
+        let facts = TableFacts {
+            credential_line: Some(line),
+            ff_suggestion: Some(FfSuggestion { behind: 3 }),
+            ..example.facts()
+        };
+        let table = list_table::render(&facts, &color_terminal(), NOW);
+        assert!(!table.contains("GITHUB_TOKEN"), "{table}");
+        let notes = list_table::render_notes(&facts, &terminal_at(400, true)).expect("notes");
+        let items: Vec<&str> = notes.lines().collect();
+        assert_eq!(items.len(), 2, "{notes:?}");
+        assert!(items[0].contains("fast-forward"), "{notes:?}");
+        assert!(items[1].starts_with(" - ") && items[1].contains("GITHUB_TOKEN"), "{notes:?}");
+        assert!(!items[1].contains("\u{1b}[2m"), "not dim: {notes:?}");
+    }
 }
 
 // The hint (§6), the closing notes (§8, §9, `--ff`), and the order of all
@@ -1115,6 +1105,74 @@ fn closing_notes_snapshot() {
             notes(TableFacts { ff_suggestion: Some(FfSuggestion { behind: 1 }), ..example.facts() }),
         ),
         ("fallback notice".to_string(), notes(TableFacts { fallback_notice: keys(), ..example.facts() })),
+        (
+            "graph omissions".to_string(),
+            notes(TableFacts {
+                graph_omissions: GraphOmissions {
+                    hidden_lanes: 3,
+                    omissions: vec![
+                        GraphOmission::UnconnectedLane {
+                            branch: "fix/globs".into(),
+                            fork: Some("e23d0c2b3a00fa6369b00619374eaa9c9664ff40".into()),
+                        },
+                        GraphOmission::UnconnectedLane { branch: "feat/far".into(), fork: Some("abcdef0123456789".into()) },
+                        GraphOmission::UnconnectedLane { branch: "feat/lost".into(), fork: None },
+                        GraphOmission::Merge { branch: "feat/m".into(), destination: "8888888abc".into() },
+                        GraphOmission::Tag("v0.1.0".into()),
+                    ],
+                    forked_off_line: vec![ForkedOffLine {
+                        branch: "fix/globs".into(),
+                        fork: "e23d0c2b3a00fa6369b00619374eaa9c9664ff40".into(),
+                        into: "origin/main".into(),
+                        merge: "21debbcc5c98000f5b9a331be59e7ef24cdde66f".into(),
+                    }],
+                    merged_elsewhere: vec![
+                        MergedElsewhere {
+                            branch: "feat/schema".into(),
+                            tip: "ba02e69e7ad4c8e3".into(),
+                            into: "origin/main".into(),
+                            through: Some("fix/skill".into()),
+                        },
+                        MergedElsewhere { branch: "feat/old".into(), tip: "0ld0000".into(), into: "main".into(), through: None },
+                    ],
+                    ..GraphOmissions::default()
+                },
+                ..example.facts()
+            }),
+        ),
+        (
+            "one hidden lane".to_string(),
+            notes(TableFacts {
+                graph_omissions: GraphOmissions { hidden_lanes: 1, ..GraphOmissions::default() },
+                ..example.facts()
+            }),
+        ),
+        (
+            "incomplete in a shallow clone".to_string(),
+            notes(TableFacts {
+                graph_omissions: GraphOmissions {
+                    history_gap: true,
+                    shallow: true,
+                    omissions: vec![GraphOmission::UnconnectedLane { branch: "feat/lost".into(), fork: None }],
+                    ..GraphOmissions::default()
+                },
+                ..example.facts()
+            }),
+        ),
+        (
+            "a history gap in a complete clone".to_string(),
+            notes(TableFacts {
+                graph_omissions: GraphOmissions { history_gap: true, ..GraphOmissions::default() },
+                ..example.facts()
+            }),
+        ),
+        (
+            "shallow but complete".to_string(),
+            notes(TableFacts {
+                graph_omissions: GraphOmissions { shallow: true, ..GraphOmissions::default() },
+                ..example.facts()
+            }),
+        ),
         (
             "suggestion before the notice".to_string(),
             notes(TableFacts {
@@ -1280,6 +1338,7 @@ impl Unavailable {
             ff_suggestion: None,
             ff_notice: None,
             fallback_notice: None,
+            graph_omissions: GraphOmissions::default(),
         }
     }
 
@@ -1345,16 +1404,16 @@ fn legend_entries_appear_only_for_markers_in_the_table() {
         rendered.lines().skip(start).map(str::trim_end).collect::<Vec<_>>().join("\n")
     };
     let healthy = " Worktree   ○ clean    ● uncommitted files    ● uncommitted source files";
-    let branch = " Branch     └─ merges cleanly into parent     └─ conflicts with parent    └┄ parent deleted";
+    let branch = " Branch     └─ merges cleanly into parent     └─ conflicts with parent      └┄ parent deleted";
 
     assert_eq!(legend(vec![base()]), format!("{healthy}\n{branch}"));
     assert_eq!(
         legend(vec![base(), unavailable("gone", Some("gone"), Availability::Missing, GIT_REASON)]),
-        format!("{healthy}\n            ✕ git can't read this worktree\n{branch}")
+        format!("{healthy}    ✕ git can't read worktree\n{branch}")
     );
     assert_eq!(
         legend(vec![base(), status("odd", Some("odd"), false, false, DirtyStatus::Unknown)]),
-        format!("{healthy}\n            ? couldn't check\n{branch}")
+        format!("{healthy}    ? couldn't check\n{branch}")
     );
     assert_eq!(
         legend(vec![
@@ -1362,8 +1421,11 @@ fn legend_entries_appear_only_for_markers_in_the_table() {
             status("odd", Some("odd"), false, false, DirtyStatus::Unknown),
             unavailable("gone", Some("gone"), Availability::Unlinked, GIT_REASON),
         ]),
-        format!("{healthy}\n            ✕ git can't read this worktree    ? couldn't check\n{branch}")
+        format!("{healthy}    ✕ git can't read worktree    ? couldn't check\n{branch}")
     );
+    let with_mark = format!("{healthy}    ✕ git can't read worktree");
+    let column = |line: &str, needle: &str| line[..line.find(needle).unwrap()].chars().count();
+    assert_eq!(column(branch, "└┄"), column(&with_mark, "✕"), "the parent-deleted elbow sits under the ✕");
 }
 
 /// Git reads a checkout through a link that replaced it and does not mark it
@@ -1378,7 +1440,8 @@ fn a_readable_replacement_link_is_unavailable_without_claiming_git_cant_read_it(
     let base = || status("repo", Some("main"), true, true, DirtyStatus::Clean);
     let legend_line = |statuses: Vec<WorktreeStatus>| {
         let rendered = Unavailable::with(statuses).table();
-        rendered.lines().find(|line| line.trim_start().starts_with('✕')).map(|line| line.trim().to_string())
+        let worktree = rendered.lines().find(|line| line.starts_with(" Worktree "))?;
+        worktree.find('✕').map(|at| worktree[at..].trim().to_string())
     };
 
     let table = Unavailable::with(vec![base(), replaced()]).table();
@@ -1386,7 +1449,7 @@ fn a_readable_replacement_link_is_unavailable_without_claiming_git_cant_read_it(
     assert_eq!(legend_line(vec![base(), replaced()]).as_deref(), Some("✕ its path is a link"));
     assert_eq!(
         legend_line(vec![base(), replaced(), unavailable("gone", Some("gone"), Availability::Missing, GIT_REASON)]).as_deref(),
-        Some("✕ git can't read this worktree, or its path is a link")
+        Some("✕ git can't read worktree, or its path is a link")
     );
     let note = note_for(replaced(), vec![]);
     let words = note.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -1404,7 +1467,8 @@ fn a_narrow_table_is_as_wide_as_its_widest_legend_line() {
         status("odd", Some("odd"), false, false, DirtyStatus::Unknown),
         unavailable("gone", Some("gone"), Availability::Missing, GIT_REASON),
     ]);
-    let rendered = example.table();
+    // Wide enough for the Worktree legend line with both marker entries.
+    let rendered = list_table::render(&example.facts(), &terminal_at(160, false), NOW);
     let width = |line: &str| line.trim_end().chars().count();
     let legend_start = rendered.lines().position(|line| line.starts_with(" Worktree ")).expect("legend");
     let widest = rendered.lines().skip(legend_start).map(width).max().unwrap();
@@ -1463,12 +1527,10 @@ fn unavailable_notes_follow_the_existing_notes_in_table_row_order() {
 }
 
 #[test]
-fn unavailable_notes_are_dim() {
+fn unavailable_notes_are_not_dim() {
     let example = Unavailable::new();
     let colored = list_table::render_notes(&example.facts(), &terminal_at(400, true)).expect("notes");
-    for line in colored.lines().filter(|line| line.contains("feat-gone") || line.contains("lhg-before")) {
-        assert!(line.contains("\u{1b}[2m"), "dim: {line:?}");
-    }
+    assert!(!colored.contains("\u{1b}[2m"), "styled like the other notes: {colored:?}");
     assert!(colored.contains("\u{1b}[7m wt remove lhg-before "), "commands in reverse video: {colored:?}");
 }
 
@@ -1500,13 +1562,6 @@ fn at(path: &str, branch: Option<&str>, availability: Availability, reason: &str
 #[test]
 fn notes_quote_names_and_paths_for_every_shell_or_suggest_no_command() {
     let unlinked = |path: &str, branch: Option<&str>| note_for(at(path, branch, Availability::Unlinked, GIT_REASON), vec![]);
-    // Windows spellings go on the base path, which is shown whole on every
-    // host; a target's basename would differ between hosts.
-    let unlinked_from_base = |base: &str| {
-        let mut main = status("repo", Some("main"), true, true, DirtyStatus::Clean);
-        main.entry.path = PathBuf::from(base);
-        Unavailable::with(vec![main, at("/code/wts/plain", None, Availability::Unlinked, GIT_REASON)]).notes()
-    };
     insta::assert_snapshot!(
         "unavailable_note_quoting",
         labeled(vec![
@@ -1516,9 +1571,6 @@ fn notes_quote_names_and_paths_for_every_shell_or_suggest_no_command() {
             ("a PowerShell quote in the path".into(), unlinked("/code/wts/it\u{2019}s", None)),
             ("shell metacharacters".into(), unlinked("/code/wts/$(rm -rf ~);x", None)),
             ("a leading dash".into(), unlinked("/code/wts/-n", None)),
-            ("a Windows base path".into(), unlinked_from_base("C:\\code\\wts\\repo")),
-            ("a UNC base path".into(), unlinked_from_base("\\\\server\\share\\repo")),
-            ("a base path ending in a backslash".into(), unlinked_from_base("C:\\repo\\")),
         ])
     );
 }
@@ -1582,8 +1634,8 @@ fn notes_keep_paths_and_commands_whole_at_a_narrow_width() {
     for copyable in [
         long("wt-moved"),
         long("holder-checkout"),
-        format!("git -C {} worktree repair {}", long("main-repo"), long("wt-unlinked")),
-        format!("git -C {} worktree repair /code/wts/feat-short-name", long("main-repo")),
+        "wt remove unlinked".to_string(),
+        "wt remove feat-short-name".to_string(),
         "wt remove feature/a-rather-long-branch-name".to_string(),
     ] {
         assert!(notes.contains(&copyable), "{copyable:?} whole in:\n{notes}");
@@ -1636,8 +1688,6 @@ fn projections(long_dir: &str, odd: &str) -> Vec<Projection> {
         fallback_notice: None,
         shown,
     };
-    let mut unlinked_base = base();
-    unlinked_base.entry.path = PathBuf::from(format!("{long_dir}/base{odd}"));
     let mut link = detached(format!("{long_dir}/link{odd}"), Availability::Other(OtherCondition::Link), "");
     link.entry.prunable = None;
     let mut competing = status("dup", Some("feat/dup"), false, false, DirtyStatus::Clean);
@@ -1657,17 +1707,11 @@ fn projections(long_dir: &str, odd: &str) -> Vec<Projection> {
             vec![detached(format!("/code/wts/target{odd}"), Availability::Missing, GIT_REASON)],
             vec![format!("- target{odd}:"), format!("wt remove 'target{odd}'")],
         ),
-        Projection {
-            example: Unavailable::with(vec![
-                unlinked_base,
-                detached(format!("{long_dir}/unlinked{odd}"), Availability::Unlinked, GIT_REASON),
-            ]),
-            ..projection(
-                "unlinked repair command target and base paths",
-                vec![],
-                vec![format!("git -C '{long_dir}/base{odd}' worktree repair '{long_dir}/unlinked{odd}'")],
-            )
-        },
+        projection(
+            "unlinked removal command and worktree label",
+            vec![detached(format!("{long_dir}/unlinked{odd}"), Availability::Unlinked, GIT_REASON)],
+            vec![format!("- unlinked{odd}:"), format!("wt remove 'unlinked{odd}'")],
+        ),
         projection("other-unavailable observed path", vec![link], vec![format!("{long_dir}/link{odd}")]),
         projection(
             "name-conflict competing path",
@@ -1762,4 +1806,46 @@ fn a_note_claims_a_missing_git_file_only_for_an_unlinked_row() {
     let claims: Vec<&str> = notes.lines().filter(|line| line.contains(".git file is missing")).collect();
     assert_eq!(claims.len(), 1, "{notes}");
     assert!(claims[0].contains("lhg-before"), "{notes}");
+}
+
+/// An unavailable worktree's note is styled like every other note, its
+/// command badge exactly like the `wt --ff` badge.
+#[test]
+fn an_unavailable_note_is_styled_like_the_other_notes() {
+    let example = Unavailable::with(vec![
+        status("repo", Some("main"), true, true, DirtyStatus::Clean),
+        at("/code/wts/plain", Some("feat/plain"), Availability::Unlinked, GIT_REASON),
+    ]);
+    let facts = TableFacts { ff_suggestion: Some(FfSuggestion { behind: 3 }), ..example.facts() };
+    let notes = list_table::render_notes(&facts, &terminal_at(400, true)).expect("notes");
+    assert!(notes.contains("\u{1b}[7m wt --ff \u{1b}[0m"), "{notes:?}");
+    assert!(notes.contains("\u{1b}[7m wt remove feat/plain \u{1b}[0m"), "{notes:?}");
+    assert!(!notes.contains("\u{1b}[2m"), "nothing is dim: {notes:?}");
+}
+
+/// The graph gets the rows the rest of the listing leaves on screen, less
+/// four for its own notes and the prompt, and never fewer than the minimum.
+#[test]
+fn the_graph_gets_the_rows_the_rest_of_the_listing_leaves() {
+    let table = "line\n".repeat(20);
+    let notes = " - a\n - b\n";
+    // 80 rows - (20 + 2 + 1 blank) - 4 reserved.
+    assert_eq!(list_table::graph_row_budget(80, &[Some(&table), None, None, Some(notes)]), 53);
+    assert_eq!(list_table::graph_row_budget(80, &[Some(&table), Some("status\n"), None, None]), 54);
+    assert_eq!(list_table::graph_row_budget(30, &[Some(&table), None, None, Some(notes)]), list_table::GRAPH_MIN_ROWS);
+}
+
+/// A behind count that merges inflate says how far the tracking ref's own
+/// line, which the graph draws, is ahead; matching counts say nothing more.
+#[test]
+fn a_behind_caption_names_the_steps_on_the_tracking_refs_own_line() {
+    let with = |commits, merges| Caption { behind_on_line: Some(LineSteps { commits, merges }), ..comparison(0, 45) };
+    let caption = |caption: &Caption| {
+        caption_for(Some(caption), true, RemoteStatus::CheckedNow).split_whitespace().collect::<Vec<_>>().join(" ")
+    };
+    assert!(caption(&with(1, 1)).contains("main is 45 commits (1 merge) behind origin/main"));
+    assert!(caption(&with(2, 2)).contains("45 commits (2 merges) behind"));
+    assert!(caption(&with(3, 1)).contains("45 commits (3 on main's line) behind"));
+    assert!(caption(&with(45, 0)).contains("45 commits behind"), "the counts agree");
+    assert!(caption(&comparison(0, 45)).contains("45 commits behind"), "nothing measured");
 }

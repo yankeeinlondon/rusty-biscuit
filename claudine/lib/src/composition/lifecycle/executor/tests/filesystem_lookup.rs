@@ -73,7 +73,7 @@ fn lifecycle_file_functions_reuse_all_request_resolution_inputs() {
         base_dir: Some(&source_dir),
         ctx_base_dir: None,
         prepared_context: None,
-        file_resolution_context: Some(&snapshot),
+        file_resolution_context: &snapshot,
         effect_engine: &engine,
         shell_runner: &shell,
         emitter: &recorder,
@@ -149,7 +149,7 @@ fn ctx_capture_follows_ctx_base_dir_not_base_dir() {
         // No prepared snapshot: exercise the fallback re-capture path so the
         // assertion proves `ctx_base_dir` (not `base_dir`) roots the capture.
         prepared_context: None,
-        file_resolution_context: None,
+        file_resolution_context: crate::test_support::process_context(),
         effect_engine: &engine,
         shell_runner: &shell,
         emitter: &recorder,
@@ -242,7 +242,7 @@ fn lifecycle_reuses_prepared_snapshot_for_prompt_outside_launch_area() {
         ctx_base_dir: Some(launch_root.as_path()),
         // The reused snapshot is the source of truth.
         prepared_context: Some(&prepared),
-        file_resolution_context: None,
+        file_resolution_context: crate::test_support::process_context(),
         effect_engine: &engine,
         shell_runner: &shell,
         emitter: &recorder,
@@ -317,7 +317,7 @@ fn file_exists_resolves_against_base_dir_after_chdir() {
         // The launch area — carried for diagnostics only, never a candidate.
         ctx_base_dir: Some(launch_dir.path()),
         prepared_context: None,
-        file_resolution_context: None,
+        file_resolution_context: crate::test_support::process_context(),
         effect_engine: &engine,
         shell_runner: &shell,
         emitter: &recorder,
@@ -371,7 +371,8 @@ fn prepare_time_and_event_time_agree_on_file_reference() {
     std::env::set_current_dir(prompt_dir.path()).unwrap();
 
     // Prepare-time resolution context (mirrors what ComposeOptions builds):
-    let prepare_ctx = ResolutionContext::new(prompt_dir.path().to_path_buf())
+    let request_context = crate::test_support::context_at(prompt_dir.path());
+    let prepare_ctx = ResolutionContext::new(request_context.clone())
         .with_file_ref_fallback_dir(launch_dir.path().to_path_buf());
 
     // Event-time resolution context (built by StackExecutionContext):
@@ -394,7 +395,7 @@ fn prepare_time_and_event_time_agree_on_file_reference() {
         base_dir: Some(prompt_dir.path()),
         ctx_base_dir: Some(launch_dir.path()),
         prepared_context: None,
-        file_resolution_context: None,
+        file_resolution_context: &request_context,
         effect_engine: &engine,
         shell_runner: &shell,
         emitter: &recorder,
@@ -404,7 +405,7 @@ fn prepare_time_and_event_time_agree_on_file_reference() {
         messaging: &harness.messaging,
         settings: &harness.settings,
     };
-    let event_ctx = context.resolution_context();
+    let event_ctx = context.resolution_context().unwrap();
 
     // Both contexts carry the same fallback directory.
     assert_eq!(
@@ -464,7 +465,7 @@ fn frontmatter_reads_resolve_against_base_dir() {
         base_dir: Some(prompt_dir.path()),
         ctx_base_dir: Some(launch_dir.path()),
         prepared_context: None,
-        file_resolution_context: None,
+        file_resolution_context: crate::test_support::process_context(),
         effect_engine: &engine,
         shell_runner: &shell,
         emitter: &recorder,
@@ -535,7 +536,7 @@ fn regression_path_only_under_launch_area_does_not_resolve() {
         base_dir: Some(prompt_dir.path()),
         ctx_base_dir: Some(launch_dir.path()),
         prepared_context: None,
-        file_resolution_context: None,
+        file_resolution_context: crate::test_support::process_context(),
         effect_engine: &engine,
         shell_runner: &shell,
         emitter: &recorder,
@@ -606,7 +607,7 @@ fn source_local_candidate_ignores_same_named_launch_file() {
         base_dir: Some(prompt_dir.path()),
         ctx_base_dir: Some(launch_dir.path()),
         prepared_context: None,
-        file_resolution_context: None,
+        file_resolution_context: crate::test_support::process_context(),
         effect_engine: &engine,
         shell_runner: &shell,
         emitter: &recorder,

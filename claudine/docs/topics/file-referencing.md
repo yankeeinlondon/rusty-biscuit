@@ -99,6 +99,7 @@ All file references can and should be thought of as a **base** path joined to a 
     - a path of `~/path/to/file.md` or `${HOME}/path/to/file.md` has an _abstracted_ base path that is resolved at run time
     - on Windows, `%USERPROFILE%\path\to\file.md` is the corresponding native environment-variable form
     - environment-variable references are substitutions, not additional file-reference sigils; `~`, `${HOME}`, and `%USERPROFILE%` are the **base** paths and `path/to/file.md` is a relative path off of that base
+    - the home behind `~` is the same one Claudine uses for its own files (`~/.claudine/config.json`, prompts, logs, MCP state): `HOME` on macOS and Linux, `USERPROFILE` on native Windows (where `HOME` alone changes nothing), and a relative value counts as no home. Launching `claudine` with `USERPROFILE=D:\fixture` on Windows therefore makes `~/.claudine/config.json` both read from and written to `D:\fixture\.claudine\config.json`. The rules are spelled out in biscuit-file's [Home section](../../../biscuit-file/docs/topics/file-references.md#home-)
 
 So what then is an **implicit relative path**? It's a path that starts immediately with a relative path segment but without adding in a clear marker for what this relative file path's base should be. An example would be:
 

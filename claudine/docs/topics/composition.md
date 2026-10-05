@@ -1100,7 +1100,7 @@ $schema:
 
 `claudine compose plan spec=everywhere` (with no literal `everywhere` file) now:
 
-1. walks the `match(**/*spec*.md)` glob from the **launch area** (the same `property_value_root` anchor completion uses, so *offered == accepted*),
+1. walks the `match(**/*spec*.md)` glob exactly as TAB completion does, so *offered == accepted*: a bare pattern searches the **launch area** first and then the repository root, and `./`, `&`, `^`, `~`, and `@` name their own folders (see [Property values](./completions/shell-completions.md#property-values-after-)),
 2. filters candidates whose path contains `everywhere` (case-insensitive), and
 3. drives a **confirmation dialog** on a single match or a **chooser** on multiple, then records the selected path in the effective override and caller provenance before continuing preparation. Each unresolved supplied input is handled, including individual file-array elements.
 
@@ -1555,7 +1555,22 @@ The original six-stage summary (`Resolve → Pre-Flight → Prepare → Select P
 
 ### Request-Owned Context
 
-Canonical wrappers and composition commands create one `InvocationContext` before resolving the first source. It freezes the launch CWD, HOME, environment, launch repository evidence, and launch `FileResolutionContext`, then projects the existing launch, workspace, and event context types from those facts. Once a file reference resolves, a `SourceContext` carries that document's base directory, repository/package roots, repository observation, and source-derived `FileResolutionContext` through preparation, preflight, lifecycle evaluation, sequences, system prompts, and harness materialization.
+The `claudine` binary reads its process exactly once, when it dispatches a command: Darkmatter's `RequestSnapshot::from_process()` records the launch directory, HOME, and environment, and every later step works from that snapshot. Canonical wrappers and composition commands create one `InvocationContext` from it before resolving the first source. It freezes the launch CWD, HOME, environment, launch repository evidence, and launch `FileResolutionContext`, then projects the existing launch, workspace, and event context types from those facts. Once a file reference resolves, a `SourceContext` carries that document's base directory, repository/package roots, repository observation, and source-derived `FileResolutionContext` through preparation, preflight, lifecycle evaluation, sequences, system prompts, and harness materialization.
+
+Every file-resolution context comes from Darkmatter's builder or is derived from one built context. Claudine registers its prompt conventions (`prompts/`, `.claudine/`, and the user-tier `~/.claudine` rows) as extra `@` roots on the snapshot, so the builder adds them to every context:
+
+```mermaid
+flowchart LR
+    P[claudine process] -->|"from_process(), once"| S[RequestSnapshot]
+    S -->|"+ prompt @ roots"| B["Darkmatter builder"]
+    B --> L[launch context]
+    B -->|"at_request_dir(source dir)"| X[source in another repository]
+    L -->|"for_source / for_cwd"| D[source context]
+    D --> R["ComposeRequest (one per compose)"]
+    X --> R
+```
+
+A context is never optional. Preparation, preflight, lifecycle and loop expressions, sequence sources, hook `when` conditions, completion, and system prompts all take one, and a compose runs on a `ComposeRequest` that pairs the options with it. The variables a run layers onto `ctx` (`AGENT`, `MODEL`, `YOLO`) are added to that request's environment, so an expression, `env.*`, and a `{{VAR}}` file reference read the same values. No step falls back to the process directory, HOME, or environment.
 
 Darkmatter scans each document for its required `ctx.*` groups and receives the matching evidence from the invocation owner. Canonical paths therefore reuse the same environment and repository facts instead of recapturing ambient CWD, HOME, Git, or topology downstream; evidence the owner could not supply remains a partial-capture diagnostic rather than an ambient probe. Content is still reread at retry, resume, and sequence JIT boundaries; only immutable request and repository evidence is reused.
 

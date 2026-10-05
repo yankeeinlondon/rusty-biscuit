@@ -15,8 +15,13 @@ use renderable::color::{BasicColor, Color, RgbColor};
 use renderable::style::UnderlineStyle;
 use renderable::tree::RenderNode;
 
-use super::markdown::{CODE_BLOCK_PLACEHOLDER_MARK, FencedCode};
+use super::LineBreaks;
+use super::markdown::{
+    LIFT_MARK, Lifted, is_escapable, is_sentinel, newline_run, parse_lift_placeholder, tag_declaration_end,
+};
 use super::styles::{ProseStyle, parse_rgb, tailwind_by_name, web_color_by_name};
+use super::tree::{project_span, split_around_blocks, trim_soft_break_whitespace};
+use crate::render_tree::link::file_reference_link;
 
 /// Parse an opening tag into its name and attributes.
 pub(super) fn parse_opening_tag(tag_content: &str) -> Option<(String, Vec<(String, String)>)> {
@@ -54,7 +59,7 @@ pub(super) fn parse_opening_tag(tag_content: &str) -> Option<(String, Vec<(Strin
                     if c == '\\'
                         && chars
                             .peek()
-                            .is_some_and(|&n| matches!(n, '<' | '>' | '\\' | '"' | '\''))
+                            .is_some_and(|&n| matches!(n, '<' | '>' | '\\' | '"' | '\'') || is_sentinel(n))
                     {
                         current_value.push(chars.next().unwrap());
                         continue;
@@ -215,82 +220,54 @@ fn resolve_tag(tag_name: &str, attrs: &[(String, String)]) -> TagResolution {
 /// Consume characters from `chars` up to the matching `</tag_name>` at depth
 /// zero, returning the inner content (without the closing tag).
 ///
-/// Tracks nesting depth so `<b>x <b>y</b> z</b>` resolves correctly.
+/// Tracks nesting depth so `<b>x <b>y</b> z</b>` resolves correctly. Reads
+/// the body under the same rules as the other pre-processing scanners: an
+/// escape pair is literal, and a recognized tag declaration is skipped whole
+/// ([`tag_declaration_end`]), so tag text inside its quoted attributes never
+/// opens or closes this scope. Any other `<` is a single literal character,
+/// as [`parse_nodes`] treats it.
 fn scan_inner(chars: &mut Peekable<Chars<'_>>, tag_name: &str) -> String {
-    let closing_tag = format!("</{}>", tag_name);
-    let opening_tag_full = format!("<{}>", tag_name);
-    let opening_tag_with_space = format!("<{} ", tag_name);
-
-    let mut inner = String::new();
+    let rest: Vec<char> = chars.clone().collect();
     let mut depth = 1;
+    let (mut inner_end, mut resume) = (rest.len(), rest.len());
+    let mut i = 0;
 
-    while depth > 0 {
-        let Some(c) = chars.next() else { break };
-        inner.push(c);
-        let len = inner.len();
-
-        if c == '>' {
-            if len >= opening_tag_full.len() {
-                let start = len - opening_tag_full.len();
-                if inner
-                    .get(start..)
-                    .is_some_and(|slice| slice.eq_ignore_ascii_case(&opening_tag_full))
-                {
+    while i < rest.len() {
+        if rest[i] == '\\' && rest.get(i + 1).is_some_and(|&next| is_escapable(next)) {
+            i += 2;
+            continue;
+        }
+        if rest[i] == '<'
+            && let Some(end) = tag_declaration_end(&rest, i)
+        {
+            let content: String = rest[i + 1..end - 1].iter().collect();
+            if content
+                .strip_prefix('/')
+                .is_some_and(|name| name.trim().eq_ignore_ascii_case(tag_name))
+            {
+                depth -= 1;
+                if depth == 0 {
+                    (inner_end, resume) = (i, end);
+                    break;
+                }
+                i = end;
+                continue;
+            }
+            if is_recognized_opening_tag(&content) {
+                if parse_opening_tag(&content).is_some_and(|(name, _)| name == tag_name) {
                     depth += 1;
                 }
-            }
-            if len >= closing_tag.len() {
-                let start = len - closing_tag.len();
-                if inner
-                    .get(start..)
-                    .is_some_and(|slice| slice.eq_ignore_ascii_case(&closing_tag))
-                {
-                    depth -= 1;
-                    if depth == 0 {
-                        inner.truncate(start);
-                    }
-                }
-            }
-        } else if c == ' ' && len >= opening_tag_with_space.len() {
-            let start = len - opening_tag_with_space.len();
-            if inner
-                .get(start..)
-                .is_some_and(|slice| slice.eq_ignore_ascii_case(&opening_tag_with_space))
-            {
-                depth += 1;
+                i = end;
+                continue;
             }
         }
+        i += 1;
     }
 
-    inner
-}
-
-/// Consume a `CODE<n>\u{0002}` placeholder body from `chars`, assuming the
-/// opening `\u{0002}` sentinel has already been taken.
-///
-/// Returns the parsed block index, or `None` when the following
-/// characters are not a well-formed placeholder (in which case the caller
-/// treats the sentinel as literal text).
-fn take_code_placeholder(chars: &mut Peekable<Chars<'_>>) -> Option<usize> {
-    for expected in ['C', 'O', 'D', 'E'] {
-        chars.next_if_eq(&expected)?;
+    for _ in 0..resume {
+        chars.next();
     }
-
-    let mut digits = String::new();
-    while let Some(&d) = chars.peek() {
-        if d.is_ascii_digit() {
-            digits.push(d);
-            chars.next();
-        } else {
-            break;
-        }
-    }
-    if digits.is_empty() {
-        return None;
-    }
-
-    chars.next_if_eq(&CODE_BLOCK_PLACEHOLDER_MARK)?;
-    digits.parse().ok()
+    rest[..inner_end].iter().collect()
 }
 
 /// Scan a bracketed-tag declaration, assuming the opening `<` was already
@@ -300,9 +277,7 @@ fn take_code_placeholder(chars: &mut Peekable<Chars<'_>>) -> Option<usize> {
 /// terminator) and escape-aware (the `\<`, `\>`, `\\`, `\"`, `\'` sequences
 /// produced by [`Prose::quoted_attr`](super::Prose::quoted_attr) are preserved
 /// verbatim, so an escaped delimiter never ends the tag). The returned content
-/// is raw — [`parse_opening_tag`] resolves the escapes inside attribute values,
-/// and keeping it raw lets an unrecognized declaration fall back to literal
-/// text intact.
+/// is raw — [`parse_opening_tag`] resolves the escapes inside attribute values.
 ///
 /// ## Returns
 ///
@@ -317,7 +292,7 @@ fn scan_tag_declaration(chars: &mut Peekable<Chars<'_>>) -> (String, bool) {
             '\\' => {
                 tag_content.push('\\');
                 if let Some(&next) = chars.peek()
-                    && matches!(next, '<' | '>' | '\\' | '"' | '\'')
+                    && (matches!(next, '<' | '>' | '\\' | '"' | '\'') || is_sentinel(next))
                 {
                     tag_content.push(next);
                     chars.next();
@@ -350,16 +325,36 @@ fn flush_render_text(text: &mut String, nodes: &mut Vec<RenderNode>) {
     }
 }
 
+/// How [`parse_render_nodes`] treats breaks and code.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct InlineOptions {
+    /// What a single newline means.
+    pub line_breaks: LineBreaks,
+    /// `true` for [`InlineProse`](super::InlineProse): fenced code becomes
+    /// `InlineCode` instead of a block-level `Code` node.
+    pub inline_only: bool,
+}
+
 /// Parse pre-processed Prose `content` directly into shared
 /// [`RenderNode`](renderable::tree::RenderNode) values.
 ///
-/// This is the render-tree counterpart of [`parse_nodes`]: it shares the same
-/// scanner ([`scan_tag_declaration`], [`scan_inner`], [`resolve_tag`],
-/// [`take_code_placeholder`]) but builds canonical tree nodes without an
-/// intervening component-local IR. Styled spans lower through
-/// [`project_span`](super::tree::project_span) to semantic
-/// `Strong`/`Emphasis`/`Delete` wrappers or a styled `Span`; links, code
-/// blocks, and literal text map to `Link`, `Code`, and `Text`.
+/// Styled spans lower through [`project_span`] to
+/// semantic `Strong`/`Emphasis`/`Delete` wrappers or a styled `Span`; links
+/// and literal text map to `Link` and `Text`. Lifted-content placeholders
+/// resolve against `lifted`: a code span becomes `InlineCode`, a fenced block
+/// or `<code-block>` body becomes `Code` (or `InlineCode` when
+/// [`InlineOptions::inline_only`]), and an HTML comment becomes nothing. A style or link wrapping a block `Code`
+/// is split around it ([`split_around_blocks`]), so the code is returned as a
+/// sibling with the wrapper resumed on each side. A `<` that opens no
+/// recognized tag is a literal `<`, and the input after it is parsed as
+/// usual.
+///
+/// Newlines follow the break rules: an unescaped `\` before a newline is a
+/// hard break unless the newline starts a blank-line run (then the backslash
+/// is literal); otherwise a run of newlines is one soft break, or one hard
+/// break per newline in [`LineBreaks::Hard`]. The spaces and tabs around a
+/// soft break are discarded even across wrapper boundaries
+/// ([`trim_soft_break_whitespace`]); other whitespace is kept.
 ///
 /// Two Prose-only tag policies:
 ///
@@ -367,41 +362,100 @@ fn flush_render_text(text: &mut String, nodes: &mut Vec<RenderNode>) {
 ///   styled `Span`, lowered per target by the shared renderers.
 /// - `<hidden>` is not recognized — it renders as inert literal text like any
 ///   unknown tag.
-pub(super) fn parse_render_nodes(content: &str, code_blocks: &[FencedCode]) -> Vec<RenderNode> {
+pub(super) fn parse_render_nodes(content: &str, lifted: &[Lifted], opts: InlineOptions) -> Vec<RenderNode> {
+    let mut nodes = parse_nodes(content, lifted, opts);
+    trim_soft_break_whitespace(&mut nodes);
+    nodes
+}
+
+/// [`parse_render_nodes`] before soft-break whitespace is trimmed, which
+/// runs once over the whole sequence so it can cross wrapper boundaries.
+fn parse_nodes(content: &str, lifted: &[Lifted], opts: InlineOptions) -> Vec<RenderNode> {
     let mut nodes: Vec<RenderNode> = Vec::new();
     let mut text = String::new();
     let mut chars = content.chars().peekable();
 
     while let Some(ch) = chars.next() {
-        // ── Fenced-code placeholders: \u{0002}CODE<n>\u{0002} ────────────
-        if ch == CODE_BLOCK_PLACEHOLDER_MARK {
-            if let Some(block) =
-                take_code_placeholder(&mut chars).and_then(|index| code_blocks.get(index))
+        // ── Lifted content: \u{0002}<n>\u{0002} ──────────────────────────
+        // Literal sentinels were escaped by `lift_fences`, so a bare one is
+        // always a placeholder this parser's pre-processor issued.
+        if ch == LIFT_MARK {
+            let rest: Vec<char> = std::iter::once(ch).chain(chars.clone()).collect();
+            if let Some((index, next)) = parse_lift_placeholder(&rest, 0)
+                && let Some(entry) = lifted.get(index)
             {
+                for _ in 1..next {
+                    chars.next();
+                }
+                // A comment leaves the text around it one run.
+                if matches!(entry, Lifted::Comment) {
+                    continue;
+                }
                 flush_render_text(&mut text, &mut nodes);
-                nodes.push(RenderNode::code(
-                    Some(block.lang.clone()).filter(|s| !s.is_empty()),
-                    None,
-                    block.body.clone(),
-                ));
+                match entry {
+                    Lifted::Span(value) => nodes.push(RenderNode::inline_code(value.clone())),
+                    Lifted::Fence(block) => push_code(
+                        Some(block.lang.clone()).filter(|s| !s.is_empty()),
+                        &block.body,
+                        opts,
+                        &mut nodes,
+                    ),
+                    Lifted::CodeBody(body) => push_code(None, body, opts, &mut nodes),
+                    Lifted::Comment => {}
+                }
             }
             continue;
         }
 
-        // ── Backslash escapes: \< \> \{ \\ \* \_ \[ \] \( \) ─────────────
+        // ── Backslash: escapes and the hard-break marker ─────────────────
         if ch == '\\' {
             match chars.peek() {
-                Some(&'<') | Some(&'>') | Some(&'{') | Some(&'\\') | Some(&'*') | Some(&'_')
-                | Some(&'[') | Some(&']') | Some(&'(') | Some(&')') => {
-                    text.push(chars.next().unwrap());
+                Some(&'\n') => {
+                    let mut look = chars.clone();
+                    look.next();
+                    if starts_blank_run(look) {
+                        // A paragraph boundary beats the hard-break marker.
+                        text.push('\\');
+                    } else {
+                        chars.next();
+                        flush_render_text(&mut text, &mut nodes);
+                        nodes.push(RenderNode::hard_break());
+                    }
+                }
+                Some(&next) if is_escapable(next) => {
+                    text.push(next);
+                    chars.next();
                 }
                 _ => text.push(ch),
             }
             continue;
         }
 
+        // ── Newlines: soft or hard breaks ────────────────────────────────
+        if ch == '\n' {
+            let rest: Vec<char> = std::iter::once(ch).chain(chars.clone()).collect();
+            let (count, end) = newline_run(&rest, 0);
+            for _ in 1..end {
+                chars.next();
+            }
+            match opts.line_breaks {
+                LineBreaks::Soft => {
+                    flush_render_text(&mut text, &mut nodes);
+                    nodes.push(RenderNode::soft_break());
+                }
+                LineBreaks::Hard => {
+                    flush_render_text(&mut text, &mut nodes);
+                    for _ in 0..count {
+                        nodes.push(RenderNode::hard_break());
+                    }
+                }
+            }
+            continue;
+        }
+
         // ── Block tags: <tag>content</tag> ────────────────────────────────
         if ch == '<' {
+            let after_bracket = chars.clone();
             let (tag_content, found_close) = scan_tag_declaration(&mut chars);
 
             if found_close
@@ -414,25 +468,23 @@ pub(super) fn parse_render_nodes(content: &str, code_blocks: &[FencedCode]) -> V
                     match resolution {
                         TagResolution::Styled(style) => {
                             flush_render_text(&mut text, &mut nodes);
-                            let children = parse_render_nodes(&inner, code_blocks);
-                            // A styled span may wrap a fenced code block; split
-                            // it around the block child so the block-in-phrasing
-                            // shape never reaches (and trips) tree validation.
-                            super::tree::project_styled_span(&style, children, &mut nodes);
+                            let children = parse_nodes(&inner, lifted, opts);
+                            split_around_blocks(children, &mut nodes, |run| project_span(&style, run));
                         }
                         TagResolution::Link(href) => {
                             flush_render_text(&mut text, &mut nodes);
-                            let children = parse_render_nodes(&inner, code_blocks);
-                            let resolved = super::styles::resolve_href(&href);
-                            nodes.push(RenderNode::link(resolved, None, children));
+                            let children = parse_nodes(&inner, lifted, opts);
+                            split_around_blocks(children, &mut nodes, |run| {
+                                file_reference_link(href.clone(), run)
+                            });
                         }
                         TagResolution::Transparent => {
                             flush_render_text(&mut text, &mut nodes);
-                            nodes.extend(parse_render_nodes(&inner, code_blocks));
+                            nodes.extend(parse_nodes(&inner, lifted, opts));
                         }
                         TagResolution::Code(lang) => {
                             flush_render_text(&mut text, &mut nodes);
-                            nodes.push(RenderNode::code(lang, None, inner));
+                            push_code(lang, code_body(&inner, lifted), opts, &mut nodes);
                         }
                         TagResolution::Unknown => unreachable!("guarded above"),
                     }
@@ -440,12 +492,11 @@ pub(super) fn parse_render_nodes(content: &str, code_blocks: &[FencedCode]) -> V
                 }
             }
 
-            // Not a recognized tree-path tag — emit as literal text.
+            // Not a recognized tag: only the `<` is literal. What follows is
+            // parsed as ordinary input, so a placeholder inside a would-be
+            // declaration still resolves instead of leaking as text.
+            chars = after_bracket;
             text.push('<');
-            text.push_str(&tag_content);
-            if found_close {
-                text.push('>');
-            }
             continue;
         }
 
@@ -454,4 +505,39 @@ pub(super) fn parse_render_nodes(content: &str, code_blocks: &[FencedCode]) -> V
 
     flush_render_text(&mut text, &mut nodes);
     nodes
+}
+
+/// Whether the characters after a newline continue it into a blank-line run
+/// (only spaces or tabs, then another newline).
+fn starts_blank_run(mut rest: Peekable<Chars<'_>>) -> bool {
+    while rest.next_if(|c| matches!(c, ' ' | '\t')).is_some() {}
+    rest.peek() == Some(&'\n')
+}
+
+/// The verbatim body of an explicit `<code-block>`: [`lift_opaque`] left its
+/// placeholder as the tag's only content.
+///
+/// [`lift_opaque`]: super::markdown::lift_opaque
+fn code_body<'a>(inner: &'a str, lifted: &'a [Lifted]) -> &'a str {
+    let chars: Vec<char> = inner.chars().collect();
+    if chars.first() == Some(&LIFT_MARK)
+        && let Some((index, next)) = parse_lift_placeholder(&chars, 0)
+        && next == chars.len()
+        && let Some(Lifted::CodeBody(body)) = lifted.get(index)
+    {
+        return body;
+    }
+    inner
+}
+
+/// Push a code block's body: a block-level `Code` node, or in
+/// [`InlineOptions::inline_only`] mode one `InlineCode` value with the
+/// language hint dropped and each line ending replaced by a space (an empty
+/// body adds nothing).
+fn push_code(lang: Option<String>, body: &str, opts: InlineOptions, nodes: &mut Vec<RenderNode>) {
+    if !opts.inline_only {
+        nodes.push(RenderNode::code(lang, None, body));
+    } else if !body.is_empty() {
+        nodes.push(RenderNode::inline_code(body.replace('\n', " ")));
+    }
 }

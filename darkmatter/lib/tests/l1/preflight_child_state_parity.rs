@@ -159,7 +159,7 @@ fn child_commands_are_approved_with_the_bytes_they_execute() {
         let options = (row.options)(base_options(&root, dir.path()));
 
         let approved: HashSet<String> = document
-            .compose_preflight(&options)
+            .compose_preflight(&crate::request_support::request(options.clone()))
             .unwrap_or_else(|error| panic!("{}: preflight failed: {error}", row.name))
             .approval_set()
             .into_iter()
@@ -172,7 +172,7 @@ fn child_commands_are_approved_with_the_bytes_they_execute() {
         );
 
         let (composed, report) = document
-            .compose_with(options.with_pre_approved_commands(approved))
+            .compose_with(&crate::request_support::request(options.with_pre_approved_commands(approved)))
             .unwrap_or_else(|error| panic!("{}: compose failed: {error}", row.name));
         let output = row.command.trim_start_matches("echo ");
         assert_eq!(
@@ -206,7 +206,7 @@ fn child_command_embedding_a_parent_shell_value_is_a_dynamic_shape() {
     );
     let document = Markdown::try_from(root.as_path()).expect("load root");
     let error = document
-        .compose_preflight(&base_options(&root, dir.path()))
+        .compose_preflight(&crate::request_support::request(base_options(&root, dir.path())))
         .expect_err("a child command built from a pending parent value");
     assert!(
         matches!(
@@ -259,7 +259,7 @@ fn a_child_command_built_from_an_unobserved_parent_value_is_refused() {
         let root = write_files(dir.path(), files);
         let document = Markdown::try_from(root.as_path()).expect("load root");
         let error = document
-            .compose_preflight(&base_options(&root, dir.path()))
+            .compose_preflight(&crate::request_support::request(base_options(&root, dir.path())))
             .expect_err("the command's executed bytes are not knowable at discovery");
         assert!(
             matches!(
@@ -287,14 +287,14 @@ fn an_overridden_unobserved_value_is_approved_as_executed() {
     let document = Markdown::try_from(root.as_path()).expect("load root");
     let options = base_options(&root, dir.path()).with_set_overrides(json!({ "flag": "given" }));
     let approved: HashSet<String> = document
-        .compose_preflight(&options)
+        .compose_preflight(&crate::request_support::request(options.clone()))
         .expect("preflight succeeds")
         .approval_set()
         .into_iter()
         .collect();
     assert!(approved.contains("echo alias-given"), "{approved:?}");
     let (composed, _) = document
-        .compose_with(options.with_pre_approved_commands(approved))
+        .compose_with(&crate::request_support::request(options.with_pre_approved_commands(approved)))
         .expect("compose succeeds");
     assert!(composed.content().contains("alias-given"), "{}", composed.content());
 }
@@ -322,7 +322,7 @@ fn a_command_reading_a_lazy_root_is_an_unevaluated_dependency() {
         let root = write_files(dir.path(), files);
         let document = Markdown::try_from(root.as_path()).expect("load root");
         let error = document
-            .compose_preflight(&base_options(&root, dir.path()))
+            .compose_preflight(&crate::request_support::request(base_options(&root, dir.path())))
             .expect_err("a command reading current.* has no approvable bytes");
         assert!(
             matches!(
@@ -358,14 +358,14 @@ fn a_when_error_block_does_not_absorb_a_pre_approval_violation() {
         // Fixture check: with its bytes approved the block runs.
         let (composed, _) = document
             .compose_with(
-                base_options(&root, dir.path())
-                    .with_pre_approved_commands(HashSet::from(["echo ran-main".to_string()])),
+                &crate::request_support::request(base_options(&root, dir.path())
+                    .with_pre_approved_commands(HashSet::from(["echo ran-main".to_string()]))),
             )
             .unwrap_or_else(|error| panic!("{name}: approved compose failed: {error}"));
         assert!(composed.content().contains("ran-main"), "{name}: {}", composed.content());
 
         let error = document
-            .compose_with(base_options(&root, dir.path()).with_pre_approved_commands(HashSet::new()))
+            .compose_with(&crate::request_support::request(base_options(&root, dir.path()).with_pre_approved_commands(HashSet::new())))
             .map(|(composed, _)| composed.content().to_string())
             .expect_err("an unapproved command is a hard composition failure");
         assert!(error.pre_approval_violation().is_some(), "{name}: {error:?}");

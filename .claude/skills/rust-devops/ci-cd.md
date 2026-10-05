@@ -268,6 +268,13 @@ Reusable lessons from closing a "docs change ran no test" gap
 - **Measure precision against real history before shipping a selector.** The
   first cut here would have scheduled cells on 49 of 62 merges; excluding
   tempdir-relative joins and mock literals brought it to 32, all genuine.
+- **Follow an input's own includes before asking tests to list them.** Tests
+  that composed shipped prompts kept hand lists of the fragments each prompt
+  pulls in with `::file`, and every new fragment broke them. Staging now
+  follows the directives, and so does the planner: a changed file transcluded
+  by a document a test reads schedules that test. Replayed over the last 62
+  merges to `main` (2026-10-04), it added units on 3, all tests composing a
+  prompt whose fragment changed.
 - **Justify cross-host evidence by the change, not the test.** Whether a test
   is OS-independent is undecidable in practice and an annotation drifts. "No
   source in this package changed, only a data file it reads" is derivable, and

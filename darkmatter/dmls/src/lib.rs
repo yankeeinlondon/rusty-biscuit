@@ -13,6 +13,7 @@
 pub mod bench;
 pub mod capabilities;
 pub mod config;
+pub mod context;
 pub mod corpus;
 pub mod diagnostics;
 pub mod graph;

@@ -38,7 +38,7 @@ mod frontmatter_shell_expansion_integration {
                 ..Default::default()
             });
 
-        let (composed, report) = md.compose_with(options).unwrap();
+        let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert!(
             composed.content().contains("Message: hello"),
             "Expected 'Message: hello' in:\n{}",
@@ -65,7 +65,7 @@ mod frontmatter_shell_expansion_integration {
                 ..Default::default()
             });
 
-        let (composed, report) = md.compose_with(options).unwrap();
+        let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         // dirname README.md returns "."
         assert!(
             composed.content().contains("Dir: ."),
@@ -93,7 +93,7 @@ mod frontmatter_shell_expansion_integration {
                 ..Default::default()
             });
 
-        let (composed, report) = md.compose_with(options).unwrap();
+        let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert_eq!(report.frontmatter_shell_expansions_applied, 1);
         assert_eq!(report.shell_expansions_applied, 1);
         assert!(composed.content().contains("from-body"));
@@ -107,7 +107,7 @@ mod frontmatter_shell_expansion_integration {
         let options =
             ComposeOptions::new().only(&[ComposeOperation::FrontmatterShellExpansion]);
 
-        let (composed, report) = md.compose_with(options).unwrap();
+        let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert_eq!(report.frontmatter_shell_expansions_applied, 0);
         assert!(composed.content().contains("Body text"));
     }
@@ -131,7 +131,7 @@ mod frontmatter_shell_expansion_integration {
                 ..Default::default()
             });
 
-        let (composed, report) = md.compose_with(options).unwrap();
+        let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert!(composed.content().contains("Value: "));
         assert_eq!(report.frontmatter_shell_expansions_applied, 1);
         assert_eq!(report.warnings.len(), 1);
@@ -148,7 +148,7 @@ mod frontmatter_shell_expansion_integration {
             ComposeOperation::FrontmatterShellExpansion,
         ]);
 
-        let err = md.compose_with(options).unwrap_err();
+        let err = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap_err();
         assert!(
             err.to_string()
                 .contains("Frontmatter shell executable may not come from interpolation")
@@ -169,7 +169,7 @@ mod frontmatter_shell_expansion_integration {
                 ..Default::default()
             });
 
-        let err = md.compose_with(options).unwrap_err();
+        let err = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap_err();
         assert!(
             err.to_string().contains("pipes") || err.to_string().contains("Shell pipes"),
             "Expected shell pipe rejection, got: {}",
@@ -191,7 +191,7 @@ mod frontmatter_shell_expansion_integration {
                 ..Default::default()
             });
 
-        let (composed, _report) = md.compose_with(options).unwrap();
+        let (composed, _report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert_eq!(
             composed.frontmatter().as_map().get("val"),
             Some(&serde_json::json!("fallback"))
@@ -228,7 +228,7 @@ mod frontmatter_shell_expansion_integration {
                 ..Default::default()
             });
 
-        let (composed, report) = md.compose_with(options).unwrap();
+        let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert_eq!(report.frontmatter_shell_expansions_applied, 1);
         assert_eq!(
             composed.frontmatter().as_map().get("spec_file"),
@@ -269,7 +269,7 @@ mod frontmatter_shell_expansion_integration {
                 ..Default::default()
             });
 
-        let (composed, report) = md.compose_with(options).unwrap();
+        let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert_eq!(report.frontmatter_shell_expansions_applied, 1);
         assert_eq!(
             composed.frontmatter().as_map().get("spec_file"),
@@ -309,7 +309,7 @@ mod frontmatter_shell_expansion_integration {
                 ..Default::default()
             });
 
-        let (composed, _report) = md.compose_with(options).unwrap();
+        let (composed, _report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         // has_spec is preserved as a real boolean `false` (whole-value
         // interpolation), and the shell branch resolves to empty.
         assert_eq!(
@@ -329,7 +329,7 @@ mod infix_logic_conditions {
     fn compose_with_page_blocks(content: &str) -> (String, ComposeReport) {
         let md: Markdown = content.into();
         let options = ComposeOptions::new().only(&[ComposeOperation::PageBlocks]);
-        let (composed, report) = md.compose_with(options).unwrap();
+        let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         (composed.content().to_string(), report)
     }
 
@@ -410,7 +410,7 @@ mod infix_logic_conditions {
 
         let (composed, _) = Markdown::try_from(root.as_path())
             .unwrap()
-            .compose_with(options)
+            .compose_with(&crate::markdown::compose::test_request(options))
             .unwrap();
         assert!(composed.content().contains("child body"));
     }
@@ -434,7 +434,7 @@ mod infix_logic_conditions {
 
         let (composed, _) = Markdown::try_from(root.as_path())
             .unwrap()
-            .compose_with(options)
+            .compose_with(&crate::markdown::compose::test_request(options))
             .unwrap();
         assert!(!composed.content().contains("child body"));
     }
@@ -445,7 +445,7 @@ mod infix_logic_conditions {
         let content = "---\na: true\n---\n::block when=\"a | b\"\ninside\n::end-block\n";
         let md: Markdown = content.into();
         let options = ComposeOptions::new().only(&[ComposeOperation::PageBlocks]);
-        let err = md.compose_with(options).unwrap_err();
+        let err = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap_err();
 
         let err_string = format!("{}", err);
         assert!(

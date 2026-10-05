@@ -425,7 +425,7 @@ pub(crate) fn format_user_interrupt_message(prompt_argv: &str) -> String {
     let absolute = std::env::current_dir()
         .ok()
         .map(|cwd| cwd.join(prompt_argv))
-        .and_then(|p| p.canonicalize().ok())
+        .and_then(|p| biscuit_file::canonicalize_simplified(&p).ok())
         .and_then(|p| crate::cli_utils::file_url(&p));
 
     let prose = if let Some(absolute) = absolute {

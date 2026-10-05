@@ -933,8 +933,9 @@ fn two_anonymous_answers_show_exactly_one_keyless_line_and_a_key_shows_none() {
     assert_eq!((gitea.requests(), gitea.branch_requests()), (1, 1), "no extra request");
     assert_eq!(keyless_lines(&stderr), 1, "{stderr}");
     let lines: Vec<&str> = stderr.lines().collect();
-    let caption = lines.iter().position(|line| line.contains("origin/main")).expect("the caption");
-    assert!(lines[caption + 1].trim_start().starts_with("Gitea answered without"), "directly beneath the caption:\n{stderr}");
+    let legend = lines.iter().position(|line| line.contains("parent deleted")).expect("the legend");
+    let notice = lines.iter().position(|line| line.contains("Gitea answered without")).expect("the notice");
+    assert!(notice > legend && lines[notice].trim_start().starts_with("- Gitea answered without"), "a closing note:\n{stderr}");
 
     // The same answers sent with a key: no notice, and the key's value is
     // in neither store nor the output.

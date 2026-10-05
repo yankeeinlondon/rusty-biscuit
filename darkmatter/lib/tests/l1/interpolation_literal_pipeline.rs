@@ -29,7 +29,7 @@ fn frontmatter_literal_survives_shell_bracketed_interpolation_passes() {
         .with_pre_approved_commands(HashSet::from([approved_command]));
 
     let (composed, report) = markdown
-        .compose_with(options)
+        .compose_with(&crate::request_support::request(options))
         .expect("full compose pipeline should succeed");
 
     assert_eq!(

@@ -66,7 +66,6 @@ impl OverlayFixture {
         coordinator(&self.fx.source_path)
             .adopt(
                 request_with(&self.fx.source_path, &self.target, overlay),
-                Some(self.dir()),
                 state,
                 &mut guard,
                 &mut claudine::composition::ActiveDocumentState::initial(),
@@ -590,7 +589,6 @@ fn an_overlay_does_not_create_a_distinct_identity_for_cycle_detection() {
                 &fx.target,
                 &[("phase", serde_json::json!(1))],
             ),
-            Some(fx.dir()),
             &mut state,
             &mut guard,
             &mut claudine::composition::ActiveDocumentState::initial(),
@@ -603,7 +601,6 @@ fn an_overlay_does_not_create_a_distinct_identity_for_cycle_detection() {
     let error = coord
         .adopt(
             request_with(&fx.target, &fx.target, &[("phase", serde_json::json!(2))]),
-            Some(fx.dir()),
             &mut state,
             &mut guard,
             &mut claudine::composition::ActiveDocumentState::initial(),

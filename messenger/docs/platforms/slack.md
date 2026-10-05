@@ -137,6 +137,19 @@ Slack mrkdwn differs from standard Markdown:
 | Lists | `• ` or `1. ` prefix |
 | Headings | rendered as `*heading*` (bold) |
 
+Slack applies `*`, `_`, and `~` only at a word boundary, and mrkdwn has no
+other way to write them. A bold, italic, or strikethrough span whose outer
+neighbor is a letter or digit, or the same delimiter character, is
+therefore sent as its plain text, the way the plain-text renderer writes
+every span:
+
+| Markdown | Slack mrkdwn |
+|----------|-------------|
+| `a **b** c` | `a *b* c` |
+| `a**b**c` | `abc` |
+| `(**b**)` | `(*b*)` |
+| `## **Status**` | `*Status*` |
+
 ## Receipts
 
 ### Bot

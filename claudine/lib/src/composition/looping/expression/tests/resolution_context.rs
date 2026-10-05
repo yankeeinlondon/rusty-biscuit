@@ -23,9 +23,7 @@ fn loop_file_functions_reuse_request_home_magic_and_package_roots() {
     .add_magic_path(magic, biscuit_file::PathPosition::Start);
     let fm = map(json!({}));
     let ambient = ambient();
-    let lookup = LoopExpressionLookup::new(&fm, &ambient)
-        .with_base_dir(Some(request.path()))
-        .with_file_resolution_context(Some(&snapshot), &source_path);
+    let lookup = LoopExpressionLookup::new(&fm, &ambient, &snapshot, &source_path);
 
     for expression in [
         "file_exists('~/home.flag')",

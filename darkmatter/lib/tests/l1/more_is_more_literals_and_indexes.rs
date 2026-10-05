@@ -36,7 +36,7 @@ fn object_and_array_literals_preserve_spans_and_evaluate_computed_values() {
 
     let dir = tempfile::tempdir().unwrap();
     let lookup = Lookup {
-        context: ResolutionContext::new(dir.path().to_path_buf()),
+        context: ResolutionContext::new(biscuit_file::FileResolutionContext::new(dir.path())),
     };
     assert_eq!(
         evaluate(&parsed.erase(), &lookup).unwrap(),
@@ -58,7 +58,7 @@ fn literals_reject_duplicate_invalid_and_trailing_keys_without_breaking_indexing
 
     let dir = tempfile::tempdir().unwrap();
     let lookup = Lookup {
-        context: ResolutionContext::new(dir.path().to_path_buf()),
+        context: ResolutionContext::new(biscuit_file::FileResolutionContext::new(dir.path())),
     };
     assert_eq!(eval(r#"["zero", "one"][1]"#, &lookup), json!("one"));
     assert_eq!(eval(r#"{ key: [4, 7] }.key[0]"#, &lookup), json!(4));
@@ -81,7 +81,7 @@ fn indexed_file_endpoints_cover_family_ordering_isolation_and_fallbacks() {
     fs::create_dir(dir.path().join("sub")).unwrap();
     fs::write(dir.path().join("sub/foo-99.md"), "").unwrap();
     let lookup = Lookup {
-        context: ResolutionContext::new(dir.path().to_path_buf()),
+        context: ResolutionContext::new(biscuit_file::FileResolutionContext::new(dir.path())),
     };
 
     assert_eq!(eval(r#"find_first_index("foo-002.md")"#, &lookup), json!("foo.md"));

@@ -37,7 +37,7 @@ fn json_schema(schema_body: &str) -> Value {
 /// Validate an in-memory document (inline `$schema`) read-only (no coercion).
 fn validate(doc: &str) -> ValidationReport {
     let md: Markdown = doc.into();
-    DarkmatterSchemas::new()
+    DarkmatterSchemas::new(crate::request_support::cwd_context())
         .validate(&md)
         .expect("schema must compile and validation must run")
 }
@@ -58,7 +58,7 @@ fn optional_array_item_const<'a>(schema: &'a Value, prop: &str) -> &'a Value {
 /// Compose an in-memory document and read back one coerced frontmatter value.
 fn compose_value(doc: &str, key: &str) -> Value {
     let md: Markdown = doc.into();
-    let (composed, _) = md.compose().expect("compose must succeed");
+    let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).expect("compose must succeed");
     composed
         .frontmatter()
         .get::<Value>(key)
@@ -211,7 +211,7 @@ fn literal_default_mismatch_fails_schema_load() {
     let matching: Markdown =
         "---\n$schema:\n  kind: literal(spec; default(spec))\n---\nbody\n".into();
     assert!(
-        DarkmatterSchemas::new().validate(&matching).is_ok(),
+        DarkmatterSchemas::new(crate::request_support::cwd_context()).validate(&matching).is_ok(),
         "default equal to the literal value must load"
     );
 
@@ -219,7 +219,7 @@ fn literal_default_mismatch_fails_schema_load() {
     let mismatch: Markdown =
         "---\n$schema:\n  kind: literal(spec; default(other))\n---\nbody\n".into();
     assert!(
-        DarkmatterSchemas::new().validate(&mismatch).is_err(),
+        DarkmatterSchemas::new(crate::request_support::cwd_context()).validate(&mismatch).is_err(),
         "default(other) against literal(spec) must fail to load"
     );
 }
@@ -563,7 +563,7 @@ fn expression_pending_shell_value_deferred() {
     // A value still holding `$(...)` follows existing pending-value deferral,
     // not an eager format failure.
     let md: Markdown = "---\n$schema:\n  when: expression\nwhen: $(echo true)\n---\nbody\n".into();
-    let report = DarkmatterSchemas::new()
+    let report = DarkmatterSchemas::new(crate::request_support::cwd_context())
         .validate(&md)
         .expect("schema must compile");
     // Read-only validate: the pending `$(...)` value is a plain string that
@@ -738,7 +738,7 @@ fn literal_large_integer_default_equality_is_exact() {
         let matching: Markdown =
             format!("---\n$schema:\n  version: literal({lit}; default({lit}))\n---\nbody\n").into();
         assert!(
-            DarkmatterSchemas::new().validate(&matching).is_ok(),
+            DarkmatterSchemas::new(crate::request_support::cwd_context()).validate(&matching).is_ok(),
             "an equal large-integer default must load for literal({lit})"
         );
 
@@ -746,7 +746,7 @@ fn literal_large_integer_default_equality_is_exact() {
             format!("---\n$schema:\n  version: literal({lit}; default({neighbor}))\n---\nbody\n")
                 .into();
         assert!(
-            DarkmatterSchemas::new().validate(&mismatch).is_err(),
+            DarkmatterSchemas::new(crate::request_support::cwd_context()).validate(&mismatch).is_err(),
             "an unequal large-integer default must fail to load for literal({lit})"
         );
     }
@@ -758,7 +758,7 @@ fn trigger_matcher_large_integer_literal_is_exact() {
     // `literal(...)` discriminant equality used to layer content-triggered
     // schemas. A required literal gate must accept the exact large integer and
     // reject its f64-colliding off-by-one neighbor.
-    use darkmatter::markdown::schemas::triggers::matches;
+    use darkmatter::markdown::schemas::triggers::{PathSubject, matches};
     use darkmatter::markdown::schemas::{
         Constraint, MatchExpr, PropertyAtom, SimplifiedType, TypeExpr,
     };
@@ -789,11 +789,11 @@ fn trigger_matcher_large_integer_literal_is_exact() {
         };
 
         assert!(
-            matches(&expr, &version_frontmatter(&expected), ""),
+            matches(&expr, &version_frontmatter(&expected), &PathSubject::detached()),
             "trigger literal({lit}) must match {lit}"
         );
         assert!(
-            !matches(&expr, &version_frontmatter(&neighbor_value), ""),
+            !matches(&expr, &version_frontmatter(&neighbor_value), &PathSubject::detached()),
             "trigger literal({lit}) must reject f64-colliding neighbor {neighbor}"
         );
     }

@@ -81,6 +81,7 @@ impl biscuit_terminal::errors::BlockError for EditorError {
         &self,
         _term: &biscuit_terminal::terminal::Terminal,
     ) -> biscuit_terminal::components::status_block::StatusBlock {
+        use biscuit_terminal::components::prose::{LineBreaks, Prose};
         use biscuit_terminal::components::status::StatusState;
         use biscuit_terminal::components::status_block::StatusBlock;
         use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
@@ -94,26 +95,26 @@ impl biscuit_terminal::errors::BlockError for EditorError {
                     .join(", ");
                 StatusBlock::new(StatusState::Error)
                     .error_header(ErrorHeader::new("EditorError", "no editor found"))
-                    .body(format!(
+                    .body(Prose::new(format!(
                         "<dim>Checked env:</dim> <cyan>$EDITOR</cyan>, <cyan>$VISUAL</cyan>\n<dim>Probed binaries:</dim> {probed}"
-                    ))
+                    )).with_line_breaks(LineBreaks::Hard))
                     .hint("Set <cyan>$EDITOR</cyan> to your preferred editor, or install one of the probed binaries.")
             }
 
             EditorError::NonZeroExit { code, editor, path } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("EditorError", "editor exited with error"))
-                .body(format!(
+                .body(Prose::new(format!(
                     "<dim>Editor:</dim> <cyan>{editor}</cyan>\n<dim>Path:</dim> <cyan>{}</cyan>\n<dim>Exit code:</dim> {code}",
                     path.display()
-                ))
+                )).with_line_breaks(LineBreaks::Hard))
                 .hint("Re-run the editor manually to see its full diagnostic output."),
 
             EditorError::Missing { path } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("EditorError", "edited file missing"))
-                .body(format!(
+                .body(Prose::new(format!(
                     "The temporary edit buffer was deleted before it could be re-read.\n<dim>Path:</dim> <cyan>{}</cyan>",
                     path.display()
-                ))
+                )).with_line_breaks(LineBreaks::Hard))
                 .hint("Avoid deleting the buffer file while editing; save and close normally."),
 
             EditorError::LaunchFailed {
@@ -122,18 +123,18 @@ impl biscuit_terminal::errors::BlockError for EditorError {
                 source,
             } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("EditorError", "launch failed"))
-                .body(format!(
+                .body(Prose::new(format!(
                     "<dim>Editor:</dim> <cyan>{editor}</cyan>\n<dim>Command:</dim> <cyan>{full_command}</cyan>\n<dim>Kind:</dim> {:?}\n{source}",
                     source.kind()
-                ))
+                )).with_line_breaks(LineBreaks::Hard))
                 .hint("Check the editor binary is executable and on <cyan>$PATH</cyan>."),
 
             EditorError::Io { operation, source } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("EditorError", "I/O error"))
-                .body(format!(
+                .body(Prose::new(format!(
                     "<dim>Operation:</dim> {operation}\n<dim>Kind:</dim> {:?}\n{source}",
                     source.kind()
-                ))
+                )).with_line_breaks(LineBreaks::Hard))
                 .hint("Confirm the temp-file location is writable and has space available."),
         }
     }

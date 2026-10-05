@@ -2,7 +2,10 @@
 
 use crate::args::SchemaValidateFormat;
 use crate::commands::schema::assignment::{self, Assignment, PositionalKind};
-use biscuit_terminal::components::prose::Prose;
+use crate::io::{DocumentArgumentError, OpenedArgument, open_argument};
+use crate::request::MdRequest;
+use darkmatter::markdown::errors::resolution_failure_name;
+use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::errors::BlockError;
 use biscuit_terminal::terminal::Terminal;
@@ -26,6 +29,10 @@ enum FileOutcome {
         schema_label: Option<String>,
         no_schema: bool,
     },
+    /// The file argument did not open (it is not valid reference syntax,
+    /// failed to resolve, or matched no file); reported with the parse
+    /// errors (exit `3`) because no document was read.
+    Unopened(color_eyre::eyre::Report),
     /// Frontmatter could not be parsed.
     ParseError(String),
     /// Schema could not be resolved/built for this file.
@@ -42,13 +49,15 @@ enum FileOutcome {
 /// - `1` — one or more files failed validation
 /// - `2` — schema or baseline could not be loaded (CLI baseline _or_ a
 ///   per-document `$schema` reference)
-/// - `3` — at least one file's frontmatter could not be parsed
+/// - `3` — at least one file could not be opened or its frontmatter could
+///   not be parsed
 pub fn run_validate(
     inputs: &[String],
     schema: Option<&Path>,
     format: SchemaValidateFormat,
     quiet: bool,
     no_trigger_schemas: bool,
+    request: &MdRequest,
 ) -> Result<()> {
     let terminal = Terminal::default();
 
@@ -67,7 +76,7 @@ pub fn run_validate(
         std::process::exit(64);
     }
 
-    let api = match load_api(schema) {
+    let api = match load_api(schema, request) {
         Ok(api) => api,
         Err(err) => {
             emit_schema_error(&err);
@@ -80,12 +89,18 @@ pub fn run_validate(
     let mut any_validation_failure = false;
 
     for file in &files {
-        let outcome = validate_one(&api, file, &assignments, no_trigger_schemas);
+        let (outcome, document) = match open_argument(file, request) {
+            Ok(opened) => {
+                let outcome = validate_one(&api, &opened, &assignments, no_trigger_schemas, request);
+                (outcome, Some(opened.into_path()))
+            }
+            Err(err) => (FileOutcome::Unopened(err), None),
+        };
         match &outcome {
             FileOutcome::Validated { report_valid, .. } if !report_valid => {
                 any_validation_failure = true;
             }
-            FileOutcome::ParseError(_) => {
+            FileOutcome::ParseError(_) | FileOutcome::Unopened(_) => {
                 any_parse_error = true;
             }
             FileOutcome::SchemaError(_) => {
@@ -93,7 +108,7 @@ pub fn run_validate(
             }
             FileOutcome::Validated { .. } => {}
         }
-        emit_outcome(file, &outcome, format, quiet, &terminal);
+        emit_outcome(file, document.as_deref(), &outcome, format, quiet, &terminal);
     }
 
     if any_parse_error {
@@ -108,14 +123,19 @@ pub fn run_validate(
     Ok(())
 }
 
-/// Builds the [`DarkmatterSchemas`] entry point, applying the CLI baseline
-/// flag or `BASELINE_SCHEMA` env var fallback.
-fn load_api(schema: Option<&Path>) -> Result<DarkmatterSchemas, SchemaError> {
+/// Builds the [`DarkmatterSchemas`] entry point at the launch context,
+/// applying the CLI baseline flag or the snapshot's `BASELINE_SCHEMA`
+/// fallback. Each file re-anchors it on its own context.
+fn load_api(schema: Option<&Path>, request: &MdRequest) -> Result<DarkmatterSchemas, SchemaError> {
     let baseline_path = schema
         .map(PathBuf::from)
-        .or_else(|| std::env::var(BASELINE_SCHEMA_ENV).ok().map(PathBuf::from));
+        .or_else(|| request.snapshot().env().get(BASELINE_SCHEMA_ENV).map(PathBuf::from));
 
-    let api = DarkmatterSchemas::new();
+    let context = request.launch_context().map_err(|error| SchemaError::Baseline {
+        message: format!("{error:#}"),
+        source: None,
+    })?;
+    let api = DarkmatterSchemas::new(context.clone());
     match baseline_path {
         Some(path) => api.with_baseline_from_file(path),
         None => Ok(api),
@@ -126,36 +146,36 @@ fn load_api(schema: Option<&Path>) -> Result<DarkmatterSchemas, SchemaError> {
 /// caller can map them to the spec's exit codes.
 fn validate_one(
     api: &DarkmatterSchemas,
-    file: &Path,
+    opened: &OpenedArgument,
     assignments: &[Assignment],
     no_trigger_schemas: bool,
+    request: &MdRequest,
 ) -> FileOutcome {
     // Legacy-spelling canonicalization: a verbatim `\\?\` result would gain a
     // path segment the gix-derived boundary lacks, disabling trigger discovery.
-    let discovery_path =
-        biscuit_file::canonicalize_simplified(file).unwrap_or_else(|_| file.to_path_buf());
+    let discovery_path = biscuit_file::canonicalize_simplified(opened.path())
+        .unwrap_or_else(|_| opened.path().to_path_buf());
     let mut md = match Markdown::try_from(discovery_path.as_path()) {
         Ok(md) => md,
         Err(err) => return FileOutcome::ParseError(err.to_string()),
     };
 
-    let api = if no_trigger_schemas {
-        api.clone()
-    } else if let Some(boundary) = darkmatter::markdown::compose::capture_file_resolution_context(
-        discovery_path.parent().unwrap_or(&discovery_path),
-    )
-    .repository_root()
-    .map(Path::to_path_buf)
-    {
-        match api
-            .clone()
-            .with_trigger_discovery(&discovery_path, boundary)
-        {
+    // The document's context resolves its schema `file` values and bounds
+    // trigger discovery. A context that cannot be built has no better outcome
+    // than the file's parse error (exit 3).
+    let document_context = match request.document_context(Some(opened.reference()), &discovery_path) {
+        Ok(context) => context,
+        Err(err) => return FileOutcome::ParseError(format!("{err:#}")),
+    };
+    let in_repository = document_context.repository_root().is_some();
+    let api = api.clone().with_file_resolution_context(document_context);
+    let api = if in_repository && !no_trigger_schemas {
+        match api.with_trigger_discovery() {
             Ok(api) => api,
             Err(err) => return FileOutcome::SchemaError(Box::new(err)),
         }
     } else {
-        api.clone()
+        api
     };
 
     if !assignments.is_empty() {
@@ -220,19 +240,20 @@ fn schema_label_from(md: &Markdown) -> Option<String> {
 
 fn emit_outcome(
     file: &Path,
+    document: Option<&Path>,
     outcome: &FileOutcome,
     format: SchemaValidateFormat,
     quiet: bool,
     terminal: &Terminal,
 ) {
     match format {
-        SchemaValidateFormat::Pretty => emit_pretty(file, outcome, quiet, terminal),
+        SchemaValidateFormat::Pretty => emit_pretty(file, document, outcome, quiet, terminal),
         SchemaValidateFormat::Json => emit_json(file, outcome),
     }
 }
 
-fn emit_pretty(file: &Path, outcome: &FileOutcome, quiet: bool, terminal: &Terminal) {
-    let link = document_link(file);
+fn emit_pretty(file: &Path, document: Option<&Path>, outcome: &FileOutcome, quiet: bool, terminal: &Terminal) {
+    let link = document_link(file, document);
 
     match outcome {
         FileOutcome::Validated {
@@ -271,6 +292,19 @@ fn emit_pretty(file: &Path, outcome: &FileOutcome, quiet: bool, terminal: &Termi
             }
             for advisory in advisories {
                 emit_advisory_bullet(advisory, terminal);
+            }
+        }
+        FileOutcome::Unopened(err) => {
+            let header = format!(
+                "- <red>✗</red> _<dim>the document</dim>_ {link} _<dim>could not be opened:</dim>_"
+            );
+            println!("{}", Prose::new(header).render(terminal));
+            match unopened_argument(err) {
+                Some(argument) => println!("{}", argument.status_block(terminal).render(terminal)),
+                None => {
+                    let bullet = format!("    - {}", escape_prose(&format!("{err:#}")));
+                    println!("{}", Prose::new(bullet).render(terminal));
+                }
             }
         }
         FileOutcome::ParseError(message) => {
@@ -334,14 +368,27 @@ fn emit_problem_bullet(problem: &ValidationProblem, terminal: &Terminal) {
     };
 
     let message = trim_redundant_property_prefix(&problem.message, problem.property.as_deref());
-    let bullet = format!("    - {prefix}{}{location_suffix}", escape_prose(message));
-    println!("{}", Prose::new(bullet).render(terminal));
+    // A message's own `hint:` row stays a row, indented under its bullet.
+    let message = escape_prose(message).replace('\n', "\n      ");
+    let bullet = format!("    - {prefix}{message}{location_suffix}");
+    println!(
+        "{}",
+        Prose::new(bullet).with_line_breaks(LineBreaks::Hard).render(terminal)
+    );
 
     // Surface the declared property description on its own dimmed sub-line,
     // one indent level beneath the bullet (Decision #7). Enrichment already
     // suppressed empty / message-equal descriptions, so a `Some` here renders.
     if let Some(description) = problem.description.as_deref() {
         let sub_line = format!("        <dim>{}</dim>", escape_prose(description));
+        println!("{}", Prose::new(sub_line).render(terminal));
+    }
+    // The stable class of a failed `file` value (R5), on its own sub-line.
+    if let Some(reference) = problem.file_reference.as_ref() {
+        let sub_line = format!(
+            "        <dim>failure:</dim> {}",
+            darkmatter::markdown::errors::resolution_failure_name(reference.resolution_failure())
+        );
         println!("{}", Prose::new(sub_line).render(terminal));
     }
 }
@@ -366,11 +413,13 @@ fn strip_pointer_prefix(pointer: &str) -> &str {
 }
 
 /// Builds the styled, OSC8-hyperlinked Prose markup for a document. The
-/// visible label is the path the user passed on the CLI; the underlying
-/// `file://` href is the absolute form so terminal-launched openers can
-/// resolve it regardless of the user's current directory.
-fn document_link(file: &Path) -> String {
-    let absolute = std::path::absolute(file).unwrap_or_else(|_| file.to_path_buf());
+/// visible label is the argument as the user spelled it; the underlying
+/// `file://` href is the absolute file it opened (`document`), so `@doc.md`
+/// links to the file it found. An argument that opened nothing links to its
+/// own absolute spelling.
+fn document_link(file: &Path, document: Option<&Path>) -> String {
+    let target = document.unwrap_or(file);
+    let absolute = std::path::absolute(target).unwrap_or_else(|_| target.to_path_buf());
     format!(
         "<blue>[{label}](file://{href})</blue>",
         label = file.display(),
@@ -430,6 +479,16 @@ fn emit_json(file: &Path, outcome: &FileOutcome) {
             }
             value
         }
+        FileOutcome::Unopened(err) => json!({
+            "file": file_str,
+            "valid": false,
+            "schema": serde_json::Value::Null,
+            "error": "file_reference",
+            "failure": unopened_argument(err)
+                .map(|argument| resolution_failure_name(argument.resolution_failure())),
+            "message": format!("{err:#}"),
+            "problems": [],
+        }),
         FileOutcome::ParseError(message) => json!({
             "file": file_str,
             "valid": false,
@@ -469,9 +528,15 @@ fn format_location(problem: &ValidationProblem) -> String {
     }
 }
 
-/// Escape text so it renders exactly as written inside Prose markup.
+/// Escape text so it renders exactly as written inside Prose markup; code
+/// spans it marks with backticks stay literal.
 fn escape_prose(input: &str) -> String {
-    Prose::escape_text(input)
+    Prose::escape_text_outside_code_spans(input)
+}
+
+/// The typed argument error inside an [`FileOutcome::Unopened`] report.
+fn unopened_argument(err: &color_eyre::eyre::Report) -> Option<&DocumentArgumentError> {
+    err.chain().find_map(|cause| cause.downcast_ref::<DocumentArgumentError>())
 }
 
 fn emit_schema_error(err: &SchemaError) {

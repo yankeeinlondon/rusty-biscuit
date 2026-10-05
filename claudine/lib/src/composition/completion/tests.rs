@@ -21,7 +21,7 @@ const VOIP_SCHEMA: &str = concat!(
 
 fn launch_schema(document: &str) -> LaunchSchema {
     let markdown: Markdown = document.to_string().into();
-    let effective = DarkmatterSchemas::new()
+    let effective = DarkmatterSchemas::new(crate::test_support::context())
         .effective_for(&markdown)
         .expect("the fixture schema should resolve")
         .expect("the fixture declares a SimplifiedSchema");

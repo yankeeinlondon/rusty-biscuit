@@ -38,7 +38,7 @@ pub(crate) static TRIGGER_DISCOVERY_COUNT: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
 
 use crate::markdown::Markdown;
-use crate::markdown::compose::{ComposeOptions, ComposeReport};
+use crate::markdown::compose::ComposeReport;
 use crate::markdown::compose::{ComposeOperation, ComposeSource};
 use crate::markdown::schemas::{
     CallerFileReferenceProvenance, DarkmatterSchemas, EffectiveSchema, FileReferenceDiagnostic,
@@ -51,7 +51,7 @@ use super::value_origin::{DataPaths, ValuePathSegment};
 
 /// Single-pass convenience wrapper used by this module's tests.
 #[cfg(test)]
-pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> MarkdownResult<()> {
+pub(crate) fn run(markdown: &mut Markdown, options: &crate::markdown::compose::ComposeRequest) -> MarkdownResult<()> {
     let mut trigger_registry = None;
     let prepared = prepare_schemas(markdown, options, &mut trigger_registry)?;
     let data = DataPaths::default();
@@ -117,21 +117,20 @@ impl CallerProjection {
         self.presentation.clone()
     }
 
-    pub(crate) fn install_provenance(&self, options: &mut ComposeOptions) {
+    pub(crate) fn install_provenance(&self, options: &mut crate::markdown::compose::ComposeRequest) {
         options.caller_file_provenance = self.provenance.clone();
     }
 }
 
-fn trigger_discovery_boundary(options: &ComposeOptions, _document_path: &Path) -> Option<PathBuf> {
-    match options.file_resolution_context.as_ref() {
-        Some(context) => context.repository_root().map(Path::to_path_buf),
-        None => None,
-    }
+/// Trigger discovery runs only for a request inside a repository; the schema
+/// roots themselves come from the document's own context.
+fn discovers_triggers(options: &crate::markdown::compose::ComposeRequest) -> bool {
+    options.resolution_context().repository_root().is_some()
 }
 
 pub(crate) fn prepare_schemas(
     markdown: &Markdown,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
     trigger_registry: &mut Option<crate::markdown::schemas::triggers::TriggerRegistry>,
 ) -> MarkdownResult<PreparedSchemas> {
     let has_document_schema = markdown.frontmatter().as_map().contains_key("$schema");
@@ -153,21 +152,26 @@ pub(crate) fn prepare_schemas(
         source: Some(Box::new(source)),
     };
 
-    let mut schemas = DarkmatterSchemas::new();
+    // The source's own context: a child opened through `~`, or a source
+    // outside the request's tree, resolves its `file` values in the tree it
+    // was opened in, as its transclusions do.
+    let mut schemas = DarkmatterSchemas::new(options.source_file_resolution_context());
     if let Some(fallback) = options.file_ref_fallback_dir.clone() {
         schemas = schemas.with_file_ref_fallback_dir(fallback);
     }
-    if let Some(context) = options.file_resolution_context.clone() {
-        schemas = schemas.with_file_resolution_context(context);
-    }
-    if let Some(baseline) = options.baseline_schema.clone() {
+    schemas = schemas.with_caller_input_records(&caller_input_records(options));
+    if options.baseline_is_darkmatter_default {
+        schemas = schemas.with_darkmatter_baseline_json_schema().map_err(|err| {
+            prepare_error(format!("schema could not be prepared: {err}"), err)
+        })?;
+    } else if let Some(baseline) = options.baseline_schema.clone() {
         schemas = schemas.with_baseline(baseline).map_err(|err| {
             prepare_error(format!("schema could not be prepared: {err}"), err)
         })?;
     }
     if options.trigger_schemas
-        && let Some(ComposeSource::File(document_path)) = markdown.source()
-        && let Some(boundary) = trigger_discovery_boundary(options, document_path)
+        && let Some(ComposeSource::File(_)) = markdown.source()
+        && discovers_triggers(options)
     {
         schemas = if let Some(registry) = trigger_registry.take() {
             schemas.with_trigger_registry(registry)
@@ -175,7 +179,7 @@ pub(crate) fn prepare_schemas(
             #[cfg(test)]
             TRIGGER_DISCOVERY_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             schemas
-                .with_trigger_discovery(document_path, boundary)
+                .with_trigger_discovery()
                 .map_err(|err| {
                     prepare_error(format!("trigger schemas could not be prepared: {err}"), err)
                 })?
@@ -198,7 +202,8 @@ pub(crate) fn prepare_schemas(
 /// 1. Checks whether document `$schema`, `ComposeOptions::baseline_schema`, or
 ///    trigger schemas are in play; if none, returns `Ok(())` without
 ///    constructing a validator.
-/// 2. Builds `DarkmatterSchemas::new()` plus the baseline: the process-cached
+/// 2. Builds `DarkmatterSchemas::new(context)` over the request's context plus
+///    the baseline: the process-cached
 ///    compiled JSON Schema when the baseline is the Darkmatter default (F9),
 ///    else `.with_baseline(...)` for a caller-supplied `SimplifiedSchema`.
 /// 3. Resolves the effective schema once and materializes absent, optional,
@@ -228,7 +233,7 @@ pub(crate) fn prepare_schemas(
 /// mutates frontmatter for validation.
 pub(crate) fn run_with_registry(
     markdown: &mut Markdown,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
     prepared: &PreparedSchemas,
     projection: &CallerProjection,
     data: &DataPaths,
@@ -446,7 +451,7 @@ pub(crate) fn run_with_registry(
 /// not satisfy the schema.
 pub(crate) fn validate_typed_shell_values(
     markdown: &Markdown,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
     prepared: &PreparedSchemas,
     keys: &HashSet<String>,
 ) -> MarkdownResult<()> {
@@ -496,7 +501,7 @@ pub(crate) fn validate_typed_shell_values(
 /// schema, without taking ownership of validation or frontmatter mutation.
 pub(crate) fn verify_projection_stability(
     markdown: &Markdown,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
     prepared: &PreparedSchemas,
     projection: &CallerProjection,
     data: &DataPaths,
@@ -554,7 +559,7 @@ fn materialize_optional_document_bindings(markdown: &mut Markdown, effective: &E
 
 pub(crate) fn prepare_caller_projection(
     markdown: &Markdown,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
     prepared: &PreparedSchemas,
     data: &DataPaths,
 ) -> MarkdownResult<CallerProjection> {
@@ -603,7 +608,7 @@ pub(crate) fn prepare_caller_projection(
 fn ensure_projection_stable(
     effective: Option<&EffectiveSchema>,
     markdown: &Markdown,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
     projection: &CallerProjection,
     data: &DataPaths,
 ) -> MarkdownResult<()> {
@@ -621,7 +626,7 @@ fn ensure_projection_stable(
 
 fn caller_classification_instance(
     markdown: &Markdown,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
     data: &DataPaths,
 ) -> (serde_json::Value, HashSet<String>) {
     let (mut instance, mut composition_pending) = build_validation_instance(markdown, options, data);
@@ -652,7 +657,7 @@ fn caller_classification_instance(
 /// never probed.
 fn resolve_caller_file_overrides(
     effective: Option<&crate::markdown::schemas::EffectiveSchema>,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
     instance: &serde_json::Value,
     composition_pending: &HashSet<String>,
 ) -> Result<CallerProjection, CallerProjectionFailure> {
@@ -718,7 +723,7 @@ fn resolve_caller_file_overrides(
 
 fn classify_caller_overrides(
     effective: Option<&EffectiveSchema>,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
     instance: &serde_json::Value,
     composition_pending: &HashSet<String>,
 ) -> HashMap<String, CallerFileMode> {
@@ -757,38 +762,27 @@ fn classify_caller_overrides(
 /// Without explicit records, every override is a caller value: authored
 /// (`--set`) and data alike. Origin decides whether a value is scanned for
 /// templates, not where a relative path in it points.
-fn caller_input_records(options: &ComposeOptions) -> crate::markdown::compose::CallerInputRecords {
+fn caller_input_records(options: &crate::markdown::compose::ComposeRequest) -> crate::markdown::compose::CallerInputRecords {
     if !options.caller_input_records().is_empty() {
         return options.caller_input_records().clone();
     }
-    let overrides: Vec<(&String, &serde_json::Value)> = [&options.set_overrides, &options.data_overrides]
-        .into_iter()
-        .filter_map(|layer| layer.as_ref().and_then(serde_json::Value::as_object))
-        .flatten()
-        .collect();
-    if overrides.is_empty() {
-        return Default::default();
-    }
-    let origin = match (
-        options.file_resolution_context.as_ref(),
-        options.file_ref_fallback_dir.as_ref(),
-    ) {
-        (Some(context), Some(fallback)) => context.for_trusted_external_cwd(fallback),
-        (Some(context), None) => {
-            context.for_trusted_external_cwd(context.request_cwd())
-        }
-        (None, Some(fallback)) => biscuit_file::FileResolutionContext::new(fallback),
-        (None, None) => return Default::default(),
-    };
-    overrides
-        .into_iter()
-        .map(|(key, value)| {
-            (
-                key.clone(),
-                crate::markdown::compose::CallerInputRecord::new(value.clone(), origin.clone()),
-            )
-        })
-        .collect()
+    crate::markdown::compose::caller_input_records_for_overrides(
+        [&options.set_overrides, &options.data_overrides].into_iter().flatten(),
+        options.resolution_context(),
+        options.file_ref_fallback_dir.as_deref(),
+    )
+}
+
+/// The context each caller-supplied property was authored in, for the
+/// `match()` judgment of its value.
+fn caller_origins(
+    records: &crate::markdown::compose::CallerInputRecords,
+) -> crate::markdown::schemas::validate::CallerOrigins {
+    crate::markdown::schemas::validate::CallerOrigins::new(
+        records
+            .iter()
+            .map(|(key, record)| (key.clone(), record.origin().clone())),
+    )
 }
 
 fn select_file_mode(
@@ -829,7 +823,7 @@ fn select_file_mode(
                         &without_match_keyword(arm),
                         Some(context.cwd()),
                         None,
-                        Some(context),
+                        context,
                     )
                     .is_ok_and(|validator| validator.is_valid(value))
                 })
@@ -1025,11 +1019,12 @@ fn root_schema_arm_applies(
         return RootArmApplicability::None;
     }
     let wrapped = crate::markdown::schemas::validate::wrap_arm_as_root_schema(arm);
-    let Ok(validator) = crate::markdown::schemas::validate::build_validator_in_context(
+    let Ok(validator) = crate::markdown::schemas::validate::build_validator_with_callers(
         &wrapped,
         Some(&document_context.cwd),
         None,
-        document_context.file_resolution_context.as_ref(),
+        &document_context.file_resolution_context,
+        caller_origins(records),
     ) else {
         return RootArmApplicability::None;
     };
@@ -1156,22 +1151,31 @@ fn resolve_caller_file_value(
                     format!(
                         "recursive caller file reference `{raw}` has no single lazy identity; declare the parameter as `file(eager)`"
                     ),
-                    FileReferenceDiagnostic::ResolutionFailed { raw: raw.to_string() },
+                    FileReferenceDiagnostic::ResolutionFailed {
+                        raw: raw.to_string(),
+                        failure: biscuit_file::ResolutionFailure::InvalidReference,
+                    },
                     None,
                 ));
             }
             if reference.class().kind == biscuit_file::FileReferenceKind::Url {
-                let target = reference.resolve_target().map_err(|err| {
+                let target = reference.resolve_target_in_context(context).map_err(|err| {
                     failure(
                         format!("could not classify remote file reference `{raw}`: {err}"),
-                        FileReferenceDiagnostic::ResolutionFailed { raw: raw.to_string() },
+                        FileReferenceDiagnostic::ResolutionFailed {
+                            raw: raw.to_string(),
+                            failure: err.resolution_failure(),
+                        },
                         None,
                     )
                 })?;
                 let Some(biscuit_file::Resolved::Remote(url)) = target else {
                     return Err(failure(
                         format!("remote file reference `{raw}` did not produce a remote target"),
-                        FileReferenceDiagnostic::ResolutionFailed { raw: raw.to_string() },
+                        FileReferenceDiagnostic::ResolutionFailed {
+                            raw: raw.to_string(),
+                            failure: biscuit_file::ResolutionFailure::UnsupportedRemote,
+                        },
                         None,
                     ));
                 };
@@ -1193,7 +1197,10 @@ fn resolve_caller_file_value(
                             "could not bind file reference `{raw}` from `{}`: {err}",
                             context.cwd().display()
                         ),
-                        FileReferenceDiagnostic::ResolutionFailed { raw: raw.to_string() },
+                        FileReferenceDiagnostic::ResolutionFailed {
+                            raw: raw.to_string(),
+                            failure: err.resolution_failure(),
+                        },
                         None,
                     )
                 })?;
@@ -1203,7 +1210,10 @@ fn resolve_caller_file_value(
                         "file reference `{raw}` produced no candidate from `{}`",
                         context.cwd().display()
                     ),
-                    FileReferenceDiagnostic::ResolutionFailed { raw: raw.to_string() },
+                    FileReferenceDiagnostic::ResolutionFailed {
+                        raw: raw.to_string(),
+                        failure: biscuit_file::ResolutionFailure::NoMatch,
+                    },
                     None,
                 )
             })?;
@@ -1214,7 +1224,10 @@ fn resolve_caller_file_value(
                         "file reference `{raw}` produced a non-absolute candidate from `{}`",
                         context.cwd().display(),
                     ),
-                    FileReferenceDiagnostic::ResolutionFailed { raw: raw.to_string() },
+                    FileReferenceDiagnostic::ResolutionFailed {
+                        raw: raw.to_string(),
+                        failure: biscuit_file::ResolutionFailure::InvalidReference,
+                    },
                     Some(candidate.clone()),
                 ));
             }
@@ -1226,7 +1239,10 @@ fn resolve_caller_file_value(
                     .map_err(|err| {
                         failure(
                             format!("file reference `{raw}` escapes its repository root: {err}"),
-                            FileReferenceDiagnostic::ResolutionFailed { raw: raw.to_string() },
+                            FileReferenceDiagnostic::ResolutionFailed {
+                                raw: raw.to_string(),
+                                failure: err.resolution_failure(),
+                            },
                             Some(candidate.clone()),
                         )
                     })?;
@@ -1256,7 +1272,10 @@ fn resolve_caller_file_value(
                         "could not resolve file reference `{raw}` from `{}`: {err}",
                         context.cwd().display()
                     ),
-                    FileReferenceDiagnostic::ResolutionFailed { raw: raw.to_string() },
+                    FileReferenceDiagnostic::ResolutionFailed {
+                        raw: raw.to_string(),
+                        failure: err.resolution_failure(),
+                    },
                     detailed
                         .candidates()
                         .first()
@@ -1264,9 +1283,13 @@ fn resolve_caller_file_value(
                 );
             }
             failure(
-                format!(
-                    "file reference `{raw}` did not match a file from `{}`",
-                    context.cwd().display()
+                crate::markdown::errors::with_glob_hint(
+                    format!(
+                        "file reference `{raw}` did not match a file from `{}`",
+                        context.cwd().display()
+                    ),
+                    biscuit_file::ResolutionFailure::NoMatch,
+                    raw,
                 ),
                 FileReferenceDiagnostic::NoMatch {
                     raw: raw.to_string(),
@@ -1426,7 +1449,7 @@ fn holds_pending_syntax(value: &serde_json::Value) -> bool {
 /// scope.
 fn build_validation_instance(
     markdown: &Markdown,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
     data: &DataPaths,
 ) -> (serde_json::Value, std::collections::HashSet<String>) {
     let fm_map = markdown.frontmatter().as_map();
@@ -1469,7 +1492,7 @@ fn top_level_pointer_segment(pointer: &str) -> Option<String> {
 /// form and is semantically a *display carrier*, not a filesystem path —
 /// renderers use [`Path::to_string_lossy`] to surface it, which is correct
 /// for both file paths and the URL/`<stdin>` strings.
-pub(crate) fn source_path(markdown: &Markdown, options: &ComposeOptions) -> PathBuf {
+pub(crate) fn source_path(markdown: &Markdown, options: &crate::markdown::compose::ComposeRequest) -> PathBuf {
     fn carrier(source: &ComposeSource) -> Option<PathBuf> {
         match source {
             ComposeSource::Unknown => None,
@@ -1491,6 +1514,13 @@ pub(crate) fn source_path(markdown: &Markdown, options: &ComposeOptions) -> Path
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::markdown::compose::ComposeOptions;
+
+    /// Runs the stage under a test request for `options`.
+    fn run(markdown: &mut Markdown, options: &ComposeOptions) -> MarkdownResult<()> {
+        super::run(markdown, &crate::markdown::compose::test_request(options.clone()))
+    }
+
     /// Native spelling of a fixture path (`join("a/b")` keeps `/` on Windows).
     fn native(path: &std::path::Path) -> String {
         std::path::PathBuf::from_iter(path.components())
@@ -1541,24 +1571,23 @@ mod tests {
     }
 
     #[test]
-    fn trigger_discovery_is_passive_and_reuses_request_repository_boundary() {
+    fn trigger_discovery_needs_a_request_repository() {
         let request_repo = tempfile::tempdir().unwrap();
         let nested_repo = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(request_repo.path().join(".git")).unwrap();
         std::fs::create_dir_all(nested_repo.path().join(".git")).unwrap();
-        let document_path = nested_repo.path().join("prompt.md");
         let snapshot = biscuit_file::FileResolutionContext::new(request_repo.path())
             .with_repository_root(request_repo.path());
-        let options = ComposeOptions::new().with_file_resolution_context(snapshot);
+        let options = crate::markdown::compose::test_request_in(ComposeOptions::new(), snapshot);
+        // A context without a repository root discovers nothing, even when
+        // the document itself sits inside a repository.
+        let unbounded = crate::markdown::compose::test_request_in(
+            ComposeOptions::new(),
+            biscuit_file::FileResolutionContext::new(nested_repo.path()),
+        );
 
-        assert_eq!(
-            trigger_discovery_boundary(&options, &document_path).as_deref(),
-            Some(request_repo.path()),
-        );
-        assert_eq!(
-            trigger_discovery_boundary(&ComposeOptions::new(), &document_path).as_deref(),
-            None,
-        );
+        assert!(discovers_triggers(&options));
+        assert!(!discovers_triggers(&unbounded));
     }
 
     #[test]
@@ -1611,7 +1640,9 @@ mod tests {
     fn document_optional_bindings_materialize_before_coercion_and_are_idempotent() {
         let mut md = md_with_schema("$schema:\n  first: string\n  count: number\n");
         let options = ComposeOptions::new();
-        let effective = DarkmatterSchemas::new()
+        let effective = DarkmatterSchemas::new(
+            crate::markdown::compose::test_request(options.clone()).resolution_context().clone(),
+        )
             .effective_for(&md)
             .unwrap()
             .unwrap();
@@ -2681,7 +2712,7 @@ mod tests {
             .with_file_ref_fallback_dir(&launch_dir)
             .with_set_overrides(serde_json::json!({ "spec": "spec.md" }));
 
-        let (composed, _) = md.compose_with(options).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert_eq!(
             composed.frontmatter().as_map().get("spec"),
             Some(&serde_json::json!(resolved.to_string_lossy())),
@@ -2717,11 +2748,10 @@ mod tests {
                 .with_source_path(&doc_path);
             let options = ComposeOptions::new()
                 .with_source_file(&doc_path)
-                .with_file_resolution_context(target_context)
                 .with_file_ref_fallback_dir(&launch_repo)
                 .with_set_overrides(serde_json::json!({ "spec": "spec.md" }));
 
-            let (composed, _) = md.compose_with(options).unwrap();
+            let (composed, _) = md.compose_with(&crate::markdown::compose::test_request_in(options, target_context)).unwrap();
             assert_eq!(
                 composed.frontmatter().as_map().get("spec"),
                 Some(&serde_json::json!(resolved.to_string_lossy())),
@@ -2750,7 +2780,7 @@ mod tests {
             .with_file_ref_fallback_dir(&launch_dir)
             .with_set_overrides(serde_json::json!({ "specs": ["first.md", "second.md"] }));
 
-        let (composed, _) = md.compose_with(options).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert_eq!(
             composed.frontmatter().as_map().get("specs"),
             Some(&serde_json::json!([
@@ -2784,7 +2814,7 @@ mod tests {
             .with_file_ref_fallback_dir(&launch_dir)
             .with_set_overrides(serde_json::json!({ "label": "spec.md" }));
 
-        let (composed, _) = md.compose_with(options).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert_eq!(
             composed.frontmatter().as_map().get("label"),
             Some(&serde_json::json!("spec.md")),
@@ -2806,7 +2836,7 @@ mod tests {
             .with_file_ref_fallback_dir(&launch_dir)
             .with_set_overrides(serde_json::json!({ "spec": "spec.md" }));
 
-        let (composed, _) = md.compose_with(options).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert_eq!(
             composed.frontmatter().as_map().get("spec"),
             Some(&serde_json::json!(launch_dir.join("spec.md").to_string_lossy())),
@@ -2829,11 +2859,10 @@ mod tests {
             .with_repository_root(repo.path());
         let options = ComposeOptions::new()
             .with_source_file(&doc_path)
-            .with_file_resolution_context(context)
             .with_file_ref_fallback_dir(&launch_dir)
             .with_set_overrides(serde_json::json!({ "spec": "spec.md" }));
 
-        let (composed, _) = md.compose_with(options).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request_in(options, context)).unwrap();
         assert_eq!(
             composed.frontmatter().as_map().get("spec"),
             Some(&serde_json::json!(repo.path().join("spec.md").to_string_lossy())),
@@ -2858,7 +2887,7 @@ mod tests {
                 "selected": "union.md",
             }));
 
-        let (composed, _) = md.compose_with(options).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert_eq!(
             composed.frontmatter().as_map().get("specs"),
             Some(&serde_json::json!([
@@ -2885,7 +2914,7 @@ mod tests {
             .with_file_ref_fallback_dir(&launch_dir)
             .with_set_overrides(serde_json::json!({ "kind": "file", "spec": "spec.md" }));
         let (file_result, _) = md_with_schema_and_source(schema, &doc_path)
-            .compose_with(file_options)
+            .compose_with(&crate::markdown::compose::test_request(file_options))
             .unwrap();
         assert_eq!(
             file_result.frontmatter().as_map().get("spec"),
@@ -2897,7 +2926,7 @@ mod tests {
             .with_file_ref_fallback_dir(&launch_dir)
             .with_set_overrides(serde_json::json!({ "kind": "label", "spec": "spec.md" }));
         let (label_result, _) = md_with_schema_and_source(schema, &doc_path)
-            .compose_with(label_options)
+            .compose_with(&crate::markdown::compose::test_request(label_options))
             .unwrap();
         assert_eq!(
             label_result.frontmatter().as_map().get("spec"),
@@ -2922,8 +2951,15 @@ mod tests {
             .with_source_file(&doc_path)
             .with_file_ref_fallback_dir(&launch_dir)
             .with_set_overrides(serde_json::json!({ "spec": "fixes/x/spec.md" }));
+        // The caller's value resolves from the launch area: the request
+        // directory, not the document's.
+        let request = crate::markdown::compose::ComposeRequest::prepare(
+            options,
+            &crate::markdown::compose::RequestSnapshot::new(&launch_dir),
+        )
+        .unwrap();
         let (composed, _) = md_with_schema_and_source(schema, &doc_path)
-            .compose_with(options)
+            .compose_with(&request)
             .unwrap();
         assert_eq!(
             composed.frontmatter().as_map().get("spec"),
@@ -2951,11 +2987,10 @@ mod tests {
             .with_source_path(&doc_path);
         let options = ComposeOptions::new()
             .with_source_file(&doc_path)
-            .with_file_resolution_context(context)
             .with_file_ref_fallback_dir(&repo)
             .with_set_overrides(serde_json::json!({ "spec": absolute }));
         let (composed, _) = md_with_schema_and_source(schema, &doc_path)
-            .compose_with(options)
+            .compose_with(&crate::markdown::compose::test_request_in(options, context))
             .unwrap();
         assert_eq!(
             composed.frontmatter().as_map().get("spec"),
@@ -2975,7 +3010,7 @@ mod tests {
                 .with_file_ref_fallback_dir(dir.path())
                 .with_set_overrides(serde_json::json!({ "spec": "spec.md" }));
             let (composed, _) = md_with_schema_and_source(&schema, &doc_path)
-                .compose_with(options)
+                .compose_with(&crate::markdown::compose::test_request(options))
                 .unwrap();
             assert_eq!(
                 composed.frontmatter().as_map().get("spec"),
@@ -2995,7 +3030,7 @@ mod tests {
             .with_file_ref_fallback_dir(dir.path())
             .with_set_overrides(serde_json::json!({ "spec": "%spec.md" }));
 
-        let error = md.compose_with(options).unwrap_err();
+        let error = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap_err();
         assert!(matches!(
             &error,
             MarkdownError::SchemaValidationFailed { problems, .. }
@@ -3017,7 +3052,7 @@ mod tests {
             .with_file_ref_fallback_dir(dir.path())
             .with_set_overrides(serde_json::json!({ "spec": "https://example.com/spec.md" }));
 
-        let (composed, _) = md.compose_with(options).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert_eq!(
             composed.frontmatter().as_map().get("spec"),
             Some(&serde_json::json!("https://example.com/spec.md")),
@@ -3035,7 +3070,7 @@ mod tests {
             .with_set_overrides(serde_json::json!({ "spec": "!spec.md" }));
 
         assert!(matches!(
-            md.compose_with(options).unwrap_err(),
+            md.compose_with(&crate::markdown::compose::test_request(options)).unwrap_err(),
             MarkdownError::SchemaValidationFailed { .. }
         ));
     }
@@ -3061,10 +3096,9 @@ mod tests {
             );
             let options = ComposeOptions::new()
                 .with_source_file(&doc_path)
-                .with_file_resolution_context(context.clone())
                 .with_file_ref_fallback_dir(&launch_dir)
                 .with_set_overrides(serde_json::json!({ "spec": provided }));
-            let error = md.compose_with(options).unwrap_err();
+            let error = md.compose_with(&crate::markdown::compose::test_request_in(options, context.clone())).unwrap_err();
             assert!(matches!(
                 &error,
                 MarkdownError::SchemaValidationFailed { problems, .. }
@@ -3093,7 +3127,7 @@ mod tests {
                 .with_source_file(&doc_path)
                 .with_file_ref_fallback_dir(&origin_dir)
                 .with_set_overrides(serde_json::json!({ "spec": "spec.md" }));
-            let (composed, _) = md.compose_with(options).unwrap();
+            let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
             assert_eq!(
                 composed.frontmatter().as_map().get("spec"),
                 Some(&serde_json::json!(origin_dir.join("spec.md").to_string_lossy())),
@@ -3142,7 +3176,7 @@ mod tests {
                 "label": "ordinary",
             }));
 
-        let (composed, _) = md.compose_with(options.clone()).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options.clone())).unwrap();
         let effective = composed.frontmatter().as_map();
 
         assert_eq!(
@@ -3173,8 +3207,8 @@ mod tests {
             .with_file_ref_fallback_dir(&launch_dir)
             .with_set_overrides(serde_json::json!({ "spec": "spec.md" }));
 
-        let (first, _) = md.compose_with(options.clone()).unwrap();
-        let (second, _) = first.compose_with(options.clone()).unwrap();
+        let (first, _) = md.compose_with(&crate::markdown::compose::test_request(options.clone())).unwrap();
+        let (second, _) = first.compose_with(&crate::markdown::compose::test_request(options.clone())).unwrap();
         let expected = serde_json::json!(launch_dir.join("spec.md").to_string_lossy());
         assert_eq!(first.frontmatter().as_map().get("spec"), Some(&expected));
         assert_eq!(second.frontmatter().as_map().get("spec"), Some(&expected));
@@ -3182,6 +3216,28 @@ mod tests {
             options.set_overrides.as_ref().unwrap()["spec"],
             serde_json::json!("spec.md"),
             "the input layer keeps the caller's raw value for a fresh epoch",
+        );
+    }
+
+    /// A caller's lazy remote `file` value takes its `{{VAR}}` host from the
+    /// request's environment, never the process's.
+    #[test]
+    fn caller_remote_file_value_interpolates_from_the_request_environment() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc_path = dir.path().join("prompt.md");
+        let md = md_with_schema_and_source("$schema:\n  spec: file\nspec: authored.md\n", &doc_path);
+        let variable = "DM_CALLER_REMOTE_HOST_PROBE";
+        assert!(std::env::var_os(variable).is_none(), "the process must not define {variable}");
+        let mut context = crate::markdown::compose::ComposeContext::capture_minimal();
+        context.env_mut().insert(variable.to_string(), "docs.example.com".to_string());
+        let options = ComposeOptions::new_with_context(context)
+            .with_source_file(&doc_path)
+            .with_set_overrides(serde_json::json!({ "spec": format!("https://{{{{{variable}}}}}/guide.md") }));
+
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
+        assert_eq!(
+            composed.frontmatter().as_map().get("spec"),
+            Some(&serde_json::json!("https://docs.example.com/guide.md")),
         );
     }
 
@@ -3205,7 +3261,7 @@ mod tests {
             .with_file_ref_fallback_dir(&launch_dir)
             .with_set_overrides(serde_json::json!({ "spec": "spec.md" }));
 
-        let (composed, _) = md.compose_with(options).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert_eq!(composed.content(), "caller sibling\n");
         assert_eq!(
             composed.frontmatter().as_map().get("spec"),

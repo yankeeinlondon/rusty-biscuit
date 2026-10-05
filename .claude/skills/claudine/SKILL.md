@@ -21,6 +21,19 @@ without changing the exit code. Never add a bare spawn in `lib/src/messaging/`
 or a direct `process::exit` in `cli/src`: guard tests fail on both. See
 [Messaging](topics/messaging.md#delivery-tracking).
 
+Every home read in `lib/src` and `cli/src` is `biscuit_file::home_dir()`,
+written qualified (`HOME` on POSIX, `USERPROFILE` on native Windows, relative →
+`None`); never `dirs::home_dir` or `std::env::home_dir`. Request-scoped policy
+code takes a captured home (`PolicyContext::with_home_dir`,
+`SensitivePathChecker::home_dir()`) instead of re-reading. A canonical path that
+is returned, stored (MCP state keys, overlay `Entry.source`), rendered, or put in
+a URL comes from `biscuit_file::canonicalize_simplified`. `tests/l1/path_lookup_guard.rs`
+in lib and cli fails on any other direct home or canonicalize call, and a new
+home read also needs its `context_construction_guard.rs` allowance. Because
+`CliProcessFixture` sets `HOME` and `USERPROFILE`, user-tier and
+`~/.claudine` fixtures run on Windows too: do not gate them `cfg(unix)` for the
+home.
+
 Audio tests must remain silent: real playback uses explicit zero volume and
 recognizable test speech with a pinned provider/voice. A fake agent does not
 suppress lifecycle audio. Tests of literal shipped prompts should set child-only
@@ -118,132 +131,17 @@ in `claudine/fixes/2026-09-15-initialize-after-proxy/spec.md` (R2).
 
 ## Library Module Map
 
-The primary public modules are below; the shared `error` type and flat
-`provider_id` leaf sit beside them. Full detail is in
-[architecture.md](architecture.md).
-
-| Module | Responsibility |
-|--------|----------------|
-| `actions` | Hook action types and responses |
-| `badges` | Styled terminal badge constants |
-| `composition` | Markdown frontmatter composition (direct/inline/sequence) plus the loop engine; `ownership` decides who owns each argument after the file and checks the tail per launch |
-| `config` | Agent detection, hook registration, atomic writes, backups |
-| `diagnostics` | Typed diagnostic facets, discovery, effective selection, and snapshots |
-| `dispatch` | Event processing pipeline, templates, matchers, expression bridge |
-| `events` | The normalized 16-event lifecycle model |
-| `harness` | Shell audit, timeouts, runtime attempt classification, speech helpers, and kept lifecycle recovery infrastructure (no validation/handler DSL — see [Validations and Handlers → Lifecycle Stacks](validations-and-handlers.md)) |
-| `hook_adapters` | Native hook request/response adapters (parse provider hook payloads; distinct from `stream/providers` stdout NDJSON parsers) |
-| `interrupt` | Process-scoped user-interrupt state shared by lifecycle work |
-| `linking` | Cross-provider resource sync with portability classification |
-| `mcp` | Catalog, defaults, provider-state, import/export, runtime injectors |
-| `messaging` | Outbound routes (Discord/Slack/Signal/WhatsApp); desktop notifications are separate and zero-config |
-| `model_catalog` | Model validation against the generated expected-offerings baseline (+ user overrides), `family_latest` alias resolution, and the dynamic-listing drift channel |
-| `opencode_config` | OpenCode configuration parsing and projection |
-| `permissions` | Provider-agnostic policy engine (`PolicyEngine`) |
-| `protect` | Standalone regex deny catalog (bash commands, write/edit paths, MCP responses) |
-| `provider` | Generated provider metadata registry plus hand-written behavior |
-| `render` | Functional render components — `FinalMessage`, `AgentPrompt`/`SystemPrompt` (under `render/prompt/`, absorbed the former `prompt_reporting` module), `EventRenderer` + the exhaustive `DISPATCH` table (live-sink stderr status dispatch), the dual-target `MetricsReport` (`TerminalRenderable` + `BrowserRenderable`), and the `StreamRenderable` span contract (`open`/`append`/`flush_idle`/`close`) with its `AssistantStream` streaming-markdown component, and `TaskStream`/`TaskStreamFrame` + the two-channel `TaskStreamSink` seam and its `TaskLiveOutput` binding (attributed color-bar framing for group tasks — headers/footers on the status channel, task body data on the data channel; `TaskBar::Invisible` gives serial work the same geometry); all consume data + policy (`DisplayPolicy`), never `match provider` |
-| `reporting` | JSONL-to-SQLite metrics index |
-| `runaway` | Pure content-guard detector (exit-expressions, group-cycle repetition, volume cap) + per-layer config; trips map to `ProcessTermination::Aborted` |
-| `signals` | Generated and bespoke normalized signal catalog and hub |
-| `stream` | Structured stream parsing through 8 parser implementations for 9 provider identities (typed models in `stream::protocol`; Kilo reuses OpenCode's parser; Goose has no native stream parser) |
-| `system_prompt` | Launch-CWD detection (`LaunchContext`), `system-prompt.md` discovery, `ResolvedSystemPrompt` resolution |
-| `provider_id` *(leaf)* | `Provider` enum, `provider_info()`, `PROVIDERS_DISPLAY_ORDER`, `OutputFormatSelector` (split from `provider/mod.rs` to break the `provider` ⇄ `stream` import cycle) |
+The `claudine` library's modules and what each owns are in
+[module-map.md](module-map.md).
 
 ## CLI Commands
 
 The `claudine` binary provides interactive setup, hook inspection, event handling, shared-resource management, MCP management, log reporting, provider wrapping, and Markdown composition. Output flows through a structured logging system that separates pipeable data (stdout) from status messages (stderr), formatted with biscuit-terminal components. Provider names accept fuzzy matching (exact → prefix → contains), so `cl` resolves to `claude`. Full reference: [cli-reference.md](cli-reference.md).
 
-**Shared Resources**
-
-| Command | Description |
-|---------|-------------|
-| `claudine skills` | List skills across providers and show link/sync state |
-| `claudine commands` | List slash commands across providers and show link/sync state |
-| `claudine agents` | List agent/subagent definitions across providers and show link/sync state |
-| `claudine mcp [list\|init\|show\|default\|alias\|remove\|sync] [--json]` | Manage the normalized MCP catalog, defaults, validation, refresh, and sync state |
-
-**Hook Events and Actions**
-
-| Command | Description |
-|---------|-------------|
-| `claudine hooks [provider]` | Show registered hooks for all or one provider |
-| `claudine hooks --support` | Provider event support matrix |
-| `claudine hooks --mapping` | Native event name mappings per provider |
-| `claudine hooks --describe` | Event descriptions and payload schemas |
-| `claudine hooks --variables` | Template variables with current values |
-| `claudine actions` | Show which actions are configured and for which events |
-| `claudine handle <event> [--provider]` | Process event from stdin (hidden; called by hook registrations) |
-
-**Wrapped Execution**
-
-| Command | Description |
-|---------|-------------|
-| `claudine claude\|codex\|gemini\|goose\|kimi\|opencode\|qwen\|kilo\|pi\|antigravity` | Wrap a provider CLI with preflight checks, env sanitization, system prompt resolution, optional `--edit` prompt drafting, MCP injection, and structured streaming where the provider exposes it. A prompt (typed or `--edit`ed) runs non-interactively; `-i` makes it the first turn of an interactive session (Kimi Code excepted for now: one turn, then exit). `--edit` needs a terminal and rejects `-i` with timeouts before the editor opens; the first `--` ends Claudine flags and is not forwarded — see [cli-reference.md](cli-reference.md#shared-wrapper-flags) |
-
-**Composition**
-
-| Command | Description |
-|---------|-------------|
-| `claudine compose <file> [key=value ...]` | Compose a Markdown file and send the result as a prompt (no file mutation) |
-| `claudine inline-compose <file> [key=value ...]` | Launch the agent **on the document itself** using frontmatter `prompt`; the agent writes the body and any requested frontmatter, Claudine restores `prompt`/`hash`/`last_updated`, updates `last_updated`, and stamps a Darkmatter `Simple` `hash:` |
-| `claudine sequence <file> [key=value ...]` | Run an ordered list of steps — static preflight over the whole task graph, then just-in-time composition at each step's turn; tasks, groups (serial/parallel), and the `outputs` accumulator |
-| `claudine budget init\|show\|suspend\|resume\|grant <ledger>` | Create and operate a persisted run budget; `sequence --budget-ledger <ledger>` enforces it across every launch, retry, restart, and crash (exit `76` exhausted, `77` blocked) — [Shared execution budgets](../../../claudine/docs/cli/budget.md) |
-
-**Administration**
-
-| Command | Description |
-|---------|-------------|
-| `claudine init [--quick] [--repo]` | Interactive setup wizard (4 phases) or quick defaults |
-| `claudine config` | TUI for managing configuration, including messenger routes |
-| `claudine sync [--dry-run] [--provider] [--fix]` | Re-apply hook registrations |
-| `claudine uninstall [--keep-config]` | Remove hooks from all agents |
-| `claudine providers` | Provider capability matrix, catalog generation, and deterministic `agent-errors` and `steering` research checks |
-| `claudine logs [today\|week\|month\|sessions\|tools\|errors\|repos\|trends\|drift\|sync]` | Reporting and sync for Claudine JSONL logs |
-| `claudine dashboard [--local]` | Mesh NOW view: live sessions across rendezvous hosts, with per-host staleness and the needs-human-intervention signal (reads the rendezvous daemon) |
-| `claudine completions <shell>` | Generate shell completions |
-| `claudine context [--values\|--expressions\|--side-effects]` | Show Darkmatter context variables, expression engine, and side-effect capabilities |
-| `claudine` *(no subcommand)* | Render rich grouped help |
-
-**Context command:** `claudine context` renders from Darkmatter's public typed descriptor catalogs, not from parsed Markdown. The default report shows every context variable grouped by category with `Property` (`ctx.NAME`), `Type`, and `Description` columns. `--values` replaces `Description` with live captured values (nulls shown, not dropped). `--expressions` shows the expression-language overview — precedence, truthiness, unary/comparison/arithmetic operators, variable access, parse modes, null propagation, and the complete function catalog grouped by category — with an `Example` column where layout permits. `--side-effects` shows the capability catalog with `Capability`, `Description`, `Safety`, and `Example` columns; the `Example` column is hidden below 70 characters to preserve the minimum-supported-width floor. It is documentation-only and does not invoke, probe, or check availability of any capability. All reports share a 140ch-inclusive width contract, inverse-styled inline code, and `UnorderedList` bullet formatting. Every report table fills to the right margin (`configure_shared_table` sets `width: 100%` via the shared `Table`'s `Width::Fixed(Length::Percent(100))`; the last column absorbs the slack) so tables with and without wrapped cells share one right edge — and the `Example` column carries a per-table `min_width` floor so a long `Description` cannot starve it.
-
-For composed prompts, `ctx.repo` must resolve without requesting `ctx.branch`
-or `ctx.worktree`. `InvocationContext::project_evidence` supplies cached Git
-identity and repository topology to every repository-dependent context group;
-the `Git` group itself (`branch`, `worktree`, `merge_conflicts`) is observed per
-composition run.
-An empty `ctx.area` at the repository root is expected.
-
-**Binding time:** **`ctx` is evaluated once for each composition run.** A composition run is one document being composed and executed: a document invoked directly or adopted through `proxy`, each sequence step (each task of a serial group; a parallel group shares one capture until a sibling re-enters), each loop iteration, and each retry or resume attempt. Transclusion does not start a run: a document and every file it includes share one `ctx`. `current` is observed once per lifecycle event. Only Git working state (`branch`, `worktree`, `merge_conflicts`, the staged/dirty/untracked keys, `recent_commits`) is per run — it lives in the `RunEvidence` each `DocumentEpoch` carries, never on the invocation; launch identity, topology, host facts, and the environment stay invocation-scoped. A document with `initialize` captures what its root page names before `initialize`; an include that is first to name a Git group captures it after (the one exception). `current.<key>` is the same key as `ctx.<key>` read lazily (`ctx.branch` is the branch when this run started, `current.branch` the branch when this event fires); `current_env.<key>` is the lazy mirror of `env.<key>`; expression functions are evaluated lazily at call time, and a variable/function pair sharing a name (`ctx.recent_commits` / `recent_commits(count)`) shares one definition. Lazy is bounded by the request: Repository metadata and topology (`repo`, `repo_root`, `packages`, `area`, and the rest of the repository keys) are fixed by the request's repository observation, so `current.repo` always reads what `ctx.repo` does; only mutable Git and filesystem facts (`branch`, `recent_commits`, `dirty_files`) refresh between events, and `current_env.*` at reference time. There is no `current.ctx.*` / `current.env.*` nesting (ratified 2026-09-11 in the more-context spec, rulings R29–R33). Under Claudine the lazy roots read the invocation's launch evidence: an unheld capability renders `null` with a `PartialRuntimeCapture` diagnostic rather than probing the host. See [Context Variables — Binding time](topics/state-management/context-variables.md#binding-time-eager-ctx-lazy-current) and [lifecycle.md — Binding Time: Early vs Late](topics/flow-control/lifecycle.md#binding-time-early-vs-late).
-
-**Wrapper & composition subsystems** — each row is a pointer; depth lives in the linked doc:
-
-| Subsystem | In one line | Reference |
-|-----------|-------------|-----------|
-| Argv pre-parsing | `argv::normalize` rewrites composition-subcommand argv before clap (provider booleans → `--provider`, `--help` hoisting); `partition_composition_tail` then keeps the file and Claudine options for clap and holds every other token after the file (with a marker where a Claudine option was removed) as `composition::ArgumentsAfterFile`; non-UTF-8 refused. Once the file is read, `compose::ownership::own_caller_arguments` (shared by `compose`/`inline-compose`/`sequence`) reads the **authored** snapshot (`authored_schema_parameters` → Darkmatter `EffectiveSchema::declares_top_level_property`; literal `agent`) and calls the pure `composition::own_arguments` against the candidate providers' compiled switch catalog, yielding setters, `argv` positionals (via `merge_set_overrides`), and one `ProviderTail` (tokens + authored `--` boundary + per-switch `SwitchAssignment`s; redacted `Debug`). A declared setter directly after a string/variadic switch stays Claudine's and is recorded as `SwitchAssignment::declared_setter`, so the missing-value `TailMismatch` (at ownership or per launch) names that key, never its value. `composition::setter_key`/`is_setter_name` is the one setter grammar: `parse_compose_setter` (which alone rejects an empty key `=v`) and completion's token shapes delegate to it. Ambiguity prompts on a TTY (answer decides ownership only), else errors. Shell completion (`completion/engine/ownership.rs`) re-runs the same normalize → partition → `composition::owner_of_last_argument` with the cursor word last and the same `compose::ownership::candidates`; it offers nothing for the agent's word or on any ownership error, reads the file only when a switch follows it, and never prompts; its value-option skipping uses `argv::OwnedFlags::for_composition` (no hand list). `SwitchContext::check` → `composition::check_launch_tail` is the resolved-provider check: in the pipeline before the notice, for statically known `sequence` steps before step 1, and in `harness_orch/launch.rs::build_harness_launch` before every spawn (resume at its own entrypoint via `SwitchContext::for_resume`); a direct wrapper's tail has no assignments and always passes. Composition and direct wrappers share its notice (`wrap::provider_tail_report`, once per provider/tail per command via `ProviderTailNotices`), `redact_sensitive_args` on every display surface, and one exit report (`AgentErrorReport::for_native_exit` over a typed `output::native_exit::NativeExit`: bounded stdout/stderr tails, precedence classifier, "likely caused by the forwarded arguments" only for a rejection naming a tail switch; composition renders it once after recovery is exhausted). `resume::assemble_resume_args` re-sends the tail exactly once after the resume entrypoint and carries only Claudine's own transport flags (read from the argv with the tail's contiguous run removed) | [CLI Pre-Parsing](topics/cli-pre-parsing.md) · [Provider-argument partition](topics/argv-normalization.md#provider-argument-partition) · [Type-aware ownership](topics/argv-normalization.md#type-aware-ownership) |
-| System prompt | File-backed `--append-system-prompt`/`--asp` + `--replace-system-prompt`/`--rsp`, launch-CWD `system-prompt.md` discovery, per-provider delivery; direct wrappers also take `--edit` | [System Prompt](topics/system-prompt.md) |
-| Timeouts | Two rules only — `timeout` (wall-clock, opt-in) and `step_timeout` (stream-silence, default `30m`) | [Timeouts](topics/timeouts.md) |
-| Run budgets | `sequence --budget-ledger` debits each agent launch before spawn in `execute_attempt_phase` and caps its `timeout` at the remaining active time, rounded **up** to whole seconds (the wall-clock timer has 1 s resolution); step boundaries, retry backoff, settle, and a heartbeat thread check exhaustion. The run is installed process-wide (`budget::run`), so every hook is a no-op without a ledger | [Shared execution budgets](../../../claudine/docs/cli/budget.md) |
-| Runaway content guards | Three volume backstops — `exit_expressions`, `runaway_repetition` (≥30 cycles), `runaway_volume` (50k lines / 32 MiB) — mapping to `Aborted`/`AgentFailure`, never a retry | [Timeouts § Content guards](topics/timeouts.md#content-guards-runaway-output) |
-| OpenCode stalled-generation | Live-but-dead backstop: trips only on retry churn **and** progress silence (`stall_timeout`, default `10m`); not a third timeout | [Timeouts § Stall](topics/timeouts.md#opencode-stalled-generation-backstop) · [OpenCode Event Sources](opencode-event-sources.md) |
-| Signals | One signal-aware wait loop across every spawn path; per-press stderr feedback, `SIGTERM → SIGKILL` ladder, `_exit(130)` second-press guard, Windows parity | [Signal Handling](topics/signal-handling.md) |
-| Child environments | One process-entry launch snapshot contributes absolute `AGENT_CWD` to every std/Tokio child; ordinary invocations overwrite inherited state, while `handle` retains only an absolute wrapper value; a clippy `disallowed-methods` deny on the raw constructors (test builds exempt) keeps every production spawn on the `child_environment` constructors | [Architecture](architecture.md#library-module-structure) |
-| Transient overlays | Written under `<repo_root>/.claudine/tmp/` (or `<launch_cwd>/.claudine-tmp/`), cleaned up on `Drop` | [System Prompt](topics/system-prompt.md) |
-| Schema validation | `$schema` runs Darkmatter `SimplifiedSchema`; typed errors, `null`-as-absent, a biscuit-tui prompt loop for required-missing values. `inline-compose` judges launch at `SchemaPhase::Launch` (`eager` controls validation timing, `required` controls presence); `compose` keeps the authoring verdict. Supplied eager `file(match)` partials complete before `initialize` and the provider picker (`schema::supplied`), root unions included: a templated sibling never rules an arm out, and an undecided union completes only when every contending arm declares the property as the same eager `file(match)` (merged globs, ruling D1). A valid caller file resolves from its origin through an undecided union too: Darkmatter materializes it when every contending arm agrees on its file mode. In a root union, an existing file outside any simplified arm's declared `match` glob rules that arm out (Darkmatter `schemas::file_match`, shared by validation, arm selection, and the chooser's `MatchGlobs`); a partial or a single schema's glob only suggests. `rebase_caller_file_problems` makes every unresolved caller value name the caller's origin, never the prompt's directory | [Composition § Schema](topics/composition.md#schema-validation) · [§ Partial files](topics/composition.md#provided-partial-file-references) |
-| Inline write grant | An inline agent edits the file itself, so `wrap::write_grant` launches the provider in the narrowest posture that can write the document (edit-accepting mode, writable sandbox, additional root); explicit denies and missing capabilities refuse before spawn; the posture rides in the resume `permission_mode` facet | [Composition § Inline](topics/composition.md#inline-composition) |
-| Completion verdict | One passive check (`composition::completion::complete_active_document`) decides `success` vs `failure` for **both** modes, after the provider and the inline closure: body changed meaningfully (inline only) and the launch-resolved `$schema` satisfied at `SchemaPhase::Completion`. Typed `composition.body_unchanged` / `composition.completion_schema`; a failed verdict is ordinary `failure` recovery and a successfully written artifact is kept | [Lifecycle § Completion verdict](topics/flow-control/lifecycle.md#the-completion-verdict-decides-which-terminal-event-fires) · [Composition § Completion](topics/composition.md#completion-verdict) |
-| Inline persistence | The closure runs repair → restore → encode → hash → one `atomic_write` (`composition/closure/persist.rs`). Repair quotes an agent-added/changed single-line plain top-level value YAML would misread (`title: Fix: colons`, `note: see issue #42`, a leading `%`/`@`/backtick); a value opening a structured form (quote, flow `[`/`{`, block `|`/`>`, `&`/`*`/`!`, `#`, `- `/`? `/`: `) is never quoted, so a malformed one (`added: "half" quoted`, `added: [a, b`) is rejected on its line; encode stores each agent-owned string holding `{{`/`$(` as a Darkmatter literal token located with `locate_frontmatter_leaves`. Failures are `InlineAgentFrontmatterRejected` (`document.invalid_frontmatter`, line + agent attribution) and roll back. Lifecycle `set_`/`merge_`/`append_`/`prepend_frontmatter` writes pass the same gate (`persisted_data`). Claudine readers decode through `closure::stored_text` (never `literal_token` in runtime modules — `override_boundary_guard.rs`) | [Composition § Inline](topics/composition.md#inline-composition) |
-| Error architecture | One discovery seam (`as_diagnostic`) + one role-based selection walk; rendering, `err.*`, and machine output all project the **same** effective diagnostic. Read before adding an error type or a catalog code | [Error Architecture](topics/error-architecture.md) |
-| Composition diagnostics | Prepare-time did-you-mean warnings (unknown function / `ctx.*`, `--silent`-suppressed); frontmatter-rooted errors append a focused YAML excerpt (TTY-gated): ±`EXCERPT_CONTEXT_LINES` (3) around each involved line plus enclosing headers, real line numbers, `⋮` between regions; schema problems focus the `$schema` declaration (every union arm); nothing locatable means no excerpt, never the whole block | [Composition](topics/composition.md#prepare-time-warnings) |
-| Whole-value frontmatter | A value that is *exactly one* `{{ … }}` / `$(…)` span is executable state — it must resolve and must never leak as raw syntax. A stored literal token (`"{{!data:v1:…}}"`) is data, never executable; `sequence:` refuses one (`SequenceInvalid`) | [Composition § Whole-value](topics/composition.md#whole-value-frontmatter-expansion-is-executable-state) |
-| Runtime value origin | Every run-produced value — loop values and `_loop_*`, `outputs`, lifecycle `set:`, evaluated task `params`/group `variables`, the step overlay, a `proxy.with:` overlay — reaches Darkmatter as **data** (never scanned again); only what a person typed (`--set`, `key=value`, interactive answers) is a template. One boundary: `LayeredOverrides` (`composition/runtime_state.rs`) built by `layered_set_overrides`, carried on `PrepareOptions`/`CallerInputLayers` (`data_override_keys`, plus the per-document `PrepareOptions::proxy_overlay`), and handed over only by `LayeredOverrides::apply_to`; `override_boundary_guard.rs` fails on a second hand-off | [Looping](topics/flow-control/looping.md) · [Flow Control Reference § `with:`](topics/flow-control/flow-control-reference.md#passing-values-with-with) |
-| Sequences | Two phases: static preflight over the whole task graph (dynamic sources snapshot once, shell approved byte-for-byte, no exceptions), then just-in-time composition at each step's turn against the live file. One executable per task; `outputs` is the sole accumulator; groups run serial or parallel | Sequences · [architecture.md § Sequences](architecture.md#sequences) |
-| Lifecycle stacks | Seven flow-control verbs (`stop`/`skip`/`error`/`proxy`/`retry`/`resume`/`defer`; `defer` unimplemented; see [Flow Control](topics/flow-control/flow-control.md)), two action forms, early/late binding via Darkmatter DM1/DM2 (fail-closed on real expression failures; an absent property is `null`), nested-span-in-literal & err-placement guards, `no_error`, the `stdout` channel. Authored lifecycle text is scanned once; what a span inserts is data, sent verbatim (a pre-flight-resolved shell command runs its approved bytes; only a `proxy.with:` value for a lifecycle key refuses template text). DM2 fails a malformed span, an unknown function, or a read of an unavailable global; an absent document property in an authored span is `null` and renders empty. **One catalog** (`lifecycle/bindings.rs`) declares `err`/`timing`/`group` (and `outputs` at sequence approval) per `LifecycleScope` — each event, task `setup:`/`teardown:`, lifecycle and sequence shell approval — as a Darkmatter `BindingView`; `runtime_bindings` supplies one explicit entry per global (`err` is `null` in `finalize`/teardown without a failure; unavailable carries `claudine.event-has-no-error`, `claudine.outside-group`, or `claudine.preflight-unavailable`). Prepare-time (`validate_no_err_in_no_error_events`, a thin `validate_prepared` adapter over the source map) and event time consult that same view; Claudine never walks an expression, and a typed `LifecycleCause` keeps the Darkmatter error on `LifecycleErrorInfo::cause` and as the source of `CompositionError::LifecycleEvaluationError` and `SequenceTaskValueResolution` (`lifecycle_cause()`), so a failed task `params`/group `variables`/`timeout` value keeps it on `TaskOutcome::error`. Sequence approval records each `setup:`/`teardown:` command's bytes as `ApprovedCommand`s on the `PreflightTask`, and execution stamps them in instead of re-evaluating. `set_`/`merge_`/`append_`/`prepend_frontmatter` write data (an authored `{{{ x }}}` stores `{{ x }}` as a token), so effects cannot write a template into a file. Lifecycle YAML mutation is mapping-only (`set: {property: value}`); the capability/loop DSL retains `set(key, value)`. A top-level `set` value that is a whole-value `$( … )` (`ProxyWithValue::Shell`) runs its command when the action executes: `preflight::resolve_set_shell_value` fixes its bytes into a Darkmatter `ResolvedShellValue` at preparation, `collect_lifecycle_shell_commands` approves them bare (no suffix), and `dispatch_runtime_set` runs them through `ShellRunner::run_values` in a fresh result cache after expression values evaluate, writing every destination or none. Unresolved values, sequence-task `set`s, and `initialize` refuse it | [Lifecycle](topics/flow-control/lifecycle.md) · [Reading a Command's Result](topics/flow-control/lifecycle.md#reading-a-commands-result) |
-| Document handoffs | `proxy` swaps the active document; one coordinator owns identity, one canonical service prepares every entry reason, so a proxied target behaves like the same document invoked directly. Key/value `proxy.with:` adds a transient, source-evaluated, typed frontmatter overlay for the immediate target | [Flow Control Reference § `proxy`](topics/flow-control/flow-control-reference.md#proxy-in-detail) · [Composition § Handoffs](topics/composition.md#document-handoffs-and-the-equivalence-contract) |
-| Retry/resume re-entry | Both replace only the provider-attempt slice: canonical fresh read, overlay + provenance kept, budgets decrement, no second `initialize`. The whole launch bundle is recomputed at that fresh read, not snapshotted at adoption, and that bundle *is* the launch — a retry spawns under the refreshed plan. `resume` also compares a session-compatibility key and refuses (`LifecycleResumeIncompatible`) when a facet moved — every document-reachable facet refuses end-to-end; workspace CWD and system-prompt content are immutable invocation inputs | [Flow Control Reference § Retry and resume](topics/flow-control/flow-control-reference.md#retry-and-resume-in-detail) · [Composition § Retry and resume](topics/composition.md#retry-and-resume-re-entry) |
-| Shell pre-flight | One resolver: every audit (eager, staged reread, proxy target, retry/resume, loop iteration, sequence step) discovers through `prepare::approve_document_shell` → `canonical_compose_options`, the options its preparation executes with; Darkmatter walks each transcluded child with `transclusion::markdown_child_options`, the derivation composition uses. A command built from a value discovery cannot observe fails pre-flight; `NotPreApproved` is a hard failure nothing tolerates; loop iterations re-audit deny-only after iteration 1 | [Pre-Flight](topics/pre-flight-checks.md) |
-| Dry run | `--dry-run` stops at a seam right after provider/model resolution — **no selected-executable validation, lifecycle events, MCP/argv/CWD setup, proxy traversal, or `inline-compose` mutation**. The selected agent need not be installed. `::shell` spans in the document graph are composition, not lifecycle, and still run for real | [Composition § Dry Run](topics/composition.md#dry-run) |
-| Protect | `protect::observe` classifies bash- and write-shaped tools; best-effort defense-in-depth, not a security boundary | [Protect Service](topics/protect-service.md) |
+Every command group and the cross-cutting behaviors (schema validation,
+`match()` completion walks, retry/resume, shell pre-flight, dry run, protect)
+are in [cli-commands.md](cli-commands.md); read it before changing a
+command or one of those behaviors.
 
 ## MCP Support
 
@@ -296,98 +194,6 @@ of a topic doc.
 
 ## Research on Agentic CLI Platforms
 
-### Cross-provider Summaries
-
-Curated comparison documents distilling each research fleet across all providers.
-Start here for "how does X vary across providers"; drop into the per-provider research
-docs below for depth. Generated by `claudine sequence` from the prompt documents in
-`claudine/docs/research/summary/` and published here via `just publish-summary-research`
-(run from the `claudine/` package area).
-
-- Protocols & session shape: [MCP](summaries/mcp.md) · [ACP](summaries/acp.md) · [Hooks](summaries/hooks.md) · [System Prompt](summaries/system-prompt.md) · [Non-Interactive Sessions](summaries/non-interactive-sessions.md) · [Session Resumption](summaries/session-resumption.md)
-- Provider identity & operations: [CLI Identity](summaries/agent-cli.md) · [Logging](summaries/agent-logging.md) · [Models](summaries/agent-models.md) · [Permissions](summaries/agent-permissions.md)
-- Shared assets & model extension: [Skills](summaries/agent-skills.md) · [Slash Commands](summaries/slash-commands.md) · [Subagents](summaries/subagents.md) · [Plugins](summaries/agent-plugins.md) · [Model Config](summaries/model-config.md) · [Local Runners](summaries/local-runners.md)
-
-### Hooks Research
-
-Each Agentic CLI's provided hooks, payloads, and return types.
-
-- [Claude Code](research/hooks/claude-code.md) · [Codex](research/hooks/codex.md) · [Gemini CLI](research/hooks/gemini-cli.md) · [Goose](research/hooks/goose.md) · [Kimi Code](research/hooks/kimi-code.md) · [OpenCode](research/hooks/opencode.md) · [Qwen CLI](research/hooks/qwen-cli.md)
-
-### Cross-referencing Research
-
-Each Agentic CLI's support for skills, slash commands, agents/subagents, and shared scripts folders.
-
-- [Claude Code](research/cross-referencing/claude-code.md) · [Codex](research/cross-referencing/codex.md) · [Gemini CLI](research/cross-referencing/gemini-cli.md) · [Goose](research/cross-referencing/goose.md) · [Kimi Code](research/cross-referencing/kimi-code.md) · [OpenCode](research/cross-referencing/opencode.md) · [Qwen CLI](research/cross-referencing/qwen-cli.md)
-
-### ACP Support
-
-Claudine does not use ACP today but may add it. For ACP work use the **acp** skill; for ACP + observability use the **agent-observability** skill. Cross-provider ACP support comparison: [summaries/acp.md](summaries/acp.md).
-
-### Topic Research (schema-enforced fleets)
-
-Per-provider, per-topic research documents produced by `claudine sequence` over the
-roster, with structured facts in frontmatter validated by a `_schema.yaml` sidecar
-(`$schema: ./_schema.yaml`). Live topics under `claudine/docs/research/`:
-
-- `agent-logging/` — log surfaces, per-site time semantics (unit/zone), record types
-- `agent-models/` — out-of-box models, selection mechanisms, precedence, dynamic listing
-- `agent-permissions/` — permission CLI params, config files, YOLO, PolicyEngine fit
-- `agent-errors/` — ordered structured-stream error vocabularies with
-  per-needle provenance; generation projects these research records into
-  `lib/src/stream/providers/vocabulary.rs`. Immutable Phase-A baselines under
-  `agent-errors/_seeds/` let the deterministic gate detect removals, re-kinds,
-  and reorders after facts graduation. New parser-backed providers must research
-  this topic rather than add keyword constants or facts seeds. The 2026-07-14
-  live roster converged in ten clean first attempts; its 55 accepted additions
-  are locked by generated-row, precedence, exact-code, and near-miss tests.
-- `model-config/` — user-side model extension (cloud + local) across all 9 roster
-  providers: config files/formats, API standards spoken (`api_standards`), local-runner
-  integration paths framed as API-standard bridging
-  (`local_runners[].integration`: first_class / base_url_override / proxy_required /
-  unsupported), cross-cloud bridging (`cloud_bridge`), merge semantics, env overrides.
-  Refreshed 2026-07-02 against local-runners ground truth (refresh notes:
-  `claudine/features/_completed/2026-07-02-provider-metadata/model-config-refresh.md`).
-  For configuration depth, prefer the **model-config** skill (distilled comparison
-  tables); the research docs remain the source of truth.
-- `local_runners/` — the runner-side counterpart to `model-config`: local model
-  runners (Ollama, LM Studio, oMLX, Llama.cpp, vLLM) as servers — per-OS binaries and
-  installs, OpenAI/Anthropic API surfaces, detection probes, config, model-id grammar,
-  traps. Roster: `claudine/docs/local-runners.yaml`; spike notes:
-  `claudine/features/_completed/2026-07-02-provider-metadata/spike-local-runners.md`.
-  For runner-specific depth, prefer the **local-llm-runners** skill (distilled tables);
-  the research docs remain the source of truth.
-- `reasoning-level/` — how each provider lets a caller choose how much reasoning a
-  model applies: the levels as the provider spells them, every control that chooses
-  one (with exact launch arguments), which models accept which levels, what happens
-  to a level the provider does not accept, and where a run records the level it
-  used. The first topic written to the narrow-contract standard: the contract is
-  `_schema.yaml` plus named types in `_types.yaml`, shared types live in
-  `claudine/docs/research/_types.yaml`, every property carries a description, and
-  the fleet prompt validates the document in its `success` event and retries a
-  rejected document once. Not yet read by the generator. Before writing or changing a
-  contract, a fleet prompt, or the `research` recipe, read
-  [Research Contracts and Fleets](research-contracts.md).
-- `agent-cli/` — the public CLI surface, narrowed to the contract standard at
-  revision 2. Its typed switch inventory (`cli_switch` in its `_types.yaml`:
-  value type, aliases, attachment forms, invocation scope, gaps) is projected
-  by `claudine-gen` into `ProviderInfo::cli_switches`; all ten providers are
-  researched (2026-10-01). Read it only through
-  `claudine::provider::{lookup_switch, match_switch_token}`,
-  keyed by provider and native command path (`["exec"]`, `["exec", "resume"]`,
-  `[]` for the root); a guard test fails on a hand-written switch table.
-  Composition token ownership, the resolved-provider check
-  (`composition::ownership`), and shell completion
-  (`composition::owner_of_last_argument`) read it through
-  `match_switch_token`. The
-  fleet's relations script also runs `claudine-gen validate <slug>`, so the
-  generator judges switch records itself. See [Provider Metadata § Switch
-  metadata](topics/provider-metadata.md#switch-metadata-cli_switches).
-- `non-interactive-sessions/`, `usage/` — earlier topics; sidecars
-  authored (every live topic directory carries a `_schema.yaml` sidecar as of
-  2026-07-03, including `mcp/`, `acp/`, `hooks/`, `resume/`, `skills/`,
-  `slash-commands/`, `subagents/`, `plugins/`, and `system-prompt/`)
-
-The pattern (sidecar rules, lifecycle verification stacks, pilot technique) is documented
-in `claudine/features/_completed/2026-07-02-provider-metadata/spec.md` and its spike findings. New topics
-follow that recipe; do not invent a parallel research format.
+Cross-provider summaries, per-provider hooks research, ACP support, and the
+schema-enforced topic fleets are indexed in
+[research-index.md](research-index.md).

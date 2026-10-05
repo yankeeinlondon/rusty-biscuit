@@ -586,11 +586,11 @@ fn bespoke_replayer(record_id: &str) -> Option<fn(&[Value]) -> bool> {
 // corpus loading
 // ---------------------------------------------------------------------------
 
-/// Walk up from CWD to the claudine package area (the directory holding
+/// Walk up from the launch directory to the claudine package area (the directory holding
 /// `docs/providers.yaml`), also accepting an ancestor whose `claudine/`
 /// child is the area — the same resolution `claudine-gen` uses.
 fn resolve_area() -> Result<PathBuf> {
-    let cwd = std::env::current_dir().wrap_err("cannot resolve the current directory")?;
+    let cwd = crate::request::snapshot().request_dir().to_path_buf();
     let mut dir = Some(cwd.as_path());
     while let Some(current) = dir {
         if current.join("docs/providers.yaml").is_file() {
@@ -658,7 +658,14 @@ fn fixture_key(doc: &Path, record: &str, evidence: &str) -> Result<String> {
 fn load_validated_frontmatter(path: &Path) -> Result<Value> {
     let md = Markdown::try_from(path)
         .map_err(|err| eyre!("failed to read {}: {err}", portable(path)))?;
-    let schemas = DarkmatterSchemas::new();
+    // The sidecar resolves beside the document, so the request is anchored
+    // in the document's directory.
+    let document_dir = path.parent().unwrap_or(path);
+    let context = darkmatter::markdown::compose::build_resolution_context(
+        &crate::request::snapshot().at_request_dir(document_dir),
+    )
+    .map_err(|err| eyre!("{}: {err}", portable(path)))?;
+    let schemas = DarkmatterSchemas::new(context);
     let effective = schemas
         .effective_for(&md)
         .map_err(|err| eyre!("{}: schema resolution failed: {err}", portable(path)))?

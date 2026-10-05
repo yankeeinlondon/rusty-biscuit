@@ -358,7 +358,7 @@ required tooling is missing — the test then skips rather than fails.
 | Harness | `available()` requires |
 |---------|------------------------|
 | `TmuxHarness` | `tmux` on `$PATH`. **Nothing else** — fully self-contained. |
-| `WezTermHarness` | `wezterm` on `$PATH` **and** `WEZTERM_UNIX_SOCKET` set. |
+| `WezTermHarness` | `wezterm` on `$PATH`, `WEZTERM_UNIX_SOCKET` set, **and** `wezterm cli list` answering within 5 s. A later answer (a busy or hung GUI) counts as available only when `BISCUIT_TEST_REQUIRED_BACKENDS` lists `wezterm`, where "unavailable" would fail the test anyway. |
 | `KittyHarness` | `kitty` on `$PATH` **and** `KITTY_LISTEN_ON` set. |
 | `KittyInstance::can_launch()` | macOS, with `kitty`, `open`, and `screencapture` on `$PATH`. |
 | `AppleTerminalHarness` | macOS, `CI != 1`, and `osascript` can address Terminal.app. |

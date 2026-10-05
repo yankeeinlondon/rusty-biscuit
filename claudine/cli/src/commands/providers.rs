@@ -450,8 +450,8 @@ fn resolve_gen_binary() -> Option<PathBuf> {
 /// A git root that looks like a cargo workspace, for the dev-checkout
 /// `cargo run -p claudine-gen` fallback.
 fn repo_root_for_cargo_fallback() -> Option<PathBuf> {
-    let cwd = std::env::current_dir().ok()?;
-    let invocation = claudine::invocation_context::InvocationContext::capture_at(&cwd);
+    let invocation =
+        claudine::invocation_context::InvocationContext::capture(crate::request::snapshot()).ok()?;
     let root = invocation.launch_repository().repo_root()?.to_path_buf();
     root.join("Cargo.toml").is_file().then_some(root)
 }

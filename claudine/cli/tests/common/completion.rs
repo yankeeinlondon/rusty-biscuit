@@ -108,7 +108,7 @@ pub(crate) fn run_complete(cwd: &Path, argv_tail: &[&str]) -> Vec<String> {
     run_complete_with_home(cwd, &home, argv_tail)
 }
 
-/// Invoke `claudine __complete` with an explicit `HOME`.
+/// Invoke `claudine __complete` with an explicit home (`HOME` and `USERPROFILE`).
 ///
 /// Use when a test needs to seed `$HOME/.claudine/...` fixtures and assert
 /// the user-global scope is rendered home-relative.
@@ -119,6 +119,7 @@ pub(crate) fn run_complete_with_home(cwd: &Path, home: &Path, argv_tail: &[&str]
     let mut cmd = Command::new(program);
     cmd.current_dir(cwd)
         .env("HOME", home)
+        .env("USERPROFILE", home)
         .env("NO_COLOR", "1")
         .env_remove("COMPLETE")
         .env_remove("_CLAP_COMPLETE_INDEX")

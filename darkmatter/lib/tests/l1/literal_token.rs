@@ -86,7 +86,7 @@ fn a_decoded_token_is_data_everywhere_it_flows() {
         let approvals = Arc::new(Recorder::default());
 
         let (composed, _) = load(dir.path())
-            .compose_with(options(dir.path(), approvals.clone()))
+            .compose_with(&crate::request_support::request(options(dir.path(), approvals.clone())))
             .unwrap_or_else(|error| panic!("{payload:?}: {error}"));
 
         assert_eq!(field(&composed, "note"), json!(payload), "{payload:?}");
@@ -122,7 +122,7 @@ fn loaders_keep_tokens_and_readers_decode_them() {
 
     for _ in 0..2 {
         let (composed, _) = load(dir.path())
-            .compose_with(options(dir.path(), Arc::default()))
+            .compose_with(&crate::request_support::request(options(dir.path(), Arc::default())))
             .unwrap();
         assert_eq!(field(&composed, "summary"), json!("fixed {{ area }} parsing"));
     }
@@ -159,7 +159,7 @@ fn reading_another_documents_frontmatter_decodes_its_tokens() {
         let approvals = Arc::new(Recorder::default());
 
         let (composed, _) = load(dir.path())
-            .compose_with(options(dir.path(), approvals.clone()))
+            .compose_with(&crate::request_support::request(options(dir.path(), approvals.clone())))
             .unwrap_or_else(|error| panic!("{payload:?}: {error}"));
 
         assert_eq!(field(&composed, "message"), json!(payload), "{payload:?}");
@@ -191,23 +191,23 @@ fn a_decoded_command_is_not_a_shell_candidate() {
     )
     .unwrap();
 
-    let collected = collect_shell_commands(&load(dir.path()), &options(dir.path(), Arc::default())).unwrap();
+    let collected = collect_shell_commands(&load(dir.path()), &crate::request_support::request(options(dir.path(), Arc::default()))).unwrap();
     assert_eq!(collected.iter().map(|entry| entry.normalized.as_str()).collect::<Vec<_>>(), ["echo Y"]);
 
     let approvals = Arc::new(Recorder::default());
-    let (composed, _) = load(dir.path()).compose_with(options(dir.path(), approvals.clone())).unwrap();
+    let (composed, _) = load(dir.path()).compose_with(&crate::request_support::request(options(dir.path(), approvals.clone()))).unwrap();
     assert!(composed.content().contains("C=$(echo X) M=$(echo Z) O=Y"), "{}", composed.content());
     assert_eq!(approvals.commands(), ["echo Y"]);
 
     let approved: HashSet<String> = load(dir.path())
-        .compose_preflight(&options(dir.path(), Arc::default()))
+        .compose_preflight(&crate::request_support::request(options(dir.path(), Arc::default())))
         .unwrap()
         .approval_set()
         .into_iter()
         .collect();
     assert_eq!(approved, HashSet::from(["echo Y".to_string()]));
     let (gated, _) = load(dir.path())
-        .compose_with(options(dir.path(), Arc::default()).with_pre_approved_commands(approved))
+        .compose_with(&crate::request_support::request(options(dir.path(), Arc::default()).with_pre_approved_commands(approved)))
         .unwrap_or_else(|error| panic!("the gate must accept the document: {error}"));
     assert!(gated.content().contains("C=$(echo X) M=$(echo Z) O=Y"), "{}", gated.content());
 }
@@ -222,7 +222,7 @@ fn escaped_spellings_are_text() {
         "---\nshown: \"{{{!data:v1:YQ}}}\"\n---\nA={{ shown }} B=\\{{!data:v1:YQ}}\n",
     )
     .unwrap();
-    let (composed, _) = load(dir.path()).compose_with(options(dir.path(), Arc::default())).unwrap();
+    let (composed, _) = load(dir.path()).compose_with(&crate::request_support::request(options(dir.path(), Arc::default()))).unwrap();
     assert_eq!(field(&composed, "shown"), json!("{{!data:v1:YQ}}"));
     assert!(composed.content().contains(r"A={{!data:v1:YQ}} B=\{{!data:v1:YQ}}"), "{}", composed.content());
 }
@@ -297,7 +297,7 @@ fn malformed_tokens_report_their_location() {
             let dir = TempDir::new().unwrap();
             std::fs::write(dir.path().join("doc.md"), case.source).unwrap();
             let error = load(dir.path())
-                .compose_with(options(dir.path(), Arc::default()).with_fail_fast(fail_fast))
+                .compose_with(&crate::request_support::request(options(dir.path(), Arc::default()).with_fail_fast(fail_fast)))
                 .map(|(composed, _)| composed.content().to_string())
                 .expect_err(case.source);
             let MarkdownError::Interpolation { key, source, cause, .. } = &error else {
@@ -327,7 +327,7 @@ fn malformed_tokens_report_their_location() {
 fn preflight_fails_on_a_body_token() {
     let dir = TempDir::new().unwrap();
     std::fs::write(dir.path().join("doc.md"), "::shell echo {{!data:v1:YQ}}\n").unwrap();
-    let error = collect_shell_commands(&load(dir.path()), &options(dir.path(), Arc::default()))
+    let error = collect_shell_commands(&load(dir.path()), &crate::request_support::request(options(dir.path(), Arc::default())))
         .expect_err("a token in a body command is malformed");
     assert!(error.to_string().contains("literal token"), "{error}");
 }

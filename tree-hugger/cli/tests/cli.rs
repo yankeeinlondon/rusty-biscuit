@@ -1830,6 +1830,40 @@ fn test_god_files_plain_output() {
 }
 
 #[test]
+fn test_god_files_plain_refactor_hint_names_symbol_without_escapes() {
+    // The dominating symbol is printed inside a code span, whose contents are
+    // literal: a Markdown-significant `_` in the name must not gain a
+    // backslash escape.
+    let dir = tempfile::TempDir::new().unwrap();
+    let mut content = String::from("def dominant_symbol_name():\n");
+    content.push_str(&"    x = 1\n".repeat(1000));
+    std::fs::write(dir.path().join("dominated.py"), content).unwrap();
+
+    let output = hug_cmd()
+        .current_dir(dir.path())
+        .args(["god-files", "--plain"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let stdout = String::from_utf8_lossy(&output);
+    let hint = stdout
+        .lines()
+        .find(|line| line.contains("likely refactor:") && line.contains("holds"))
+        .unwrap_or_else(|| panic!("no dominated-by-single-symbol hint in:\n{stdout}"));
+    assert!(
+        hint.contains("`dominant_symbol_name` holds"),
+        "hint must name the symbol verbatim in a code span: {hint}"
+    );
+    assert!(
+        !hint.contains('\\'),
+        "hint must not contain a backslash: {hint}"
+    );
+}
+
+#[test]
 fn test_god_files_high_risk_suppresses_moderate_section() {
     let dir = tempfile::TempDir::new().unwrap();
     let high_content = "x = 1\n".repeat(1000);

@@ -419,6 +419,7 @@ impl biscuit_terminal::errors::BlockError for NormalizationError {
         &self,
         _term: &biscuit_terminal::terminal::Terminal,
     ) -> biscuit_terminal::components::status_block::StatusBlock {
+        use biscuit_terminal::components::prose::{LineBreaks, Prose};
         use biscuit_terminal::components::status::StatusState;
         use biscuit_terminal::components::status_block::StatusBlock;
         use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
@@ -439,9 +440,9 @@ impl biscuit_terminal::errors::BlockError for NormalizationError {
 
                 StatusBlock::new(StatusState::Error)
                     .error_header(ErrorHeader::new("NormalizationError", "heading level overflow"))
-                    .body(format!(
+                    .body(Prose::new(format!(
                         "<dim>Target:</dim> {target}\n<dim>Affected headings:</dim> {affected_count}\n<dim>Deepest heading:</dim> <cyan>{deepest_title}</cyan>\n<dim>Would become:</dim> H{would_become} (exceeds H6)"
-                    ))
+                    )).with_line_breaks(LineBreaks::Hard))
                     .hint(format!(
                         "Pick a target shallower than or equal to <cyan>{max_safe_display}</cyan> so no heading overflows H6."
                     ))
@@ -452,7 +453,7 @@ impl biscuit_terminal::errors::BlockError for NormalizationError {
                     "NormalizationError",
                     "validation failed",
                 ))
-                .body(render_validation_issues(issues))
+                .body(Prose::new(render_validation_issues(issues)).with_line_breaks(LineBreaks::Hard))
                 .hint(
                     "Fix the highlighted structural issues (multiple H1, skipped levels, hierarchy violations) before re-leveling.",
                 ),

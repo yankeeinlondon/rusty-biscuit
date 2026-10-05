@@ -300,3 +300,37 @@ use super::*;
         );
     }
 
+
+    /// Restyles the emphasis in `content` to `style` and returns the text
+    /// events with their markers restored.
+    fn standardized(content: &str, style: EmphasisStyle) -> String {
+        let events: Vec<_> = cleanup_parser(content).into_offset_iter().collect();
+        let mut out = String::new();
+        for event in preserve_original_emphasis(content, &events, Some(style)) {
+            if let Event::Text(text) = event {
+                out.push_str(&text);
+            }
+        }
+        restore_emphasis_placeholders(&mut out);
+        out
+    }
+
+    #[test]
+    fn standardized_italics_keep_the_original_marker_where_the_preferred_one_cannot_flank() {
+        let cases = [
+            // `_` opens and closes only at a word boundary.
+            ("a *b* c", EmphasisStyle::Underscore, "a _b_ c"),
+            ("(*b*)", EmphasisStyle::Underscore, "(_b_)"),
+            ("a*b*c", EmphasisStyle::Underscore, "a*b*c"),
+            ("a*b* c", EmphasisStyle::Underscore, "a*b* c"),
+            ("a *b*c", EmphasisStyle::Underscore, "a *b*c"),
+            // A neighbor of the preferred character would join its run.
+            ("x_ *b*", EmphasisStyle::Underscore, "x_ _b_"),
+            ("*__b__*", EmphasisStyle::Underscore, "*__b__*"),
+            ("_b_", EmphasisStyle::Asterisk, "*b*"),
+            ("*_b_*", EmphasisStyle::Asterisk, "*_b_*"),
+        ];
+        for (content, style, expected) in cases {
+            assert_eq!(standardized(content, style), expected, "{content:?} {style:?}");
+        }
+    }

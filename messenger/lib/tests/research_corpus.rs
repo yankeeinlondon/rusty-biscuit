@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use darkmatter::markdown::Markdown;
+use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
 use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema, ValidationReport};
 use messenger::ProviderKind;
 use serde_json::Value;
@@ -54,9 +55,18 @@ fn load(path: &Path) -> Markdown {
 }
 
 /// One validator cache per test process, so each schema compiles once.
+///
+/// Each document's `$schema` and `file` values resolve from its own
+/// directory, through a context built at the repository root (read at run
+/// time, see [`lib_dir`]). Fixtures name `messenger/docs/` through `..`, which
+/// must stay inside the tree even where no `.git` marks the root (an archive
+/// run's extracted workspace).
 fn schemas() -> &'static DarkmatterSchemas {
     static SCHEMAS: OnceLock<DarkmatterSchemas> = OnceLock::new();
-    SCHEMAS.get_or_init(DarkmatterSchemas::new)
+    SCHEMAS.get_or_init(|| {
+        let snapshot = RequestSnapshot::new(messenger_dir().parent().expect("repository root"));
+        DarkmatterSchemas::new(build_resolution_context(&snapshot).expect("package context"))
+    })
 }
 
 /// Resolved schemas by canonical `$schema` path. `DarkmatterSchemas::validate`
@@ -563,6 +573,7 @@ mod typed {
     use std::sync::OnceLock;
 
     use darkmatter::markdown::Markdown;
+    use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
     use messenger::research::canonical::schema_fingerprint;
     use messenger::research::generate::{check, generate};
     use messenger::research::model::{Date, Mappings, Overrides, PlatformDocument, PlatformId, Roster};
@@ -575,13 +586,21 @@ mod typed {
 
     use super::{files_in, fixtures_dir, header_value, messenger_dir};
 
+    /// A loader whose context is built for the workspace root from a snapshot
+    /// that reads nothing from the test process.
+    fn research_loader(workspace: Workspace) -> Loader {
+        let snapshot = RequestSnapshot::new(workspace.repo_root());
+        let context = build_resolution_context(&snapshot).expect("research root context builds");
+        Loader::new(workspace, context)
+    }
+
     pub(super) fn repo_root() -> std::path::PathBuf {
         messenger_dir().parent().expect("repository root").to_path_buf()
     }
 
     pub(super) fn loader() -> &'static Loader {
         static LOADER: OnceLock<Loader> = OnceLock::new();
-        LOADER.get_or_init(|| Loader::new(Workspace::new(repo_root()).expect("absolute root")))
+        LOADER.get_or_init(|| research_loader(Workspace::new(repo_root()).expect("absolute root")))
     }
 
     pub(super) fn shipped_roster() -> &'static Roster {
@@ -905,7 +924,7 @@ mod typed {
     /// (legacy prose no longer qualifies) and pass the Accepted-scope rules,
     /// and `generate --check` must find neither drift nor a hand edit.
     fn published_baseline_findings(root: &Path) -> Option<Vec<String>> {
-        let loader = Loader::new(Workspace::new(root).expect("absolute root"));
+        let loader = research_loader(Workspace::new(root).expect("absolute root"));
         let workspace = loader.workspace();
         if !workspace.manifest().exists() {
             return None;
@@ -985,7 +1004,7 @@ mod typed {
                 .replace("$schema: ../../../../../../docs/research/platforms/_schema.yaml", "$schema: ./_schema.yaml");
             std::fs::write(target.document(*platform), text).expect("write document");
         }
-        generate(&Loader::new(target), &BTreeMap::new(), &today(), Options::default()).expect("fixture publishes");
+        generate(&research_loader(target), &BTreeMap::new(), &today(), Options::default()).expect("fixture publishes");
         dir
     }
 

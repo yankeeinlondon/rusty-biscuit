@@ -178,7 +178,7 @@ fn level2_wezterm_windows_review_router_partial_confirms_before_initialize() {
     // this platform it is drawn in native spelling.
     let unwrapped: String = dialog.plain.lines().collect();
     assert!(
-        names_selected_spec(&unwrapped, SELECTED_SPEC) && !unwrapped.contains("local-decoy"),
+        names_selected_spec(&unwrapped, SELECTED_SPEC) && !unwrapped.contains("remote-decoy"),
         "the confirmation must name the launch-area candidate only; plain:\n{}",
         dialog.plain
     );

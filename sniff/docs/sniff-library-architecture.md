@@ -241,6 +241,11 @@ corresponding `RepoDetailRequest` instead of relying on accidentally enriched st
 
 ### Package Discovery vs. Enrichment
 
+A directory is a package boundary when it holds one of the file names in
+`sniff::filesystem::repo::PACKAGE_MANIFEST_FILE_NAMES` (`Cargo.toml`, `package.json`,
+`pyproject.toml`, `go.mod`). Code that watches for package changes should read that constant
+instead of copying the names.
+
 Discovery finishes before enrichment begins. Detectors return cheap `PackageSeed` values (`repo/seed.rs`)
 — a normalized key, the `owner_root` the boundary was resolved against, the owning standard,
 provenance, and matched evidence kinds — and `merge_seeds` collapses duplicate boundaries **before**

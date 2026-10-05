@@ -148,14 +148,16 @@
 
 ## Workspace Dependencies
 
-- [biscuit-file](../../biscuit-file/lib) _v0.1.0_ (features: `toml`, `yaml`, `json5`; `default-features = false`)
+- [biscuit-file](../../biscuit-file/lib) _v0.1.0_ (features: `toml`, `yaml`, `json5`, `file-reference`; `default-features = false`)
 
     _In-repo format layer used by the app-metadata value extractor. Parses
     TOML/YAML/JSON5 config files and normalizes each to a single
     `serde_json::Value`, so one shared dot-path resolver reads all structured
     formats. Chosen over depending on `toml` / `serde_yaml_ng` / `json-five`
-    directly (spec §6). `default-features = false` keeps its heavy PDF/gix tree
-    out. No dependency cycle — `biscuit-file` does not depend on biscuit-terminal._
+    directly (spec §6). `file-reference` (which brings in gix) resolves a
+    Prose link's file destination to a `file://` URL when it renders as a
+    terminal OSC 8 link. `default-features = false` keeps its PDF tree out.
+    No dependency cycle — `biscuit-file` does not depend on biscuit-terminal._
 
     _Tags: workspace, config, parsing_
 
@@ -204,6 +206,12 @@
     _Property-based testing framework._
 
     _Tags: testing, property-based_
+
+- [pulldown-cmark](https://github.com/pulldown-cmark/pulldown-cmark) _v0.13_
+
+    _Independent CommonMark reader; Level 1 tests parse `Prose`/`InlineProse` Markdown output back to check literal text and break kinds._
+
+    _Tags: testing, markdown_
 
 - [serial_test](https://github.com/palfrey/serial_test) _v3_
 

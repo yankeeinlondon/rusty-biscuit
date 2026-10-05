@@ -28,7 +28,7 @@ use claudine::composition::{
     self, CompositionError, CompositionExecutionRequest, CompositionMode, PreflightGraph,
     ProxyHandoff, ResolvedCompositionSource, RunLedger, RuntimeState, SequencePlan,
     SequenceRunSummary, SequenceStepResult, SequenceTaskResult, SharedRunLedger, SurfacedHandoff,
-    commit_proxy_in_context,
+    commit_proxy,
 };
 use claudine::diagnostics::DiagnosticSnapshot;
 use claudine::system_prompt::SystemPromptArgs;
@@ -682,7 +682,7 @@ pub(super) fn run_step_proxy_loop(
     loop {
         let handoff: ProxyHandoff = match surfaced {
             SurfacedHandoff::Request(request) => {
-                commit_proxy_in_context(
+                commit_proxy(
                     &mut ledger.lock().unwrap(),
                     request,
                     &active_file_resolution_context,

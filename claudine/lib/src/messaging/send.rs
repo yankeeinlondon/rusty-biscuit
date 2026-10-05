@@ -8,6 +8,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use biscuit_terminal::components::prose::LineBreaks;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::status::{Status, StatusState};
 use biscuit_terminal::terminal::Terminal;
@@ -426,22 +427,7 @@ fn report_send_failure(route: &ResolvedMessagingRoute, error: &MessagingError, k
     // their own Display, run the regex here so a variant added later without
     // that treatment still cannot leak a secret to stderr or a test snapshot.
     let safe_error = redact_webhook_urls(&error.to_string());
-    let hint = failure_hint(&safe_error);
-    let route_name = prose_escape(&route.name);
-    let error_text = prose_escape(&safe_error);
-
-    let mut body = format!(
-        "Failed to send {kind} via <b>{provider}</b> route \
-         <blue-500>{route_name}</blue-500>: {error_text}"
-    );
-    if let Some(hint) = hint {
-        body.push_str(&format!("\n  <dim>\u{2192} {hint}</dim>"));
-    }
-
-    let rendered = Status::from_prose(body)
-        .state(StatusState::Warning)
-        .render(&Terminal::default());
-    eprintln!("{rendered}");
+    eprintln!("{}", send_failure_text(route, &safe_error, kind, &Terminal::default()));
 
     // Keep a machine-readable breadcrumb for log collectors without the
     // user-facing WARN noise. Use the redacted form so log aggregators never
@@ -453,6 +439,30 @@ fn report_send_failure(route: &ResolvedMessagingRoute, error: &MessagingError, k
         error = safe_error.as_str(),
         "messaging send failed"
     );
+}
+
+/// The warning line for a failed send, followed by an indented `→ hint` row
+/// when the (already redacted) error matches a known signature.
+fn send_failure_text(
+    route: &ResolvedMessagingRoute,
+    safe_error: &str,
+    kind: &str,
+    term: &Terminal,
+) -> String {
+    let provider = provider_kind_label_from_config(&route.config);
+    let route_name = prose_escape(&route.name);
+    let error_text = prose_escape(safe_error);
+    let mut body = format!(
+        "Failed to send {kind} via <b>{provider}</b> route \
+         <blue-500>{route_name}</blue-500>: {error_text}"
+    );
+    if let Some(hint) = failure_hint(safe_error) {
+        body.push_str(&format!("\n  <dim>\u{2192} {hint}</dim>"));
+    }
+    Status::from_prose(body)
+        .with_line_breaks(LineBreaks::Hard)
+        .state(StatusState::Warning)
+        .render(term)
 }
 
 /// Produce a short actionable hint based on common error signatures so the
@@ -514,9 +524,10 @@ fn redact_webhook_urls(input: &str) -> String {
 }
 
 /// Escape arbitrary error text so it renders exactly as written when embedded
-/// in a `Status::from_prose` body.
+/// in a `Status::from_prose` body; code spans the text marks with backticks
+/// stay literal.
 pub(super) fn prose_escape(text: &str) -> String {
-    biscuit_terminal::components::prose::Prose::escape_text(text)
+    biscuit_terminal::components::prose::Prose::escape_text_outside_code_spans(text)
 }
 
 /// Internal payload structure for the async send task.

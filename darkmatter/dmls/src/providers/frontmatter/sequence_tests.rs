@@ -12,6 +12,7 @@ use lsp_types::{InitializeParams, Uri};
 
 use super::*;
 use crate::capabilities::ClientProfile;
+use biscuit_file::FileResolutionContext;
 use crate::config::{DmlsConfig, SchemaExtensionConfig};
 use crate::graph::WorkspaceGraph;
 use crate::overlay::{OverlayState, format_dotted};
@@ -26,9 +27,11 @@ fn claudine_schema_path() -> PathBuf {
 /// The shipped Claudine extension baseline's resolved shape (imports expanded).
 fn claudine_root() -> SchemaShape {
     let path = claudine_schema_path();
+    let base = path.parent().unwrap();
     let resolved = resolve_schema(
         &Value::String(path.to_string_lossy().into_owned()),
-        path.parent().unwrap(),
+        base,
+        &FileResolutionContext::new(base),
     )
     .expect("shipped Claudine schema resolves");
     match resolved.simplified {
@@ -62,9 +65,14 @@ fn with_ctx_at<R>(
     }
     let roots = [root.to_path_buf()];
     let state = OverlayState::default();
-    let overlay = state.for_document(&uri, text, path, &config, &roots);
+    let resolution = if root == Path::new("/w") {
+        crate::context::test_support::resolution_for(path)
+    } else {
+        crate::context::test_support::resolution_in(root, path)
+    };
+    let overlay = state.for_document(&uri, text, path, &config, &roots, &resolution);
     let source_map = SourceMap::new(uri.clone(), 1, PositionEncoding::Utf16, Arc::from(text));
-    let graph = WorkspaceGraph::build(&BTreeMap::new(), 1);
+    let graph = WorkspaceGraph::build(&BTreeMap::new(), 1, &crate::context::test_support::workspace_contexts());
     let profile = ClientProfile::from_initialize(&InitializeParams::default(), PositionEncoding::Utf16);
     let ctx = DocumentContext {
         uri: &uri,
@@ -76,6 +84,7 @@ fn with_ctx_at<R>(
         config: &config,
         profile: &profile,
         overlay: overlay.as_ref(),
+        resolution: &resolution,
     };
     f(&ctx)
 }

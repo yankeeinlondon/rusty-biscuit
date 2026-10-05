@@ -36,6 +36,22 @@ let term = Terminal::default();
 println!("{}", quote.display(&term));
 ```
 
+### Prose Content
+
+A block quote holds blocks, so it takes the block [`Prose`](./prose.md) (`BlockQuote::from(prose)`). Each Prose paragraph and fenced code block becomes its own block inside the quote, with a bordered blank line between paragraphs:
+
+```rust
+let quote = BlockQuote::from(Prose::new("one\n\ntwo"));
+// terminal:   │ one
+//             │
+//             │ two
+// Markdown:   > one
+//             >
+//             > two
+```
+
+A layout set on the `Prose` (for example `with_left_margin`) applies inside the border, on the Prose's own blocks; the quote keeps its own layout. A plain string is quoted literally as one paragraph.
+
 ### Key API
 
 | Method | Description |

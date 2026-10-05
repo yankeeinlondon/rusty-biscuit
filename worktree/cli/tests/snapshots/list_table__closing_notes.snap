@@ -18,6 +18,32 @@ expression: labeled(cases)
  - Set GH_TOKEN or GITHUB_TOKEN to let wt try the provider API, or use  --ignore-api  to use Git directly for this repository.
 
 
+## graph omissions
+ - 3 worktrees aren't in the graph: it shows the most recently active ones that fit the terminal.
+ - fix/globs branched from e23d0c2, which reached origin/main through merge 21debbc, so the graph doesn't join its lane to origin/main.
+ - feat/far branched from abcdef0, which isn't in the graph, so its lane isn't joined to the others.
+ - The graph couldn't tell where feat/lost branched from, so its lane isn't joined to the others.
+ - 8888888 is drawn as a plain commit, not as feat/m's merge: the graph couldn't place both ends of it.
+ - The v0.1.0 label isn't in the graph: its commit isn't drawn.
+ - feat/schema's commits are all in origin/main (merged through fix/skill).
+ - feat/old's commits are all in main (merged through another branch).
+
+
+## one hidden lane
+ - 1 worktree isn't in the graph: it shows the most recently active ones that fit the terminal.
+
+
+## incomplete in a shallow clone
+ - This clone is shallow, so the graph can't connect some older history; run  git fetch --unshallow  to fill it in.
+
+
+## a history gap in a complete clone
+ - Git couldn't answer every question about this history, so the graph may be missing connections; run  wt list  again to retry.
+
+
+## shallow but complete
+(none)
+
 ## suggestion before the notice
  - main is 3 commits behind origin/main; run  wt --ff  to fast-forward it.
  - Git checked origin using `ls-remote`; this can take longer than the provider API.

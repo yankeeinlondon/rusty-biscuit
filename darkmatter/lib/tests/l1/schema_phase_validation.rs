@@ -11,7 +11,7 @@ use tempfile::tempdir;
 
 fn effective(schema: &str) -> darkmatter::markdown::schemas::EffectiveSchema {
     let source: Markdown = format!("---\n$schema:\n{schema}---\nbody\n").into();
-    DarkmatterSchemas::new()
+    DarkmatterSchemas::new(crate::request_support::cwd_context())
         .effective_for(&source)
         .expect("schema resolves")
         .expect("effective schema")
@@ -249,7 +249,7 @@ fn raw_json_schema_keeps_required_at_launch() {
     let document = dir.path().join("document.md");
     fs::write(&document, "---\n$schema: ./raw.json\n---\nbody\n").expect("write document");
     let source = Markdown::try_from(document.as_path()).expect("read document");
-    let schema = DarkmatterSchemas::new()
+    let schema = DarkmatterSchemas::new(crate::request_support::cwd_context())
         .effective_for(&source)
         .expect("schema resolves")
         .expect("effective schema");
@@ -269,7 +269,7 @@ fn phase_projection_preserves_merged_baseline_properties() {
     )
     .expect("baseline YAML");
     let baseline = parse_yaml_schema(&baseline_yaml).expect("baseline schema");
-    let api = DarkmatterSchemas::new()
+    let api = DarkmatterSchemas::new(crate::request_support::cwd_context())
         .with_baseline(baseline)
         .expect("baseline accepted");
     let source: Markdown = "---\n$schema:\n  output: string(required)\n---\nbody\n".into();
@@ -638,7 +638,7 @@ fn shipped_schema_and_trigger_corpus_parses_passively() {
 fn shipped_inline_schema_uses_normal_resolution_and_phase_path() {
     let text = include_str!("../../../../claudine/cli/tests/fixtures/shipped_implement_route/_implement/implement-plan.md");
     let source: Markdown = text.into();
-    let schema = DarkmatterSchemas::new()
+    let schema = DarkmatterSchemas::new(crate::request_support::cwd_context())
         .effective_for(&source)
         .expect("shipped schema resolves")
         .expect("the shipped document declares a schema");

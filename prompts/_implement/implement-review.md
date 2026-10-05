@@ -37,6 +37,8 @@ initialize:
 
 ::file "../_test-tiers.md"
 
+::file "../_headless-orchestration.md"
+
 ## Task
 
 > **Review:** {{target}}

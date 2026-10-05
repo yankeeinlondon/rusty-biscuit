@@ -6,15 +6,16 @@
 //! in `effective_for`. The assembly order is:
 //!
 //! 1. Caller-configured baseline.
-//! 2. Matching trigger payloads — nearest root first, filename-lexicographic
-//!    within a root (the registry's built-in order).
+//! 2. Matching trigger payloads — first schema root first,
+//!    filename-lexicographic within a root (the registry's built-in order).
 //! 3. Document `$schema` (always wins on conflict).
 //!
 //! Shadowing is applied **before** matching (a shadowed trigger file is never
 //! in the registry). Later layers win per top-level property via the existing
 //! [`super::super::resolve::merge_baseline`] contract.
 //!
-//! See `darkmatter/features/2026-07-10-schema-triggers/spec.md`.
+//! The user-facing contract is the "Repository Trigger Schemas" section of
+//! `darkmatter/docs/topics/schemas/definition.md`.
 
 use std::path::{Path, PathBuf};
 
@@ -24,11 +25,13 @@ use serde_yaml_ng::Value as YamlValue;
 use crate::markdown::schemas::errors::SchemaError;
 use crate::markdown::schemas::resolve::{self, ResolvedSchema, validate_simple_object_schema};
 
+use crate::markdown::schemas::roots::SchemaRoots;
+
 use super::discovery::{LoadedTrigger, TriggerRegistry};
 use super::envelope::parse_trigger_envelope_from_str;
-use super::matcher;
+use super::matcher::{self, PathSubject};
 
-// ── Pure matching entry ─────────────────────────────────────────────────────
+// ── Matching entry ──────────────────────────────────────────────────────────
 
 /// The result of evaluating one trigger against a document snapshot.
 #[derive(Debug, Clone)]
@@ -43,13 +46,12 @@ pub struct TriggerEvaluation<'a> {
 }
 
 /// Owned, presentation-neutral explanation of trigger discovery and matching.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TriggerTrace {
-    /// Discovery boundary.
-    pub boundary: PathBuf,
-    /// Schema roots, nearest first.
-    pub roots: Vec<PathBuf>,
-    /// Shadowed envelope paths paired with their nearer winner.
+    /// The five schema roots in search order, including the ones that
+    /// contribute nothing.
+    pub roots: SchemaRoots,
+    /// Shadowed envelope paths paired with the earlier root's winner.
     pub shadowed: Vec<(PathBuf, PathBuf)>,
     /// Evaluated unshadowed triggers in registry order.
     pub triggers: Vec<TriggerTraceEntry>,
@@ -77,16 +79,36 @@ pub struct TriggerArmTrace {
     pub defeat: Option<String>,
 }
 
+/// The subject one trigger's `$path` patterns judge: `document` in the
+/// registry's context, with the trigger's own `cwd` for bare, `./`, and
+/// `../` patterns.
+fn subject_for<'a>(
+    registry: &'a TriggerRegistry,
+    trigger: &'a LoadedTrigger,
+    document: Option<&'a Path>,
+) -> PathSubject<'a> {
+    match document {
+        Some(document) => {
+            PathSubject::new(document, registry.context()).with_pattern_cwd(&trigger.pattern_cwd)
+        }
+        None => PathSubject::detached(),
+    }
+}
+
 /// Builds the shared structured trace consumed by inspection surfaces.
+///
+/// `document` is the checked document's path; without one, every `$path`
+/// predicate is defeated.
 pub fn trace_registry(
     registry: &TriggerRegistry,
     frontmatter: &Value,
-    normalized_path: &str,
+    document: Option<&Path>,
 ) -> TriggerTrace {
     let triggers = registry
         .triggers
         .iter()
         .map(|trigger| {
+            let subject = subject_for(registry, trigger, document);
             let arms = trigger
                 .envelope
                 .match_arms
@@ -94,12 +116,12 @@ pub fn trace_registry(
                 .iter()
                 .enumerate()
                 .map(|(index, arm)| {
-                    let matched = matcher::matches(arm, frontmatter, normalized_path);
+                    let matched = matcher::matches(arm, frontmatter, &subject);
                     TriggerArmTrace {
                         index,
                         matched,
                         defeat: (!matched)
-                            .then(|| matcher::first_defeat(arm, frontmatter, normalized_path))
+                            .then(|| matcher::first_defeat(arm, frontmatter, &subject))
                             .flatten(),
                     }
                 })
@@ -112,7 +134,6 @@ pub fn trace_registry(
         })
         .collect();
     TriggerTrace {
-        boundary: registry.boundary.clone(),
         roots: registry.roots.clone(),
         shadowed: registry
             .shadowed
@@ -124,31 +145,32 @@ pub fn trace_registry(
 }
 
 /// Evaluates every trigger in the registry against the given frontmatter
-/// snapshot and normalized path.
+/// snapshot and document path, judged in the registry's context.
 ///
-/// Returns results in registry order (nearest root first, filename-lexicographic
-/// within a root). This is the pure matching entry both surfaces (CLI trace +
-/// DMLS) consume — it performs no I/O.
+/// Returns results in registry order (first root first, filename-lexicographic
+/// within a root). This is the matching entry both surfaces (CLI trace +
+/// DMLS) consume; it judges the known path without a walk.
 pub fn evaluate_registry<'a>(
     registry: &'a TriggerRegistry,
     frontmatter: &Value,
-    normalized_path: &str,
+    document: Option<&Path>,
 ) -> Vec<TriggerEvaluation<'a>> {
     registry
         .triggers
         .iter()
         .map(|trigger| {
+            let subject = subject_for(registry, trigger, document);
             let arms = &trigger.envelope.match_arms;
             let matched = arms
                 .0
                 .iter()
-                .any(|arm| matcher::matches(arm, frontmatter, normalized_path));
+                .any(|arm| matcher::matches(arm, frontmatter, &subject));
             let defeat = if matched {
                 None
             } else {
                 arms.0
                     .iter()
-                    .filter_map(|arm| matcher::first_defeat(arm, frontmatter, normalized_path))
+                    .filter_map(|arm| matcher::first_defeat(arm, frontmatter, &subject))
                     .next()
             };
             TriggerEvaluation {
@@ -160,15 +182,15 @@ pub fn evaluate_registry<'a>(
         .collect()
 }
 
-/// Returns only the matching triggers in registry order (nearest root first,
+/// Returns only the matching triggers in registry order (first root first,
 /// filename-lexicographic within a root). Convenience over
 /// [`evaluate_registry`].
 pub fn matched_triggers<'a>(
     registry: &'a TriggerRegistry,
     frontmatter: &Value,
-    normalized_path: &str,
+    document: Option<&Path>,
 ) -> Vec<&'a LoadedTrigger> {
-    evaluate_registry(registry, frontmatter, normalized_path)
+    evaluate_registry(registry, frontmatter, document)
         .into_iter()
         .filter(|eval| eval.matched)
         .map(|eval| eval.trigger)
@@ -207,6 +229,7 @@ pub(crate) struct ResolvedPayload {
 pub(crate) fn resolve_trigger_payload(
     trigger: &LoadedTrigger,
     schema_roots: &[PathBuf],
+    context: &biscuit_file::FileResolutionContext,
 ) -> Result<ResolvedPayload, SchemaError> {
     let payload = trigger.envelope.payload.as_ref().ok_or_else(|| {
         SchemaError::TriggerPayloadNotMergeable {
@@ -220,7 +243,7 @@ pub(crate) fn resolve_trigger_payload(
         .source
         .parent()
         .unwrap_or_else(|| Path::new("."));
-    let resolved = resolve::resolve_yaml_schema_with_roots(payload, base_dir, schema_roots)?;
+    let resolved = resolve::resolve_yaml_schema_with_roots(payload, base_dir, schema_roots, context)?;
 
     // Cycle detection: the payload must not resolve to a trigger envelope.
     check_payload_cycles(trigger, &resolved)?;
@@ -371,7 +394,7 @@ fn describe_payload(payload: &YamlValue) -> String {
 }
 
 fn canonicalize(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+    biscuit_file::canonicalize_simplified(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 #[cfg(test)]
@@ -381,6 +404,12 @@ mod tests {
     use crate::markdown::schemas::triggers::discovery;
     use std::fs;
     use tempfile::TempDir;
+
+    /// A document context at the repository root, with no home directory.
+    fn doc_context(root: &Path) -> biscuit_file::FileResolutionContext {
+        biscuit_file::FileResolutionContext::from_snapshot(root, None, std::collections::HashMap::new())
+            .with_repository_root(root)
+    }
 
     fn repo_fixture() -> TempDir {
         let dir = TempDir::new().unwrap();
@@ -416,7 +445,11 @@ mod tests {
         let envelope = parse_trigger_envelope_from_str(content)
             .expect("envelope should parse")
             .expect("content should claim trigger-schema");
-        LoadedTrigger { source: source.to_path_buf(), envelope }
+        LoadedTrigger {
+            source: source.to_path_buf(),
+            envelope,
+            pattern_cwd: source.parent().and_then(Path::parent).unwrap_or(source).to_path_buf(),
+        }
     }
 
     // ── Matching ────────────────────────────────────────────────────────
@@ -438,11 +471,11 @@ mod tests {
         write(&root.join("schemas/other.yaml"), PAYLOAD);
 
         let doc = root.join("doc.md");
-        let registry = discovery::scan(&doc, root).unwrap();
+        let registry = discovery::scan(&doc_context(root)).unwrap();
 
         // `prompt` present → a matches; b does not.
         let fm = frontmatter(&[("prompt", Value::String("x".into()))]);
-        let matched = matched_triggers(&registry, &fm, "doc.md");
+        let matched = matched_triggers(&registry, &fm, Some(&doc));
         assert_eq!(matched.len(), 1);
         assert!(matched[0].source.ends_with("a.trigger.yaml"));
     }
@@ -459,10 +492,10 @@ mod tests {
         write(&root.join("schemas/claudine.yaml"), PAYLOAD);
 
         let doc = root.join("doc.md");
-        let registry = discovery::scan(&doc, root).unwrap();
+        let registry = discovery::scan(&doc_context(root)).unwrap();
 
         let fm = frontmatter(&[]);
-        let evals = evaluate_registry(&registry, &fm, "doc.md");
+        let evals = evaluate_registry(&registry, &fm, Some(&doc));
         assert_eq!(evals.len(), 1);
         assert!(!evals[0].matched);
         assert!(evals[0].defeat.as_deref().unwrap().contains("required"));
@@ -481,10 +514,9 @@ mod tests {
         );
         write(&root.join("schemas/claudine.yaml"), PAYLOAD);
 
-        let doc = root.join("doc.md");
-        let registry = discovery::scan(&doc, root).unwrap();
+        let registry = discovery::scan(&doc_context(root)).unwrap();
         let trigger = &registry.triggers[0];
-        let resolved = resolve_trigger_payload(trigger, &registry.roots).unwrap();
+        let resolved = resolve_trigger_payload(trigger, registry.roots.search_paths(), &biscuit_file::FileResolutionContext::new(root)).unwrap();
         assert_eq!(
             resolved.json_schema["type"], "object",
             "payload must resolve to an object schema"
@@ -512,7 +544,7 @@ mod tests {
              $schema:\n  - model: string(required)\n  - title: string(required)\n",
             &source,
         );
-        let err = resolve_trigger_payload(&trigger, &[root.join("schemas")]).unwrap_err();
+        let err = resolve_trigger_payload(&trigger, &[root.join("schemas")], &biscuit_file::FileResolutionContext::new(root)).unwrap_err();
         assert!(
             matches!(err, SchemaError::TriggerPayloadNotMergeable { .. }),
             "root union payload must be rejected: {err:?}"
@@ -529,7 +561,7 @@ mod tests {
             "kind: trigger-schema\nmatch:\n  prompt: string(required)\n",
             &source,
         );
-        let err = resolve_trigger_payload(&trigger, &[root.join("schemas")]).unwrap_err();
+        let err = resolve_trigger_payload(&trigger, &[root.join("schemas")], &biscuit_file::FileResolutionContext::new(root)).unwrap_err();
         assert!(
             matches!(err, SchemaError::TriggerPayloadNotMergeable { .. }),
             "missing payload must be rejected: {err:?}"
@@ -556,7 +588,7 @@ mod tests {
              $schema: self.trigger.yaml\n",
             &source,
         );
-        let err = resolve_trigger_payload(&trigger, &[root.join("schemas")]).unwrap_err();
+        let err = resolve_trigger_payload(&trigger, &[root.join("schemas")], &biscuit_file::FileResolutionContext::new(root)).unwrap_err();
         assert!(
             matches!(err, SchemaError::TriggerPayloadCycle { .. }),
             "self-referencing payload must be rejected: {err:?}"
@@ -585,7 +617,7 @@ mod tests {
              $schema: b.trigger.yaml\n",
             &a_source,
         );
-        let err = resolve_trigger_payload(&trigger, &[root.join("schemas")]).unwrap_err();
+        let err = resolve_trigger_payload(&trigger, &[root.join("schemas")], &biscuit_file::FileResolutionContext::new(root)).unwrap_err();
         assert!(
             matches!(err, SchemaError::TriggerPayloadCycle { .. }),
             "payload referencing another trigger must be rejected: {err:?}"

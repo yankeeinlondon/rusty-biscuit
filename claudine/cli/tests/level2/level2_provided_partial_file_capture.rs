@@ -150,7 +150,7 @@ fn run_accept_path<H: KeySender>(harness: &mut H) {
     // the emulator's column count puts the break, so match it unwrapped.
     let unwrapped: String = dialog.plain.lines().collect();
     assert!(
-        names_selected_spec(&unwrapped, SELECTED_SPEC) && !unwrapped.contains("local-decoy"),
+        names_selected_spec(&unwrapped, SELECTED_SPEC) && !unwrapped.contains("remote-decoy"),
         "the confirmation must name the launch-area candidate only; plain:\n{}",
         dialog.plain
     );

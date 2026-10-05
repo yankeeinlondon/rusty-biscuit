@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::pad::PadRight;
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{InlineProse, Prose};
 use biscuit_terminal::components::renderable::RenderableTerminalContent;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
@@ -413,16 +413,17 @@ fn render_recipe_line(
 
     let line = if let Some(ref desc) = recipe.description {
         // Use PadRight to align descriptions
-        let padded = PadRight::new(Prose::new(&name_and_params), pad_width);
+        let padded = PadRight::new(InlineProse::new(&name_and_params), pad_width);
         let padded_str = padded.render(term);
-        let desc_str = Prose::new(format!("<dim>{}</dim>", desc)).render(term);
+        let desc_str = InlineProse::new(format!("<dim>{}</dim>", desc)).render(term);
         format!("{}{}", padded_str, desc_str)
     } else {
-        Prose::new(&name_and_params).render(term)
+        InlineProse::new(&name_and_params).render(term)
     };
 
     if verbose >= 2 {
-        let hash_str = Prose::new(format!("  <dim>#{:016x}</dim>", recipe.hash)).render(term);
+        let hash_str =
+            InlineProse::new(format!("  <dim>#{:016x}</dim>", recipe.hash)).render(term);
         format!("{}{}", line, hash_str)
     } else {
         line

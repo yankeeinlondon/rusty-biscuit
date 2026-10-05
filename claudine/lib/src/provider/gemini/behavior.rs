@@ -58,7 +58,7 @@ impl McpBehavior for GeminiProvider {
     }
 
     fn native_config_path(&self, scope: &Scope) -> Option<PathBuf> {
-        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+        let home = biscuit_file::home_dir().unwrap_or_else(|| PathBuf::from("."));
         Some(match scope {
             Scope::User => home.join(".gemini").join("settings.json"),
             Scope::Repo(root) => root.join(".gemini").join("settings.json"),

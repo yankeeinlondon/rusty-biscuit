@@ -154,12 +154,12 @@ same remote transport cache as the compose pipeline, including
 `cache_namespace`.
 
 ```rust
-let mut options = ReferenceGraphOptions::default();
-options.compose = options.compose
+let options = ComposeOptions::new()
     .with_cache_root(workspace_root)
     .with_cache_namespace("feature-branch");
+let request = ComposeRequest::prepare(options, &RequestSnapshot::new(workspace_root))?;
 
-let graph = md.reference_graph(options)?;
+let graph = md.reference_graph(ReferenceGraphOptions::with_compose(&request))?;
 ```
 
 ## Remote Transport Cache

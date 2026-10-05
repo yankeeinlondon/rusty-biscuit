@@ -601,7 +601,7 @@ fn level2_declining_after_a_repair_keeps_the_restored_link_and_the_files() {
     let script = scene.script(Shell::Bash, false, &scene.repo(), "wt remove feat-x", "");
     scene.start(&mut harness, Shell::Bash, &script);
     let plain = wait_for_text(&mut harness, "Discard the files listed above");
-    assert!(plain.contains("Restored the link for feat-x"), "repair precedes the question:\n{plain}");
+    assert!(plain.contains("Its .git file was missing"), "repair precedes the question:\n{plain}");
     assert!(plain.contains("lib.rs"), "{plain}");
     assert_one_blank_line_before(&plain, "Discard the files listed above");
 
@@ -631,7 +631,7 @@ fn level2_a_repaired_worktree_moves_first_through_the_wrapper() {
     let script = scene.script(Shell::Bash, true, &wt, "wt remove feat-x", "");
     scene.start(&mut harness, Shell::Bash, &script);
     let plain = wait_for_text(&mut harness, "Discard the files listed above");
-    assert!(plain.contains("Restored the link for feat-x"), "{plain}");
+    assert!(plain.contains("Its .git file was missing"), "{plain}");
     harness.send_text(b"y\n").unwrap();
 
     let outcome = scene.wait_outcome();

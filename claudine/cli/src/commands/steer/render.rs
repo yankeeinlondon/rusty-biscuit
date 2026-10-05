@@ -7,7 +7,7 @@
 //! `claudine/docs/cli/steer.md`.
 
 use biscuit_terminal::components::list::UnorderedList;
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{InlineProse, Prose};
 use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
 use biscuit_terminal::components::table::table::{Table, TableColumn};
 use biscuit_terminal::terminal::Terminal;
@@ -181,13 +181,17 @@ fn line(markup: impl Into<String>) -> Prose {
     Prose::new(markup.into()).with_word_wrap(WordWrap::WrapProse(None, Some(2)))
 }
 
-fn cell(text: &str, selectable: bool) -> Prose {
+fn cell_markup(text: &str, selectable: bool) -> String {
     let text = Prose::escape_text(text);
-    if selectable { line(text) } else { line(format!("<dim><strikethrough>{text}</strikethrough></dim>")) }
+    if selectable { text } else { format!("<dim><strikethrough>{text}</strikethrough></dim>") }
+}
+
+fn cell(text: &str, selectable: bool) -> InlineProse {
+    InlineProse::new(cell_markup(text, selectable))
 }
 
 fn details(row: &SessionListing) -> Vec<RenderableTerminalContent> {
-    let escape = |text: &str| Prose::escape_text(text).to_string();
+    let escape = |text: &str| Prose::escape_text_outside_code_spans(text).to_string();
     let mut items: Vec<RenderableTerminalContent> = Vec::new();
     let availability = &row.availability;
     if let Some(operation) = availability.operation {
@@ -242,7 +246,7 @@ impl TerminalRenderable for SessionTable {
             for (index, row) in self.rows.iter().enumerate() {
                 lines.push(String::new());
                 if !tabular {
-                    lines.push(cell(&picker_label(index, row), row.is_selectable()).render(term));
+                    lines.push(line(cell_markup(&picker_label(index, row), row.is_selectable())).render(term));
                 }
                 let id = Prose::escape_text(&row.id.to_string()).to_string();
                 let heading = if tabular { format!("<bold>#{}</bold> {id}", index + 1) } else { format!("  {id}") };
@@ -347,7 +351,7 @@ pub(crate) fn receipt(delivery: &Delivery, term: &Terminal) -> String {
         heading.push_str(&format!(" · via `{mechanism}`"));
     }
     let mut items: Vec<RenderableTerminalContent> =
-        vec![Prose::new(Prose::escape_text(outcome_explanation(result.outcome)).to_string()).into()];
+        vec![Prose::new(Prose::escape_text_outside_code_spans(outcome_explanation(result.outcome)).to_string()).into()];
     if let Some(phases) = result.interruption {
         let replacement = match phases.replacement {
             Some(outcome) => format!("the replacement message was {}", outcome_word(outcome)),
@@ -356,7 +360,7 @@ pub(crate) fn receipt(delivery: &Delivery, term: &Terminal) -> String {
         items.push(Prose::new(format!("Interruption: {}; {replacement}.", cancellation_words(phases.cancellation))).into());
     }
     if let Some(detail) = delivery.detail.as_ref() {
-        items.push(Prose::new(format!("<bold>Detail:</bold> {}", Prose::escape_text(detail.as_str()))).into());
+        items.push(Prose::new(format!("<bold>Detail:</bold> {}", Prose::escape_text_outside_code_spans(detail.as_str()))).into());
     }
     items.push(Prose::new(format!("<dim>Request {}</dim>", result.request_id)).into());
     [line(heading).render(term), UnorderedList::from(items).render(term)].join("\n")

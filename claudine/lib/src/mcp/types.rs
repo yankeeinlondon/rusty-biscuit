@@ -296,7 +296,7 @@ impl Default for McpProviderState {
 
 /// Returns the MCP data directory (`~/.claudine/mcp/`).
 pub fn mcp_dir() -> PathBuf {
-    dirs::home_dir()
+    biscuit_file::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".claudine")
         .join("mcp")

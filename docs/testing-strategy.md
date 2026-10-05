@@ -353,6 +353,16 @@ recipe tears the panes down when nextest exits. A backend whose tooling is
 missing on the host is silently skipped at spawn time, and its tests then skip
 through `require_level!`.
 
+Apple Terminal is the exception to "every available backend". Terminal.app
+cannot spawn a window in the background, so the shared window would sit on the
+developer's desktop for the whole run. The recipe starts it only for a package
+whose `Cargo.toml` asks for it:
+
+```toml
+[package.metadata.ci.tests]
+l2-backends = ["tmux", "wezterm", "kitty", "apple-terminal"]
+```
+
 Suites marked `l2-parallel-self-spawn` use isolated per-test resources instead
 of shared panes and can run concurrently. Their default worker count is
 `max(1, logical_cores - 2)` locally. CI uses all logical cores on runners with

@@ -370,6 +370,14 @@ mod tests {
     }
 
     #[test]
+    fn parses_reference_prefixed_globs_as_one_token() {
+        for glob in ["&docs/*.md", "^docs/*.md", "@prompts/*.md", "~/notes/**/*.md", "./docs/*.md", "../x/*.md", "!x.md"] {
+            let directives = parse_file_links_directives(&format!("::file-links {glob}\n")).unwrap();
+            assert_eq!(directives[0].mode, FileLinksMode::Glob(glob.to_string()), "{glob}");
+        }
+    }
+
+    #[test]
     fn parses_quoted_glob_with_spaces() {
         let directives =
             parse_file_links_directives("::file-links \"my docs/**/*.md\"\n").unwrap();

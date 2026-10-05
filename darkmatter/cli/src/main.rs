@@ -1,16 +1,18 @@
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable as _;
 use biscuit_terminal::errors::as_block_error as as_terminal_block_error;
 use biscuit_terminal::terminal::Terminal;
 use clap::{CommandFactory, Parser};
 use clap_complete::CompleteEnv;
-use color_eyre::eyre::Result;
+use color_eyre::eyre::{Context, Result};
 use darkmatter::markdown::errors::as_block_error as as_darkmatter_block_error;
 use darkmatter::markdown::highlighting::{ColorMode, ThemePair};
 use darkmatter_cli::Cli;
+use darkmatter::markdown::compose::RequestSnapshot;
 use darkmatter_cli::commands::{
     CleanOptions, run_clean, run_render, run_subcommand, validate_subcommand_usage,
 };
+use darkmatter_cli::request::{MdRequest, with_magic_roots};
 use std::io::{self, IsTerminal};
 use tracing_subscriber::{filter::EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -75,7 +77,9 @@ fn main() {
         // (it is a documented stub); the call here is intentional to leave room for
         // future extension without adding a hard dependency.
         let block = e.chain().find_map(|cause| {
-            as_darkmatter_block_error(cause).or_else(|| as_terminal_block_error(cause))
+            as_darkmatter_block_error(cause)
+                .or_else(|| darkmatter_cli::io::as_block_error(cause))
+                .or_else(|| as_terminal_block_error(cause))
         });
 
         if let Some(block) = block {
@@ -90,38 +94,42 @@ fn main() {
         }
 
         // Fallback: legacy Display-chain renderer.
-        // Deduplicate chain: skip causes whose message is already contained in a prior message.
-        let top = e.to_string();
-        let mut seen = top.clone();
-        let causes: Vec<String> = e
-            .chain()
-            .skip(1)
-            .filter_map(|c| {
-                let msg = c.to_string();
-                if seen.contains(&msg) {
-                    None
-                } else {
-                    seen.push_str(&msg);
-                    Some(msg)
-                }
-            })
-            .collect();
-        let msg = if causes.is_empty() {
-            format!("<red><b>Error:</b></red> {top}")
-        } else {
-            format!(
-                "<red><b>Error:</b></red> {top}\n       {}",
-                causes
-                    .iter()
-                    .map(|c| format!("<dim>▸</dim> {c}"))
-                    .collect::<Vec<_>>()
-                    .join("\n       ")
-            )
-        };
-        let terminal = Terminal::default();
-        eprintln!("{}", Prose::new(msg).render(&terminal));
+        eprintln!("{}", error_chain_prose(&e).render(&Terminal::default()));
         std::process::exit(1);
     }
+}
+
+/// The legacy Display-chain report: the top error, then each cause not
+/// already contained in an earlier message on its own indented row.
+fn error_chain_prose(e: &color_eyre::Report) -> Prose {
+    let top = e.to_string();
+    let mut seen = top.clone();
+    let causes: Vec<String> = e
+        .chain()
+        .skip(1)
+        .filter_map(|c| {
+            let msg = c.to_string();
+            if seen.contains(&msg) {
+                None
+            } else {
+                seen.push_str(&msg);
+                Some(msg)
+            }
+        })
+        .collect();
+    let msg = if causes.is_empty() {
+        format!("<red><b>Error:</b></red> {top}")
+    } else {
+        format!(
+            "<red><b>Error:</b></red> {top}\n       {}",
+            causes
+                .iter()
+                .map(|c| format!("<dim>▸</dim> {c}"))
+                .collect::<Vec<_>>()
+                .join("\n       ")
+        )
+    };
+    Prose::new(msg).with_line_breaks(LineBreaks::Hard)
 }
 
 fn run() -> Result<()> {
@@ -142,9 +150,15 @@ fn run() -> Result<()> {
         return Ok(());
     }
 
+    // The one read of the process's directory, home, and environment for
+    // file resolution; every route resolves against this snapshot.
+    let snapshot =
+        RequestSnapshot::from_process().wrap_err("Failed to capture the current directory")?;
+    let request = MdRequest::new(with_magic_roots(snapshot, &cli.magic_roots)?);
+
     if let Some(command) = cli.command.clone() {
         validate_subcommand_usage(&cli)?;
-        run_subcommand(command, &cli)?;
+        run_subcommand(command, &cli, &request)?;
         return Ok(());
     }
 
@@ -154,7 +168,7 @@ fn run() -> Result<()> {
             verbose: cli.verbose > 0,
             ..CleanOptions::default()
         };
-        run_clean(cli.input.as_ref(), &options)?;
+        run_clean(cli.input.as_ref(), &options, &request)?;
         return Ok(());
     }
 
@@ -165,7 +179,7 @@ fn run() -> Result<()> {
     }
 
     // Run as implicit render using top-level args
-    run_render(cli.input.as_ref(), cli.output, cli.show, None, &cli)?;
+    run_render(cli.input.as_ref(), cli.output, cli.show, None, &cli, &request)?;
 
     Ok(())
 }
@@ -225,3 +239,28 @@ fn reset_sigpipe() {
 
 #[cfg(not(unix))]
 fn reset_sigpipe() {}
+
+#[cfg(test)]
+mod error_chain_tests {
+    use super::*;
+
+    #[test]
+    fn each_cause_is_its_own_indented_row() {
+        let report = color_eyre::eyre::eyre!("inner cause")
+            .wrap_err("middle cause")
+            .wrap_err("top error");
+        let term = Terminal::builder()
+            .width(200)
+            .color_depth(biscuit_terminal::discovery::detection::ColorDepth::None)
+            .build();
+        let rendered = biscuit_terminal::utils::escape_codes::strip_escape_codes(
+            error_chain_prose(&report).render(&term),
+        );
+        let rows: Vec<&str> = rendered.lines().collect();
+        assert_eq!(
+            rows,
+            ["Error: top error", "       ▸ middle cause", "       ▸ inner cause"],
+            "{rendered:?}"
+        );
+    }
+}

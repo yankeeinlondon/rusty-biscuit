@@ -40,6 +40,35 @@ fn load_md(dir: &TempDir, name: &str) -> Markdown {
     Markdown::try_from(path.as_path()).unwrap()
 }
 
+/// Graph options over a request anchored at the process directory, as the
+/// removed ambient `graph_options()` was.
+fn graph_options() -> ReferenceGraphOptions {
+    ReferenceGraphOptions::with_compose(&crate::request_support::request(ComposeOptions::new()))
+}
+
+fn validation_options() -> ReferenceValidationOptions {
+    ReferenceValidationOptions::with_graph(graph_options())
+}
+
+/// Graph options over a request anchored at the fixture directory the
+/// documents live in; a graph refuses a document outside its request's
+/// repository.
+fn graph_options_at(dir: &std::path::Path) -> ReferenceGraphOptions {
+    ReferenceGraphOptions::with_compose(&crate::request_support::request_at(dir, ComposeOptions::new()))
+}
+
+fn validation_options_at(dir: &std::path::Path) -> ReferenceValidationOptions {
+    ReferenceValidationOptions::with_graph(graph_options_at(dir))
+}
+
+/// A request anchored at the directory holding `path`.
+fn request_beside(path: &std::path::Path) -> darkmatter::markdown::compose::ComposeRequest {
+    crate::request_support::request_at(
+        path.parent().expect("document path has a parent"),
+        ComposeOptions::new(),
+    )
+}
+
 fn mismatch_kind(err: &MarkdownError) -> ReferenceGraphMismatchKind {
     match err {
         MarkdownError::Reference(inner) => match inner.as_ref() {
@@ -62,7 +91,7 @@ fn assert_child_source(source: &ComposeSource, file_name: &str) {
     }
 }
 
-fn reference_options(repo_root: &std::path::Path) -> ComposeOptions {
+fn reference_options(repo_root: &std::path::Path) -> darkmatter::markdown::compose::ComposeRequest {
     let context = FileResolutionContext::from_snapshot(
         repo_root,
         None,
@@ -75,8 +104,11 @@ fn reference_options(repo_root: &std::path::Path) -> ComposeOptions {
     // repository and read no `ctx.*`, so the scan is pure cost. The context is
     // caller-supplied and frozen: a `ctx.*` read of another group would fail
     // with `ContextNotCaptured`.
-    ComposeOptions::new_with_context(ComposeContext::capture_for_content(repo_root, ""))
-        .with_file_resolution_context(context)
+    darkmatter::markdown::compose::ComposeRequest::with_context(
+        ComposeOptions::new_with_context(ComposeContext::capture_for_content(repo_root, "")),
+        context,
+    )
+    .unwrap()
 }
 
 struct CurrentDirGuard(std::path::PathBuf);
@@ -121,7 +153,7 @@ fn explicit_context_is_shared_by_enumeration_graph_and_validation() {
     );
     let md = load_md(&repo, "docs/root.md");
     let compose = reference_options(repo.path());
-    let graph_options = ReferenceGraphOptions::with_compose(compose.clone());
+    let graph_options = ReferenceGraphOptions::with_compose(&compose);
 
     let _cwd = CurrentDirGuard::set(unrelated.path());
 
@@ -150,7 +182,7 @@ fn invalid_reference_propagates_across_all_reference_surfaces() {
     write_files(&repo, &[("root.md", "::file {{}}\n")]);
     let md = load_md(&repo, "root.md");
     let compose = reference_options(repo.path());
-    let graph_options = ReferenceGraphOptions::with_compose(compose.clone());
+    let graph_options = ReferenceGraphOptions::with_compose(&compose);
 
     let enumeration = md.transclusions_with_options(&compose).unwrap_err();
     let graph = md.reference_graph(graph_options.clone()).unwrap_err();
@@ -178,7 +210,7 @@ fn permission_failure_propagates_across_all_reference_surfaces() {
     );
     let md = load_md(&repo, "root.md");
     let compose = reference_options(repo.path());
-    let graph_options = ReferenceGraphOptions::with_compose(compose.clone());
+    let graph_options = ReferenceGraphOptions::with_compose(&compose);
     let locked = repo.path().join("locked");
     let original_mode = std::fs::metadata(&locked).unwrap().permissions().mode();
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o0)).unwrap();
@@ -218,7 +250,7 @@ fn recursive_file_traversal() {
     );
 
     let md = load_md(&dir, "root.md");
-    let options = ReferenceGraphOptions::default();
+    let options = graph_options_at(dir.path());
     let graph = md.reference_graph(options).unwrap();
 
     assert_eq!(graph.node_count(), 2);
@@ -250,7 +282,7 @@ fn prologue_and_epilogue() {
     );
 
     let md = load_md(&dir, "root.md");
-    let options = ReferenceGraphOptions::default();
+    let options = graph_options_at(dir.path());
     let graph = md.reference_graph(options.clone()).unwrap();
 
     // Root + header + footer = 3 nodes
@@ -279,7 +311,7 @@ fn nested_recursion() {
     );
 
     let md = load_md(&dir, "root.md");
-    let options = ReferenceGraphOptions::default();
+    let options = graph_options_at(dir.path());
     let graph = md.reference_graph(options).unwrap();
 
     // root + mid + leaf = 3 nodes
@@ -295,7 +327,7 @@ fn cycle_detection_stops_infinite_recursion() {
     );
 
     let md = load_md(&dir, "a.md");
-    let options = ReferenceGraphOptions::default();
+    let options = graph_options_at(dir.path());
     // Should not hang and should produce exactly 2 unique nodes
     let graph = md.reference_graph(options).unwrap();
     assert_eq!(
@@ -323,7 +355,7 @@ fn cycle_composed_references_stay_finite() {
     );
 
     let md = load_md(&dir, "a.md");
-    let options = ReferenceGraphOptions::default();
+    let options = graph_options_at(dir.path());
     let composed = md.composed_references(options).unwrap();
 
     // Flattened references should be finite and non-duplicative
@@ -356,7 +388,7 @@ fn depth_limit_respected() {
     let md = load_md(&dir, "a.md");
     // Set a depth limit of 2
     let options =
-        ReferenceGraphOptions::with_compose(ComposeOptions::new().with_max_transclusion_depth(2));
+        ReferenceGraphOptions::with_compose(&crate::request_support::request_at(dir.path(), ComposeOptions::new().with_max_transclusion_depth(2)));
     let graph = md.reference_graph(options).unwrap();
 
     // Should not reach all 5 levels
@@ -376,7 +408,7 @@ fn transclusion_records_in_all_views() {
     );
 
     let md = load_md(&dir, "root.md");
-    let options = ReferenceGraphOptions::default();
+    let options = graph_options_at(dir.path());
 
     // Local references should include transclusion records
     let graph = md.reference_graph(options.clone()).unwrap();
@@ -405,7 +437,7 @@ fn toc_linking_dependency_and_generated_links_appear_in_composed_references() {
     );
 
     let md = load_md(&dir, "root.md");
-    let options = ReferenceGraphOptions::default();
+    let options = graph_options_at(dir.path());
     let graph = md.reference_graph(options.clone()).unwrap();
 
     let toc_deps: Vec<_> = graph.root()
@@ -458,7 +490,7 @@ fn toc_linking_repeated_target_generates_all_heading_links() {
     );
 
     let md = load_md(&dir, "root.md");
-    let options = ReferenceGraphOptions::default();
+    let options = graph_options_at(dir.path());
     let composed = md.composed_references(options).unwrap();
 
     for anchor in ["child.md#alpha-section", "child.md#beta-section"] {
@@ -486,7 +518,7 @@ fn mermaid_output_includes_child_nodes() {
     );
 
     let md = load_md(&dir, "root.md");
-    let options = ReferenceGraphOptions::default();
+    let options = graph_options_at(dir.path());
     let graph = md.reference_graph(options).unwrap();
 
     let mermaid = graph.to_mermaid();
@@ -504,7 +536,7 @@ fn dot_output_includes_child_nodes() {
     );
 
     let md = load_md(&dir, "root.md");
-    let options = ReferenceGraphOptions::default();
+    let options = graph_options_at(dir.path());
     let graph = md.reference_graph(options).unwrap();
 
     let dot = graph.to_dot();
@@ -529,7 +561,7 @@ fn validate_child_origin_relative_path() {
     );
 
     let md = load_md(&dir, "root.md");
-    let options = ReferenceValidationOptions::default();
+    let options = validation_options_at(dir.path());
     let report = md.validate_references(options).unwrap();
 
     // The child's link to ./sibling.md should resolve relative to sub/,
@@ -560,7 +592,7 @@ fn validate_cross_doc_fragment_in_child() {
     let md = load_md(&dir, "root.md");
     let options = ReferenceValidationOptions {
         validate_fragments: true,
-        ..Default::default()
+        ..validation_options_at(dir.path())
     };
     let report = md.validate_references(options).unwrap();
 
@@ -587,7 +619,7 @@ fn validate_missing_file_in_child() {
     );
 
     let md = load_md(&dir, "root.md");
-    let options = ReferenceValidationOptions::default();
+    let options = validation_options_at(dir.path());
     let report = md.validate_references(options).unwrap();
 
     assert!(
@@ -605,7 +637,7 @@ fn validate_missing_toc_linking_target() {
     write_files(&dir, &[("root.md", "::toc-linking missing.md\n")]);
 
     let md = load_md(&dir, "root.md");
-    let options = ReferenceValidationOptions::default();
+    let options = validation_options_at(dir.path());
     let report = md.validate_references(options).unwrap();
 
     assert!(
@@ -634,7 +666,7 @@ fn validate_fail_fast_stops_early() {
 
     let options = ReferenceValidationOptions {
         fail_fast: true,
-        ..Default::default()
+        ..validation_options_at(dir.path())
     };
     let report = md.validate_references(options).unwrap();
     assert_eq!(
@@ -661,7 +693,7 @@ fn validate_same_document_fragment_against_composed_headings() {
     let md = load_md(&dir, "root.md");
     let options = ReferenceValidationOptions {
         validate_fragments: true,
-        ..Default::default()
+        ..validation_options_at(dir.path())
     };
     let report = md.validate_references(options).unwrap();
 
@@ -696,7 +728,7 @@ fn validate_cross_doc_fragment_with_interpolated_heading() {
     let md = load_md(&dir, "root.md");
     let options = ReferenceValidationOptions {
         validate_fragments: true,
-        ..Default::default()
+        ..validation_options_at(dir.path())
     };
     let report = md.validate_references(options).unwrap();
 
@@ -725,7 +757,7 @@ fn validate_same_doc_fragment_with_interpolated_heading() {
     let md = load_md(&dir, "doc.md");
     let options = ReferenceValidationOptions {
         validate_fragments: true,
-        ..Default::default()
+        ..validation_options_at(dir.path())
     };
     let report = md.validate_references(options).unwrap();
 
@@ -756,7 +788,7 @@ fn validate_file_links_skips_local_path_validation() {
     );
 
     let md = load_md(&dir, "root.md");
-    let options = ReferenceValidationOptions::default();
+    let options = validation_options_at(dir.path());
     let report = md.validate_references(options).unwrap();
 
     assert!(
@@ -796,7 +828,7 @@ fn inline_css_graph_collects_across_nodes() {
     );
 
     let md = load_md(&dir, "root.md");
-    let options = ReferenceGraphOptions::default();
+    let options = graph_options_at(dir.path());
     let css_blocks = md.inline_css_graph(options).unwrap();
     assert!(
         css_blocks.len() >= 2,
@@ -823,7 +855,7 @@ fn script_import_graph_collects_across_nodes() {
     );
 
     let md = load_md(&dir, "root.md");
-    let options = ReferenceGraphOptions::default();
+    let options = graph_options_at(dir.path());
     let imports = md.script_import_graph(options).unwrap();
     assert!(
         imports.len() >= 2,
@@ -855,8 +887,10 @@ fn reference_graph_with_cache_root() {
     );
 
     let md = load_md(&dir, "root.md");
-    let mut options = ReferenceGraphOptions::default();
-    options.compose = options.compose.with_cache_root(cache_dir.path());
+    let options = ReferenceGraphOptions::with_compose(&crate::request_support::request_at(
+        dir.path(),
+        ComposeOptions::new().with_cache_root(cache_dir.path()),
+    ));
 
     // Two passes against one cache root build identical graphs; no local
     // artifact is persisted between them (R18).
@@ -887,13 +921,15 @@ fn fragment_validation_with_cache_root() {
     );
 
     let md = load_md(&dir, "root.md");
-    let mut graph_options = ReferenceGraphOptions::default();
-    graph_options.compose = graph_options.compose.with_cache_root(cache_dir.path());
+    let graph_options = ReferenceGraphOptions::with_compose(&crate::request_support::request_at(
+        dir.path(),
+        ComposeOptions::new().with_cache_root(cache_dir.path()),
+    ));
 
     let options = ReferenceValidationOptions {
         graph: graph_options,
         validate_fragments: true,
-        ..Default::default()
+        ..validation_options_at(dir.path())
     };
     let report = md.validate_references(options).unwrap();
 
@@ -921,7 +957,7 @@ fn transclusion_ref_resolved_target_filled() {
     );
 
     let md = load_md(&dir, "root.md");
-    let refs = md.transclusions().unwrap();
+    let refs = md.transclusions_with_options(&crate::request_support::request_at(dir.path(), ComposeOptions::new())).unwrap();
     assert_eq!(refs.len(), 1);
     assert!(
         refs[0].resolved_target.is_some(),
@@ -945,7 +981,7 @@ fn transclusion_ref_all_kinds() {
     );
 
     let md = load_md(&dir, "root.md");
-    let refs = md.transclusions().unwrap();
+    let refs = md.transclusions_with_options(&crate::request_support::request_at(dir.path(), ComposeOptions::new())).unwrap();
     assert_eq!(refs.len(), 3);
 
     let kinds: Vec<_> = refs.iter().map(|r| r.origin.syntax).collect();
@@ -966,7 +1002,7 @@ fn transclusion_ref_resolved_target_is_correct_path() {
     );
 
     let md = load_md(&dir, "root.md");
-    let refs = md.transclusions().unwrap();
+    let refs = md.transclusions_with_options(&crate::request_support::request_at(dir.path(), ComposeOptions::new())).unwrap();
     assert_eq!(refs.len(), 1);
 
     let resolved = refs[0].resolved_target.as_deref().unwrap();
@@ -999,11 +1035,12 @@ fn reference_graph_with_namespaced_cache_root_writes_nothing() {
     );
 
     let md = load_md(&dir, "root.md");
-    let mut options = ReferenceGraphOptions::default();
-    options.compose = options
-        .compose
-        .with_cache_root(cache_dir.path())
-        .with_cache_namespace("test-branch");
+    let options = ReferenceGraphOptions::with_compose(&crate::request_support::request_at(
+        dir.path(),
+        ComposeOptions::new()
+            .with_cache_root(cache_dir.path())
+            .with_cache_namespace("test-branch"),
+    ));
 
     // The only persistent store is the remote-body store, and it creates its
     // namespaced directories only when it writes a remote body; a local-only
@@ -1033,7 +1070,7 @@ fn section_context_populated_in_graph() {
 
     let md = load_md(&dir, "root.md");
     let graph = md
-        .reference_graph(ReferenceGraphOptions::default())
+        .reference_graph(graph_options_at(dir.path()))
         .unwrap();
 
     assert!(
@@ -1074,7 +1111,7 @@ fn file_tree_builds_from_real_document() {
     );
 
     let path = dir.path().join("doc.md");
-    let mut tree = FileTree::new(&path).unwrap();
+    let mut tree = FileTree::new(&path, &request_beside(&path)).unwrap();
     tree.ensure_built().unwrap();
 
     let output = tree.render_optimistic(Some(120));
@@ -1112,7 +1149,7 @@ fn file_tree_follow_mode() {
     );
 
     let path = dir.path().join("root.md");
-    let mut tree = FileTree::new(&path).unwrap().follow_transclusions();
+    let mut tree = FileTree::new(&path, &request_beside(&path)).unwrap().follow_transclusions();
     tree.ensure_built().unwrap();
 
     let output = tree.render_optimistic(Some(120));
@@ -1144,7 +1181,7 @@ fn file_tree_toc_linking_follow_mode() {
     );
 
     let path = dir.path().join("root.md");
-    let mut tree = FileTree::new(&path).unwrap().follow_transclusions();
+    let mut tree = FileTree::new(&path, &request_beside(&path)).unwrap().follow_transclusions();
     tree.ensure_built().unwrap();
 
     let output = tree.render_optimistic(Some(120));
@@ -1175,7 +1212,7 @@ fn file_tree_toc_linking_follow_validate_catches_child_issues() {
     );
 
     let path = dir.path().join("root.md");
-    let mut tree = FileTree::new(&path)
+    let mut tree = FileTree::new(&path, &request_beside(&path))
         .unwrap()
         .follow_transclusions()
         .validate();
@@ -1218,7 +1255,7 @@ fn file_tree_epilogue_follow_mode() {
     );
 
     let path = dir.path().join("root.md");
-    let mut tree = FileTree::new(&path).unwrap().follow_transclusions();
+    let mut tree = FileTree::new(&path, &request_beside(&path)).unwrap().follow_transclusions();
     tree.ensure_built().unwrap();
 
     let output = tree.render_optimistic(Some(120));
@@ -1254,7 +1291,7 @@ fn file_tree_multiple_prologues_follow_mode() {
     );
 
     let path = dir.path().join("root.md");
-    let mut tree = FileTree::new(&path).unwrap().follow_transclusions();
+    let mut tree = FileTree::new(&path, &request_beside(&path)).unwrap().follow_transclusions();
     tree.ensure_built().unwrap();
 
     let output = tree.render_optimistic(Some(120));
@@ -1287,7 +1324,7 @@ fn file_tree_show_root_false_preserves_subtree() {
     );
 
     let path = dir.path().join("root.md");
-    let mut tree = FileTree::new(&path).unwrap().show_root(false);
+    let mut tree = FileTree::new(&path, &request_beside(&path)).unwrap().show_root(false);
     tree.ensure_built().unwrap();
 
     let output = tree.render_optimistic(Some(120));
@@ -1323,7 +1360,7 @@ fn file_tree_section_caption_respects_heading_level() {
     );
 
     let md = load_md(&dir, "root.md");
-    let options = ReferenceGraphOptions::default();
+    let options = graph_options_at(dir.path());
     let graph = md.reference_graph(options).unwrap();
 
     // Find the insertion for child.md
@@ -1363,7 +1400,7 @@ fn prebuilt_graph_matches_build_then_validate() {
         ],
     );
     let md = load_md(&dir, "root.md");
-    let options = ReferenceValidationOptions::default();
+    let options = validation_options_at(dir.path());
 
     let via_build = md.validate_references(options.clone()).unwrap();
 
@@ -1384,14 +1421,14 @@ fn prebuilt_graph_rejects_edited_root_body() {
     write_files(&dir, &[("root.md", "# Root\n\n[ok](https://example.com)\n")]);
     let original = load_md(&dir, "root.md");
     let graph = original
-        .reference_graph(ReferenceGraphOptions::default())
+        .reference_graph(graph_options_at(dir.path()))
         .unwrap();
 
     // A different in-memory document (extra body line) reuses the stale graph.
     let edited = Markdown::new("# Root\n\n[ok](https://example.com)\n\nExtra line\n")
         .with_source(ComposeSource::File(dir.path().join("root.md")));
     let err = edited
-        .validate_references_with_graph(&graph, ReferenceValidationOptions::default())
+        .validate_references_with_graph(&graph, validation_options_at(dir.path()))
         .unwrap_err();
     assert_eq!(mismatch_kind(&err),ReferenceGraphMismatchKind::Document);
     // Human-readable diagnostic still names the differing dimension.
@@ -1407,7 +1444,7 @@ fn prebuilt_graph_rejects_different_source() {
     let dir = TempDir::new().unwrap();
     let body = "# Root\n\n[ok](https://example.com)\n";
     write_files(&dir, &[("a.md", body), ("b.md", body)]);
-    let opts = ReferenceValidationOptions::default();
+    let opts = validation_options_at(dir.path());
 
     let md_a = load_md(&dir, "a.md");
     let graph = md_a.reference_graph(opts.graph.clone()).unwrap();
@@ -1432,7 +1469,7 @@ fn prebuilt_transclusion_only_graph_rejected_by_full_validation() {
     let dir = TempDir::new().unwrap();
     write_files(&dir, &[("root.md", "# Root\n\n[ok](https://example.com)\n")]);
     let md = load_md(&dir, "root.md");
-    let opts = ReferenceValidationOptions::default();
+    let opts = validation_options_at(dir.path());
 
     let graph = md.transclusion_graph(opts.graph.clone()).unwrap();
     let err = md
@@ -1456,12 +1493,12 @@ fn prebuilt_graph_rejects_changed_graph_options() {
     // differs (context capture is shared through the clone).
     let base = ComposeOptions::new();
     let graph = md
-        .reference_graph(ReferenceGraphOptions::with_compose(base.clone()))
+        .reference_graph(ReferenceGraphOptions::with_compose(&crate::request_support::request(base.clone())))
         .unwrap();
 
     let changed = base.with_max_transclusion_depth(3);
     let val_opts =
-        ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(changed));
+        ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(&crate::request_support::request(changed)));
     let err = md
         .validate_references_with_graph(&graph, val_opts)
         .unwrap_err();
@@ -1483,7 +1520,7 @@ fn prebuilt_graph_rejects_edited_child_before_flatten() {
         &[("root.md", "# Root\n\n::file child.md\n"), ("child.md", "# Child\n")],
     );
     let md = load_md(&dir, "root.md");
-    let opts = ReferenceValidationOptions::default(); // fragments disabled
+    let opts = validation_options_at(dir.path()); // fragments disabled
     let graph = md.reference_graph(opts.graph.clone()).unwrap();
 
     std::fs::write(
@@ -1515,7 +1552,7 @@ fn prebuilt_graph_rejects_missing_child() {
         &[("root.md", "# Root\n\n::file child.md\n"), ("child.md", "# Child\n")],
     );
     let md = load_md(&dir, "root.md");
-    let opts = ReferenceValidationOptions::default();
+    let opts = validation_options_at(dir.path());
     let graph = md.reference_graph(opts.graph.clone()).unwrap();
 
     std::fs::remove_file(dir.path().join("child.md")).unwrap();
@@ -1542,7 +1579,7 @@ fn prebuilt_graph_rejects_unreadable_child() {
         &[("root.md", "# Root\n\n::file child.md\n"), ("child.md", "# Child\n")],
     );
     let md = load_md(&dir, "root.md");
-    let opts = ReferenceValidationOptions::default();
+    let opts = validation_options_at(dir.path());
     let graph = md.reference_graph(opts.graph.clone()).unwrap();
 
     let child = dir.path().join("child.md");
@@ -1574,7 +1611,7 @@ fn prebuilt_graph_bypasses_cache_for_descendant_edit() {
 
     // Build the graph with a cache root configured (no child is persisted).
     let graph_opts =
-        ReferenceGraphOptions::with_compose(ComposeOptions::new().with_cache_root(cache_root.path()));
+        ReferenceGraphOptions::with_compose(&crate::request_support::request_at(dir.path(), ComposeOptions::new().with_cache_root(cache_root.path())));
     let graph = md.reference_graph(graph_opts.clone()).unwrap();
 
     std::fs::write(dir.path().join("child.md"), "# Child edited\n").unwrap();
@@ -1607,7 +1644,7 @@ fn cloned_prebuilt_graph_validates_identically() {
         ],
     );
     let md = load_md(&dir, "root.md");
-    let opts = ReferenceValidationOptions::default();
+    let opts = validation_options_at(dir.path());
     let graph = md.reference_graph(opts.graph.clone()).unwrap();
     let cloned = graph.clone();
 
@@ -1639,7 +1676,7 @@ fn file_tree_validate_reuses_graph_without_spurious_mismatch() {
         ],
     );
     let path = dir.path().join("root.md");
-    let mut tree = FileTree::new(&path).unwrap().validate();
+    let mut tree = FileTree::new(&path, &request_beside(&path)).unwrap().validate();
     tree.ensure_built().expect("graph reuse must not mismatch");
     let report = tree.validation_report().expect("validation ran");
     assert!(report.is_valid(), "issues: {:?}", report.issues);
@@ -1655,7 +1692,7 @@ fn prebuilt_graph_rejects_changed_frontmatter() {
     write_files(&dir, &[("root.md", &format!("---\ntitle: A\n---\n{body}"))]);
     let original = load_md(&dir, "root.md");
     let graph = original
-        .reference_graph(ReferenceGraphOptions::default())
+        .reference_graph(graph_options_at(dir.path()))
         .unwrap();
 
     // Same body and references, different frontmatter value → the stale graph
@@ -1663,7 +1700,7 @@ fn prebuilt_graph_rejects_changed_frontmatter() {
     let edited = Markdown::new(format!("---\ntitle: B\n---\n{body}"))
         .with_source(ComposeSource::File(dir.path().join("root.md")));
     let err = edited
-        .validate_references_with_graph(&graph, ReferenceValidationOptions::default())
+        .validate_references_with_graph(&graph, validation_options_at(dir.path()))
         .unwrap_err();
     assert_eq!(mismatch_kind(&err),ReferenceGraphMismatchKind::Document);
     assert!(
@@ -1679,7 +1716,7 @@ fn prebuilt_graph_rejects_different_url_source() {
     let md_a = Markdown::new(body)
         .with_source(ComposeSource::Url("https://host.example/a.md".parse().unwrap()));
     let graph = md_a
-        .reference_graph(ReferenceGraphOptions::default())
+        .reference_graph(graph_options())
         .unwrap();
 
     // Same content, different URL source → source rejects reuse even though the
@@ -1687,7 +1724,7 @@ fn prebuilt_graph_rejects_different_url_source() {
     let md_b = Markdown::new(body)
         .with_source(ComposeSource::Url("https://host.example/b.md".parse().unwrap()));
     let err = md_b
-        .validate_references_with_graph(&graph, ReferenceValidationOptions::default())
+        .validate_references_with_graph(&graph, validation_options())
         .unwrap_err();
     assert_eq!(mismatch_kind(&err),ReferenceGraphMismatchKind::Source);
     assert!(
@@ -1709,7 +1746,7 @@ fn prebuilt_graph_rejects_representative_option_families() {
     // shared clone carries the same captured context).
     let base = ComposeOptions::new();
     let graph = md
-        .reference_graph(ReferenceGraphOptions::with_compose(base.clone()))
+        .reference_graph(ReferenceGraphOptions::with_compose(&crate::request_support::request(base.clone())))
         .unwrap();
 
     let mutations: Vec<(&str, ComposeOptions)> = vec![
@@ -1722,7 +1759,7 @@ fn prebuilt_graph_rejects_representative_option_families() {
 
     for (family, opts) in mutations {
         let val_opts =
-            ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(opts));
+            ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(&crate::request_support::request(opts)));
         let err = md
             .validate_references_with_graph(&graph, val_opts)
             .unwrap_err();
@@ -1765,7 +1802,7 @@ fn prebuilt_graph_rejects_recreated_shell_handler() {
     let handler_a: Arc<dyn ShellApprovalHandler> = Arc::new(Denier);
     let graph = md
         .reference_graph(ReferenceGraphOptions::with_compose(
-            base.clone().with_shell_approval_handler(handler_a),
+            &crate::request_support::request(base.clone().with_shell_approval_handler(handler_a)),
         ))
         .unwrap();
 
@@ -1775,7 +1812,7 @@ fn prebuilt_graph_rejects_recreated_shell_handler() {
     // A fresh, behaviorally-identical handler is a different instance.
     let handler_b: Arc<dyn ShellApprovalHandler> = Arc::new(Denier);
     let val_recreated = ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(
-        base.clone().with_shell_approval_handler(handler_b),
+        &crate::request_support::request(base.clone().with_shell_approval_handler(handler_b)),
     ));
     let err = md
         .validate_references_with_graph(&graph, val_recreated)
@@ -1792,7 +1829,7 @@ fn prebuilt_graph_rejects_recreated_shell_handler() {
 
     // Supplying no handler at validation time is likewise rejected.
     let val_absent =
-        ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(base));
+        ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(&crate::request_support::request(base)));
     let err = md
         .validate_references_with_graph(&graph, val_absent)
         .unwrap_err();
@@ -1829,7 +1866,7 @@ fn graph_ownership_does_not_extend_shell_handler_lifetime() {
     let handler: Arc<dyn ShellApprovalHandler> = Arc::new(Denier);
     // The `handler` variable plus the live `opts` each hold one strong ref.
     let opts = ReferenceGraphOptions::with_compose(
-        ComposeOptions::new().with_shell_approval_handler(Arc::clone(&handler)),
+        &crate::request_support::request(ComposeOptions::new().with_shell_approval_handler(Arc::clone(&handler))),
     );
     let strong_with_opts = Arc::strong_count(&handler);
 
@@ -1863,7 +1900,7 @@ fn prebuilt_graph_rejects_recreated_preflight_graph() {
     let base = ComposeOptions::new();
     let graph = md
         .reference_graph(ReferenceGraphOptions::with_compose(
-            base.clone().with_preflight_graph(PreflightGraphNode::default()),
+            &crate::request_support::request(base.clone().with_preflight_graph(PreflightGraphNode::default())),
         ))
         .unwrap();
 
@@ -1872,7 +1909,7 @@ fn prebuilt_graph_rejects_recreated_preflight_graph() {
 
     // A fresh preflight with identical (default) data is a different instance.
     let val_recreated = ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(
-        base.with_preflight_graph(PreflightGraphNode::default()),
+        &crate::request_support::request(base.with_preflight_graph(PreflightGraphNode::default())),
     ));
     let err = md
         .validate_references_with_graph(&graph, val_recreated)
@@ -1911,14 +1948,14 @@ fn graph_ownership_does_not_extend_preflight_graph_lifetime() {
     // options and is released when `reference_graph` returns.
     let graph = md
         .reference_graph(ReferenceGraphOptions::with_compose(
-            base.clone().with_preflight_graph(PreflightGraphNode::default()),
+            &crate::request_support::request(base.clone().with_preflight_graph(PreflightGraphNode::default())),
         ))
         .unwrap();
 
     // Validation supplying a fresh preflight is rejected: the graph retained no
     // strong reference to keep the build-time instance alive to be matched.
     let val = ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(
-        base.with_preflight_graph(PreflightGraphNode::default()),
+        &crate::request_support::request(base.with_preflight_graph(PreflightGraphNode::default())),
     ));
     let err = md.validate_references_with_graph(&graph, val).unwrap_err();
     assert_eq!(
@@ -1946,7 +1983,7 @@ fn prebuilt_graph_rejects_recreated_shared_remote_fetch() {
     let base = ComposeOptions::new();
     let graph = md
         .reference_graph(ReferenceGraphOptions::with_compose(
-            base.clone().with_shared_remote_fetch(),
+            &crate::request_support::request(base.clone().with_shared_remote_fetch()),
         ))
         .unwrap();
 
@@ -1955,7 +1992,7 @@ fn prebuilt_graph_rejects_recreated_shared_remote_fetch() {
 
     // A fresh shared runtime is a different instance even with identical config.
     let val = ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(
-        base.with_shared_remote_fetch(),
+        &crate::request_support::request(base.with_shared_remote_fetch()),
     ));
     let err = md.validate_references_with_graph(&graph, val).unwrap_err();
     assert_eq!(
@@ -1987,17 +2024,17 @@ fn graph_from_cloned_options_passes_original_and_further_clone() {
     );
     let md = load_md(&dir, "root.md");
 
-    let original = ComposeOptions::new();
+    let original = crate::request_support::request_at(dir.path(), ComposeOptions::new());
     // Mirror FileTree::ensure_built: build from a clone of the options.
     let graph = md
-        .reference_graph(ReferenceGraphOptions::with_compose(original.clone()))
+        .reference_graph(ReferenceGraphOptions::with_compose(&original.clone()))
         .unwrap();
 
     let via_original = md
         .validate_references_with_graph(
             &graph,
             ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(
-                original.clone(),
+                &original.clone(),
             )),
         )
         .unwrap();
@@ -2007,7 +2044,7 @@ fn graph_from_cloned_options_passes_original_and_further_clone() {
         .validate_references_with_graph(
             &graph,
             ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(
-                original.clone(),
+                &original.clone(),
             )),
         )
         .unwrap();
@@ -2031,7 +2068,7 @@ fn unchanged_child_via_multiple_insertions_passes() {
         ],
     );
     let md = load_md(&dir, "root.md");
-    let opts = ReferenceValidationOptions::default();
+    let opts = validation_options_at(dir.path());
     let graph = md.reference_graph(opts.graph.clone()).unwrap();
 
     let report = md.validate_references_with_graph(&graph, opts).unwrap();
@@ -2056,7 +2093,7 @@ fn prebuilt_graph_view_json_omits_provenance() {
     );
     let md = load_md(&dir, "root.md");
     let graph = md
-        .reference_graph(ReferenceGraphOptions::default())
+        .reference_graph(graph_options_at(dir.path()))
         .unwrap();
 
     for follow in [false, true] {

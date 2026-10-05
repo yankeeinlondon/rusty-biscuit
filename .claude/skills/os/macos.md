@@ -31,8 +31,28 @@ conditions that masquerade as repository defects.
   `prunable`. Do not treat that state as corruption; `git worktree prune`
   clears the registration, and long-lived worktrees belong under
   `~/.claudine/worktrees`, not `/tmp`.
+- Case-insensitive APFS folds names by a Unicode rule, not by lowercasing: `ς` opens a stored
+  `Σ` and `ß` opens a stored `SS`, though their `to_lowercase()` strings
+  differ. Decide whether a spelling is the stored one by an exact
+  `read_dir` entry, never by comparing folded strings. When the parent can
+  be traversed but not listed (mode `0111`), `fs::canonicalize` still
+  reports the stored final name (`locked/anchor/DOCS` canonicalizes to
+  `…/docs`), unless that name is a symlink. biscuit-file's absolute-glob
+  spelling check relies on both facts (verified 2026-10-02).
+- macOS temporary directories can live on a case-sensitive filesystem. Do
+  not assert that a differently cased ASCII or Unicode name opens merely
+  because `cfg!(target_os = "macos")` is true. Probe the fixture directory's
+  behavior and keep the ordinary exact-name and mismatch assertions on both
+  filesystem types. Reproduced 2026-10-02 with a temporary HFSX image:
+  `hdiutil create -size 40m -fs HFSX -volname glob-review-case -type UDIF /tmp/glob-review-case.dmg`,
+  attach with `hdiutil attach -nobrowse -mountpoint /tmp/glob-review-case-mount /tmp/glob-review-case.dmg`,
+  then set `TMPDIR=/tmp/glob-review-case-mount` on the area's `just test`
+  command. Detach the image and remove it afterward. These commands need no
+  administrator prompt or foreground window.
 - `dirs::home_dir()` honors `HOME` here, which is why a hermetic-home test can
-  be green on macOS and read the real home directory on Windows.
+  be green on macOS and read the real home directory on Windows. The shared
+  `biscuit_file::home_dir()` follows `USERPROFILE` on Windows instead, so a
+  fixture setting both variables lands in the same place on every OS.
 - A Unix socket path holds at most 104 bytes (`sun_path`), and the per-user
   `$TMPDIR` (`/private/var/folders/xx/…/T/`) spends about half of that. A
   test that starts a socket-binding daemon under a `tempfile` directory can
@@ -119,7 +139,10 @@ focus-stealing tests could run, and they do not run on CI at all. Details in
   `2026-09-24-ux-improvements` ran against the main checkout this way. The
   giveaways were a first log line naming `/Users/ken/coding/...` and
   test counts that did not match the branch. In scripts, `unset CDPATH` and
-  `cd` to absolute paths (or `./area`), and log `pwd` first.
+  `cd` to absolute paths (or `./area`), and log `pwd` first. It redirects
+  edits too: on 2026-10-03 a `cd darkmatter/lib/src && sed -i …` issued while
+  the shell was already inside that directory wrote into the main checkout.
+  After any relative-`cd` edit, check `git -C <main checkout> status`.
 - **Claudine currently shadows the login home for agent sessions on this
   host.** An agent can inherit `HOME=/Users/ken/.claudine` even though the
   login home and OpenPGP keyring are under `/Users/ken`. A signed Git command

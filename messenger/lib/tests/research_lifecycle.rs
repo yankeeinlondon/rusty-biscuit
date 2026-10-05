@@ -8,6 +8,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
 use messenger::research::delta::{Baseline, ChangeKind, Delta, FlagKind, compare};
 use messenger::research::model::{Mappings, Roster};
 use messenger::research::project::AcceptedDocument;
@@ -16,6 +17,14 @@ use tempfile::TempDir;
 
 fn lib_dir() -> PathBuf {
     biscuit_test_harness::manifest_dir!()
+}
+
+/// A loader whose context is built for the workspace root from a snapshot
+/// that reads nothing from the test process.
+fn research_loader(workspace: Workspace) -> Loader {
+    let snapshot = RequestSnapshot::new(workspace.repo_root());
+    let context = build_resolution_context(&snapshot).expect("research root context builds");
+    Loader::new(workspace, context)
 }
 
 fn repo_root() -> PathBuf {
@@ -44,7 +53,7 @@ impl Repo {
             fs::create_dir_all(target.parent().expect("parent")).expect("mkdir");
             fs::copy(repo_root().join(path), target).expect("copy");
         }
-        let loader = Loader::new(Workspace::new(dir.path()).expect("absolute"));
+        let loader = research_loader(Workspace::new(dir.path()).expect("absolute"));
         let roster = loader
             .load_roster(&dir.path().join("messenger/docs/platforms.yaml"))
             .expect("roster")

@@ -189,7 +189,7 @@ pub(crate) fn resolve_prompt_display_path(
     {
         return biscuit_file::to_portable_string(rel);
     }
-    if let Some(home) = dirs::home_dir()
+    if let Some(home) = biscuit_file::home_dir()
         && let Ok(rel) = path.strip_prefix(&home)
     {
         return format!("~/{}", biscuit_file::to_portable_string(rel));

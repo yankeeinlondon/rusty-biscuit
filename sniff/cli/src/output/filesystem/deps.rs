@@ -8,7 +8,7 @@ use biscuit_terminal::components::graph_expression::{
     GraphExpression, GraphInputSyntax, GraphOrientation,
 };
 use biscuit_terminal::components::list::UnorderedList;
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{InlineProse, Prose};
 use biscuit_terminal::components::renderable::{
     BrowserRenderable, RenderableTerminalContent, TerminalRenderable,
 };
@@ -384,19 +384,19 @@ pub fn render_repo_deps_text(
 
     let mut outer_items: Vec<RenderableTerminalContent> = Vec::new();
     for pkg in &relevant {
-        let label = Prose::new(format!("<b><blue>{}</blue></b>", pkg.name)).render(&term);
+        let label = InlineProse::new(format!("<b><blue>{}</blue></b>", pkg.name)).render(&term);
         outer_items.push(RenderableTerminalContent::String(label));
 
         let mut detail_items: Vec<String> = Vec::new();
         if !pkg.depends_on.is_empty() {
             detail_items.push(
-                Prose::new(format!("<b>depends-on:</b> {}", pkg.depends_on.join(", ")))
+                InlineProse::new(format!("<b>depends-on:</b> {}", pkg.depends_on.join(", ")))
                     .render(&term),
             );
         }
         if !pkg.used_by.is_empty() {
             detail_items.push(
-                Prose::new(format!("<b>used-by:</b> {}", pkg.used_by.join(", "))).render(&term),
+                InlineProse::new(format!("<b>used-by:</b> {}", pkg.used_by.join(", "))).render(&term),
             );
         }
 

@@ -17,9 +17,11 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use darkmatter::markdown::compose::RequestSnapshot;
 use dmls::capabilities::ClientProfile;
 use dmls::config::{DmlsConfig, SchemaExtensionConfig};
-use dmls::graph::WorkspaceGraph;
+use dmls::context::RepositoryContexts;
+use dmls::graph::{NoContexts, WorkspaceGraph};
 use dmls::overlay::OverlayState;
 use dmls::providers::{DocumentContext, ProviderRegistry};
 use dmls::source_map::{PositionEncoding, SourceMap};
@@ -72,9 +74,12 @@ fn diagnostics_json(path: &Path, config: &DmlsConfig) -> Value {
     let root = path.parent().expect("document directory").to_path_buf();
     let uri: Uri = url::Url::from_file_path(path).unwrap().as_str().parse().unwrap();
     let state = OverlayState::default();
-    let overlay = state.for_document(&uri, &text, path, config, std::slice::from_ref(&root));
+    let resolution =
+        RepositoryContexts::new(RequestSnapshot::new(&root)).for_document(path);
+    let overlay =
+        state.for_document(&uri, &text, path, config, std::slice::from_ref(&root), &resolution);
     let source_map = SourceMap::new(uri.clone(), 1, PositionEncoding::Utf16, Arc::from(text.as_str()));
-    let graph = WorkspaceGraph::build(&BTreeMap::new(), 1);
+    let graph = WorkspaceGraph::build(&BTreeMap::new(), 1, &NoContexts);
     let profile = ClientProfile::from_initialize(&InitializeParams::default(), PositionEncoding::Utf16);
     let ctx = DocumentContext {
         uri: &uri,
@@ -86,6 +91,7 @@ fn diagnostics_json(path: &Path, config: &DmlsConfig) -> Value {
         config,
         profile: &profile,
         overlay: overlay.as_ref(),
+        resolution: &resolution,
     };
     let diagnostics = ProviderRegistry::with_substrate().diagnostics(&ctx);
     let mut json = serde_json::to_value(diagnostics).expect("serialize diagnostics");

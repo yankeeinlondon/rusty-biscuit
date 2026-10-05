@@ -111,8 +111,8 @@ pub(super) fn unmapped_event_markup(event: &UnmappedNativeEvent) -> String {
     format!(
         "<cyan>{}</cyan> <dim>— {} {}</dim>",
         Prose::escape_text(event.native_event),
-        Prose::escape_text(event.description),
-        Prose::escape_text(event.remediation),
+        Prose::escape_text_outside_code_spans(event.description),
+        Prose::escape_text_outside_code_spans(event.remediation),
     )
 }
 

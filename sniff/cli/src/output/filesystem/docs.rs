@@ -4,7 +4,7 @@ use std::fmt::Write;
 use std::rc::Rc;
 
 use biscuit_terminal::components::list::UnorderedList;
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{InlineProse, Prose};
 use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
 use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::docs::MarkdownMeta;
@@ -42,7 +42,7 @@ pub fn render_docs_output(docs: &[MarkdownMeta], verbose: u8) -> TextOutput {
         .flat_map(|doc| {
             let file_link =
                 format_styled_filepath(&doc.relative, &doc.filepath.display().to_string());
-            let main = Prose::new(&file_link).render(&terminal);
+            let main = InlineProse::new(&file_link).render(&terminal);
             let mut result = vec![RenderableTerminalContent::String(main)];
 
             if verbose > 0 {
@@ -61,13 +61,13 @@ pub fn render_docs_output(docs: &[MarkdownMeta], verbose: u8) -> TextOutput {
                         "<b>title:</b> {} <dim><i>(from {})</i></dim>",
                         doc.title, title_source_label
                     );
-                    details.push(Prose::new(&title_line).render(&terminal));
+                    details.push(InlineProse::new(&title_line).render(&terminal));
                 } else {
                     let title_line = format!(
                         "<b>title:</b> <yellow>none</yellow> <dim><i>(from {})</i></dim>",
                         title_source_label
                     );
-                    details.push(Prose::new(&title_line).render(&terminal));
+                    details.push(InlineProse::new(&title_line).render(&terminal));
                 }
 
                 // updated
@@ -80,13 +80,13 @@ pub fn render_docs_output(docs: &[MarkdownMeta], verbose: u8) -> TextOutput {
                     "<b>updated:</b> {} <dim><i>(from {})</i></dim>",
                     date_str, updated_source_label
                 );
-                details.push(Prose::new(&updated_line).render(&terminal));
+                details.push(InlineProse::new(&updated_line).render(&terminal));
 
                 // frontmatter properties
                 if !doc.frontmatter_keys.is_empty() {
                     let props = doc.frontmatter_keys.join(", ");
                     let props_line = format!("<b>frontmatter properties:</b> <i>{props}</i>");
-                    details.push(Prose::new(&props_line).render(&terminal));
+                    details.push(InlineProse::new(&props_line).render(&terminal));
                 }
 
                 let detail_list = UnorderedList::new(details).with_bullet("  ");

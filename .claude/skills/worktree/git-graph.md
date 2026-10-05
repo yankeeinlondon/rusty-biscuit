@@ -50,7 +50,7 @@ lane tip, then a diverged `origin/<default>` tip. Results:
 | unmerged | — | lane |
 | merged directly | strong | lane `T --not C^1`, `with_merge(T, C)` |
 | no separate history | strong | a label at `T`, never an empty lane |
-| integrated otherwise | weak | lane, no merge, incomplete |
+| integrated otherwise | weak | lane, no merge, `GraphFacts::merged_elsewhere` (not incomplete) |
 
 - A strong result wins at the first candidate that yields one. A weak result
   lets the walk continue; it is returned only when no later candidate is strong.
@@ -58,6 +58,13 @@ lane tip, then a diverged `origin/<default>` tip. Results:
   merge (`MergedDirectly { after_indirect: true }`).
 - A `GatherGap` before any weak result is the result; one after it returns the
   weak result.
+- Integrated otherwise is a **verified** answer, never a gap: `place` reports
+  it as `Placement::merged_through` (the carrying merge `C` and its lane), and
+  `assemble` turns it into `MergedElsewhere`, naming the carrying branch only
+  when a drawn placement's own merge (`merges_at`) is `C`. It used to set
+  `incomplete`, which produced a "history not shown" note nobody could act on
+  (observed 2026-10-04: a branch whose last commit reached `origin/main`
+  through another branch's PR).
 - A merged branch's fork is measured against `C^1`, or against its parent's tip
   only when the merge went elsewhere and was not found after an indirect match
   (the parent's tip contains `T` otherwise).
@@ -122,7 +129,8 @@ A lane's boundary (the first commit below it) is classified too, sharing one
 - Every gathered line passes its branch tip (`GraphLine::with_tip`). `GitGraph`
   labels a line without commits at that tip and never at its fork.
 - A tag, fork, or merge commit it cannot draw sets `GitGraphPlan::incomplete`
-  ("Some history is not shown") **instead of being substituted**.
+  **instead of being substituted**; `wt list` words it as a closing note
+  ([list.md](list.md)).
 - `GraphLine::with_merge(source, destination)` (a `LaneMerge`, appended oldest
   first) draws a `merge`. A source in the middle of a lane makes `GitGraph` emit
   that lane in segments: pause after the source and the lanes forked at it,
@@ -229,3 +237,37 @@ Other L1 facts:
 - The floor row measures the remaining fixed cost (about 350 ms).
 - Record with
   `WT_GRAPH_PERF_SAMPLES=10 just test-perf perf_graph --cargo-profile release`.
+
+## Focused view: lanes that hold a fork
+
+- `focused_view` loops: after each `assemble`, every `GraphFacts::forked_off_line`
+  entry (a fork no drawn lane holds, found by `drawn`, which checks each
+  lane's `placed` anchors **and** its drawn entries) looks for a
+  `fork_holder`: an undrawn worktree branch whose first-parent chain holds
+  the fork (`classify` gives `NoSeparateHistory`), recorded parent first.
+  Found holders are selected with their own recorded parents and the view
+  is gathered again; the loop ends when nothing new is found.
+- **Trap:** `GitGraph::in_view` filters a focused view's lanes itself. It
+  used to keep only the current branch and its parent, so a holder `wt`
+  passed was silently dropped and its fork reported as undrawn. It now keeps
+  the parent chain and any lane holding an in-view lane's fork.
+- `GraphFacts::to_git_graph` tags each `MergedElsewhere` tip `in <into>`
+  (`with_ref`), only when that tip is one of the branch line's drawn
+  entries: an undrawn ref would come back as a `GraphOmission::Tag` note.
+
+## Merges into lanes other than parent or default
+
+- `place` classifies against parent, default, and origin only. When that
+  gives `Unmerged` or `IntegratedOtherwise`, `direct_merge_elsewhere` tries
+  every other selected branch (not the parent) and accepts only
+  `MergedDirectly` (tip is the merge's second parent). It overrides only
+  `merge`: the fork and stop stay from the first classification. Measuring
+  the fork against the merging lane hung a merged-into-child branch from
+  the child.
+- Cost: one `--is-ancestor` per (branch, other lane) pair not already in
+  `Classifications`, pinned in
+  `the_base_view_gives_every_worktree_branch_a_line`.
+- `GitGraph`'s emitter used to drop a merge whose destination lane is
+  emitted before the source lane (depth-first order). `EmitState::awaiting`
+  now parks a lane before such a destination; emitting the source resumes
+  it, and the final loop drops only waits that can never end.

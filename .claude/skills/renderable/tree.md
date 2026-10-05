@@ -175,6 +175,11 @@ patch completed HTML:
   the `xml` prefix) with `BrowserAttrNameError`, at construction *and* on serde
   deserialize. The fixed `data-` / `aria-` prefix makes it impossible to inject
   an arbitrary attribute (`onclick`, `style`, `href`, `src`) through the map.
+- **`block_element: BlockElement`** — the element a `Paragraph` renders as:
+  `P` (the default, never serialized), `Div`, `Section`, `Article`, `Aside`,
+  `Header`, `Footer`. A non-default value is valid only on a `Paragraph`; a
+  progress-widget paragraph ignores it. Distinct from `NodeKind::Section`
+  (document structure). Terminal and Markdown output do not change.
 
 These are distinct from the opaque `NodeAttrs::data` extension bag. Both browser
 writers (fragment and streaming) fold them into identical output: classes, the
@@ -263,7 +268,8 @@ pub trait CodeRenderer {
 - **Markdown** — `render_markdown_node` / `render_markdown_document` with
   `MarkdownRenderOptions` and `MarkdownDialect` (`Markdown` / `MarkdownPlus`).
 - **Browser** — `render_browser_node` / `render_browser_document` with
-  `BrowserRenderOptions` and `RawHtmlPolicy` (`Allow` / `Escape` / `Reject`).
+  `BrowserRenderOptions` and `RawHtmlPolicy` (`Allow` / `Escape` / `Reject`;
+  a comment-only `Html` node renders as nothing under `Escape`/`Reject`).
   `render_browser_document_html(doc, opts)` is the direct `Document` → final
   HTML `String` path: it streams the tree into one buffer (no fragment per
   node) and emits bytes identical to

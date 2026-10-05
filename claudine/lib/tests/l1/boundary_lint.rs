@@ -109,7 +109,7 @@ fn every_proxy_route_uses_the_shared_resolver_and_typed_error() {
 
     let commit = read_source("src/composition/coordinator/commit.rs");
     assert!(
-        commit.contains("resolve_proxy_target(&target, &source_path, repo_root)"),
+        commit.contains("resolve_proxy_target(&target, &source_path, request_context)"),
         "the coordinator commit no longer owns the shared existence-checking resolver"
     );
     assert!(

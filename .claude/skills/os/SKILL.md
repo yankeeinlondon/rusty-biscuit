@@ -56,6 +56,7 @@ environment's cell and how to record an execution ban.
 | A substring count in rendered output red on Linux | temp-path length changes where text wraps | [linux.md](linux.md#temp-path-length-changes-word-wrapping) |
 | A process count too high on Linux or WSL | `sysinfo` lists threads as processes | [linux.md](linux.md#sysinfo-lists-threads-as-processes) |
 | Red only on `wsl2-ubuntu` | the guest runs an archive built on `ubuntu-latest`; builder paths baked in at compile time (`env!("CARGO_BIN_EXE_*")`, `CARGO_MANIFEST_DIR` fixtures, toolchain lookups; fix binaries with `biscuit_test_harness::bin_exe!`) | [wsl.md](wsl.md) |
+| Red only in an archive run (WSL2, or `just cross-check --os windows`), "could not resolve `../../…`" | an extracted archive has no `.git`, so `build_resolution_context` makes the request directory the tree root and a snapshot built at a package refuses a fixture's `..` climb; anchor it at the run-time repository root (`manifest_dir!()`'s ancestor), never `env!("CARGO_MANIFEST_DIR")` | [wsl.md](wsl.md) |
 | WSL guest red at provisioning with a 403 | anonymous GitHub API rate limit (fixed; do not re-diagnose) | [wsl.md](wsl.md) |
 | WSL guest "lost communication with the server", killed at ~45 min, no log | runner agent died during provisioning (open, instrumented) | [wsl.md](wsl.md) |
 | Red only on `windows-latest`, a path in the message | 8.3 short-name TEMP (`RUNNER~1`) or verbatim `\\?\` spelling | [windows-paths.md](windows-paths.md) |

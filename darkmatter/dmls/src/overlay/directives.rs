@@ -101,6 +101,14 @@ pub fn is_transclusion(kind: DirectiveKind) -> bool {
     matches!(kind, DirectiveKind::File | DirectiveKind::Code)
 }
 
+/// Whether a directive's positional target names local files that `md
+/// compose` resolves: the transclusions plus `::toc-linking`'s fallback
+/// chain (read through `ParsedDirective::target_chain`).
+/// `::file-links` names a directory or glob, not one file.
+pub fn has_file_target(kind: DirectiveKind) -> bool {
+    is_transclusion(kind) || kind == DirectiveKind::TocLinking
+}
+
 /// The directive whose full line span contains `offset`, if any.
 pub fn directive_at(source: &str, offset: usize) -> Option<ParsedDirective> {
     scan_darkmatter_directives(source)

@@ -23,7 +23,7 @@ fn supplied_files_separate_resolution_from_schema_verdict() {
     .unwrap();
     std::fs::write(dir.path().join("existing.md"), "existing").unwrap();
     let context = FileResolutionContext::new(dir.path());
-    let source = resolve_composition_source(path.to_str().unwrap()).unwrap();
+    let source = resolve_composition_source(path.to_str().unwrap(), &crate::test_support::snapshot()).unwrap();
     let records = CallerInputLayers::from_caller_overrides(
         Some(json!({
             "spec": "first-partial", "extra": "second-partial",
@@ -65,7 +65,7 @@ fn supplied_files_use_caller_origin_and_defer_unavailable_metadata() {
         "{spec: 'unknown-type'}",
     ] {
         std::fs::write(&path, format!("---\n$schema: {schema}\n---\nbody\n")).unwrap();
-        let source = resolve_composition_source(path.to_str().unwrap()).unwrap();
+        let source = resolve_composition_source(path.to_str().unwrap(), &crate::test_support::snapshot()).unwrap();
         assert!(
             unresolved_supplied_files(&source, &records, &context.for_source(&path)).is_empty()
         );
@@ -81,7 +81,7 @@ fn supplied_file_failure_matches_existing_partial_diagnostic() {
         "---\n$schema:\n  spec: file(required;eager;match(**/*.md))\n---\nbody\n",
     )
     .unwrap();
-    let source = resolve_composition_source(path.to_str().unwrap()).unwrap();
+    let source = resolve_composition_source(path.to_str().unwrap(), &crate::test_support::snapshot()).unwrap();
     let context = FileResolutionContext::new(dir.path());
     let overrides = Some(json!({"spec": "no-matching-file"}));
     let records = CallerInputLayers::from_caller_overrides(
@@ -91,7 +91,7 @@ fn supplied_file_failure_matches_existing_partial_diagnostic() {
     .caller_input_records;
     let pending = unresolved_supplied_files(&source, &records, &context.for_source(&path));
     let previous =
-        super::super::pre_validate_schema(&source, overrides.as_ref(), Some(dir.path()))
+        super::super::pre_validate_schema(&source, overrides.as_ref(), Some(dir.path()), &crate::test_support::context())
             .unwrap_err();
     let CompositionError::UnresolvedFileReference { reason: old_reason, .. } = previous else {
         panic!("expected the existing partial-file classification");
@@ -107,7 +107,7 @@ fn supplied_files_select_shipped_review_router_union_arm() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("review.md");
     std::fs::write(&path, include_str!("../../../../../../prompts/review.md")).unwrap();
-    let source = resolve_composition_source(path.to_str().unwrap()).unwrap();
+    let source = resolve_composition_source(path.to_str().unwrap(), &crate::test_support::snapshot()).unwrap();
     let context = FileResolutionContext::new(dir.path());
     let records = CallerInputLayers::from_caller_overrides(
         Some(json!({"spec": "fixes/2026-09-10-local"})),
@@ -139,7 +139,7 @@ fn supplied_files_leave_ambiguous_and_mismatched_union_arms_untouched() {
         "[{spec: 'file(required;eager;match(**/*.md))', count: 'number(required)'}, {plan: 'file(required;eager;match(**/*.md))'}]",
     ] {
         std::fs::write(&path, format!("---\n$schema: {schema}\n---\nbody\n")).unwrap();
-        let source = resolve_composition_source(path.to_str().unwrap()).unwrap();
+        let source = resolve_composition_source(path.to_str().unwrap(), &crate::test_support::snapshot()).unwrap();
         assert!(
             unresolved_supplied_files(&source, &records, &context.for_source(&path)).is_empty()
         );
@@ -168,7 +168,7 @@ fn pending_for(document: &str, overrides: serde_json::Value) -> Vec<UnresolvedSu
     let path = dir.path().join("plan.md");
     std::fs::write(&path, document).unwrap();
     std::fs::write(dir.path().join("unrelated.md"), "unrelated").unwrap();
-    let source = resolve_composition_source(path.to_str().unwrap()).unwrap();
+    let source = resolve_composition_source(path.to_str().unwrap(), &crate::test_support::snapshot()).unwrap();
     let context = FileResolutionContext::new(dir.path());
     let records = CallerInputLayers::from_caller_overrides(Some(overrides), context.clone())
         .caller_input_records;
@@ -398,7 +398,7 @@ fn an_existing_file_selects_the_arm_whose_contested_glob_admits_it() {
          ---\nbody\n",
     )
     .unwrap();
-    let source = resolve_composition_source(path.to_str().unwrap()).unwrap();
+    let source = resolve_composition_source(path.to_str().unwrap(), &crate::test_support::snapshot()).unwrap();
     let context = FileResolutionContext::new(dir.path());
     for (tree, expected) in [
         ("fixes", "**/fixes/**/plan.md"),
@@ -447,12 +447,8 @@ fn late_verdict_on_a_settled_union_completes_against_that_arm_alone() {
         two_tree_union(FEATURES_SPEC, FIXES_SPEC).trim_end_matches("---\nbody\n")
     );
     std::fs::write(&path, settled).unwrap();
-    let source = resolve_composition_source(path.to_str().unwrap()).unwrap();
-    let error = super::super::pre_validate_schema(
-        &source,
-        Some(&json!({"spec": "cli"})),
-        Some(dir.path()),
-    )
+    let source = resolve_composition_source(path.to_str().unwrap(), &crate::test_support::snapshot()).unwrap();
+    let error = super::super::pre_validate_schema(&source, Some(&json!({"spec": "cli"})), Some(dir.path()), &crate::test_support::context())
     .unwrap_err();
     let CompositionError::UnresolvedFileReference { patterns, .. } = error else {
         panic!("expected UnresolvedFileReference, got {error:?}");

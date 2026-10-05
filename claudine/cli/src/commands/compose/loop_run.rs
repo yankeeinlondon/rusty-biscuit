@@ -27,6 +27,9 @@ pub(crate) fn record_prep_substage(
 }
 
 /// Emits non-fatal Darkmatter compose warnings to stderr, unless `--silent` is set.
+///
+/// A tolerated file-reference failure keeps its stable `failure: <class>`
+/// row, as `md` renders it.
 pub(crate) fn emit_compose_warnings(warnings: &[ComposeWarning], silent: bool) {
     if silent {
         return;
@@ -37,6 +40,12 @@ pub(crate) fn emit_compose_warnings(warnings: &[ComposeWarning], silent: bool) {
             message = format!("[{}] line {line}: {message}", warning.stage);
         } else {
             message = format!("[{}] {message}", warning.stage);
+        }
+        if let Some(failure) = warning.resolution_failure {
+            message = format!(
+                "{message}\nfailure: {}",
+                darkmatter::markdown::errors::resolution_failure_name(failure)
+            );
         }
         crate::log::warn(&message);
     }
@@ -178,7 +187,7 @@ pub(crate) fn run_loop_with_overrides<F>(
     effect_engine: &darkmatter::effects::EffectEngine,
     shell_runner: &dyn claudine::composition::ShellRunner,
     emitter: &dyn claudine::composition::LifecycleEmitter,
-    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
     document_epoch: Option<&claudine::invocation_context::DocumentEpoch>,
     mut executor: F,
 ) -> std::result::Result<
@@ -204,10 +213,10 @@ where
     // user's original launch directory. `PWD` is injected onto the child
     // `Command` env map in `build_child_env_with_launch`, so we do not need
     // to mutate the process-global `PWD` here.
-    let launch_cwd = lifecycle_ctx
-        .launch_area
-        .map(std::path::Path::to_path_buf)
-        .or_else(|| std::env::current_dir().ok());
+    let launch_cwd = Some(lifecycle_ctx.launch_area.map_or_else(
+        || crate::request::snapshot().request_dir().to_path_buf(),
+        std::path::Path::to_path_buf,
+    ));
 
     // The Ctrl+C SIGINT handler is installed at the top of the compose
     // subcommand (see `install_user_interrupt_guard`) so it covers the

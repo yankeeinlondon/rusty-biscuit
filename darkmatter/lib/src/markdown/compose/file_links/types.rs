@@ -29,7 +29,9 @@ pub(crate) const DEFAULT_DIR_DEPTH: u32 = 0;
 /// The source form a `::file-links` directive takes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FileLinksMode {
-    /// `::file-links <glob>` — a glob pattern resolved relative to the document.
+    /// `::file-links <glob>` — a glob reference (`[!][prefix]glob`) authored in
+    /// the document; a bare glob searches the document's folder, then the
+    /// repository root.
     Glob(String),
     /// `::file-links --dir <path> [--depth <u32>]` — a directory scan.
     Dir {
@@ -87,6 +89,9 @@ pub struct FileLinksResult {
     pub directive: FileLinksDirective,
     /// Rendering metadata. `None` when no files matched.
     pub render: Option<FileLinksRender>,
+    /// File symlinks a glob matched but left out because their target lies
+    /// outside the file tree. Always empty for `--dir`.
+    pub skipped: Vec<biscuit_file::SkippedEntry>,
 }
 
 /// Errors that can occur during `::file-links` parsing or discovery.
@@ -108,12 +113,25 @@ pub enum FileLinksError {
     #[error("Target '{path}' is not a directory (line {line})")]
     TargetNotDirectory { path: String, line: usize },
 
-    /// A glob pattern failed to compile.
-    #[error("Invalid glob pattern '{pattern}' at line {line}: {message}")]
-    InvalidGlob {
-        pattern: String,
+    /// The glob reference could not be parsed, rooted, or listed: an invalid
+    /// glob or prefix, a relative glob leaving the file tree, `&`/`^` outside
+    /// a repository, or a search root that cannot be read.
+    #[error("{source} (line {line})")]
+    GlobReference {
         line: usize,
-        message: String,
+        #[source]
+        source: biscuit_file::GlobReferenceError,
+    },
+
+    /// A `--dir` scan reached a directory it could not read, or an entry
+    /// whose type could not be determined. The scan fails rather than
+    /// rendering a tree with that directory's files left out.
+    #[error("cannot read '{}' (line {line}): {source}", path.display())]
+    Unreadable {
+        path: std::path::PathBuf,
+        line: usize,
+        #[source]
+        source: std::io::Error,
     },
 
     /// I/O error during discovery.
@@ -135,6 +153,7 @@ impl biscuit_terminal::errors::BlockError for FileLinksError {
         &self,
         _term: &biscuit_terminal::terminal::Terminal,
     ) -> biscuit_terminal::components::status_block::StatusBlock {
+        use biscuit_terminal::components::prose::{LineBreaks, Prose};
         use biscuit_terminal::components::status::StatusState;
         use biscuit_terminal::components::status_block::StatusBlock;
         use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
@@ -145,9 +164,9 @@ impl biscuit_terminal::errors::BlockError for FileLinksError {
                     "FileLinksError",
                     "directive parse failed",
                 ))
-                .body(format!(
+                .body(Prose::new(format!(
                     "<dim>Line:</dim> {line}\n<dim>Message:</dim> {message}"
-                ))
+                )).with_line_breaks(LineBreaks::Hard))
                 .hint("Syntax: <cyan>::file-links \"docs/**/*.md\"</cyan> or <cyan>::file-links --dir docs --depth 2</cyan>."),
 
             FileLinksError::MissingSourceContext { line } => StatusBlock::new(StatusState::Error)
@@ -155,9 +174,9 @@ impl biscuit_terminal::errors::BlockError for FileLinksError {
                     "FileLinksError",
                     "no source file",
                 ))
-                .body(format!(
+                .body(Prose::new(format!(
                     "<dim>Line:</dim> {line}\nPaths resolve relative to the containing document, but no source file was provided."
-                ))
+                )).with_line_breaks(LineBreaks::Hard))
                 .hint("Compose from a file (e.g. <cyan>md compose doc.md</cyan>) or pass <cyan>ComposeOptions::with_source_file</cyan>."),
 
             FileLinksError::TargetNotFound { path, line } => StatusBlock::new(StatusState::Error)
@@ -165,9 +184,9 @@ impl biscuit_terminal::errors::BlockError for FileLinksError {
                     "FileLinksError",
                     "target directory not found",
                 ))
-                .body(format!(
+                .body(Prose::new(format!(
                     "<dim>Path:</dim> <cyan>{path}</cyan>\n<dim>Line:</dim> {line}"
-                ))
+                )).with_line_breaks(LineBreaks::Hard))
                 .hint("Confirm the directory exists relative to the document."),
 
             FileLinksError::TargetNotDirectory { path, line } => StatusBlock::new(StatusState::Error)
@@ -175,28 +194,38 @@ impl biscuit_terminal::errors::BlockError for FileLinksError {
                     "FileLinksError",
                     "target is not a directory",
                 ))
-                .body(format!(
+                .body(Prose::new(format!(
                     "<dim>Path:</dim> <cyan>{path}</cyan>\n<dim>Line:</dim> {line}"
-                ))
+                )).with_line_breaks(LineBreaks::Hard))
                 .hint("<cyan>--dir</cyan> requires a directory; use a glob (e.g. <cyan>::file-links \"docs/*.md\"</cyan>) to match a file."),
 
-            FileLinksError::InvalidGlob {
-                pattern,
-                line,
-                message,
-            } => StatusBlock::new(StatusState::Error)
+            FileLinksError::GlobReference { line, source: source @ biscuit_file::GlobReferenceError::Io { path, .. } } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
                     "FileLinksError",
-                    "invalid glob pattern",
+                    "glob search failed",
                 ))
-                .body(format!(
-                    "<dim>Pattern:</dim> <cyan>{pattern}</cyan>\n<dim>Line:</dim> {line}\n<dim>Message:</dim> {message}"
+                .body(Prose::new(format!("<dim>Line:</dim> {line}\n<dim>Path:</dim> <cyan>{}</cyan>\n<dim>Message:</dim> {source}", path.display())).with_line_breaks(LineBreaks::Hard))
+                .hint("Make the directory readable, or narrow the glob so its search does not enter it."),
+
+            FileLinksError::GlobReference { line, source } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "FileLinksError",
+                    "invalid glob reference",
                 ))
-                .hint("See the globset crate docs for supported pattern syntax."),
+                .body(Prose::new(format!("<dim>Line:</dim> {line}\n<dim>Message:</dim> {source}")).with_line_breaks(LineBreaks::Hard))
+                .hint("A glob takes a file-reference prefix (<cyan>&</cyan>, <cyan>^</cyan>, <cyan>@</cyan>, <cyan>~/</cyan>, <cyan>./</cyan>) and stays inside the file tree unless it names its root."),
+
+            FileLinksError::Unreadable { path, line, source } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("FileLinksError", "directory unreadable"))
+                .body(Prose::new(format!(
+                    "<dim>Path:</dim> <cyan>{}</cyan>\n<dim>Line:</dim> {line}\n<dim>Message:</dim> {source}",
+                    path.display()
+                )).with_line_breaks(LineBreaks::Hard))
+                .hint("Make the directory readable, or lower <cyan>--depth</cyan> so the scan does not enter it."),
 
             FileLinksError::Io(source) => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("FileLinksError", "I/O error"))
-                .body(format!("<dim>Kind:</dim> {:?}\n{source}", source.kind()))
+                .body(Prose::new(format!("<dim>Kind:</dim> {:?}\n{source}", source.kind())).with_line_breaks(LineBreaks::Hard))
                 .hint("Confirm the referenced paths are readable."),
         }
     }

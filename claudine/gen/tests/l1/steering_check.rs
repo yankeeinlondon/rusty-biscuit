@@ -27,6 +27,8 @@ fn generation_stops_before_writes_when_steering_gate_fails() {
     // Resolved at run time: the WSL2 CI leg executes a nextest archive whose
     // compile-time `CARGO_BIN_EXE_*` path names the builder's target directory.
     let output = Command::new(bin_exe!("claudine-gen"))
+        // Not the monorepo the test runs in: its snapshot would walk every package.
+        .current_dir(area.path())
         .args(["--area", area.path().to_str().expect("UTF-8 path"), "generate", "--yes"])
         .output()
         .expect("run claudine-gen");

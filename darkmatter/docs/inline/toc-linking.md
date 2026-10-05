@@ -83,9 +83,10 @@ There are several ways the `::toc-linking` operation can result in an error. All
 
 Here's a non-exhaustive list of the kinds of errors we could expect from this operation:
 
-- Invalid Filename
-    - if the file referenced doesn't exist in the filesystem
-    - if invalid characters are used for the filename then this is another variant
+- Unresolved Target
+    - no target in the chain resolved to a file, and the chain does not end with `| false`
+    - the error reports the failure class of the **first** target, the one you wrote, as a `failure:` row: `failure: no-match` when no such file exists, `failure: invalid-reference` when the reference is malformed or climbs out of the file tree (for example `../../outside.md` above the repository root)
+    - by default composition tolerates it: the directive is replaced by `` _Could not link headings from `./missing.md`_ `` and a warning carrying the same `failure:` row is reported; with `fail_fast` it is an error
 - Invalid Cleanup Service
     - if the `service={service}` parameter is found with a service that is invalid then this is an error
     - similarly if a list of services is provided and any one of these services is invalid this is an error

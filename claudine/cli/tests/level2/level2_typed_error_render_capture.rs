@@ -882,13 +882,13 @@ fn level2_proxy_routes_share_identity_across_routes_in_tmux() {
     let init_plain = normalize_wrapped_block(&init.frame.plain);
     let term_plain = normalize_wrapped_block(&term.frame.plain);
     assert!(
-        init_plain.contains("`initialize` event of"),
+        init_plain.contains("initialize event of"),
         "the initialize route must render its structured event label separately \
          from the property path.\nplain:\n{}",
         init.frame.plain
     );
     assert!(
-        term_plain.contains("`failure` event of"),
+        term_plain.contains("failure event of"),
         "the terminal route must render its structured event label separately \
          from the property path.\nplain:\n{}",
         term.frame.plain

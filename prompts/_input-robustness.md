@@ -1,6 +1,6 @@
 ## Input Robustness Matrix
 
-This section applies when the work adds or changes code that reads a file format or configuration: a parser, a manifest or lockfile reader, a config loader, a deserializer. Skip it otherwise.
+This section applies when the work adds or changes code that reads a file format or configuration: a parser, a manifest or lockfile reader, a config loader, a deserializer. Skip it otherwise, including for text grammars (Markdown, prose markup, templates) and for writers, serializers, and renderers: their fields are not configuration, and this matrix does not describe their inputs.
 
 A **load-bearing field** is any field whose value changes what the code reports or decides. For every load-bearing field, each shape below has a defined outcome. The specification or plan names the outcome in a table, and a test asserts it through the public result, not the parser's return value.
 

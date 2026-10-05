@@ -480,7 +480,7 @@ fn union_partial_with_zero_matches_fails_before_the_provider_picker() {
     let plain = common::strip_ansi(&transcript);
 
     assert!(
-        plain.contains("no existing file matched reference `no-such-partial`"),
+        plain.contains("no existing file matched reference no-such-partial"),
         "the unresolved reference should be reported; transcript:\n{plain}"
     );
     assert_picker_never_rendered(&transcript, "zero candidates");
@@ -553,7 +553,7 @@ fn union_partial_declined_or_cancelled_fails_before_the_provider_picker() {
         let transcript = pre + &read_for(&mut session, Duration::from_secs(10));
         let plain = common::strip_ansi(&transcript);
         assert!(
-            plain.contains("no existing file matched reference `everywhere`"),
+            plain.contains("no existing file matched reference everywhere"),
             "{label}: the unresolved reference should be reported; transcript:\n{plain}"
         );
         assert_picker_never_rendered(&transcript, label);

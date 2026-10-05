@@ -33,9 +33,10 @@ fn execute_frontmatter_shell_expansion(
     pre_interpolation_snapshot: Option<&std::collections::HashMap<String, String>>,
 ) -> crate::markdown::types::MarkdownResult<FrontmatterShellExpansionReport> {
     let mut provenance = super::tests::test_provenance(frontmatter, pre_interpolation_snapshot);
+    let request = crate::markdown::compose::test_request(options.clone());
     super::execute_frontmatter_shell_expansion(
         frontmatter,
-        options,
+        &request,
         runtime,
         &mut provenance,
         &test_ctx(),
@@ -1062,7 +1063,7 @@ fn preflight_enumerates_command_branch_and_excludes_value_branch() {
     .unwrap()
     .unwrap();
     let fm = fm_from_json(json!({}));
-    let options = ComposeOptions::new();
+    let options = crate::markdown::compose::test_request(ComposeOptions::new());
 
     let pipelines =
         super::directive_reachable_pipelines(&directive, &fm, &options, &test_ctx()).unwrap();
@@ -1083,7 +1084,7 @@ fn preflight_excludes_safe_function_branch_from_approval() {
     .unwrap()
     .unwrap();
     let fm = fm_from_json(json!({}));
-    let options = ComposeOptions::new();
+    let options = crate::markdown::compose::test_request(ComposeOptions::new());
 
     let pipelines =
         super::directive_reachable_pipelines(&directive, &fm, &options, &test_ctx()).unwrap();

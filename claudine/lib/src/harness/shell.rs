@@ -115,6 +115,25 @@ pub(crate) fn tokenize_words_strict(raw: &str) -> Result<Vec<String>, ShellExpan
     Ok(words)
 }
 
+/// The shell policy files under `policy_root`.
+///
+/// Darkmatter reads an explicit policy root directly; the context it is
+/// handed is anchored there and never consulted.
+fn policy_paths_at(
+    policy_root: &Path,
+) -> Option<darkmatter::markdown::compose::shell_expansion::ShellPolicyPaths> {
+    let shell_opts = ShellExpansionOptions {
+        policy_root: Some(policy_root.to_path_buf()),
+        ..Default::default()
+    };
+    let context = darkmatter::markdown::compose::build_resolution_context_with_catalog(
+        &darkmatter::markdown::compose::RequestSnapshot::new(policy_root),
+        None,
+    )
+    .ok()?;
+    resolve_policy_paths(&shell_opts, &ComposeSource::File(policy_root.join("dummy")), &context).ok()
+}
+
 /// Validate an already-tokenized command against shell policies.
 ///
 /// This is used for structured command inputs such as JSON arrays or expanded
@@ -153,40 +172,35 @@ pub fn validate_and_approve_command_parts(
         });
     }
 
-    // Resolve policy paths — needs a file under the policy root for path resolution.
-    let policy_source = match &options.policy_root {
-        Some(root) => ComposeSource::File(root.join("dummy")),
-        None => ComposeSource::Unknown,
-    };
-
     // Display source for approval prompts — use real provenance when available.
-    let display_source = match source_file {
-        Some(path) => ComposeSource::File(path.to_path_buf()),
-        None => policy_source.clone(),
+    let display_source = match (source_file, &options.policy_root) {
+        (Some(path), _) => ComposeSource::File(path.to_path_buf()),
+        (None, Some(root)) => ComposeSource::File(root.join("dummy")),
+        (None, None) => ComposeSource::Unknown,
     };
     let display_origin = ShellCommandOrigin::Body {
         line: source_line.unwrap_or(0),
     };
 
-    let shell_opts = ShellExpansionOptions {
-        timeout: std::time::Duration::from_secs(30),
-        policy_root: options.policy_root.clone(),
-        working_directory: options.policy_root.clone(),
-        approval_handler: options.approval_handler.clone(),
-        ..Default::default()
+    // Without a policy root there are no user policy files to consult: the
+    // built-in blacklist, the session cache, and the approval handler decide.
+    let policy_paths = match &options.policy_root {
+        Some(policy_root) => Some(policy_paths_at(policy_root).ok_or_else(|| {
+            HarnessError::ShellCommandDenied {
+                command: raw.clone(),
+            }
+        })?),
+        None => None,
     };
 
-    let policy_paths = resolve_policy_paths(&shell_opts, &policy_source).map_err(|_| {
-        HarnessError::ShellCommandDenied {
-            command: raw.clone(),
-        }
-    })?;
-
     // Load and check user blacklist
-    let blacklist = darkmatter::markdown::compose::shell_expansion::store::load_ruleset(
-        &policy_paths.blacklist,
-    )
-    .unwrap_or_default();
+    let blacklist = policy_paths
+        .as_ref()
+        .and_then(|paths| {
+            darkmatter::markdown::compose::shell_expansion::store::load_ruleset(&paths.blacklist)
+                .ok()
+        })
+        .unwrap_or_default();
     if check_user_blacklist(&blacklist, executable, &args, &normalized) {
         debug!("shell command blocked by user blacklist");
         return Err(HarnessError::ShellCommandBlacklisted {
@@ -196,10 +210,13 @@ pub fn validate_and_approve_command_parts(
     }
 
     // Check whitelist — if whitelisted, approve immediately
-    let whitelist = darkmatter::markdown::compose::shell_expansion::store::load_ruleset(
-        &policy_paths.whitelist,
-    )
-    .unwrap_or_default();
+    let whitelist = policy_paths
+        .as_ref()
+        .and_then(|paths| {
+            darkmatter::markdown::compose::shell_expansion::store::load_ruleset(&paths.whitelist)
+                .ok()
+        })
+        .unwrap_or_default();
     if check_whitelist(&whitelist, executable, &normalized) {
         debug!("shell command approved via whitelist");
         return Ok(ApprovedRuntimeCommand {
@@ -241,8 +258,9 @@ pub fn validate_and_approve_command_parts(
         }
     }
 
-    // If not whitelisted, invoke approval handler
-    if let Some(ref handler) = options.approval_handler {
+    // If not whitelisted, invoke approval handler. A decision is recorded in
+    // the policy files, so a handler needs a policy root.
+    if let (Some(handler), Some(policy_paths)) = (&options.approval_handler, &policy_paths) {
         let request = darkmatter::markdown::compose::shell_expansion::ShellApprovalRequest {
             source: display_source.clone(),
             origin: display_origin,
@@ -263,7 +281,7 @@ pub fn validate_and_approve_command_parts(
                     ShellApprovalDecision::AllowExactPersist => {
                         debug!("handler approved (AllowExactPersist), persisting to whitelist");
                         let _ = darkmatter::markdown::compose::shell_expansion::store::append_whitelist_exact(
-                            &policy_paths,
+                            policy_paths,
                             &normalized,
                         );
                         cache_approval_decision(
@@ -275,7 +293,7 @@ pub fn validate_and_approve_command_parts(
                     ShellApprovalDecision::AllowCommandPersist => {
                         debug!("handler approved (AllowCommandPersist), persisting to whitelist");
                         let _ = darkmatter::markdown::compose::shell_expansion::store::append_whitelist_prefix(
-                            &policy_paths,
+                            policy_paths,
                             executable,
                         );
                         cache_approval_decision(
@@ -306,7 +324,7 @@ pub fn validate_and_approve_command_parts(
                     ShellApprovalDecision::BlacklistPersist => {
                         debug!("handler blacklisted command");
                         let _ = darkmatter::markdown::compose::shell_expansion::store::append_blacklist_exact(
-                            &policy_paths,
+                            policy_paths,
                             &normalized,
                         );
                         cache_approval_decision(

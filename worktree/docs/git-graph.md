@@ -7,7 +7,8 @@ In short, the graph:
 - draws every lane as its tip's **first-parent** history, so a merged branch's commits never appear as the default branch's;
 - gives a merged branch its own lane with a **merge edge** at the actual merge commit, including a branch that kept going after its merge, which stays one connected lane;
 - draws forks and merges only at **verified** commits, however old, and folds the history between them into `+N` squares;
-- never moves a label or a fork to a different commit. When it cannot show something, it says **"Some history is not shown"** instead.
+- never moves a label or a fork to a different commit. When it cannot show something, `wt list`'s closing notes say so instead: in a shallow clone, how to fetch the missing history; otherwise, that the graph left something out.
+- names a branch whose work reached a lane only through another branch's merge (`feat/a's commits are all in main (merged through feat/b).`). That is complete history with no merge of its own to draw, so it is not reported as missing. When the branch's tip is drawn, it also gets an `in main` (or `in origin/main`) tag, so a tip that trails past the lane's merges doesn't read as unmerged.
 
 ## Who does what
 
@@ -16,7 +17,8 @@ In short, the graph:
 | Which branches to draw; how each was integrated; each lane's first-parent commits with its fork, merge, and label commits; ref tips; creation and activity times | worktree CLI | [`git_graph.rs`](../cli/src/commands/git_graph.rs) (`gather`, `GraphFacts`), [`git_graph/topology.rs`](../cli/src/commands/git_graph/topology.rs) |
 | Open PRs (the same list the table's badges use) | worktree library | [`pull_requests.rs`](../lib/src/pull_requests.rs) |
 | Lanes versus tags, lane order, merge statements, `+N` squares, unique commit IDs, the incomplete-history notice | `GitGraph` | `biscuit-terminal/lib/src/components/git_graph.rs` |
-| Scale, width cap, trimming, height cap, the "N more worktrees not shown" note | `GitGraph` | `GitGraph::plan` |
+| Scale, width cap, trimming, height cap, the count of lanes left out | `GitGraph` | `GitGraph::plan` |
+| Wording of what the graph left out, as closing notes | `wt list` | `render_notes` in [`list_table.rs`](../cli/src/commands/list_table.rs) |
 | A merge's second parent, spacing commits so tags never overlap | `biscuit-visualized` | [Mermaid gitGraph corrections](../../biscuit-visualized/docs/mermaid-gitgraph.md) |
 
 `GitGraph` runs no git commands, and `git_graph.rs` makes no layout decisions.
@@ -36,8 +38,9 @@ Selection does not depend on whether a branch is merged.
 ### Focused view (a feature branch is checked out)
 
 - The default branch and the current branch.
-- The current branch's recorded parent (from its fork-origin record, written by `wt create`), when that is another existing local branch. The parent does not need a worktree. It gets a lane, and its tip is passed as a ref. This is one level only: the parent's own parent is not added.
+- The current branch's recorded parent (from its fork-origin record, written by `wt create`), when that is another existing local branch. The parent does not need a worktree. It gets a lane, and its tip is passed as a ref. The parent's own parent is not added for its own sake.
 - A recorded parent that no longer exists is ignored, and the current branch is measured against the default branch.
+- Any worktree branch whose own line (first-parent history) holds the fork commit of a drawn lane, when no drawn lane holds it. A lane's recorded parent is preferred, then branches in listing order; each added branch hangs from its own recorded parent when that is drawn, and the view is gathered again until every fork that some branch holds is drawn. Example: in `fix/path-spelling`'s view, its parent `fix/magic-globs` forked at `e23d0c2`, a commit on `feat/schema-enhancement`'s line that reached `main` only through that branch's merge. Without `feat/schema-enhancement`'s lane the fork has nowhere to be drawn (putting it on `main`'s lane would claim `main` had that commit on its own line), so the lane is added and `fix/magic-globs` hangs from `e23d0c2` on it.
 
 `wt list -v` reuses the focused view's `merge-base` with the default lane for its "forked from" commit, and lists every commit on the branch that neither default tip has (all parents, not only first parents).
 
@@ -45,7 +48,7 @@ Selection does not depend on whether a branch is merged.
 
 - The default branch and every worktree branch.
 - A branch's recorded parent is used only when that parent is also drawn.
-- When the graph is taller than half the terminal, `GitGraph` keeps the most recently active lanes (each line carries its tip's commit time, in whole seconds; lanes whose tips share a second keep their lane order) and prints "N more worktrees not shown". A lane is kept together with its parent's lane and the lanes holding its fork and merge commits. The focused view is never cut this way.
+- When the graph is taller than the rows `wt list` gives it (`GitGraph::with_max_rows`: whatever the rest of the listing leaves on screen, less four, at least 12; see `list_table::graph_row_budget`), `GitGraph` keeps the most recently active lanes (each line carries its tip's commit time, in whole seconds; lanes whose tips share a second keep their lane order) and `wt list` notes "N worktrees aren't in the graph". A lane is kept together with its parent's lane and the lanes holding its fork and merge commits. The focused view is never cut this way.
 
 ## The default lane
 
@@ -65,6 +68,8 @@ Each selected branch `B` with tip `T` is compared against the lanes that could c
 2. the default lane;
 3. the diverged `origin/<default>` lane, when there is one.
 
+When none of these merged `T` directly, the other drawn lanes are tried too (the branch's own parent excluded), and only a **direct** merge there counts: a commit on that lane whose second parent is `T`. So a branch merged into a child or a sibling, such as `feat/schema-enhancement` merged into `fix/path-spelling`, is drawn merging there. Its fork and its line stay what the three lanes above gave it; measuring the fork from the merging lane would hang the branch from it. A tip that is merely on another lane's line (a child forked there) is no merge. Merges of the default branch into a branch are not drawn: the default lane is not classified.
+
 For each lane `X` whose tip contains `T` (`merge-base --is-ancestor`), `C` is the oldest commit on `X`'s first-parent chain that descends from `T`. It is found as the leading run of `rev-list --first-parent --parents T..X` whose commits are also in `rev-list --ancestry-path T..X`. What `C` says about `T` gives that lane's class.
 
 The lanes are tried in order, but not every answer ends the search:
@@ -78,7 +83,7 @@ flowchart TD
     start([Selected branch B, tip T]) --> next{Next candidate lane X?}
     next -- none left --> kept1{An indirect answer kept?}
     kept1 -- no --> unmerged[Unmerged:<br/>lane of B's own commits,<br/>fork at merge-base]
-    kept1 -- yes --> indirect[Integrated otherwise:<br/>lane, no merge edge,<br/>show the notice]
+    kept1 -- yes --> indirect[Integrated otherwise:<br/>lane, no merge edge,<br/>note: merged through another branch]
     next -- yes --> contains{T is an ancestor of X?}
     contains -- no --> next
     contains -- git could not tell --> kept2{An indirect answer kept?}
@@ -98,7 +103,7 @@ flowchart TD
 | Unmerged | No candidate contains `T` | A lane of `T`'s first-parent commits that its fork lane lacks, forked at `merge-base(parent tip, else default lane tip, T)` |
 | Merged directly | `T` is a non-first parent of `C`, on the first lane that gives a merged-directly or no-separate-history answer | A lane of `T`'s first-parent commits down to `C^1`, with a merge edge into `C` |
 | No separate history | `T` is on `X`'s first-parent chain | A tag at `T` on `X`'s lane: no empty lane, no merge |
-| Integrated otherwise | `T` reached `X` through another branch's merge, and no later lane merged it directly or has it on its first-parent chain | A lane like a merged one, with no merge edge, and the notice |
+| Integrated otherwise | `T` reached `X` through another branch's merge, and no later lane merged it directly or has it on its first-parent chain | A lane like a merged one, with no merge edge, and a closing note naming where its commits are |
 | Unknown | Git could not answer (see [Unavailable history](#unavailable-history)) | Whatever was verified, and the notice |
 
 Tip equality is never used to classify. Two branches at the same commit can still differ: one may have been merged with a merge commit and the other created at that commit afterwards.
@@ -144,7 +149,7 @@ gitGraph
 
 **No separate history.** A branch fast-forwarded into `main`, or created at a commit already on `main` and never committed to, has its tip on `main`'s first-parent chain. It is a tag on that commit.
 
-**Integrated otherwise.** `feat/a` was merged into `feat/b`, and `feat/b` into `main`. On `main`'s chain, `C` is `feat/b`'s merge, and `feat/a`'s tip is not one of its parents. `feat/a` keeps its lane and fork, but no merge edge is drawn, because the merge that brought it in is on no drawn lane.
+**Integrated otherwise.** `feat/a` was merged into `feat/b`, and `feat/b` into `main`. On `main`'s chain, `C` is `feat/b`'s merge, and `feat/a`'s tip is not one of its parents. `feat/a` keeps its lane and fork, but no merge edge is drawn, because the merge that brought it in is `feat/b`'s, not its own. Nothing is missing, so the graph is not marked incomplete; `wt list` notes `feat/a's commits are all in main (merged through feat/b).` It names `feat/b` only when `feat/b` is drawn and one of its own merges is that commit, and says "another branch" otherwise.
 
 **Continued after a merge.** This is the most common flow: a pull request merges, and work continues on the same branch. `fix/wt-ux` was merged into `main` at `C` with `B` as its tip, got one more commit `N`, and `fix/sniff-pr` still points at `B`:
 
@@ -214,10 +219,21 @@ The default lane is drawn down to its oldest anchor plus that anchor's first par
 
 - A lane whose fork commit is not drawn, or whose fork is unknown, is drawn **unconnected**, not hung from the start of another lane.
 - A tag whose commit is not drawn is left out, and counted.
-- A merge whose source or destination is not drawn, or whose destination would be emitted before its source, is not drawn, and counted.
+- A merge whose source or destination is not drawn, or whose destination would still be emitted before its source, is not drawn, and counted. (A lane that reaches a merge destination before its source is drawn waits there, so this is rare.)
 - A branch with no commits of its own is labeled at its own tip (`GraphLine::with_tip`), never at its fork commit.
 
-Anything counted this way shows the dim notice **"Some history is not shown"** below the graph, after "N more worktrees not shown". Lanes the base view's height cap leaves out are counted by that note, not by the notice.
+Each thing counted this way is a `GraphOmission` in `GitGraphPlan::omissions` (and sets `GitGraphPlan::incomplete`). `wt list` draws the graph with `GitGraph::render_without_notes` and writes one closing note per omission, naming the branch and commits, after the note counting the lanes the height cap left out (those lanes are counted by that note, not here):
+
+| Omission | Note |
+|---|---|
+| a lane whose fork its expected lane holds only through a merge (gathering records it as a `ForkedOffLine`) | `fix/magic-globs branched from e23d0c2, which reached origin/main through merge 21debbc, so the graph doesn't join its lane to origin/main.` |
+| a lane whose fork no lane draws, for another reason | `feat/far branched from abcdef0, which isn't in the graph, so its lane isn't joined to the others.` |
+| a lane whose fork is unknown | `The graph couldn't tell where feat/lost branched from, so its lane isn't joined to the others.` |
+| a merge it can't draw | `8888888 is drawn as a plain commit, not as feat/m's merge: the graph couldn't place both ends of it.` |
+| a label whose commit isn't drawn | `The v0.1.0 label isn't in the graph: its commit isn't drawn.` |
+| gathering couldn't establish something (a Git command failed) | `Git couldn't answer every question about this history, so the graph may be missing connections; run wt list again to retry.` |
+
+In a shallow clone (`rev-parse --is-shallow-repository` read `true`) all of these come from the cut, so the one note **"This clone is shallow, so the graph can't connect some older history; run git fetch --unshallow to fill it in."** replaces them.
 
 ## Unavailable history
 
@@ -250,7 +266,7 @@ Neighboring tags never overlap. `biscuit-visualized` widens the commit spacing o
 - **No squash-merge inference.** A squash-merged branch shares no commits with the default branch. It stays an unmerged lane.
 - **Earlier merges are drawn only when direct and provable.** A branch's earlier merge is drawn when another drawn lane merged the branch's old tip directly. A usable fork-origin record stops the walk at the branch's creation commit; without one, the walk stops at an ordinary fork or an indirect integration. An earlier merge reached only through another branch is not drawn (see [Examples](#examples)).
 - **Shallow histories.** Past a shallow clone's cut, no merge is reconstructed and `+N` counts are lower bounds; the notice appears (see [Unavailable history](#unavailable-history)).
-- **No edge for indirect integration.** A branch that reached its lane through another branch's merge has no merge edge of its own. It is drawn with its fork and the notice.
+- **No edge for indirect integration.** A branch that reached its lane through another branch's merge has no merge edge of its own. It is drawn with its fork, and a closing note says where its commits are.
 - **One merged lane per commit.** A commit is drawn merging one source. When one commit merged two drawn lanes (an octopus merge), only the first is drawn merging, and the notice appears.
 - **Branch creation is known only from the fork-origin record.** Without a usable record, a branch created at an already merged commit is drawn as if it had been merged there itself (see [the fork-origin cutoff](#examples)).
 
@@ -258,7 +274,7 @@ Neighboring tags never overlap. `biscuit-visualized` widens the commit spacing o
 
 - [`git_graph/tests.rs`](../cli/src/commands/git_graph/tests.rs) (L1, real Git): the facts each view hands over, as exact full SHAs, for both observed merge situations. Also merged into a parent, fast-forward, equal tips, indirect integration, old connections with exact `+N` counts, a shallow clone, a deleted parent, a merged lane under the height cap, a branch merged directly into `main` after its parent took it indirectly, and the classifier and anchor placement on their own. Branches that continued after a merge are covered in the observed pull-request shape (base view and both focused views, with `main` at the merge, behind it, and diverged from `origin/main`), merged twice, created at an already merged tip with and without a fork-origin record (`fork_origin_cutoff_matrix` covers each record shape), a boundary integrated through another merge, and a shallow boundary. An ordinary unmerged branch is pinned to the same facts and an exact Git call count. The shared `merge-base`, call counts, PR filtering, and the `--width` override are covered too.
 - `gathered_graphs_lay_out_with_exact_merges_and_no_overlapping_tags` in the same file gathers real repositories, plans them at 120×40 and 56×60 with real measurement, and checks the layout the image is drawn from: no overlapping tags, every tag on its SHA's commit, exact merge parents, the commit after each merge source hanging from it, and no label shortened. The fixtures include the continued-after-merge shapes above. `--width 40` is never trimmed. `the_observed_graph_keeps_recent_commits_on_every_lane_at_200x60` plans the observed history above at 200×60: the step is the renderer's default, `fix/wt-ux` draws `W1` merged into `M103`, `fix/sniff` hangs from `W1` and merges into the default lane, there is no notice, and every branch lane except `fix/wt-ux` keeps at least two commits after its last `+N` square. At the 8×16 fallback cell size the trimmer folds `fix/wt-ux`'s recent commits first, because it prefers commits beside a square; at Kitty's real cell size the lane keeps three.
-- `cli/tests/list_remote_head.rs::a_shallow_clone_lists_with_the_incomplete_history_notice_and_asks_origin_nothing` runs `wt list` in a shallow clone. It shows the notice, the table stays, and the graph adds no request to origin.
+- `cli/tests/list_remote_head.rs::a_shallow_clone_lists_with_the_incomplete_history_notice_and_asks_origin_nothing` runs `wt list` in a shallow clone. It shows the shallow-clone note, the table stays, and the graph adds no request to origin.
 - `GitGraph`'s own tests cover lanes and tags, merges (including a lane merged from its middle, merged twice, children forked before, at, and after a merge source, merges between sibling lanes, and a cycle), the no-substitution rule, the height cap keeping a merge's two lanes together, trimming, and sizing (`biscuit-terminal/lib/src/components/git_graph/tests.rs`).
 - `level2_list_verbose.rs` runs the image path in tmux, which cannot display it.
 - `level2_graph_in_kitty.rs` checks the graph as Kitty draws it (macOS): in a short and a narrow window, the image's columns fit, its rows respect the half-height cap and match the rows `wt` reserves, the elision notice follows it, the table is intact, and a screenshot shows the image where it belongs. `level2_graph_draws_a_merged_branch_in_kitty` does the same for a merged branch, `level2_graph_restores_lane_density_in_kitty` for the observed history at 200×60, and `level2_graph_draws_a_branch_continued_after_its_merge_in_kitty` for the pull-request shape above at 200×60; the last two expect no notice, and all three keep each screenshot and transmitted PNG for inspection, under fixed names in the temp directory (`$TMPDIR/wt-graph-<case>-<cols>x<rows>-{screenshot,transmitted}.png`; the pull-request shape is `wt-graph-continued-200x60-*`), and print both paths. Each window is launched and screenshotted before the next opens.

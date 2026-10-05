@@ -242,6 +242,11 @@ pub enum NodeKind {
     /// A hard line break.
     HardBreak,
     /// Raw HTML content.
+    ///
+    /// A value that is only HTML comments ([`is_html_comment_only`]) has no
+    /// visible content: the terminal and browser renderers write nothing for
+    /// it whatever their raw-HTML policy, and the Markdown renderer writes it
+    /// back without a portability diagnostic.
     Html {
         /// The raw HTML value.
         value: String,
@@ -607,4 +612,48 @@ impl RenderNode {
             label: label.into(),
         })
     }
+}
+
+/// Whether a raw HTML `value` consists only of HTML comments, optionally
+/// separated or surrounded by ASCII whitespace.
+///
+/// A comment follows CommonMark: `<!-->`, `<!--->`, or `<!--` followed by
+/// text that does not contain `-->`, then `-->`. Such a value renders nothing
+/// in an HTML reader. The check reads the whole value, so a comment followed
+/// by anything else (`<!-- x --> text`, `<b><!-- x --></b>`) is not
+/// comment-only, and a value is never partly treated as a comment.
+///
+/// ## Examples
+///
+/// ```rust
+/// use renderable::tree::is_html_comment_only;
+///
+/// assert!(is_html_comment_only("<!-- -->"));
+/// assert!(is_html_comment_only("<!-- a -->\n<!-- b -->\n"));
+/// assert!(!is_html_comment_only("<!-- a --> b"));
+/// assert!(!is_html_comment_only("<span title=\"<!-- -->\">"));
+/// ```
+#[must_use]
+pub fn is_html_comment_only(value: &str) -> bool {
+    let is_space = |c: char| c.is_ascii_whitespace();
+    let mut rest = value.trim_start_matches(is_space);
+    if rest.is_empty() {
+        return false;
+    }
+    while !rest.is_empty() {
+        let Some(body) = rest.strip_prefix("<!--") else {
+            return false;
+        };
+        let after = if let Some(after) = body.strip_prefix('>') {
+            after
+        } else if let Some(after) = body.strip_prefix("->") {
+            after
+        } else if let Some(close) = body.find("-->") {
+            &body[close + 3..]
+        } else {
+            return false;
+        };
+        rest = after.trim_start_matches(is_space);
+    }
+    true
 }

@@ -93,6 +93,7 @@ You are performing a review of the functionality defined by the `{{spec_name}}` 
 - The second thing you will need to check is whether:
     - any of the _
     - any of the _findings_ in the review's `## Blocked Findings` were _unblocked_ prior to the last implementation's
+- The third thing is the repair's log (`{{dirname(spec)}}/log.md`): a finding the repair marked **disputed** is either re-raised with the authority it was missing (see "What blocks readiness") or dropped; never re-raise it unchanged
 ::end-block
 
 
@@ -118,23 +119,64 @@ Read both the specification document and then perform a review on the implementa
 
 - look for gaps in functionality that were designed but not implemented
 - features who's implementation is broken or incomplete
-- functionality which is light on test coverage (we expect strong unit and integration testing for everything)
+- functionality the spec asks for which is light on test coverage
 - are there any changes which would make the code more ergonomic, more performant, or both?
+
+## What blocks readiness
+
+A review's job is to find the defects that matter, not to find every defect
+it can construct. A blocking finding costs a full fix cycle and adds code; a
+missed contrived edge case costs little in a repository with no external
+users.
+
+Every finding cites its **authority**, in its first paragraph:
+
+- **spec**: the acceptance criterion, decision, or sentence of the spec (or
+  design) it violates, quoted or numbered; or
+- **regression**: behavior that worked on the base branch and no longer does,
+  reached by a **realistic input**: one an existing call site, template, or
+  fixture produces, or one a user would plausibly type.
+
+A finding with neither is an **observation**. A behavior the spec does not
+require is not made a requirement by a `docs/` page, a CommonMark or other
+external standard, or a reviewer's own expectation of how the code ought to
+behave.
+
+| Priority | Meaning | Blocks `ready` |
+|---|---|---|
+| high | has authority and a realistic input gives a wrong result, or an acceptance criterion is unmet or untested at the level it needs | yes |
+| medium | has authority, but only an unusual input reaches it | no |
+| low | polish, naming, ergonomics | no |
+
+List observations under `## Observations`, one short paragraph each, after the
+findings. Defects in code this spec did not add or change are always
+observations, unless this spec's change made them reachable. An observation
+is information for the spec's author, who either schedules a fix or lets it
+go; it never asks this cycle to repair it.
+
+When a fix for a finding would be large next to the harm it prevents (a new
+escaping or protection layer, new syntax in generated output, a matrix of
+synthetic payloads), say so and recommend documenting the limitation instead.
 
 ## Sweep the class before you write
 
-Your goal is to be the last review. A review that reports one instance of a
-defect the code has in several places is an incomplete review, and it costs a
-full review/fix cycle for every sibling it leaves out. For example: five
-consecutive reviews each report that one more parser coerces a missing, null,
-or wrong-type field to a permissive default. One review that swept every
-parser for that class would have replaced all five.
+A review that reports one instance of a defect the code has in several places
+is an incomplete review, and it costs a full review/fix cycle for every
+sibling it leaves out. For example: five consecutive reviews each report that
+one more parser coerces a missing, null, or wrong-type field to a permissive
+default. One review that swept every parser for that class would have
+replaced all five.
 
-For every finding:
+The sweep is bounded by the spec: siblings are sites this spec added or
+changed, and the call sites that reach them. A sibling outside that boundary
+is an observation.
+
+For every high or medium finding:
 
 - classify it in one sentence that names the defect class, not the file
-- enumerate every sibling site: each parser, reader, detector, or projection
-  that handles the same kind of input or makes the same kind of decision
+- enumerate every sibling site within the boundary: each parser, reader,
+  detector, or projection that handles the same kind of input or makes the
+  same kind of decision
 - check each one, using the same reproduction you used for the first (copy a
   real fixture, change one field, run the shipped CLI or public API)
 - report the class as **one finding** with an instance table: site, shape
@@ -150,10 +192,16 @@ in this directory. If a finding belongs to the same class as an earlier one:
 
 - say so under a `## Recurrence` heading, naming the earlier review and finding
 - state which sibling sites that fix should have swept and did not
-- sweep them all now, so this review carries the complete list
+- sweep them all now, within the spec boundary, so this review carries the
+  complete list
 - set the frontmatter property `recurrence` to `true`; the review loop does not
   stop on it, so the next repair cycle implements exactly the list this review
-  carries, and a missed sibling here costs another cycle
+  carries
+
+A class that keeps recurring because each repair adds new machinery, which the
+next review then finds a new edge in, is a sign the requirement has no
+boundary. Say so, and mark the finding medium unless an acceptance criterion
+names the failing case.
 ::end-block
 
 ::file "../_input-robustness.md"
@@ -184,7 +232,7 @@ When reviewing, for each requirement that asserts user-observable behaviour (mod
 - "Spec requires `^X` badges with specific colors" + Level-1 unit tests on style only = needs
   Level-2 capture verifying real-terminal rendering.
 
-A feature MAY be marked production-ready only when each user-observable requirement has at minimum
+A feature MAY be marked production-ready only when each user-observable requirement of the spec has at minimum
 the level of verification appropriate for it. Reviewers MUST list any requirement whose strongest
 test is at the wrong level under "Findings" with severity at least "high".
 

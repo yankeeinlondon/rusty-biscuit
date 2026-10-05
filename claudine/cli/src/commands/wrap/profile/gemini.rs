@@ -127,7 +127,7 @@ impl WrapperProfile for GeminiWrapper {
         _cwd: &Path,
         scoped_tmp: &Path,
     ) -> Result<crate::commands::wrap::system_prompt::SystemPromptApplication> {
-        let real_provider_dir = dirs::home_dir().map(|h| h.join(".gemini"));
+        let real_provider_dir = biscuit_file::home_dir().map(|h| h.join(".gemini"));
         crate::commands::wrap::system_prompt::apply_system_prompt_via_spec(
             self.system_prompt_spec(),
             prompt.mode,

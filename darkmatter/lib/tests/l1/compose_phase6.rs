@@ -21,7 +21,7 @@ fn fixture_text(stem: &str) -> String {
 fn compose(stem: &str) -> String {
     let md = Markdown::from(fixture_text(stem).as_str());
     let (composed, _report) = md
-        .compose_with(ComposeOptions::new())
+        .compose_with(&crate::request_support::request(ComposeOptions::new()))
         .expect("fixture composes without fault");
     composed.content().to_string()
 }

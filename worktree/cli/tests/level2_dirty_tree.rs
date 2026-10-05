@@ -1,7 +1,7 @@
 //! Level 2 tests for dirty-file tree terminal rendering.
 //!
 //! Verifies that `dirty_tree::render_markup` output, when processed through
-//! `Prose::new(...).render(terminal)`, keeps its box-drawing layout and its
+//! `Prose` with `LineBreaks::Hard`, keeps its box-drawing layout and its
 //! per-file colors in a real terminal (tmux): source files red, other files
 //! yellow, directories dim, connectors unstyled.
 

@@ -65,7 +65,7 @@ fn write(dir: &Path, name: &str, content: &str) {
 fn compose(dir: &Path, file: &str, options: ComposeOptions) -> Result<Markdown, String> {
     let markdown = Markdown::try_from(dir.join(file).as_path()).unwrap();
     markdown
-        .compose_with(options)
+        .compose_with(&crate::request_support::request(options))
         .map(|(composed, _)| composed)
         .map_err(|error| error.to_string())
 }
@@ -208,7 +208,7 @@ fn only_an_authored_frontmatter_command_is_collected_and_approved() {
     write(dir.path(), "doc.md", "---\ns: \"$(echo hi)\"\n---\n{{ s }}\n");
     let authored = options(dir.path(), "doc.md", Recorder::denying());
     let markdown = Markdown::try_from(dir.path().join("doc.md").as_path()).unwrap();
-    let entries = collect_shell_commands(&markdown, &authored).unwrap();
+    let entries = collect_shell_commands(&markdown, &crate::request_support::request(authored.clone())).unwrap();
     assert_eq!(entries.iter().map(|e| e.normalized.as_str()).collect::<Vec<_>>(), ["echo hi"]);
     let approvals = Recorder::denying();
     assert!(compose(dir.path(), "doc.md", options(dir.path(), "doc.md", approvals.clone())).is_err());
@@ -218,7 +218,7 @@ fn only_an_authored_frontmatter_command_is_collected_and_approved() {
     let data = options(dir.path(), "data.md", Recorder::denying())
         .with_data_overrides(json!({ "s": "$(echo hi)" }));
     let markdown = Markdown::try_from(dir.path().join("data.md").as_path()).unwrap();
-    assert!(collect_shell_commands(&markdown, &data).unwrap().is_empty());
+    assert!(collect_shell_commands(&markdown, &crate::request_support::request(data.clone())).unwrap().is_empty());
 }
 
 /// Interpolation that produces a whole-value `$( … )` produces text, and

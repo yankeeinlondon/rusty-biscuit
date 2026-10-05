@@ -152,3 +152,56 @@ fn level2_status_block_hint_carries_italic_sgr_in_wezterm() {
         frame_b.raw,
     );
 }
+
+/// A `Hard`-mode `Status` description keeps each authored line on its own row
+/// with its written indentation, while the default soft mode joins them. No
+/// `bt` subcommand renders a `Status`, so it is rendered in-process and its
+/// bytes are shown in the pane.
+fn assert_hard_mode_status_display<H: TerminalHarness>(harness: &mut H) {
+    use biscuit_terminal::components::prose::LineBreaks;
+    use biscuit_terminal::components::renderable::TerminalRenderable;
+    use biscuit_terminal::components::status::{Status, StatusState};
+
+    let term = common::styled_terminal();
+    let hard = Status::from_prose("captured=[<b>line one</b>\n  line two]")
+        .with_line_breaks(LineBreaks::Hard)
+        .state(StatusState::Info)
+        .render(&term);
+    let (frame, rows) = common::display_bytes_rows(harness, hard.as_bytes());
+    let plain: Vec<&str> = rows.iter().map(|row| row.plain.as_str()).collect();
+    assert_eq!(plain.len(), 2, "{plain:?}\nplain:\n{}", frame.plain);
+    assert!(plain[0].ends_with("captured=[line one"), "{plain:?}");
+    assert_eq!(plain[1], "  line two]", "{plain:?}");
+    assert_eq!(
+        common::active_runs(&crate::prose_cells::attr_run_cells(&rows[0].raw, "1"), true),
+        ["line one"],
+        "{:?}",
+        rows[0]
+    );
+
+    let soft = Status::from_prose("a\nb").state(StatusState::Info).render(&term);
+    let (frame, rows) = common::display_bytes_rows(harness, soft.as_bytes());
+    let plain: Vec<&str> = rows.iter().map(|row| row.plain.as_str()).collect();
+    assert_eq!(plain.len(), 1, "{plain:?}\nplain:\n{}", frame.plain);
+    assert!(plain[0].ends_with("a b"), "{plain:?}");
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_status_hard_line_breaks_in_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+    let mut guard = SHARED_TMUX
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let harness = guard.as_mut().expect("shared tmux harness present");
+    assert_hard_mode_status_display(harness);
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_status_hard_line_breaks_in_wezterm() {
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
+    let harness = guard.as_mut().expect("shared WezTerm harness present");
+    assert_hard_mode_status_display(harness);
+}

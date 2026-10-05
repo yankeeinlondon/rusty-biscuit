@@ -948,6 +948,15 @@ mod corpus {
                 Box::new(ClaudineError::SystemPromptFileNotFound("sp.md".to_string())),
             ),
             (
+                "ClaudineError::SystemPromptFileUnresolvable",
+                Box::new(ClaudineError::SystemPromptFileUnresolvable {
+                    reference: "~user/sp.md".to_string(),
+                    source: Box::new(biscuit_file::FileReferenceError::UnsupportedUserHome(
+                        "~user/sp.md".to_string(),
+                    )),
+                }),
+            ),
+            (
                 "ClaudineError::LockError",
                 Box::new(ClaudineError::LockError {
                     path: PathBuf::from("/tmp/x.lock"),
@@ -1110,6 +1119,7 @@ mod corpus {
                     source_path: PathBuf::from("run.md"),
                     message: "agent must be a string".to_string(),
                     problems: Vec::new(),
+                    failures: Vec::new(),
                 }),
             ),
             (

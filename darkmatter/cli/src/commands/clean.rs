@@ -8,7 +8,8 @@
 
 mod frontmatter_repair;
 
-use crate::io::resolve_file_path;
+use crate::io::{OpenedArgument, open_argument};
+use crate::request::MdRequest;
 use color_eyre::eyre::{Context, Result, eyre};
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
@@ -26,7 +27,7 @@ use std::path::PathBuf;
 use tracing::instrument;
 
 pub use frontmatter_repair::CleanSchemaFlags;
-use frontmatter_repair::{repair_frontmatter, report_suggestions};
+use frontmatter_repair::{DocumentRequest, repair_frontmatter, report_suggestions};
 
 /// Everything `md clean` needs beyond its input path.
 #[derive(Debug, Clone)]
@@ -69,8 +70,9 @@ pub(crate) fn resolve_list_spacing(compact: bool, loose: bool) -> ListSpacingMod
 }
 
 #[instrument(skip_all)]
-pub fn run_clean(input: Option<&PathBuf>, options: &CleanOptions) -> Result<()> {
-    let resolved = resolve_input_path(input)?;
+pub fn run_clean(input: Option<&PathBuf>, options: &CleanOptions, request: &MdRequest) -> Result<()> {
+    let opened = open_input(input, request)?;
+    let resolved = opened.as_ref().map(|opened| opened.path().to_path_buf());
     // Resolving the destination up front means the stdin-under-`--save`
     // rejection happens once, before any read, and the write branch below
     // needs no second guard.
@@ -85,7 +87,8 @@ pub fn run_clean(input: Option<&PathBuf>, options: &CleanOptions) -> Result<()> 
     };
     let raw = read_source(resolved.as_ref())?;
 
-    let repair = repair_frontmatter(&raw, resolved.as_deref(), &options.schema)?;
+    let document_request = DocumentRequest { request, opening: opened.as_ref().map(|opened| opened.reference()) };
+    let repair = repair_frontmatter(&raw, resolved.as_deref(), &options.schema, &document_request)?;
 
     // Building the document is what enforces the unrepairable-YAML contract.
     // JSON mode reports that domain failure through its machine channel before
@@ -174,17 +177,17 @@ fn assemble(source: &str, cleaned: &Markdown) -> String {
     }
 }
 
-/// Resolves the input path through biscuit-file's reference system.
+/// Opens the input argument through the shared reference reader.
 ///
 /// ## Returns
 ///
 /// `None` when the document comes from stdin — either no path at all, or the
 /// explicit `-` marker.
-fn resolve_input_path(input: Option<&PathBuf>) -> Result<Option<PathBuf>> {
+fn open_input(input: Option<&PathBuf>, request: &MdRequest) -> Result<Option<OpenedArgument>> {
     match input {
         None => Ok(None),
         Some(path) if path.to_str() == Some("-") => Ok(None),
-        Some(path) => resolve_file_path(path).map(Some),
+        Some(path) => open_argument(path, request).map(Some),
     }
 }
 

@@ -1,7 +1,7 @@
 use crate::commands::color_parse::parse_color;
 use crate::commands::shared::{print_example_command, terminal_for_render};
 use crate::commands::{CliContext, Run};
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{InlineProse, LineBreaks};
 use biscuit_terminal::components::renderable::{BrowserRenderable, TerminalRenderable};
 use biscuit_terminal::components::table::types::{ColumnType, Currency};
 use biscuit_terminal::components::table::{Table, TableCellContent, TableColumn};
@@ -58,10 +58,18 @@ fn recognized_column_type(token: &str) -> Option<ColumnType> {
     })
 }
 
+/// Parses one styled cell argument as [`InlineProse`].
+///
+/// A literal `\n` in the argument becomes a hard line break inside the styled
+/// run; shells cannot pass a raw newline as one argument word.
+fn prose_cell(markup: &str) -> InlineProse {
+    InlineProse::new(markup.replace("\\n", "\n")).with_line_breaks(LineBreaks::Hard)
+}
+
 /// Builds the [`TableCellContent`] for one `--mixed-row` cell from its column's
 /// type: a numeric column parses the value into the matching typed cell; any
-/// other column parses the cell as [`Prose`] markup (`\n` → hard line break, as
-/// in `--prose-row`).
+/// other column parses the cell as [`InlineProse`] markup (`\n` → hard line
+/// break, as in `--prose-row`).
 ///
 /// ## Errors
 ///
@@ -69,7 +77,7 @@ fn recognized_column_type(token: &str) -> Option<ColumnType> {
 /// number.
 fn typed_cell(value: &str, column_type: &ColumnType) -> color_eyre::Result<TableCellContent> {
     let cell = match column_type {
-        ColumnType::String => TableCellContent::from(Prose::new(value.replace("\\n", "\n"))),
+        ColumnType::String => TableCellContent::from(prose_cell(value)),
         ColumnType::Integer => TableCellContent::Integer(
             value
                 .parse()
@@ -127,9 +135,9 @@ pub struct TableArgs {
     #[arg(long = "row")]
     pub rows: Vec<String>,
 
-    /// A comma-separated row whose cells are parsed as [`Prose`] markup, so
-    /// inline tags (`<b>`, `<red>`, `<a href=…>`, …) become capability-resolved
-    /// `StyledProse` cells. Repeat for multiple rows; appended after `--row`.
+    /// A comma-separated row whose cells are parsed as [`InlineProse`] markup,
+    /// so inline tags (`<b>`, `<red>`, `<a href=…>`, …) become
+    /// capability-resolved `StyledInlineProse` cells. Repeat for multiple rows; appended after `--row`.
     ///
     /// A literal `\n` in a cell becomes a hard line break inside that styled
     /// run, so one cell can span multiple visual lines.
@@ -139,8 +147,9 @@ pub struct TableArgs {
     /// A comma-separated row whose cells are interpreted by their column's
     /// declared type (see `--columns`): a numeric column parses the value into
     /// a typed, right-aligned cell, while every other column parses the cell as
-    /// [`Prose`] markup (a left-aligned `StyledProse` cell, `\n` → hard line
-    /// break). Lets one row mix a styled Prose cell with typed numeric cells.
+    /// [`InlineProse`] markup (a left-aligned `StyledInlineProse` cell, `\n` →
+    /// hard line break). Lets one row mix a styled cell with typed numeric
+    /// cells.
     /// Repeat for multiple rows; appended after `--prose-row`.
     #[arg(long = "mixed-row")]
     pub mixed_rows: Vec<String>,
@@ -259,25 +268,20 @@ impl Run for TableArgs {
             })
             .collect();
 
-        // `--prose-row` cells are parsed as Prose markup so inline tags become
-        // capability-resolved `StyledProse` cells. Appended after the plain rows.
+        // `--prose-row` cells are parsed as InlineProse markup so inline tags
+        // become capability-resolved `StyledInlineProse` cells. Appended after
+        // the plain rows.
         for row in &self.prose_rows {
             let cells: Vec<TableCellContent> = row
                 .split(',')
-                .map(|cell| {
-                    // A literal `\n` in the cell becomes a hard line break inside
-                    // the styled run; shells cannot pass a raw newline as one
-                    // argument word.
-                    let markup = cell.trim().replace("\\n", "\n");
-                    TableCellContent::from(Prose::new(markup))
-                })
+                .map(|cell| TableCellContent::from(prose_cell(cell.trim())))
                 .collect();
             data.push(cells);
         }
 
         // `--mixed-row` cells take their kind from the matching column's type,
-        // so one row can carry a left-aligned styled Prose cell next to typed,
-        // right-aligned numeric cells. Appended after the Prose rows.
+        // so one row can carry a left-aligned styled cell next to typed,
+        // right-aligned numeric cells. Appended after the `--prose-row` rows.
         for row in &self.mixed_rows {
             let cells: Vec<TableCellContent> = row
                 .split(',')

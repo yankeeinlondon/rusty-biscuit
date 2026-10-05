@@ -3,7 +3,13 @@ use crate::diagnostics::Diagnostic;
 use darkmatter::markdown::compose::shell_expansion::types::{
     ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest, ShellExpansionError,
 };
+use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest};
 use std::sync::{Arc, Mutex};
+
+/// `options` prepared against the test process's launch context.
+fn request(options: ComposeOptions) -> ComposeRequest {
+    ComposeRequest::with_context(options, crate::test_support::context()).unwrap()
+}
 
 struct CapturingHandler {
     captured: Arc<Mutex<Vec<ShellApprovalRequest>>>,
@@ -109,7 +115,7 @@ status: \"{{ frontmatter('does-not-exist.md', 'ready') }}\"\n\
     let no_exclude = ComposeOptions::new();
     let unguarded = resolve_shell_approvals(
         Some(&md),
-        Some(&no_exclude),
+        Some(&request(no_exclude.clone())),
         &ShellApprovalOptions::default(),
         None,
         None,
@@ -124,7 +130,7 @@ status: \"{{ frontmatter('does-not-exist.md', 'ready') }}\"\n\
     let excluded = ComposeOptions::new().with_exclude_keys(["status"]);
     let guarded = resolve_shell_approvals(
         Some(&md),
-        Some(&excluded),
+        Some(&request(excluded.clone())),
         &ShellApprovalOptions::default(),
         None,
         None,
@@ -148,7 +154,7 @@ fn dry_run_no_handler_emits_cannot_dry_run_message() {
         ..Default::default()
     };
 
-    let err = resolve_shell_approvals(Some(&md), Some(&compose_options), &options, None, None)
+    let err = resolve_shell_approvals(Some(&md), Some(&request(compose_options.clone())), &options, None, None)
         .unwrap_err();
     let msg = err.to_string();
     assert!(
@@ -167,7 +173,7 @@ fn non_dry_run_no_handler_keeps_generic_message() {
     let compose_options = ComposeOptions::new();
     let (_dir, options) = approval_options_with_whitelist(&[]);
 
-    let err = resolve_shell_approvals(Some(&md), Some(&compose_options), &options, None, None)
+    let err = resolve_shell_approvals(Some(&md), Some(&request(compose_options.clone())), &options, None, None)
         .unwrap_err();
     let msg = err.to_string();
     assert!(
@@ -187,7 +193,7 @@ fn discovers_commands_from_template() {
     let (_dir, approval_options) = approval_options_with_whitelist(&["echo"]);
 
     let result =
-        resolve_shell_approvals(Some(&md), Some(&compose_options), &approval_options, None, None)
+        resolve_shell_approvals(Some(&md), Some(&request(compose_options.clone())), &approval_options, None, None)
             .unwrap();
 
     assert_eq!(result.total_discovered, 1);
@@ -201,7 +207,7 @@ fn blacklisted_command_returns_error() {
     let (_dir, approval_options) = approval_options_with_whitelist(&["rm"]);
 
     let result =
-        resolve_shell_approvals(Some(&md), Some(&compose_options), &approval_options, None, None);
+        resolve_shell_approvals(Some(&md), Some(&request(compose_options.clone())), &approval_options, None, None);
 
     assert!(result.is_err());
     let err = result.unwrap_err();
@@ -314,14 +320,14 @@ fn full_flow_template_with_whitelisted_commands() {
 
     // Pre-flight should discover and approve "echo hello"
     let result =
-        resolve_shell_approvals(Some(&md), Some(&compose_opts), &options, None, None).unwrap();
+        resolve_shell_approvals(Some(&md), Some(&request(compose_opts.clone())), &options, None, None).unwrap();
     assert!(result.approved_commands.contains("echo hello"));
 
     // Now compose with the pre-approved set — should succeed
     let compose_with_approval = ComposeOptions::new()
         .with_source_file(&file_path)
         .with_pre_approved_commands(result.approved_commands);
-    let (composed, _) = md.compose_with(compose_with_approval).unwrap();
+    let (composed, _) = md.compose_with(&request(compose_with_approval)).unwrap();
     assert!(composed.content().contains("hello"));
 }
 
@@ -369,7 +375,7 @@ iteration: \"{{ file_exists('design.md') ? 2 : 1 }}\"\n\
 
     // Pre-flight must discover the RESOLVED command, not the raw template.
     let result =
-        resolve_shell_approvals(Some(&md), Some(&compose_opts), &options, None, None).unwrap();
+        resolve_shell_approvals(Some(&md), Some(&request(compose_opts.clone())), &options, None, None).unwrap();
     assert!(
         result.approved_commands.contains("dirname fixes/x/spec.md"),
         "pre-approved set must contain the resolved command; got: {:?}",
@@ -381,7 +387,7 @@ iteration: \"{{ file_exists('design.md') ? 2 : 1 }}\"\n\
         .with_source_file(&file_path)
         .with_set_overrides(overrides)
         .with_pre_approved_commands(result.approved_commands);
-    let (composed, _) = md.compose_with(compose_with_approval).unwrap();
+    let (composed, _) = md.compose_with(&request(compose_with_approval)).unwrap();
     assert!(
         composed.content().contains("fixes/x"),
         "composed body should contain the resolved dir; got: {:?}",
@@ -402,7 +408,7 @@ fn full_flow_blacklisted_command_aborts_preflight() {
         ..Default::default()
     };
 
-    let err = resolve_shell_approvals(Some(&md), Some(&compose_opts), &options, None, None);
+    let err = resolve_shell_approvals(Some(&md), Some(&request(compose_opts.clone())), &options, None, None);
     assert!(err.is_err());
     let msg = err.unwrap_err().to_string();
     assert!(msg.contains("blacklisted"), "got: {msg}");
@@ -428,7 +434,7 @@ fn full_flow_unapproved_command_rejected_at_compose_time() {
         .with_pre_approved_commands(approved);
 
     let md = Markdown::try_from(file_path.as_path()).unwrap();
-    let err = md.compose_with(options).unwrap_err();
+    let err = md.compose_with(&request(options)).unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("not pre-approved"), "got: {msg}");
 }
@@ -447,7 +453,7 @@ fn allow_once_populates_cache_without_persisting() {
     };
 
     let result =
-        resolve_shell_approvals(Some(&md), Some(&compose_options), &options, None, None).unwrap();
+        resolve_shell_approvals(Some(&md), Some(&request(compose_options.clone())), &options, None, None).unwrap();
 
     assert_eq!(result.total_discovered, 1);
     assert_eq!(result.user_approved, 1);
@@ -467,7 +473,7 @@ fn deny_returns_shell_command_denied_error() {
         ..Default::default()
     };
 
-    let result = resolve_shell_approvals(Some(&md), Some(&compose_options), &options, None, None);
+    let result = resolve_shell_approvals(Some(&md), Some(&request(compose_options.clone())), &options, None, None);
 
     assert!(result.is_err());
     assert!(
@@ -494,13 +500,13 @@ fn warm_cache_prevents_second_handler_invocation() {
 
     // First call: handler invoked
     let result1 =
-        resolve_shell_approvals(Some(&md), Some(&compose_options), &options, None, None).unwrap();
+        resolve_shell_approvals(Some(&md), Some(&request(compose_options.clone())), &options, None, None).unwrap();
     assert_eq!(result1.user_approved, 1);
     assert_eq!(handler.calls(), 1);
 
     // Second call: cache hit, handler NOT invoked
     let result2 =
-        resolve_shell_approvals(Some(&md), Some(&compose_options), &options, None, None).unwrap();
+        resolve_shell_approvals(Some(&md), Some(&request(compose_options.clone())), &options, None, None).unwrap();
     assert_eq!(result2.total_discovered, 1);
     assert_eq!(
         handler.calls(),
@@ -523,7 +529,7 @@ fn interactive_handler_is_invoked_for_non_whitelisted_command() {
     };
 
     let result =
-        resolve_shell_approvals(Some(&md), Some(&compose_options), &options, None, None).unwrap();
+        resolve_shell_approvals(Some(&md), Some(&request(compose_options.clone())), &options, None, None).unwrap();
 
     assert_eq!(
         handler.calls(),
@@ -579,13 +585,13 @@ fn shared_cache_across_distinct_options_prevents_reprompt() {
 
     // Step 1: fresh options, cache wired in.
     let step1 = shared_cache_options(&dir, handler.clone(), Arc::clone(&shared_cache));
-    let r1 = resolve_shell_approvals(Some(&md), Some(&compose_options), &step1, None, None).unwrap();
+    let r1 = resolve_shell_approvals(Some(&md), Some(&request(compose_options.clone())), &step1, None, None).unwrap();
     assert_eq!(r1.user_approved, 1);
     assert_eq!(handler.calls(), 1, "step 1 must prompt once");
 
     // Step 2: BRAND NEW options, same Arc-cloned cache. Cache hit.
     let step2 = shared_cache_options(&dir, handler.clone(), Arc::clone(&shared_cache));
-    let r2 = resolve_shell_approvals(Some(&md), Some(&compose_options), &step2, None, None).unwrap();
+    let r2 = resolve_shell_approvals(Some(&md), Some(&request(compose_options.clone())), &step2, None, None).unwrap();
     assert_eq!(r2.total_discovered, 1);
     assert_eq!(
         handler.calls(),
@@ -625,7 +631,7 @@ fn caller_file_origins_do_not_partition_the_exact_command_approval_cache() {
         let compose_options = ComposeOptions::new().with_caller_input_records(records(origin));
         resolve_shell_approvals(
             Some(&md),
-            Some(&compose_options),
+            Some(&request(compose_options.clone())),
             &approval_options,
             None,
             None,
@@ -659,7 +665,7 @@ fn approval_request_carries_real_source_provenance() {
     };
 
     let _result =
-        resolve_shell_approvals(Some(&md), Some(&compose_opts), &options, None, None).unwrap();
+        resolve_shell_approvals(Some(&md), Some(&request(compose_opts.clone())), &options, None, None).unwrap();
 
     let requests = handler.captured_requests();
     assert_eq!(requests.len(), 1, "handler should be called once");
@@ -760,7 +766,7 @@ fn lifecycle_shell_read_side_resolves_against_document_dir() {
         &frontmatter,
         &ComposeContext::capture_for_dir(doc_dir.path()),
         &source_path,
-        None,
+        crate::test_support::process_context(),
         Some(launch_dir.path()),
     )
     .expect("resolution against the document dir must succeed");
@@ -792,7 +798,7 @@ fn lifecycle_shell_read_side_does_not_resolve_launch_only_file() {
         &frontmatter,
         &ComposeContext::capture_for_dir(doc_dir.path()),
         &source_path,
-        None,
+        crate::test_support::process_context(),
         None,
     )
     .expect("resolution still succeeds; file just resolves to absent");
@@ -873,7 +879,7 @@ fn lifecycle_shell_read_side_reuses_all_request_resolution_inputs() {
         &frontmatter,
         &ComposeContext::capture_for_dir(request.path()),
         &source_dir.join("prompt.md"),
-        Some(&snapshot),
+        &snapshot,
         None,
     )
     .unwrap();

@@ -119,7 +119,7 @@ fn git(dir: &Path, args: &[&str]) {
 fn prepared(repo: &Repo, frontmatter: &Value) -> LifecycleConfig {
     let mut config = parse_lifecycle_config(frontmatter, &repo.source()).unwrap();
     let context = ComposeContext::capture_for_content(repo.dir.path(), "");
-    resolve_lifecycle_shell_commands(&mut config, frontmatter, &context, &repo.source(), None, None)
+    resolve_lifecycle_shell_commands(&mut config, frontmatter, &context, &repo.source(), crate::test_support::process_context(), None)
         .unwrap();
     config
 }

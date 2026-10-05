@@ -28,7 +28,6 @@ use std::{
 };
 
 use biscuit_file::{FileReference, FileReferenceKind, FileResolutionContext};
-use crate::markdown::compose::document_resolution_context;
 use indexmap::IndexMap;
 use serde_json::{Map, Value};
 use serde_yaml_ng::Value as YamlValue;
@@ -94,43 +93,39 @@ pub struct ResolvedSchema {
 ///
 /// Returns:
 /// - [`SchemaError::RemoteUnsupported`] for `http://` / `https://` values.
-/// - [`SchemaError::Unresolved`] when a file reference fails to resolve.
+/// - [`SchemaError::Unresolved`] when a file reference is malformed or the
+///   resolver rejects it.
+/// - [`SchemaError::NoMatch`] when a file reference matches no file.
 /// - [`SchemaError::Io`] when reading the referenced file fails.
 /// - [`SchemaError::AmbiguousReferenced`] when the referenced file is neither
 ///   a valid SimplifiedSchema nor a JSON Schema.
 /// - [`SchemaError::FrontmatterShape`] for unsupported `$schema` shapes.
 /// - [`SchemaError::Grammar`] / [`SchemaError::Convert`] propagated from the
 ///   parser and converter.
-pub fn resolve_schema(value: &Value, base_dir: &Path) -> Result<ResolvedSchema, SchemaError> {
-    resolve_schema_with_roots(value, base_dir, &[])
+pub fn resolve_schema(
+    value: &Value,
+    base_dir: &Path,
+    context: &biscuit_file::FileResolutionContext,
+) -> Result<ResolvedSchema, SchemaError> {
+    resolve_schema_with_roots(value, base_dir, &[], context)
 }
 
 /// Same as [`resolve_schema`] but threads schema-root resolution context for
 /// bare-name references (Phase 3). A bare name (`$schema: claudine.yaml`)
 /// resolves against `schema_roots` nearest-first; path-qualified references
 /// are untouched.
+///
+/// File references resolve through `request_context` derived to `base_dir`, so
+/// the document base changes without recapturing repository, package, home,
+/// environment, or configured roots.
 pub fn resolve_schema_with_roots(
     value: &Value,
     base_dir: &Path,
     schema_roots: &[PathBuf],
+    request_context: &biscuit_file::FileResolutionContext,
 ) -> Result<ResolvedSchema, SchemaError> {
     let yaml = json_to_yaml(value);
-    resolve_yaml_schema_with_roots(&yaml, base_dir, schema_roots)
-}
-
-/// Resolves a document schema using an immutable host request snapshot.
-///
-/// The compatibility entry points remain ambient-capable. Compose hosts use
-/// this variant so the document base changes without recapturing repository,
-/// package, home, environment, or configured roots.
-pub(crate) fn resolve_schema_with_roots_in_context(
-    value: &Value,
-    base_dir: &Path,
-    schema_roots: &[PathBuf],
-    request_context: Option<&biscuit_file::FileResolutionContext>,
-) -> Result<ResolvedSchema, SchemaError> {
-    let yaml = json_to_yaml(value);
-    resolve_yaml_schema_with_roots_in_context(&yaml, base_dir, schema_roots, request_context)
+    resolve_yaml_schema_with_roots(&yaml, base_dir, schema_roots, request_context)
 }
 
 /// Same as [`resolve_schema`] but takes a YAML value directly. Used by the
@@ -138,8 +133,9 @@ pub(crate) fn resolve_schema_with_roots_in_context(
 pub fn resolve_yaml_schema(
     value: &YamlValue,
     base_dir: &Path,
+    context: &biscuit_file::FileResolutionContext,
 ) -> Result<ResolvedSchema, SchemaError> {
-    resolve_yaml_schema_with_roots(value, base_dir, &[])
+    resolve_yaml_schema_with_roots(value, base_dir, &[], context)
 }
 
 /// Same as [`resolve_yaml_schema`] but threads schema-root resolution context
@@ -148,15 +144,7 @@ pub fn resolve_yaml_schema_with_roots(
     value: &YamlValue,
     base_dir: &Path,
     schema_roots: &[PathBuf],
-) -> Result<ResolvedSchema, SchemaError> {
-    resolve_yaml_schema_with_roots_in_context(value, base_dir, schema_roots, None)
-}
-
-fn resolve_yaml_schema_with_roots_in_context(
-    value: &YamlValue,
-    base_dir: &Path,
-    schema_roots: &[PathBuf],
-    request_context: Option<&biscuit_file::FileResolutionContext>,
+    request_context: &biscuit_file::FileResolutionContext,
 ) -> Result<ResolvedSchema, SchemaError> {
     let mut stack = ReferenceStack::default();
     match value {
@@ -208,7 +196,7 @@ fn resolve_root_union(
     items: &[YamlValue],
     base_dir: &Path,
     schema_roots: &[PathBuf],
-    request_context: Option<&biscuit_file::FileResolutionContext>,
+    request_context: &biscuit_file::FileResolutionContext,
     stack: &mut ReferenceStack,
 ) -> Result<ResolvedSchema, SchemaError> {
     if items.is_empty() {
@@ -340,39 +328,26 @@ fn is_bare_name(file_ref: &FileReference) -> bool {
 /// resolved path of the first root that contains a file matching `name`, or
 /// `None` when no root has it.
 ///
-/// Each root gets an explicit context derived from the request snapshot with no
-/// repository or package anchor. The parsed implicit-relative reference
-/// therefore has exactly one candidate per iteration, so the loop's advertised
-/// nearest-first ordering decides the winner without reading ambient state.
+/// Each root is tried with the name spelled as an explicit `./name`, resolved
+/// in the request context derived onto that root. An explicit relative
+/// reference has exactly one candidate, the root's own entry, so the loop's
+/// advertised nearest-first ordering decides the winner. The derivation keeps
+/// the request's home and environment and reads no ambient state; it crosses
+/// the trust boundary because a schema root (configuration, `~`) may lie
+/// outside the request's repository.
 fn try_bare_name_in_roots(
     file_ref: &FileReference,
     schema_roots: &[PathBuf],
-    request_context: Option<&FileResolutionContext>,
+    request_context: &FileResolutionContext,
 ) -> Result<Option<PathBuf>, SchemaError> {
-    let captured = request_context.cloned().unwrap_or_else(|| {
-        FileResolutionContext::new(
-            schema_roots
-                .first()
-                .map(PathBuf::as_path)
-                .unwrap_or_else(|| Path::new(".")),
-        )
-    });
+    let unresolved = |source| SchemaError::Unresolved {
+        reference: file_ref.raw().to_string(),
+        source,
+    };
+    let explicit = FileReference::new(&format!("./{}", file_ref.raw())).map_err(unresolved)?;
     for root in schema_roots {
-        // Omit repository/package anchors so this implicit bare name has one
-        // candidate: the selected schema root. HOME and environment still come
-        // from the immutable request snapshot, with no ambient reads.
-        let root_context = FileResolutionContext::from_snapshot(
-            root,
-            captured.home_dir().map(Path::to_path_buf),
-            captured.env().clone(),
-        );
-        if let Some(path) = file_ref
-            .resolve_in_context(&root_context)
-            .map_err(|source| SchemaError::Unresolved {
-                reference: file_ref.raw().to_string(),
-                source,
-            })?
-        {
+        let root_context = request_context.for_trusted_external_cwd(root);
+        if let Some(path) = explicit.resolve_in_context(&root_context).map_err(unresolved)? {
             return Ok(Some(path));
         }
     }
@@ -447,7 +422,7 @@ fn resolve_reference_in_context(
     reference: &str,
     base_dir: &Path,
     schema_roots: &[PathBuf],
-    request_context: Option<&biscuit_file::FileResolutionContext>,
+    request_context: &biscuit_file::FileResolutionContext,
     stack: &mut ReferenceStack,
 ) -> Result<ResolvedSchema, SchemaError> {
     let trimmed = reference.trim();
@@ -492,11 +467,9 @@ fn resolve_reference_in_context(
             });
         }
         // No sibling either — the bare name simply does not resolve.
-        return Err(SchemaError::Unresolved {
+        return Err(SchemaError::NoMatch {
             reference: trimmed.to_string(),
-            source: biscuit_file::FileReferenceError::InvalidSyntax(format!(
-                "bare-name reference `{trimmed}` not found in any schema root"
-            )),
+            bare_name: true,
         });
     }
 
@@ -509,11 +482,9 @@ fn resolve_reference_in_context(
             reference: trimmed.to_string(),
             source,
         })?
-        .ok_or_else(|| SchemaError::Unresolved {
+        .ok_or_else(|| SchemaError::NoMatch {
             reference: trimmed.to_string(),
-            source: biscuit_file::FileReferenceError::InvalidSyntax(format!(
-                "no file matched `{trimmed}`"
-            )),
+            bare_name: false,
         })?;
 
     let mut resolved = load_guarded_in_context(
@@ -537,7 +508,7 @@ fn resolve_reference_in_context(
 fn load_guarded_in_context(
     path: &Path,
     schema_roots: &[PathBuf],
-    request_context: Option<&biscuit_file::FileResolutionContext>,
+    request_context: &biscuit_file::FileResolutionContext,
     stack: &mut ReferenceStack,
 ) -> Result<ResolvedSchema, SchemaError> {
     let canonical = canonical_path(path);
@@ -564,20 +535,15 @@ fn load_guarded_in_context(
 fn resolve_file_reference_in_context(
     file_ref: &FileReference,
     base_dir: &Path,
-    request_context: Option<&biscuit_file::FileResolutionContext>,
+    request_context: &biscuit_file::FileResolutionContext,
 ) -> Result<Option<PathBuf>, biscuit_file::FileReferenceError> {
-    match request_context {
-        Some(snapshot) => file_ref.resolve_in_context(&snapshot.for_cwd(base_dir)),
-        None => file_ref.resolve_in_context(&document_resolution_context(
-            base_dir, None, &[], None,
-        )),
-    }
+    file_ref.resolve_in_context(&request_context.for_cwd(base_dir))
 }
 
 fn load_schema_from_path_in_context(
     path: &Path,
     schema_roots: &[PathBuf],
-    request_context: Option<&biscuit_file::FileResolutionContext>,
+    request_context: &biscuit_file::FileResolutionContext,
     stack: &mut ReferenceStack,
 ) -> Result<ResolvedSchema, SchemaError> {
     let bytes = fs::read(path).map_err(|source| SchemaError::Io {
@@ -599,7 +565,7 @@ fn parse_yaml_referenced_file(
     path: &Path,
     bytes: &[u8],
     schema_roots: &[PathBuf],
-    request_context: Option<&biscuit_file::FileResolutionContext>,
+    request_context: &biscuit_file::FileResolutionContext,
     stack: &mut ReferenceStack,
 ) -> Result<ResolvedSchema, SchemaError> {
     let text = std::str::from_utf8(bytes).map_err(|_| SchemaError::AmbiguousReferenced {
@@ -749,7 +715,7 @@ fn resolve_standalone_schema(
     schema: SimplifiedSchema,
     path: &Path,
     schema_roots: &[PathBuf],
-    request_context: Option<&biscuit_file::FileResolutionContext>,
+    request_context: &biscuit_file::FileResolutionContext,
     stack: &mut ReferenceStack,
 ) -> Result<ResolvedSchema, SchemaError> {
     let file_dir = path.parent().unwrap_or_else(|| Path::new("."));
@@ -794,7 +760,7 @@ fn resolve_standalone_root_union(
     base_dir: &Path,
     path: &Path,
     schema_roots: &[PathBuf],
-    request_context: Option<&biscuit_file::FileResolutionContext>,
+    request_context: &biscuit_file::FileResolutionContext,
     stack: &mut ReferenceStack,
 ) -> Result<ResolvedSchema, SchemaError> {
     let mut any_of = Vec::with_capacity(arms.len());
@@ -945,7 +911,7 @@ struct ImportEngine {
     /// Schema-root resolution context for bare-name import targets (Phase 3).
     schema_roots: Vec<PathBuf>,
     /// Immutable host request snapshot used by nested import references.
-    file_resolution_context: Option<biscuit_file::FileResolutionContext>,
+    file_resolution_context: biscuit_file::FileResolutionContext,
     /// Parsed named-type namespaces keyed by canonical file path.
     namespace_cache: HashMap<PathBuf, CachedNamespace>,
 }
@@ -968,7 +934,7 @@ fn expand_document_imports(
     base_dir: &Path,
     key: NamespaceKey,
     schema_roots: &[PathBuf],
-    request_context: Option<&biscuit_file::FileResolutionContext>,
+    request_context: &biscuit_file::FileResolutionContext,
 ) -> Result<(SimplifiedSchema, Vec<PathBuf>), SchemaError> {
     if !schema_has_imports(&schema) {
         return Ok((schema, Vec::new()));
@@ -987,7 +953,7 @@ fn expand_document_imports(
         stack: Vec::new(),
         dependencies: BTreeSet::new(),
         schema_roots: schema_roots.to_vec(),
-        file_resolution_context: request_context.cloned(),
+        file_resolution_context: request_context.clone(),
         namespace_cache: HashMap::new(),
     };
     let expanded = engine.expand_schema(schema, &current)?;
@@ -1201,7 +1167,7 @@ impl ImportEngine {
             if let Some(p) = try_bare_name_in_roots(
                 &file_ref,
                 &self.schema_roots,
-                self.file_resolution_context.as_ref(),
+                &self.file_resolution_context,
             )? {
                 p
             } else {
@@ -1213,28 +1179,24 @@ impl ImportEngine {
                         suggestion: format!("./{trimmed}"),
                     });
                 }
-                return Err(SchemaError::Unresolved {
+                return Err(SchemaError::NoMatch {
                     reference: reference.to_string(),
-                    source: biscuit_file::FileReferenceError::InvalidSyntax(format!(
-                        "bare-name reference `{trimmed}` not found in any schema root"
-                    )),
+                    bare_name: true,
                 });
             }
         } else {
             resolve_file_reference_in_context(
                 &file_ref,
                 &current.base_dir,
-                self.file_resolution_context.as_ref(),
+                &self.file_resolution_context,
             )
                 .map_err(|source| SchemaError::Unresolved {
                     reference: trimmed.to_string(),
                     source,
                 })?
-                .ok_or_else(|| SchemaError::Unresolved {
+                .ok_or_else(|| SchemaError::NoMatch {
                     reference: trimmed.to_string(),
-                    source: biscuit_file::FileReferenceError::InvalidSyntax(format!(
-                        "no file matched `{trimmed}`"
-                    )),
+                    bare_name: false,
                 })?
         };
 
@@ -1282,7 +1244,7 @@ impl ImportEngine {
 /// the given path when canonicalization fails (it should not, since the path
 /// was just resolved on disk).
 fn canonical_path(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+    biscuit_file::canonicalize_simplified(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 /// Loads a standalone schema file's mapping payload as named types.
@@ -1529,7 +1491,7 @@ fn resolve_document_examples(
     base_dir: &Path,
     this_file: Option<&Path>,
     schema_roots: &[PathBuf],
-    request_context: Option<&biscuit_file::FileResolutionContext>,
+    request_context: &biscuit_file::FileResolutionContext,
 ) -> Result<Vec<PathBuf>, SchemaError> {
     let mut deps: BTreeSet<PathBuf> = BTreeSet::new();
     let mut reads: HashMap<PathBuf, Vec<u8>> = HashMap::new();
@@ -1550,7 +1512,7 @@ fn resolve_examples_in_json(
     base_dir: &Path,
     this_file: Option<&Path>,
     schema_roots: &[PathBuf],
-    request_context: Option<&biscuit_file::FileResolutionContext>,
+    request_context: &biscuit_file::FileResolutionContext,
     deps: &mut BTreeSet<PathBuf>,
     reads: &mut HashMap<PathBuf, Vec<u8>>,
 ) -> Result<(), SchemaError> {
@@ -1635,7 +1597,7 @@ fn resolve_one_example(
     this_file: Option<&Path>,
     target: Option<&Value>,
     schema_roots: &[PathBuf],
-    request_context: Option<&biscuit_file::FileResolutionContext>,
+    request_context: &biscuit_file::FileResolutionContext,
     deps: &mut BTreeSet<PathBuf>,
     reads: &mut HashMap<PathBuf, Vec<u8>>,
 ) -> Result<Value, SchemaError> {
@@ -1673,11 +1635,9 @@ fn resolve_one_example(
                         suggestion: format!("./{trimmed}"),
                     });
                 }
-                return Err(SchemaError::Unresolved {
+                return Err(SchemaError::NoMatch {
                     reference: reference.to_string(),
-                    source: biscuit_file::FileReferenceError::InvalidSyntax(format!(
-                        "bare-name reference `{trimmed}` not found in any schema root"
-                    )),
+                    bare_name: true,
                 });
             }
         } else {
@@ -1686,11 +1646,9 @@ fn resolve_one_example(
                     reference: trimmed.to_string(),
                     source,
                 })?
-                .ok_or_else(|| SchemaError::Unresolved {
+                .ok_or_else(|| SchemaError::NoMatch {
                     reference: trimmed.to_string(),
-                    source: biscuit_file::FileReferenceError::InvalidSyntax(format!(
-                        "no file matched `{trimmed}`"
-                    )),
+                    bare_name: false,
                 })?
         }
     };
@@ -1988,7 +1946,7 @@ mod tests {
     #[test]
     fn resolves_inline_mapping() {
         let v = yaml_value("title: 'string(required)'");
-        let resolved = resolve_yaml_schema(&v, Path::new(".")).unwrap();
+        let resolved = resolve_yaml_schema(&v, Path::new("."), &biscuit_file::FileResolutionContext::new(Path::new("."))).unwrap();
         assert!(resolved.simplified.is_some());
         assert_eq!(resolved.json_schema["type"], "object");
         let required = resolved.json_schema["required"].as_array().unwrap();
@@ -1998,28 +1956,28 @@ mod tests {
     #[test]
     fn resolves_inline_root_union() {
         let v = yaml_value("- title: 'string(required)'\n- name: string");
-        let resolved = resolve_yaml_schema(&v, Path::new(".")).unwrap();
+        let resolved = resolve_yaml_schema(&v, Path::new("."), &biscuit_file::FileResolutionContext::new(Path::new("."))).unwrap();
         assert!(resolved.json_schema["anyOf"].is_array());
     }
 
     #[test]
     fn remote_https_is_rejected() {
         let v = yaml_value("'https://example.com/schema.json'");
-        let err = resolve_yaml_schema(&v, Path::new(".")).unwrap_err();
+        let err = resolve_yaml_schema(&v, Path::new("."), &biscuit_file::FileResolutionContext::new(Path::new("."))).unwrap_err();
         assert!(matches!(err, SchemaError::RemoteUnsupported { .. }));
     }
 
     #[test]
     fn remote_http_is_rejected() {
         let v = yaml_value("'http://example.com/schema.json'");
-        let err = resolve_yaml_schema(&v, Path::new(".")).unwrap_err();
+        let err = resolve_yaml_schema(&v, Path::new("."), &biscuit_file::FileResolutionContext::new(Path::new("."))).unwrap_err();
         assert!(matches!(err, SchemaError::RemoteUnsupported { .. }));
     }
 
     #[test]
     fn unsupported_shape_is_rejected() {
         let v = yaml_value("42");
-        let err = resolve_yaml_schema(&v, Path::new(".")).unwrap_err();
+        let err = resolve_yaml_schema(&v, Path::new("."), &biscuit_file::FileResolutionContext::new(Path::new("."))).unwrap_err();
         assert!(matches!(err, SchemaError::FrontmatterShape { .. }));
     }
 
@@ -2038,7 +1996,7 @@ mod tests {
             "$schema:\n  title: 'string(required)'\n",
         );
         let v = yaml_value("./schema.yaml");
-        let resolved = resolve_yaml_schema(&v, dir.path()).unwrap();
+        let resolved = resolve_yaml_schema(&v, dir.path(), &biscuit_file::FileResolutionContext::new(dir.path())).unwrap();
         assert!(resolved.simplified.is_some());
         let required = resolved.json_schema["required"].as_array().unwrap();
         assert_eq!(required[0], "title");
@@ -2055,14 +2013,14 @@ mod tests {
             "$schema:\n  title: 'string(required)'\n",
         );
         let v = yaml_value("./schema.yaml");
-        let resolved = resolve_yaml_schema(&v, dir.path()).unwrap();
+        let resolved = resolve_yaml_schema(&v, dir.path(), &biscuit_file::FileResolutionContext::new(dir.path())).unwrap();
         assert_eq!(resolved.referenced_files, vec![canonical_path(&path)]);
     }
 
     #[test]
     fn inline_mapping_records_no_referenced_files() {
         let v = yaml_value("title: 'string(required)'");
-        let resolved = resolve_yaml_schema(&v, Path::new(".")).unwrap();
+        let resolved = resolve_yaml_schema(&v, Path::new("."), &biscuit_file::FileResolutionContext::new(Path::new("."))).unwrap();
         assert!(resolved.referenced_files.is_empty());
     }
 
@@ -2077,7 +2035,7 @@ mod tests {
             "$schema:\n  title: 'string(required)'\n",
         );
         let v = yaml_value("- ./arm.yaml\n- name: string\n");
-        let resolved = resolve_yaml_schema(&v, dir.path()).unwrap();
+        let resolved = resolve_yaml_schema(&v, dir.path(), &biscuit_file::FileResolutionContext::new(dir.path())).unwrap();
         assert_eq!(resolved.referenced_files, vec![canonical_path(&arm)]);
     }
 
@@ -2090,7 +2048,7 @@ mod tests {
             r#"{"type":"object","properties":{"x":{"type":"number"}}}"#,
         );
         let v = yaml_value("./schema.json");
-        let resolved = resolve_yaml_schema(&v, dir.path()).unwrap();
+        let resolved = resolve_yaml_schema(&v, dir.path(), &biscuit_file::FileResolutionContext::new(dir.path())).unwrap();
         assert!(resolved.simplified.is_none());
         assert_eq!(resolved.json_schema["properties"]["x"]["type"], "number");
     }
@@ -2104,7 +2062,7 @@ mod tests {
             "title: hello\nproperties:\n  x:\n    type: number\n",
         );
         let v = yaml_value("./no-schema.yaml");
-        let resolved = resolve_yaml_schema(&v, dir.path()).unwrap();
+        let resolved = resolve_yaml_schema(&v, dir.path(), &biscuit_file::FileResolutionContext::new(dir.path())).unwrap();
         assert!(resolved.simplified.is_none());
     }
 
@@ -2116,7 +2074,7 @@ mod tests {
             "schema.yaml",
             "source_marker: string(required)\nspec: 'file(eager; required)'\ncaller_spec: 'file(eager; required)'\n",
         );
-        let resolved = resolve_yaml_schema(&yaml_value("./schema.yaml"), dir.path()).unwrap();
+        let resolved = resolve_yaml_schema(&yaml_value("./schema.yaml"), dir.path(), &biscuit_file::FileResolutionContext::new(dir.path())).unwrap();
 
         assert!(resolved.simplified.is_none());
         assert_eq!(resolved.json_schema["source_marker"], "string(required)");
@@ -2163,7 +2121,7 @@ mod tests {
         for (name, body) in cases {
             write_schema_file(dir.path(), name, body);
             let resolved =
-                resolve_yaml_schema(&yaml_value(&format!("./{name}")), dir.path()).unwrap();
+                resolve_yaml_schema(&yaml_value(&format!("./{name}")), dir.path(), &biscuit_file::FileResolutionContext::new(dir.path())).unwrap();
             assert!(
                 resolved.advisories.is_empty(),
                 "unexpected advisory for {name}"
@@ -2177,7 +2135,7 @@ mod tests {
         );
         write_schema_file(dir.path(), "scalar.yaml", "$schema: ./target.yaml\n");
         let resolved =
-            resolve_yaml_schema(&yaml_value("./scalar.yaml"), dir.path()).unwrap();
+            resolve_yaml_schema(&yaml_value("./scalar.yaml"), dir.path(), &biscuit_file::FileResolutionContext::new(dir.path())).unwrap();
         assert!(resolved.advisories.is_empty());
     }
 
@@ -2189,6 +2147,7 @@ mod tests {
         let resolved = resolve_yaml_schema(
             &yaml_value("- ./z.yaml\n- ./a.yaml\n- ./z.yaml\n"),
             dir.path(),
+            &biscuit_file::FileResolutionContext::new(dir.path()),
         )
         .unwrap();
 
@@ -2206,7 +2165,7 @@ mod tests {
             "root.yaml",
             "$schema:\n  - ./z.yaml\n  - ./a.yaml\n  - ./z.yaml\n",
         );
-        let nested = resolve_yaml_schema(&yaml_value("./root.yaml"), dir.path()).unwrap();
+        let nested = resolve_yaml_schema(&yaml_value("./root.yaml"), dir.path(), &biscuit_file::FileResolutionContext::new(dir.path())).unwrap();
         assert_eq!(
             nested
                 .advisories
@@ -2222,16 +2181,35 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         write_schema_file(dir.path(), "bad.yaml", "- one\n- two\n");
         let v = yaml_value("./bad.yaml");
-        let err = resolve_yaml_schema(&v, dir.path()).unwrap_err();
+        let err = resolve_yaml_schema(&v, dir.path(), &biscuit_file::FileResolutionContext::new(dir.path())).unwrap_err();
         assert!(matches!(err, SchemaError::AmbiguousReferenced { .. }));
     }
 
     #[test]
-    fn missing_file_errors_with_unresolved() {
+    fn missing_file_errors_with_no_match() {
         let dir = tempfile::tempdir().unwrap();
         let v = yaml_value("./nope.yaml");
-        let err = resolve_yaml_schema(&v, dir.path()).unwrap_err();
-        assert!(matches!(err, SchemaError::Unresolved { .. }));
+        let err = resolve_yaml_schema(&v, dir.path(), &biscuit_file::FileResolutionContext::new(dir.path())).unwrap_err();
+        assert!(matches!(err, SchemaError::NoMatch { bare_name: false, .. }), "{err:?}");
+        assert!(!err.to_string().contains("::file-links"), "a plain miss has no glob hint: {err}");
+    }
+
+    /// A `$schema` reference that looks like a glob names one file; its miss
+    /// is a `NoMatch` carrying the literal-glob hint. A malformed reference is
+    /// `Unresolved` with its syntax error and carries no hint, whatever its
+    /// text.
+    #[test]
+    fn literal_glob_miss_hints_and_invalid_syntax_does_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let context = biscuit_file::FileResolutionContext::new(dir.path());
+
+        let glob = resolve_yaml_schema(&yaml_value("./schemas/*.yaml"), dir.path(), &context).unwrap_err();
+        assert!(matches!(glob, SchemaError::NoMatch { .. }), "{glob:?}");
+        assert!(glob.to_string().contains("::file-links"), "{glob}");
+
+        let malformed = resolve_yaml_schema(&yaml_value("~user/*.yaml"), dir.path(), &context).unwrap_err();
+        assert!(matches!(malformed, SchemaError::Unresolved { .. }), "{malformed:?}");
+        assert!(!malformed.to_string().contains("::file-links"), "{malformed}");
     }
 
     #[test]
@@ -2416,7 +2394,7 @@ mod tests {
     /// motivating `darkmatter.yaml` baseline shape.
     #[test]
     fn baseline_nested_ctx_generated_validates_when_ctx_absent() {
-        use crate::markdown::schemas::validate::build_validator;
+        use crate::markdown::schemas::validate::build_structural_validator;
         let baseline_yaml = "ctx:\n  today: \"date(generated; required)\"";
         let baseline_value: YamlValue = serde_yaml_ng::from_str(baseline_yaml).unwrap();
         let baseline_schema = parse_yaml_schema(&baseline_value).unwrap();
@@ -2424,7 +2402,7 @@ mod tests {
 
         let doc = json!({"type": "object", "properties": {}});
         let merged = merge_baseline(&baseline_json, doc).unwrap();
-        let validator = build_validator(&merged, None, None).unwrap();
+        let validator = build_structural_validator(&merged).unwrap();
 
         // Authored document omits `ctx` entirely — validates.
         assert!(
@@ -2464,7 +2442,7 @@ mod schema_plus_phase1 {
         let schema_value = fm
             .get("$schema")
             .expect("schema file must have a `$schema` key");
-        resolve_yaml_schema(schema_value, dir)
+        resolve_yaml_schema(schema_value, dir, &biscuit_file::FileResolutionContext::new(dir))
     }
 
     // ── Feature B — `@` cross-file named-type import ─────────────────────
@@ -2877,7 +2855,13 @@ mod schema_plus_phase1 {
                 "demo": { "type": "string", "x-darkmatter-example": ["this"] }
             }
         });
-        let deps = resolve_document_examples(&mut json, dir.path(), Some(&path), &[], None)
+        let deps = resolve_document_examples(
+            &mut json,
+            dir.path(),
+            Some(&path),
+            &[],
+            &FileResolutionContext::new(dir.path()),
+        )
             .expect("`this` example must resolve");
         assert_eq!(
             json["properties"]["demo"]["x-darkmatter-example"][0]["kind"],
@@ -2940,7 +2924,7 @@ mod schema_plus_phase1 {
         let fm: YamlValue = serde_yaml_ng::from_str(&raw).expect("parse example.yaml");
         let schema_value = fm.get("$schema").expect("example.yaml has a `$schema` key");
         let fixture_json =
-            resolve_yaml_schema(schema_value, &dir).expect("example.yaml envelope must resolve");
+            resolve_yaml_schema(schema_value, &dir, &biscuit_file::FileResolutionContext::new(&dir)).expect("example.yaml envelope must resolve");
 
         let builtin: YamlValue = serde_yaml_ng::from_str(
             super::super::example::EXAMPLE_ENVELOPE_YAML,
@@ -3079,7 +3063,7 @@ mod bare_name_phase3 {
         ];
         let v = yaml_value("claudine.yaml");
         let resolved =
-            resolve_yaml_schema_with_roots(&v, &root.join("pkg/docs"), &roots).expect("resolves");
+            resolve_yaml_schema_with_roots(&v, &root.join("pkg/docs"), &roots, &biscuit_file::FileResolutionContext::new(root.join("pkg/docs"))).expect("resolves");
 
         // Near root wins → `prompt` is required.
         let required = resolved.json_schema["required"].as_array().unwrap();
@@ -3134,11 +3118,11 @@ mod bare_name_phase3 {
         }
 
         let value = yaml_value("'{{DARKMATTER_SCHEMA_ROOT_NAME}}'");
-        let result = resolve_yaml_schema_with_roots_in_context(
+        let result = resolve_yaml_schema_with_roots(
             &value,
             &docs,
             std::slice::from_ref(&schemas),
-            Some(&request_context),
+            &request_context,
         );
 
         match prior_name {
@@ -3177,7 +3161,7 @@ mod bare_name_phase3 {
         ];
         let v = yaml_value("claudine.yaml");
         let resolved =
-            resolve_yaml_schema_with_roots(&v, &root.join("pkg/docs"), &roots).expect("resolves");
+            resolve_yaml_schema_with_roots(&v, &root.join("pkg/docs"), &roots, &biscuit_file::FileResolutionContext::new(root.join("pkg/docs"))).expect("resolves");
         let required = resolved.json_schema["required"].as_array().unwrap();
         assert!(required.iter().any(|v| v == "title"));
     }
@@ -3217,7 +3201,7 @@ mod bare_name_phase3 {
         let roots = vec![root.join("schemas")];
         let v = yaml_value("schema.yaml");
         let resolved =
-            resolve_yaml_schema_with_roots(&v, &root.join("docs"), &roots).expect("resolves");
+            resolve_yaml_schema_with_roots(&v, &root.join("docs"), &roots, &biscuit_file::FileResolutionContext::new(root.join("docs"))).expect("resolves");
 
         let required = resolved.json_schema["required"].as_array().unwrap();
         assert!(
@@ -3270,7 +3254,7 @@ mod bare_name_phase3 {
         let roots = vec![root.join("near"), root.join("far")];
         let v = yaml_value("schema.yaml");
         let resolved =
-            resolve_yaml_schema_with_roots(&v, &root.join("docs"), &roots).expect("resolves");
+            resolve_yaml_schema_with_roots(&v, &root.join("docs"), &roots, &biscuit_file::FileResolutionContext::new(root.join("docs"))).expect("resolves");
 
         let required = resolved.json_schema["required"].as_array().unwrap();
         assert!(
@@ -3308,7 +3292,7 @@ mod bare_name_phase3 {
         let roots = vec![root.join("schemas")];
         let v = yaml_value("./local.yaml");
         let resolved =
-            resolve_yaml_schema_with_roots(&v, &root.join("docs"), &roots).expect("resolves");
+            resolve_yaml_schema_with_roots(&v, &root.join("docs"), &roots, &biscuit_file::FileResolutionContext::new(root.join("docs"))).expect("resolves");
 
         // `./local.yaml` resolves to the sibling, not the root.
         let required = resolved.json_schema["required"].as_array().unwrap();
@@ -3335,7 +3319,7 @@ mod bare_name_phase3 {
 
         let roots = vec![root.join("schemas")];
         let v = yaml_value("local.yaml");
-        let err = resolve_yaml_schema_with_roots(&v, &root.join("docs"), &roots).unwrap_err();
+        let err = resolve_yaml_schema_with_roots(&v, &root.join("docs"), &roots, &biscuit_file::FileResolutionContext::new(root.join("docs"))).unwrap_err();
 
         match err {
             SchemaError::BareNameSiblingExists {
@@ -3350,7 +3334,7 @@ mod bare_name_phase3 {
     }
 
     #[test]
-    fn bare_name_not_found_no_sibling_is_unresolved() {
+    fn bare_name_not_found_no_sibling_is_no_match() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
 
@@ -3359,8 +3343,8 @@ mod bare_name_phase3 {
 
         let roots = vec![root.join("schemas")];
         let v = yaml_value("nonexistent.yaml");
-        let err = resolve_yaml_schema_with_roots(&v, &root.join("docs"), &roots).unwrap_err();
-        assert!(matches!(err, SchemaError::Unresolved { .. }));
+        let err = resolve_yaml_schema_with_roots(&v, &root.join("docs"), &roots, &biscuit_file::FileResolutionContext::new(root.join("docs"))).unwrap_err();
+        assert!(matches!(err, SchemaError::NoMatch { bare_name: true, .. }), "{err:?}");
     }
 
     #[test]
@@ -3377,7 +3361,7 @@ mod bare_name_phase3 {
         );
 
         let v = yaml_value("sibling.yaml");
-        let resolved = resolve_yaml_schema(&v, root).expect("resolves via legacy path");
+        let resolved = resolve_yaml_schema(&v, root, &biscuit_file::FileResolutionContext::new(root)).expect("resolves via legacy path");
         let required = resolved.json_schema["required"].as_array().unwrap();
         assert!(required.iter().any(|v| v == "title"));
     }
@@ -3410,7 +3394,7 @@ mod bare_name_phase3 {
         let main_yaml: YamlValue = serde_yaml_ng::from_str(&main_raw).unwrap();
         let schema_value = main_yaml.get("$schema").unwrap();
 
-        let resolved = resolve_yaml_schema_with_roots(schema_value, &root.join("docs"), &roots)
+        let resolved = resolve_yaml_schema_with_roots(schema_value, &root.join("docs"), &roots, &biscuit_file::FileResolutionContext::new(root.join("docs")))
             .expect("import resolves via roots");
 
         // `value` should have the inlined enum from types.yaml.
@@ -3447,7 +3431,7 @@ mod bare_name_phase3 {
         let main_yaml: YamlValue = serde_yaml_ng::from_str(&main_raw).unwrap();
         let schema_value = main_yaml.get("$schema").unwrap();
 
-        let err = resolve_yaml_schema_with_roots(schema_value, &root.join("docs"), &roots)
+        let err = resolve_yaml_schema_with_roots(schema_value, &root.join("docs"), &roots, &biscuit_file::FileResolutionContext::new(root.join("docs")))
             .unwrap_err();
         assert!(
             matches!(err, SchemaError::BareNameSiblingExists { .. }),
@@ -3482,7 +3466,7 @@ mod bare_name_phase3 {
         let main_yaml: YamlValue = serde_yaml_ng::from_str(&main_raw).unwrap();
         let schema_value = main_yaml.get("$schema").unwrap();
 
-        let resolved = resolve_yaml_schema_with_roots(schema_value, &root.join("docs"), &roots)
+        let resolved = resolve_yaml_schema_with_roots(schema_value, &root.join("docs"), &roots, &biscuit_file::FileResolutionContext::new(root.join("docs")))
             .expect("example resolves via roots");
 
         let examples = &resolved.json_schema["properties"]["demo"]["x-darkmatter-example"];
@@ -3517,7 +3501,7 @@ mod bare_name_phase3 {
         let main_yaml: YamlValue = serde_yaml_ng::from_str(&main_raw).unwrap();
         let schema_value = main_yaml.get("$schema").unwrap();
 
-        let err = resolve_yaml_schema_with_roots(schema_value, &root.join("docs"), &roots)
+        let err = resolve_yaml_schema_with_roots(schema_value, &root.join("docs"), &roots, &biscuit_file::FileResolutionContext::new(root.join("docs")))
             .unwrap_err();
         assert!(
             matches!(err, SchemaError::BareNameSiblingExists { .. }),
@@ -3560,7 +3544,7 @@ mod bare_name_phase3 {
 
         // 1. `$schema` bare-name reference.
         let v = yaml_value("shared.yaml");
-        let r1 = resolve_yaml_schema_with_roots(&v, &root.join("docs"), &roots).unwrap();
+        let r1 = resolve_yaml_schema_with_roots(&v, &root.join("docs"), &roots, &biscuit_file::FileResolutionContext::new(root.join("docs"))).unwrap();
         assert!(r1.referenced_files.len() == 1);
 
         // 2. `Name@file` bare-name import target.
@@ -3572,7 +3556,7 @@ mod bare_name_phase3 {
         let importer_raw = std::fs::read_to_string(root.join("docs/importer.yaml")).unwrap();
         let importer_yaml: YamlValue = serde_yaml_ng::from_str(&importer_raw).unwrap();
         let schema_value = importer_yaml.get("$schema").unwrap();
-        let r2 = resolve_yaml_schema_with_roots(schema_value, &root.join("docs"), &roots).unwrap();
+        let r2 = resolve_yaml_schema_with_roots(schema_value, &root.join("docs"), &roots, &biscuit_file::FileResolutionContext::new(root.join("docs"))).unwrap();
         let expected = canonical_path(&root.join("schemas/shared.yaml"));
         assert!(
             r2.imports.contains(&expected),
@@ -3613,7 +3597,7 @@ mod bare_name_phase3 {
         let importer: YamlValue = serde_yaml_ng::from_str(&raw).unwrap();
         let schema_value = importer.get("$schema").unwrap();
         let resolved =
-            resolve_yaml_schema_with_roots(schema_value, &root.join("docs"), &[]).unwrap();
+            resolve_yaml_schema_with_roots(schema_value, &root.join("docs"), &[], &biscuit_file::FileResolutionContext::new(root.join("docs"))).unwrap();
 
         // All three named types inlined to their declared shapes. Top-level
         // presence is re-decided at the use site, so each imported type is

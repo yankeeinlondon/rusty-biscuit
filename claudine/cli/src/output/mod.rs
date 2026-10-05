@@ -322,13 +322,14 @@ pub(crate) fn log_dry_run(
     sp_lines: Option<&[String]>,
 ) {
     let mut header = format!(
-        "\n<blue><bold>Claudine</bold></blue> <dim>\u{25b8}</dim> <bold>{}</bold> <dim>[DRY RUN]</dim>",
+        "<blue><bold>Claudine</bold></blue> <dim>\u{25b8}</dim> <bold>{}</bold> <dim>[DRY RUN]</dim>",
         profile.provider()
     );
     if repo_requested {
         header.push_str(&format!(" {}", &*REPO_FLAG.to_string()));
     }
-    log::message(&Prose::new(header).render(term));
+    // The blank spacing row sits outside the Prose, which trims edge newlines.
+    log::message(&format!("\n{}", Prose::new(header).render(term)));
 
     // Working directory
     log::message(

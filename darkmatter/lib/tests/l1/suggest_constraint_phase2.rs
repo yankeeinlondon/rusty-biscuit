@@ -157,6 +157,7 @@ fn import_suggestions_are_interpreted_after_exact_target_resolution() {
     let resolved = resolve_schema(
         &json!({ "value": "count(suggest(003.500, 4))@./types.yaml" }),
         dir.path(),
+        &biscuit_file::FileResolutionContext::new(dir.path()),
     )
     .unwrap();
     let SimplifiedSchema::Single(shape) = resolved.simplified.unwrap() else {
@@ -179,6 +180,7 @@ fn import_suggestions_are_interpreted_after_exact_target_resolution() {
     let unsupported = resolve_schema(
         &json!({ "value": "flag(suggest(true))@./types.yaml" }),
         dir.path(),
+        &biscuit_file::FileResolutionContext::new(dir.path()),
     )
     .unwrap_err();
     assert!(unsupported.to_string().contains("exact `string` or `number`"));

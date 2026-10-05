@@ -752,7 +752,8 @@ impl MarkdownRenderable for TwoColumn {
     /// `<div class="columns" style="display:flex;gap:{gap}ch">` with two
     /// `<div class="column">` children. The left column carries the width
     /// CSS from [`ColumnsHints::left_width`]; the right column flexes to
-    /// fill.
+    /// fill. The container is one raw HTML block, which a Markdown reader
+    /// does not parse, so the column bodies are the browser's HTML too.
     fn render_markdown_plus(&self) -> String {
         let node = <Self as TreeRenderable>::render_tree(self);
         let opts = MarkdownRenderOptions {
@@ -840,8 +841,11 @@ fn column_width_kind(width: ColumnWidth) -> ColumnWidthKind {
 
 /// Projects a column's content into block-level render-tree nodes.
 ///
-/// Inline-only projected content is wrapped in a [`RenderNode::paragraph`] so
-/// the enclosing block quote carries valid block children.
+/// A column is a block region: a [`Prose`] contributes its own `Paragraph`
+/// and `Code` blocks. A run of inline nodes from any other content (a plain
+/// string, an `InlineProse`, a text fallback) is wrapped in a
+/// [`RenderNode::paragraph`] so the enclosing block quote carries valid block
+/// children.
 fn project_column(content: &RenderableTerminalContent) -> Vec<RenderNode> {
     let mut ctx = TreeProjectionContext::default();
     let nodes = content.to_tree_nodes(&mut ctx).nodes;

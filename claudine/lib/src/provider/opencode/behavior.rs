@@ -56,7 +56,7 @@ impl McpBehavior for OpenCodeProvider {
     }
 
     fn native_config_path(&self, scope: &Scope) -> Option<PathBuf> {
-        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+        let home = biscuit_file::home_dir().unwrap_or_else(|| PathBuf::from("."));
         Some(match scope {
             Scope::User => home.join(".config").join("opencode").join("opencode.json"),
             Scope::Repo(root) => root.join("opencode.json"),

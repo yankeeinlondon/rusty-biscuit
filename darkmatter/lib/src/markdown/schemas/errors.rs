@@ -6,7 +6,8 @@
 //! variants used by the resolution and validation pipeline:
 //!
 //! - [`SchemaError::Unresolved`] — a `$schema` file reference could not be
-//!   resolved on disk.
+//!   resolved (invalid syntax or a resolver error).
+//! - [`SchemaError::NoMatch`] — a `$schema` file reference matched no file.
 //! - [`SchemaError::AmbiguousReferenced`] — a referenced file is neither a
 //!   SimplifiedSchema (missing root `$schema:` key) nor a valid JSON Schema.
 //! - [`SchemaError::RemoteUnsupported`] — a `$schema` value is an `http(s)://`
@@ -23,6 +24,7 @@
 use std::{ops::Range, path::PathBuf};
 
 use thiserror::Error;
+
 
 /// Errors produced by the schemas subsystem.
 #[derive(Debug, Error)]
@@ -69,14 +71,23 @@ pub enum SchemaError {
     #[error("cannot convert SimplifiedSchema for `{property}` to JSON Schema: {message}")]
     Convert { property: String, message: String },
 
-    /// A `$schema` file reference could not be resolved (the path does not
-    /// exist, the syntax is invalid, or biscuit-file rejected it).
+    /// A `$schema` file reference could not be resolved: the syntax is
+    /// invalid, or biscuit-file rejected it. A reference that resolves but
+    /// matches no file is [`SchemaError::NoMatch`].
     #[error("could not resolve $schema reference `{reference}`")]
     Unresolved {
         reference: String,
         #[source]
         source: biscuit_file::FileReferenceError,
     },
+
+    /// A `$schema` file reference matched no file
+    /// ([`ResolutionFailure::NoMatch`](biscuit_file::ResolutionFailure::NoMatch)).
+    /// `bare_name` is set for a bare schema name that no schema root holds.
+    /// The message carries the literal-glob hint
+    /// ([`ResolutionFailure::glob_hint`](biscuit_file::ResolutionFailure::glob_hint)).
+    #[error("{}", crate::markdown::errors::with_glob_hint(format!("could not resolve $schema reference `{reference}`"), biscuit_file::ResolutionFailure::NoMatch, reference))]
+    NoMatch { reference: String, bare_name: bool },
 
     /// A referenced schema file is neither a recognized standalone
     /// SimplifiedSchema envelope nor a recognizable JSON Schema.
@@ -117,7 +128,8 @@ pub enum SchemaError {
     #[error("could not build JSON Schema validator: {message}")]
     BuildValidator { message: String },
 
-    /// I/O failed while reading a referenced or baseline schema file.
+    /// I/O failed while reading a referenced or baseline schema file, or
+    /// while inspecting or enumerating a schema root folder.
     #[error("io error reading `{path}`")]
     Io {
         path: PathBuf,
@@ -168,8 +180,10 @@ pub enum SchemaError {
 
     /// A trigger-schema match expression is malformed (bad combinator shape,
     /// unknown key, or an otherwise unparseable `match:` payload). `message`
-    /// describes the structural failure; the trigger grammar is defined in
-    /// `darkmatter/features/2026-07-10-schema-triggers/spec.md`.
+    /// describes the structural failure; the trigger grammar is documented in
+    /// the "Repository Trigger Schemas" section of
+    /// `darkmatter/docs/topics/schemas/definition.md`. A `$path` pattern that
+    /// is not an allowed glob reference is reported here too.
     #[error("invalid trigger-schema match expression: {message}")]
     TriggerMatch { message: String },
 
@@ -307,7 +321,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                 .body(
                     errors
                         .iter()
-                        .map(|error| Prose::new(Prose::escape_text(&error.to_string())))
+                        .map(|error| Prose::new(Prose::escape_text_outside_code_spans(&error.to_string())))
                         .collect::<Vec<_>>(),
                 )
                 .hint("Fix each listed property definition, then validate the schema again."),
@@ -324,7 +338,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                         )),
                         Prose::new(format!(
                             "<dim>Cause:</dim> {}",
-                            Prose::escape_text(&source.to_string())
+                            Prose::escape_text_outside_code_spans(&source.to_string())
                         )),
                     ])
                     .hint("Fix the referenced schema definition, then validate again.")
@@ -345,7 +359,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                     )),
                     Prose::new(format!(
                         "<dim>Message:</dim> {}",
-                        Prose::escape_text(message)
+                        Prose::escape_text_outside_code_spans(message)
                     )),
                 ];
                 StatusBlock::new(StatusState::Error)
@@ -370,7 +384,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                     )),
                     Prose::new(format!(
                         "<dim>Reason:</dim> {}",
-                        Prose::escape_text(message)
+                        Prose::escape_text_outside_code_spans(message)
                     )),
                 ])
                 .hint(
@@ -387,13 +401,39 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                     )),
                     Prose::new(format!(
                         "<dim>Cause:</dim> {}",
-                        Prose::escape_text(&source.to_string())
+                        Prose::escape_text_outside_code_spans(&source.to_string())
                     )),
                 ])
                 .hint(
                     "Confirm the file exists, uses a supported reference prefix (e.g. <cyan>./</cyan>, \
                      <cyan>~/</cyan>, <cyan>@/</cyan>), and is readable.",
                 ),
+
+            SchemaError::NoMatch { reference, bare_name } => {
+                let cause = if *bare_name {
+                    format!("no schema root holds `{reference}`")
+                } else {
+                    format!("no file matched `{reference}`")
+                };
+                let failure = biscuit_file::ResolutionFailure::NoMatch;
+                let mut body = vec![
+                    Prose::new(format!(
+                        "Could not resolve <cyan>$schema: {}</cyan>",
+                        Prose::escape_text(reference)
+                    )),
+                    Prose::new(format!("<dim>Cause:</dim> {}", Prose::escape_text_outside_code_spans(&cause))),
+                ];
+                if let Some(hint) = failure.glob_hint(reference) {
+                    body.push(Prose::new(format!("<dim>hint:</dim> {hint}")));
+                }
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new("SchemaError", "$schema unresolved"))
+                    .body(body)
+                    .hint(
+                        "Confirm the file exists, uses a supported reference prefix (e.g. <cyan>./</cyan>, \
+                         <cyan>~/</cyan>, <cyan>@/</cyan>), and is readable.",
+                    )
+            }
 
             SchemaError::AmbiguousReferenced { path } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
@@ -422,7 +462,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                     )),
                     Prose::new(format!(
                         "<dim>Reason:</dim> {}",
-                        Prose::escape_text(message)
+                        Prose::escape_text_outside_code_spans(message)
                     )),
                 ])
                 .hint(
@@ -444,12 +484,12 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
             SchemaError::Baseline { message, source } => {
                 let mut body = vec![Prose::new(format!(
                     "<dim>Reason:</dim> {}",
-                    Prose::escape_text(message)
+                    Prose::escape_text_outside_code_spans(message)
                 ))];
                 if let Some(cause) = source {
                     body.push(Prose::new(format!(
                         "<dim>Cause:</dim> {}",
-                        Prose::escape_text(&cause.to_string())
+                        Prose::escape_text_outside_code_spans(&cause.to_string())
                     )));
                 }
                 StatusBlock::new(StatusState::Error)
@@ -468,7 +508,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                 ))
                 .body(Prose::new(format!(
                     "<dim>jsonschema:</dim> {}",
-                    Prose::escape_text(message)
+                    Prose::escape_text_outside_code_spans(message)
                 )))
                 .hint(
                     "The lowered JSON Schema was rejected at compile time. Re-run with \
@@ -484,7 +524,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                     )),
                     Prose::new(format!(
                         "<dim>Cause:</dim> {} <dim>({:?})</dim>",
-                        Prose::escape_text(&source.to_string()),
+                        Prose::escape_text_outside_code_spans(&source.to_string()),
                         source.kind()
                     )),
                 ])
@@ -497,7 +537,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                 ))
                 .body(Prose::new(format!(
                     "<dim>Reason:</dim> {}",
-                    Prose::escape_text(message)
+                    Prose::escape_text_outside_code_spans(message)
                 )))
                 .hint(
                     "<cyan>$schema</cyan> must be a YAML mapping (inline schema), a string (file \
@@ -561,7 +601,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                         )),
                         Prose::new(format!(
                             "<dim>Reason:</dim> {}",
-                            Prose::escape_text(message)
+                            Prose::escape_text_outside_code_spans(message)
                         )),
                     ])
                     .hint(
@@ -578,7 +618,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                 ))
                 .body(Prose::new(format!(
                     "<dim>Reason:</dim> {}",
-                    Prose::escape_text(message)
+                    Prose::escape_text_outside_code_spans(message)
                 )))
                 .hint(
                     "See the trigger grammar: combinators (<cyan>all</cyan>/<cyan>any</cyan>/\
@@ -673,7 +713,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                         )),
                         Prose::new(format!(
                             "<dim>Reason:</dim> {}",
-                            Prose::escape_text(&source.to_string())
+                            Prose::escape_text_outside_code_spans(&source.to_string())
                         )),
                     ])
                     .hint(
@@ -727,7 +767,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                     )),
                     Prose::new(format!(
                         "<dim>Reason:</dim> {}",
-                        Prose::escape_text(reason)
+                        Prose::escape_text_outside_code_spans(reason)
                     )),
                 ])
                 .hint(
@@ -952,3 +992,4 @@ mod tests {
         assert!(out.contains("expected mapping"), "missing detail: {out}",);
     }
 }
+

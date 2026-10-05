@@ -24,7 +24,7 @@ use crate::markdown::compose::transclusion::{
     DirectiveKind, TransclusionRuntime, parse_frontmatter_refs,
 };
 use crate::markdown::compose::{
-    ComposeOperation, ComposeOptions, ComposeSource, EffectiveStateBuilder, ResolvingLookup,
+    ComposeOperation, ComposeSource, EffectiveStateBuilder, ResolvingLookup,
 };
 use crate::markdown::normalize::HeadingLevel;
 use crate::markdown::types::MarkdownResult;
@@ -73,13 +73,13 @@ fn build_graph_inner(
     let extract_references = matches!(mode, ReferenceGraphMode::Full);
 
     let source = md.source().clone().unwrap_or(ComposeSource::Unknown);
-    let compose = super::options_with_reference_resolution_context(&source, &options.compose);
+    let compose = options.compose.clone();
     let compose = match &source {
         ComposeSource::File(path) => compose.with_source_file(path),
         ComposeSource::Url(url) => compose.with_source_url(url.clone()),
         ComposeSource::Unknown => compose,
     };
-    let options = ReferenceGraphOptions::with_compose(compose);
+    let options = ReferenceGraphOptions::from_compose_options(compose);
     let options = &options;
     let mut runtime = ReferenceAnalysisRuntime {
         transclusion: TransclusionRuntime::new(options.compose.max_transclusion_depth),
@@ -259,7 +259,7 @@ fn accepted_child_options(
     path: &std::path::Path,
     opening: Option<crate::markdown::compose::context::options::SourceOpening>,
 ) -> ReferenceGraphOptions {
-    ReferenceGraphOptions::with_compose(
+    ReferenceGraphOptions::from_compose_options(
         options
             .compose
             .clone()
@@ -903,7 +903,7 @@ pub(super) fn prepare_content_for_validation(
             accepted_child_options(options, path, None)
         }
         ComposeSource::Url(url) if options.compose.source != *source => {
-            ReferenceGraphOptions::with_compose(
+            ReferenceGraphOptions::from_compose_options(
                 options.compose.clone().with_source_url(url.clone()),
             )
         }
@@ -925,14 +925,16 @@ fn prepare_content(
     md: &Markdown,
     options: &ReferenceGraphOptions,
 ) -> MarkdownResult<(String, Option<crate::markdown::compose::body_origin::DataRanges>)> {
-    let inline_pre_options = options.compose.clone().only(&[
-        ComposeOperation::TextReplacement,
-        ComposeOperation::PageBlocks,
-        ComposeOperation::Interpolation,
-        ComposeOperation::ShellExpansion,
-    ]);
+    let inline_pre_options = options.compose.clone().derive(|compose| {
+        compose.only(&[
+            ComposeOperation::TextReplacement,
+            ComposeOperation::PageBlocks,
+            ComposeOperation::Interpolation,
+            ComposeOperation::ShellExpansion,
+        ])
+    });
 
-    let (result, report) = md.compose_with(inline_pre_options)?;
+    let (result, report) = md.compose_with_options(inline_pre_options)?;
     Ok((result.content().to_string(), report.body_data))
 }
 
@@ -953,7 +955,7 @@ fn is_literal_content(value: &str) -> bool {
 fn resolve_local_target(
     raw_target: &str,
     source: &ComposeSource,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
 ) -> Result<Option<std::path::PathBuf>, super::ReferenceError> {
     super::resolve_transclusion_target(raw_target, source, options)
 }
@@ -966,8 +968,10 @@ fn resolve_local_target(
 fn source_to_id(source: &ComposeSource) -> NodeId {
     match source {
         ComposeSource::Unknown => NodeId::from("unknown"),
+        // `canonicalize_simplified`, not `canonicalize`: a Windows verbatim
+        // `\\?\` prefix would leak into every id and rendered graph.
         ComposeSource::File(p) => NodeId::from(
-            p.canonicalize()
+            biscuit_file::canonicalize_simplified(p)
                 .unwrap_or_else(|_| p.clone())
                 .to_string_lossy()
                 .to_string(),
@@ -1035,10 +1039,26 @@ mod tests {
     use crate::markdown::reference::ReferenceGraphMismatchKind;
     use crate::markdown::reference::validate::ReferenceValidationOptions;
 
+    fn graph_options() -> ReferenceGraphOptions {
+        ReferenceGraphOptions::with_compose(&crate::markdown::compose::test_request(
+            ComposeOptions::new(),
+        ))
+    }
+
+    /// Graph options whose request is anchored at the fixture directory the
+    /// documents live in; a graph refuses a document outside its request's
+    /// repository.
+    fn graph_options_at(dir: &std::path::Path) -> ReferenceGraphOptions {
+        ReferenceGraphOptions::with_compose(&crate::markdown::compose::test_request_in(
+            ComposeOptions::new(),
+            biscuit_file::FileResolutionContext::new(dir),
+        ))
+    }
+
     #[test]
     fn single_document_graph() {
         let md = Markdown::new("# Hello\n\n[link](./file.md)\n\n![img](./photo.png)");
-        let options = ReferenceGraphOptions::default();
+        let options = graph_options();
         let graph = build_reference_graph(&md, &options).unwrap();
 
         assert_eq!(graph.node_count(), 1);
@@ -1054,7 +1074,7 @@ mod tests {
     #[test]
     fn flatten_single_node() {
         let md = Markdown::new("[a](./a.md)\n[b](./b.md)");
-        let options = ReferenceGraphOptions::default();
+        let options = graph_options();
         let graph = build_reference_graph(&md, &options).unwrap();
         let flat = flatten_graph(&graph);
         assert_eq!(flat.len(), 2);
@@ -1063,7 +1083,7 @@ mod tests {
     #[test]
     fn transclusion_graph_no_references() {
         let md = Markdown::new("# Just text\n\nNo links here.");
-        let options = ReferenceGraphOptions::default();
+        let options = graph_options();
         let graph = build_transclusion_graph(&md, &options).unwrap();
 
         assert_eq!(graph.node_count(), 1);
@@ -1094,7 +1114,7 @@ mod tests {
         .unwrap();
 
         let root_md = Markdown::try_from(root_path.as_path()).unwrap();
-        let graph = build_reference_graph(&root_md, &ReferenceGraphOptions::default()).unwrap();
+        let graph = build_reference_graph(&root_md, &graph_options_at(dir.path())).unwrap();
         assert_eq!(graph.node_count(), 2);
     }
 
@@ -1136,8 +1156,8 @@ mod tests {
         .add_magic_path(magic, biscuit_file::PathPosition::Start);
         let prior = std::env::var_os("HOME");
         // SAFETY: the test is serialized while process-global state is changed.
-        let options = ReferenceGraphOptions::with_compose(
-            ComposeOptions::new().with_file_resolution_context(snapshot),
+        let options = ReferenceGraphOptions::from_compose_options(
+            crate::markdown::compose::test_request_in(ComposeOptions::new(), snapshot),
         );
         let ambient = tempfile::tempdir().unwrap();
         // SAFETY: the test is serialized while process-global state is changed.
@@ -1171,7 +1191,7 @@ mod tests {
         .unwrap();
 
         let root_md = Markdown::try_from(root_path.as_path()).unwrap();
-        let graph = build_reference_graph(&root_md, &ReferenceGraphOptions::default()).unwrap();
+        let graph = build_reference_graph(&root_md, &graph_options_at(dir.path())).unwrap();
         // Condition false → directive skipped, child not traversed.
         assert_eq!(graph.node_count(), 1);
     }
@@ -1197,7 +1217,7 @@ mod tests {
         .unwrap();
 
         let root_md = Markdown::try_from(root_path.as_path()).unwrap();
-        let options = ReferenceGraphOptions::default();
+        let options = graph_options_at(dir.path());
         let graph = build_reference_graph(&root_md, &options).unwrap();
 
         // Root + child = 2 nodes
@@ -1245,13 +1265,14 @@ mod tests {
         )
         .with_repository_root(&repository)
         .add_magic_path(&external, biscuit_file::PathPosition::Start);
-        let compose = ComposeOptions::new()
-            .with_source_file(&root_path)
-            .with_file_resolution_context(snapshot);
-        let graph_options = ReferenceGraphOptions::with_compose(compose.clone());
+        let compose = crate::markdown::compose::test_request_in(
+            ComposeOptions::new().with_source_file(&root_path),
+            snapshot,
+        );
+        let graph_options = ReferenceGraphOptions::from_compose_options(compose.clone());
         let root_md = Markdown::try_from(root_path.as_path()).unwrap();
 
-        let (composed, _) = root_md.compose_with(compose.clone()).unwrap();
+        let (composed, _) = root_md.compose_with(&compose).unwrap();
         assert!(composed.content().contains("External child"));
         assert!(composed.content().contains("External grandchild"));
 
@@ -1308,7 +1329,7 @@ mod tests {
         .unwrap();
 
         let root_md = Markdown::try_from(root_path.as_path()).unwrap();
-        let options = ReferenceGraphOptions::default();
+        let options = graph_options_at(dir.path());
         let graph = build_reference_graph(&root_md, &options).unwrap();
 
         // Root + prologue + epilogue = 3 nodes
@@ -1329,7 +1350,7 @@ mod tests {
         std::fs::write(&b_path, "::file a.md").unwrap();
 
         let root_md = Markdown::try_from(a_path.as_path()).unwrap();
-        let options = ReferenceGraphOptions::default();
+        let options = graph_options_at(dir.path());
         // Should not infinite loop — cycle detection stops recursion
         let graph = build_reference_graph(&root_md, &options).unwrap();
 
@@ -1357,7 +1378,7 @@ mod tests {
         std::fs::write(&b_path, "[b-link](https://b.example.com)\n\n::file a.md").unwrap();
 
         let root_md = Markdown::try_from(a_path.as_path()).unwrap();
-        let options = ReferenceGraphOptions::default();
+        let options = graph_options_at(dir.path());
         let graph = build_reference_graph(&root_md, &options).unwrap();
         let flat = flatten_graph(&graph);
 
@@ -1372,7 +1393,7 @@ mod tests {
     #[test]
     fn transclusion_records_emitted() {
         let md = Markdown::new("::file child.md\n::code example.rs\n::url https://example.com");
-        let options = ReferenceGraphOptions::default();
+        let options = graph_options();
         let graph = build_reference_graph(&md, &options).unwrap();
 
         let transclusions = graph.root().local_references.transclusions();
@@ -1456,7 +1477,7 @@ mod tests {
 
         let graph = ReferenceGraph::from_build(
             &Markdown::new(""),
-            &ReferenceGraphOptions::default(),
+            &graph_options(),
             ReferenceGraphMode::Full,
             node,
             vec![child_a, child_b],
@@ -1486,7 +1507,7 @@ mod tests {
         .unwrap();
 
         let root_md = Markdown::try_from(root_path.as_path()).unwrap();
-        let options = ReferenceGraphOptions::default();
+        let options = graph_options_at(dir.path());
         let graph = build_reference_graph(&root_md, &options).unwrap();
 
         // Root + child = 2 nodes when the condition is true
@@ -1510,7 +1531,7 @@ mod tests {
         .unwrap();
 
         let root_md = Markdown::try_from(root_path.as_path()).unwrap();
-        let options = ReferenceGraphOptions::default();
+        let options = graph_options_at(dir.path());
         let graph = build_reference_graph(&root_md, &options).unwrap();
 
         // Child is skipped, so only the root node remains
@@ -1534,7 +1555,7 @@ mod tests {
         .unwrap();
 
         let root_md = Markdown::try_from(root_path.as_path()).unwrap();
-        let graph = build_reference_graph(&root_md, &ReferenceGraphOptions::default()).unwrap();
+        let graph = build_reference_graph(&root_md, &graph_options_at(dir.path())).unwrap();
 
         let manifest = graph.provenance().dependencies();
         assert_eq!(
@@ -1563,7 +1584,7 @@ mod tests {
         .unwrap();
 
         let root_md = Markdown::try_from(root_path.as_path()).unwrap();
-        let graph = build_reference_graph(&root_md, &ReferenceGraphOptions::default()).unwrap();
+        let graph = build_reference_graph(&root_md, &graph_options_at(dir.path())).unwrap();
 
         let manifest = graph.provenance().dependencies();
         assert_eq!(
@@ -1577,7 +1598,7 @@ mod tests {
     fn dependency_manifest_empty_without_local_children() {
         // A remote-only transclusion never materializes a local child.
         let md = Markdown::new("::url https://example.com\n[link](https://example.com)");
-        let graph = build_reference_graph(&md, &ReferenceGraphOptions::default()).unwrap();
+        let graph = build_reference_graph(&md, &graph_options()).unwrap();
         assert!(graph.provenance().dependencies().is_empty());
     }
 
@@ -1596,7 +1617,7 @@ mod tests {
         .unwrap();
 
         let root_md = Markdown::try_from(root_path.as_path()).unwrap();
-        let options = ReferenceGraphOptions::default();
+        let options = graph_options_at(dir.path());
         let graph = build_reference_graph(&root_md, &options).unwrap();
 
         assert_eq!(graph.node_count(), 2);
@@ -1666,19 +1687,21 @@ mod tests {
         let md = Markdown::try_from(root_path.as_path()).unwrap();
 
         let compose_for = |stamp: &str| {
-            ComposeOptions::new_with_context(ComposeContext::fixed_for_testing_with([(
-                "timestamp",
-                serde_json::json!(stamp),
-            )]))
+            crate::markdown::compose::test_request_in(
+                ComposeOptions::new_with_context(ComposeContext::fixed_for_testing_with([(
+                    "timestamp", serde_json::json!(stamp),
+                )])),
+                biscuit_file::FileResolutionContext::new(dir.path()),
+            )
         };
         let compose_a = compose_for("1000");
         let compose_b = compose_for("2000");
 
         let graph_a = md
-            .reference_graph(ReferenceGraphOptions::with_compose(compose_a.clone()))
+            .reference_graph(ReferenceGraphOptions::from_compose_options(compose_a.clone()))
             .unwrap();
         let graph_b = md
-            .reference_graph(ReferenceGraphOptions::with_compose(compose_b.clone()))
+            .reference_graph(ReferenceGraphOptions::from_compose_options(compose_b.clone()))
             .unwrap();
 
         // The graphs differ in *contents*, not merely in provenance: each root
@@ -1698,7 +1721,7 @@ mod tests {
         let report = md
             .validate_references_with_graph(
                 &graph_a,
-                ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(
+                ReferenceValidationOptions::with_graph(ReferenceGraphOptions::from_compose_options(
                     compose_a,
                 )),
             )
@@ -1709,7 +1732,7 @@ mod tests {
         let err = md
             .validate_references_with_graph(
                 &graph_a,
-                ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(
+                ReferenceValidationOptions::with_graph(ReferenceGraphOptions::from_compose_options(
                     compose_b,
                 )),
             )
@@ -1742,21 +1765,23 @@ mod tests {
         let md = Markdown::try_from(root_path.as_path()).unwrap();
 
         let compose_for = |memory_used: u64| {
-            ComposeOptions::new_with_context(ComposeContext::fixed_for_testing_with([(
-                "memory_used",
-                serde_json::json!(memory_used),
-            )]))
+            crate::markdown::compose::test_request_in(
+                ComposeOptions::new_with_context(ComposeContext::fixed_for_testing_with([(
+                    "memory_used", serde_json::json!(memory_used),
+                )])),
+                biscuit_file::FileResolutionContext::new(dir.path()),
+            )
         };
         let compose_excluded = compose_for(1024);
         let compose_included = compose_for(4096);
 
         let graph_excluded = md
-            .reference_graph(ReferenceGraphOptions::with_compose(
+            .reference_graph(ReferenceGraphOptions::from_compose_options(
                 compose_excluded.clone(),
             ))
             .unwrap();
         let graph_included = md
-            .reference_graph(ReferenceGraphOptions::with_compose(
+            .reference_graph(ReferenceGraphOptions::from_compose_options(
                 compose_included.clone(),
             ))
             .unwrap();
@@ -1789,7 +1814,7 @@ mod tests {
         ] {
             md.validate_references_with_graph(
                 graph,
-                ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(
+                ReferenceValidationOptions::with_graph(ReferenceGraphOptions::from_compose_options(
                     compose,
                 )),
             )
@@ -1801,7 +1826,7 @@ mod tests {
         let err = md
             .validate_references_with_graph(
                 &graph_included,
-                ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(
+                ReferenceValidationOptions::with_graph(ReferenceGraphOptions::from_compose_options(
                     compose_excluded,
                 )),
             )
@@ -1814,7 +1839,7 @@ mod tests {
         let err = md
             .validate_references_with_graph(
                 &graph_excluded,
-                ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(
+                ReferenceValidationOptions::with_graph(ReferenceGraphOptions::from_compose_options(
                     compose_included,
                 )),
             )
@@ -1859,6 +1884,7 @@ mod tests {
 
         let mut compose = ComposeOptions::new();
         compose.remote_fetch = Some(runtime.clone());
+        let compose = crate::markdown::compose::test_request(compose);
         assert_eq!(
             runtime.strong_count(),
             strong_alone + 1,
@@ -1866,7 +1892,7 @@ mod tests {
         );
 
         let graph = md
-            .reference_graph(ReferenceGraphOptions::with_compose(compose))
+            .reference_graph(ReferenceGraphOptions::from_compose_options(compose))
             .unwrap();
         // Building the graph moved and dropped the build options, and provenance
         // captured only a `Weak`: the runtime is back to a single owner.
@@ -1915,6 +1941,7 @@ mod tests {
 
         let mut compose = ComposeOptions::new();
         compose.preflight_graph = Some(Arc::clone(&preflight));
+        let compose = crate::markdown::compose::test_request(compose);
         assert_eq!(
             Arc::strong_count(&preflight),
             strong_alone + 1,
@@ -1922,7 +1949,7 @@ mod tests {
         );
 
         let graph = md
-            .reference_graph(ReferenceGraphOptions::with_compose(compose))
+            .reference_graph(ReferenceGraphOptions::from_compose_options(compose))
             .unwrap();
         // Graph construction consumed and dropped the build options and captured
         // only a `Weak`, so the count is back to the external handle alone.

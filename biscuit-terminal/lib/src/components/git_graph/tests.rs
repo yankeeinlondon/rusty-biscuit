@@ -1206,10 +1206,59 @@ fn the_height_cap_adds_lanes_in_activity_order_until_one_does_not_fit() {
 }
 
 #[test]
+fn with_max_rows_replaces_the_half_height_cap() {
+    // 40 rows would cap at 20; 30 rows fit four lanes (25), as a 60-row
+    // viewport's default cap does.
+    let planned = plan(&base_view_with_lanes().with_max_rows(30), viewport(200, 40));
+    assert_eq!(planned.hidden_lanes, 2, "{}", planned.mermaid);
+    let tighter = plan(&base_view_with_lanes().with_max_rows(10), viewport(200, 200));
+    assert_eq!(tighter.hidden_lanes, 5, "only the default lane fits: {}", tighter.mermaid);
+}
+
+#[test]
 fn a_focused_view_is_never_cut_by_the_height_cap() {
     let planned = plan(&spec_example(), viewport(200, 10));
     assert_eq!(planned.hidden_lanes, 0);
     assert_eq!(planned.mermaid, SPEC_EXAMPLE);
+}
+
+/// `dest` is emitted before `src` but merges `src` mid-lane: `dest` waits
+/// before the merge commit until `src` has drawn its source, so the merge is
+/// drawn instead of dropped.
+#[test]
+fn a_lane_waits_before_a_merge_whose_source_is_not_drawn_yet() {
+    let graph = GitGraph::new("main", commits(&["1111111"]))
+        .with_line(GraphLine::new("dest").forked_at(sha("1111111")).with_entries(commits(&["d100000", "3333333", "d200000"])))
+        .with_line(
+            GraphLine::new("src")
+                .forked_at(sha("1111111"))
+                .with_entries(commits(&["5555555"]))
+                .with_merge(sha("5555555"), sha("3333333")),
+        );
+    let planned = plan(&graph, viewport(400, 200));
+    assert!(planned.omissions.is_empty(), "{:?}\n{}", planned.omissions, planned.mermaid);
+    assert!(planned.mermaid.contains("merge src id: \"3333333\""), "{}", planned.mermaid);
+    let source = planned.mermaid.find("\"5555555\"").expect("the source");
+    let destination = planned.mermaid.find("\"3333333\"").expect("the destination");
+    assert!(source < destination, "the source is emitted first: {}", planned.mermaid);
+}
+
+/// A focused view keeps the current branch's parent chain and any lane that
+/// holds the fork of a lane in view; an unrelated lane stays out.
+#[test]
+fn a_focused_view_keeps_the_lane_holding_a_fork() {
+    let graph = GitGraph::new("main", commits(&["1111111"]))
+        .with_line(GraphLine::new("holder").forked_at(sha("1111111")).with_entries(commits(&["5555555", "6666666"])))
+        .with_line(GraphLine::new("parent").forked_at(sha("5555555")).with_entries(commits(&["aaaaaaa"])))
+        .with_line(GraphLine::new("current").with_parent("parent").forked_at(sha("aaaaaaa")).with_entries(commits(&["bbbbbbb"])))
+        .with_line(line("other", None, "ccccccc", 1))
+        .with_current_branch("current");
+    let planned = plan(&graph, viewport(400, 200));
+    for drawn in ["branch holder", "branch parent", "branch current"] {
+        assert!(planned.mermaid.contains(drawn), "{drawn}: {}", planned.mermaid);
+    }
+    assert!(!planned.mermaid.contains("branch other"), "{}", planned.mermaid);
+    assert!(planned.omissions.is_empty(), "{:?}", planned.omissions);
 }
 
 #[test]
@@ -1448,6 +1497,46 @@ fn the_incomplete_history_notice_follows_the_lane_note() {
     // A complete graph has no notice.
     let complete = spec_example().with_theme(MermaidTheme::Default).render(&term);
     assert!(!complete.contains(INCOMPLETE_HISTORY_NOTE), "{complete}");
+}
+
+#[test]
+fn render_without_notes_leaves_the_notes_to_the_caller() {
+    let term = plain_terminal(200, 24);
+    let graph = base_view_with_lanes()
+        .with_theme(MermaidTheme::Default)
+        .with_ref("v0.1.0", sha("0ld0000"));
+    let (output, plan) = graph.render_without_notes(&term).expect("a graph to draw");
+    assert!(plan.hidden_lanes > 0 && plan.incomplete, "{plan:?}");
+    assert!(!output.contains("not shown"), "{output}");
+    assert_eq!(graph.render(&term).trim_end(), with_notes(output, &plan, &term).trim_end());
+}
+
+/// Each thing left out is named, so a caller can explain it.
+#[test]
+fn the_plan_names_what_it_leaves_out() {
+    let graph = GitGraph::new("main", commits(&["1111111", "2222222"]))
+        .with_ref("v0.1.0", sha("0ld0000"))
+        .with_line(
+            GraphLine::new("feat/a")
+                .forked_at(sha("9999999"))
+                .with_entries(commits(&["aaaaaaa"]))
+                .with_merge(sha("aaaaaaa"), sha("8888888")),
+        )
+        .with_line(line("feat/b", None, "bbbbbbb", 10));
+    let planned = plan(&graph, viewport(400, 200));
+    assert!(planned.incomplete);
+    assert_eq!(
+        planned.omissions,
+        vec![
+            GraphOmission::Merge { branch: "feat/a".into(), destination: sha("8888888") },
+            GraphOmission::UnconnectedLane { branch: "feat/a".into(), fork: Some(sha("9999999")) },
+            GraphOmission::Tag("v0.1.0".into()),
+        ],
+        "{}",
+        planned.mermaid
+    );
+    let complete = plan(&GitGraph::new("main", commits(&["1111111"])).with_line(line("feat/b", None, "bbbbbbb", 10)), viewport(400, 200));
+    assert!(complete.omissions.is_empty() && !complete.incomplete, "{complete:?}");
 }
 
 #[test]

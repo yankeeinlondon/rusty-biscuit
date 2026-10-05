@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::InlineProse;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::repo::{Package, RepoInfo};
@@ -200,7 +200,7 @@ pub fn render_repo_package_areas_formatted(
             } else {
                 area_display_label(area).to_string()
             };
-            Prose::new(markup).render(&term)
+            InlineProse::new(markup).render(&term)
         })
         .collect();
 

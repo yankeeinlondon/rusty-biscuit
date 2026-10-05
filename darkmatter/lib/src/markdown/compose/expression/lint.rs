@@ -998,14 +998,14 @@ mod tests {
 
             let markdown: Markdown =
                 format!("---\npkg: darkmatter\n---\n{{{{ {expression} }}}}\n").into();
-            let (composed, report) = markdown.compose().unwrap();
+            let (composed, report) = markdown.compose_with(&crate::markdown::compose::test_request(crate::markdown::compose::ComposeOptions::new())).unwrap();
             assert_eq!(composed.content().trim(), "in {{pkg}}");
             assert!(report.warnings.is_empty(), "{:?}", report.warnings);
 
             let rewrite = suggestion(expression);
             let markdown: Markdown =
                 format!("---\npkg: darkmatter\n---\n{{{{ {rewrite} }}}}\n").into();
-            let (composed, _) = markdown.compose().unwrap();
+            let (composed, _) = markdown.compose_with(&crate::markdown::compose::test_request(crate::markdown::compose::ComposeOptions::new())).unwrap();
             assert_eq!(composed.content().trim(), "in darkmatter");
         }
     }

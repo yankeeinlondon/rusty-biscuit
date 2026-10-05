@@ -149,13 +149,11 @@ Git can't check the files without the link, so `wt remove` first runs `git -C <b
 - a fresh `git worktree list` shows the same worktree, with the same branch or detached commit, no longer marked `prunable`;
 - the path is still a real directory, not a link (every other check reads through a link, so only this one notices a checkout moved away and replaced by a link to it).
 
-Then the ordinary report, consent, and handoff follow, exactly as for a healthy worktree:
+Then the ordinary report, consent, and handoff follow, exactly as for a healthy worktree. The report says the `.git` file was missing, right under its heading and before any question:
 
 ```text
-Restored the link for unlinked so its files could be checked.
-  git worktree repair may also have restored other worktrees' links.
-
 Removing worktree unlinked at /code/wts/repo/unlinked
+Its .git file was missing; wt restored it to check the files (Git may restore other worktrees' broken links too).
 
 Uncommitted files (1):
 └── notes.txt
@@ -165,7 +163,7 @@ Nothing was removed. Worktree unlinked has uncommitted or protected included fil
   The .git link restored for unlinked was left in place.
 ```
 
-The repair happens **before** you are asked anything, because nothing can be asked about files that can't be checked. It is not undone if you then decline, or if a later check refuses; those messages say the restored link was left in place. Run from the base checkout, `git worktree repair` also restores the links of **other** worktrees whose `.git` is missing or broken, which is why the success line says so. It never deletes anything.
+The repair happens **before** you are asked anything, because nothing can be asked about files that can't be checked. It is not undone if you then decline, or if a later check refuses; those messages say the restored link was left in place. Run from the base checkout, `git worktree repair` also restores the links of **other** worktrees whose `.git` is missing or broken, which is why the report line says so. It never deletes anything.
 
 When the link can't be verified, nothing is removed, whatever the flags (exit 3):
 

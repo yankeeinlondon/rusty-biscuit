@@ -8,6 +8,7 @@ expression: out
 ┃ Design document
 ┃ invalid cover: `` is not a valid file reference: file reference syntax
 ┃ is invalid: empty reference string at 5:7
+┃ failure: invalid-reference
 ┃ 
 ┃ Correct the frontmatter so it satisfies the declared $schema (or
 ┃ baseline schema).

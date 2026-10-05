@@ -63,7 +63,7 @@ fn fixture() -> WorkspaceGraph {
         indices.insert(path.clone(), index_document(&path, source));
     }
     let roots = vec![PathBuf::from("/ws/root-a"), PathBuf::from("/ws/root-b")];
-    WorkspaceGraph::build_with_roots(&indices, 1, &roots)
+    WorkspaceGraph::build_with_roots(&indices, 1, &roots, &dmls::graph::NoContexts)
 }
 
 /// The Source document's wiki-link payloads in document order.

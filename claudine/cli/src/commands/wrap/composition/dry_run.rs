@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use biscuit_terminal::components::horizontal_rule::{
     HorizontalRule, RuleAlignment, RuleStyle, RuleWeight,
 };
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::table::TableColumn;
 use biscuit_terminal::terminal::Terminal;
@@ -219,7 +219,7 @@ fn relative_or_abs(path: &Path) -> String {
 /// [`agent_state_breakdown`] so the dry-run table stays a faithful
 /// prediction of the live path.
 fn render_agent_cell(state: &AgentResolutionState, term: &Terminal) -> String {
-    Prose::new(agent_state_breakdown(state)).render(term)
+    claudine::composition::agent_message_prose(agent_state_breakdown(state)).render(term)
 }
 
 /// Render the dry-run metadata table to a terminal string.
@@ -259,8 +259,9 @@ pub(crate) fn render_metadata_table(render: &DryRunRender, term: &Terminal) -> S
     if let Some(description) = &render.description {
         let cell = Prose::new(format!(
             "<i><dim>{}</dim></i>",
-            Prose::escape_text(description)
+            Prose::escape_text_outside_code_spans(description)
         ))
+        .with_line_breaks(LineBreaks::Hard)
         .render(term);
         table.add_row(vec!["Description".into(), cell.into()]);
     }

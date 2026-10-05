@@ -53,7 +53,7 @@ fn missing_required(md: &Markdown, api: &DarkmatterSchemas) -> Vec<ValidationPro
 }
 
 fn baseline_api() -> DarkmatterSchemas {
-    DarkmatterSchemas::new()
+    DarkmatterSchemas::new(crate::request_support::cwd_context())
         .with_darkmatter_baseline_json_schema()
         .expect("darkmatter baseline must attach")
 }
@@ -153,7 +153,7 @@ fn two_required_properties_are_reported_under_a_schema_additional_properties() {
     let md: Markdown = document.into();
     let md = md.with_source(ComposeSource::File(doc_path));
 
-    let missing = missing_required(&md, &DarkmatterSchemas::new());
+    let missing = missing_required(&md, &DarkmatterSchemas::new(crate::request_support::cwd_context()));
     let names: Vec<&str> = missing
         .iter()
         .filter_map(|problem| problem.property.as_deref())

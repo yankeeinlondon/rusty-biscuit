@@ -16,6 +16,10 @@ Body content — any block-level Markdown, including nested disclosure blocks.
 - `::disclosure` opens the block. The remainder of the line is the summary. It must contain only phrasing content — no paragraph breaks, hard line breaks, or block-level elements.
 - `::details` separates the summary from the body.
 - `::end-disclosure` closes the block.
+- The line endings next to the directive lines belong to the directives, not
+  to the content: a summary or a one-paragraph body neither starts nor ends
+  with a soft break, so `Hidden body text.` between `::details` and
+  `::end-disclosure` renders as exactly that paragraph on every target.
 
 Each directive must appear at the start of a line and be followed by ASCII whitespace or end-of-line. Near-miss text such as `::disclosurex` is treated as literal prose.
 
@@ -26,7 +30,7 @@ Disclosure blocks are recognized during the render-tree fold and lowered differe
 | Target | Output |
 |---|---|
 | `markdown` | DSL emitted verbatim: `::disclosure`, `::details`, `::end-disclosure`. |
-| `markdown-plus` | Summary and body rendered to Markdown, then wrapped in `<details><summary>…</summary>…</details>`. |
+| `markdown-plus` | `<details><summary>…</summary>`, a blank line, the body as Markdown, then `</details>`. The summary line is raw HTML, which a reader does not parse as Markdown, so the summary is written as HTML: `License _terms_` becomes `<summary>License <em>terms</em></summary>`, and inline code becomes an escaped `<code>` element. Raw HTML in the summary is kept byte for byte; raw HTML holding a blank line would end the summary's HTML block, so it is lossy content (rejected under `Strict`, reported under `Warn`). |
 | `html` / `browser` | Native HTML `<details>` / `<summary>` elements; no JavaScript. |
 | `terminal` | Summary rendered normally; body rendered as a block quote with dim and italic text. |
 | `json` / `ast` | Native `NodeKind::Disclosure` node in the render tree. |

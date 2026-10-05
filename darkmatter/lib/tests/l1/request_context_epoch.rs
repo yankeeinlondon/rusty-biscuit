@@ -81,7 +81,7 @@ fn write(directory: &Path, name: &str, contents: &str) -> PathBuf {
 fn compose(root: &Path, options: ComposeOptions) -> Result<String, MarkdownError> {
     let markdown = Markdown::try_from(root).expect("root loads");
     markdown
-        .compose_with(options.with_source_file(root))
+        .compose_with(&crate::request_support::request(options.with_source_file(root)))
         .map(|(composed, _)| composed.content().to_string())
 }
 
@@ -266,7 +266,7 @@ fn preflight_discovers_a_child_branch_reading_a_child_introduced_group() {
     let preflight = |options: ComposeOptions| {
         Markdown::try_from(root.as_path())
             .expect("root loads")
-            .compose_preflight(&options.with_source_file(&root))
+            .compose_preflight(&crate::request_support::request(options.with_source_file(&root)))
     };
 
     let extension = CountingExtension::new("preflight");
@@ -315,7 +315,7 @@ fn compose_partial(root: &Path, options: ComposeOptions) -> PartialCompose {
         options.with_context_authority(ContextAuthority::CallerExtended(Arc::new(UnavailableEvidence)));
     let markdown = Markdown::try_from(root).expect("root loads");
     let (composed, report) = markdown
-        .compose_with(options.with_source_file(root))
+        .compose_with(&crate::request_support::request(options.with_source_file(root)))
         .expect("a partial capture renders");
     PartialCompose {
         output: composed.content().to_string(),
@@ -373,7 +373,7 @@ mod persistent_cache {
         let options = extended(root.parent().unwrap(), &extension).with_cache_root(cache);
         let markdown = Markdown::try_from(root).expect("root loads");
         let (composed, _) = markdown
-            .compose_with(options.with_source_file(root))
+            .compose_with(&crate::request_support::request(options.with_source_file(root)))
             .expect("the graph composes");
         composed.content().to_string()
     }

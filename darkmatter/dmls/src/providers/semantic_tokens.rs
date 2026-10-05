@@ -631,7 +631,7 @@ mod tests {
         let uri: Uri = "file:///t.md".parse().unwrap();
         let path = Path::new("/t.md");
         let sm = source_map(text, PositionEncoding::Utf16);
-        let graph = WorkspaceGraph::build(&BTreeMap::new(), 1);
+        let graph = WorkspaceGraph::build(&BTreeMap::new(), 1, &crate::context::test_support::workspace_contexts());
         let profile = test_profile();
         let ctx = DocumentContext {
             uri: &uri,
@@ -643,6 +643,7 @@ mod tests {
             config,
             profile: &profile,
             overlay: None,
+            resolution: &crate::context::test_support::resolution_for(path),
         };
         f(&ctx);
     }

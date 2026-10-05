@@ -15,9 +15,11 @@ use super::formatting::{
 use super::truncation::{strip_leading_whitespace, truncate_front_back, truncate_head};
 use super::{ReportMode, TruncationMode};
 
-/// Render the user-prompt header line.
+/// Render the user-prompt header line, preceded by a blank spacing row.
 fn render_user_prompt_header(term: &Terminal) -> String {
-    Prose::new("\n<green-500>■ <b>Agent Prompt</b></green-500>").render(term)
+    // The spacing row sits outside the Prose, which trims edge newlines.
+    let header = Prose::new("<green-500>■ <b>Agent Prompt</b></green-500>").render(term);
+    format!("\n{header}")
 }
 
 /// Render the user-prompt body inside a green block quote.
@@ -141,6 +143,16 @@ mod tests {
         let term = test_terminal();
         let header = render_user_prompt_header(&term);
         assert!(header.contains("■"));
+    }
+
+    #[test]
+    fn header_is_preceded_by_one_blank_spacing_row() {
+        let term = test_terminal();
+        let header = strip_ansi_codes(&render_user_prompt_header(&term));
+        let rows: Vec<&str> = header.split('\n').collect();
+        assert_eq!(rows.len(), 2, "{header:?}");
+        assert_eq!(rows[0], "", "{header:?}");
+        assert!(rows[1].contains("Agent Prompt"), "{header:?}");
     }
 
     #[test]

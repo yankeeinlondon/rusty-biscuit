@@ -38,13 +38,17 @@ pub struct DispatchRuntimeContext {
 }
 
 impl DispatchRuntimeContext {
-    /// Load and compile the runtime config once for a specific environment.
-    pub fn load_for_env(env: &EnvironmentContext) -> Result<Self> {
+    /// Load and compile the runtime config once for a specific environment,
+    /// evaluating hook conditions against `request`.
+    pub fn load_for_env(
+        env: &EnvironmentContext,
+        request: &darkmatter::markdown::compose::RequestSnapshot,
+    ) -> Result<Self> {
         let repo_root = runtime_repo_root(env);
 
         match loader::load_claudine_config(None, repo_root) {
             Ok(config) => {
-                let runtime = loader::compile_canonical_runtime(config, repo_root)?;
+                let runtime = loader::compile_canonical_runtime(config, repo_root, request)?;
                 Ok(Self {
                     canonical_config: Some(Arc::new(runtime)),
                 })
@@ -59,11 +63,14 @@ impl DispatchRuntimeContext {
     /// Deprecated: use [`load_for_env`](Self::load_for_env) instead. This
     /// method is an identical alias kept for API compatibility.
     #[deprecated(note = "use load_for_env instead")]
-    pub fn load_canonical_for_env(env: &EnvironmentContext) -> Result<Self> {
+    pub fn load_canonical_for_env(
+        env: &EnvironmentContext,
+        request: &darkmatter::markdown::compose::RequestSnapshot,
+    ) -> Result<Self> {
         let repo_root = runtime_repo_root(env);
         match loader::load_claudine_config(None, repo_root) {
             Ok(config) => {
-                let runtime = loader::compile_canonical_runtime(config, repo_root)?;
+                let runtime = loader::compile_canonical_runtime(config, repo_root, request)?;
                 Ok(Self {
                     canonical_config: Some(Arc::new(runtime)),
                 })
@@ -103,6 +110,7 @@ pub async fn dispatch(
     raw: &Value,
     provider: Provider,
     env: &EnvironmentContext,
+    request: &darkmatter::markdown::compose::RequestSnapshot,
 ) -> Result<DispatchOutcome> {
     let _span = info_span!("dispatch_event", %provider).entered();
 
@@ -119,7 +127,7 @@ pub async fn dispatch(
 
     prepare_meta_for_dispatch(&mut meta, env);
 
-    dispatch_preparsed(provider, event, meta).await
+    dispatch_preparsed(provider, event, meta, request).await
 }
 
 /// Dispatch a normalized event that has already been mapped into Claudine's
@@ -132,12 +140,13 @@ pub async fn dispatch_event_meta(
     provider: Provider,
     event: AgenticEvent,
     mut meta: EventMeta,
+    request: &darkmatter::markdown::compose::RequestSnapshot,
 ) -> Result<DispatchOutcome> {
     meta.provider = provider;
     meta.event = event;
     let env = meta.env.clone();
     prepare_meta_for_dispatch(&mut meta, &env);
-    dispatch_preparsed(provider, event, meta).await
+    dispatch_preparsed(provider, event, meta, request).await
 }
 
 /// Dispatch a normalized event using a cached wrapper-session runtime config.
@@ -177,6 +186,7 @@ pub async fn dispatch_canonical(
     raw: &Value,
     provider: Provider,
     env: &EnvironmentContext,
+    request: &darkmatter::markdown::compose::RequestSnapshot,
 ) -> Result<DispatchOutcome> {
     let adapter = hook_adapters::adapter_for(provider);
 
@@ -218,7 +228,7 @@ pub async fn dispatch_canonical(
 
     let runtime = {
         let _span = info_span!("dispatch_compile_runtime").entered();
-        loader::compile_canonical_runtime(config, repo_root)?
+        loader::compile_canonical_runtime(config, repo_root, request)?
     };
     dispatch_canonical_with_runtime(provider, event, meta, &runtime).await
 }
@@ -335,6 +345,7 @@ pub async fn dispatch_canonical_with_runtime(
                 Some(binding.compiled_mappers()),
                 &resolved_hook.meta,
                 runner::DispatchConfig::Canonical(runtime.config()),
+                runtime.request_snapshot(),
                 runtime.messaging(),
                 resolved_hook.can_block,
                 protect_pre.as_ref(),
@@ -403,6 +414,7 @@ async fn dispatch_preparsed(
     provider: Provider,
     event: AgenticEvent,
     meta: EventMeta,
+    request: &darkmatter::markdown::compose::RequestSnapshot,
 ) -> Result<DispatchOutcome> {
     let repo_root_path = runtime_repo_root(&meta.env);
     let repo_root = repo_root_path
@@ -424,7 +436,7 @@ async fn dispatch_preparsed(
         Err(error) => return Err(error),
     };
 
-    let runtime = loader::compile_canonical_runtime(config, repo_root_path)?;
+    let runtime = loader::compile_canonical_runtime(config, repo_root_path, request)?;
     dispatch_canonical_with_runtime(provider, event, meta, &runtime).await
 }
 

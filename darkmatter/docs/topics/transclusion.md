@@ -18,6 +18,15 @@ Darkmatter provides a large variety of ways of performing transclusion but the m
 
 > this simple directive will bring the content from the two referenced files _into_ the base document.
 
+A transclusion target may use any [file reference form](./file-referencing.md)
+(`./`, bare, `&`, `^`, `@`, `~`, `{{VAR}}`, absolute). Every target resolves
+against the one context the [compose request](./compose-requests.md) prepared,
+so a reference behaves the same in pre-flight, validation, and composition.
+Each transcluded child gets a context derived for its own folder: its `./`,
+`../`, and bare references start beside the child, while its `@` references
+keep the request's search order. A target that cannot be resolved reports a
+[`failure` class](../errors/file-reference-failures.md).
+
 The `::file-links` directive discovers document files and renders them as a
 linked file tree. See [File Links](../inline/file-links.md) for syntax and
 options.

@@ -163,10 +163,11 @@ pub use self::pdf::{Pdf, PdfConfig, PdfError, PdfMarkdown, PdfToc};
 pub use self::file_reference::{
     BaseDirOrigin, CandidatePlanOrder, CompletionEntryForm, ContextAnchor, DetailedOutcome, DetailedResolution, FileReference,
     FileReferenceClass, FileReferenceError, FileReferenceKind, FileResolutionContext,
+    GlobListing, GlobReference, GlobReferenceError, SkippedEntry,
     LaunchMagicScope, MagicPathRegistration, MagicPathTier, MagicSearchRoot, PackageAreaFallback,
     PartialCompletion, PathIdentity, PathPosition, ProbeDisposition, ProbedCandidate, RepositoryScope,
     RepositoryScopeCatalog, RepositoryScopeCatalogError, ResolutionCandidate, ResolutionFailure,
-    RelativeRoute, RootProvenance, find_git_root, home_dir,
+    RelativeRoute, RootProvenance, capture_env, find_git_root, home_dir,
 };
 
 #[cfg(feature = "file-reference")]

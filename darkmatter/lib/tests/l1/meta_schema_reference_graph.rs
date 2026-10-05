@@ -19,6 +19,7 @@
 
 use std::path::{Path, PathBuf};
 
+use biscuit_file::FileResolutionContext;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::errors::BlockError;
 use biscuit_terminal::utils::escape_codes::strip_escape_codes;
@@ -84,7 +85,7 @@ fn multi_hop_chain_resolves_and_records_every_hop() {
         "$schema:\n  title: 'string(required)'\n",
     );
 
-    let resolved = resolve_yaml_schema(&reference("./a.yaml"), dir.path())
+    let resolved = resolve_yaml_schema(&reference("./a.yaml"), dir.path(), &FileResolutionContext::new(dir.path()))
         .expect("a terminating delegation chain resolves");
 
     // The schema is the terminal file's, not an empty redirect shell.
@@ -118,7 +119,7 @@ fn self_referencing_file_is_a_structured_cycle_error() {
     let dir = tempfile::tempdir().unwrap();
     write(dir.path(), "a.yaml", "$schema: ./a.yaml\n");
 
-    let err = resolve_yaml_schema(&reference("./a.yaml"), dir.path())
+    let err = resolve_yaml_schema(&reference("./a.yaml"), dir.path(), &FileResolutionContext::new(dir.path()))
         .expect_err("a file that references itself cannot resolve");
 
     let SchemaError::ReferenceCycle { chain } = err else {
@@ -133,7 +134,7 @@ fn two_file_cycle_is_a_structured_cycle_error() {
     write(dir.path(), "a.yaml", "$schema: ./b.yaml\n");
     write(dir.path(), "b.yaml", "$schema: ./a.yaml\n");
 
-    let err = resolve_yaml_schema(&reference("./a.yaml"), dir.path())
+    let err = resolve_yaml_schema(&reference("./a.yaml"), dir.path(), &FileResolutionContext::new(dir.path()))
         .expect_err("mutually referencing files cannot resolve");
 
     let SchemaError::ReferenceCycle { chain } = err else {
@@ -156,7 +157,7 @@ fn root_union_arm_cycling_back_into_the_chain_is_rejected() {
         "$schema:\n  - title: 'string(required)'\n  - ./a.yaml\n",
     );
 
-    let err = resolve_yaml_schema(&reference("./a.yaml"), dir.path())
+    let err = resolve_yaml_schema(&reference("./a.yaml"), dir.path(), &FileResolutionContext::new(dir.path()))
         .expect_err("a union arm may not re-enter an open file");
 
     let SchemaError::ReferenceCycle { chain } = err else {
@@ -178,7 +179,7 @@ fn document_root_union_arm_cycling_through_a_chain_is_rejected() {
     write(dir.path(), "b.yaml", "$schema: ./a.yaml\n");
 
     let union = serde_yaml_ng::Value::Sequence(vec![reference("./a.yaml")]);
-    let err = resolve_yaml_schema(&union, dir.path())
+    let err = resolve_yaml_schema(&union, dir.path(), &FileResolutionContext::new(dir.path()))
         .expect_err("a document union arm entering a cycle cannot resolve");
 
     assert!(
@@ -203,7 +204,7 @@ fn a_file_referenced_twice_without_a_cycle_still_resolves() {
         "$schema:\n  - ./shared.yaml\n  - ./shared.yaml\n",
     );
 
-    let resolved = resolve_yaml_schema(&reference("./union.yaml"), dir.path())
+    let resolved = resolve_yaml_schema(&reference("./union.yaml"), dir.path(), &FileResolutionContext::new(dir.path()))
         .expect("a repeated non-cyclic reference resolves");
 
     let mut expected = vec![shared, union];
@@ -219,7 +220,7 @@ fn the_deepest_permitted_acyclic_chain_resolves() {
     let dir = tempfile::tempdir().unwrap();
     let entry = write_delegation_chain(dir.path(), MAX_REFERENCE_DEPTH);
 
-    let resolved = resolve_yaml_schema(&reference(&entry), dir.path())
+    let resolved = resolve_yaml_schema(&reference(&entry), dir.path(), &FileResolutionContext::new(dir.path()))
         .expect("a chain of exactly MAX_REFERENCE_DEPTH files is within the cap");
 
     assert_eq!(
@@ -239,7 +240,7 @@ fn one_hop_past_the_cap_reports_depth_exhaustion_not_a_cycle() {
     let dir = tempfile::tempdir().unwrap();
     let entry = write_delegation_chain(dir.path(), MAX_REFERENCE_DEPTH + 1);
 
-    let err = resolve_yaml_schema(&reference(&entry), dir.path())
+    let err = resolve_yaml_schema(&reference(&entry), dir.path(), &FileResolutionContext::new(dir.path()))
         .expect_err("a chain one file past the cap cannot resolve");
 
     let SchemaError::ReferenceDepthExceeded { limit, chain } = &err else {
@@ -284,7 +285,7 @@ fn a_root_union_arm_is_bounded_by_the_same_depth_cap() {
     let entry = write_delegation_chain(dir.path(), MAX_REFERENCE_DEPTH + 1);
 
     let union = serde_yaml_ng::Value::Sequence(vec![reference(&entry)]);
-    let err = resolve_yaml_schema(&union, dir.path())
+    let err = resolve_yaml_schema(&union, dir.path(), &FileResolutionContext::new(dir.path()))
         .expect_err("a union arm may not outrun the depth cap");
 
     let SchemaError::ReferenceDepthExceeded { limit, .. } = &err else {

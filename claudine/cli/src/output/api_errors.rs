@@ -1,4 +1,4 @@
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 
@@ -95,7 +95,8 @@ fn try_format_structured_api_error(line: &str, term: &Terminal) -> Option<String
         )
     };
 
-    Some(Prose::new(friendly).render(term))
+    // The error line, each hint, and the request id are separate rows.
+    Some(Prose::new(friendly).with_line_breaks(LineBreaks::Hard).render(term))
 }
 
 /// Format common CLI error patterns that are not API JSON errors.
@@ -150,6 +151,21 @@ mod tests {
         assert!(result.contains("Overloaded"));
         assert!(result.contains("transient"));
         assert!(result.contains("req_abc123"));
+    }
+
+    #[test]
+    fn structured_api_error_puts_the_hint_and_request_id_on_their_own_rows() {
+        let term = Terminal::builder()
+            .width(300)
+            .color_depth(biscuit_terminal::discovery::detection::ColorDepth::None)
+            .build();
+        let line = r#"API Error: 529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"},"request_id":"req_abc123"}"#;
+        let rendered = strip_ansi_codes(&try_format_api_error(line, &term).unwrap());
+        let rows: Vec<&str> = rendered.lines().collect();
+        assert_eq!(rows.len(), 3, "{rendered:?}");
+        assert_eq!(rows[0], "API Error (529): Overloaded");
+        assert!(rows[1].starts_with("The API is temporarily overloaded."), "{rendered:?}");
+        assert_eq!(rows[2], "request: req_abc123");
     }
 
     #[test]

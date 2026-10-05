@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use crate::components::prose::Prose;
+use crate::components::prose::InlineProse;
 use crate::components::renderable::TerminalRenderable;
 use crate::utils::{block_constraint::visible_width, layout::Alignment};
 
@@ -43,7 +43,7 @@ pub(super) fn expand_tabs_with_width(content: &str, tab_width: usize) -> Cow<'_,
 /// - **Integer**: Formats with thousands separators (e.g., `1,234,567`)
 /// - **Float**: Formats with two decimal places (e.g., `12,345.67`)
 /// - **Currency**: Formats with currency symbol prefix and two decimal places (e.g., `$1,234.56`)
-/// - **StyledProse**: Embeds a [`Prose`] whose inline styles, links, and emphasis are preserved in the table cell
+/// - **StyledInlineProse**: Embeds an [`InlineProse`] whose inline styles, links, emphasis, and inline code are preserved in the table cell
 ///
 /// ## Examples
 ///
@@ -85,15 +85,19 @@ pub enum TableCellContent {
     Float(f64),
     /// Currency value with symbol prefix
     Currency(Currency, f64),
-    /// Styled inline content backed by a [`Prose`].
+    /// Styled inline content backed by an [`InlineProse`].
     ///
-    /// The payload is boxed deliberately: [`Prose`] embeds a full
-    /// [`Layout`](crate::utils::layout::Layout), so an inline `Prose` would make
+    /// A table cell is phrasing content, so it takes the inline component: a
+    /// fenced block in the cell becomes one inline code value rather than a
+    /// block.
+    ///
+    /// The payload is boxed deliberately: [`InlineProse`] embeds a full
+    /// [`Layout`](crate::utils::layout::Layout), so an unboxed value would make
     /// this enum an order of magnitude larger than its other (≤24-byte) variants
     /// and trip `clippy::large_enum_variant` for every cell in the
-    /// `Vec<Vec<TableCellContent>>` grid. `From<Prose>` boxes for callers, so the
-    /// allocation is invisible at the construction site.
-    StyledProse(Box<Prose>),
+    /// `Vec<Vec<TableCellContent>>` grid. `From<InlineProse>` boxes for callers,
+    /// so the allocation is invisible at the construction site.
+    StyledInlineProse(Box<InlineProse>),
 }
 
 impl From<String> for TableCellContent {
@@ -120,9 +124,9 @@ impl From<f64> for TableCellContent {
     }
 }
 
-impl From<Prose> for TableCellContent {
-    fn from(prose: Prose) -> Self {
-        TableCellContent::StyledProse(Box::new(prose))
+impl From<InlineProse> for TableCellContent {
+    fn from(prose: InlineProse) -> Self {
+        TableCellContent::StyledInlineProse(Box::new(prose))
     }
 }
 
@@ -133,7 +137,7 @@ impl std::fmt::Display for TableCellContent {
             TableCellContent::Integer(n) => write!(f, "{}", format_integer(*n)),
             TableCellContent::Float(n) => write!(f, "{}", format_float(*n)),
             TableCellContent::Currency(c, amt) => write!(f, "{}", format_currency(c, *amt)),
-            TableCellContent::StyledProse(prose) => {
+            TableCellContent::StyledInlineProse(prose) => {
                 f.write_str(&prose.render_optimistic(None))
             }
         }

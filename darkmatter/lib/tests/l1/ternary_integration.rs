@@ -4,12 +4,12 @@ use darkmatter::markdown::Markdown;
 fn test_ternary_content_interpolation() {
     let content = "---\nactive: true\n---\nStatus: {{ active ? 'Online' : 'Offline' }}";
     let md: Markdown = content.into();
-    let (composed, _) = md.compose().unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert_eq!(composed.content().trim(), "Status: Online");
 
     let content_false = "---\nactive: false\n---\nStatus: {{ active ? 'Online' : 'Offline' }}";
     let md_false: Markdown = content_false.into();
-    let (composed_false, _) = md_false.compose().unwrap();
+    let (composed_false, _) = md_false.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert_eq!(composed_false.content().trim(), "Status: Offline");
 }
 
@@ -18,7 +18,7 @@ fn test_recursive_ternary_content_interpolation() {
     let content =
         "---\na: true\nb: false\n---\nResult: {{ a ? b ? 'both' : 'only a' : 'neither' }}";
     let md: Markdown = content.into();
-    let (composed, _) = md.compose().unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert_eq!(composed.content().trim(), "Result: only a");
 }
 
@@ -26,7 +26,7 @@ fn test_recursive_ternary_content_interpolation() {
 fn test_frontmatter_ternary_interpolation() {
     let content = "---\nmode: production\nurl: \"{{ mode == 'production' ? 'https://api.com' : 'http://localhost' }}\"\n---\nURL: {{url}}";
     let md: Markdown = content.into();
-    let (composed, _) = md.compose().unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert_eq!(composed.content().trim(), "URL: https://api.com");
 }
 
@@ -36,13 +36,13 @@ fn test_page_block_with_ternary_condition() {
     let content =
         "---\nenabled: true\n---\n::block when=\"enabled ? true : false\"\nVISIBLE\n::end-block";
     let md: Markdown = content.into();
-    let (composed, _) = md.compose().unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert!(composed.content().contains("VISIBLE"));
 
     let content_false =
         "---\nenabled: false\n---\n::block when=\"enabled ? true : false\"\nVISIBLE\n::end-block";
     let md_false: Markdown = content_false.into();
-    let (composed_false, _) = md_false.compose().unwrap();
+    let (composed_false, _) = md_false.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert!(!composed_false.content().contains("VISIBLE"));
 }
 
@@ -50,7 +50,7 @@ fn test_page_block_with_ternary_condition() {
 fn test_ternary_with_parentheses_grouping() {
     let content = "---\na: true\nb: true\n---\n{{ a ? (b ? 'YES' : 'NO') : 'OUTER' }}";
     let md: Markdown = content.into();
-    let (composed, _) = md.compose().unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert_eq!(composed.content().trim(), "YES");
 }
 
@@ -58,7 +58,7 @@ fn test_ternary_with_parentheses_grouping() {
 fn test_ternary_with_complex_comparison() {
     let content = "---\ncount: 5\n---\n{{ count > 0 ? 'HAS' : 'EMPTY' }}";
     let md: Markdown = content.into();
-    let (composed, _) = md.compose().unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert_eq!(composed.content().trim(), "HAS");
 }
 
@@ -68,12 +68,12 @@ fn test_ternary_with_complex_comparison() {
 fn test_ternary_branch_with_nested_interpolation() {
     let content = "---\npkg: darkmatter\n---\n{{ pkg ? 'in a package directory: {{pkg}}' : 'not in a package directory' }}";
     let md: Markdown = content.into();
-    let (composed, _) = md.compose().unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert_eq!(composed.content().trim(), "in a package directory: {{pkg}}");
 
     let content = "---\npkg: darkmatter\n---\n{{ pkg ? 'in a package directory: ' + pkg : 'not in a package directory' }}";
     let md: Markdown = content.into();
-    let (composed, _) = md.compose().unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert_eq!(composed.content().trim(), "in a package directory: darkmatter");
 }
 
@@ -83,7 +83,7 @@ fn test_ternary_branch_with_nested_interpolation() {
 fn test_frontmatter_ternary_with_nested_interpolation() {
     let content = "---\npkg: darkmatter\nmessage: \"{{ pkg ? 'Package: {{pkg}}' : 'No package' }}\"\n---\n{{message}}";
     let md: Markdown = content.into();
-    let (composed, _) = md.compose().unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert_eq!(composed.content().trim(), "Package: {{pkg}}");
 }
 
@@ -92,7 +92,7 @@ fn test_false_branch_with_nested_interpolation() {
     let content =
         "---\npkg: null\nfallback: none\n---\n{{ pkg ? 'has: {{pkg}}' : 'missing: {{fallback}}' }}";
     let md: Markdown = content.into();
-    let (composed, _) = md.compose().unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert_eq!(composed.content().trim(), "missing: {{fallback}}");
 }
 
@@ -104,7 +104,7 @@ fn test_frontmatter_ternary_dependency_ordering() {
     // `message` would resolve before `spec` and produce an empty branch value.
     let content = "---\nuse: true\nmessage: \"{{ use ? spec : 'none' }}\"\nbase: \"prefix\"\nspec: \"{{ base }}/spec.md\"\n---\n{{message}}";
     let md: Markdown = content.into();
-    let (composed, _) = md.compose().unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert_eq!(composed.content().trim(), "prefix/spec.md");
 }
 
@@ -114,6 +114,6 @@ fn test_frontmatter_fallback_dependency_ordering() {
     // appears alongside a literal default.
     let content = "---\nlabel: \"{{ area || 'unknown' }}\"\nbase: \"core\"\narea: \"{{ base }}-area\"\n---\n{{label}}";
     let md: Markdown = content.into();
-    let (composed, _) = md.compose().unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert_eq!(composed.content().trim(), "core-area");
 }

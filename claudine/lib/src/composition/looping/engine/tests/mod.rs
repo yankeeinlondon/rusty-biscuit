@@ -132,7 +132,7 @@ fn run_loop(
         &effect_engine,
         &crate::composition::lifecycle_executor::SystemShellRunner,
         &crate::composition::DefaultLifecycleEmitter,
-        None,
+        crate::test_support::process_context(),
         None,
         |ctx, guard| {
             guard.emit_start_once();

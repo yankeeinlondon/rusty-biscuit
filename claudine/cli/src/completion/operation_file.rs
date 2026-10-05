@@ -185,6 +185,10 @@ pub(crate) enum OperationFileRecovery {
 }
 
 /// Apply the shared operation-file recovery policy to a structured no-match.
+///
+/// A miss carrying the literal-glob hint is reported, never handed to the
+/// picker: its text is a pattern the picker would only search for as a
+/// substring, and the hint is what tells the author why it matched nothing.
 pub(crate) fn recover_operation_file(
     reference: &str,
     no_match: CompositionError,
@@ -192,7 +196,7 @@ pub(crate) fn recover_operation_file(
     let Some((retained_reference, resolution, _)) = no_match.file_reference_no_match() else {
         return OperationFileRecovery::ExplicitNoMatch(no_match);
     };
-    if is_operation_file_autocomplete_eligible(reference) {
+    if is_operation_file_autocomplete_eligible(reference) && no_match.glob_hint().is_none() {
         return OperationFileRecovery::AttemptAutocomplete;
     }
 

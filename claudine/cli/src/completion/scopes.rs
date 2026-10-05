@@ -193,18 +193,18 @@ pub(crate) struct ScopeContext {
 }
 
 impl ScopeContext {
-    /// Build a context by inspecting the filesystem.
+    /// Build a context for the invocation's launch directory by inspecting
+    /// the filesystem.
     ///
     /// Invokes `sniff::detect_repo_structure` exactly once. Errors are
     /// swallowed into `None` — completion is best-effort and must never
     /// fail loudly because `sniff` had trouble with an unusual checkout.
     pub(crate) fn discover() -> Self {
-        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        Self::discover_from(&cwd)
+        Self::discover_from(crate::request::snapshot().request_dir())
     }
 
-    /// Like [`discover`](Self::discover) but treats `cwd` as given. Used by
-    /// tests.
+    /// Like [`discover`](Self::discover) but treats `cwd` as given, keeping
+    /// the request snapshot's home directory.
     ///
     /// `sniff::detect_repo_structure` runs against the detected repo root,
     /// not `cwd` itself — `sniff` only reads manifests at the exact path
@@ -218,47 +218,39 @@ impl ScopeContext {
             .and_then(|root| detect_repo_structure(root).ok().flatten());
         Self {
             cwd: cwd.to_path_buf(),
-            home: dirs::home_dir(),
+            home: crate::request::snapshot().home().map(Path::to_path_buf),
             repo_info,
             git_root: repo_root,
         }
     }
 }
 
-/// Build the explicit file-resolution context used by one composition
-/// completion invocation.
+/// Build the file-resolution context used by one composition completion
+/// invocation.
 ///
 /// The shared `FileReference` completer receives the same ordered Claudine
-/// magic roots that runtime composition registers. Repository, package-area,
+/// magic roots that runtime composition registers: the context is built by
+/// Claudine's prompt builder from the request snapshot anchored at the
+/// completion directory, with this scope's home. Repository, package-area,
 /// discrete-package, home, and environment state are captured once here;
 /// completion does not rediscover or reclassify them while walking candidates.
-/// Without a repository the launch (completion) directory is the local `@`
-/// root, so it registers the same convention rows a repository would.
-pub(crate) fn file_resolution_context(ctx: &ScopeContext) -> FileResolutionContext {
-    let repository_root = effective_repo_root(ctx);
-
-    let mut resolution = FileResolutionContext::new(ctx.cwd.clone());
-    if let (Some(root), Some(repo)) = (repository_root, ctx.repo_info.as_ref()) {
-        let catalog = darkmatter::markdown::compose::repository_scope_catalog(repo, root)
-            .expect("observed repository topology must project to valid absolute scopes");
-        resolution = resolution.with_repository_scope_catalog(catalog);
-    } else if let Some(root) = repository_root {
-        resolution = resolution.with_repository_root(root);
-    }
-    if let Some(home) = ctx.home.as_ref() {
-        resolution = resolution.with_home_dir(home);
-    } else {
-        resolution = resolution.without_home_dir();
-    }
-    let package_area = resolution.package_area().map(Path::to_path_buf);
-    let package = resolution.package_root().map(Path::to_path_buf);
-    let local_root = repository_root.unwrap_or(ctx.cwd.as_path());
-    claudine::composition::with_prompt_magic_roots(
-        resolution,
-        local_root,
-        package_area.as_deref(),
-        package.as_deref(),
-        ctx.home.as_deref(),
+/// Without a repository the completion directory is the local `@` root, so it
+/// registers the same convention rows a repository would.
+///
+/// ## Errors
+///
+/// The builder's error when the context fails validation, for example a
+/// relative completion directory.
+pub(crate) fn file_resolution_context(
+    ctx: &ScopeContext,
+) -> Result<FileResolutionContext, darkmatter::markdown::compose::ContextBuildError> {
+    let snapshot = crate::request::snapshot()
+        .at_request_dir(&ctx.cwd)
+        .with_home(ctx.home.clone());
+    claudine::composition::build_prompt_resolution_context(
+        &snapshot,
+        effective_repo_root(ctx),
+        ctx.repo_info.as_ref(),
     )
 }
 

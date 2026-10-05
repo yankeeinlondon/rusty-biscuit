@@ -21,7 +21,7 @@ use serde_json::Value;
 
 use crate::markdown::Markdown;
 use crate::markdown::compose::ComposeOperation;
-use crate::markdown::compose::ComposeOptions;
+use crate::markdown::compose::ComposeRequest;
 use crate::markdown::compose::ComposeSource;
 use crate::markdown::compose::DeferredCapabilities;
 use crate::markdown::compose::frontmatter_interpolation::interpolate_frontmatter_best_effort;
@@ -118,12 +118,13 @@ pub(crate) fn resolve_executable(exe_raw: &str, args_raw: &[String]) -> (String,
 ///
 /// ```
 /// use darkmatter::markdown::Markdown;
-/// use darkmatter::markdown::compose::ComposeOptions;
+/// use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest, RequestSnapshot};
 /// use darkmatter::markdown::compose::preflight::collect_shell_commands;
 ///
 /// let md: Markdown = "# Test\n::shell echo hello\n".into();
-/// let options = ComposeOptions::new();
-/// let entries = collect_shell_commands(&md, &options).unwrap();
+/// let request =
+///     ComposeRequest::prepare(ComposeOptions::new(), &RequestSnapshot::new(std::env::temp_dir())).unwrap();
+/// let entries = collect_shell_commands(&md, &request).unwrap();
 /// assert_eq!(entries.len(), 1);
 /// assert_eq!(entries[0].executable, "echo");
 /// ```
@@ -136,9 +137,9 @@ pub(crate) fn resolve_executable(exe_raw: &str, args_raw: &[String]) -> (String,
 ///   embeds a frontmatter value still pending frontmatter-shell expansion.
 pub fn collect_shell_commands(
     markdown: &Markdown,
-    options: &ComposeOptions,
+    request: &ComposeRequest,
 ) -> MarkdownResult<Vec<ShellCommandEntry>> {
-    let (entries, _graph) = collect_shell_commands_with_graph(markdown, options)?;
+    let (entries, _graph) = collect_shell_commands_with_graph(markdown, request)?;
     Ok(entries)
 }
 
@@ -151,9 +152,9 @@ pub fn collect_shell_commands(
 /// still returned for callers that only need the deduped approval set.
 pub fn collect_shell_commands_with_graph(
     markdown: &Markdown,
-    options: &ComposeOptions,
+    request: &ComposeRequest,
 ) -> MarkdownResult<(Vec<ShellCommandEntry>, super::PreflightGraphNode)> {
-    let (entries, _icmp, _capabilities, graph) = collect_effects(markdown, options)?;
+    let (entries, _icmp, _capabilities, graph) = collect_effects(markdown, request)?;
     Ok((entries, graph))
 }
 
@@ -164,15 +165,21 @@ pub fn collect_shell_commands_with_graph(
 /// `ping` records its target, timeout, and attempt count and answers `null`.
 /// A probe inside `as_markdown` content is found the same way, because that
 /// content is walked as a child of the document that named it.
+///
+/// `options` are a prepared request's root options. They are extended for the
+/// groups `markdown` names, as the compose pass extends them, so discovery
+/// reads the context the real pass will.
 pub(crate) fn collect_effects(
     markdown: &Markdown,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
 ) -> MarkdownResult<(
     Vec<ShellCommandEntry>,
     Vec<PlannedIcmpProbe>,
     DeferredCapabilities,
     super::PreflightGraphNode,
 )> {
+    let extended = options.extended_for(markdown);
+    let options = &*extended;
     let mut seen = HashSet::new();
     let mut entries = Vec::new();
     let mut icmp = Vec::new();
@@ -214,11 +221,13 @@ pub(crate) fn collect_effects(
 ///
 /// ```
 /// use darkmatter::markdown::Markdown;
-/// use darkmatter::markdown::compose::ComposeOptions;
+/// use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest, RequestSnapshot};
 /// use darkmatter::markdown::compose::preflight::collect::collect_frontmatter_shell_commands;
 ///
 /// let md: Markdown = "---\nwho: \"$(whoami)\"\n---\n::shell echo body\n::file ./missing.md\n".into();
-/// let entries = collect_frontmatter_shell_commands(&md, &ComposeOptions::new()).unwrap();
+/// let request =
+///     ComposeRequest::prepare(ComposeOptions::new(), &RequestSnapshot::new(std::env::temp_dir())).unwrap();
+/// let entries = collect_frontmatter_shell_commands(&md, &request).unwrap();
 /// assert_eq!(entries.len(), 1);
 /// assert_eq!(entries[0].normalized, "whoami");
 /// ```
@@ -230,8 +239,19 @@ pub(crate) fn collect_effects(
 ///   still depends on a value that cannot be resolved before execution.
 pub fn collect_frontmatter_shell_commands(
     markdown: &Markdown,
-    options: &ComposeOptions,
+    request: &ComposeRequest,
 ) -> MarkdownResult<Vec<ShellCommandEntry>> {
+    frontmatter_shell_commands(markdown, request)
+}
+
+/// [`collect_frontmatter_shell_commands`] over a prepared request's root
+/// options, extended for the groups `markdown` names.
+pub(crate) fn frontmatter_shell_commands(
+    markdown: &Markdown,
+    options: &crate::markdown::compose::ComposeRequest,
+) -> MarkdownResult<Vec<ShellCommandEntry>> {
+    let extended = options.extended_for(markdown);
+    let options = &*extended;
     let source_file = match &options.source {
         ComposeSource::File(p) => p.clone(),
         ComposeSource::Url(u) => PathBuf::from(u.as_str()),
@@ -272,7 +292,7 @@ pub fn collect_frontmatter_shell_commands(
 #[allow(clippy::too_many_arguments)]
 fn collect_recursive(
     markdown: &Markdown,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
     seen: &mut HashSet<String>,
     entries: &mut Vec<ShellCommandEntry>,
     icmp: &mut Vec<PlannedIcmpProbe>,
@@ -292,7 +312,7 @@ fn collect_recursive(
     let is_nested = nested_key.is_some();
     let source_key = nested_key.or_else(|| match &options.source {
         ComposeSource::File(path) => Some(
-            std::fs::canonicalize(path)
+            biscuit_file::canonicalize_simplified(path)
                 .unwrap_or_else(|_| path.clone())
                 .to_string_lossy()
                 .to_string(),
@@ -327,6 +347,7 @@ fn collect_recursive(
     // across the whole graph.
     let mut local_entries: Vec<ShellCommandEntry> = Vec::new();
     let mut edges: Vec<super::PreflightGraphEdge> = Vec::new();
+    let mut targets: Vec<super::PreflightTargetEdge> = Vec::new();
 
     // ── Deferred context reads ─────────────────────────────────────
     // Metadata only (R30): planning names the lazy reads and function calls
@@ -381,12 +402,11 @@ fn collect_recursive(
     inline_exclude_keys.insert("$schema".to_string());
     let mut inline_options = discovery
         .clone()
-        .only(&inline_ops)
-        .with_exclude_keys(inline_exclude_keys);
+        .derive(|options| options.only(&inline_ops).with_exclude_keys(inline_exclude_keys));
     inline_options.defer_shell_pending_schema_problems = true;
     inline_options.defer_missing_runtime_context = true;
     inline_options.defer_expression_failures = true;
-    let (prepared, prepared_report) = markdown.compose_with(inline_options)?;
+    let (prepared, prepared_report) = markdown.compose_with_options(inline_options)?;
     // The bytes of the prepared body that interpolation inserted. Discovery
     // reads the body through the same data-aware scanners as the compose pass,
     // so the approval set is exactly what can execute.
@@ -525,11 +545,32 @@ fn collect_recursive(
     )? {
         // `::file` and `::url` can both reference Markdown children that
         // contain shell directives. `::code` inserts literal code (no shell
-        // directives), so it is excluded.
-        if !matches!(
-            directive.kind,
-            transclusion::DirectiveKind::File | transclusion::DirectiveKind::Url
-        ) {
+        // directives): its target is resolved but never read.
+        if directive.kind == transclusion::DirectiveKind::Code {
+            if !options.is_enabled(ComposeOperation::CodeTransclusion) {
+                continue;
+            }
+            let resolved_target = match transclusion::resolve_target(
+                directive.kind,
+                &directive.raw_target,
+                &transclusion_opts,
+                &options.source,
+                directive.line,
+                prepared_ctx.clone(),
+            ) {
+                Ok(transclusion::ResolvedTarget::File { path, resolved, .. }) => {
+                    super::PreflightResolvedTarget::File { path, resolved }
+                }
+                Ok(transclusion::ResolvedTarget::Url { url, .. }) => super::PreflightResolvedTarget::Url(url),
+                Err(transclusion::TransclusionError::UrlExecutionDisabled { .. }) => continue,
+                Err(e) => return Err(e.into()),
+            };
+            targets.push(super::PreflightTargetEdge {
+                kind: super::PreflightTargetKind::Code,
+                line: directive.line,
+                raw_target: directive.raw_target.clone(),
+                resolved_target,
+            });
             continue;
         }
 
@@ -606,6 +647,32 @@ fn collect_recursive(
                     directive: directive.clone(),
                     resolved_target: super::PreflightResolvedTarget::Url(url),
                     child: std::sync::Arc::new(child),
+                });
+            }
+        }
+    }
+
+    // ── `::toc-linking` targets (resolved, never read) ─────────────
+    // The chain's selection rule is composition's: the first existing
+    // alternative wins, a trailing `false` suppresses, and otherwise the
+    // first alternative's failure class is the error.
+    if options.is_enabled(ComposeOperation::TocLinking) {
+        for directive in
+            crate::markdown::compose::toc_linking::parse_directives_in(prepared.content(), Some(&body_data))?
+        {
+            if let Some((raw_target, path)) = crate::markdown::compose::toc_linking::resolve_target_chain(
+                &directive,
+                &options.source,
+                &transclusion_opts,
+                // Body-relative, as the compose pass reports this directive.
+                prepared.source_context_for_errors(),
+            )? {
+                targets.push(super::PreflightTargetEdge {
+                    kind: super::PreflightTargetKind::TocLinking,
+                    line: directive.line + line_offset,
+                    raw_target,
+                    // The chain yields only the canonical path.
+                    resolved_target: super::PreflightResolvedTarget::File { resolved: path.clone(), path },
                 });
             }
         }
@@ -737,6 +804,7 @@ fn collect_recursive(
         entries: local_entries,
         edges,
         children,
+        targets,
     })
 }
 
@@ -762,7 +830,7 @@ fn fetch_remote_child_body(
 /// Collects the frontmatter `$(...)` commands for a single document.
 fn scan_one_frontmatter(
     markdown: &Markdown,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
     source_file: &std::path::Path,
     seen: &mut HashSet<String>,
     entries: &mut Vec<ShellCommandEntry>,
@@ -993,7 +1061,7 @@ struct InheritedDiscovery {
 /// overridden key is observable.
 fn unobserved_keys(
     markdown: &Markdown,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
     inherited: &[String],
 ) -> Vec<String> {
     let frontmatter = markdown.frontmatter().as_map();
@@ -1139,7 +1207,7 @@ fn authored_as_markdown_literals(markdown: &Markdown) -> Vec<String> {
 ///
 /// A call whose arguments do not validate is left to the compose pass to
 /// reject: preflight reports effects, it does not diagnose authoring.
-fn authored_icmp_probes(markdown: &Markdown, options: &ComposeOptions) -> Vec<PlannedIcmpProbe> {
+fn authored_icmp_probes(markdown: &Markdown, options: &crate::markdown::compose::ComposeRequest) -> Vec<PlannedIcmpProbe> {
     let authority = options.icmp_authority().discovering();
     for expression in authored_expressions(markdown) {
         visit_calls(&expression, &mut |name, args| {
@@ -1148,7 +1216,10 @@ fn authored_icmp_probes(markdown: &Markdown, options: &ComposeOptions) -> Vec<Pl
             }
             let literals: Option<Vec<Value>> = args.iter().map(literal_value).collect();
             if let Some(literals) = literals {
-                let context = ResolutionContext { icmp: authority.clone(), ..Default::default() };
+                let context = ResolutionContext {
+                    icmp: authority.clone(),
+                    ..ResolutionContext::new(options.source_file_resolution_context())
+                };
                 let _ = super::super::expression::functions::dispatch_fs(name, &literals, &context);
             }
         });
@@ -1548,7 +1619,7 @@ mod tests {
     fn runtime_page_blocks_suppress_guarded_null_target() {
         let content = "---\n$schema:\n  log: file\n---\n\n::block when=\"file_exists(log)\"\n::file {{log}}\n::end-block\n";
         let md: Markdown = content.into();
-        let (composed, report) = md.compose_with(ComposeOptions::new()).unwrap();
+        let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(ComposeOptions::new())).unwrap();
         assert!(!composed.content().contains("::file"), "{}", composed.content());
         assert!(
             report.warnings.iter().all(|warning| !warning.message.contains("nullable target")),
@@ -1568,7 +1639,7 @@ mod tests {
         let md = Markdown::try_from(root.as_path()).unwrap();
         let (entries, graph) = collect_shell_commands_with_graph(
             &md,
-            &ComposeOptions::new().with_source_file(&root),
+            &crate::markdown::compose::test_request(ComposeOptions::new().with_source_file(&root)),
         )
         .expect("nullable target must not abort condition-blind preflight");
         assert_eq!(entries.len(), 1, "entries: {entries:?}");
@@ -1582,7 +1653,7 @@ mod tests {
         let content = "---\n$schema:\n  log: file\n---\n\n::file {{log}}\n";
         let md: Markdown = content.into();
         let (composed, report) = md
-            .compose_with(ComposeOptions::new())
+            .compose_with(&crate::markdown::compose::test_request(ComposeOptions::new()))
             .expect("unguarded null target must compose");
         assert!(!composed.content().contains("::file"));
         let warnings: Vec<_> = report
@@ -1600,7 +1671,7 @@ mod tests {
         let content = "---\nlog: \"\"\n---\n\n::file {{log}}\n";
         let md: Markdown = content.into();
         let (composed, report) = md
-            .compose_with(ComposeOptions::new())
+            .compose_with(&crate::markdown::compose::test_request(ComposeOptions::new()))
             .expect("empty-string target must compose");
         assert!(!composed.content().contains("::file"));
         let warnings: Vec<_> = report
@@ -1618,7 +1689,7 @@ mod tests {
     fn authored_empty_targets_remain_errors_and_mixed_targets_remain_paths() {
         for content in ["::file\n", "::file \"\"\n"] {
             let md: Markdown = content.into();
-            assert!(md.compose_with(ComposeOptions::new()).is_err(), "{content:?}");
+            assert!(md.compose_with(&crate::markdown::compose::test_request(ComposeOptions::new())).is_err(), "{content:?}");
         }
 
         let content = "::file \"{{dir}}/log.md\"\n";
@@ -1634,10 +1705,10 @@ mod tests {
     fn malformed_directive_in_false_block_has_distinct_runtime_and_preflight_outcomes() {
         let content = "---\nenabled: false\n---\n\n::block when=\"enabled\"\n::file\n::end-block\n";
         let md: Markdown = content.into();
-        let (composed, _) = md.compose_with(ComposeOptions::new()).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(ComposeOptions::new())).unwrap();
         assert!(!composed.content().contains("::file"));
 
-        let error = collect_shell_commands(&md, &ComposeOptions::new())
+        let error = collect_shell_commands(&md, &crate::markdown::compose::test_request(ComposeOptions::new()))
             .expect_err("condition-blind preflight must reject authored malformed syntax");
         assert!(error.to_string().contains("Failed to parse directive"));
     }
@@ -1652,7 +1723,7 @@ mod tests {
             let content = format!("{frontmatter}\n# Body\n::file\n");
             let expected_line = content[..content.find("::file").unwrap()].matches('\n').count() + 1;
             let md: Markdown = content.into();
-            let error = collect_shell_commands(&md, &ComposeOptions::new())
+            let error = collect_shell_commands(&md, &crate::markdown::compose::test_request(ComposeOptions::new()))
                 .expect_err("malformed directive");
             let crate::markdown::types::MarkdownError::Transclusion(error) = error else {
                 panic!("expected transclusion error");
@@ -1676,7 +1747,7 @@ mod tests {
         let md = Markdown::try_from(root.as_path()).unwrap();
         let error = collect_shell_commands(
             &md,
-            &ComposeOptions::new().with_source_file(&root),
+            &crate::markdown::compose::test_request(ComposeOptions::new().with_source_file(&root)),
         )
         .expect_err("pending target must fail as a dynamic command shape");
         let message = error.to_string();
@@ -1691,7 +1762,7 @@ mod tests {
         let md: Markdown = content.into();
         let options = ComposeOptions::new();
 
-        let entries = collect_shell_commands(&md, &options).unwrap();
+        let entries = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap();
 
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].executable, "echo");
@@ -1717,7 +1788,7 @@ mod tests {
         let md: Markdown = root_content.into();
         let options = ComposeOptions::new().with_source_file(&root_path);
 
-        let entries = collect_shell_commands(&md, &options).unwrap();
+        let entries = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap();
 
         assert_eq!(entries.len(), 2);
         let raw_commands: Vec<&str> = entries.iter().map(|e| e.raw_command.as_str()).collect();
@@ -1731,7 +1802,7 @@ mod tests {
         let md: Markdown = content.into();
         let options = ComposeOptions::new();
 
-        let entries = collect_shell_commands(&md, &options).unwrap();
+        let entries = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap();
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].normalized, "echo hello");
@@ -1746,7 +1817,7 @@ mod tests {
             "iteration": "1",
         }));
 
-        let entries = collect_shell_commands(&md, &options).unwrap();
+        let entries = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap();
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].executable, "dirname");
@@ -1776,7 +1847,7 @@ iteration: \"{{ file_exists('design.md') ? 2 : 1 }}\"\n\
             "spec": "fixes/x/spec.md",
         }));
 
-        let entries = collect_shell_commands(&md, &options).unwrap();
+        let entries = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap();
 
         assert_eq!(entries.len(), 1, "exactly one shell command (dir)");
         assert_eq!(entries[0].executable, "dirname");
@@ -1834,7 +1905,7 @@ spec: \"{{ file_exists(plan) ? dirname(plan) + '/spec.md' : null }}\"
                 "spec": "reviews/2026-06-30-replace-expression/spec.md",
             }));
 
-        md.compose_preflight(&options)
+        md.compose_preflight(&crate::markdown::compose::test_request(options.clone()))
             .expect("preflight should resolve the derived plan through the request context");
     }
 
@@ -1866,7 +1937,7 @@ cmd: \"$(echo '{{ exists }}')\"\n\
         let md: Markdown = content.into();
         let options = ComposeOptions::new();
 
-        let err = collect_shell_commands(&md, &options).unwrap_err();
+        let err = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap_err();
         let msg = err.to_string();
         assert!(
             msg.contains("frontmatter.cmd") && msg.contains("'exists'"),
@@ -1896,7 +1967,7 @@ cmd: \"$(echo '{{ name }}')\"\n\
         let md: Markdown = content.into();
         let options = ComposeOptions::new();
 
-        let entries = collect_shell_commands(&md, &options).unwrap();
+        let entries = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap();
         assert_eq!(entries.len(), 1, "entries: {entries:?}");
         assert_eq!(entries[0].executable, "echo");
         assert_eq!(entries[0].args, vec!["world"]);
@@ -1913,7 +1984,7 @@ cmd: \"$(echo '{{ name }}')\"\n\
         let md: Markdown = content.into();
         let options = ComposeOptions::new();
 
-        let entries = collect_shell_commands(&md, &options).unwrap();
+        let entries = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap();
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].raw_command, "echo world");
@@ -1925,7 +1996,7 @@ cmd: \"$(echo '{{ name }}')\"\n\
         let md: Markdown = content.into();
         let options = ComposeOptions::new();
 
-        let entries = collect_shell_commands(&md, &options).unwrap();
+        let entries = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap();
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].raw_command, "echo outside");
@@ -1936,7 +2007,7 @@ cmd: \"$(echo '{{ name }}')\"\n\
         let md: Markdown = "# Just a heading\n\nSome text.\n".into();
         let options = ComposeOptions::new();
 
-        let entries = collect_shell_commands(&md, &options).unwrap();
+        let entries = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap();
 
         assert!(entries.is_empty());
     }
@@ -1957,7 +2028,7 @@ include_shell: false
         let md: Markdown = content.into();
         let options = ComposeOptions::new();
 
-        let entries = collect_shell_commands(&md, &options).unwrap();
+        let entries = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap();
 
         let raw: Vec<&str> = entries.iter().map(|e| e.raw_command.as_str()).collect();
         assert!(raw.contains(&"echo always"), "raw: {raw:?}");
@@ -1982,7 +2053,7 @@ echo conditional
         let md: Markdown = content.into();
         let options = ComposeOptions::new();
 
-        let entries = collect_shell_commands(&md, &options).unwrap();
+        let entries = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap();
 
         let raw: Vec<&str> = entries.iter().map(|e| e.raw_command.as_str()).collect();
         assert!(raw.contains(&"echo always"), "raw: {raw:?}");
@@ -2007,7 +2078,7 @@ echo conditional
         let md = Markdown::try_from(root_path.as_path()).unwrap();
         let options = ComposeOptions::new().with_source_file(&root_path);
 
-        let entries = collect_shell_commands(&md, &options).unwrap();
+        let entries = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap();
 
         assert_eq!(entries.len(), 1, "entries: {entries:?}");
         assert_eq!(entries[0].raw_command, "echo hidden");
@@ -2031,7 +2102,7 @@ echo conditional
         let md = Markdown::try_from(root_path.as_path()).unwrap();
         let options = ComposeOptions::new().with_source_file(&root_path);
 
-        let entries = collect_shell_commands(&md, &options).unwrap();
+        let entries = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap();
 
         assert_eq!(entries.len(), 1, "entries: {entries:?}");
         assert_eq!(entries[0].raw_command, "echo hidden-body");
@@ -2049,7 +2120,7 @@ replace:
         let md: Markdown = content.into();
         let options = ComposeOptions::new();
 
-        let entries = collect_shell_commands(&md, &options).unwrap();
+        let entries = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap();
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].raw_command, "echo replaced");
@@ -2073,7 +2144,7 @@ replace:
         let md: Markdown = root_content.into();
         let options = ComposeOptions::new().with_source_file(&root_path);
 
-        let entries = collect_shell_commands(&md, &options).unwrap();
+        let entries = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap();
 
         assert_eq!(entries.len(), 2);
 
@@ -2107,7 +2178,7 @@ replace:
         let md: Markdown = content.into();
         let options = ComposeOptions::new();
 
-        let entries = collect_shell_commands(&md, &options).unwrap();
+        let entries = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap();
 
         assert_eq!(entries.len(), 2, "entries: {entries:?}");
         let executables: Vec<&str> = entries.iter().map(|e| e.executable.as_str()).collect();
@@ -2121,7 +2192,7 @@ replace:
         let md: Markdown = content.into();
         let options = ComposeOptions::new();
 
-        let entries = collect_shell_commands(&md, &options).unwrap();
+        let entries = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap();
 
         assert_eq!(entries.len(), 1, "entries: {entries:?}");
         assert_eq!(entries[0].executable, "echo");
@@ -2145,7 +2216,7 @@ replace:
         let md = Markdown::try_from(root_path.as_path()).unwrap();
         let options = ComposeOptions::new().with_source_file(&root_path);
 
-        let entries = collect_shell_commands(&md, &options).unwrap();
+        let entries = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap();
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].raw_command, "echo child-frontmatter");
@@ -2168,7 +2239,7 @@ replace:
         let md: Markdown = content.into();
         let options = ComposeOptions::new();
 
-        let entries = collect_shell_commands(&md, &options).unwrap();
+        let entries = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap();
 
         assert_eq!(entries.len(), 1);
         match &entries[0].origin {
@@ -2183,7 +2254,7 @@ replace:
         let md: Markdown = content.into();
         let options = ComposeOptions::new();
 
-        let entries = collect_shell_commands(&md, &options).unwrap();
+        let entries = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap();
 
         assert_eq!(entries.len(), 1);
     }
@@ -2194,7 +2265,7 @@ replace:
         let md: Markdown = content.into();
         let options = ComposeOptions::new();
 
-        let entries = collect_shell_commands(&md, &options).unwrap();
+        let entries = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap();
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].raw_command, "echo world");
@@ -2207,7 +2278,7 @@ replace:
         let options = ComposeOptions::new()
             .with_external_state(serde_json::json!({"tool": "$(echo external)"}));
 
-        let entries = collect_shell_commands(&md, &options).unwrap();
+        let entries = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap();
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].raw_command, "echo external");
@@ -2220,7 +2291,7 @@ replace:
         let options =
             ComposeOptions::new().with_set_overrides(serde_json::json!({"cmd": "$(echo after)"}));
 
-        let entries = collect_shell_commands(&md, &options).unwrap();
+        let entries = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap();
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].raw_command, "echo after");
@@ -2232,7 +2303,7 @@ replace:
         let md: Markdown = content.into();
         let options = ComposeOptions::new();
 
-        let err = collect_shell_commands(&md, &options).unwrap_err();
+        let err = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap_err();
         assert!(
             err.to_string()
                 .contains("Frontmatter shell executable may not come from interpolation")
@@ -2247,7 +2318,7 @@ replace:
         let md: Markdown = content.into();
         let options = ComposeOptions::new();
 
-        let err = collect_shell_commands(&md, &options).unwrap_err();
+        let err = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap_err();
         let msg = err.to_string();
         assert!(
             msg.contains("depends on frontmatter key 'branch'"),
@@ -2267,7 +2338,7 @@ replace:
         let md: Markdown = content.into();
         let options = ComposeOptions::new();
 
-        let entries = collect_shell_commands(&md, &options).unwrap();
+        let entries = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap();
         // Only the frontmatter command itself is collected.
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].executable, "git");
@@ -2279,7 +2350,7 @@ replace:
         let md: Markdown = content.into();
         let options = ComposeOptions::new();
 
-        let entries = collect_shell_commands(&md, &options).unwrap();
+        let entries = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap();
 
         let raw: Vec<&str> = entries.iter().map(|e| e.raw_command.as_str()).collect();
         assert!(raw.contains(&"echo ok"), "missing echo ok: {raw:?}");
@@ -2293,7 +2364,7 @@ replace:
         let md: Markdown = content.into();
         let options = ComposeOptions::new();
 
-        let entries = collect_shell_commands(&md, &options).unwrap();
+        let entries = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap();
 
         let executables: Vec<&str> = entries.iter().map(|e| e.executable.as_str()).collect();
         assert!(executables.contains(&"echo"), "missing echo: {executables:?}");
@@ -2306,7 +2377,7 @@ replace:
         let md: Markdown = content.into();
         let options = ComposeOptions::new();
 
-        let entries = collect_shell_commands(&md, &options).unwrap();
+        let entries = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap();
 
         let executables: Vec<&str> = entries.iter().map(|e| e.executable.as_str()).collect();
         assert!(executables.contains(&"echo"));
@@ -2319,7 +2390,7 @@ replace:
         let md: Markdown = content.into();
         let options = ComposeOptions::new();
 
-        let entries = collect_shell_commands(&md, &options).unwrap();
+        let entries = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap();
 
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].raw_command, "echo hello");
@@ -2339,7 +2410,7 @@ replace:
         let md: Markdown = content.into();
         let options = ComposeOptions::new();
 
-        let entries = collect_shell_commands(&md, &options).unwrap();
+        let entries = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap();
 
         let raw: Vec<&str> = entries.iter().map(|e| e.raw_command.as_str()).collect();
         assert!(raw.contains(&"echo ok"), "missing echo ok: {raw:?}");
@@ -2359,7 +2430,7 @@ replace:
         let md: Markdown = content.into();
         let options = ComposeOptions::new();
 
-        let entries = collect_shell_commands(&md, &options).unwrap();
+        let entries = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap();
 
         assert_eq!(entries.len(), 2);
         let standalones: Vec<_> = entries
@@ -2382,7 +2453,7 @@ replace:
         let md: Markdown = content.into();
         let options = ComposeOptions::new();
 
-        let entries = collect_shell_commands(&md, &options).unwrap();
+        let entries = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap();
 
         assert_eq!(entries.len(), 1);
     }
@@ -2399,7 +2470,7 @@ out: \"$(flag ? echo yes : basename README.md)\"
         let md: Markdown = content.into();
         let options = ComposeOptions::new();
 
-        let entries = collect_shell_commands(&md, &options).unwrap();
+        let entries = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap();
 
         let raw: Vec<&str> = entries.iter().map(|e| e.raw_command.as_str()).collect();
         assert!(raw.contains(&"echo yes"), "missing echo yes: {raw:?}");
@@ -2420,7 +2491,7 @@ out: \"$(flag ? echo only : '')\"
         let md: Markdown = content.into();
         let options = ComposeOptions::new();
 
-        let entries = collect_shell_commands(&md, &options).unwrap();
+        let entries = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap();
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].raw_command, "echo only");
@@ -2437,7 +2508,7 @@ out: \"$(flag ? echo a && pwd : ls)\"
         let md: Markdown = content.into();
         let options = ComposeOptions::new();
 
-        let entries = collect_shell_commands(&md, &options).unwrap();
+        let entries = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap();
 
         let executables: Vec<&str> = entries.iter().map(|e| e.executable.as_str()).collect();
         assert!(executables.contains(&"echo"), "missing echo: {executables:?}");
@@ -2457,7 +2528,7 @@ out: \"$(flag ? basename {{name}} : '')\"
         let md: Markdown = content.into();
         let options = ComposeOptions::new();
 
-        let entries = collect_shell_commands(&md, &options).unwrap();
+        let entries = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap();
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].executable, "basename");
@@ -2476,7 +2547,7 @@ out: \"$(flag ? {{cmd_name}} hi : '')\"
         let md: Markdown = content.into();
         let options = ComposeOptions::new();
 
-        let err = collect_shell_commands(&md, &options).unwrap_err();
+        let err = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap_err();
         assert!(
             err.to_string().contains("may not come from interpolation"),
             "unexpected error: {err}"
@@ -2503,7 +2574,7 @@ out: \"$(flag ? {{cmd_name}} hi : '')\"
         let md: Markdown = root_content.into();
         let options = ComposeOptions::new().with_source_file(&root_path);
 
-        let entries = collect_shell_commands(&md, &options).unwrap();
+        let entries = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap();
 
         assert_eq!(entries.len(), 2);
 
@@ -2565,7 +2636,7 @@ out: \"$(flag ? {{cmd_name}} hi : '')\"
             .with_allow_remote_transclusion(true)
             .with_remote_read_config(config);
 
-        let entries = collect_shell_commands(&md, &options).unwrap();
+        let entries = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap();
         let raw: Vec<&str> = entries.iter().map(|e| e.raw_command.as_str()).collect();
         assert!(
             raw.contains(&"echo remote-body"),
@@ -2611,7 +2682,7 @@ out: \"$(flag ? {{cmd_name}} hi : '')\"
             .with_allow_remote_transclusion(true)
             .with_remote_read_config(config);
 
-        let entries = collect_shell_commands(&md, &options).unwrap();
+        let entries = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap();
         assert!(
             entries
                 .iter()
@@ -2659,7 +2730,7 @@ out: \"$(flag ? {{cmd_name}} hi : '')\"
             .with_allow_remote_transclusion(true)
             .with_remote_read_config(config);
 
-        let entries = collect_shell_commands(&md, &options).unwrap();
+        let entries = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap();
         let raw: Vec<&str> = entries.iter().map(|e| e.raw_command.as_str()).collect();
         assert!(
             raw.contains(&"echo hidden-remote"),
@@ -2704,7 +2775,7 @@ out: \"$(flag ? {{cmd_name}} hi : '')\"
             .with_allow_remote_transclusion(true)
             .with_remote_read_config(config);
 
-        let entries = collect_shell_commands(&md, &options).unwrap();
+        let entries = collect_shell_commands(&md, &crate::markdown::compose::test_request(options.clone())).unwrap();
         let raw: Vec<&str> = entries.iter().map(|e| e.raw_command.as_str()).collect();
         assert!(
             raw.contains(&"echo prologue-cmd"),
@@ -2736,7 +2807,7 @@ out: \"$(flag ? {{cmd_name}} hi : '')\"
         let md = Markdown::try_from(root_path.as_path()).unwrap();
         let options = ComposeOptions::new().with_source_file(&root_path);
 
-        let (entries, graph) = collect_shell_commands_with_graph(&md, &options).unwrap();
+        let (entries, graph) = collect_shell_commands_with_graph(&md, &crate::markdown::compose::test_request(options.clone())).unwrap();
 
         // The flat approval set is the union, deduped.
         let raw: Vec<&str> = entries.iter().map(|e| e.raw_command.as_str()).collect();

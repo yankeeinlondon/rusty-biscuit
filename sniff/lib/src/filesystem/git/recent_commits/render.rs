@@ -361,14 +361,64 @@ impl Format {
     }
 }
 
-/// Backslash-escape characters that `format` would read as markup. Prose has
-/// no inline code and renders the backslash of an escaped backtick, so only
-/// Markdown escapes backticks.
+/// Backslash-escape characters that `format` would read as markup. In Prose
+/// a closed backtick pair is kept as a code span, and that span's contents
+/// are copied unescaped because Prose shows a code span's backslashes; an
+/// unmatched backtick is escaped like any other markup. This mirrors
+/// biscuit-terminal's
+/// `Prose::escape_text_outside_code_spans`, which `sniff` cannot call: the
+/// library does not depend on biscuit-terminal.
 fn escape(text: &str, format: Format) -> String {
+    if format != Format::Prose {
+        return escape_chars(text, format);
+    }
+    let mut escaped = String::with_capacity(text.len());
+    let mut plain_start = 0;
+    let mut index = 0;
+    while let Some(offset) = text[index..].find('`') {
+        let open = index + offset;
+        let ticks = backtick_run(&text[open..]);
+        let content_start = open + ticks;
+        match closing_backtick_run(&text[content_start..], ticks) {
+            Some(close) => {
+                let end = content_start + close + ticks;
+                escaped.push_str(&escape_chars(&text[plain_start..open], format));
+                escaped.push_str(&text[open..end]);
+                plain_start = end;
+                index = end;
+            }
+            None => index = content_start,
+        }
+    }
+    escaped.push_str(&escape_chars(&text[plain_start..], format));
+    escaped
+}
+
+fn backtick_run(text: &str) -> usize {
+    text.bytes().take_while(|&b| b == b'`').count()
+}
+
+/// Byte offset in `text` of the first backtick run exactly `ticks` long.
+fn closing_backtick_run(text: &str, ticks: usize) -> Option<usize> {
+    let mut index = 0;
+    while let Some(offset) = text[index..].find('`') {
+        let at = index + offset;
+        let run = backtick_run(&text[at..]);
+        if run == ticks {
+            return Some(at);
+        }
+        index = at + run;
+    }
+    None
+}
+
+fn escape_chars(text: &str, format: Format) -> String {
     let mut escaped = String::with_capacity(text.len());
     for character in text.chars() {
-        let markup = matches!(character, '\\' | '*' | '_' | '[' | ']' | '<' | '>')
-            || (character == '`' && format == Format::Markdown);
+        // Markdown alone also reads `~` (strikethrough) and `&` (an entity
+        // or character reference such as `&copy;`) as markup.
+        let markup = matches!(character, '\\' | '*' | '_' | '[' | ']' | '<' | '>' | '`')
+            || (matches!(character, '~' | '&') && format == Format::Markdown);
         if markup {
             escaped.push('\\');
         }
@@ -377,9 +427,11 @@ fn escape(text: &str, format: Format) -> String {
     escaped
 }
 
-/// Percent-encode characters that would end a `[text](url)` target early.
+/// Percent-encode characters that would end a `[text](url)` target early or,
+/// for `&`, be decoded as an entity reference.
 fn link_target(url: &str) -> String {
-    url.replace('(', "%28")
+    url.replace('&', "%26")
+        .replace('(', "%28")
         .replace(')', "%29")
         .replace(' ', "%20")
         .replace('<', "%3C")
@@ -779,6 +831,29 @@ mod tests {
                 ..conventional()
             }])
             .with_repo_root(repo_root())
+        }
+
+        #[test]
+        fn prose_leaves_code_span_contents_literal() {
+            assert_eq!(
+                escape(r"set `my_var[0]{x}\n` then a_b", Format::Prose),
+                r"set `my_var[0]{x}\n` then a\_b"
+            );
+            assert_eq!(escape("``a`_b`` c_d", Format::Prose), r"``a`_b`` c\_d");
+            // An unmatched backtick is text, so what follows it is escaped.
+            assert_eq!(escape("odd ` a_b", Format::Prose), r"odd \` a\_b");
+            // Markdown escapes the backticks, so it opens no span.
+            assert_eq!(escape("`a_b`", Format::Markdown), r"\`a\_b\`");
+        }
+
+        #[test]
+        fn markdown_keeps_strikethrough_and_entity_spellings_literal() {
+            assert_eq!(
+                escape("~~gone~~ &copy; AT&T", Format::Markdown),
+                r"\~\~gone\~\~ \&copy; AT\&T"
+            );
+            assert_eq!(escape("~ &", Format::Prose), "~ &");
+            assert_eq!(link_target("file:///a&copy;b"), "file:///a%26copy;b");
         }
 
         #[test]

@@ -2,7 +2,7 @@
 
 A heading with optional content below it, rendered in Markdown style. The heading level (h1-h6) controls the prefix (`#`, `##`, etc.) and visual styling: h1-h3 are bold, h4-h5 are italic, h6 is plain text.
 
-Content items can be strings, `Prose`, or any `Renderable` type.
+Content items can be strings, `Prose`, or any `Renderable` type. A string is one literal paragraph; a [`Prose`](./prose.md) contributes each of its paragraphs and fenced code blocks as its own block.
 
 ## Programmatic Use
 
@@ -22,6 +22,7 @@ let output = section.display(&term);
 // ## Getting Started
 //
 // Welcome to the tutorial.
+//
 // Let's begin with installation.
 
 // Different heading levels
@@ -53,4 +54,14 @@ assert_eq!(HeadingLevel::h2.level(), 2);
 
 ## CLI
 
-Not directly exposed as a standalone CLI command. Sections are used programmatically and rendered by `darkmatter` when processing Markdown headings.
+Exposed via `bt section`. Each `--content` item is a `Prose`, so it takes the Prose markup and renders as its own paragraph:
+
+```bash
+bt section "Deployment Guide" --level 2 -c "Follow these steps to deploy." -c "Run \`md hash\` first." --html
+```
+
+```html
+<section><h2>Deployment Guide</h2><p>Follow these steps to deploy.</p><p>Run <code>md hash</code> first.</p></section>
+```
+
+`--md` and `--md-plus` render Markdown instead, and `bt section --example` shows a sample.

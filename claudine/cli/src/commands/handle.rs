@@ -168,7 +168,7 @@ async fn run_inner(args: HandleArgs) -> Result<i32> {
             event = %event_label,
         );
         let _enter = span.enter();
-        claudine::dispatch::dispatch_canonical(&raw, provider, &env).await?
+        claudine::dispatch::dispatch_canonical(&raw, provider, &env, crate::request::snapshot()).await?
     };
 
     if let Some(contribution) = canonical_event.and_then(status_contribution_for) {

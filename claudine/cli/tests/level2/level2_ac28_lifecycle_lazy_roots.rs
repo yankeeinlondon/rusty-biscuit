@@ -61,6 +61,7 @@
 #![cfg(unix)]
 
 use crate::common;
+use common::prompt_staging::stage_shipped_prompts;
 use common::wrap::seed_minimal_config;
 use common::{augmented_path, helper_command, write_executable};
 
@@ -537,15 +538,9 @@ fn level2_ac28_shipped_prompt_that_references_a_lazy_root_composes() {
     let fixture = stage();
     fs::create_dir_all(fixture.repo.join("features/f1")).unwrap();
     fs::write(fixture.repo.join("features/f1/spec.md"), "# fixture spec\n").unwrap();
-    // `plan.md` transcludes `./_input-robustness.md`, so it must sit beside
-    // both documents written below.
-    write_document(
-        &fixture,
-        "_input-robustness.md",
-        &fs::read_to_string(workspace_root().join("prompts/_input-robustness.md"))
-            .expect("the shipped input-robustness prompt must be readable"),
-    );
-    let real = write_document(&fixture, "plan.md", &shipped);
+    // What `plan.md` transcludes must sit beside both documents composed below.
+    stage_shipped_prompts(&workspace_root(), &fixture.repo, &["prompts/plan.md"]);
+    let real = "plan.md".to_string();
     let control = write_document(
         &fixture,
         "plan-control.md",

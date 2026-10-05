@@ -30,6 +30,8 @@ sniff = { path = "../../sniff/lib" }
 # dependency tree transitively via darkmatter and does not depend on the
 # `claudine` lib/CLI, so the bootstrap boundary is preserved.
 biscuit-terminal = { path = "../../biscuit-terminal/lib" }
+# `renderable::markdown::code_span` fences dynamic values in report code spans.
+renderable = { path = "../../renderable" }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -81,6 +83,9 @@ required-features = ["terminal-tests"]
 # — tmux-driven report rendering), so the tier must be declared here or those
 # tests run in NO tier anywhere (AC12).
 [package.metadata.ci.tests]
+# The context construction guard includes darkmatter-cli's shared engine by
+# `#[path]` and spells both files in its test.
+source-inputs = ["darkmatter/cli/tests/common/context_guard.rs", "darkmatter/cli/tests/common/source_scan.rs"]
 tiers = ["L1", "L2"]
 l2-backends = ["tmux"]
 # The L2 tier spawns one shared terminal pane through the harness broker.

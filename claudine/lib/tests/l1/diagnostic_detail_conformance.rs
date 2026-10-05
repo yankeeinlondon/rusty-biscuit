@@ -140,6 +140,7 @@ fn composition_representatives() -> Vec<CompositionError> {
             source_path: PathBuf::from("p.md"),
             message: "validation failed".to_string(),
             problems: vec!["/spec".to_string()],
+            failures: Vec::new(),
         },
         // composition.missing_properties
         CompositionError::MissingProperties {

@@ -20,7 +20,7 @@ fn validate_candidate(semantic_type: &str, candidate_yaml: &str) -> ValidationRe
     let source = format!(
         "---\n$schema:\n  candidate: {semantic_type}(required)\n{candidate_yaml}---\nBody\n"
     );
-    DarkmatterSchemas::new()
+    DarkmatterSchemas::new(crate::request_support::cwd_context())
         .validate(&Markdown::from(source.as_str()))
         .expect("the semantic schema must compile and validation must run")
 }
@@ -131,7 +131,7 @@ fn semantic_arrays_disambiguate_unions_and_survive_two_disk_round_trips() {
         "---\nBody\n",
     );
     let original = Markdown::from(source);
-    let report = DarkmatterSchemas::new().validate(&original).expect("validation must run");
+    let report = DarkmatterSchemas::new(crate::request_support::cwd_context()).validate(&original).expect("validation must run");
     assert!(report.valid, "array/union matrix must validate: {:?}", report.problems);
 
     let expected = original.frontmatter().as_map().clone();
@@ -276,11 +276,12 @@ fn shipped_base_schema_retypes_schema_and_preserves_resolution_acceptance() {
             &declaration,
             dir.path(),
             &[],
+            &biscuit_file::FileResolutionContext::new(dir.path()),
         )
         .expect("existing declaration shape must still resolve");
     }
 
-    let api = DarkmatterSchemas::new()
+    let api = DarkmatterSchemas::new(crate::request_support::cwd_context())
         .with_darkmatter_baseline_json_schema()
         .expect("shipped base schema");
     let seed = Markdown::from("---\ntitle: Seed\n---\nBody\n");
@@ -296,6 +297,7 @@ fn shipped_base_schema_retypes_schema_and_preserves_resolution_acceptance() {
             &json!(true),
             dir.path(),
             &[],
+            &biscuit_file::FileResolutionContext::new(dir.path()),
         )
         .is_err(),
         "full preparation must continue rejecting the same malformed declaration",

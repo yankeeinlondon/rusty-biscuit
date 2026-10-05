@@ -20,9 +20,9 @@ fn with_ctx<R>(text: &str, f: impl FnOnce(&DocumentContext) -> R) -> R {
     let config = DmlsConfig::default();
     let roots = [PathBuf::from("/w")];
     let state = OverlayState::default();
-    let overlay = state.for_document(&uri, text, path, &config, &roots);
+    let overlay = state.for_document(&uri, text, path, &config, &roots, &crate::context::test_support::resolution_for(path));
     let source_map = SourceMap::new(uri.clone(), 1, PositionEncoding::Utf16, Arc::from(text));
-    let graph = WorkspaceGraph::build(&BTreeMap::new(), 1);
+    let graph = WorkspaceGraph::build(&BTreeMap::new(), 1, &crate::context::test_support::workspace_contexts());
     let profile =
         ClientProfile::from_initialize(&InitializeParams::default(), PositionEncoding::Utf16);
     let ctx = DocumentContext {
@@ -35,6 +35,7 @@ fn with_ctx<R>(text: &str, f: impl FnOnce(&DocumentContext) -> R) -> R {
         config: &config,
         profile: &profile,
         overlay: overlay.as_ref(),
+        resolution: &crate::context::test_support::resolution_for(path),
     };
     f(&ctx)
 }

@@ -185,7 +185,7 @@ fn classify(
 ) -> (Outcome, String) {
     let dir = tempfile::TempDir::new().unwrap();
     let state = empty_state(kind);
-    let ctx = ResolutionContext::new(dir.path().to_path_buf());
+    let ctx = ResolutionContext::at(dir.path().to_path_buf());
     let lookup = ResolvingLookup::new(&state, ctx);
     let evaluator = Evaluator::new(&lookup);
 
@@ -320,7 +320,7 @@ fn document_body_is_strict_whatever_fail_fast_says() {
             ))
             .with_source_file(path.clone())
             .with_fail_fast(fail_fast);
-            let error = match markdown.compose_with(options) {
+            let error = match markdown.compose_with(&crate::markdown::compose::test_request(options)) {
                 Ok((composed, report)) => panic!(
                     "fatality drift: kind={} fail_fast={} composed {:?} with warnings {:?}",
                     case.kind,

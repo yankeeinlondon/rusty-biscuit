@@ -1016,6 +1016,10 @@ fn fixture_sidecars(dir: &Path) -> PathBuf {
 struct Produced {
     out: PathBuf,
     target: PathBuf,
+    /// The checkout a consumer verifies against.
+    workspace: PathBuf,
+    /// The checkout the producer compiled; the manifest records its path.
+    producer_workspace: PathBuf,
     manifest_path: PathBuf,
     manifest: Manifest,
     plan: PathBuf,
@@ -1055,15 +1059,99 @@ fn produce_fixture(dir: &Path) -> Produced {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let manifest_path = out.join("build-archive-portability-local-host-0f1e2d3c4b5a6978.manifest.json");
+    let manifest_path = out.join(FIXTURE_MANIFEST);
     let manifest = read_manifest(&manifest_path).expect("the producer's own manifest must parse");
     Produced {
         out,
         target,
+        workspace: dir.join("workspace"),
+        producer_workspace: dir.join("workspace"),
         manifest_path,
         manifest,
         plan,
         triple,
+    }
+}
+
+const FIXTURE_MANIFEST: &str = "build-archive-portability-local-host-0f1e2d3c4b5a6978.manifest.json";
+
+/// The fixture as one shared build produced it, with private copies of its
+/// `out` directory and checkout in `dir`, for a test that reads or tampers
+/// with the archive and manifest but needs no build of its own. Its target
+/// directory is the shared build's: read it, never change it. A test that
+/// hides or edits it calls [`produce_fixture`].
+///
+/// The consumer checkout is a copy, with its Git history so its tree matches
+/// the manifest. A test that runs the shipped `verify --workspace` builds its
+/// own fixture: against the shared build it wrote no verdict on
+/// ubuntu-latest's archive run, though it passed on every other host.
+///
+/// Every test is its own process, so the build is shared through the target
+/// directory: the first test to take the lock builds it, keyed by the shipped
+/// binary and the fixture's sources, and later runs reuse it until either
+/// changes.
+fn shared_fixture(dir: &Path) -> Produced {
+    let shared = shared_build();
+    let out = dir.join("out");
+    copy_tree(&shared.join("out"), &out);
+    let manifest_path = out.join(FIXTURE_MANIFEST);
+    let manifest = read_manifest(&manifest_path).expect("the shared manifest must parse");
+    let workspace = dir.join("workspace");
+    copy_tree(&shared.join("workspace"), &workspace);
+    Produced {
+        out,
+        target: shared.join("target"),
+        workspace,
+        producer_workspace: shared.join("workspace"),
+        manifest_path,
+        manifest,
+        plan: shared.join("plan.json"),
+        triple: host_triple(),
+    }
+}
+
+fn shared_build() -> PathBuf {
+    let binary = crate::tests::shipped_wrapper();
+    let mut identity = fs::read(&binary).expect("reading the shipped binary");
+    fixture_source_bytes(&fixture_workspace(), &mut identity);
+    let key = format!("{:016x}", biscuit_hash::xx_hash_bytes(&identity));
+    let parent = binary.parent().expect("the binary has a directory").join("ci-build-archive-fixture");
+    fs::create_dir_all(&parent).expect("creating the shared fixture directory");
+    let root = parent.join(&key);
+    let lock = fs::File::create(parent.join(format!("{key}.lock"))).expect("creating the fixture lock");
+    lock.lock().expect("locking the shared fixture");
+    if !root.join("ready").exists() {
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).expect("creating the fixture build directory");
+        produce_fixture(&root);
+        fs::write(root.join("ready"), "").expect("marking the fixture built");
+        // Builds for an older binary or fixture are never read again.
+        for entry in fs::read_dir(&parent).expect("listing shared fixtures").flatten() {
+            let name = entry.file_name();
+            if !name.to_string_lossy().starts_with(&key) {
+                let _ = fs::remove_dir_all(entry.path());
+                let _ = fs::remove_file(entry.path());
+            }
+        }
+    }
+    root
+}
+
+/// Appends every fixture file's path and bytes, in a stable order.
+fn fixture_source_bytes(dir: &Path, bytes: &mut Vec<u8>) {
+    let mut entries: Vec<_> = fs::read_dir(dir).expect("reading the fixture").flatten().collect();
+    entries.sort_by_key(fs::DirEntry::file_name);
+    for entry in entries {
+        let path = entry.path();
+        if entry.file_name() == "target" {
+            continue;
+        }
+        bytes.extend_from_slice(path.to_string_lossy().as_bytes());
+        if path.is_dir() {
+            fixture_source_bytes(&path, bytes);
+        } else {
+            bytes.extend(fs::read(&path).expect("reading a fixture file"));
+        }
     }
 }
 
@@ -1082,20 +1170,25 @@ fn verify_fixture(produced: &Produced, extra: &[&str]) -> (bool, Value) {
         .args(extra)
         .output()
         .expect("running ci-build verify");
-    let verdict: Value =
-        serde_json::from_slice(&output.stdout).expect("the verdict is a JSON document");
+    let verdict: Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|err| {
+        panic!(
+            "the verdict is a JSON document ({err}); {}; stderr:\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        )
+    });
     (output.status.success(), verdict)
 }
 
 #[test]
 fn the_fixture_archive_carries_every_declared_payload_class() {
     let dir = Scratch::new("produce");
-    let produced = produce_fixture(dir.path());
+    let produced = shared_fixture(dir.path());
     let manifest = &produced.manifest;
 
     assert_eq!(manifest.key, "0f1e2d3c4b5a6978");
     assert_eq!(manifest.digest, realized_digest(manifest));
-    assert_eq!(manifest.source_tree, fixture_git(&dir.path().join("workspace"), &["rev-parse", "HEAD^{tree}"]));
+    assert_eq!(manifest.source_tree, fixture_git(&produced.workspace, &["rev-parse", "HEAD^{tree}"]));
     assert_eq!(manifest.realized.target, produced.triple);
     assert!(manifest.archive.bytes > 0);
     assert_eq!(manifest.archive.blake3.len(), 64);
@@ -1181,7 +1274,7 @@ fn a_produced_fixture_verifies_including_its_own_archive_inventory() {
         &produced,
         &[
             "--workspace",
-            &dir.path().join("workspace").to_string_lossy(),
+            &produced.workspace.to_string_lossy(),
         ],
     );
     assert!(accepted, "{verdict:#}");
@@ -1203,7 +1296,7 @@ fn a_consumer_reports_its_extraction_apart_from_its_identity_checks() {
         &produced,
         &[
             "--workspace",
-            &dir.path().join("workspace").to_string_lossy(),
+            &produced.workspace.to_string_lossy(),
             "--verdict-out",
             &out.to_string_lossy(),
         ],
@@ -1236,7 +1329,7 @@ fn a_refused_consumer_still_reports_what_its_transfer_cost() {
     // A cell that never started is exactly the one whose stage costs a reader
     // wants: the verdict document is written for a refusal too.
     let dir = Scratch::new("verify-timings-refused");
-    let produced = produce_fixture(dir.path());
+    let produced = shared_fixture(dir.path());
     fs::remove_file(produced.out.join(&produced.manifest.archive.file)).expect("removing");
     let out = dir.path().join("verdict.json");
     let (accepted, verdict) =
@@ -1252,7 +1345,7 @@ fn a_refused_consumer_still_reports_what_its_transfer_cost() {
 #[test]
 fn a_tampered_fixture_archive_is_refused_with_a_stable_code_and_exit_status() {
     let dir = Scratch::new("tamper-e2e");
-    let produced = produce_fixture(dir.path());
+    let produced = shared_fixture(dir.path());
     let archive = produced.out.join(&produced.manifest.archive.file);
     let mut body = fs::read(&archive).expect("reading the archive");
     // One byte, deep inside the compressed stream: the length is unchanged, so
@@ -1275,7 +1368,7 @@ fn a_tampered_fixture_archive_is_refused_with_a_stable_code_and_exit_status() {
 #[test]
 fn a_missing_sidecar_is_refused_end_to_end() {
     let dir = Scratch::new("sidecar-e2e");
-    let produced = produce_fixture(dir.path());
+    let produced = shared_fixture(dir.path());
     fs::remove_file(produced.out.join(&produced.manifest.sidecars[0].record.file))
         .expect("removing the sidecar");
     let (accepted, verdict) = verify_fixture(&produced, &[]);
@@ -1286,7 +1379,7 @@ fn a_missing_sidecar_is_refused_end_to_end() {
 #[test]
 fn an_archive_offered_to_the_wrong_environment_is_refused_end_to_end() {
     let dir = Scratch::new("environment-e2e");
-    let produced = produce_fixture(dir.path());
+    let produced = shared_fixture(dir.path());
     let binary = crate::tests::shipped_wrapper();
     let output = Command::new(&binary)
         .arg("verify")
@@ -1527,7 +1620,7 @@ fn an_archive_missing_a_declared_binary_is_refused_before_any_test_starts() {
 
     let (accepted, verdict) = verify_fixture(
         &produced,
-        &["--workspace", &dir.path().join("workspace").to_string_lossy()],
+        &["--workspace", &produced.workspace.to_string_lossy()],
     );
     assert!(!accepted, "{verdict:#}");
     assert_eq!(verdict["inventory_checked"], true);
@@ -1564,7 +1657,7 @@ fn an_archive_of_more_programs_than_the_plan_resolved_is_refused() {
 
     let (accepted, verdict) = verify_fixture(
         &produced,
-        &["--workspace", &dir.path().join("workspace").to_string_lossy()],
+        &["--workspace", &produced.workspace.to_string_lossy()],
     );
     assert!(!accepted, "{verdict:#}");
     assert_eq!(
@@ -1734,13 +1827,23 @@ fn produce_with(dir: &Path, plan: &Path, extra: &[&str]) -> std::process::Output
         .expect("running ci-build produce")
 }
 
-/// A leg that fails must not take an unrelated key down with it, and must
-/// leave an account of itself where the rollup reads one.
+/// A leg that fails, at compile or at preflight, must not take an unrelated
+/// key down with it, and must leave an account of itself where the rollup
+/// reads one. One invocation carries both failures beside the healthy record,
+/// so the fixture is compiled once.
 #[test]
-fn a_failed_key_still_reports_itself_and_lets_an_unrelated_key_finish() {
+fn failed_and_refused_keys_report_themselves_and_let_an_unrelated_key_finish() {
     let dir = Scratch::new("partial-owner");
     let triple = host_triple();
     let plan = plan_with_a_failing_record(dir.path(), &triple);
+    let mut document: Value =
+        serde_json::from_str(&fs::read_to_string(&plan).expect("reading the plan")).expect("the plan is JSON");
+    let mut refused = document["builds"][1].clone();
+    refused["key"] = json!("beef0000beef0000");
+    refused["artifact"] = json!("build-no-such-package-local-host-beef0000beef0000");
+    refused["identity"]["host"] = json!("s390x-unknown-linux-gnu");
+    document["builds"].as_array_mut().expect("the plan carries a builds list").push(refused);
+    fs::write(&plan, serde_json::to_string_pretty(&document).unwrap()).expect("writing the plan");
 
     let output = produce_with(dir.path(), &plan, &[]);
     assert!(
@@ -1792,28 +1895,34 @@ fn a_failed_key_still_reports_itself_and_lets_an_unrelated_key_finish() {
         "a failed key must say why: {bad}"
     );
     assert!(bad["digest"].is_null(), "a failed key realized no digest: {bad}");
+
+    let refused: Value = serde_json::from_str(
+        &fs::read_to_string(out.join("build-no-such-package-local-host-beef0000beef0000.status.json"))
+            .expect("the refused key must leave a status"),
+    )
+    .expect("the status is JSON");
+    assert_eq!(refused["stage"], "preflight");
+    assert!(refused["digest"].is_null(), "a refused key realized no digest: {refused}");
 }
 
 /// The owner matrix expands one leg per record, so a leg produces exactly the
-/// record it is named for.
+/// record it is named for. The leg named is the one that fails without
+/// compiling, so the test proves the sibling is untouched without building it.
 #[test]
 fn a_key_narrowed_leg_produces_only_its_own_record() {
     let dir = Scratch::new("one-key");
     let triple = host_triple();
     let plan = plan_with_a_failing_record(dir.path(), &triple);
 
-    let output = produce_with(dir.path(), &plan, &["--key", "0f1e2d3c4b5a6978"]);
-    assert!(
-        output.status.success(),
-        "the healthy key alone must succeed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    let output = produce_with(dir.path(), &plan, &["--key", "dead0000dead0000"]);
+    assert!(!output.status.success(), "the named key fails on its own");
     let out = dir.path().join("out");
     assert!(
-        out.join("build-archive-portability-local-host-0f1e2d3c4b5a6978.manifest.json").is_file()
+        out.join("build-no-such-package-local-host-dead0000dead0000.status.json").is_file(),
+        "the named key leaves its status"
     );
     assert!(
-        !out.join("build-no-such-package-local-host-dead0000dead0000.status.json").exists(),
+        !out.join("build-archive-portability-local-host-0f1e2d3c4b5a6978.status.json").exists(),
         "a narrowed leg must not touch a sibling key"
     );
 }
@@ -1905,42 +2014,6 @@ fn a_record_planned_for_a_target_this_toolchain_cannot_build_is_refused() {
     );
 }
 
-/// A preflight refusal is attributable to its own key, exactly as a compile
-/// failure is: the owner matrix runs one leg per record, and `fail-fast: false`
-/// only means something if a sibling key can still finish.
-#[test]
-fn a_preflight_refusal_leaves_an_unrelated_key_free_to_finish() {
-    let dir = Scratch::new("preflight-sibling");
-    let triple = host_triple();
-    let path = plan_with_a_failing_record(dir.path(), &triple);
-    let mut plan: Value =
-        serde_json::from_str(&fs::read_to_string(&path).expect("reading the plan"))
-            .expect("the plan is JSON");
-    // The record that would otherwise fail at compile now fails at preflight,
-    // leaving the healthy fixture record as the only one that may proceed.
-    plan["builds"][1]["identity"]["host"] = json!("s390x-unknown-linux-gnu");
-    fs::write(&path, serde_json::to_string_pretty(&plan).unwrap()).expect("writing the plan");
-
-    let output = produce_with(dir.path(), &path, &[]);
-    assert!(!output.status.success());
-
-    let healthy = fixture_status(dir.path());
-    assert_eq!(healthy["result"], "success");
-    assert_eq!(healthy["stage"], "produce");
-
-    let refused: Value = serde_json::from_str(
-        &fs::read_to_string(
-            dir.path()
-                .join("out")
-                .join("build-no-such-package-local-host-dead0000dead0000.status.json"),
-        )
-        .expect("the refused key must leave a status"),
-    )
-    .expect("the status is JSON");
-    assert_eq!(refused["stage"], "preflight");
-    assert!(refused["digest"].is_null());
-}
-
 /// A key the plan does not own is a disagreement between the owner matrix and
 /// the plan, and the producer refuses rather than silently building nothing.
 #[test]
@@ -1964,8 +2037,8 @@ fn a_key_this_producer_does_not_own_is_refused() {
 #[test]
 fn the_manifest_records_the_workspace_the_producer_compiled_at() {
     let dir = Scratch::new("producer-workspace");
-    let produced = produce_fixture(dir.path());
-    let expected = canonical_path(&dir.path().join("workspace"))
+    let produced = shared_fixture(dir.path());
+    let expected = canonical_path(&produced.producer_workspace)
         .expect("the fixture workspace resolves")
         .to_string_lossy()
         .replace(std::path::MAIN_SEPARATOR, "/");
@@ -2704,12 +2777,12 @@ fn produce_accepts_the_planned_head_and_refuses_the_merge_revision() {
 #[test]
 fn consumer_refuses_a_different_source_tree_even_with_a_recomputed_manifest_digest() {
     let dir = Scratch::new("consumer-source");
-    let produced = produce_fixture(dir.path());
+    let produced = shared_fixture(dir.path());
     let mut manifest = produced.manifest.clone();
     manifest.source_tree = "forged-tree".into();
     manifest.digest = realized_digest(&manifest);
     let mut opts = options(&produced.out, "local-host");
-    opts.workspace = Some(dir.path().join("workspace"));
+    opts.workspace = Some(produced.workspace.clone());
     let rejections = verify(&manifest, &opts, Some(&read_plan(&produced.plan).unwrap()), host_runtime());
     assert!(codes(&rejections).contains(&"build-source-mismatch"));
 }

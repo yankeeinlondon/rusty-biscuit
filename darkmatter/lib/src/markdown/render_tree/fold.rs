@@ -311,11 +311,20 @@ impl Fold<'_> {
     /// A nested block-extension pass recognizes nested disclosures in the body.
     /// When the folded result contains only inline nodes they are wrapped in a
     /// paragraph so the disclosed body is always structurally block-level.
+    /// As for the summary, leading and trailing soft breaks of such a body
+    /// are the line endings around the directive lines, not content, and
+    /// are trimmed.
     fn lower_body_events(
         &mut self,
         events: Vec<(Event<'_>, Range<usize>)>,
     ) -> Result<Vec<RenderNode>, MarkdownError> {
-        let children = self.run_sub_fold(events)?;
+        let mut children = self.run_sub_fold(events)?;
+        if children.iter().all(|n| is_inline_kind(&n.kind)) {
+            let is_soft = |n: &RenderNode| matches!(n.kind, NodeKind::SoftBreak);
+            let start = children.iter().take_while(|n| is_soft(n)).count();
+            let end = children.len() - children.iter().rev().take_while(|n| is_soft(n)).count();
+            children = children.drain(start..end.max(start)).collect();
+        }
         if children.is_empty() {
             return Ok(children);
         }

@@ -30,3 +30,14 @@ fn prelude_exports_browser_renderable_trait() {
     let svg = takes_browser_renderable(&rule);
     assert!(svg.contains("<svg"), "expected SVG output: {svg}");
 }
+
+#[test]
+fn prelude_exports_prose_components() {
+    // Both prose components and their option enums come from the prelude.
+    let block = Prose::new("a\nb")
+        .with_line_breaks(LineBreaks::Hard)
+        .with_tag(ProseTag::Div);
+    assert_eq!(block.render_html_fragment().render(), "<div>a<br>b</div>");
+    let inline = InlineProse::new("`x`");
+    assert_eq!(inline.render_html_fragment().render(), "<code>x</code>");
+}

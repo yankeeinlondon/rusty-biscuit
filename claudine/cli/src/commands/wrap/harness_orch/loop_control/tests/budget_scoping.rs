@@ -105,7 +105,6 @@ fn a_proxy_target_earns_its_own_retry_budget_rather_than_inheriting_the_sources(
     coord
         .adopt(
             request_for(&fx.source_path, &target, vec![fx.source_path.clone()]),
-            Some(fx._dir.path()),
             &mut state,
             &mut guard,
             &mut active,
@@ -187,7 +186,6 @@ fn a_proxy_target_earns_its_own_resume_budget_rather_than_inheriting_the_sources
     coord
         .adopt(
             request_for(&fx.source_path, &target, vec![fx.source_path.clone()]),
-            Some(fx._dir.path()),
             &mut state,
             &mut guard,
             &mut active,
@@ -251,7 +249,6 @@ fn adoption_resets_budgets_while_the_invocation_wide_chain_keeps_growing() {
     coord
         .adopt(
             request_for(&fx.source_path, &target, vec![fx.source_path.clone()]),
-            Some(fx._dir.path()),
             &mut state,
             &mut guard,
             &mut active,
@@ -295,7 +292,6 @@ fn a_refused_hop_leaves_the_budgets_the_source_earned_intact() {
     coord
         .adopt(
             request_for(&fx.source_path, &missing, vec![fx.source_path.clone()]),
-            Some(fx._dir.path()),
             &mut state,
             &mut guard,
             &mut active,

@@ -230,6 +230,167 @@ fn long_verbatim_descendant_stays_inside_a_short_legacy_root() {
     );
 }
 
+/// `Path::join("docs/file.md")` keeps the literal `/`, so a candidate built on
+/// a Windows root carries mixed separators; under ordinary Windows grammar
+/// both separators split names.
+#[test]
+fn mixed_separators_on_an_ordinary_path_share_one_identity() {
+    assert_eq!(win(r"C:\repo\docs/file.md"), win(r"C:\repo\docs\file.md"));
+    assert!(win(r"C:\repo\docs/file.md").starts_with(&win(r"C:\repo\docs")));
+}
+
+#[test]
+fn other_drives_and_drive_relative_spellings_are_distinct_identities() {
+    assert_ne!(win(r"C:\repo"), win(r"D:\repo"));
+    assert_ne!(win(r"C:repo"), win(r"C:\repo"));
+    assert_ne!(win(r"\\?\C:\repo"), win(r"\\?\D:\repo"));
+}
+
+#[test]
+fn a_verbatim_share_is_distinct_from_another_server_or_share() {
+    let verbatim = win(r"\\?\UNC\server\share\x");
+    assert_ne!(verbatim, win(r"\\other\share\x"));
+    assert_ne!(verbatim, win(r"\\server\other\x"));
+    assert!(!verbatim.starts_with(&win(r"\\server\other")));
+}
+
+/// Containment is by whole names in every spelling of the boundary.
+#[test]
+fn a_sibling_with_the_boundary_as_text_prefix_is_outside() {
+    let boundary = win(r"C:\repo");
+    for document in [r"C:\repo-old\x.md", r"\\?\C:\repo-old\x.md", r"c:/repo-old/x.md"] {
+        assert!(!win(document).starts_with(&boundary), "{document}");
+        assert_eq!(win(document).strip_prefix(&boundary), None, "{document}");
+    }
+    assert!(win(r"\\?\C:\repo\x.md").starts_with(&boundary));
+}
+
+/// Text alone cannot show that `RUNNER~1` names `runneradmin`; only the
+/// filesystem can, so the identity keeps them apart in every spelling.
+#[test]
+fn short_and_long_names_are_not_lexically_unified() {
+    let short = win(r"C:\Users\RUNNER~1\AppData\Local\Temp");
+    let long = win(r"C:\Users\runneradmin\AppData\Local\Temp");
+    assert_ne!(short, long);
+    assert!(!short.starts_with(&win(r"C:\Users\runneradmin")));
+    assert_ne!(win(r"\\?\C:\Users\RUNNER~1"), win(r"C:\Users\runneradmin"));
+    assert_eq!(route(&short, &win(r"C:\Users\runneradmin")).map(|(hops, _)| hops), Some(1));
+}
+
+// ---- first-seen ordering (production dedupe) ----------------------------
+
+/// Run `first_seen_by_identity` over tagged Windows spellings and report
+/// each survivor's tag and its spelling, unchanged.
+fn first_seen<'a>(entries: &[(&'a str, &'a str)]) -> Vec<(&'a str, &'a str)> {
+    first_seen_by_identity(entries.iter().copied(), |(_, text)| win(text))
+}
+
+fn reversed<'a>(entries: &[(&'a str, &'a str)]) -> Vec<(&'a str, &'a str)> {
+    entries.iter().rev().copied().collect()
+}
+
+/// The PR #66 shape: a repository root reached through `canonicalize`
+/// (verbatim) and a source directory from `gix` (legacy) name one directory.
+/// Whichever comes first survives, with its own tag and spelling.
+#[test]
+fn verbatim_and_legacy_duplicates_keep_the_first_occurrence_in_either_order() {
+    let entries = [("source", r"C:\repo\x.md"), ("repository", r"\\?\C:\repo\x.md")];
+    assert_eq!(first_seen(&entries), [("source", r"C:\repo\x.md")]);
+    assert_eq!(
+        first_seen(&reversed(&entries)),
+        [("repository", r"\\?\C:\repo\x.md")]
+    );
+}
+
+#[test]
+fn unc_verbatim_and_legacy_duplicates_keep_the_first_occurrence() {
+    let entries = [
+        ("legacy", r"\\server\share\repo\x.md"),
+        ("verbatim", r"\\?\UNC\server\share\repo\x.md"),
+        ("slashes", "//server/share/repo/x.md"),
+        ("other-share", r"\\server\other\repo\x.md"),
+    ];
+    assert_eq!(
+        first_seen(&entries),
+        [("legacy", r"\\server\share\repo\x.md"), ("other-share", r"\\server\other\repo\x.md")]
+    );
+    assert_eq!(
+        first_seen(&reversed(&entries)),
+        [("other-share", r"\\server\other\repo\x.md"), ("slashes", "//server/share/repo/x.md")]
+    );
+}
+
+/// Drive case and separators fold; name case, other drives, and
+/// drive-relative spellings do not. The count is the same in both orders;
+/// only which tag represents each identity changes.
+#[test]
+fn ordering_folds_only_the_windows_equalities() {
+    let entries = [
+        ("upper-name", r"C:\Repo\x.md"),
+        ("lower-name", r"C:\repo\x.md"),
+        ("lower-drive", r"c:\repo\x.md"),
+        ("mixed", r"C:\repo/x.md"),
+        ("verbatim-upper-name", r"\\?\C:\Repo\x.md"),
+        ("other-drive", r"D:\repo\x.md"),
+        ("drive-relative", r"C:repo\x.md"),
+    ];
+    let tags = |survivors: Vec<(&str, &str)>| -> Vec<String> {
+        survivors.into_iter().map(|(tag, _)| tag.to_string()).collect()
+    };
+    assert_eq!(
+        tags(first_seen(&entries)),
+        ["upper-name", "lower-name", "other-drive", "drive-relative"]
+    );
+    assert_eq!(
+        tags(first_seen(&reversed(&entries))),
+        ["drive-relative", "other-drive", "verbatim-upper-name", "mixed"]
+    );
+}
+
+/// A verbatim path too long for a legacy spelling still names the same file
+/// as its legacy form, so the two collapse even though the verbatim spelling
+/// cannot be reduced.
+#[test]
+fn a_long_verbatim_duplicate_collapses_onto_its_legacy_spelling() {
+    let long = "a".repeat(300);
+    let legacy = format!(r"C:\repo\{long}\x.md");
+    let verbatim = format!(r"\\?\C:\repo\{long}\x.md");
+    let entries = [("verbatim", verbatim.as_str()), ("legacy", legacy.as_str())];
+    assert_eq!(first_seen(&entries), [("verbatim", verbatim.as_str())]);
+    assert_eq!(first_seen(&reversed(&entries)), [("legacy", legacy.as_str())]);
+}
+
+/// Under `\\?\`, `..` is a directory name, so a verbatim path with a literal
+/// `..` is not a duplicate of the path ordinary normalization would give.
+#[test]
+fn verbatim_literal_dot_segments_are_not_duplicates_of_collapsed_paths() {
+    let entries = [("verbatim", r"\\?\C:\a\..\b\x.md"), ("legacy", r"C:\b\x.md")];
+    assert_eq!(first_seen(&entries), entries);
+    assert_eq!(first_seen(&reversed(&entries)), reversed(&entries));
+}
+
+#[test]
+fn short_and_long_spellings_are_both_kept() {
+    let entries = [("short", r"C:\Users\RUNNER~1\x.md"), ("long", r"C:\Users\runneradmin\x.md")];
+    assert_eq!(first_seen(&entries), entries);
+}
+
+#[cfg(unix)]
+#[test]
+fn ordering_keeps_distinct_non_unicode_names_on_unix() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    let entries = [
+        ("ff", Path::new(OsStr::from_bytes(b"/repo/bad\xFF.md"))),
+        ("fe", Path::new(OsStr::from_bytes(b"/repo/bad\xFE.md"))),
+        ("ff-again", Path::new(OsStr::from_bytes(b"/repo/./bad\xFF.md"))),
+    ];
+    let survivors = first_seen_by_identity(entries, |(_, path)| PathIdentity::new(path));
+    let tags: Vec<&str> = survivors.iter().map(|(tag, _)| *tag).collect();
+    assert_eq!(tags, ["ff", "fe"]);
+}
+
 // ---- verbatim literal dot segments --------------------------------------
 
 #[test]
@@ -389,4 +550,37 @@ fn host_identity_keeps_unpaired_surrogates_distinct_on_windows() {
     assert_ne!(first, second);
     assert!(!first.starts_with(&second));
     assert!(first.starts_with(&host(r"C:\repo")));
+}
+
+/// Text cannot show that a short name and its long name are one directory, so
+/// the identities differ while the filesystem resolves both to one target.
+/// Needs a Windows volume that generates 8.3 names; many disable generation,
+/// and then there is no alias to test, so the test reports that and returns.
+#[cfg(windows)]
+#[test]
+fn a_real_short_name_alias_is_one_directory_but_two_identities() {
+    use std::os::windows::process::CommandExt;
+
+    let temp = tempfile::TempDir::new().unwrap();
+    let long = temp.path().join("Long Directory Name");
+    std::fs::create_dir(&long).unwrap();
+    std::fs::write(long.join("x.md"), b"x").unwrap();
+    let output = std::process::Command::new("cmd")
+        .raw_arg(format!(r#"/C for %I in ("{}") do @echo %~sI"#, long.display()))
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "cmd failed: {output:?}");
+    let short = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+    if short == long {
+        eprintln!("8.3 name generation is disabled for {}; no alias to test", long.display());
+        return;
+    }
+
+    assert_ne!(PathIdentity::new(&short), PathIdentity::new(&long));
+    assert!(!PathIdentity::new(&short.join("x.md")).starts_with(&PathIdentity::new(&long)));
+    assert_eq!(std::fs::read(short.join("x.md")).unwrap(), b"x");
+    assert_eq!(
+        std::fs::canonicalize(&short).unwrap(),
+        std::fs::canonicalize(&long).unwrap()
+    );
 }

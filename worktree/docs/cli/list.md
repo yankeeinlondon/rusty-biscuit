@@ -2,7 +2,7 @@
 
 Lists all git worktrees along with their status. This is the default command -- running `wt` with no subcommand is equivalent to `wt list`.
 
-Before it lists anything, `wt list` checks whether `origin/<default>` is current (fetching it when it is not) and asks for the open pull requests, both in one short wait; see [Checking origin](#checking-origin). The output is then, in order: a caption, an optional credentials line (a warning, or the keyless notice), the worktree table, a legend, the git graph (image-capable terminals only), a status list holding this run's PR item and the refresh hint, the verbose section (`-v` only), and, after a blank line, any closing notes. Everything is written to stderr.
+Before it lists anything, `wt list` checks whether `origin/<default>` is current (fetching it when it is not) and asks for the open pull requests, both in one short wait; see [Checking origin](#checking-origin). The output is then, in order: a caption, the worktree table, a legend, the git graph (image-capable terminals only), a status list holding this run's PR item and the refresh hint, the verbose section (`-v` only), and, after a blank line, any closing notes. Everything is written to stderr.
 
 ## Output
 
@@ -24,7 +24,7 @@ Before it lists anything, `wt list` checks whether `origin/<default>` is current
 └───────────────────┴──────────────────────────────────┴──────────────────────┴───────────────────────────┘
 
  Worktree   ○ clean    ● uncommitted files    ● uncommitted source files
- Branch     └─ merges cleanly into parent     └─ conflicts with parent    └┄ parent deleted
+ Branch     └─ merges cleanly into parent     └─ conflicts with parent      └┄ parent deleted
 
  - main is 7 commits behind origin/main; run wt --ff to fast-forward it.
 ```
@@ -122,6 +122,8 @@ The caption is one sentence: how the local default branch compares with `origin/
 
 The comparison is `is N commits behind`, `is N commits ahead of`, `is in sync with`, or `has diverged from … (N commits ahead, M commits behind)`. Only the counts are colored. It says `local origin/main` in the two rows where this run could not bring the tracking ref up to date, so the counts may be old.
 
+The counts include every commit, merged-in ones too, as `git rev-list --count` does. When the default branch is behind and merges brought most of those commits in, an italic aside to the count says how far `origin/<default>`'s own line (its first-parent history, which is all the graph's default lane draws) is ahead: `main is 45 commits (1 merge) behind origin/main`. It reads `(2 merges)` when every step on that line is a merge, `(3 on main's line)` otherwise, and is left out when the two counts agree.
+
 | This run | Caption |
 |---|---|
 | Checked; no difference | `main is 3 commits behind origin/main` |
@@ -141,7 +143,7 @@ Ages use the PR age units: `less than 1 min`, then minutes, hours below two days
 
 ### Credentials line
 
-At most one dim credentials line follows the caption. It is either a **warning** about a request that failed for a confirmed credentials or rate-limit reason, or the **keyless notice** about a request that succeeded without an API key. A warning always wins:
+At most one credentials line appears, as a [closing note](#closing-notes) after the `--ff` note. It is either a **warning** about a request that failed for a confirmed credentials or rate-limit reason, or the **keyless notice** about a request that succeeded without an API key. A warning always wins:
 
 1. a warning from the `origin` check;
 2. a warning from the PR request;
@@ -193,12 +195,11 @@ What counts is what the refresh worker recorded for the exact answer this listin
 
 The closing fallback notice below is about a different request and may appear in the same listing.
 
-The `Worktree` legend gains a second line only when the table needs it: `✕ git can't read this worktree` when some row shows `✕` for that reason, and `? couldn't check` when some row shows `?`. A `✕` row whose path is [a link Git still reads through](#a-link-in-place-of-the-worktree) is explained as `✕ its path is a link`, or, beside rows Git can't read, `✕ git can't read this worktree, or its path is a link`. A listing with neither keeps the two lines above:
+The `Worktree` legend line gains entries at its end only when the table needs them: `✕ git can't read worktree` when some row shows `✕` for that reason, and `? couldn't check` when some row shows `?`. A `✕` row whose path is [a link Git still reads through](#a-link-in-place-of-the-worktree) is explained as `✕ its path is a link`, or, beside rows Git can't read, `✕ git can't read worktree, or its path is a link`. A listing with neither shows the two lines above. With both:
 
 ```text
- Worktree   ○ clean    ● uncommitted files    ● uncommitted source files
-            ✕ git can't read this worktree    ? couldn't check
- Branch     └─ merges cleanly into parent     └─ conflicts with parent    └┄ parent deleted
+ Worktree   ○ clean    ● uncommitted files    ● uncommitted source files    ✕ git can't read worktree    ? couldn't check
+ Branch     └─ merges cleanly into parent     └─ conflicts with parent      └┄ parent deleted
 ```
 
 The table is never narrower than the legend beneath it; a table with short content widens its last column to match. In the legend the `conflicts` sample sits in the same column as the source-files dot above it.
@@ -243,7 +244,7 @@ A linked worktree can lose its connection to the repository while Git still reco
 | What `wt` finds on disk | Called | Note |
 |---|---|---|
 | The recorded directory does not exist | missing | `its directory is gone; wt remove <name> checks whether its remaining Git record can be removed safely.` |
-| The directory exists but its `.git` file does not | unlinked | `its .git file is missing; wt remove <name> attempts to restore the link before checking its files. To restore it without removing it, run git -C <base> worktree repair <path>.` |
+| The directory exists but its `.git` file does not | unlinked | `its .git file is missing; wt remove <name> removes it.` |
 | Anything else: a file or a link at the path, a path or `.git` that can't be inspected, or a `.git` that exists but Git can't use | other | `Git can't read this worktree: <what was found>; Git reports: <Git's reason>.` |
 
 "Does not exist" means the operating system answered "not found". A permission or I/O error is never read as absence; it is the "other" case, with the system's message. See [`wt remove`](remove.md) for what removing each kind does.
@@ -299,9 +300,9 @@ Every line is its branch's first-parent history, so a merged branch's commits ne
 
 Each line shows its 5 newest commits; older ones fold into a `+N` square. Open PRs appear as `PR #n → target` tags. When `origin/<default>` has diverged from the local default branch it gets a line of its own.
 
-When local history cannot establish a connection (in a shallow clone, for instance), or something the graph should show cannot be drawn at its own commit, the graph shows what it could verify followed by a dim "Some history is not shown". It never fetches more history for this.
+When local history cannot establish a connection (in a shallow clone, for instance), or something the graph should show cannot be drawn at its own commit, the graph shows what it could verify, and the closing notes say so. In a shallow clone the note tells you how to fill in the history (`This clone is shallow, so the graph can't connect some older history; run git fetch --unshallow to fill it in.`); otherwise each note names what is missing and why, for example `fix/magic-globs branched from e23d0c2, which reached origin/main through merge 21debbc, so the graph doesn't join its lane to origin/main.` (the full list is in [git-graph.md](../git-graph.md#nothing-undrawn-is-substituted)). `wt list` never fetches more history itself. A branch whose commits reached the default branch only through another branch's merge is not missing anything; a note says where they are, for example `feat/schema-enhancement's commits are all in origin/main (merged through fix/wt-skill).`
 
-There is no minimum terminal width: the graph is sized from its natural width and the terminal's cell size, trims commits into `+N` squares to fit, and shrinks only when even the trimmed graph is too wide. In the base view a graph taller than half the terminal keeps the most recently active lines and notes how many were left out. See [git-graph.md](../git-graph.md) for the design.
+There is no minimum terminal width: the graph is sized from its natural width and the terminal's cell size, trims commits into `+N` squares to fit, and shrinks only when even the trimmed graph is too wide. In the base view the whole listing is meant to fit on one screen: the graph gets the rows the caption, table, legend, status list, verbose section, and notes leave, less four for its own notes and your prompt (never fewer than 12). A graph taller than that keeps the most recently active lines, and the closing notes say how many were left out. Terminal width never changes how many lines are drawn, only how many commits fold into `+N` squares (`3 worktrees aren't in the graph: it shows the most recently active ones that fit the terminal.`). See [git-graph.md](../git-graph.md) for the design.
 
 `-w` / `--width` sets the graph's width directly (`70`, `70ch`, or `50%` of the terminal); the graph is then never trimmed to fit.
 
@@ -330,7 +331,7 @@ Commits are formatted as conventional commits when possible (e.g. `feat(scope): 
 
 ### Closing notes
 
-After a blank line, the output can end with up to four kinds of note, in this order. A command a note tells you to run (`wt --ff`, `--ignore-api`) is shown in reverse video, so it stands out as something to type. The examples below are plain text.
+After a blank line, the output can end with up to six kinds of note, in this order. Every note is styled the same way, and none is dim. A command a note tells you to run (`wt --ff`, `--ignore-api`) is shown in reverse video, so it stands out as something to type. The examples below are plain text.
 
 - **Fast-forward suggestion.** When the local default branch is strictly behind `origin/<default>` (not diverged):
 
@@ -339,6 +340,11 @@ After a blank line, the output can end with up to four kinds of note, in this or
     ```
 
     It is not shown when the listing rendered while origin was still being checked or pulled, or under `--ff`, which reports its own result instead: nothing when it moved the branch or there was nothing to do, otherwise the reason it did not, for example (`main has diverged from origin/main, so it can't be fast-forwarded.`, `main wasn't fast-forwarded: the checkout has uncommitted changes to files the update touches.`, or `main wasn't fast-forwarded: origin/main doesn't exist.`). A failed check or fetch still shows it, since `--ff` moves to the local tracking ref; the caption keeps the failure reason, so the target may itself be out of date.
+- **Credentials line.** The one warning or keyless notice described under [Credentials](#credentials-line), for example:
+
+    ```text
+    - GitHub answered without an API key; set GH_TOKEN or GITHUB_TOKEN for higher rate limits.
+    ```
 - **Fallback notice.** When no API key was set, the provider would not show the repository without one, and `ls-remote` answered instead:
 
     ```text
@@ -347,23 +353,31 @@ After a blank line, the output can end with up to four kinds of note, in this or
     ```
 
     A rate-limit fallback never produces it, and neither does a check made for an `origin` that was replaced or removed during the wait.
-- **Unavailable worktrees.** One dim note per `✕` row, in table order (a `?` row gets none), as described under [Worktrees Git can't read](#worktrees-git-cant-read):
+- **About the graph.** Shown only when a graph was drawn; the graph image itself carries no text. Lanes left out, then what it couldn't connect (in a shallow clone the one shallow note, otherwise one note per lane, merge, or label it couldn't draw), then one note per branch merged through another branch:
+
+    ```text
+    - 3 worktrees aren't in the graph: it shows the most recently active ones that fit the terminal.
+    - This clone is shallow, so the graph can't connect some older history; run git fetch --unshallow to fill it in.
+    - fix/magic-globs branched from e23d0c2, which reached origin/main through merge 21debbc, so the graph doesn't join its lane to origin/main.
+    - feat/schema-enhancement's commits are all in origin/main (merged through fix/wt-skill).
+    ```
+
+    The last names the lane by what you know it as (`origin/main` when it is ahead of `main`), and the carrying branch only when it is drawn; otherwise it says `merged through another branch`. The graph tags that branch's tip `in origin/main` too, when the tip is drawn.
+- **Unavailable worktrees.** One note per `✕` row, in table order (a `?` row gets none), as described under [Worktrees Git can't read](#worktrees-git-cant-read):
 
     ```text
     - feat-gone: its directory is gone; wt remove feat/gone checks whether its remaining Git record can be removed safely.
-    - lhg-before: its .git file is missing; wt remove lhg-before attempts to restore the link before checking its files. To restore it without removing it, run git -C /code/wts/rusty-biscuit worktree repair /code/wts/lhg-before.
+    - lhg-before: its .git file is missing; wt remove lhg-before removes it.
     ```
 
-    The suggested name is one that `wt remove` resolves to exactly this worktree: its branch, else its directory name. When neither does (another worktree matches the same name, for example), the note says `wt remove` without a name and explains why: `No name selects it for wt remove: feat also matches /code/wts/other.` Names and paths that need it are single-quoted (`wt remove 'my work'`). A value that can't be spelled the same way in bash, zsh, fish, and PowerShell (a leading `-` or `~`, a single quote, two backslashes in a row or a trailing one, a control character) is never offered as something to type: the note names the command and the value separately instead, for example `run git worktree repair from the base checkout, naming /code/wts/it's.` Nothing in a note is ever executed. Names, paths, Git's reasons, and error messages are shown exactly as recorded, whatever characters they hold: text that looks like styling, such as `<red>`, is printed as is.
+    The suggested name is one that `wt remove` resolves to exactly this worktree: its branch, else its directory name. When neither does (another worktree matches the same name, for example), the note says `wt remove` without a name and explains why: `No name selects it for wt remove: feat also matches /code/wts/other.` Names and paths that need it are single-quoted (`wt remove 'my work'`). A value that can't be spelled the same way in bash, zsh, fish, and PowerShell (a leading `-` or `~`, a single quote, two backslashes in a row or a trailing one, a control character) is never offered as something to type: the note names the command without it and says why instead, for example `wt remove removes it. No name selects it for wt remove: it's can't be typed the same way in every shell.` Nothing in a note is ever executed. Names, paths, Git's reasons, and error messages are shown exactly as recorded, whatever characters they hold: text that looks like styling, such as `<red>`, is printed as is.
 
     A path or command in these notes, and the path in the `--ff` refusal for a worktree Git can't read, is never broken by the wrap, so what you copy is what `wt` means. It moves to the next line whole, and one too long for any line gets a line of its own that your terminal wraps, without an added `-`. In a 60-column terminal:
 
     ```text
-    - lhg-before: its .git file is missing;
-      wt remove lhg-before  attempts to restore the link
-      before checking its files. To restore it without
-      removing it, run
-      git -C /code/wts/rusty-biscuit worktree repair /code/wts/lhg-before .
+    - wt-gone: its directory is gone;
+      wt remove feature/a-rather-long-branch-name  checks
+      whether its remaining Git record can be removed safely.
     ```
 
 ## Flags

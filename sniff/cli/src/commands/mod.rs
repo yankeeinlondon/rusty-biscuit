@@ -978,7 +978,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
                     let terminal = biscuit_terminal::terminal::Terminal::default();
                     let render = |markup: &str| {
-                        biscuit_terminal::components::prose::Prose::new(markup).render(&terminal)
+                        biscuit_terminal::components::prose::InlineProse::new(markup).render(&terminal)
                     };
                     let bodies: Vec<(bool, String)> = entries
                         .iter()

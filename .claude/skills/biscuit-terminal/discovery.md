@@ -55,6 +55,14 @@ match color_mode() {
 
 Detection: OSC11 query → `DARK_MODE` env → macOS `AppleInterfaceStyle` → Dark default
 
+The "OSC11 query" step is really `bg_color()`: a live query only for apps in
+`osc_queries::support::answers_color_queries`, then `COLORFGBG`, then a
+per-app default. **Trap:** a per-app default decides the mode outright, so a
+wrong one beats the system appearance. Apple Terminal used to default to a
+white background, which made every dark Terminal.app profile read as Light
+(a near-white row highlight with white text, 2026-10-04). It now has no
+default and is never queried, so it falls through to `AppleInterfaceStyle`.
+
 ## Feature Support
 
 ### Image Support

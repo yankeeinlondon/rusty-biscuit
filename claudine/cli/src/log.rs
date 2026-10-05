@@ -2,7 +2,7 @@ use std::io::Write;
 use std::sync::LazyLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::discovery::detection::{ColorDepth, ColorMode};
 use biscuit_terminal::terminal::Terminal;
@@ -133,27 +133,48 @@ pub fn output(msg: &str) {
 }
 
 /// Write a warning to stderr in yellow, rendered through Prose.
+///
+/// A single newline in `msg` starts a new row (hard break).
 pub fn warn(msg: &str) {
-    let term = terminal();
-    let rendered =
-        Prose::new(format!("<orange><bold>warning:</bold></orange> {msg}")).render(&term);
+    let rendered = warning_text(msg, &terminal());
     let _ = writeln!(std::io::stderr(), "{rendered}");
+}
+
+fn warning_text(msg: &str, term: &Terminal) -> String {
+    Prose::new(format!("<orange><bold>warning:</bold></orange> {msg}"))
+        .with_line_breaks(LineBreaks::Hard)
+        .render(term)
 }
 
 /// Write an error to stderr in red, rendered through Prose.
 ///
 /// Error messages may contain Prose tags (e.g. `<blue>--flag</blue>`) for
-/// styled rendering of CLI switches and other highlights.
+/// styled rendering of CLI switches and other highlights. A single newline
+/// in `msg` starts a new row (hard break), as in a multi-line error report.
 pub fn error(msg: &str) {
-    let term = terminal();
-    let rendered = Prose::new(format!("<red><bold>Error:</bold></red> {msg}")).render(&term);
+    let rendered = error_text(msg, &terminal());
     let _ = writeln!(std::io::stderr(), "\n{rendered}");
+}
+
+fn error_text(msg: &str, term: &Terminal) -> String {
+    Prose::new(format!("<red><bold>Error:</bold></red> {msg}"))
+        .with_line_breaks(LineBreaks::Hard)
+        .render(term)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serial_test::serial;
+
+    #[test]
+    fn warnings_and_errors_keep_each_message_row() {
+        let term = plain_terminal(200);
+        let warning = biscuit_terminal::utils::escape_codes::strip_escape_codes(warning_text("first\nsecond", &term));
+        assert_eq!(warning.lines().collect::<Vec<_>>(), ["warning: first", "second"]);
+        let error = biscuit_terminal::utils::escape_codes::strip_escape_codes(error_text(":\n- a\n- b", &term));
+        assert_eq!(error.lines().collect::<Vec<_>>(), ["Error: :", "- a", "- b"]);
+    }
 
     #[test]
     #[serial]

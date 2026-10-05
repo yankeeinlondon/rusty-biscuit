@@ -53,14 +53,15 @@ pub enum WorktreeError {
     /// what it would delete could not be checked. Nothing was removed, but
     /// "nothing removed" is not "nothing changed": `wt remove` may already
     /// have run `git worktree repair` to make the files checkable, and that
-    /// repair is never rolled back. The message is Prose markup explaining
-    /// what to do, and says when Git metadata may have changed.
+    /// repair is never rolled back. The message is Prose markup, one line per
+    /// `\n`, explaining what to do, and says when Git metadata may have
+    /// changed.
     #[error("{0}")]
     RefusedToLoseWork(String),
 
     /// The environment prevents the command (for example, no shell wrapper to
     /// move the caller); nothing was removed and no `--force-*` flag helps.
-    /// The message is Prose markup explaining what to do.
+    /// The message is Prose markup, one line per `\n`, explaining what to do.
     #[error("{0}")]
     BlockedByEnvironment(String),
 

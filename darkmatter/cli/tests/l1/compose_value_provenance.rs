@@ -9,6 +9,7 @@
 use crate::common;
 
 use common::CliProcessFixture;
+use darkmatter::testing::strip_ansi_codes;
 use predicates::prelude::*;
 
 #[test]
@@ -52,17 +53,21 @@ fn set_value_with_malformed_template_still_fails() {
     let fixture = CliProcessFixture::named("set_value_with_malformed_template_still_fails");
     let md_path = fixture.write_file("cwd/repro.md", "---\ntitle: t\n---\nLast: {{ note }}\n");
 
-    fixture
+    let output = fixture
         .command()
         .arg("compose")
         .arg(&md_path)
         .args(["--set", r#"{"note":"see {{…}} siblings"}"#])
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("interpolation failed"))
-        .stderr(predicate::str::contains("note"))
-        .stderr(predicate::str::contains("command-line override (`--set`)"))
-        .stderr(predicate::str::contains("Defined in:").not());
+        .output()
+        .expect("md compose should run");
+
+    assert!(!output.status.success(), "expected a failure exit status");
+    // The supplier's code span is styled (dim) even without color support.
+    let stderr = strip_ansi_codes(&String::from_utf8_lossy(&output.stderr));
+    assert!(stderr.contains("interpolation failed"), "stderr: {stderr}");
+    assert!(stderr.contains("note"), "stderr: {stderr}");
+    assert!(stderr.contains("command-line override (--set)"), "stderr: {stderr}");
+    assert!(!stderr.contains("Defined in:"), "stderr: {stderr}");
 }
 
 /// R5 control: a malformed template the document authors keeps its
@@ -326,14 +331,18 @@ fn malformed_literal_token_fails_with_its_location() {
         "---\ntitle: t\nnote: \"{{!data:v2:YQ}}\"\n---\nx\n",
     );
 
-    fixture
+    let output = fixture
         .command()
         .arg("compose")
         .arg(&md_path)
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("malformed literal token"))
-        .stderr(predicate::str::contains("unsupported literal token version `v2`"))
-        .stderr(predicate::str::contains("line: 3, column: 8"))
-        .stderr(predicate::str::contains("parse error").not());
+        .output()
+        .expect("md compose should run");
+
+    assert!(!output.status.success(), "expected a failure exit status");
+    // The reason's code span is styled (dim) even without color support.
+    let stderr = strip_ansi_codes(&String::from_utf8_lossy(&output.stderr));
+    assert!(stderr.contains("malformed literal token"), "stderr: {stderr}");
+    assert!(stderr.contains("unsupported literal token version v2"), "stderr: {stderr}");
+    assert!(stderr.contains("line: 3, column: 8"), "stderr: {stderr}");
+    assert!(!stderr.contains("parse error"), "stderr: {stderr}");
 }

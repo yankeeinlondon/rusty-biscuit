@@ -10,7 +10,7 @@ use super::super::super::cleanup;
 use super::super::super::normalize::NormalizationError;
 use super::super::super::types::{MarkdownError, MarkdownResult};
 use super::super::{
-    ComposeOperation, ComposeOptions, ComposeReport, ComposeWarning, EffectiveState, SourceRange,
+    ComposeOperation, ComposeReport, ComposeWarning, EffectiveState, SourceRange,
 };
 use super::super::{
     file_links, inline, link_normalization, link_resolve, perf, shell_blocks, shell_expansion,
@@ -33,7 +33,7 @@ impl Markdown {
         &mut self,
         operation: ComposeOperation,
         state: &EffectiveState,
-        options: &ComposeOptions,
+        options: &crate::markdown::compose::ComposeRequest,
         runtime: &mut shell_expansion::types::PipelineRuntime,
         report: &mut ComposeReport,
         perf: &mut perf::PerfCollector,
@@ -100,7 +100,7 @@ impl Markdown {
     pub(crate) fn run_inline_post_operation(
         &mut self,
         operation: ComposeOperation,
-        options: &ComposeOptions,
+        options: &crate::markdown::compose::ComposeRequest,
         report: &mut ComposeReport,
     ) -> MarkdownResult<()> {
         match operation {
@@ -184,7 +184,7 @@ impl Markdown {
     pub(crate) fn run_finalization_operation(
         &mut self,
         operation: ComposeOperation,
-        options: &ComposeOptions,
+        options: &crate::markdown::compose::ComposeRequest,
         report: &mut ComposeReport,
     ) -> MarkdownResult<()> {
         match operation {
@@ -205,7 +205,7 @@ impl Markdown {
         &mut self,
         operations: &[ComposeOperation],
         state: &EffectiveState,
-        options: &ComposeOptions,
+        options: &crate::markdown::compose::ComposeRequest,
         runtime: &mut shell_expansion::types::PipelineRuntime,
         report: &mut ComposeReport,
         perf_collector: &mut perf::PerfCollector,
@@ -314,8 +314,8 @@ impl Markdown {
                 }
                 ComposeOperation::CodeTransclusion => {
                     if let Some(directives) = parsed_directives.as_ref() {
-                        // `::code` directives are never in the preflight graph
-                        // (they contribute no shell entries), so there is no
+                        // Pre-flight records `::code` targets as passive
+                        // targets, not graph edges, so there is no
                         // resolution cache to reuse here.
                         engine.prepare_block_transclusions(
                             directives,
@@ -429,7 +429,10 @@ impl Markdown {
                     // that the span is filled rather than emptied.
                     let mut skipped = ComposeReport::new();
                     skipped.transclusions_skipped = 1;
-                    skipped.add_warning(ComposeWarning::new("transclusion", error.to_string()));
+                    skipped.add_warning(
+                        ComposeWarning::new("transclusion", error.to_string())
+                            .with_resolution_failure(error.resolution_failure()),
+                    );
                     ResolvedTransclusion {
                         order: anchor.order,
                         content: Some(self.fit_notice_to_span(&anchor.target, anchor.notice)),

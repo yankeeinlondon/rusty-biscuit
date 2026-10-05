@@ -52,7 +52,7 @@ pub struct ProviderSkillPaths {
 impl ProviderSkillPaths {
     /// Construct provider paths from capability metadata.
     pub fn new() -> Self {
-        let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+        let home_dir = biscuit_file::home_dir().unwrap_or_else(|| PathBuf::from("."));
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let repo_root = resolve_repo_root(&cwd);
         Self::from_roots(home_dir, repo_root)
@@ -393,7 +393,7 @@ mod tests {
 
         assert_eq!(
             paths.home_dir,
-            dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")),
+            biscuit_file::home_dir().unwrap_or_else(|| PathBuf::from(".")),
             "`new` must root user-scope paths at the process home"
         );
         assert!(

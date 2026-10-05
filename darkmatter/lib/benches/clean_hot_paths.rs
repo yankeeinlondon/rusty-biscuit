@@ -115,8 +115,14 @@ cargo nextest run
 Follow up next week with the metrics review.
 ";
 
+/// Anchors schema resolution at the process directory with the process's home
+/// and environment, as the context-free constructors did.
+fn process_context() -> biscuit_file::FileResolutionContext {
+    biscuit_file::FileResolutionContext::new(std::env::current_dir().expect("process directory"))
+}
+
 /// The non-save `md clean` hot path, including the invalid-frontmatter feature.
-fn clean_pipeline(source: &str) -> String {
+fn clean_pipeline(source: &str, context: &biscuit_file::FileResolutionContext) -> String {
     let repaired = match extract_frontmatter_block(source).expect("frontmatter extraction") {
         Some(extraction) if !extraction.yaml.trim().is_empty() => {
             let analysis = analyze_yaml(extraction.yaml);
@@ -128,7 +134,7 @@ fn clean_pipeline(source: &str) -> String {
             repaired.push_str(&source[extraction.yaml_span.end..]);
 
             let markdown = Markdown::try_from_content(repaired.clone()).expect("parse");
-            let schema = CleanSchemaConfig::new()
+            let schema = CleanSchemaConfig::new(context.clone())
                 .resolve(None)
                 .expect("default schema resolution");
             black_box(schema.analyze(&markdown, &yaml).expect("schema analysis"));
@@ -153,9 +159,10 @@ fn clean_pipeline(source: &str) -> String {
 
 fn bench_clean_hot_paths(c: &mut Criterion) {
     let mut group = c.benchmark_group("clean_hot_paths");
+    let context = process_context();
 
     group.bench_function("no_frontmatter/full_pipeline", |b| {
-        b.iter(|| black_box(clean_pipeline(black_box(NO_FRONTMATTER))))
+        b.iter(|| black_box(clean_pipeline(black_box(NO_FRONTMATTER), &context)))
     });
     group.bench_function("no_frontmatter/parse_only", |b| {
         b.iter(|| {
@@ -163,7 +170,7 @@ fn bench_clean_hot_paths(c: &mut Criterion) {
         })
     });
     group.bench_function("clean_frontmatter/full_pipeline", |b| {
-        b.iter(|| black_box(clean_pipeline(black_box(CLEAN_FRONTMATTER))))
+        b.iter(|| black_box(clean_pipeline(black_box(CLEAN_FRONTMATTER), &context)))
     });
     group.bench_function("clean_frontmatter/parse_only", |b| {
         b.iter(|| {

@@ -10,6 +10,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use claudine_gen::{GenError, Provenance, generate_for_area};
+use darkmatter::markdown::compose::RequestSnapshot;
 
 /// Research topics the registry consumes (fixture copy set).
 pub(crate) const TOPICS: &[&str] = &[
@@ -140,7 +141,8 @@ impl Fixture {
     }
 
     pub(crate) fn generate(&self) -> Result<claudine_gen::Generation, GenError> {
-        generate_for_area(&self.area(), self.slug)
+        let area = self.area();
+        generate_for_area(&area, self.slug, &RequestSnapshot::new(&area))
     }
 }
 
@@ -208,7 +210,7 @@ fn relative_area_inside_a_repository_uses_one_absolute_resolution_boundary() {
         .expect("fixture was created below the current directory")
         .to_path_buf();
 
-    let generation = generate_for_area(&relative_area, "claude")
+    let generation = generate_for_area(&relative_area, "claude", &RequestSnapshot::new(&cwd))
         .expect("relative area and schema paths must share one absolute boundary");
 
     assert!(generation.data_rs.contains("    slug: \"claude\",\n"));

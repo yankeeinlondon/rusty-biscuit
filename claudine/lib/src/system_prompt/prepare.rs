@@ -1,6 +1,6 @@
 use biscuit_file::serde_yaml_ng;
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::compose::{ComposeContext, ComposeOptions, ComposeSource};
+use darkmatter::markdown::compose::{ComposeContext, ComposeOptions, ComposeSource, RequestSnapshot};
 use darkmatter::markdown::schemas::{SimplifiedSchema, parse_yaml_schema};
 use tracing::{info_span, warn};
 
@@ -121,7 +121,7 @@ fn effective_mode(source: &SystemPromptSource, composed: &Markdown) -> SystemPro
 fn compose_prompt_markdown(
     source: &SystemPromptSource,
     raw_text: &str,
-    shared_ctx: Option<&SharedComposeContext>,
+    shared_ctx: &SharedComposeContext,
     source_context: Option<&crate::invocation_context::SourceContext>,
     shell_cwd: Option<&std::path::Path>,
 ) -> Result<Markdown, crate::error::ClaudineError> {
@@ -131,57 +131,37 @@ fn compose_prompt_markdown(
         None => md,
     };
 
-    // Canonical session preparation supplies one context covering the union of
-    // the primary and appendix requirements. The ambient branch remains for
-    // library compatibility and captures only groups referenced by this file.
-    let ctx = match shared_ctx {
-        Some(c) => c.runtime.clone(),
-        None => {
-            let base_dir = match source_path(source).and_then(|p| p.parent()) {
-                Some(parent) => parent.to_path_buf(),
-                None => std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
-            };
-            ComposeContext::capture_for_content(&base_dir, raw_text)
-        }
-    };
-    // Transcluded prompt fragments grow the snapshot from the evidence that
-    // produced it: launch evidence for the shared bundle, host discovery for
-    // the ambient capture above.
-    let authority = match shared_ctx {
-        Some(SharedComposeContext {
-            invocation: Some(invocation),
-            ..
-        }) => invocation.compose_context_authority(),
-        Some(_) => darkmatter::markdown::compose::ContextAuthority::CallerSupplied,
-        None => darkmatter::markdown::compose::ContextAuthority::DarkmatterOwned,
-    };
-    let options = ComposeOptions::new_with_context(ctx).with_context_authority(authority);
+    // Session preparation supplies one context covering the union of the
+    // primary and appendix requirements. Transcluded prompt fragments grow it
+    // from the launch evidence that produced it.
+    let invocation = &shared_ctx.invocation;
+    let options = ComposeOptions::new_with_context(shared_ctx.runtime.clone())
+        .with_context_authority(invocation.compose_context_authority());
     let mut options = match source_path(source) {
         Some(path) => crate::composition::bind_agent_workspace(options, path, shell_cwd),
         None => options,
     };
-    if let Some(invocation) = shared_ctx.and_then(|shared| shared.invocation.as_ref()) {
-        invocation.record_compose_operation();
-        invocation.record_prepared_context_consumer(
-            crate::invocation_context::PreparedContextConsumer::Body,
-        );
-        invocation.record_prepared_context_consumer(
-            crate::invocation_context::PreparedContextConsumer::EffectiveFrontmatter,
-        );
-    }
-    if let Some(source_context) = source_context {
-        options = options.with_file_resolution_context(
-            source_context.file_resolution_context().clone(),
-        );
-    } else if shared_ctx.is_none()
-        && shell_cwd.is_none()
-        && let Some(path) = source_path(source)
-        && let Some(parent) = path.parent()
+    invocation.record_compose_operation();
+    invocation.record_prepared_context_consumer(
+        crate::invocation_context::PreparedContextConsumer::Body,
+    );
+    invocation.record_prepared_context_consumer(
+        crate::invocation_context::PreparedContextConsumer::EffectiveFrontmatter,
+    );
+    // A file-backed prompt resolves from its own source context; the built-in
+    // appendix has no file and resolves from the launch context.
+    let file_resolution_context = source_context.map_or_else(
+        || invocation.launch_file_resolution_context().clone(),
+        |source_context| source_context.file_resolution_context().clone(),
+    );
+    // Without a session workspace, shell policy is the prompt's own: its
+    // repository, else its directory.
+    if shell_cwd.is_none()
+        && let Some(parent) = source_path(source).and_then(std::path::Path::parent)
     {
-        let policy_root = biscuit_file::find_git_root(parent)
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| parent.to_path_buf());
+        let policy_root = file_resolution_context
+            .repository_root()
+            .map_or_else(|| parent.to_path_buf(), std::path::Path::to_path_buf);
         options = options.with_shell_policy_root(policy_root);
     }
     // Attach the baseline schema for discovered `system-prompt.md` files
@@ -194,8 +174,11 @@ fn compose_prompt_markdown(
     } else {
         options
     };
+    let request = crate::composition::compose_request(options, file_resolution_context).map_err(|error| {
+        crate::error::ClaudineError::Io(std::io::Error::new(std::io::ErrorKind::InvalidInput, error))
+    })?;
 
-    let (composed, _report) = md.compose_with(options)?;
+    let (composed, _report) = md.compose_with(&request)?;
 
     Ok(composed)
 }
@@ -215,7 +198,7 @@ fn merge_prompt_sections(base: &str, appendix: &str) -> String {
 
 struct SharedComposeContext {
     runtime: ComposeContext,
-    invocation: Option<crate::invocation_context::InvocationContext>,
+    invocation: crate::invocation_context::InvocationContext,
 }
 
 fn build_shared_compose_context_with_invocation(
@@ -249,14 +232,14 @@ fn build_shared_compose_context_with_invocation(
 
     Ok(SharedComposeContext {
         runtime,
-        invocation: Some(invocation.clone()),
+        invocation: invocation.clone(),
     })
 }
 
 /// Prepare a resolved input with its request-owned source and compose context.
 fn prepare_system_prompt_with_ctx(
     input: ResolvedPromptInput,
-    shared_ctx: Option<&SharedComposeContext>,
+    shared_ctx: &SharedComposeContext,
     shell_cwd: Option<&std::path::Path>,
 ) -> Result<ResolvedSystemPrompt, crate::error::ClaudineError> {
     let ResolvedPromptInput {
@@ -289,7 +272,7 @@ fn prepare_system_prompt_with_ctx(
 /// already-resolved candidate list and an optional shared context.
 fn prepare_non_interactive_appendix_from(
     candidates: Vec<ResolvedPromptInput>,
-    shared_ctx: Option<&SharedComposeContext>,
+    shared_ctx: &SharedComposeContext,
     shell_cwd: Option<&std::path::Path>,
 ) -> Result<PreparedNonInteractiveAppendix, crate::error::ClaudineError> {
     for input in candidates {
@@ -319,51 +302,57 @@ fn prepare_non_interactive_appendix_from(
 }
 
 /// Compose a resolved system prompt source through Darkmatter and
-/// return the effective result.
+/// return the effective result, resolving its references through
+/// `invocation`.
 ///
 /// If the composed body is empty after trimming, returns
 /// `ResolvedSystemPrompt::Disabled`. Otherwise returns `Ready`.
 pub fn prepare_system_prompt(
     source: SystemPromptSource,
     raw_text: &str,
+    invocation: &crate::invocation_context::InvocationContext,
 ) -> Result<ResolvedSystemPrompt, crate::error::ClaudineError> {
+    let input = ResolvedPromptInput::capture((source, raw_text.to_string()), invocation)?;
+    let requirements = darkmatter::markdown::compose::ContextRequirements::for_content(raw_text);
+    let shared_ctx = SharedComposeContext {
+        runtime: invocation.capture_launch_context(&requirements),
+        invocation: invocation.clone(),
+    };
     // No launch context here, so shell directives fall back to Darkmatter's
     // source-relative default. The session-aware path supplies a working
-    // directory via `resolve_and_prepare_for_session`.
-    let composed_md = compose_prompt_markdown(&source, raw_text, None, None, None)?;
-    let composed_markdown = composed_md.content().to_string();
-
-    // Empty-body check
-    if composed_markdown.trim().is_empty() {
-        return Ok(ResolvedSystemPrompt::Disabled { source });
-    }
-
-    let mode = effective_mode(&source, &composed_md);
-    Ok(ResolvedSystemPrompt::Ready(PreparedSystemPrompt {
-        mode,
-        source,
-        raw_text: raw_text.to_string(),
-        composed_markdown,
-        non_interactive_appendix: None,
-    }))
+    // directory.
+    prepare_system_prompt_with_ctx(input, &shared_ctx, None)
 }
 
 /// Top-level convenience: resolve + compose in one call.
+///
+/// ## Errors
+///
+/// As [`resolve_and_prepare_for_session`].
 pub fn resolve_and_prepare(
     args: &SystemPromptArgs,
     context: &crate::system_prompt::context::LaunchContext,
+    snapshot: &RequestSnapshot,
 ) -> Result<ResolvedSystemPrompt, crate::error::ClaudineError> {
-    resolve_and_prepare_for_session(args, context, false)
+    resolve_and_prepare_for_session(args, context, false, snapshot)
 }
 
 /// Session-aware convenience: resolve + compose and optionally append
-/// non-interactive safety instructions.
+/// non-interactive safety instructions, capturing an invocation at the launch
+/// context's directory from `snapshot`.
+///
+/// ## Errors
+///
+/// Returns an I/O-wrapped error when the invocation's file-resolution context
+/// cannot be built, and any resolution or composition failure.
 pub fn resolve_and_prepare_for_session(
     args: &SystemPromptArgs,
     context: &crate::system_prompt::context::LaunchContext,
     non_interactive: bool,
+    snapshot: &RequestSnapshot,
 ) -> Result<ResolvedSystemPrompt, crate::error::ClaudineError> {
-    let invocation = crate::invocation_context::InvocationContext::capture_at(&context.cwd);
+    let invocation = crate::invocation_context::InvocationContext::capture_at(snapshot, &context.cwd)
+        .map_err(invocation_context_error)?;
     resolve_and_prepare_for_session_with_context(args, context, non_interactive, &invocation)
 }
 
@@ -388,14 +377,14 @@ pub fn resolve_and_prepare_for_session_with_context(
     // cost twice (system prompt + appendix); a single pre-capture pays
     // it once.
     let lookup_started = std::time::Instant::now();
-    let primary_result = crate::system_prompt::resolve::resolve_system_prompt_source_with_invocation(
+    let primary_result = crate::system_prompt::resolve::resolve_system_prompt_source(
         args,
         context,
         invocation,
     );
     let appendix_candidates_result = if non_interactive {
         Some(
-            crate::system_prompt::resolve::resolve_non_interactive_candidates_with_invocation(
+            crate::system_prompt::resolve::resolve_non_interactive_candidates(
                 context,
                 invocation,
             ),
@@ -441,7 +430,7 @@ pub fn resolve_and_prepare_for_session_with_context(
 
     let primary_compose_started = std::time::Instant::now();
     let effective_result = match primary {
-        Some(input) => prepare_system_prompt_with_ctx(input, Some(&shared_ctx), shell_cwd),
+        Some(input) => prepare_system_prompt_with_ctx(input, &shared_ctx, shell_cwd),
         None => Ok(ResolvedSystemPrompt::None),
     };
     invocation.record_system_prompt_timing(
@@ -457,7 +446,7 @@ pub fn resolve_and_prepare_for_session_with_context(
     let appendix_compose_started = std::time::Instant::now();
     let appendix_result = prepare_non_interactive_appendix_from(
         appendix_candidates.unwrap_or_default(),
-        Some(&shared_ctx),
+        &shared_ctx,
         shell_cwd,
     );
     invocation.record_system_prompt_timing(

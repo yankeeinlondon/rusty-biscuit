@@ -21,7 +21,7 @@ fn build_loop_seed_resolves_control_variables_and_omits_derived() {
     let config = resolve_loop_config(&source).unwrap().unwrap();
     let options = PrepareOptions {
         set_overrides: Some(json!({"initial_phase": 1})),
-        ..PrepareOptions::default()
+        ..PrepareOptions::new(crate::test_support::context())
     };
 
     let seed =
@@ -60,7 +60,7 @@ fn build_loop_seed_with_lifecycle_carries_event_blocks_dropped_from_seed() {
     let result = build_loop_seed_with_lifecycle(
         &source,
         &config,
-        PrepareOptions::default(),
+        PrepareOptions::new(crate::test_support::context()),
         CompositionMode::ChainedDocument,
     )
     .unwrap();
@@ -102,7 +102,7 @@ fn build_loop_seed_inline_mode_resolves_prompt_frontmatter_with_empty_body() {
     let seed = build_loop_seed(
         &source,
         &config,
-        PrepareOptions::default(),
+        PrepareOptions::new(crate::test_support::context()),
         CompositionMode::InlineFrontmatterPrompt,
     )
     .expect("inline seed should resolve from prompt frontmatter with empty body");
@@ -115,7 +115,7 @@ fn build_loop_seed_inline_mode_resolves_prompt_frontmatter_with_empty_body() {
     let direct = build_loop_seed(
         &source,
         &config,
-        PrepareOptions::default(),
+        PrepareOptions::new(crate::test_support::context()),
         CompositionMode::ChainedDocument,
     );
     assert!(
@@ -145,7 +145,7 @@ fn seeded_loop_repro_runs_to_completion_with_live_derived_variable() {
     let seed = build_loop_seed(
         &source,
         &config,
-        PrepareOptions::default(),
+        PrepareOptions::new(crate::test_support::context()),
         CompositionMode::ChainedDocument,
     )
     .unwrap();
@@ -159,7 +159,7 @@ fn seeded_loop_repro_runs_to_completion_with_live_derived_variable() {
         |ctx| {
             let prepared = prepare_direct(
                 &source,
-                PrepareOptions::default().with_layered_overrides(
+                PrepareOptions::new(crate::test_support::context()).with_layered_overrides(
                     ctx.as_layered_overrides(&crate::composition::LayeredOverrides::new()),
                 ),
             )?;
@@ -219,7 +219,7 @@ fn seeded_loop_reports_honest_error_for_non_numeric_control_variable() {
     let seed = build_loop_seed(
         &source,
         &config,
-        PrepareOptions::default(),
+        PrepareOptions::new(crate::test_support::context()),
         CompositionMode::ChainedDocument,
     )
     .unwrap();
@@ -269,7 +269,7 @@ fn seeded_loop_doc_namespace_condition_retains_readonly_control_value() {
     let seed = build_loop_seed(
         &source,
         &config,
-        PrepareOptions::default(),
+        PrepareOptions::new(crate::test_support::context()),
         CompositionMode::ChainedDocument,
     )
     .unwrap();
@@ -286,7 +286,7 @@ fn seeded_loop_doc_namespace_condition_retains_readonly_control_value() {
         |ctx| {
             let prepared = prepare_direct(
                 &source,
-                PrepareOptions::default().with_layered_overrides(
+                PrepareOptions::new(crate::test_support::context()).with_layered_overrides(
                     ctx.as_layered_overrides(&crate::composition::LayeredOverrides::new()),
                 ),
             )?;
@@ -341,7 +341,7 @@ fn loop_seed_read_honors_the_deferred_schema_verdict() {
     let judged = build_loop_seed_with_lifecycle(
         &source,
         &config,
-        PrepareOptions::default(),
+        PrepareOptions::new(crate::test_support::context()),
         CompositionMode::ChainedDocument,
     );
     assert!(
@@ -356,7 +356,7 @@ fn loop_seed_read_honors_the_deferred_schema_verdict() {
         &config,
         PrepareOptions {
             defer_schema_verdict: true,
-            ..PrepareOptions::default()
+            ..PrepareOptions::new(crate::test_support::context())
         },
         CompositionMode::ChainedDocument,
     );

@@ -237,7 +237,7 @@ fn suggest_phase1_candidate_constraints_target_scalar_or_array_items() {
 fn suggest_phase1_metadata_does_not_restrict_document_values() {
     let document: Markdown = "---\n$schema:\n  color: string(suggest(red, green))\ncolor: purple\n---\n"
         .into();
-    let report = DarkmatterSchemas::new()
+    let report = DarkmatterSchemas::new(crate::request_support::cwd_context())
         .validate(&document)
         .expect("suggestion metadata builds a validator");
     assert!(report.valid, "an unlisted valid value remains valid: {:?}", report.problems);
@@ -261,12 +261,15 @@ fn suggest_phase1_standalone_envelopes_resolve_consistently() {
     )
     .unwrap();
 
-    let pure_resolved = resolve_schema(&json!(pure.to_string_lossy()), dir.path()).unwrap();
-    let tagged_resolved = resolve_schema(&json!(tagged.to_string_lossy()), dir.path()).unwrap();
+    let context = biscuit_file::FileResolutionContext::new(dir.path());
+    let pure_resolved =
+        resolve_schema(&json!(pure.to_string_lossy()), dir.path(), &context).unwrap();
+    let tagged_resolved =
+        resolve_schema(&json!(tagged.to_string_lossy()), dir.path(), &context).unwrap();
     assert_eq!(pure_resolved.json_schema, tagged_resolved.json_schema);
     assert!(pure_resolved.simplified.is_some());
     assert!(tagged_resolved.simplified.is_some());
-    assert!(resolve_schema(&json!(sequence.to_string_lossy()), dir.path()).is_ok());
+    assert!(resolve_schema(&json!(sequence.to_string_lossy()), dir.path(), &context).is_ok());
 }
 
 #[test]

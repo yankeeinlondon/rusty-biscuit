@@ -34,10 +34,10 @@ fn preflight_discovery_does_not_launch_the_login_shell() {
     context.env_mut().insert("SHELL".to_string(), shell.to_string_lossy().into_owned());
     let options = ComposeOptions::new_with_context(context).with_source_file(dir.path().join("doc.md"));
 
-    document.compose_preflight(&options).expect("preflight succeeds");
+    document.compose_preflight(&crate::request_support::request(options.clone())).expect("preflight succeeds");
     assert_eq!(launches(&log), 0, "preflight launched the login shell");
 
-    let (composed, _) = document.compose_with(options).expect("compose succeeds");
+    let (composed, _) = document.compose_with(&crate::request_support::request(options)).expect("compose succeeds");
     assert!(composed.content().contains("alias=true"), "{}", composed.content());
     assert_eq!(launches(&log), 1, "only the terminal pass probes the request's login shell");
 }

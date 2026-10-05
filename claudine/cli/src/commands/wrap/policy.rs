@@ -409,11 +409,11 @@ fn emit_stream_summary_inner(
             // when transitioning into `TrailerMetadata`, so callers do not
             // need any ad-hoc newline bookkeeping.
             if let Some(markup) = primary_markup {
-                let rendered = Prose::new(markup).render(&term);
+                let rendered = summary_rows(markup).render(&term);
                 section_stream.emit_stderr(Section::TrailerMetadata, &rendered);
             }
             if let Some(markup) = secondary_markup {
-                let rendered = Prose::new(markup).render(&term);
+                let rendered = summary_rows(markup).render(&term);
                 section_stream.emit_stderr(Section::TrailerMetadata, &format!("  {rendered}"));
             }
         } else {
@@ -430,11 +430,11 @@ fn emit_stream_summary_inner(
                 }
             }
             if let Some(markup) = primary_markup {
-                let rendered = Prose::new(markup).render(&term);
+                let rendered = summary_rows(markup).render(&term);
                 eprintln!("{rendered}");
             }
             if let Some(markup) = secondary_markup {
-                let rendered = Prose::new(markup).render(&term);
+                let rendered = summary_rows(markup).render(&term);
                 eprintln!("  {rendered}");
             }
         }
@@ -542,6 +542,13 @@ pub(crate) fn format_summary_prose(
     Some(out)
 }
 
+/// Trailer markup keeps its rows: the summary, each badge, and each
+/// remediation link start a new line.
+fn summary_rows(markup: String) -> biscuit_terminal::components::prose::Prose {
+    use biscuit_terminal::components::prose::{LineBreaks, Prose};
+    Prose::new(markup).with_line_breaks(LineBreaks::Hard)
+}
+
 pub(crate) fn format_verbose_summary_details_prose(
     summary: &claudine::stream::summary::StreamExecutionSummary,
     details: &StructuredSummaryDetails,
@@ -609,6 +616,35 @@ mod tests {
         assert!(rendered.contains("Billing"));
         assert!(rendered.contains("Insufficient credits"));
         assert!(rendered.contains("https://console.anthropic.com/settings/billing"));
+    }
+
+    #[test]
+    fn summary_badge_and_remediation_link_render_on_their_own_rows() {
+        use biscuit_terminal::components::renderable::TerminalRenderable;
+
+        let summary = StreamExecutionSummary {
+            provider: Provider::Claude,
+            duration_ms: Some(1000),
+            badges: vec![SessionBadge {
+                category: BadgeCategory::Billing,
+                severity: BadgeSeverity::Error,
+                label: "Billing".into(),
+                message: "Insufficient credits".into(),
+                remediation_url: Some("https://console.anthropic.com/settings/billing".into()),
+            }],
+            ..Default::default()
+        };
+        let term = biscuit_terminal::terminal::Terminal::builder()
+            .width(300)
+            .color_depth(biscuit_terminal::discovery::detection::ColorDepth::None)
+            .build();
+        let rendered = biscuit_terminal::utils::escape_codes::strip_escape_codes(
+            summary_rows(format_summary_prose(&summary).unwrap()).render(&term),
+        );
+        let rows: Vec<&str> = rendered.lines().map(str::trim).collect();
+        assert_eq!(rows.len(), 3, "{rendered:?}");
+        assert!(rows[1].starts_with("⚠ Billing — Insufficient credits"), "{rendered:?}");
+        assert!(rows[2].ends_with("https://console.anthropic.com/settings/billing"), "{rendered:?}");
     }
 
     #[test]

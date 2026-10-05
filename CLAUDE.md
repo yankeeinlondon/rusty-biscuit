@@ -44,8 +44,9 @@
 - **A changed file schedules the code that reads it, and nothing more.** A
   non-source change selects no package, except where compiled code names the
   path: embedded into shipped code it is that package's source; read by a
-  test it adds one `{package, ubuntu-latest, L1}` cell narrowed to exactly
-  those tests. Another package's source file gets the same narrowed cell only
+  test, directly or through a document that transcludes it with `::file`, it
+  adds one `{package, ubuntu-latest, L1}` cell narrowed to exactly those
+  tests. Another package's source file gets the same narrowed cell only
   for a package that declares it in `[package.metadata.ci.tests]
   source-inputs`. Spell a test's repository reads in the forms the
   `rust-testing` skill lists. See `docs/cicd/test-inputs.md`.

@@ -127,6 +127,17 @@ Darkmatter parses the line and starts each program itself; it does not hand the 
 
 To filter one command's output with another, do the filtering in the program itself (`git log --grep`, `rg` reading a file) or move the work into a script and run the script.
 
+## Working directory
+
+A command runs in the first of these that applies:
+
+1. the directory set with `ComposeOptions::with_shell_working_directory()`;
+2. the directory of the document that holds the command, so `::shell ls` in `docs/guide.md` lists `docs/`;
+3. the shell policy root (`ComposeOptions::with_shell_policy_root()`), which `md compose -` sets to the directory it was launched from;
+4. the request directory, which a library caller names in its `RequestSnapshot`.
+
+The process's own current directory is never consulted, so a library that composes a string document gets the same directory whatever the process is doing.
+
 ## Timeouts
 
 A command has 10 seconds. One that runs longer stops the composition:

@@ -73,7 +73,8 @@ let states = vec![
 | Method | Description |
 |--------|-------------|
 | `Status::new(text)` | Create with plain description |
-| `Status::from_prose(text)` | Create with Prose-formatted description |
+| `Status::from_prose(text)` | Create with Prose-formatted description (an `InlineProse`; in the default soft mode a single newline joins with a space) |
+| `.with_line_breaks(LineBreaks::Hard)` | Each newline in a prose description starts a new row, as written (`"failed\nhint: quote it"` renders the `hint:` row under the status line, with no added indent); each row wraps on its own |
 | `.state(StatusState)` | Set the status state |
 | `.theme(StatusTheme)` | Set the visual theme |
 | `.no_color_icons()` | Disable icon colorization |

@@ -2,6 +2,7 @@
 
 use crate::common;
 
+use common::prompt_staging::{stage_shipped_prompts, workspace_root};
 use common::{CliProcessFixture, strip_ansi, write};
 // Consumed only inside the `#[cfg(unix)]` statements below; ungated, the
 // Windows check (`just check-windows`) reports it unused.
@@ -283,30 +284,15 @@ fn shipped_implement_router_prefers_an_unimplemented_review_over_the_completed_p
     );
 
     let router = fixture.cwd().join("prompts/implement.md");
-    write(&router, include_str!("../../../../prompts/implement.md"));
-    write(
-        &fixture
-            .cwd()
-            .join("prompts/_implement/implement-suggestions.md"),
-        include_str!("../../../../prompts/_implement/implement-suggestions.md"),
-    );
-    // The shipped route transcludes these snippets; without them the
-    // redirect fails on a missing file instead of reaching its assertions.
-    write(
-        &fixture.cwd().join("prompts/_no_formatting.md"),
-        include_str!("../../../../prompts/_no_formatting.md"),
-    );
-    write(
-        &fixture.cwd().join("prompts/_os.md"),
-        include_str!("../../../../prompts/_os.md"),
-    );
-    write(
-        &fixture.cwd().join("prompts/_test-tiers.md"),
-        include_str!("../../../../prompts/_test-tiers.md"),
-    );
-    write(
-        &fixture.cwd().join("prompts/_input-robustness.md"),
-        include_str!("../../../../prompts/_input-robustness.md"),
+    let repository = workspace_root();
+    stage_shipped_prompts(
+        &repository,
+        &fixture.cwd().join("prompts"),
+        &[
+            "prompts/implement.md",
+            "prompts/_implement/implement-suggestions.md",
+            "prompts/_implement/implement-plan.md",
+        ],
     );
     write(
         &fixture.cwd().join("prompts/_implement/implement-plan.md"),
