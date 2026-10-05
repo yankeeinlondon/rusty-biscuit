@@ -3,6 +3,22 @@ use serial_test::serial;
 use std::path::PathBuf;
 use tempfile::TempDir;
 
+/// [`super::prepare_system_prompt`] under an invocation launched in the
+/// prompt's own directory (the test process's directory for the built-in
+/// appendix), as a standalone composition of that file would be.
+fn prepare_system_prompt(
+    source: SystemPromptSource,
+    raw_text: &str,
+) -> Result<ResolvedSystemPrompt, crate::error::ClaudineError> {
+    let snapshot = crate::test_support::snapshot();
+    let launch = source_path(&source)
+        .and_then(std::path::Path::parent)
+        .map_or_else(|| snapshot.request_dir().to_path_buf(), std::path::Path::to_path_buf);
+    let invocation =
+        crate::invocation_context::InvocationContext::capture_at(&snapshot, &launch).unwrap();
+    super::prepare_system_prompt(source, raw_text, &invocation)
+}
+
 use crate::system_prompt::context::LaunchContext;
 
 /// Helper: create a temp file and return its path.
@@ -13,37 +29,6 @@ fn write_temp_file(dir: &std::path::Path, name: &str, content: &str) -> PathBuf 
     }
     std::fs::write(&path, content).unwrap();
     path
-}
-
-/// Build an executable in `dir` that prints its working directory, and return
-/// its portable path text for use as both a `::shell` command and a whitelist
-/// `prefix` rule.
-///
-/// The probe reports the portable spelling because its output lands in a
-/// Markdown document: a native Windows path would lose the separator of any
-/// segment beginning with punctuation to CommonMark backslash escaping.
-fn compile_cwd_probe(dir: &std::path::Path) -> String {
-    std::fs::create_dir_all(dir).unwrap();
-    let source = write_temp_file(
-        dir,
-        "cwd_probe.rs",
-        "fn main() {\n    let cwd = std::env::current_dir().unwrap();\n    \
-         println!(\"{}\", cwd.display().to_string().replace('\\\\', \"/\"));\n}\n",
-    );
-    let executable = dir.join(format!("cwd-probe{}", std::env::consts::EXE_SUFFIX));
-    let compiler = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
-    let compilation = std::process::Command::new(compiler)
-        .arg(&source)
-        .arg("-o")
-        .arg(&executable)
-        .output()
-        .unwrap();
-    assert!(
-        compilation.status.success(),
-        "failed to compile cwd probe: {}",
-        String::from_utf8_lossy(&compilation.stderr)
-    );
-    biscuit_file::to_portable_string(&executable)
 }
 
 struct ScopedHome {
@@ -86,7 +71,7 @@ fn shared_context_uses_request_owned_repo_and_os_evidence() {
         path: write_temp_file(tmp.path(), "prompt.md", "{{ ctx.area }} / {{ ctx.os }}"),
         mode: SystemPromptMode::Append,
     };
-    let invocation = crate::invocation_context::InvocationContext::capture_at(&root);
+    let invocation = crate::invocation_context::InvocationContext::capture_at(&crate::test_support::snapshot(), &root).unwrap();
     let context = invocation.launch_context();
     let input = ResolvedPromptInput::capture(
         (source, "{{ ctx.area }} / {{ ctx.os }}".to_string()),
@@ -104,7 +89,7 @@ fn shared_context_uses_request_owned_repo_and_os_evidence() {
     assert!(shared.runtime.get("repo").is_some());
     assert!(shared.runtime.get("os").is_some());
 
-    let result = prepare_system_prompt_with_ctx(input, Some(&shared), None).unwrap();
+    let result = prepare_system_prompt_with_ctx(input, &shared, None).unwrap();
     match result {
         ResolvedSystemPrompt::Ready(prepared) => {
             assert!(
@@ -188,7 +173,7 @@ fn relocated_primary_and_appendix_share_launch_context_but_keep_source_files() {
     std::fs::write(&primary_path, primary_raw).unwrap();
     std::fs::write(&appendix_path, appendix_raw).unwrap();
 
-    let invocation = crate::invocation_context::InvocationContext::capture_at(&launch_dir);
+    let invocation = crate::invocation_context::InvocationContext::capture_at(&crate::test_support::snapshot(), &launch_dir).unwrap();
     let launch_context = invocation.launch_context();
     let primary = ResolvedPromptInput::capture(
         (
@@ -221,13 +206,13 @@ fn relocated_primary_and_appendix_share_launch_context_but_keep_source_files() {
     .unwrap();
 
     let ResolvedSystemPrompt::Ready(primary) =
-        prepare_system_prompt_with_ctx(primary, Some(&shared), Some(&launch_dir)).unwrap()
+        prepare_system_prompt_with_ctx(primary, &shared, Some(&launch_dir)).unwrap()
     else {
         panic!("expected a prepared primary system prompt");
     };
     let appendix = prepare_non_interactive_appendix_from(
         vec![appendix],
-        Some(&shared),
+        &shared,
         Some(&launch_dir),
     )
     .unwrap();
@@ -668,7 +653,7 @@ fn discovered_replace_mode_flows_through_full_pipeline() {
         package_root: None,
     };
 
-    let result = resolve_and_prepare_for_session(&args, &context, false).unwrap();
+    let result = resolve_and_prepare_for_session(&args, &context, false, &crate::test_support::snapshot()).unwrap();
 
     unsafe {
         std::env::remove_var("HOME");
@@ -719,7 +704,7 @@ fn explicit_replace_flag_ignores_frontmatter_mode() {
         package_root: None,
     };
 
-    let result = resolve_and_prepare_for_session(&args, &context, false).unwrap();
+    let result = resolve_and_prepare_for_session(&args, &context, false, &crate::test_support::snapshot()).unwrap();
 
     unsafe {
         std::env::remove_var("HOME");
@@ -772,7 +757,7 @@ fn non_interactive_session_preserves_discovered_replace_mode() {
     let _home = ScopedHome::set(&home);
 
     let args = SystemPromptArgs::default();
-    let invocation = crate::invocation_context::InvocationContext::capture_at(&repo);
+    let invocation = crate::invocation_context::InvocationContext::capture_at(&crate::test_support::snapshot(), &repo).unwrap();
     let context = invocation.launch_context();
 
     let result = resolve_and_prepare_for_session_with_context(
@@ -826,7 +811,7 @@ fn session_reuses_resolved_external_source_context() {
     assert!(status.success());
     let prompt = write_temp_file(&source_repo, "prompt.md", "External prompt.");
 
-    let invocation = crate::invocation_context::InvocationContext::capture_at(&launch);
+    let invocation = crate::invocation_context::InvocationContext::capture_at(&crate::test_support::snapshot(), &launch).unwrap();
     let context = invocation.launch_context();
     let args = SystemPromptArgs {
         append_file: Some(prompt.display().to_string()),
@@ -852,15 +837,14 @@ fn session_reuses_resolved_external_source_context() {
 
 #[test]
 fn non_repository_session_runs_shell_in_launch_cwd() {
-    let compiler = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
-    if !std::process::Command::new(compiler)
-        .arg("--version")
-        .output()
-        .is_ok_and(|output| output.status.success())
-    {
+    // A compiled probe rather than `pwd`: the built-in shell blacklist rejects
+    // every Windows shell that could report a working directory, and no
+    // whitelist can override it.
+    let Some(probe) = crate::test_support::cwd_probe() else {
         eprintln!("skipping cwd probe test because rustc is unavailable");
         return;
-    }
+    };
+    let probe = biscuit_file::to_portable_string(&probe);
 
     let tmp = TempDir::new().unwrap();
     let launch = tmp.path().join("launch");
@@ -873,10 +857,6 @@ fn non_repository_session_runs_shell_in_launch_cwd() {
         .status()
         .unwrap();
     assert!(status.success());
-    // A compiled probe rather than `pwd`: the built-in shell blacklist rejects
-    // every Windows shell that could report a working directory, and no
-    // whitelist can override it.
-    let probe = compile_cwd_probe(&tmp.path().join("probe"));
     write_temp_file(
         &source_repo,
         ".darkmatter-shell-whitelist",
@@ -888,7 +868,7 @@ fn non_repository_session_runs_shell_in_launch_cwd() {
         &format!("Before.\n\n::shell \"{probe}\"\n\nAfter."),
     );
 
-    let invocation = crate::invocation_context::InvocationContext::capture_at(&launch);
+    let invocation = crate::invocation_context::InvocationContext::capture_at(&crate::test_support::snapshot(), &launch).unwrap();
     let context = invocation.launch_context();
     assert!(context.repo_root.is_none());
     let args = SystemPromptArgs {
@@ -1032,7 +1012,7 @@ fn non_interactive_session_uses_builtin_when_no_prompt_exists() {
         package_root: None,
     };
 
-    let result = resolve_and_prepare_for_session(&args, &context, true).unwrap();
+    let result = resolve_and_prepare_for_session(&args, &context, true, &crate::test_support::snapshot()).unwrap();
 
     unsafe {
         std::env::remove_var("HOME");
@@ -1091,7 +1071,7 @@ fn non_interactive_session_appends_repo_prompt() {
         package_root: None,
     };
 
-    let result = resolve_and_prepare_for_session(&args, &context, true).unwrap();
+    let result = resolve_and_prepare_for_session(&args, &context, true, &crate::test_support::snapshot()).unwrap();
 
     unsafe {
         std::env::remove_var("HOME");
@@ -1149,7 +1129,7 @@ fn non_interactive_session_preserves_replace_mode() {
         package_root: None,
     };
 
-    let result = resolve_and_prepare_for_session(&args, &context, true).unwrap();
+    let result = resolve_and_prepare_for_session(&args, &context, true, &crate::test_support::snapshot()).unwrap();
 
     unsafe {
         std::env::remove_var("HOME");
@@ -1195,7 +1175,7 @@ fn non_interactive_session_ignores_empty_base_prompt() {
         package_root: None,
     };
 
-    let result = resolve_and_prepare_for_session(&args, &context, true).unwrap();
+    let result = resolve_and_prepare_for_session(&args, &context, true, &crate::test_support::snapshot()).unwrap();
 
     unsafe {
         std::env::remove_var("HOME");
@@ -1232,7 +1212,7 @@ fn resolve_and_prepare_none() {
         package_root: None,
     };
 
-    let result = resolve_and_prepare(&args, &context).unwrap();
+    let result = resolve_and_prepare(&args, &context, &crate::test_support::snapshot()).unwrap();
 
     // Should be None unless ~/.claudine/system-prompt.md exists on the host
     match result {

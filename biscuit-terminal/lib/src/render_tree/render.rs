@@ -39,13 +39,13 @@ use renderable::tree::{
 };
 #[cfg(feature = "image")]
 use renderable::tree::TerminalMermaidMode;
-use renderable::tree::{ValidationError, ValidationMode, validate};
+use renderable::tree::{ValidationError, ValidationMode, is_html_comment_only, validate};
 
 use crate::components::block_quote::BlockQuote;
 use crate::components::horizontal_rule::{HorizontalRule, RuleAlignment, RuleStyle, RuleWeight};
 #[cfg(feature = "image")]
 use crate::components::mermaid::MermaidDiagram;
-use crate::components::prose::Prose;
+use crate::components::prose::{LineBreaks, Prose};
 use crate::components::renderable::TerminalRenderable;
 use crate::components::terminal_image::TerminalImage;
 use crate::discovery::detection::ImageSupport;
@@ -93,7 +93,8 @@ const ELLIPSIS: &str = "…";
 ///   escalated by the validation gate before the writer runs).
 /// - [`RenderError::Unsupported`] / [`RenderError::LossyRejected`] if
 ///   [`RenderStrictness::Strict`] meets content that cannot be rendered
-///   faithfully to a terminal (an unsupported node or raw HTML).
+///   faithfully to a terminal (an unsupported node, or raw HTML that is more
+///   than comments).
 pub fn render_terminal_node(
     node: &RenderNode,
     opts: &TerminalRenderOptions,
@@ -1116,6 +1117,15 @@ impl Writer<'_> {
                     None => child_effective.emphasis.dim = true,
                 }
                 let open = style::text_appearance_sgr(&child_effective, term);
+                // When the code appearance emits nothing beyond what the
+                // enclosing run already carries (no color, no dim support),
+                // the code would be unmarked; keep a Markdown backtick fence
+                // instead. Comparing the full appearances, not `open.is_empty()`,
+                // matters because `open` repeats any inherited styling.
+                if open == style::text_appearance_sgr(effective, term) {
+                    let fenced = renderable::markdown::code_span(value);
+                    return Ok(apply_classes(&fenced, &node.attrs.classes, effective, term));
+                }
                 let close = style::appearance_close(&open, effective, term);
                 Ok(apply_classes(&format!("{open}{value}{close}"), &node.attrs.classes, effective, term))
             }
@@ -1149,6 +1159,7 @@ impl Writer<'_> {
                     Some(hints) => self.apply_text_layout(styled, hints),
                     None => styled,
                 };
+                let url = super::link::terminal_link_url(node, url);
                 if url.is_empty() {
                     Ok(styled)
                 } else if term.osc_link_support {
@@ -1667,9 +1678,15 @@ impl Writer<'_> {
             None
         };
         // Escape Prose-special characters so literal `<b>` etc. in the
-        // rendered inline output are not mis-parsed as tags during wrap.
-        let safe = Prose::escape_text(markup);
-        let prose = Prose::new(safe).with_word_wrap(WordWrap::WrapProse(None, hang));
+        // rendered inline output are not mis-parsed as tags during wrap. A
+        // colorless terminal keeps inline code as a backtick span, which the
+        // re-parse reads literally, so its contents must stay unescaped.
+        // Soft breaks are already spaces here; every remaining newline is a
+        // hard break (or raw text's own line) and must survive the re-parse.
+        let safe = Prose::escape_text_outside_code_spans(markup);
+        let prose = Prose::new(safe)
+            .with_line_breaks(LineBreaks::Hard)
+            .with_word_wrap(WordWrap::WrapProse(None, hang));
         let rendered = prose.render_in_width(term, child_width);
 
         let mut out = String::new();
@@ -2132,12 +2149,19 @@ impl Writer<'_> {
     /// this is a [`RenderError::LossyRejected`]; under
     /// [`RenderStrictness::Warn`] the raw value is emitted verbatim with a
     /// diagnostic; under [`RenderStrictness::Lossy`] the node is dropped.
+    ///
+    /// A comment-only value ([`is_html_comment_only`]) has no visible content,
+    /// so it renders as nothing in every mode, with no diagnostic. Markdown
+    /// written by the shared renderer puts one between touching code spans.
     fn render_html(
         &mut self,
         node: &RenderNode,
         value: &str,
         _block: bool,
     ) -> Result<String, RenderError> {
+        if is_html_comment_only(value) {
+            return Ok(String::new());
+        }
         match self.opts.strictness {
             RenderStrictness::Strict => Err(RenderError::LossyRejected {
                 message: "raw HTML cannot be rendered to a terminal".to_string(),
@@ -2610,7 +2634,7 @@ fn reconstruct_cell(attrs: &renderable::tree::NodeAttrs, text: String) -> TableC
                 _ => TableCellContent::Text(text),
             }
         }
-        "styled_prose" => TableCellContent::Text(text),
+        "styled_inline_prose" => TableCellContent::Text(text),
         // "text" and anything unrecognized keep the rendered text.
         _ => TableCellContent::Text(text),
     }
@@ -2833,6 +2857,19 @@ mod render_tree_tests {
 
     use crate::terminal::Terminal;
     use crate::utils::escape_codes::strip_escape_codes;
+
+    #[test]
+    fn colorless_list_item_keeps_inline_code_literal() {
+        let code = RenderNode::inline_code(r"_a_[x]{{ctx.area}}a\b");
+        let list = RenderNode::list(false, None, vec![RenderNode::list_item(None, vec![code])]);
+        let term = Terminal::builder()
+            .width(120)
+            .color_depth(crate::discovery::detection::ColorDepth::None)
+            .build();
+        let opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
+        let output = strip_escape_codes(&render_terminal_node(&list, &opts).unwrap().output);
+        assert!(output.contains(r"`_a_[x]{{ctx.area}}a\b`"), "{output:?}");
+    }
 
     fn opts(strictness: RenderStrictness) -> TerminalRenderOptions {
         TerminalRenderOptions::new(&Terminal::new_optimistic(80), strictness)

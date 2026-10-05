@@ -126,6 +126,21 @@ mod tests {
     }
 
     #[test]
+    fn terminal_renderable_is_inline_text_without_line_breaks() {
+        use biscuit_terminal::components::renderable::TerminalRenderable;
+        use biscuit_terminal::prelude::strip_escape_codes;
+        use biscuit_terminal::terminal::Terminal;
+
+        let styled = Terminal::new_optimistic(80);
+        let plain = Terminal::default();
+        let glyph = strip_escape_codes(crate::domain::Emoji::Happy.icon().render(&styled));
+        let id = strip_escape_codes(crate::domain::Os::Finder.icon().render(&plain));
+
+        assert_eq!(glyph, "\u{1F600}");
+        assert_eq!(id, "hugeicons:apple-finder");
+    }
+
+    #[test]
     fn tree_renders_unicode_glyph_to_terminal_through_shared_adapter() {
         use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node};
         use renderable::tree::TreeRenderable;

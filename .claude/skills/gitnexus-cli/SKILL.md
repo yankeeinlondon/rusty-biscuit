@@ -19,12 +19,26 @@ Commands below use `node .gitnexus/run.cjs <command>` — the project-local runn
 just gitnexus
 ```
 
-In an interactive terminal, the recipe starts `gitnexus analyze --watch` in the
-background and returns, printing the watcher's pid and its log file. Re-running
+In an interactive terminal, the recipe starts a background watcher and returns,
+printing the watcher's pid, its log file, a `kill -- -<pid>` stop command (the
+negative pid stops the whole process group; a plain `kill` during the forced
+build orphans `gitnexus analyze`), and (when an index already exists)
+the `gitnexus status` of the index it is about to replace. Every watcher begins
+with a full `gitnexus analyze --force` and only then runs `gitnexus analyze
+--watch`: the watcher's own startup update is incremental and can leave a stale
+index reported as current, and `--watch` rejects `--force`. Expect each start
+to cost a full build (about 9 minutes for this repo on the dev Mac). Re-running
 it for the same worktree reports the running watcher's pid and log file, then
-`gitnexus status`. Watchers are tracked outside every worktree, in
-`/tmp/gitnexus-watch-<user>/`: `<worktree-slug>.pid` (pid, then worktree root)
-and `<worktree-slug>.log`. The path is fixed rather than `$TMPDIR` so sandboxed
+one of: that its initial full build is still running (rather than `gitnexus status`, which calls the
+worktree unindexed until that build finishes); a `gitnexus analyze --force` it
+runs itself when the worktree has no index and no build is running; or
+`gitnexus status`. Status output omits the analyzer-runner-identity JSON lines
+and, when the index is stale, names the build that is updating it (the pid
+holding `.gitnexus/analyze.lock`) instead of leaving `gitnexus status`'s
+"re-run gitnexus analyze" advice unanswered. Watchers are tracked outside every
+worktree, in `/tmp/gitnexus-watch-<user>/`: `<worktree-slug>.pid` (pid, then
+worktree root), `<worktree-slug>.log`, and `<worktree-slug>.bootstrap` while
+the initial full build runs. The path is fixed rather than `$TMPDIR` so sandboxed
 agents see the same registry.
 
 Every run, interactive or not, first sweeps that registry: entries whose process

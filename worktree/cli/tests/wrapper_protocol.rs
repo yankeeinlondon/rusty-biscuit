@@ -113,10 +113,14 @@ fn exit_3_when_removal_would_lose_files_and_nobody_can_confirm() {
         if let Some(ci) = ci {
             cmd.env("CI", ci);
         }
-        cmd.args(["remove", "feat/dirty"])
-            .assert()
-            .code(3)
-            .stderr(predicate::str::contains("Nothing was removed"));
+        let assert = cmd.args(["remove", "feat/dirty"]).assert().code(3);
+        let stderr = String::from_utf8_lossy(&assert.get_output().stderr).into_owned();
+        let refusal = stderr.lines().find(|line| line.contains("Nothing was removed"));
+        let advice = stderr.lines().find(|line| line.contains("to discard them."));
+        assert!(
+            refusal.is_some() && advice.is_some() && refusal != advice,
+            "the refusal and its advice are separate lines:\n{stderr}"
+        );
         assert!(wt_path.join("notes.txt").exists(), "CI={ci:?}");
     }
 }
@@ -149,6 +153,12 @@ fn exit_4_for_go_without_the_shell_wrapper() {
         assert!(
             !stderr.contains("dim>") && !stderr.contains("\\<"),
             "markup leaked into the rendered help:\n{stderr}"
+        );
+        assert!(stderr.starts_with('\n'), "a blank line comes first:\n{stderr}");
+        assert_eq!(
+            stderr.lines().filter(|line| line.contains("--completions")).count(),
+            4,
+            "each shell's line stays on its own line:\n{stderr}"
         );
     }
 }
@@ -353,8 +363,11 @@ fn create_from_forks_the_named_base_and_records_it() {
 fn create_from_errors_use_the_ruled_messages_and_create_nothing() {
     let fixture = CreateFixture::new();
 
+    // Without color a code span keeps its backticks, so the messages read
+    // exactly as the library spells them; its contents are never escaped.
     fixture
         .wt()
+        .env("NO_COLOR", "1")
         .args(["create", "feat/theme", "--from", "main"])
         .assert()
         .code(1)
@@ -365,6 +378,7 @@ fn create_from_errors_use_the_ruled_messages_and_create_nothing() {
 
     fixture
         .wt()
+        .env("NO_COLOR", "1")
         .args(["create", "fix/e", "--from", "no-such-base"])
         .assert()
         .code(1)
@@ -377,11 +391,13 @@ fn create_from_errors_use_the_ruled_messages_and_create_nothing() {
     run_git(fixture.repo.path(), &["checkout", "--detach", &head]);
     fixture
         .wt()
+        .env("NO_COLOR", "1")
         .args(["create", "fix/f"])
         .assert()
         .code(1)
         .stderr(predicate::str::contains("HEAD is detached"))
-        .stderr(predicate::str::contains("--from <branch>"));
+        .stderr(predicate::str::contains("Pass `--from <branch>` to choose"))
+        .stderr(predicate::str::contains("\\").not());
     assert!(!fixture.worktree_path("fix-f").exists());
     assert!(!fixture.store.exists(), "no failed create may write a record");
 }

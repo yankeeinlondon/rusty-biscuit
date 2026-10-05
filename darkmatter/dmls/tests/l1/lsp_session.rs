@@ -14,6 +14,18 @@ use dmls::overlay::expressions;
 use lsp_server::{RequestId, Response};
 use serde_json::{Value, json};
 
+/// A minimal repository Git discovery accepts, without running `git`.
+fn init_repository(root: &std::path::Path) {
+    std::fs::create_dir_all(root.join(".git/objects")).unwrap();
+    std::fs::create_dir_all(root.join(".git/refs/heads")).unwrap();
+    std::fs::write(root.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+    std::fs::write(
+        root.join(".git/config"),
+        "[core]\n\trepositoryformatversion = 0\n\tbare = false\n",
+    )
+    .unwrap();
+}
+
 fn neovim_like_initialize_params(root: &std::path::Path) -> Value {
     let root_uri = url::Url::from_directory_path(root).unwrap();
     json!({
@@ -561,6 +573,10 @@ fn server_rescan_fallback_tracks_unopened_files_on_save() {
 #[test]
 fn trigger_payload_failure_retains_effective_schema_and_diagnoses_envelope() {
     let workspace = LspWorkspace::new();
+    // A repository, so the open envelope's own context has the workspace as
+    // its tree root and `schemas/` as a schema root: its refresh reports the
+    // failed scan itself rather than waiting for the consumer's transition.
+    init_repository(workspace.path());
     let schemas = workspace.path().join("schemas");
     std::fs::create_dir(&schemas).unwrap();
     std::fs::write(
@@ -2666,6 +2682,52 @@ fn function_completion_shape() {
     assert_eq!(
         length["textEdit"]["range"]["end"],
         json!({ "line": 2, "character": 13 })
+    );
+
+    fixture.shutdown();
+}
+
+const CODE_LINK_COMPLETION_DOC: &str = "# Doc\n\nSee {{ code_l\n";
+
+/// DMLS offers `code_link` from the shared catalog, with bare-name insertion
+/// and the catalog's signature and description.
+#[test]
+fn function_completion_offers_code_link() {
+    let workspace = LspWorkspace::new();
+    std::fs::write(workspace.path().join("doc.md"), CODE_LINK_COMPLETION_DOC).unwrap();
+
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
+    open(&fixture, uri.as_str(), CODE_LINK_COMPLETION_DOC);
+
+    let completions = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 2, "character": 13 }
+            }),
+        )
+        .result
+        .expect("completions");
+    let items = completions.as_array().expect("completion array");
+    let code_link = items
+        .iter()
+        .find(|item| item["textEdit"]["newText"] == json!("code_link"))
+        .unwrap_or_else(|| panic!("`code_l` offers `code_link`; got {items:?}"));
+
+    let descriptor = expressions::function_descriptor("code_link").unwrap();
+    assert_eq!(code_link["label"], json!(descriptor.signature));
+    assert_eq!(code_link["label"], json!("code_link(file)"));
+    assert_eq!(code_link["detail"], json!(descriptor.typed_signature()));
+    assert_eq!(
+        code_link["documentation"]["value"],
+        json!(descriptor.description)
+    );
+    assert_eq!(
+        code_link["textEdit"]["range"]["start"],
+        json!({ "line": 2, "character": 7 })
     );
 
     fixture.shutdown();

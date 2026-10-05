@@ -34,7 +34,7 @@ use super::LoopAction;
 /// `frontmatter`, returning the stored value.
 fn loop_render(value: &Value, frontmatter: &Map<String, Value>) -> Result<Value, CompositionError> {
     let ambient = LoopAmbient::new(1, true, false, "", 0);
-    let lookup = LoopExpressionLookup::new(frontmatter, &ambient);
+    let lookup = LoopExpressionLookup::new(frontmatter, &ambient, crate::test_support::process_context(), std::path::Path::new("prompt.md"));
     let mut stage = ActionStaging::new(&Map::new(), 1, 1);
     stage.apply_action(
         &LoopAction::Set {
@@ -303,7 +303,8 @@ fn every_engine_agrees_on_missing_properties_and_escapes() {
         let Value::String(raw) = &case.input else { unreachable!() };
         let lookup = super::sequence::expr::SourceExpressionLookup::new(
             &case.frontmatter,
-            std::path::Path::new("."),
+            crate::test_support::process_context(),
+            std::path::Path::new("doc.md"),
         );
         let source = super::sequence::expr::render_interpolated(raw, &lookup)
             .unwrap_or_else(|error| panic!("sequence source failed for `{}`: {error}", case.name));

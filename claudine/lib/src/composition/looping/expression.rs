@@ -58,12 +58,13 @@ impl LoopAmbient {
 ///    `_loop_last_output`, `_loop_last_exit_code`)
 /// 5. Frontmatter properties, including nested object paths via `.`
 ///
-/// When constructed with a base directory ([`with_base_dir`](Self::with_base_dir)),
-/// the lookup exposes a [`ResolutionContext`] rooted at the prompt's parent so
+/// The lookup resolves file references through the request's
+/// file-resolution context, derived for the document at `source_path`, so
 /// read-side expression functions (`file_exists`, `absolute`, `relative`, …)
-/// resolve implicit document-authored references against the document directory
-/// before the repository fallback. The probe re-runs each iteration while the request
-/// snapshot and source remain fixed.
+/// resolve implicit document-authored references against the document
+/// directory before the repository fallback. The probe re-runs each iteration
+/// while the request context and source remain fixed. `env.NAME` without a
+/// prepared context reads the same context's environment.
 ///
 /// [`with_file_ref_fallback_dir`](Self::with_file_ref_fallback_dir) retains the
 /// captured launch area as diagnostic metadata only. It is not a candidate for
@@ -73,33 +74,29 @@ impl LoopAmbient {
 pub struct LoopExpressionLookup<'a> {
     frontmatter: &'a Map<String, Value>,
     ambient: &'a LoopAmbient,
-    base_dir: Option<&'a Path>,
     file_ref_fallback_dir: Option<&'a Path>,
-    file_resolution_context: Option<&'a biscuit_file::FileResolutionContext>,
-    source_path: Option<&'a Path>,
+    file_resolution_context: &'a biscuit_file::FileResolutionContext,
+    source_path: &'a Path,
     prepared_context: Option<&'a darkmatter::markdown::compose::ComposeContext>,
 }
 
 impl<'a> LoopExpressionLookup<'a> {
-    /// Create a lookup over the current loop state.
-    pub fn new(frontmatter: &'a Map<String, Value>, ambient: &'a LoopAmbient) -> Self {
+    /// Create a lookup over the current loop state of the document at
+    /// `source_path`, resolving its references through `file_resolution_context`.
+    pub fn new(
+        frontmatter: &'a Map<String, Value>,
+        ambient: &'a LoopAmbient,
+        file_resolution_context: &'a biscuit_file::FileResolutionContext,
+        source_path: &'a Path,
+    ) -> Self {
         Self {
             frontmatter,
             ambient,
-            base_dir: None,
             file_ref_fallback_dir: None,
-            file_resolution_context: None,
-            source_path: None,
+            file_resolution_context,
+            source_path,
             prepared_context: None,
         }
-    }
-
-    /// Root read-side expression functions at `base_dir` (typically the prompt
-    /// document's parent directory). `None` leaves the lookup context-free.
-    #[must_use]
-    pub fn with_base_dir(mut self, base_dir: Option<&'a Path>) -> Self {
-        self.base_dir = base_dir;
-        self
     }
 
     /// Retain the captured launch area as `file_ref_fallback_dir` diagnostic
@@ -110,18 +107,6 @@ impl<'a> LoopExpressionLookup<'a> {
     #[must_use]
     pub fn with_file_ref_fallback_dir(mut self, fallback: Option<&'a Path>) -> Self {
         self.file_ref_fallback_dir = fallback;
-        self
-    }
-
-    /// Reuse the request snapshot for references authored by `source_path`.
-    #[must_use]
-    pub fn with_file_resolution_context(
-        mut self,
-        context: Option<&'a biscuit_file::FileResolutionContext>,
-        source_path: &'a Path,
-    ) -> Self {
-        self.file_resolution_context = context;
-        self.source_path = Some(source_path);
         self
     }
 
@@ -159,7 +144,7 @@ impl EvaluationLookup for LoopExpressionLookup<'_> {
             {
                 return Some(Value::String(value.clone()));
             }
-            return resolve_env(env_key);
+            return resolve_env(self.file_resolution_context, env_key);
         }
 
         if is_reserved_namespace(path.split('.').next().unwrap_or(path)) {
@@ -182,21 +167,17 @@ impl EvaluationLookup for LoopExpressionLookup<'_> {
     }
 
     fn resolution_context(&self) -> Option<ResolutionContext> {
-        self.base_dir.map(|dir| match self.source_path {
-            Some(source_path) => super::super::document_expression_resolution_context(
-                source_path,
-                self.prepared_context,
-                self.file_resolution_context,
-                self.file_ref_fallback_dir,
-            ),
-            None => {
-                let ctx = ResolutionContext::new(dir.to_path_buf());
-                match self.file_ref_fallback_dir {
-                    Some(fallback) => ctx.with_file_ref_fallback_dir(fallback.to_path_buf()),
-                    None => ctx,
-                }
-            }
-        })
+        // `None` makes a read-side function fail with Darkmatter's
+        // "requires a document resolution context" error, so an invalid
+        // request context surfaces at the first file function.
+        super::super::document_expression_resolution_context(
+            self.source_path,
+            self.prepared_context,
+            self.file_resolution_context,
+            self.file_ref_fallback_dir,
+        )
+        .inspect_err(|error| tracing::warn!(%error, "loop expression context is invalid"))
+        .ok()
     }
 }
 
@@ -261,12 +242,12 @@ fn resolve_doc(frontmatter: &Map<String, Value>, path: &str) -> Option<Value> {
     }
 }
 
-fn resolve_env(name: &str) -> Option<Value> {
+fn resolve_env(context: &biscuit_file::FileResolutionContext, name: &str) -> Option<Value> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
         return None;
     }
-    std::env::var(trimmed).ok().map(Value::String)
+    context.env().get(trimmed).cloned().map(Value::String)
 }
 
 fn resolve_ambient(path: &str, ambient: &LoopAmbient) -> Option<Value> {
@@ -329,7 +310,7 @@ mod tests {
     fn resolves_ambient_variables() {
         let fm = map(json!({}));
         let ambient = LoopAmbient::new(3, false, true, "done", 7);
-        let lookup = LoopExpressionLookup::new(&fm, &ambient);
+        let lookup = LoopExpressionLookup::new(&fm, &ambient, crate::test_support::process_context(), std::path::Path::new("prompt.md"));
 
         assert_eq!(lookup.get("_loop_count"), Some(json!(3)));
         assert_eq!(lookup.get("_loop_is_first"), Some(json!(false)));
@@ -345,7 +326,7 @@ mod tests {
         // not silently overwritten by the loop counter.
         let fm = map(json!({"iteration": 99, "is_first": false}));
         let ambient = ambient();
-        let lookup = LoopExpressionLookup::new(&fm, &ambient);
+        let lookup = LoopExpressionLookup::new(&fm, &ambient, crate::test_support::process_context(), std::path::Path::new("prompt.md"));
 
         assert_eq!(lookup.get("iteration"), Some(json!(99)));
         assert_eq!(lookup.get("is_first"), Some(json!(false)));
@@ -361,7 +342,7 @@ mod tests {
             "state": {"inner": {"done": true}}
         }));
         let ambient = ambient();
-        let lookup = LoopExpressionLookup::new(&fm, &ambient);
+        let lookup = LoopExpressionLookup::new(&fm, &ambient, crate::test_support::process_context(), std::path::Path::new("prompt.md"));
 
         assert_eq!(lookup.get("counter"), Some(json!(4)));
         assert_eq!(lookup.get("stage"), Some(json!("review")));
@@ -372,7 +353,7 @@ mod tests {
     fn resolves_environment_variables() {
         let fm = map(json!({}));
         let ambient = ambient();
-        let lookup = LoopExpressionLookup::new(&fm, &ambient);
+        let lookup = LoopExpressionLookup::new(&fm, &ambient, crate::test_support::process_context(), std::path::Path::new("prompt.md"));
 
         assert_eq!(
             lookup.get("env.PATH").is_some(),
@@ -384,11 +365,11 @@ mod tests {
     fn evaluates_while_condition() {
         let ambient = ambient();
         let fm = map(json!({"counter": 3}));
-        let lookup = LoopExpressionLookup::new(&fm, &ambient);
+        let lookup = LoopExpressionLookup::new(&fm, &ambient, crate::test_support::process_context(), std::path::Path::new("prompt.md"));
         assert!(evaluate_condition(&LoopCondition::While("counter < 5".into()), &lookup).unwrap());
 
         let fm = map(json!({"counter": 5}));
-        let lookup = LoopExpressionLookup::new(&fm, &ambient);
+        let lookup = LoopExpressionLookup::new(&fm, &ambient, crate::test_support::process_context(), std::path::Path::new("prompt.md"));
         assert!(!evaluate_condition(&LoopCondition::While("counter < 5".into()), &lookup).unwrap());
     }
 
@@ -396,11 +377,11 @@ mod tests {
     fn evaluates_until_condition_as_continue_decision() {
         let ambient = ambient();
         let fm = map(json!({"done": false}));
-        let lookup = LoopExpressionLookup::new(&fm, &ambient);
+        let lookup = LoopExpressionLookup::new(&fm, &ambient, crate::test_support::process_context(), std::path::Path::new("prompt.md"));
         assert!(evaluate_condition(&LoopCondition::Until("done".into()), &lookup).unwrap());
 
         let fm = map(json!({"done": true}));
-        let lookup = LoopExpressionLookup::new(&fm, &ambient);
+        let lookup = LoopExpressionLookup::new(&fm, &ambient, crate::test_support::process_context(), std::path::Path::new("prompt.md"));
         assert!(!evaluate_condition(&LoopCondition::Until("done".into()), &lookup).unwrap());
     }
 
@@ -408,7 +389,7 @@ mod tests {
     fn evaluates_ambient_and_env_conditions() {
         let fm = map(json!({"counter": 1}));
         let ambient = ambient();
-        let lookup = LoopExpressionLookup::new(&fm, &ambient);
+        let lookup = LoopExpressionLookup::new(&fm, &ambient, crate::test_support::process_context(), std::path::Path::new("prompt.md"));
 
         assert!(
             evaluate_condition(&LoopCondition::While("_loop_count == 1".into()), &lookup).unwrap()
@@ -434,7 +415,7 @@ mod tests {
             "doc": {"child": "literal-doc"},
         }));
         let ambient = ambient();
-        let lookup = LoopExpressionLookup::new(&fm, &ambient);
+        let lookup = LoopExpressionLookup::new(&fm, &ambient, crate::test_support::process_context(), std::path::Path::new("prompt.md"));
 
         // doc.<path> traverses the frontmatter object.
         assert_eq!(lookup.get("doc.build"), Some(json!("from-frontmatter")));
@@ -453,18 +434,16 @@ mod tests {
     }
 
     #[test]
-    fn read_side_functions_resolve_against_base_dir() {
+    fn read_side_functions_resolve_against_the_document_directory() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::write(dir.path().join("artifact"), "ready").unwrap();
         let fm = map(json!({}));
         let ambient = ambient();
+        let context = crate::test_support::context_at(dir.path());
+        let source_path = dir.path().join("prompt.md");
 
-        // Without a base dir, read-side functions have no resolution context.
-        let context_free = LoopExpressionLookup::new(&fm, &ambient);
-        assert!(context_free.resolution_context().is_none());
-
-        // With a base dir, `file_exists` resolves against it.
-        let lookup = LoopExpressionLookup::new(&fm, &ambient).with_base_dir(Some(dir.path()));
+        // `file_exists` resolves against the directory of the document.
+        let lookup = LoopExpressionLookup::new(&fm, &ambient, &context, &source_path);
         assert!(lookup.resolution_context().is_some());
 
         // `until` continues while the expression is falsy. The artifact exists,
@@ -504,8 +483,9 @@ mod tests {
         let fm = map(json!({}));
         let ambient = ambient();
 
-        let lookup = LoopExpressionLookup::new(&fm, &ambient)
-            .with_base_dir(Some(prompt_dir.path()))
+        let context = crate::test_support::context_at(prompt_dir.path());
+        let source_path = prompt_dir.path().join("prompt.md");
+        let lookup = LoopExpressionLookup::new(&fm, &ambient, &context, &source_path)
             .with_file_ref_fallback_dir(Some(launch_dir.path()));
 
         // A file present only under the launch area does NOT resolve, so the
@@ -548,7 +528,7 @@ mod tests {
     fn parse_errors_carry_the_typed_parse_cause() {
         let fm = map(json!({}));
         let ambient = ambient();
-        let lookup = LoopExpressionLookup::new(&fm, &ambient);
+        let lookup = LoopExpressionLookup::new(&fm, &ambient, crate::test_support::process_context(), std::path::Path::new("prompt.md"));
         let err = evaluate_condition(&LoopCondition::While("counter <".into()), &lookup)
             .expect_err("condition should fail to parse");
 
@@ -578,7 +558,7 @@ mod tests {
     fn evaluate_errors_carry_the_typed_evaluate_cause() {
         let fm = map(json!({}));
         let ambient = ambient();
-        let lookup = LoopExpressionLookup::new(&fm, &ambient);
+        let lookup = LoopExpressionLookup::new(&fm, &ambient, crate::test_support::process_context(), std::path::Path::new("prompt.md"));
         let err = evaluate_condition(&LoopCondition::Until("no_such_function()".into()), &lookup)
             .expect_err("condition should fail to evaluate");
 

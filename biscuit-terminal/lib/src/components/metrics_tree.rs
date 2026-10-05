@@ -17,7 +17,7 @@
 use std::any::Any;
 use std::time::Duration;
 
-use crate::components::prose::Prose;
+use crate::components::prose::{LineBreaks, Prose};
 use crate::components::renderable::TerminalRenderable;
 use crate::terminal::Terminal;
 use crate::utils::layout::Layout;
@@ -591,7 +591,7 @@ impl TerminalRenderable for MetricsTree {
         // render-tree fold honors `margin` / `alignment` / `max_width` /
         // `word_wrap` (spec C1/C5). The markup text is identical; only the
         // outer box placement is delegated.
-        let mut prose = Prose::new(self.build_markup(true, width));
+        let mut prose = Prose::new(self.build_markup(true, width)).with_line_breaks(LineBreaks::Hard);
         *prose.layout_mut() = self.layout.clone();
         prose.render_optimistic(term_width)
     }
@@ -600,7 +600,8 @@ impl TerminalRenderable for MetricsTree {
         let width = term.width() as usize;
         // See `render_optimistic`: propagate the outer Layout so the fold
         // applies the box model.
-        let mut prose = Prose::new(self.build_markup(term.supports_unicode, width));
+        let mut prose =
+            Prose::new(self.build_markup(term.supports_unicode, width)).with_line_breaks(LineBreaks::Hard);
         *prose.layout_mut() = self.layout.clone();
         prose.render(term)
     }
@@ -632,7 +633,8 @@ impl TreeRenderable for MetricsTree {
         // Render at a generous width so the markup text is not pre-truncated;
         // the fold re-resolves the box against the real terminal width.
         let markup = self.build_markup(true, 240);
-        let mut prose = Prose::new(markup);
+        // One metric per line: each newline in the markup is a hard break.
+        let mut prose = Prose::new(markup).with_line_breaks(LineBreaks::Hard);
         *prose.layout_mut() = self.layout.clone();
         prose.render_tree()
     }

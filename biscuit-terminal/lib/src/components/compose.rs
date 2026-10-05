@@ -320,13 +320,12 @@ impl Compose {
     /// `OrderedList`, `UnorderedList`, `Progress`, `TwoColumn`, and `Compose`
     /// itself) contribute their structural node directly.
     ///
-    /// [`Prose`] gets a dedicated downcast path so inline styling
-    /// (`<b>` / `<i>` / `<red>` runs) survives as structured inline
-    /// `RenderNode`s (`Strong` / `Emphasis` / styled `Span`) — matching the
-    /// pattern established by the `BlockQuote` migration. Without this, the
-    /// generic [`RenderableTerminalContent::to_tree_nodes`] fallback would
-    /// flatten Prose to ANSI-stripped plain text and Compose would silently
-    /// drop the user's authored styling.
+    /// A [`Prose`] part contributes its `Paragraph` and `Code` blocks, so its
+    /// inline styling (`<b>` / `<i>` / `<red>` runs) survives as structured
+    /// `Strong` / `Emphasis` / styled `Span` nodes. Compose's sequence has no
+    /// separator of its own, so a blank-line `Text` is placed between
+    /// consecutive blocks of one `Prose`: its paragraphs stay apart on every
+    /// target, as they do when the `Prose` renders alone.
     ///
     /// `terminal_hint` is the terminal context to use when a bespoke-only
     /// component must be rendered for the ANSI-stripping fallback. Threading
@@ -343,6 +342,21 @@ impl Compose {
         // terminal-threaded fallback; Compose only adds its own `Root`
         // flattening on top.
         let nodes = project_renderable_content(part, ProjectionMode::Structural { terminal_hint });
+        let is_prose = matches!(
+            part,
+            RenderableTerminalContent::Component(component)
+                if component.as_any().downcast_ref::<Prose>().is_some()
+        );
+        if is_prose {
+            let mut joined = Vec::with_capacity(nodes.len() * 2);
+            for (index, node) in nodes.into_iter().enumerate() {
+                if index > 0 {
+                    joined.push(RenderNode::text("\n\n"));
+                }
+                joined.push(node);
+            }
+            return joined;
+        }
         // A nested `Compose` (or any tree-renderable that returns a `Root`
         // node) is invalid as a child of our outer `Root`. Inline its
         // children so the nested sequence's contents become siblings —
@@ -735,10 +749,11 @@ mod tests {
         let (_tmp, fs) = make_fs_fixture();
         let mut compose = Compose::default();
         compose
-            .add_prose(Prose::new("<bold>Directory listing</bold>\n"))
+            .add_prose(Prose::new("<bold>Directory listing</bold>"))
+            .add_text("\n")
             .add_file_system(fs);
         let output = compose.render_optimistic(Some(80));
-        assert!(output.contains("Directory listing"));
+        assert!(crate::discovery::eval::strip_ansi_codes(&output).starts_with("Directory listing\n"));
         assert!(output.contains("hello.txt"));
     }
 
@@ -847,10 +862,11 @@ mod tests {
             .with_data(vec![vec!["k".into(), "v".into()]]);
         let mut compose = Compose::default();
         compose
-            .add_prose(Prose::new("<bold>Table:</bold>\n"))
+            .add_prose(Prose::new("<bold>Table:</bold>"))
+            .add_text("\n")
             .add_table(table);
         let output = compose.render_optimistic(Some(80));
-        assert!(output.contains("Table:"));
+        assert!(crate::discovery::eval::strip_ansi_codes(&output).starts_with("Table:\n"));
         assert!(output.contains("Key"));
     }
 
@@ -876,11 +892,11 @@ mod tests {
         let mut compose = Compose::default();
         compose
             .add_text("Header\n")
-            .add_prose(Prose::new("description\n"))
+            .add_prose(Prose::new("description"))
+            .add_text("\n")
             .add_unordered_list(UnorderedList::new(vec!["item"]));
         let output = compose.render_optimistic(Some(80));
-        assert!(output.contains("Header"));
-        assert!(output.contains("description"));
+        assert!(output.starts_with("Header\ndescription\n"), "{output:?}");
         assert!(output.contains("item"));
     }
 
@@ -1783,3 +1799,4 @@ mod tests {
         assert!(stripped.contains(" tail"));
     }
 }
+

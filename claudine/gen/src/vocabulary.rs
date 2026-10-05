@@ -28,6 +28,8 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+use darkmatter::markdown::compose::RequestSnapshot;
+
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -251,11 +253,11 @@ pub fn vocabulary_path(area: &Path) -> PathBuf {
 /// parserless provider carries one, or any bucket violates the hygiene rules
 /// ([`GenError::VocabularyGenInvalid`]); the loader's collision/parse errors
 /// propagate unchanged.
-pub fn build_vocabulary(area: &Path) -> Result<String, GenError> {
+pub fn build_vocabulary(area: &Path, snapshot: &RequestSnapshot) -> Result<String, GenError> {
     let slugs = provider_slugs();
     let mut tables = Vec::with_capacity(slugs.len());
     for slug in slugs {
-        let inputs = inputs::load(area, slug, &[RESEARCH_TOPIC])?;
+        let inputs = inputs::load(area, slug, &[RESEARCH_TOPIC], snapshot)?;
         let loaded = load_error_vocabulary(&inputs)?;
         let parserless = PARSERLESS_SLUGS.contains(&slug);
         let vocab = match (loaded, parserless) {
@@ -289,8 +291,8 @@ pub fn build_vocabulary(area: &Path) -> Result<String, GenError> {
 
 /// Byte-compares [`build_vocabulary`] output against the committed file — the
 /// code path shared by the CLI `check` subcommand and the drift test.
-pub fn check_vocabulary(area: &Path) -> Result<CheckOutcome, GenError> {
-    let generated = build_vocabulary(area)?;
+pub fn check_vocabulary(area: &Path, snapshot: &RequestSnapshot) -> Result<CheckOutcome, GenError> {
+    let generated = build_vocabulary(area, snapshot)?;
     let path = vocabulary_path(area);
     if !path.is_file() {
         return Ok(CheckOutcome::MissingCommitted { path });

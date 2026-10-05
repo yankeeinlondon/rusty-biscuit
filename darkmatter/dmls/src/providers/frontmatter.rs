@@ -31,7 +31,6 @@ use lsp_types::{
 };
 
 use super::DocumentContext;
-use crate::graph::normalize_join;
 use crate::overlay::{
     FmEntry, FmEntryRole, FmPathSegment, FmValueKind, FrontmatterAst, SchemaAuthoringState,
     doc_links, expressions,
@@ -1320,7 +1319,7 @@ pub(crate) fn schema_hover_details(def: &PropertyDef) -> Option<String> {
     // A `literal(x)` atom shows its exact pinned value directly under the type,
     // ahead of the shared constraint/description lines.
     if let Some(value) = atom.literal_value() {
-        lines.push(format!("Value: _{value}_"));
+        lines.push(format!("Value: {}", hover_italic(&value.to_string())));
     }
 
     if is_required(def) {
@@ -1328,7 +1327,7 @@ pub(crate) fn schema_hover_details(def: &PropertyDef) -> Option<String> {
     }
     lines.extend(eager_hover_line(def));
     if let Some(members) = enum_members(atom) {
-        let italicized: Vec<String> = members.iter().map(|m| format!("_{m}_")).collect();
+        let italicized: Vec<String> = members.iter().map(|m| hover_italic(m)).collect();
         lines.push(format!("Values: {}", italicized.join(", ")));
     }
     if let Some(default) = default_value(atom) {
@@ -1398,9 +1397,17 @@ pub fn document_links(ctx: &DocumentContext) -> Vec<DocumentLink> {
 
 /// The `(value_span, resolved_path)` navigation targets in the frontmatter:
 /// the `$schema` file reference plus every `file(...)`-typed scalar value.
+///
+/// Each value resolves through the document's context to the existing file,
+/// else to where it would be created. A document without a context has no
+/// targets.
 fn nav_targets(ctx: &DocumentContext, ast: &FrontmatterAst) -> Vec<(SourceSpan, PathBuf)> {
-    let Some(base_dir) = ctx.path.parent() else {
+    if ctx.file_context().is_err() {
         return Vec::new();
+    }
+    let navigate = |value: &str| {
+        ctx.resolve_reference(value)
+            .and_then(|target| target.navigation_target().map(Path::to_path_buf))
     };
     let mut targets = Vec::new();
 
@@ -1409,8 +1416,9 @@ fn nav_targets(ctx: &DocumentContext, ast: &FrontmatterAst) -> Vec<(SourceSpan, 
         && entry.kind == FmValueKind::Scalar
         && let Some(value) = &entry.scalar
         && looks_like_path(value)
+        && let Some(path) = navigate(value)
     {
-        targets.push((entry.value_span.clone(), normalize_join(base_dir, value)));
+        targets.push((entry.value_span.clone(), path));
     }
 
     // `file(...)`-typed scalar values at any depth: a top-level key is a
@@ -1428,8 +1436,9 @@ fn nav_targets(ctx: &DocumentContext, ast: &FrontmatterAst) -> Vec<(SourceSpan, 
             .is_some_and(|def| file_atom(&def).is_some())
             && let Some(value) = &entry.scalar
             && is_schema_file_value(value)
+            && let Some(path) = navigate(value)
         {
-            targets.push((entry.value_span.clone(), normalize_join(base_dir, value)));
+            targets.push((entry.value_span.clone(), path));
         }
     }
     targets
@@ -2026,6 +2035,33 @@ fn enum_members(atom: &PropertyAtom) -> Option<&[String]> {
     })
 }
 
+/// Italicizes `text` for a hover line, where it follows a space and precedes
+/// `,` or the line end.
+///
+/// A `_` or `\` at either edge is backslash-escaped so it cannot join or
+/// escape the `_` delimiters (`_x` → `_\_x_`, not `__x_`). Text that is
+/// empty or has edge whitespace, where no delimiter can open or close, is
+/// written plain.
+fn hover_italic(text: &str) -> String {
+    if text.is_empty()
+        || text.starts_with(char::is_whitespace)
+        || text.ends_with(char::is_whitespace)
+    {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len() + 4);
+    out.push('_');
+    let last = text.char_indices().next_back().map(|(index, _)| index);
+    for (index, c) in text.char_indices() {
+        if (index == 0 || Some(index) == last) && matches!(c, '_' | '\\') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out.push('_');
+    out
+}
+
 /// The declared default value of an atom, if any.
 fn default_value(atom: &PropertyAtom) -> Option<&serde_json::Value> {
     atom.constraints.iter().find_map(|constraint| match constraint {
@@ -2339,7 +2375,7 @@ mod tests {
         let config = DmlsConfig::default();
         let roots = [PathBuf::from("/w")];
         let state = OverlayState::default();
-        let overlay = state.for_document(&uri, text, path, &config, &roots);
+        let overlay = state.for_document(&uri, text, path, &config, &roots, &crate::context::test_support::resolution_for(path));
         let source_map = SourceMap::new(uri.clone(), 1, PositionEncoding::Utf16, Arc::from(text));
         let mut indices = BTreeMap::new();
         for (doc_path, source) in docs {
@@ -2348,7 +2384,7 @@ mod tests {
                 crate::graph::index_document(Path::new(doc_path), source),
             );
         }
-        let graph = WorkspaceGraph::build(&indices, 1);
+        let graph = WorkspaceGraph::build(&indices, 1, &crate::context::test_support::workspace_contexts());
         let profile = ClientProfile::from_initialize(&InitializeParams::default(), PositionEncoding::Utf16);
         let ctx = DocumentContext {
             uri: &uri,
@@ -2360,6 +2396,7 @@ mod tests {
             config: &config,
             profile: &profile,
             overlay: overlay.as_ref(),
+            resolution: &crate::context::test_support::resolution_for(path),
         };
         f(&ctx)
     }
@@ -4154,5 +4191,26 @@ mod tests {
         let (element, start) = flow_array_element("[a,    b", 0);
         assert_eq!(element, "b");
         assert_eq!(start, 7); // after `,    `
+    }
+
+    #[test]
+    fn hover_italic_keeps_its_delimiters_able_to_open_and_close() {
+        let cases = [
+            ("draft", "_draft_"),
+            ("\"published\"", "_\"published\"_"),
+            ("snake_case", "_snake_case_"),
+            // An edge `_` would join the delimiter run, an edge `\` would
+            // escape it.
+            ("_private", "_\\_private_"),
+            ("trailing_", "_trailing\\__"),
+            ("_", "_\\__"),
+            ("a\\", "_a\\\\_"),
+            // No delimiter opens before or closes after whitespace.
+            (" padded", " padded"),
+            ("", ""),
+        ];
+        for (text, expected) in cases {
+            assert_eq!(hover_italic(text), expected, "{text:?}");
+        }
     }
 }

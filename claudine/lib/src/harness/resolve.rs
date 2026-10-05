@@ -20,19 +20,6 @@ use biscuit_file::{FileReference, FileReferenceError, FileResolutionContext};
 
 use crate::harness::error::{HarnessError, PathResolutionFailure, ResolutionDetail};
 
-/// Context for resolving harness-internal document references.
-#[derive(Debug, Clone)]
-pub struct HarnessResolutionContext<'a> {
-    /// Absolute path to the source document authoring the reference.
-    pub source_path: &'a Path,
-    /// Repository (worktree) root, when known. Supplied by the caller (already
-    /// discovered via `sniff`); implicit references use it after the source.
-    pub repo_root: Option<&'a Path>,
-    /// Package-area root captured for this request. Repository-scoped (`^`)
-    /// references use this anchor before the repository fallback.
-    pub package_area: Option<&'a Path>,
-}
-
 /// Resolve a raw reference string to an existing file, delegating grammar and
 /// candidate ordering to the shared [`FileReference`] resolver.
 ///
@@ -49,6 +36,10 @@ pub struct HarnessResolutionContext<'a> {
 /// - **`~`**, **`~/foo`** — the user's home directory (`~user` unsupported).
 /// - **absolute** — the path itself.
 ///
+/// The reference resolves in `request_context` derived for `source_path`
+/// (`for_source`): only the authoring document changes; every other
+/// resolution input is retained without ambient reads or discovery.
+///
 /// ## Errors
 ///
 /// Returns [`HarnessError::PathResolutionFailed`] with
@@ -60,60 +51,6 @@ pub struct HarnessResolutionContext<'a> {
 /// [`HarnessError::FileReferenceUnresolvable`] carrying the typed
 /// [`FileReferenceError`].
 pub fn resolve_harness_path(
-    raw: &str,
-    ctx: &HarnessResolutionContext<'_>,
-) -> Result<PathBuf, HarnessError> {
-    let trimmed = raw.trim();
-
-    if trimmed.is_empty() {
-        return Err(HarnessError::PathResolutionFailed {
-            raw: raw.to_string(),
-            failure: PathResolutionFailure::EmptyReference,
-            source_path: Some(ctx.source_path.to_path_buf()),
-            resolved: None,
-            resolution: None,
-        });
-    }
-
-    let file_ref = FileReference::new(trimmed)
-        .map_err(|error| unresolvable(trimmed, ctx.source_path, error, None))?;
-    let resolution_ctx = build_resolution_context(trimmed, ctx)?;
-
-    let detailed = file_ref.resolve_detailed(&resolution_ctx);
-    // Surface the first ordered candidate in the
-    // "does not exist" message so a miss names a concrete path.
-    let primary = detailed
-        .candidates()
-        .first()
-        .map(|probed| probed.candidate().path().to_path_buf());
-    // Retain the whole ordered plan before `into_convenience` discards it, so a
-    // no-match projects candidate/root/kind detail rather than just its winner
-    // (spec §D8).
-    let resolution = ResolutionDetail::from_detailed(&detailed);
-
-    match detailed.into_convenience() {
-        Ok(Some(path)) => Ok(path),
-        Ok(None) => Err(HarnessError::PathResolutionFailed {
-            raw: trimmed.to_string(),
-            failure: PathResolutionFailure::TargetMissing,
-            source_path: Some(ctx.source_path.to_path_buf()),
-            resolved: primary,
-            resolution: Some(Box::new(resolution)),
-        }),
-        Err(error) => Err(unresolvable(
-            trimmed,
-            ctx.source_path,
-            error,
-            Some(resolution),
-        )),
-    }
-}
-
-/// Resolves a harness reference from an immutable request snapshot.
-///
-/// Only the authoring document changes; every other resolution input is
-/// retained from `request_context` without ambient reads or discovery.
-pub fn resolve_harness_path_in_context(
     raw: &str,
     source_path: &Path,
     request_context: &FileResolutionContext,
@@ -161,37 +98,6 @@ pub fn resolve_harness_path_in_context(
             Some(resolution),
         )),
     }
-}
-
-/// Build the explicit resolution context for a document-backed reference.
-///
-/// `base_dir` is the source document's directory. A caller-supplied repository
-/// root is retained only when it lexically contains that directory; implicit
-/// references still probe the source directory before that repository scope.
-fn build_resolution_context(
-    trimmed: &str,
-    ctx: &HarnessResolutionContext<'_>,
-) -> Result<FileResolutionContext, HarnessError> {
-    let base_dir = ctx
-        .source_path
-        .parent()
-        .ok_or_else(|| HarnessError::PathResolutionFailed {
-            raw: trimmed.to_string(),
-            failure: PathResolutionFailure::NoSourceParent,
-            source_path: Some(ctx.source_path.to_path_buf()),
-            resolved: None,
-            resolution: None,
-        })?;
-
-    let mut resolution_ctx =
-        FileResolutionContext::new(base_dir).with_source_path(ctx.source_path);
-    if let Some(root) = ctx.repo_root.filter(|root| base_dir.starts_with(root)) {
-        resolution_ctx = resolution_ctx.with_repository_root(root);
-    }
-    if let Some(package_area) = ctx.package_area {
-        resolution_ctx = resolution_ctx.with_package_area(package_area);
-    }
-    Ok(resolution_ctx)
 }
 
 /// Wrap a typed [`FileReferenceError`] in the harness diagnostic.

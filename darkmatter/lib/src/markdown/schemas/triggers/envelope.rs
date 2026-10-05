@@ -14,7 +14,8 @@
 //! performs no I/O: it validates shape, parses the match grammar, and runs
 //! the vacuous-trigger lint, then hands the parsed result back to the caller.
 //!
-//! See `darkmatter/features/2026-07-10-schema-triggers/spec.md`.
+//! See the "Repository Trigger Schemas" section of
+//! `darkmatter/docs/topics/schemas/definition.md`.
 
 use serde_yaml_ng::Value as YamlValue;
 

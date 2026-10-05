@@ -120,6 +120,14 @@ files (`find target/release -type f ! -perm -u+w -links +1 -delete`) fixed it
 without a cold rebuild. Same failure and fix in `<host>--feat-reusable-path` on
 2026-09-30 (373 files, first seen as `libav_scenechange-*.rmeta is not
 writeable`), so clear them in any standing clone before reading the leg as red.
+Again in `<host>--fix-magic-globs` on 2026-10-02 (`libbiscuit_file-*.rmeta`);
+a session that may not SSH to the host can take the native path instead by
+passing a build flag (`--features <a feature the package declares>`).
+
+In archive mode a Cargo target selector (`--test l1`, `--lib`) reaches the
+consumer's `cargo nextest run --archive-file` and is rejected with a usage
+error, reported as a failing leg. Narrow by test-name filter alone
+(`just cross-check darkmatter --os windows glob_implementation_guard`).
 
 The `just` recipe re-splits its arguments, so a filterset containing spaces
 or parentheses (`-E 'binary(a) | binary(b)'`) dies with a shell syntax error

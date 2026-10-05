@@ -21,5 +21,5 @@ pub use diagnostics::{
 pub use env_anchor::PORTABLE_ENV_VARIABLES;
 pub use evaluate::{PortablePath, PortableReference};
 pub use path_identity::{PathIdentity, RelativeRoute};
-pub(crate) use path_identity::normalize_native;
+pub(crate) use path_identity::{first_seen_by_identity, normalize_native};
 pub use strategy::{IntentForms, PortabilityPreference};

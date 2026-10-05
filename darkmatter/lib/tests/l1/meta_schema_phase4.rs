@@ -8,7 +8,7 @@ use darkmatter::markdown::{
     schemas::{
         Constraint, DarkmatterSchemas, PropertyAtom, SimplifiedType, TypeExpr,
         ValidationProblemCode, parse_yaml_schema, to_json_schema,
-        triggers::{MatchExpr, matches as trigger_matches},
+        triggers::{MatchExpr, PathSubject, matches as trigger_matches},
     },
 };
 use serde_json::{Value, json};
@@ -20,7 +20,7 @@ fn compiled_schema(source: &str) -> Value {
 }
 
 fn validate_document(source: &str) -> darkmatter::markdown::schemas::ValidationReport {
-    DarkmatterSchemas::new()
+    DarkmatterSchemas::new(crate::request_support::cwd_context())
         .validate(&Markdown::from(source))
         .expect("schema compilation and validation")
 }
@@ -36,7 +36,7 @@ fn semantic_match(name: &str, ty: SimplifiedType, is_array: bool, value: Value) 
             description: None,
         },
     };
-    trigger_matches(&expr, &json!({ name: value }), "docs/input.md")
+    trigger_matches(&expr, &json!({ name: value }), &PathSubject::detached())
 }
 
 #[test]
@@ -163,7 +163,7 @@ fn semantic_carriers_are_validation_and_compose_no_ops() {
     );
     let original = Markdown::from(source);
     let before = original.frontmatter().as_map().clone();
-    let report = DarkmatterSchemas::new()
+    let report = DarkmatterSchemas::new(crate::request_support::cwd_context())
         .validate(&original)
         .expect("validation must run");
     assert!(
@@ -177,7 +177,7 @@ fn semantic_carriers_are_validation_and_compose_no_ops() {
         "validation is read-only"
     );
 
-    let (composed, _) = original.compose().expect("normal compose path");
+    let (composed, _) = original.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).expect("normal compose path");
     assert_eq!(composed.frontmatter().as_map(), &before);
 }
 

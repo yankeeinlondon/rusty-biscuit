@@ -1,5 +1,6 @@
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable;
+use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::Result;
 
 use crate::log;
@@ -148,19 +149,22 @@ fn render_group(group: &CommandGroup, term: &biscuit_terminal::terminal::Termina
     out
 }
 
+/// The name row, then the package description on its own row.
+fn title(term: &Terminal) -> String {
+    Prose::new(format!(
+        "<b><yellow>Claudine</yellow></b>\n<dim><i>{}</i></dim>",
+        env!("CARGO_PKG_DESCRIPTION")
+    ))
+    .with_line_breaks(LineBreaks::Hard)
+    .render(term)
+}
+
 /// Render the grouped help display.
 pub fn run() -> Result<()> {
     let term = log::terminal();
     let mut output = String::new();
 
-    // Title
-    output.push_str(
-        &Prose::new(format!(
-            "<b><yellow>Claudine</yellow></b>\n<dim><i>{}</i></dim>",
-            env!("CARGO_PKG_DESCRIPTION")
-        ))
-        .render(&term),
-    );
+    output.push_str(&title(&term));
     output.push_str("\n\n");
 
     // Usage
@@ -209,6 +213,17 @@ pub fn run() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn title_puts_the_description_on_its_own_row() {
+        let term = Terminal::builder()
+            .width(300)
+            .color_depth(biscuit_terminal::discovery::detection::ColorDepth::None)
+            .build();
+        let rendered = biscuit_terminal::utils::escape_codes::strip_escape_codes(title(&term));
+        let rows: Vec<&str> = rendered.lines().collect();
+        assert_eq!(rows, ["Claudine", env!("CARGO_PKG_DESCRIPTION")], "{rendered:?}");
+    }
 
     fn group_by_name<'a>(groups: &'a [CommandGroup], name: &str) -> &'a CommandGroup {
         groups

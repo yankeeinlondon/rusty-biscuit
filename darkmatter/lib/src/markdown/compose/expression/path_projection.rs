@@ -43,7 +43,7 @@ use std::path::{Path, PathBuf};
 /// need native path text.
 #[cfg(test)]
 pub(crate) fn make_relative(abs: &Path, cwd: &Path) -> String {
-    make_relative_in_context(abs, cwd, None)
+    make_relative_in_context(abs, cwd, &biscuit_file::FileResolutionContext::new(cwd))
 }
 
 /// The projection's chosen value, still a path.
@@ -61,26 +61,18 @@ enum Projection {
 fn project_in_context(
     abs: &Path,
     cwd: &Path,
-    request_context: Option<&biscuit_file::FileResolutionContext>,
+    request_context: &biscuit_file::FileResolutionContext,
 ) -> Projection {
-    let repository_root = match request_context {
-        Some(context) => context.repository_root().map(Path::to_path_buf),
-        None => None,
-    };
-    if let Some(repo) = repository_root
-        && let Some(stripped) = strip_prefix_any_spelling(abs, &repo)
+    if let Some(repo) = request_context.repository_root()
+        && let Some(stripped) = strip_prefix_any_spelling(abs, repo)
     {
         return Projection::Bare(stripped);
     }
     if let Some(stripped) = strip_prefix_any_spelling(abs, cwd) {
         return Projection::Bare(stripped);
     }
-    let home_dir = match request_context {
-        Some(context) => context.home_dir().map(Path::to_path_buf),
-        None => dirs::home_dir(),
-    };
-    if let Some(home) = home_dir
-        && let Ok(stripped) = abs.strip_prefix(&home)
+    if let Some(home) = request_context.home_dir()
+        && let Ok(stripped) = abs.strip_prefix(home)
     {
         return Projection::HomeRelative(stripped.to_path_buf());
     }
@@ -91,18 +83,18 @@ fn project_in_context(
 ///
 /// The request repository root keeps the launch directory's spelling while a
 /// probed candidate may come back canonical (macOS `/var` vs `/private/var`,
-/// Windows verbatim prefixes). Both spellings name the same directory, so a
+/// a symlinked ancestor). Both spellings name the same directory, so a
 /// literal miss retries against the canonical form of each side before giving
 /// up; a path that does not exist simply keeps its literal spelling.
 fn strip_prefix_any_spelling(abs: &Path, root: &Path) -> Option<PathBuf> {
     if let Ok(stripped) = abs.strip_prefix(root) {
         return Some(stripped.to_path_buf());
     }
-    let canonical_root = std::fs::canonicalize(root).ok()?;
+    let canonical_root = biscuit_file::canonicalize_simplified(root).ok()?;
     if let Ok(stripped) = abs.strip_prefix(&canonical_root) {
         return Some(stripped.to_path_buf());
     }
-    let canonical_abs = std::fs::canonicalize(abs).ok()?;
+    let canonical_abs = biscuit_file::canonicalize_simplified(abs).ok()?;
     canonical_abs
         .strip_prefix(&canonical_root)
         .ok()
@@ -119,7 +111,7 @@ fn strip_prefix_any_spelling(abs: &Path, root: &Path) -> Option<PathBuf> {
 pub(crate) fn make_relative_in_context(
     abs: &Path,
     cwd: &Path,
-    request_context: Option<&biscuit_file::FileResolutionContext>,
+    request_context: &biscuit_file::FileResolutionContext,
 ) -> String {
     match project_in_context(abs, cwd, request_context) {
         Projection::Bare(path) => path.to_string_lossy().to_string(),
@@ -130,13 +122,13 @@ pub(crate) fn make_relative_in_context(
 /// Projects an absolute path to a repo/base/home-relative string with `/`
 /// separators, suitable for persisted Markdown.
 ///
-/// The context-free wrapper over [`make_portable_relative_in_context`]. It
-/// routes through the shared [`Projection`] rather than re-rendering
+/// The wrapper over [`make_portable_relative_in_context`] for a context at
+/// `cwd` with the process's home and no repository. It routes through the shared [`Projection`] rather than re-rendering
 /// [`make_relative`]'s output, so the tests exercise the same prefix policy
 /// production does instead of a parallel separator swap.
 #[cfg(test)]
 pub(crate) fn make_portable_relative(abs: &Path, cwd: &Path) -> String {
-    make_portable_relative_in_context(abs, cwd, None)
+    make_portable_relative_in_context(abs, cwd, &biscuit_file::FileResolutionContext::new(cwd))
 }
 
 /// Renders the projection through [`biscuit_file::to_portable_string`],
@@ -150,7 +142,7 @@ pub(crate) fn make_portable_relative(abs: &Path, cwd: &Path) -> String {
 pub(crate) fn make_portable_relative_in_context(
     abs: &Path,
     cwd: &Path,
-    request_context: Option<&biscuit_file::FileResolutionContext>,
+    request_context: &biscuit_file::FileResolutionContext,
 ) -> String {
     match project_in_context(abs, cwd, request_context) {
         Projection::Bare(path) => biscuit_file::to_portable_string(&path),
@@ -197,7 +189,7 @@ mod tests {
         // cwd is a temp dir (outside any repo, outside $HOME), so the
         // projection reaches the home-alias arm for a path under $HOME.
         let base = TempDir::new().unwrap();
-        let home = dirs::home_dir().expect("home dir available");
+        let home = biscuit_file::home_dir().expect("home dir available");
         let abs = home.join("notes/file.md");
         assert_eq!(make_relative(&abs, base.path()), "~/notes/file.md");
         assert_eq!(
@@ -216,7 +208,7 @@ mod tests {
             None,
             std::collections::HashMap::new(),
         );
-        let rendered = make_relative_in_context(&abs, base.path(), Some(&context));
+        let rendered = make_relative_in_context(&abs, base.path(), &context);
         // No repo, not under cwd, not under $HOME → absolute verbatim.
         assert_eq!(rendered, abs.to_string_lossy());
     }

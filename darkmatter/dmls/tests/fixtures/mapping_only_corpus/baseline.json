@@ -183,6 +183,9 @@
     },
     {
       "code": "dm.transclusion.broken_path",
+      "data": {
+        "resolution_failure": "NoMatch"
+      },
       "message": "broken transclusion: no file matches `./_writing_clearly.md`",
       "range": {
         "end": {
@@ -205,6 +208,9 @@
   "_reviews__review-spec-inline.md": [
     {
       "code": "dm.transclusion.broken_path",
+      "data": {
+        "resolution_failure": "NoMatch"
+      },
       "message": "broken transclusion: no file matches `_writing_clearly.md`",
       "range": {
         "end": {
@@ -221,6 +227,9 @@
     },
     {
       "code": "dm.transclusion.broken_path",
+      "data": {
+        "resolution_failure": "NoMatch"
+      },
       "message": "broken transclusion: no file matches `./_set_spec_schema.md`",
       "range": {
         "end": {
@@ -263,6 +272,9 @@
   "feature.md": [
     {
       "code": "dm.transclusion.broken_path",
+      "data": {
+        "resolution_failure": "NoMatch"
+      },
       "message": "broken transclusion: no file matches `@prompts/feature-prompts/tech-design.md`",
       "range": {
         "end": {
@@ -279,6 +291,9 @@
     },
     {
       "code": "dm.transclusion.broken_path",
+      "data": {
+        "resolution_failure": "NoMatch"
+      },
       "message": "broken transclusion: no file matches `@prompts/feature-prompts/plan.md`",
       "range": {
         "end": {
@@ -295,6 +310,9 @@
     },
     {
       "code": "dm.transclusion.broken_path",
+      "data": {
+        "resolution_failure": "NoMatch"
+      },
       "message": "broken transclusion: no file matches `@prompts/feature-prompts/implement.md`",
       "range": {
         "end": {
@@ -311,6 +329,9 @@
     },
     {
       "code": "dm.transclusion.broken_path",
+      "data": {
+        "resolution_failure": "NoMatch"
+      },
       "message": "broken transclusion: no file matches `@prompts/feature-prompts/commit-implementation.md`",
       "range": {
         "end": {
@@ -327,6 +348,9 @@
     },
     {
       "code": "dm.transclusion.broken_path",
+      "data": {
+        "resolution_failure": "NoMatch"
+      },
       "message": "broken transclusion: no file matches `@prompts/feature-prompts/review.md`",
       "range": {
         "end": {
@@ -343,6 +367,9 @@
     },
     {
       "code": "dm.transclusion.broken_path",
+      "data": {
+        "resolution_failure": "NoMatch"
+      },
       "message": "broken transclusion: no file matches `@prompts/feature-prompts/suggestions.md`",
       "range": {
         "end": {
@@ -359,6 +386,9 @@
     },
     {
       "code": "dm.transclusion.broken_path",
+      "data": {
+        "resolution_failure": "NoMatch"
+      },
       "message": "broken transclusion: no file matches `@prompts/feature-prompts/commit-review.md`",
       "range": {
         "end": {
@@ -375,6 +405,9 @@
     },
     {
       "code": "dm.transclusion.broken_path",
+      "data": {
+        "resolution_failure": "NoMatch"
+      },
       "message": "broken transclusion: no file matches `@prompts/feature-prompts/update-documents.md`",
       "range": {
         "end": {

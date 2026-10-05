@@ -3,7 +3,7 @@ use crate::commands::shared::*;
 use crate::commands::{CliContext, Run};
 use crate::output::RenderMeta;
 use biscuit_terminal::components::graph_expression::GraphExpression;
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::section::{HeadingLevel, Section};
 use biscuit_terminal::terminal::Terminal;
@@ -222,6 +222,11 @@ pub fn display_graph(
     Ok(())
 }
 
+/// The raw graph expression source, literal and keeping its line structure.
+fn graph_source_prose(source: &str) -> Prose {
+    Prose::new(Prose::escape_text(source)).with_line_breaks(LineBreaks::Hard)
+}
+
 /// Handle graph rendering errors with user-friendly output.
 pub fn handle_graph_error(
     error: biscuit_terminal::components::graph_expression::GraphRenderError,
@@ -240,10 +245,11 @@ pub fn handle_graph_error(
             let mut section = Section::new(HeadingLevel::h3, "Error");
             section.push(Prose::new(format!(
                 "<red><b>Error:</b></red> {}",
-                Prose::escape_text(&viz_err.to_string())
+                Prose::escape_text_outside_code_spans(&viz_err.to_string())
             )));
             section.push(Prose::new("<dim>Graph expression was defined as:</dim>"));
-            section.push(Prose::new(Prose::escape_text(fallback)));
+            // `fallback` is already a fenced code block, whose body is literal.
+            section.push(Prose::new(fallback));
             eprintln!("{}", section.render(term));
             Err(color_eyre::eyre::eyre!("{}", viz_err))
         }
@@ -251,12 +257,49 @@ pub fn handle_graph_error(
             let mut section = Section::new(HeadingLevel::h3, "Error");
             section.push(Prose::new(format!(
                 "<red><b>Error:</b></red> Failed to display image: {}",
-                Prose::escape_text(msg)
+                Prose::escape_text_outside_code_spans(msg)
             )));
             section.push(Prose::new("<dim>Graph expression source was:</dim>"));
-            section.push(Prose::new(Prose::escape_text(source)));
+            section.push(graph_source_prose(source));
             eprintln!("{}", section.render(term));
             Err(color_eyre::eyre::eyre!("Failed to display image: {}", msg))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use biscuit_terminal::discovery::detection::ColorDepth;
+
+    fn plain_terminal() -> Terminal {
+        Terminal::builder()
+            .width(120)
+            .color_depth(ColorDepth::None)
+            .build()
+    }
+
+    #[test]
+    fn fallback_code_block_body_renders_without_escape_backslashes() {
+        let graph = GraphExpression::parse(
+            "digraph { A -> B; }",
+            biscuit_terminal::components::graph_expression::GraphInputSyntax::Dot,
+        )
+        .unwrap();
+
+        let rendered = Prose::new(graph.fallback_code_block()).render(&plain_terminal());
+
+        assert!(rendered.contains("digraph { A -> B; }"), "{rendered:?}");
+        assert!(!rendered.contains('\\'), "stray escape backslash: {rendered:?}");
+    }
+
+    #[test]
+    fn graph_source_prose_keeps_lines_and_literal_characters() {
+        let source = "digraph {\n  a_b -> <c>;\n}";
+
+        let rendered = graph_source_prose(source).render(&plain_terminal());
+        let lines: Vec<&str> = rendered.trim_end().lines().map(str::trim_end).collect();
+
+        assert_eq!(lines, vec!["digraph {", "  a_b -> <c>;", "}"], "{rendered:?}");
     }
 }

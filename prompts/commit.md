@@ -29,8 +29,7 @@ initialize:
               - skip
 start:
     message: |-
-        🗳️  starting **git commits** in {{ ctx.repo }} -> **{{ctx.branch}}** (_<dim>using </dim>{{agent}}/{{model}}_)
-        {{ ctx.is_monorepo ? '&nbsp;&nbsp;**packages impacted:** ' + as_unordered_list(ctx.dirty_packages) : '' }}
+        🗳️  starting **git commits** in {{ ctx.repo }} -> **{{ctx.branch}}** (_<dim>using </dim>{{agent}}/{{model}}_). {{ ctx.is_monorepo ? 'Packages impacted:\n\n' + as_unordered_list(ctx.dirty_packages) : '' }}
 success:
     message: |-
         🗳️  staged files in {{ctx.area || ctx.repo }}'s **{{ctx.branch}}** branch, have been **committed to git**
@@ -135,6 +134,8 @@ In addition to the best practices above, the repository keeps a short journal of
 ::file {{lessons_learned}}
 
 Step 5 says when, and how rarely, an entry may be added.
+
+::file "./_headless-orchestration.md"
 
 ## Task
 

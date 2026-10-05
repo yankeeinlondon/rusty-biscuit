@@ -11,6 +11,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use claudine_gen::{GenError, SIGNAL_SLUGS, build_signals};
+use darkmatter::markdown::compose::RequestSnapshot;
 
 /// The real claudine package-area root.
 fn real_area() -> &'static Path {
@@ -60,7 +61,7 @@ impl Fixture {
     }
 
     fn build(&self) -> Result<String, GenError> {
-        build_signals(self.dir.path())
+        build_signals(self.dir.path(), &RequestSnapshot::new(self.dir.path()))
     }
 }
 

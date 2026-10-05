@@ -32,7 +32,7 @@ use crate::markdown::compose::shell_expansion::tokenize::{parse_pipeline, tokeni
 use crate::markdown::compose::shell_expansion::types::{
     ShellExpansionError, ShellExpansionRuntime, ShellPipeline,
 };
-use crate::markdown::compose::{ComposeContext, ComposeOptions};
+use crate::markdown::compose::ComposeContext;
 
 /// Checks an authored whole-value `$( … )` without resolving or running it.
 ///
@@ -181,7 +181,7 @@ impl ResolvedShellValue {
 /// All values read the same `state`; none sees another's result. The values
 /// share one command cache created for this call, so a command two of them
 /// name runs once, and nothing is reused from an earlier call. Commands run
-/// under `options`' shell settings and must be in its pre-approved set when it
+/// under the request's shell settings and must be in its pre-approved set when it
 /// has one; without one, shell policy and the approval handler decide as they
 /// do for any frontmatter value.
 ///
@@ -194,10 +194,11 @@ impl ResolvedShellValue {
 pub fn execute_resolved_shell_values(
     values: &[&ResolvedShellValue],
     state: HashMap<String, Value>,
-    options: &ComposeOptions,
+    request: &crate::markdown::compose::ComposeRequest,
 ) -> Result<Vec<(String, Value)>, ShellExpansionError> {
+    let options = request;
     let shell_opts = options.shell_options();
-    let policy_paths = resolve_policy_paths(&shell_opts, &options.source)?;
+    let policy_paths = resolve_policy_paths(&shell_opts, &options.source, options.resolution_context())?;
     let mut shell = ShellExpansionRuntime::new();
     shell.ensure_loaded(&policy_paths)?;
     let resolution = options.frontmatter_resolution_context();

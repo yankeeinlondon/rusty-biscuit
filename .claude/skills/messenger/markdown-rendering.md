@@ -59,9 +59,11 @@ Unsupported Markdown constructs (images, tables, block quotes) are flattened to 
 
 ## Provider-Specific Notes
 
-**Discord / Discord-Webhook**: Mostly pass-through Markdown. Both adapters use the same renderer because Discord webhooks accept the same formatting syntax as bot-authenticated sends.
+**Discord / Discord-Webhook**: Mostly pass-through Markdown. Both adapters use the same renderer because Discord webhooks accept the same formatting syntax as bot-authenticated sends. Parsed text is literal (the parser removed the source's escapes), so the renderer backslash-escapes `\`, `*`, `~`, `` ` ``, `|`, `[`, `]`, `<`, a `_` outside a word, and a heading/quote/list marker that starts a line: source `\*\*literal\*\*` stays literal instead of turning bold. Inline code containing a backtick uses a double-backtick span.
 
-**Slack**: Uses mrkdwn dialect. Bold is `*text*` (not `**`), links use `<url|label>` pipe syntax. Headings render as bold text since Slack has no heading syntax.
+**Slack**: Uses mrkdwn dialect. Bold is `*text*` (not `**`), links use `<url|label>` pipe syntax. Headings render as bold text since Slack has no heading syntax. Slack reads `&`, `<`, and `>` as markup everywhere (`<!channel>`, `<url|label>`), so text and code escape them as `&amp;`, `&lt;`, `&gt;`; mrkdwn has no escape for `*`, `_`, `~`, or `` ` ``, so a literal formatting spelling in text still formats in Slack. Slack formats a delimiter only at a word boundary, so a span whose outer neighbor is a letter, digit, or the same delimiter (`a**b**c`, bold inside a heading) is written as plain text (`abc`); mrkdwn has no other spelling.
+
+**Delimiter edges (Discord, Slack)**: edge whitespace and breaks of a span go outside its delimiters (`split_edges` in `ast.rs`). Discord's `*`, `**`, and `~~` have no word-boundary or punctuation rule, so intraword and punctuation-adjacent spans keep their delimiters there.
 
 **Telegram**: Renders to HTML for the Bot API `parse_mode: "HTML"`. All formatting uses HTML tags. Code blocks use `<pre>` with optional `<code class="language-X">`.
 

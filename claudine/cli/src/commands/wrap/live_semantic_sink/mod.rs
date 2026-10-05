@@ -265,7 +265,7 @@ impl LiveSemanticSink {
             provider,
             env,
             cwd: cwd.to_path_buf(),
-            renderer: EventRenderer::new(provider, cwd.to_path_buf(), dirs::home_dir()),
+            renderer: EventRenderer::new(provider, cwd.to_path_buf(), biscuit_file::home_dir()),
             agent_pid: None,
             verbosity,
             session_id: None,
@@ -324,7 +324,7 @@ impl LiveSemanticSink {
         task_gutter: Option<String>,
     ) -> Self {
         let handle = tokio::runtime::Handle::try_current().ok();
-        let runtime_context = match claudine::dispatch::DispatchRuntimeContext::load_for_env(&env) {
+        let runtime_context = match claudine::dispatch::DispatchRuntimeContext::load_for_env(&env, crate::request::snapshot()) {
             Ok(runtime) => runtime,
             Err(error) => {
                 tracing::warn!(%provider, "failed to preload wrapper runtime config: {error}");
@@ -372,7 +372,7 @@ impl LiveSemanticSink {
             provider,
             env,
             cwd: cwd.to_path_buf(),
-            renderer: EventRenderer::new(provider, cwd.to_path_buf(), dirs::home_dir()),
+            renderer: EventRenderer::new(provider, cwd.to_path_buf(), biscuit_file::home_dir()),
             agent_pid: None,
             verbosity,
             session_id: None,

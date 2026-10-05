@@ -47,7 +47,7 @@ fn probe(content: &str, name: &str) -> String {
 fn compose(root: &Path, options: ComposeOptions) -> String {
     let markdown = Markdown::try_from(root).expect("root loads");
     let (composed, _) = markdown
-        .compose_with(options.with_source_file(root))
+        .compose_with(&crate::request_support::request(options.with_source_file(root)))
         .expect("the graph composes");
     composed.content().to_string()
 }
@@ -138,7 +138,10 @@ fn a_reference_graph_with_a_cache_root_persists_no_local_artifact() {
     let cache = tempfile::tempdir().unwrap();
     let root = write_graph(directory.path());
     let options = ReferenceGraphOptions::with_compose(
-        ComposeOptions::new().with_cache_root(cache.path()).with_cache_namespace("branch"),
+        &crate::request_support::request_at(
+            directory.path(),
+            ComposeOptions::new().with_cache_root(cache.path()).with_cache_namespace("branch"),
+        ),
     );
     let markdown = Markdown::try_from(root.as_path()).unwrap();
 
@@ -208,7 +211,7 @@ fn cache_root_options(variant: &str, cache_root: &Path) -> ComposeOptions {
 fn assert_local_only_compose(root: &Path, options: ComposeOptions, label: &str) {
     let markdown = Markdown::try_from(root).expect("root loads");
     let (composed, report) = markdown
-        .compose_with(options.with_source_file(root))
+        .compose_with(&crate::request_support::request(options.with_source_file(root)))
         .unwrap_or_else(|error| panic!("{label}: the graph composes: {error}"));
     let content = composed.content();
     assert!(content.contains("fn main() {}"), "{label}: ::code rendered: {content}");
@@ -239,7 +242,10 @@ fn a_nonexistent_cache_root_is_never_created_by_local_only_work() {
 
     let cache_root = parent.path().join("never-created-by-graph");
     let options = ReferenceGraphOptions::with_compose(
-        ComposeOptions::new().with_cache_root(&cache_root).with_cache_namespace("branch"),
+        &crate::request_support::request_at(
+            root.parent().unwrap(),
+            ComposeOptions::new().with_cache_root(&cache_root).with_cache_namespace("branch"),
+        ),
     );
     Markdown::try_from(root.as_path()).unwrap().reference_graph(options).unwrap();
     assert_absent(&cache_root, "reference graph");

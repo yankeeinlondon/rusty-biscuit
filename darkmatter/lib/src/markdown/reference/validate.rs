@@ -56,23 +56,10 @@ pub struct ReferenceValidationOptions {
 }
 
 impl ReferenceValidationOptions {
-    /// Creates validation options using the given graph options,
-    /// avoiding the cost of constructing a default `ComposeOptions`.
+    /// Creates validation options over the given graph options.
     pub fn with_graph(graph: ReferenceGraphOptions) -> Self {
         Self {
             graph,
-            validate_remote: false,
-            remote_timeout: Duration::from_secs(10),
-            validate_fragments: false,
-            fail_fast: false,
-        }
-    }
-}
-
-impl Default for ReferenceValidationOptions {
-    fn default() -> Self {
-        Self {
-            graph: ReferenceGraphOptions::default(),
             validate_remote: false,
             remote_timeout: Duration::from_secs(10),
             validate_fragments: false,
@@ -165,7 +152,7 @@ impl biscuit_terminal::components::renderable::TerminalRenderable for Validation
         use std::collections::BTreeMap;
 
         use biscuit_terminal::components::list::UnorderedList;
-        use biscuit_terminal::components::prose::Prose;
+        use biscuit_terminal::components::prose::{LineBreaks, Prose};
 
         let errors: Vec<_> = self
             .report
@@ -223,7 +210,19 @@ impl biscuit_terminal::components::renderable::TerminalRenderable for Validation
                     )
                 };
 
-                list.add(Prose::new(item_text));
+                list.add(Prose::new(match issue.resolution_failure() {
+                    Some(failure) => {
+                        let mut text = format!(
+                            "{item_text}\n\n<dim>failure:</dim> {}",
+                            crate::markdown::errors::resolution_failure_name(failure)
+                        );
+                        if let Some(hint) = failure.glob_hint(&issue.reference_display) {
+                            text.push_str(&format!("\n<dim>hint:</dim> {hint}"));
+                        }
+                        text
+                    }
+                    None => item_text,
+                }).with_line_breaks(LineBreaks::Hard));
             }
 
             out.push_str(&list.render(term));
@@ -260,6 +259,22 @@ pub struct ReferenceIssue {
     pub reference_id: String,
     /// Where the reference was found.
     pub origin: ReferenceOrigin,
+}
+
+impl ReferenceIssue {
+    /// The file-reference failure class behind this issue, when it has one.
+    ///
+    /// A [`ReferenceIssueCode::MissingLocalTarget`] is a local path that
+    /// resolved through its file reference to no file, so it is
+    /// [`ResolutionFailure::NoMatch`](biscuit_file::ResolutionFailure::NoMatch).
+    /// A resolution *error* is not an issue: validation returns it as a
+    /// [`ReferenceError`](super::ReferenceError), which carries its own class.
+    pub fn resolution_failure(&self) -> Option<biscuit_file::ResolutionFailure> {
+        match self.code {
+            ReferenceIssueCode::MissingLocalTarget => Some(biscuit_file::ResolutionFailure::NoMatch),
+            _ => None,
+        }
+    }
 }
 
 impl Serialize for ReferenceIssue {
@@ -620,10 +635,7 @@ fn verify_graph_compatibility(
     let request_document = ReferenceDocumentIdentity::capture(md);
     let request_source = md.source().clone();
     let effective_source = request_source.clone().unwrap_or(ComposeSource::Unknown);
-    let request_compose = super::options_with_reference_resolution_context(
-        &effective_source,
-        &options.graph.compose,
-    );
+    let request_compose = options.graph.compose.clone();
     let request_compose = match &effective_source {
         ComposeSource::File(path) => request_compose.with_source_file(path),
         ComposeSource::Url(url) => request_compose.with_source_url(url.clone()),
@@ -739,7 +751,11 @@ fn validate_local_path(
                 .is_some_and(|origin| origin == "data");
             report.issues.push(ReferenceIssue {
                 code: ReferenceIssueCode::MissingLocalTarget,
-                message: format!("Missing local target: {raw}"),
+                message: crate::markdown::errors::with_glob_hint(
+                    format!("Missing local target: {raw}"),
+                    biscuit_file::ResolutionFailure::NoMatch,
+                    raw,
+                ),
                 severity: if in_data { ReferenceSeverity::Warning } else { ReferenceSeverity::Error },
                 kind: record.kind,
                 reference_display: raw.to_string(),
@@ -1099,10 +1115,28 @@ mod tests {
     use crate::markdown::reference::ReferenceSyntax;
     use serial_test::serial;
 
+    fn validation_options() -> ReferenceValidationOptions {
+        ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(
+            &crate::markdown::compose::test_request(crate::markdown::compose::ComposeOptions::new()),
+        ))
+    }
+
+    /// Validation options whose request is anchored at the fixture directory
+    /// the documents live in; a graph refuses a document outside its
+    /// request's repository.
+    fn validation_options_at(dir: &std::path::Path) -> ReferenceValidationOptions {
+        ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(
+            &crate::markdown::compose::test_request_in(
+                crate::markdown::compose::ComposeOptions::new(),
+                biscuit_file::FileResolutionContext::new(dir),
+            ),
+        ))
+    }
+
     #[test]
     fn validate_valid_url_syntax() {
         let md = Markdown::new("[link](https://example.com)");
-        let options = ReferenceValidationOptions::default();
+        let options = validation_options();
         let report = validate(&md, &options).unwrap();
         assert_eq!(report.references_scanned, 1);
         assert_eq!(report.references_valid, 1);
@@ -1112,7 +1146,7 @@ mod tests {
     #[test]
     fn validate_protocol_relative_url_syntax() {
         let md = Markdown::new("[cdn](//cdn.example.com/app.js)");
-        let options = ReferenceValidationOptions::default();
+        let options = validation_options();
         let report = validate(&md, &options).unwrap();
         assert_eq!(report.references_scanned, 1);
         assert_eq!(report.references_valid, 1);
@@ -1127,7 +1161,7 @@ mod tests {
     #[test]
     fn validate_fragment_not_validated_by_default() {
         let md = Markdown::new("[link](#section)");
-        let options = ReferenceValidationOptions::default();
+        let options = validation_options();
         let report = validate(&md, &options).unwrap();
         assert_eq!(report.references_valid, 1);
     }
@@ -1137,7 +1171,7 @@ mod tests {
         let md = Markdown::new("# My Heading\n\n[link](#my-heading)");
         let options = ReferenceValidationOptions {
             validate_fragments: true,
-            ..Default::default()
+            ..validation_options()
         };
         let report = validate(&md, &options).unwrap();
         assert!(report.is_valid());
@@ -1148,7 +1182,7 @@ mod tests {
         let md = Markdown::new("# My Heading\n\n[link](#nonexistent)");
         let options = ReferenceValidationOptions {
             validate_fragments: true,
-            ..Default::default()
+            ..validation_options()
         };
         let report = validate(&md, &options).unwrap();
         assert!(
@@ -1162,7 +1196,7 @@ mod tests {
     #[test]
     fn validate_missing_source_context_for_local() {
         let md = Markdown::new("[link](./file.md)");
-        let options = ReferenceValidationOptions::default();
+        let options = validation_options();
         let report = validate(&md, &options).unwrap();
         assert!(
             report
@@ -1175,7 +1209,7 @@ mod tests {
     #[test]
     fn validate_other_scheme_is_info() {
         let md = Markdown::new("[email](mailto:test@example.com)");
-        let options = ReferenceValidationOptions::default();
+        let options = validation_options();
         let report = validate(&md, &options).unwrap();
         let scheme_issues: Vec<_> = report
             .issues
@@ -1189,12 +1223,13 @@ mod tests {
 
     #[test]
     fn validate_fail_fast() {
+        let dir = tempfile::TempDir::new().unwrap();
         let md = Markdown::new("[a](./missing1.md)\n[b](./missing2.md)")
-            .with_source(ComposeSource::File("/tmp/test.md".into()));
+            .with_source(ComposeSource::File(dir.path().join("test.md")));
 
         let options = ReferenceValidationOptions {
             fail_fast: true,
-            ..Default::default()
+            ..validation_options_at(dir.path())
         };
         let report = validate(&md, &options).unwrap();
         assert_eq!(report.error_count(), 1);
@@ -1204,7 +1239,7 @@ mod tests {
     fn report_counts_correct() {
         let md =
             Markdown::new("[a](https://example.com)\n[b](#section)\n[c](data:text/plain,hello)");
-        let options = ReferenceValidationOptions::default();
+        let options = validation_options();
         let report = validate(&md, &options).unwrap();
         assert_eq!(report.references_scanned, 3);
         assert_eq!(report.references_valid, 3);
@@ -1221,7 +1256,7 @@ mod tests {
 
         let md = Markdown::new("[link](./exists.md)").with_source(ComposeSource::File(source_path));
 
-        let options = ReferenceValidationOptions::default();
+        let options = validation_options_at(dir.path());
         let report = validate(&md, &options).unwrap();
         assert!(report.is_valid());
         assert_eq!(report.references_valid, 1);
@@ -1236,7 +1271,7 @@ mod tests {
         let md =
             Markdown::new("[link](./missing.md)").with_source(ComposeSource::File(source_path));
 
-        let options = ReferenceValidationOptions::default();
+        let options = validation_options_at(dir.path());
         let report = validate(&md, &options).unwrap();
         assert!(!report.is_valid());
         assert!(
@@ -1261,7 +1296,7 @@ mod tests {
 
         let options = ReferenceValidationOptions {
             validate_fragments: true,
-            ..Default::default()
+            ..validation_options_at(dir.path())
         };
         let report = validate(&md, &options).unwrap();
         assert!(report.is_valid());
@@ -1281,7 +1316,7 @@ mod tests {
 
         let options = ReferenceValidationOptions {
             validate_fragments: true,
-            ..Default::default()
+            ..validation_options_at(dir.path())
         };
         let report = validate(&md, &options).unwrap();
         assert!(
@@ -1342,13 +1377,18 @@ mod tests {
         let md = Markdown::new("[Text Replacement](@darkmatter/docs/inline/text-replacement.md)")
             .with_source(ComposeSource::File(source_path));
 
-        // Configure the magic path: @darkmatter → <tmp>/darkmatter
-        let mut options = ReferenceValidationOptions::default();
-        options
-            .graph
-            .compose
-            .magic_paths
-            .push((root.to_path_buf(), PathPosition::Start));
+        // Configure the magic path through the request snapshot:
+        // @darkmatter → <tmp>/darkmatter
+        let snapshot = crate::markdown::compose::RequestSnapshot::new(&source_dir)
+            .with_magic_root(root, PathPosition::Start);
+        let request = crate::markdown::compose::ComposeRequest::prepare(
+            crate::markdown::compose::ComposeOptions::new(),
+            &snapshot,
+        )
+        .unwrap();
+        let options = ReferenceValidationOptions::with_graph(
+            crate::markdown::reference::ReferenceGraphOptions::with_compose(&request),
+        );
 
         // CWD is whatever the test runner uses — NOT source_dir.
         // This is the exact scenario that was broken before the fix.
@@ -1476,7 +1516,7 @@ mod tests {
 
         let options = ReferenceValidationOptions {
             validate_fragments: true,
-            ..Default::default()
+            ..validation_options_at(dir.path())
         };
 
         let via_build = validate(&md, &options).unwrap();
@@ -1515,7 +1555,7 @@ mod tests {
         // One options value feeds the build and both seams, so the checked
         // path can only reject for the edited child — never for an options
         // mismatch. Remote validation stays off: no network I/O.
-        let opts = ReferenceValidationOptions::default();
+        let opts = validation_options_at(dir.path());
         let graph = super::super::graph::build_reference_graph(&md, &opts.graph).unwrap();
 
         // Edit the visited child after construction, adding a broken local
@@ -1586,7 +1626,7 @@ mod tests {
         // mismatch. Remote validation stays off: no network I/O.
         let opts = ReferenceValidationOptions {
             validate_fragments: true,
-            ..Default::default()
+            ..validation_options_at(dir.path())
         };
         let graph = super::super::graph::build_reference_graph(&md, &opts.graph).unwrap();
 

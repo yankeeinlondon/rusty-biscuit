@@ -5690,7 +5690,7 @@ class RealWorkspaceDocumentationOnlyTests(unittest.TestCase):
     #: read by any test, which a document like `docs/topics/ci-cd.md` is.
     LEVELS = (
         "docs/comment-quality.md",
-        "darkmatter/docs/topics/caching.md",
+        "darkmatter/README.md",
         "biscuit-file/README.md",
     )
 
@@ -5910,6 +5910,7 @@ class RealWorkspaceRetirementScopeTests(unittest.TestCase):
                 "claudine-gen",
                 "darkmatter",
                 "darkmatter-cli",
+                "dmls",
                 "messenger",
                 "messenger-cli",
                 "model-citizen",
@@ -7724,6 +7725,27 @@ class TestInputIndexTests(unittest.TestCase):
         self.assertEqual([("pkg/lib/schema.yaml", None, True)], found)
 
 
+class TranscludedPathTests(unittest.TestCase):
+    """The `::file` targets a Markdown document names, as repository paths."""
+
+    def test_each_spelling_resolves_and_expressions_are_skipped(self) -> None:
+        text = (
+            '::file "../_quoted.md"\n'
+            "    ::file ./_bare.md actor={{actor}}\n"
+            "::file @docs/anchored.md\n"
+            "::file {{lessons_learned}}\n"
+            "::filed not-a-directive.md\n"
+            "prose mentioning ::file inline.md\n"
+        )
+        self.assertEqual(
+            {"prompts/_quoted.md", "prompts/_impl/_bare.md", "docs/anchored.md"},
+            test_inputs.transcluded("prompts/_impl/entry.md", text),
+        )
+
+    def test_a_target_climbing_out_of_the_repository_is_dropped(self) -> None:
+        self.assertEqual(set(), test_inputs.transcluded("entry.md", "::file ../outside.md\n"))
+
+
 class TestInputSelectionTests(unittest.TestCase):
     """What the planner schedules for a changed file that code reads."""
 
@@ -7736,17 +7758,26 @@ class TestInputSelectionTests(unittest.TestCase):
             {
                 "reader/lib/src/lib.rs": (
                     "pub const BASE: &str = include_str!(\"../../schemas/base.yaml\");\n"
+                    "pub const SHIPPED: &str = include_str!(\"../../prompts/shipped.md\");\n"
                 ),
                 "reader/lib/tests/l1/main.rs": "mod docs;\n",
                 "reader/lib/tests/l1/docs.rs": (
                     "fn repo_root() -> std::path::PathBuf { todo!() }\n"
                     "#[test]\nfn guide_wording_holds() {\n"
                     "    let _ = repo_root().join(\"docs/guide.md\");\n}\n"
+                    "#[test]\nfn entry_prompt_composes() {\n"
+                    "    let _ = repo_root().join(\"prompts/entry.md\");\n}\n"
                 ),
                 "other/lib/src/lib.rs": "",
                 "docs/guide.md": "# Guide\n",
                 "docs/unread.md": "# Unread\n",
                 "reader/schemas/base.yaml": "a: 1\n",
+                "prompts/entry.md": "::file \"./_middle.md\"\n::file {{lessons}}\n",
+                "prompts/_middle.md": "  ::file ../prompts/_leaf.md exclude=\"## Notes\"\n",
+                "prompts/_leaf.md": "leaf\n",
+                "prompts/_orphan.md": "orphan\n",
+                "reader/prompts/shipped.md": "::file ./_shipped_fragment.md\n",
+                "reader/prompts/_shipped_fragment.md": "fragment\n",
             },
         )
         packages = [
@@ -7822,6 +7853,28 @@ class TestInputSelectionTests(unittest.TestCase):
         plan = self.plan(["docs/moved.md"], renamed_from=["docs/guide.md"])
         self.assertEqual(["reader"], [cell["package"] for cell in plan["cells"]])
         self.assertEqual(["docs/moved.md"], plan["change_inventory"]["paths"]["documentation"])
+
+    def test_a_fragment_schedules_the_tests_that_read_a_document_transcluding_it(self) -> None:
+        # `entry.md` pulls `_leaf.md` in through `_middle.md`; no code names the leaf.
+        plan = self.plan(["prompts/_leaf.md"])
+        self.assertEqual(
+            [("reader", "ubuntu-latest", "L1")],
+            [(cell["package"], cell["environment"], cell["gate"]) for cell in plan["cells"]],
+        )
+        self.assertEqual(
+            "(binary_id(reader::l1) & test(=docs::entry_prompt_composes))",
+            plan["cells"][0]["test_filter"],
+        )
+        self.assertIn("prompts/_leaf.md", plan["cells"][0]["selection_reason"])
+
+    def test_a_fragment_no_document_transcludes_schedules_nothing(self) -> None:
+        self.assertEqual([], self.plan(["prompts/_orphan.md"])["cells"])
+
+    def test_a_fragment_of_an_embedded_document_is_not_source(self) -> None:
+        # The embed holds the document's text, not the files it transcludes.
+        plan = self.plan(["reader/prompts/_shipped_fragment.md"])
+        self.assertEqual([], plan["source_packages"])
+        self.assertEqual([], plan["cells"])
 
     def test_an_embedded_file_is_source_of_the_package_that_ships_it(self) -> None:
         plan = self.plan(["reader/schemas/base.yaml"])
@@ -8384,6 +8437,19 @@ class RealWorkspaceTestInputTests(unittest.TestCase):
                 self.assertEqual(1, len(cells))
                 self.assertEqual(("ubuntu-latest", "L1"), (cells[0]["environment"], cells[0]["gate"]))
                 self.assertIn(self.LIVE_TEST, cells[0]["test_filter"])
+
+    def test_a_prompt_fragment_selects_the_tests_that_stage_its_transcluders(self) -> None:
+        # No test names this fragment; `implement-plan.md` transcludes it.
+        fragment = "prompts/_headless-orchestration.md"
+        self.assertTrue((ROOT / fragment).is_file(), f"{fragment} is no longer tracked")
+        cells = [cell for cell in self.plan(fragment)["cells"] if cell["package"] == "claudine-cli"]
+        self.assertEqual(1, len(cells))
+        self.assertEqual(("ubuntu-latest", "L1"), (cells[0]["environment"], cells[0]["gate"]))
+        self.assertIn(
+            "test(=compose_caller_file_provenance::"
+            "shipped_implement_router_prefers_an_unimplemented_review_over_the_completed_plan)",
+            cells[0]["test_filter"],
+        )
 
     def test_readme_typos_schedule_nothing(self) -> None:
         for readme in ("README.md", "darkmatter/README.md", "biscuit-file/README.md"):

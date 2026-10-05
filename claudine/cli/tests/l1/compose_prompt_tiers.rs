@@ -8,12 +8,8 @@
 //! its `.claudine` tiers, or a plain launch directory — wins over any home
 //! match (`2026-09-23-local-before-home`).
 //!
-//! Tests whose subject is the user tier itself are `cfg(not(windows))`: native
-//! Windows resolves the home directory through the known-folder API and
-//! ignores the fixture's `HOME`/`USERPROFILE` (D11; `os` skill, windows.md), so
-//! a fixture home cannot stand in for it there. The ordering they prove is
-//! lexical and is covered on every OS by the snapshot-home unit tests in
-//! biscuit-file and `claudine::composition::resolve`.
+//! The fixture home reaches the child as `HOME` and `USERPROFILE`, so the user
+//! tier is staged the same way on every OS.
 
 use std::path::{Path, PathBuf};
 
@@ -73,7 +69,6 @@ fn compose_dry_run_failure(fixture: &CliProcessFixture, launch: &Path, reference
     strip_ansi(&String::from_utf8_lossy(&output.stderr))
 }
 
-#[cfg(not(windows))] // fixture home cannot replace the known folder
 #[test]
 fn path_shaped_reference_reaches_user_tier_from_plain_repository_under_home() {
     let (fixture, launch) = stage("prompt-tiers-repo-path", true);
@@ -81,7 +76,6 @@ fn path_shaped_reference_reaches_user_tier_from_plain_repository_under_home() {
     assert!(stdout.contains("Tier=[user]"), "{stdout}");
 }
 
-#[cfg(not(windows))] // fixture home cannot replace the known folder
 #[test]
 fn concise_reference_reaches_user_tier_from_plain_repository_under_home() {
     let (fixture, launch) = stage("prompt-tiers-repo-concise", true);
@@ -89,7 +83,6 @@ fn concise_reference_reaches_user_tier_from_plain_repository_under_home() {
     assert!(stdout.contains("Tier=[user]"), "{stdout}");
 }
 
-#[cfg(not(windows))] // fixture home cannot replace the known folder
 #[test]
 fn both_reference_forms_reach_user_tier_outside_any_repository() {
     let (fixture, launch) = stage("prompt-tiers-no-repo", false);
@@ -168,7 +161,6 @@ fn plain_launch_directory_under_home_wins_for_both_forms() {
     }
 }
 
-#[cfg(not(windows))] // fixture home cannot replace the known folder
 #[test]
 fn local_root_file_wins_over_user_prompt_tier_when_the_local_tree_is_home() {
     // Ruling 1: when the launch directory, or its repository, *is* `$HOME`,
@@ -212,7 +204,6 @@ fn stage_transclusion_routers(dir: &Path, forms: &[&str]) -> Vec<(String, PathBu
         .collect()
 }
 
-#[cfg(not(windows))] // fixture home cannot replace the known folder
 #[test]
 fn nested_magic_reference_in_a_user_prompt_resolves_from_the_launch_tree() {
     // Ruling 2: a prompt loaded from `~/.claudine/prompts` keeps the launch
@@ -277,7 +268,6 @@ fn nested_magic_reference_in_another_repository_resolves_from_the_launch_tree() 
 ///
 /// The workspace-relative form absorbs the launch directory's physical
 /// spelling (`/private/var/…` on macOS) against `$HOME`'s authored one.
-#[cfg(not(windows))]
 fn rendered_search_roots(stderr: &str, fixture: &CliProcessFixture) -> Vec<(String, bool)> {
     let workspace = fixture.workspace_path().file_name().unwrap().to_str().unwrap();
     let anchor = format!("{workspace}/");
@@ -296,7 +286,6 @@ fn rendered_search_roots(stderr: &str, fixture: &CliProcessFixture) -> Vec<(Stri
         .collect()
 }
 
-#[cfg(not(windows))] // fixture home cannot replace the known folder
 #[test]
 fn magic_miss_lists_ordered_search_roots_instead_of_joined_candidates() {
     // Defect 3, the reported input: the human-readable miss names the payload
@@ -356,7 +345,6 @@ fn magic_miss_lists_ordered_search_roots_instead_of_joined_candidates() {
     );
 }
 
-#[cfg(not(windows))] // fixture home cannot replace the known folder
 #[test]
 fn magic_miss_outside_any_repository_lists_the_launch_directory_first() {
     let (fixture, launch) = stage_at("prompt-tiers-scratch-miss", &["scratch"], false);
@@ -404,7 +392,7 @@ fn absolute_and_bare_misses_keep_their_existing_reports() {
     assert!(!stderr.contains("an `@` reference searches"), "{stderr}");
 }
 
-#[cfg(unix)] // fixture home cannot replace the known folder; unix symlink API
+#[cfg(unix)] // unix symlink API
 #[test]
 fn repository_claudine_symlinked_to_user_claudine_keeps_local_priority() {
     // Review-1 High: a repository whose `.claudine` is a symlink to

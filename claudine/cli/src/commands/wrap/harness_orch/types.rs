@@ -105,11 +105,13 @@ pub(crate) struct HarnessPromptState {
 }
 
 impl HarnessPromptState {
-    pub(crate) fn file_resolution_context(&self) -> Option<&biscuit_file::FileResolutionContext> {
-        self.source_context
-            .as_ref()
-            .map(claudine::invocation_context::SourceContext::file_resolution_context)
-            .or(self.input_layers.file_resolution_context.as_ref())
+    /// The active source's context, else the request context the caller's
+    /// inputs were captured in.
+    pub(crate) fn file_resolution_context(&self) -> &biscuit_file::FileResolutionContext {
+        self.source_context.as_ref().map_or(
+            &self.input_layers.file_resolution_context,
+            claudine::invocation_context::SourceContext::file_resolution_context,
+        )
     }
 
     pub(crate) fn repository_root_or<'a>(
@@ -146,7 +148,8 @@ pub(crate) struct MaterializedHarnessPrompt {
     /// about to face (spec §D5). `None` when the document declares no schema,
     /// and for the passthrough seed.
     pub(crate) launch_schema: Option<claudine::composition::LaunchSchema>,
-    pub(crate) file_resolution_context: Option<biscuit_file::FileResolutionContext>,
+    /// The request context this materialization resolved its references in.
+    pub(crate) file_resolution_context: biscuit_file::FileResolutionContext,
     /// Exact early-binding context used for this materialization.
     pub(crate) compose_context: Option<darkmatter::markdown::compose::ComposeContext>,
     /// Exact Claudine-local work recorder paired with `compose_context`.

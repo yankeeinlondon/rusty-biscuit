@@ -174,7 +174,7 @@ fn refusal(error: RefreshError, json: bool) -> Result<i32, String> {
         println!("{}", pretty(&json!({ "refused": error.to_string(), "reasons": reasons })));
     } else {
         let term = Terminal::default();
-        eprint!("{}", prose(format!("<b>refused:</b> {}", Prose::escape_text(&error.to_string())), &term));
+        eprint!("{}", prose(format!("<b>refused:</b> {}", Prose::escape_text_outside_code_spans(&error.to_string())), &term));
         eprint!("{}", list(reasons, &term));
     }
     Ok(code)

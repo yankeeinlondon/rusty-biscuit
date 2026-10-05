@@ -18,7 +18,8 @@ All components implement the [`Renderable`](../../lib/src/components/renderable.
 | [PadLeft](./pad_left.md) | Right-align content by padding with spaces on the left |
 | [PadRight](./pad_right.md) | Left-align content by padding with spaces on the right |
 | [Progress](./progress.md) | Horizontal progress bar with configurable width, characters, and colors |
-| [Prose](./prose.md) | Styled text with bracketed tags (`<b>...</b>`, `<red>...</red>`) and a Markdown subset |
+| [InlineProse](./prose.md) | Inline styled text for table cells, labels, and values inside a line; the inline form of Prose |
+| [Prose](./prose.md) | Block styled text: paragraphs and fenced code from bracketed tags (`<b>...</b>`, `<red>...</red>`) and a Markdown subset |
 | [Section](./section.md) | Heading (h1-h6) with optional content body |
 | [Spinner](./spinner.md) | Live single-line activity spinner on stderr (not a `TerminalRenderable`) |
 | [Status](./status.md) | Status items with icons (success, failure, warning, info, active, not-started) |

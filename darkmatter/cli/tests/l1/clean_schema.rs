@@ -434,8 +434,12 @@ fn test_absent_and_empty_frontmatter_perform_no_schema_work() {
 
     // Positive control: the probe fires when frontmatter is present.
     let with_frontmatter = repo.write("docs/has-fm.md", "---\ntitle: Fine\n---\n\n# Body\n");
+    // Wide enough that the temp path (its length differs by OS) never wraps
+    // inside the file name the assertion looks for.
     fixture
-        .command()
+        .command_builder()
+        .plain_terminal(400, 50)
+        .build()
         .arg("clean")
         .arg(&with_frontmatter)
         .arg("--baseline-schema")
@@ -472,8 +476,12 @@ fn test_absent_frontmatter_never_resolves_the_schema_override() {
     let missing = repo.root.join("nope.yaml");
 
     let with_frontmatter = repo.write("docs/has-fm.md", "---\ntitle: Fine\n---\n\n# Body\n");
+    // Wide enough that the temp path (its length differs by OS) never wraps
+    // inside the file name the assertion looks for.
     fixture
-        .command()
+        .command_builder()
+        .plain_terminal(400, 50)
+        .build()
         .arg("clean")
         .arg(&with_frontmatter)
         .arg("--schema")

@@ -26,8 +26,9 @@ pub mod invalidate;
 pub mod node;
 pub mod substrate;
 
-pub use arena::{DocumentId, DocumentRecord, LinkDiagnostic, WorkspaceGraph};
-pub(crate) use arena::normalize_join;
+pub use arena::{
+    DocumentContexts, DocumentId, DocumentRecord, LinkDiagnostic, NoContexts, WorkspaceGraph,
+};
 pub use edge::{Edge, EdgeId, EdgeKind, EdgeTarget};
 pub use invalidate::{Invalidation, WorkspaceIndex};
 pub use key_index::KeyIndex;

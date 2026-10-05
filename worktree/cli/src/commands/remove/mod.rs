@@ -20,7 +20,7 @@ mod report;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{InlineProse, LineBreaks, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable as _;
 use biscuit_terminal::terminal::Terminal;
 use inquire::{Confirm, InquireError, Select};
@@ -55,12 +55,16 @@ use super::list_table::{shell_word, unavailable_reason};
 pub use policy::Flags;
 use policy::{Actions, BranchStep, Decision, Question, Refusal, Situation};
 
+/// Escape text for Prose markup, leaving the code spans it marks with
+/// backticks literal.
 fn esc(text: &str) -> String {
-    Prose::escape_text(text)
+    Prose::escape_text_outside_code_spans(text)
 }
 
+/// Prints one message to stderr; each `\n` in `markup` starts a new line.
 fn print(terminal: &Terminal, markup: impl Into<String>) {
-    eprintln!("{}", Prose::new(markup.into()).render(terminal));
+    let prose = Prose::new(markup.into()).with_line_breaks(LineBreaks::Hard);
+    eprintln!("{}", prose.render(terminal));
 }
 
 /// The name a worktree is reported by: its directory's basename.
@@ -298,7 +302,7 @@ pub fn run(name: &str, flags: Flags) -> Result<(), WorktreeError> {
     let display = display_name(&entry);
     if inside && !crate::env::shell_wrapper_active() {
         return Err(WorktreeError::BlockedByEnvironment(format!(
-            "\n<red><b>Nothing was removed.</b></red> You are inside worktree <blue>{}</blue>, and \
+            "<red><b>Nothing was removed.</b></red> You are inside worktree <blue>{}</blue>, and \
             without the shell wrapper <i>wt</i> cannot move your shell out before removing it.\n{}\n\n\
             Or run <i>wt remove</i> from another directory.",
             esc(&display),
@@ -334,10 +338,11 @@ pub fn run(name: &str, flags: Flags) -> Result<(), WorktreeError> {
             refusal_markup(refusal, &facts) + &facts.kept_link_note(),
         )),
         Decision::Cancelled => {
+            eprintln!();
             print(
                 &terminal,
                 format!(
-                    "\n<dim>Cancelled. Worktree <blue>{}</blue> was not removed.</dim>{}",
+                    "<dim>Cancelled. Worktree <blue>{}</blue> was not removed.</dim>{}",
                     esc(&facts.display_name),
                     facts.kept_link_note()
                 ),
@@ -379,7 +384,7 @@ fn files_unchanged(facts: &Facts) -> Result<(), WorktreeError> {
 fn unprovable_remote(state: Option<&RemoteState>) -> Option<String> {
     match state? {
         RemoteState::MultiplePushUrls { .. } => Some(
-            "\n<red><b>Nothing was removed.</b></red> Origin pushes to more than one repository, \
+            "<red><b>Nothing was removed.</b></red> Origin pushes to more than one repository, \
             so <i>--force-remote</i> cannot delete the branch from exactly the one reported.\n  \
             <dim>Leave out <i>--force-remote</i>, or delete the branch in each repository with \
             <i>git push</i>.</dim>"
@@ -390,7 +395,7 @@ fn unprovable_remote(state: Option<&RemoteState>) -> Option<String> {
             by: Reinterpretation::Rewrite(rule),
             ..
         } => Some(format!(
-            "\n<red><b>Nothing was removed.</b></red> Git would rewrite origin's push URL <b>{}</b> \
+            "<red><b>Nothing was removed.</b></red> Git would rewrite origin's push URL <b>{}</b> \
             again by <i>{}</i>, so <i>--force-remote</i> cannot delete the branch from exactly the \
             repository reported.\n  \
             <dim>Leave out <i>--force-remote</i>, or change that rule.</dim>",
@@ -402,7 +407,7 @@ fn unprovable_remote(state: Option<&RemoteState>) -> Option<String> {
             by: Reinterpretation::RemoteName { source },
             ..
         } => Some(format!(
-            "\n<red><b>Nothing was removed.</b></red> Git would read origin's push URL <b>{}</b> \
+            "<red><b>Nothing was removed.</b></red> Git would read origin's push URL <b>{}</b> \
             as the name of the remote defined by <i>{}</i>, so <i>--force-remote</i> cannot delete \
             the branch from exactly the repository reported.\n  \
             <dim>Leave out <i>--force-remote</i>, or rename that remote.</dim>",
@@ -416,18 +421,18 @@ fn unprovable_remote(state: Option<&RemoteState>) -> Option<String> {
 fn refusal_markup(refusal: Refusal, facts: &Facts) -> String {
     match refusal {
         Refusal::FilesNeedForce if facts.missing().is_some() => format!(
-            "\n<red><b>Nothing was removed.</b></red> The record of worktree <blue>{}</blue> holds \
+            "<red><b>Nothing was removed.</b></red> The record of worktree <blue>{}</blue> holds \
             staged changes (listed above), and there is no terminal to confirm discarding them.\n  \
             <dim>Add <i>--force-worktree</i> to discard them.</dim>",
             esc(&facts.display_name)
         ),
         Refusal::FilesNeedForce => format!(
-            "\n<red><b>Nothing was removed.</b></red> Worktree <blue>{}</blue> has uncommitted or \
+            "<red><b>Nothing was removed.</b></red> Worktree <blue>{}</blue> has uncommitted or \
             protected included files (listed above), and there is no terminal to confirm discarding them.\n  \
             <dim>Add <i>--force-worktree</i> to discard them.</dim>",
             esc(&facts.display_name)
         ),
-        Refusal::ForceBranchNeedsWorktree => "\n<red><b>Nothing was removed.</b></red> \
+        Refusal::ForceBranchNeedsWorktree => "<red><b>Nothing was removed.</b></red> \
             <i>--force-branch</i> needs the worktree removed first, and it has uncommitted files; \
             add <i>--force-worktree</i> to discard them."
             .to_string(),
@@ -450,7 +455,7 @@ fn prepare_refusal_markup(refusal: &PrepareRefusal, name: &str, entry: &Worktree
             let repair = typed_command("git worktree repair", &path)
                 .unwrap_or_else(|| format!("<i>git worktree repair</i> naming {}", esc(&path)));
             let mut markup = format!(
-                "\n<red><b>Can't remove {label}:</b></red> its .git file was missing and Git couldn't \
+                "<red><b>Can't remove {label}:</b></red> its .git file was missing and Git couldn't \
                 restore a verified link.\n{nothing} The repair attempt may have changed Git metadata \
                 for this or other worktrees.\nFrom the base checkout, inspect the repair result with \
                 {list} and try {repair}, then retry {retry}."
@@ -472,19 +477,19 @@ fn prepare_refusal_markup(refusal: &PrepareRefusal, name: &str, entry: &Worktree
             markup
         }
         PrepareRefusal::Repair(refusal) => format!(
-            "\n<red><b>Can't remove {label}:</b></red> Git can't read this worktree, and no repair was \
+            "<red><b>Can't remove {label}:</b></red> Git can't read this worktree, and no repair was \
             attempted: {}.\n{nothing}\n  <dim>Inspect it from the base checkout with {list}, then retry \
             {retry}.</dim>",
             esc(&refusal.to_string())
         ),
         PrepareRefusal::Missing(refusal) => format!(
-            "\n<red><b>Can't remove {label}:</b></red> its directory is gone, and its remaining Git record \
+            "<red><b>Can't remove {label}:</b></red> its directory is gone, and its remaining Git record \
             couldn't be checked: {}.\n{nothing}\n  <dim>Inspect it from the base checkout with {list}, \
             then retry {retry}.</dim>",
             esc(&refusal.to_string())
         ),
         PrepareRefusal::Unavailable(condition) => format!(
-            "\n<red><b>Can't remove {label}:</b></red> {}.\n{nothing} \
+            "<red><b>Can't remove {label}:</b></red> {}.\n{nothing} \
             <i>wt remove</i> deletes a directory only after checking its files, and no <i>--force</i> \
             flag changes that.\n  <dim>Restore or move what is at {}, then retry {retry}.</dim>",
             unavailable_reason(entry, condition),
@@ -508,7 +513,7 @@ fn ask(terminal: &Terminal, facts: &Facts, question: Question) -> Result<bool, W
                     else { format!("the files listed above, including {}", included.join(", ")) };
                 format!("Discard {names} and remove worktree <blue>{}</blue>?", esc(&facts.display_name))
             };
-            let label = Prose::new(question).render(terminal);
+            let label = InlineProse::new(question).render(terminal);
             Confirm::new(&label)
                 .with_default(false)
                 .prompt()
@@ -530,7 +535,7 @@ fn ask(terminal: &Terminal, facts: &Facts, question: Question) -> Result<bool, W
                 commits.len(),
                 if commits.len() == 1 { "" } else { "s" }
             );
-            let label = Prose::new(format!(
+            let label = InlineProse::new(format!(
                 "Branch <blue>{}</blue> is not safe to delete:",
                 esc(branch)
             ))
@@ -563,7 +568,7 @@ fn execute(terminal: &Terminal, facts: &Facts, actions: Actions) -> Result<(), W
     } else {
         remove_worktree(&facts.base, &facts.entry.path, actions.discard_files).map_err(|error| match error {
             WorktreeError::NotARealDirectory(_) => WorktreeError::RefusedToLoseWork(format!(
-                "\n<red><b>Nothing was removed.</b></red> {} is no longer the directory of worktree <blue>{}</blue> \
+                "<red><b>Nothing was removed.</b></red> {} is no longer the directory of worktree <blue>{}</blue> \
                 that was checked: a link or something else replaced it.\n  <dim>Put the checkout back at that \
                 path, then run <i>wt remove</i> again.</dim>",
                 esc(&facts.entry.path.display().to_string()),
@@ -578,16 +583,17 @@ fn execute(terminal: &Terminal, facts: &Facts, actions: Actions) -> Result<(), W
     }
     let mut removed = vec![format!("worktree {}", facts.display_name)];
     let path = esc(&facts.entry.path.display().to_string());
+    eprintln!();
     print(
         terminal,
         if facts.missing().is_some() {
             format!(
-                "\n<green>Removed the record of worktree</green> <b>{}</b> <dim>(its directory at {path} was \
+                "<green>Removed the record of worktree</green> <b>{}</b> <dim>(its directory at {path} was \
                 already gone)</dim>",
                 esc(&facts.display_name)
             )
         } else {
-            format!("\n<green>Removed worktree</green> <b>{}</b> <dim>at {path}</dim>", esc(&facts.display_name))
+            format!("<green>Removed worktree</green> <b>{}</b> <dim>at {path}</dim>", esc(&facts.display_name))
         },
     );
 
@@ -786,10 +792,11 @@ fn hand_off(terminal: &Terminal, facts: &Facts, cwd: &Path, actions: Actions) ->
     })?;
     handoff::write_record(&path, &HandoffRecord::new(state, approvals, now()))?;
 
+    eprintln!();
     print(
         terminal,
         format!(
-            "\nMoving you to {description} <dim>at {}</dim> to finish removing the worktree.",
+            "Moving you to {description} <dim>at {}</dim> to finish removing the worktree.",
             esc(&landing.display().to_string())
         ),
     );
@@ -873,7 +880,7 @@ fn fingerprint(facts: &Facts) -> Result<String, WorktreeError> {
 
 fn start_again(reason: &str) -> String {
     format!(
-        "\n<red><b>Nothing was removed.</b></red> {reason}\n  \
+        "<red><b>Nothing was removed.</b></red> {reason}\n  \
         <dim>Run <i>wt remove</i> again to start over.</dim>"
     )
 }

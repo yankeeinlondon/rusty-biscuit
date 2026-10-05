@@ -48,7 +48,7 @@ fn load_case(dir: &Path) -> (Markdown, Value) {
 
 #[test]
 fn validate_table() {
-    let api = DarkmatterSchemas::new();
+    let api = DarkmatterSchemas::new(crate::request_support::cwd_context());
     let cases = list_cases();
     assert!(!cases.is_empty(), "no validate fixtures found");
 

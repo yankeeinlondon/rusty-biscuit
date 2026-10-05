@@ -92,9 +92,10 @@ pub struct WikiLinkFact {
 /// `transcludes` edge.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TransclusionFact {
-    /// Raw directive target exactly as authored (may carry a `#fragment`).
+    /// Raw directive target exactly as authored.
     pub raw_target: String,
-    /// The workspace-local path portion (any `#fragment` stripped).
+    /// The workspace-local path: the whole target, since composition reads a
+    /// `#` in a directive target as part of the filename.
     pub path: String,
     /// Byte span of the directive target in the document.
     pub span: SourceSpan,
@@ -305,23 +306,33 @@ pub fn index_document_timed(path: &Path, source: &str) -> (DocumentIndex, IndexT
                 let Some(target) = local_directive_target(directive.target) else {
                     continue;
                 };
+                // A directive target has no fragment syntax: composition
+                // reads `#` as part of the filename, so the graph does too.
                 transclusions.push(TransclusionFact {
-                    path: path_before_fragment(&target.value),
+                    path: target.value.clone(),
                     raw_target: target.value,
                     span: shift(target.span, body_base),
                     line,
                 });
             }
             DirectiveKind::TocLinking => {
-                let Some(target) = local_directive_target(directive.target) else {
+                // Each alternative of a fallback chain is a file use: the
+                // directive's output changes when any of them appears,
+                // changes, or disappears. `false` is never a file.
+                let Some(Ok(chain)) = directive.target_chain(body) else {
                     continue;
                 };
-                file_uses.push(FileRefFact {
-                    path: path_before_fragment(&target.value),
-                    raw_target: target.value,
-                    span: shift(target.span, body_base),
-                    line,
-                });
+                for alternative in chain.alternatives {
+                    if is_remote_target(&alternative.value) {
+                        continue;
+                    }
+                    file_uses.push(FileRefFact {
+                        path: alternative.value.clone(),
+                        raw_target: alternative.value,
+                        span: shift(alternative.span, body_base),
+                        line,
+                    });
+                }
             }
             DirectiveKind::FileLinks => {
                 // Positional glob form (`::file-links docs/*.md`) or the option
@@ -468,7 +479,9 @@ fn is_local_path(raw: &str) -> bool {
 }
 
 /// The workspace-local path portion of a reference target — everything before
-/// the first `#` (a heading/anchor or `::code` line-range fragment).
+/// the first `#` (a heading anchor). Not used for `::file`/`::code`/
+/// `::toc-linking` targets, where composition reads `#` as part of the
+/// filename.
 fn path_before_fragment(raw: &str) -> String {
     match raw.split_once('#') {
         Some((path, _)) => path.to_string(),
@@ -659,11 +672,14 @@ mod tests {
     }
 
     #[test]
-    fn test_transclusion_path_strips_fragment() {
-        let source = "::file ./guide.md#setup\n";
+    fn test_transclusion_path_keeps_hash_as_part_of_the_filename() {
+        // Composition has no fragment syntax for directive targets: `#setup`
+        // is part of the filename it resolves.
+        let source = "::file ./guide.md#setup\n::toc-linking \"./a.md#x | false\"\n";
         let index = index_document(Path::new("doc.md"), source);
-        assert_eq!(index.transclusions[0].path, "./guide.md");
+        assert_eq!(index.transclusions[0].path, "./guide.md#setup");
         assert_eq!(index.transclusions[0].raw_target, "./guide.md#setup");
+        assert_eq!(index.file_uses[0].path, "./a.md#x");
     }
 
     #[test]
@@ -715,6 +731,17 @@ mod tests {
         assert_eq!(index.file_uses.len(), 1);
         assert_eq!(index.file_uses[0].path, "./guide.md");
         assert_eq!(&source[index.file_uses[0].span.clone()], "./guide.md");
+    }
+
+    #[test]
+    fn test_toc_linking_chain_alternatives_are_file_uses() {
+        let source = "::toc-linking \"&missing.md | ./guide.md | false\"\n";
+        let index = index_document(Path::new("doc.md"), source);
+        let paths: Vec<&str> = index.file_uses.iter().map(|file| file.path.as_str()).collect();
+        assert_eq!(paths, ["&missing.md", "./guide.md"]);
+        for file in &index.file_uses {
+            assert_eq!(&source[file.span.clone()], file.raw_target);
+        }
     }
 
     #[test]

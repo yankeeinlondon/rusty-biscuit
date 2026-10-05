@@ -54,7 +54,7 @@ Before any schema intelligence can fire, DMLS must decide *which* schema applies
 flowchart TD
     BASE["Darkmatter base baseline"] --> MERGE["combined baseline"]
     EXT["extension baselines<br/>from .dmls.toml [schema.extensions.*]<br/>(globs match the document)"] --> MERGE
-    TRIG["trigger envelopes<br/>discovered under schemas/ roots<br/>within the workspace boundary"] --> REGISTRY["trigger registry"]
+    TRIG["trigger envelopes<br/>discovered in the five schema roots<br/>(package, area, tree root, SCHEMAS_DIR, ~/schemas)"] --> REGISTRY["trigger registry"]
     MERGE --> ENGINE["DarkmatterSchemas::effective_for"]
     REGISTRY --> ENGINE
     DOC["document frontmatter<br/>(including its own $schema)"] --> ENGINE
@@ -71,9 +71,10 @@ A few details worth knowing:
 - the base baseline always applies, so a document with no `$schema` of its own still gets schema-driven completion and hover for keys like `title` or `style`
 - extension baselines whose activation globs match the document contribute their shapes even when the document declares no `$schema` — this is how a Claudine prompt gets `provider`/`model` completions "for free"
 - the effective schema (and every file it depends on — the referenced `$schema` file, its imports, its examples, and each matched extension baseline) is content-hash cached per document; editing any dependency invalidates the bundle immediately
+- the cache is also keyed on the document's file-resolution context: its repository, its folder, its tree root and how that was chosen, the home folder, the environment (so `SCHEMAS_DIR`), and the extra `@` roots. A `$schema: ^shape.yaml` that resolves to a package's `shape.yaml` is never served to the same text once the package root changes; the schema is assembled again for the new context
 - when a schema fails to load, DMLS keeps the **last good** bundle serving completion and hover rather than flapping to nothing mid-keystroke
 
-DMLS does **not** read the `SCHEMA_DIR` environment variable; that is a CLI/library-side discovery mechanism. In the editor, additional always-on baselines arrive through [configuration](#extensibility-through-configuration) instead.
+DMLS searches the same five [schema roots](./definition.md#schema-roots) as `md`, for the document being edited (when it is inside an open workspace folder), so the editor and the terminal apply the same triggers and resolve the same bare-name `$schema`. `SCHEMAS_DIR` and the home folder come from the environment the editor started the server with: a GUI editor that was not launched from your shell may lack `SCHEMAS_DIR`, and a changed value takes effect after a server restart. Additional always-on baselines arrive through [configuration](#extensibility-through-configuration).
 
 ## Implemented LSP Features
 
@@ -181,7 +182,7 @@ The honest list. None of these are advertised to the editor, so no client will e
 | **Selection ranges / linked editing / on-type formatting** | client capability gates are tracked in the server's client profile, but no handlers are routed                                                                                                                |
 | **Constraint-argument completion**                         | deliberately absent (see [Completion](#completion))                                                                                                                                                           |
 | **Remote URI `$schema` references**                        | the grammar reserves them, but remote resolution is not implemented anywhere in Darkmatter yet                                                                                                                |
-| **`SCHEMA_DIR` discovery**                                 | not read by DMLS; editor-side baselines arrive via `.dmls.toml`                                                                                                                                               |
+| **`SCHEMAS_DIR` changes while running**                    | read once from the environment the server started with; restart the server to pick up a change                                                                                                                |
 
 ## Coverage Matrix
 

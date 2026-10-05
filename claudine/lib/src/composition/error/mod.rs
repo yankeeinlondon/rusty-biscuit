@@ -117,6 +117,11 @@ pub enum CompositionError {
         source: biscuit_file::FileReferenceError,
     },
 
+    /// The request's file-resolution context could not be built, so no
+    /// reference could be resolved.
+    #[error(transparent)]
+    ResolutionContext(#[from] darkmatter::markdown::compose::ContextBuildError),
+
     /// A file reference the author wrote in their prompt document could not be
     /// resolved to a usable file.
     ///
@@ -154,11 +159,11 @@ pub enum CompositionError {
     /// New top-level resolution uses [`Self::FileReferenceNoMatch`] so the
     /// candidate record is retained. This arm remains for compatibility with
     /// callers that construct the historical error directly.
-    #[error("file not found: {0}")]
+    #[error("{}", darkmatter::markdown::errors::with_glob_hint(format!("file not found: {}", .0), biscuit_file::ResolutionFailure::NoMatch, .0))]
     FileNotFound(String),
 
     /// A top-level operation-file reference produced a clean resolver no-match.
-    #[error("file not found: {reference}")]
+    #[error("{}", darkmatter::markdown::errors::with_glob_hint(format!("file not found: {}", .reference), biscuit_file::ResolutionFailure::NoMatch, .reference))]
     FileReferenceNoMatch {
         /// The exact reference authored at the command boundary.
         reference: String,
@@ -2365,6 +2370,10 @@ pub enum CompositionError {
         /// declaration order. Empty when the underlying validator did not
         /// expose structured locations.
         problems: Vec<String>,
+        /// The resolution failure class of each problem that is a failed
+        /// file reference, in problem order; each renders as a `failure:`
+        /// row.
+        failures: Vec<biscuit_file::ResolutionFailure>,
     },
 
     /// Required schema properties are missing and cannot be collected
@@ -2654,8 +2663,13 @@ pub enum SequenceLoadCause {
     #[error(transparent)]
     Read(#[from] std::io::Error),
     /// The reference resolved but no file exists at the resolved path.
-    #[error("file not found")]
-    NotFound,
+    /// `glob_hint` is the reference's literal-glob hint
+    /// ([`ResolutionFailure::glob_hint`](biscuit_file::ResolutionFailure::glob_hint)).
+    #[error("{}", darkmatter::markdown::errors::with_hint_line("file not found", *glob_hint))]
+    NotFound {
+        /// The literal-glob hint, when the reference's text looks like a glob.
+        glob_hint: Option<&'static str>,
+    },
     /// `~` expansion failed because no home directory is known.
     #[error("unable to resolve home directory")]
     HomeDir,
@@ -3080,6 +3094,40 @@ impl CompositionError {
                 .collect();
         }
         self
+    }
+
+    /// The biscuit-file failure class of a prompt-argument reference that did
+    /// not resolve, rendered as the block's `failure:` row.
+    ///
+    /// The autocomplete family is reached only after the argument matched no
+    /// file (the picker is the recovery for a clean bare miss), so each of its
+    /// variants is a `NoMatch` whatever the picker then did. Other variants
+    /// carry no class here.
+    pub fn resolution_failure(&self) -> Option<biscuit_file::ResolutionFailure> {
+        use biscuit_file::ResolutionFailure;
+        match self {
+            Self::InvalidReference { source, .. } => Some(source.resolution_failure()),
+            Self::FileNotFound(_)
+            | Self::FileReferenceNoMatch { .. }
+            | Self::AutocompleteNoMatches { .. }
+            | Self::AutocompleteOverCap { .. }
+            | Self::AutocompleteNotInteractive
+            | Self::AutocompleteCancelled { .. } => Some(ResolutionFailure::NoMatch),
+            _ => None,
+        }
+    }
+
+    /// The literal-glob hint for a file-reference no-match whose authored
+    /// text looks like a glob
+    /// ([`ResolutionFailure::glob_hint`](biscuit_file::ResolutionFailure::glob_hint));
+    /// `None` for every other error, including a no-match the picker reached.
+    pub fn glob_hint(&self) -> Option<&'static str> {
+        match self {
+            Self::FileNotFound(reference) | Self::FileReferenceNoMatch { reference, .. } => {
+                biscuit_file::ResolutionFailure::NoMatch.glob_hint(reference)
+            }
+            _ => None,
+        }
     }
 
     /// Inspect the retained no-match evidence without coupling to rendering.

@@ -29,6 +29,12 @@ const SCHEMA_FRONTMATTER: &str = "$schema:\n  \
     status: 'enum(draft, published, archived; required)'\n  \
     tags: 'string[]'\n";
 
+/// Anchors schema resolution at the process directory with the process's home
+/// and environment, as the context-free constructors did.
+fn process_context() -> biscuit_file::FileResolutionContext {
+    biscuit_file::FileResolutionContext::new(std::env::current_dir().expect("process directory"))
+}
+
 fn build_corpus() -> Vec<Markdown> {
     (0..CORPUS_SIZE)
         .map(|i| {
@@ -75,9 +81,10 @@ fn bench_validate_corpus(c: &mut Criterion) {
     group.throughput(Throughput::Elements(CORPUS_SIZE as u64));
     group.sample_size(20);
 
+    let context = process_context();
     group.bench_function("validate_1000_docs", |b| {
         b.iter_batched(
-            DarkmatterSchemas::new,
+            || DarkmatterSchemas::new(context.clone()),
             |api| {
                 let (ok, bad) = validate_corpus(black_box(&api), black_box(&corpus));
                 black_box((ok, bad));
@@ -87,7 +94,7 @@ fn bench_validate_corpus(c: &mut Criterion) {
     });
 
     group.bench_function("validate_1000_docs_warm_cache", |b| {
-        let api = DarkmatterSchemas::new();
+        let api = DarkmatterSchemas::new(context.clone());
         // Prime the validator cache so each iteration measures hot-path work.
         let _ = validate_corpus(&api, &corpus);
         b.iter(|| {

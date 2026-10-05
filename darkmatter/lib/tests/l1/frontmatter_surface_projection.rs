@@ -108,7 +108,7 @@ fn projection_reads_frontmatter_without_dereferencing_missing_includes() {
     let md = fixture.markdown();
 
     let (projected, report) = md
-        .compose_with(fixture.options().only_frontmatter_surface())
+        .compose_with(&crate::request_support::request(fixture.options().only_frontmatter_surface()))
         .expect("the projection must not dereference a missing include");
 
     assert_eq!(
@@ -151,7 +151,7 @@ fn projection_sees_the_generated_file_once_it_exists() {
 
     let (projected, _) = fixture
         .markdown()
-        .compose_with(fixture.options().only_frontmatter_surface())
+        .compose_with(&crate::request_support::request(fixture.options().only_frontmatter_surface()))
         .unwrap();
 
     assert_eq!(projected.frontmatter().as_map()["has_log"], json!(true));
@@ -162,23 +162,23 @@ fn full_compose_and_preflight_still_fail_on_the_missing_include() {
     let fixture = Fixture::new(GENERATED_LOG_DOCUMENT);
     let md = fixture.markdown();
 
-    let full = md.compose_with(fixture.options());
+    let full = md.compose_with(&crate::request_support::request(fixture.options()));
     assert!(
         matches!(full, Err(MarkdownError::Transclusion(_))),
         "full composition must still fail on the missing include: {full:?}"
     );
 
     let full_with_approvals = md.compose_with(
-        fixture
+        &crate::request_support::request(fixture
             .options()
-            .with_pre_approved_commands(approved(&["echo fixes/demo/implementation-log.md"])),
+            .with_pre_approved_commands(approved(&["echo fixes/demo/implementation-log.md"]))),
     );
     assert!(
         full_with_approvals.is_err(),
         "the condition-blind approval walk must still dereference the include"
     );
 
-    let preflight = md.compose_preflight(&fixture.options());
+    let preflight = md.compose_preflight(&crate::request_support::request(fixture.options()));
     assert!(
         preflight.is_err(),
         "condition-blind preflight must still resolve every include: {:?}",
@@ -195,10 +195,10 @@ fn projection_with_pre_approved_commands_skips_the_body_graph_walk() {
     // and it must consult frontmatter commands only.
     let (projected, _) = md
         .compose_with(
-            fixture
+            &crate::request_support::request(fixture
                 .options()
                 .with_pre_approved_commands(HashSet::new())
-                .only_frontmatter_surface(),
+                .only_frontmatter_surface()),
         )
         .expect("an approval set must not turn the projection into a body walk");
 
@@ -222,7 +222,7 @@ fn projection_runs_approved_frontmatter_commands_but_never_body_commands() {
         .options()
         .with_pre_approved_commands(approved(&[&format!("touch {}", portable(&front))]))
         .only_frontmatter_surface();
-    let (projected, _) = fixture.markdown().compose_with(options).unwrap();
+    let (projected, _) = fixture.markdown().compose_with(&crate::request_support::request(options)).unwrap();
 
     assert!(front.exists(), "the approved frontmatter command runs");
     assert!(!body.exists(), "a body `::shell` never runs through the projection");
@@ -243,7 +243,7 @@ fn projection_refuses_an_unapproved_frontmatter_command_before_any_runs() {
         .options()
         .with_pre_approved_commands(approved(&[&format!("touch {}", portable(&sentinel))]))
         .only_frontmatter_surface();
-    let err = fixture.markdown().compose_with(options).unwrap_err();
+    let err = fixture.markdown().compose_with(&crate::request_support::request(options)).unwrap_err();
 
     assert!(is_not_pre_approved(&err), "unexpected error: {err:?}");
     assert!(
@@ -265,7 +265,7 @@ fn full_compose_still_refuses_an_unapproved_body_command() {
 
     let err = fixture
         .markdown()
-        .compose_with(fixture.options().with_pre_approved_commands(approval.clone()))
+        .compose_with(&crate::request_support::request(fixture.options().with_pre_approved_commands(approval.clone())))
         .unwrap_err();
     assert!(is_not_pre_approved(&err), "unexpected error: {err:?}");
     assert!(!sentinel.exists(), "full compose must refuse before any command runs");
@@ -274,10 +274,10 @@ fn full_compose_still_refuses_an_unapproved_body_command() {
     fixture
         .markdown()
         .compose_with(
-            fixture
+            &crate::request_support::request(fixture
                 .options()
                 .with_pre_approved_commands(approval)
-                .only_frontmatter_surface(),
+                .only_frontmatter_surface()),
         )
         .unwrap();
     assert!(sentinel.exists());
@@ -289,7 +289,7 @@ fn projection_honors_the_schema_verdict_setting() {
     let fixture = Fixture::new(content);
     let md = fixture.markdown();
 
-    let owned = md.compose_with(fixture.options().only_frontmatter_surface());
+    let owned = md.compose_with(&crate::request_support::request(fixture.options().only_frontmatter_surface()));
     assert!(
         matches!(owned, Err(MarkdownError::SchemaValidationFailed { .. })),
         "a projection that owns the verdict reports it: {owned:?}"
@@ -297,10 +297,10 @@ fn projection_honors_the_schema_verdict_setting() {
 
     let (deferred, _) = md
         .compose_with(
-            fixture
+            &crate::request_support::request(fixture
                 .options()
                 .with_deferred_schema_verdict(true)
-                .only_frontmatter_surface(),
+                .only_frontmatter_surface()),
         )
         .expect("a deferred verdict is not reported by the projection");
     assert_eq!(frontmatter_str(&deferred, "log"), "a/b");
@@ -321,7 +321,7 @@ fn projection_keeps_a_caller_disabled_frontmatter_operation_disabled() {
     assert!(options.is_enabled(ComposeOperation::FrontmatterInterpolation));
     assert!(!options.is_enabled(ComposeOperation::FrontmatterShellExpansion));
 
-    let (projected, _) = fixture.markdown().compose_with(options).unwrap();
+    let (projected, _) = fixture.markdown().compose_with(&crate::request_support::request(options)).unwrap();
     assert!(frontmatter_str(&projected, "front").starts_with("$(touch"));
     assert!(!sentinel.exists());
 }
@@ -365,7 +365,7 @@ echo block
     let fixture = Fixture::new(content);
     let md = fixture.markdown();
 
-    let entries = collect_frontmatter_shell_commands(&md, &fixture.options())
+    let entries = collect_frontmatter_shell_commands(&md, &crate::request_support::request(fixture.options()))
         .expect("the frontmatter collector must not read the body");
     let normalized: Vec<&str> = entries.iter().map(|entry| entry.normalized.as_str()).collect();
 
@@ -377,5 +377,5 @@ echo block
     }
 
     // The condition-blind graph collector sees the body and fails on the include.
-    assert!(md.compose_preflight(&fixture.options()).is_err());
+    assert!(md.compose_preflight(&crate::request_support::request(fixture.options())).is_err());
 }

@@ -19,7 +19,7 @@ use std::path::Path;
 use claudine::composition::{
     ActiveDocumentState, DocumentEntryReason, EvaluatedProxyRequest, LifecycleConfig,
     LifecycleRunGuard, ProxyCommitError, ProxyHandoff, ProxyProvenance, RunLedger,
-    SharedApprovalCache, commit_proxy, commit_proxy_in_context,
+    SharedApprovalCache, commit_proxy,
 };
 
 use super::super::HarnessPromptState;
@@ -157,20 +157,12 @@ impl ActiveDocumentCoordinator {
     pub(super) fn adopt(
         &mut self,
         request: EvaluatedProxyRequest,
-        repo_root: Option<&Path>,
         prompt_state: &mut HarnessPromptState,
         lifecycle_guard: &mut LifecycleRunGuard<'_>,
         active: &mut ActiveDocumentState,
     ) -> Result<(), ProxyCommitError> {
-        let handoff = match prompt_state.file_resolution_context() {
-            Some(context) => commit_proxy_in_context(&mut self.ledger, request, context)?,
-            None => {
-                if let Some(invocation) = prompt_state.invocation_context.as_ref() {
-                    invocation.record_ambient_fallback();
-                }
-                commit_proxy(&mut self.ledger, request, repo_root)?
-            }
-        };
+        let handoff =
+            commit_proxy(&mut self.ledger, request, prompt_state.file_resolution_context())?;
 
         // Assignment, not merge: the overlay is document-scoped, so the source's
         // is discarded with the rest of its state and the target gets only what
@@ -248,7 +240,7 @@ impl ActiveDocumentCoordinator {
         prompt_state.document_epoch = None;
         if let Some(source_context) = source_context.as_ref() {
             prompt_state.input_layers.file_resolution_context =
-                Some(source_context.file_resolution_context().clone());
+                source_context.file_resolution_context().clone();
         }
         prompt_state.source_context = source_context;
     }

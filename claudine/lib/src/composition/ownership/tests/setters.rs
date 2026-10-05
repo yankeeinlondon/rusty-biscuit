@@ -414,7 +414,7 @@ fn schema_of(root: &Path, document: &str) -> Result<SchemaParameters, crate::com
     write(&file, document);
     let context = FileResolutionContext::new(root);
     let source = resolve_composition_source_in_context(file.to_str().unwrap(), &context).unwrap();
-    authored_schema_parameters(&source, Some(root), Some(&context))
+    authored_schema_parameters(&source, Some(root), &context)
 }
 
 /// One temp directory per schema source, each with a decoy schema of the

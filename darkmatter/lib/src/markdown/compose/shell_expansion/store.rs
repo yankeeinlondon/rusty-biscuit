@@ -4,17 +4,17 @@ use super::types::{
     ShellExpansionError, ShellExpansionOptions, ShellPolicyPaths, ShellRuleEntry, ShellRuleSet,
 };
 use crate::markdown::compose::ComposeSource;
+use biscuit_file::FileResolutionContext;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// Resolves the paths to whitelist and blacklist policy files.
 ///
 /// Resolution order:
 /// 1. If `policy_root` is set in options, use it
-/// 2. If source is a file, use its parent directory
-/// 3. Otherwise use current working directory
-/// 4. Walk up to find `.git` directory if inside a git repo
-/// 5. Fall back to HOME directory if no git repo found
+/// 2. The request context's repository root
+/// 3. The request context's home directory
+/// 4. The source file's directory, else the request directory
 ///
 /// ## Examples
 ///
@@ -26,47 +26,31 @@ use std::path::{Path, PathBuf};
 ///
 /// let options = ShellExpansionOptions::default();
 /// let source = ComposeSource::File(PathBuf::from("/path/to/file.md"));
-/// let paths = resolve_policy_paths(&options, &source).unwrap();
+/// let context = biscuit_file::FileResolutionContext::from_snapshot("/path/to", None, Default::default());
+/// let paths = resolve_policy_paths(&options, &source, &context).unwrap();
 /// ```
 pub fn resolve_policy_paths(
     shell_opts: &ShellExpansionOptions,
     source: &ComposeSource,
+    context: &FileResolutionContext,
 ) -> Result<ShellPolicyPaths, ShellExpansionError> {
     // If policy_root is explicitly set, use it directly
     let policy_dir = if let Some(ref policy_root) = shell_opts.policy_root {
         policy_root.clone()
     } else {
-        // Determine base directory from source
+        // A source without a directory of its own sits in the request's.
         let base_dir = match source {
-            ComposeSource::File(path) => {
-                if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
-                    parent.to_path_buf()
-                } else {
-                    std::env::current_dir().map_err(|e| ShellExpansionError::PolicyIo {
-                        path: PathBuf::from("."),
-                        source: e,
-                    })?
-                }
-            }
-            ComposeSource::Url(_) | ComposeSource::Unknown => {
-                std::env::current_dir().map_err(|e| ShellExpansionError::PolicyIo {
-                    path: PathBuf::from("."),
-                    source: e,
-                })?
-            }
+            ComposeSource::File(path) => path
+                .parent()
+                .filter(|p| !p.as_os_str().is_empty())
+                .map_or_else(|| context.request_cwd().to_path_buf(), Path::to_path_buf),
+            ComposeSource::Url(_) | ComposeSource::Unknown => context.request_cwd().to_path_buf(),
         };
 
-        shell_opts
-            .file_resolution_context
-            .as_ref()
-            .and_then(|context| context.repository_root().map(Path::to_path_buf))
-            .or_else(|| {
-                shell_opts
-                    .file_resolution_context
-                    .as_ref()
-                    .and_then(|context| context.home_dir().map(Path::to_path_buf))
-            })
-            .unwrap_or(base_dir)
+        context
+            .repository_root()
+            .or_else(|| context.home_dir())
+            .map_or(base_dir, Path::to_path_buf)
     };
 
     let whitelist = policy_dir.join(".darkmatter-shell-whitelist");
@@ -260,6 +244,7 @@ fn append_rule(path: &Path, rule_type: &str, value: &str) -> Result<(), ShellExp
 mod tests {
     use crate::markdown::compose::find_git_root_from;
     use super::*;
+    use std::path::PathBuf;
     use tempfile::TempDir;
 
     #[test]
@@ -271,7 +256,7 @@ mod tests {
         };
         let source = ComposeSource::Unknown;
 
-        let paths = resolve_policy_paths(&options, &source).unwrap();
+        let paths = resolve_policy_paths(&options, &source, &FileResolutionContext::new(std::env::temp_dir())).unwrap();
         assert_eq!(
             paths.whitelist,
             temp_dir.path().join(".darkmatter-shell-whitelist")
@@ -291,7 +276,7 @@ mod tests {
         let options = ShellExpansionOptions::default();
         let source = ComposeSource::File(file_path);
 
-        let paths = resolve_policy_paths(&options, &source).unwrap();
+        let paths = resolve_policy_paths(&options, &source, &FileResolutionContext::new(std::env::temp_dir())).unwrap();
         // Should use the parent directory (temp_dir) or walk up to find git root
         assert!(
             paths

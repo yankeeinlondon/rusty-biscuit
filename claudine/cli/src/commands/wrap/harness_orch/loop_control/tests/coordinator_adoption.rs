@@ -53,12 +53,12 @@ fn adoption_persists_non_repository_target_context_for_the_next_hop() {
     let launch_decoy = fx._dir.path().join("next.md");
     std::fs::write(&launch_decoy, "---\n---\nwrong next\n").unwrap();
 
-    let invocation = claudine::invocation_context::InvocationContext::capture_at(fx._dir.path());
+    let invocation = claudine::invocation_context::InvocationContext::capture_at(crate::request::snapshot(), fx._dir.path()).unwrap();
     let router_context = invocation.derive_source(&fx.source_path).unwrap();
     assert_eq!(router_context.repository_root(), Some(fx._dir.path()));
     let mut state = prompt_state(&fx.source_path);
     state.input_layers.file_resolution_context =
-        Some(router_context.file_resolution_context().clone());
+        router_context.file_resolution_context().clone();
     state.invocation_context = Some(invocation);
     state.source_context = Some(router_context);
 
@@ -79,7 +79,6 @@ fn adoption_persists_non_repository_target_context_for_the_next_hop() {
     coordinator
         .adopt(
             request_for(&fx.source_path, &target, vec![fx.source_path.clone()]),
-            Some(fx._dir.path()),
             &mut state,
             &mut guard,
             &mut active,
@@ -88,7 +87,7 @@ fn adoption_persists_non_repository_target_context_for_the_next_hop() {
     let target_context = state.source_context.as_ref().unwrap();
     assert_eq!(target_context.repository_root(), None);
     assert_eq!(
-        state.file_resolution_context().unwrap().cwd(),
+        state.file_resolution_context().cwd(),
         outside.path()
     );
 
@@ -100,7 +99,6 @@ fn adoption_persists_non_repository_target_context_for_the_next_hop() {
                 "next.md".to_string(),
                 vec![fx.source_path.clone(), target.clone()],
             ),
-            Some(fx._dir.path()),
             &mut state,
             &mut guard,
             &mut active,
@@ -160,7 +158,6 @@ fn adopt_commits_identity_and_discards_source_execution_state() {
     coord
         .adopt(
             request_for(&fx.source_path, &target, vec![fx.source_path.clone()]),
-            Some(fx._dir.path()),
             &mut state,
             &mut guard,
             &mut active,
@@ -237,7 +234,6 @@ fn a_target_initialized_from_its_bootstrap_read_owes_only_the_stabilized_tail() 
     coord
         .adopt(
             request_for(&fx.source_path, &target, vec![fx.source_path.clone()]),
-            Some(fx._dir.path()),
             &mut state,
             &mut guard,
             &mut active,
@@ -283,7 +279,6 @@ fn adopt_rejects_a_missing_target_without_activating_it() {
     let error = coord
         .adopt(
             request_for(&fx.source_path, &missing, vec![fx.source_path.clone()]),
-            Some(fx._dir.path()),
             &mut state,
             &mut guard,
             &mut ActiveDocumentState::initial(),
@@ -350,7 +345,6 @@ fn adopt_rejects_a_hop_back_to_a_document_already_in_the_chain() {
     coord
         .adopt(
             request_for(&fx.source_path, &target, vec![fx.source_path.clone()]),
-            Some(fx._dir.path()),
             &mut state,
             &mut guard,
             &mut ActiveDocumentState::initial(),
@@ -367,7 +361,6 @@ fn adopt_rejects_a_hop_back_to_a_document_already_in_the_chain() {
                 &fx.source_path,
                 vec![fx.source_path.clone(), target.clone()],
             ),
-            Some(fx._dir.path()),
             &mut state,
             &mut guard,
             &mut ActiveDocumentState::initial(),
@@ -428,12 +421,11 @@ fn a_committed_handoff_synthesizes_no_source_finalize() {
 
         coord
             .adopt(
-                request_for(&fx.source_path, &target, vec![fx.source_path.clone()]),
-                Some(fx._dir.path()),
-                &mut state,
-                &mut guard,
-                &mut ActiveDocumentState::initial(),
-            )
+            request_for(&fx.source_path, &target, vec![fx.source_path.clone()]),
+            &mut state,
+            &mut guard,
+            &mut ActiveDocumentState::initial(),
+        )
             .expect("the hop is resolvable and uncontested");
         // Guard drops here, at the end of the scope.
     }
@@ -509,7 +501,6 @@ fn inline_closure_ownership_follows_the_adopted_target() {
     coordinator(&fx.source_path)
         .adopt(
             request_for(&fx.source_path, &target, vec![fx.source_path.clone()]),
-            Some(fx._dir.path()),
             &mut state,
             &mut guard,
             &mut ActiveDocumentState::initial(),
@@ -577,7 +568,6 @@ fn adopt_discards_the_sources_lifecycle_config_so_the_boot_has_no_stale_catch() 
     coord
         .adopt(
             request_for(&fx.source_path, &target, vec![fx.source_path.clone()]),
-            Some(fx._dir.path()),
             &mut state,
             &mut guard,
             &mut ActiveDocumentState::initial(),
@@ -621,7 +611,6 @@ fn a_refused_hop_leaves_the_active_documents_lifecycle_config_installed() {
     coord
         .adopt(
             request_for(&fx.source_path, &missing, vec![fx.source_path.clone()]),
-            Some(fx._dir.path()),
             &mut state,
             &mut guard,
             &mut ActiveDocumentState::initial(),
@@ -675,7 +664,6 @@ fn a_rejected_hop_exposes_its_typed_cause_to_the_error_chain() {
     coord
         .adopt(
             request_for(&fx.source_path, &target, vec![fx.source_path.clone()]),
-            Some(fx._dir.path()),
             &mut state,
             &mut guard,
             &mut ActiveDocumentState::initial(),
@@ -690,7 +678,6 @@ fn a_rejected_hop_exposes_its_typed_cause_to_the_error_chain() {
                 &fx.source_path,
                 vec![fx.source_path.clone(), target.clone()],
             ),
-            Some(fx._dir.path()),
             &mut state,
             &mut guard,
             &mut ActiveDocumentState::initial(),
@@ -730,7 +717,6 @@ fn an_unresolvable_target_exposes_its_typed_cause_to_the_error_chain() {
     let error = coord
         .adopt(
             request_for(&fx.source_path, &missing, vec![fx.source_path.clone()]),
-            Some(fx._dir.path()),
             &mut state,
             &mut guard,
             &mut ActiveDocumentState::initial(),
@@ -775,7 +761,6 @@ fn a_refused_handoff_projects_typed_err_facets_per_variant() {
     let resolution = coord
         .adopt(
             request_for(&fx.source_path, &missing, vec![fx.source_path.clone()]),
-            Some(fx._dir.path()),
             &mut state,
             &mut guard,
             &mut ActiveDocumentState::initial(),
@@ -796,7 +781,6 @@ fn a_refused_handoff_projects_typed_err_facets_per_variant() {
     coord
         .adopt(
             request_for(&fx.source_path, &target, vec![fx.source_path.clone()]),
-            Some(fx._dir.path()),
             &mut state,
             &mut guard,
             &mut ActiveDocumentState::initial(),
@@ -810,7 +794,6 @@ fn a_refused_handoff_projects_typed_err_facets_per_variant() {
                 &fx.source_path,
                 vec![fx.source_path.clone(), target.clone()],
             ),
-            Some(fx._dir.path()),
             &mut state,
             &mut guard,
             &mut ActiveDocumentState::initial(),

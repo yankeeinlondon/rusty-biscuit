@@ -31,6 +31,7 @@
 
 mod browser_adapter;
 mod component;
+pub(crate) mod link;
 mod options;
 pub mod projection;
 pub(crate) mod render;

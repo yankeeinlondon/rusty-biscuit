@@ -3204,40 +3204,38 @@ fn a_missing_directory_with_an_unchanged_split_index_is_removed() {
     assert!(listed_block(&fixture, &gone).is_none());
 }
 
-/// The review's split-index reproduction and its sibling shapes: the shared
-/// file a split index's entries live in changes after `diff-index` checked
-/// it, leaving `index` itself byte-identical. Removal refuses (exit 3) and
-/// keeps the record, both index files, and the branch: unforced over a clean
-/// index, and with every force flag over reported staged work.
+/// The review's split-index reproduction: the shared file a split index's
+/// entries live in changes after `diff-index` checked it, leaving `index`
+/// itself byte-identical. Removal refuses (exit 3) and keeps the record, both
+/// index files, and the branch: unforced over a clean index, and with every
+/// force flag over reported staged work. Every shape of the change is the
+/// library's `a_split_index_whose_shared_file_changes_after_inspection_refuses`;
+/// this test only proves the refusal reaches the command, so it takes one shape
+/// per flag set.
 #[cfg(unix)]
 #[test]
 fn a_split_index_whose_shared_file_changes_after_its_check_refuses_even_with_every_force_flag() {
-    let edits = [
-        ("corrupted", "printf corrupt > \"$shared\""),
-        ("removed", "rm \"$shared\""),
-        ("emptied", ": > \"$shared\""),
-        ("given trailing garbage", "printf garbage >> \"$shared\""),
-        ("replaced by a directory", "rm \"$shared\" && mkdir \"$shared\""),
+    let cases = [
+        (false, &[][..], "corrupted", "printf corrupt > \"$shared\""),
+        (true, &ALL_FORCE_FLAGS[..], "removed", "rm \"$shared\""),
     ];
-    for (stage, flags) in [(false, &[][..]), (true, &ALL_FORCE_FLAGS[..])] {
-        for (shape, edit) in edits {
-            let fixture = Fixture::new();
-            let (gone, index, shared) = missing_with_a_split_index(&fixture, "feat/split", "split", stage);
-            let primary = fs::read(&index).unwrap();
-            let path = one_shot_git_shim(&fixture, "diff-index", &format!("shared='{}'; {edit}", shared.display()));
+    for (stage, flags, shape, edit) in cases {
+        let fixture = Fixture::new();
+        let (gone, index, shared) = missing_with_a_split_index(&fixture, "feat/split", "split", stage);
+        let primary = fs::read(&index).unwrap();
+        let path = one_shot_git_shim(&fixture, "diff-index", &format!("shared='{}'; {edit}", shared.display()));
 
-            let output = fixture.wt(&fixture.repo()).env("PATH", path).args(["remove", "split"]).args(flags).output().unwrap();
+        let output = fixture.wt(&fixture.repo()).env("PATH", path).args(["remove", "split"]).args(flags).output().unwrap();
 
-            let stderr = stderr_of(&output);
-            let case = format!("{shape}, staged: {stage}, flags: {flags:?}");
-            assert_eq!(output.status.code(), Some(3), "{case}: {stderr}");
-            assert!(stderr.contains("can't be inspected") && stderr.contains("start over"), "{case}: {stderr}");
-            assert!(!stderr.contains("Removed the record") && !stderr.contains("Deleted branch"), "{case}: {stderr}");
-            assert!(listed_block(&fixture, &gone).is_some(), "{case}: the record stays");
-            assert_eq!(fs::read(&index).unwrap(), primary, "{case}: only the shared file changed");
-            assert!(fs::symlink_metadata(&shared).is_ok() || shape == "removed", "{case}");
-            assert!(fixture.branch_exists("feat/split"), "{case}");
-        }
+        let stderr = stderr_of(&output);
+        let case = format!("{shape}, staged: {stage}, flags: {flags:?}");
+        assert_eq!(output.status.code(), Some(3), "{case}: {stderr}");
+        assert!(stderr.contains("can't be inspected") && stderr.contains("start over"), "{case}: {stderr}");
+        assert!(!stderr.contains("Removed the record") && !stderr.contains("Deleted branch"), "{case}: {stderr}");
+        assert!(listed_block(&fixture, &gone).is_some(), "{case}: the record stays");
+        assert_eq!(fs::read(&index).unwrap(), primary, "{case}: only the shared file changed");
+        assert!(fs::symlink_metadata(&shared).is_ok() || shape == "removed", "{case}");
+        assert!(fixture.branch_exists("feat/split"), "{case}");
     }
 }
 

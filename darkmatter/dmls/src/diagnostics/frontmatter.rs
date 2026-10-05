@@ -25,6 +25,7 @@ use lsp_types::{
     Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, Location, NumberOrString, Range,
 };
 
+use crate::context::resolution_failure_data;
 use crate::diagnostics::codes::{code, source};
 use crate::diagnostics::nested_span;
 use crate::overlay::{
@@ -280,6 +281,11 @@ fn schema_problem_diagnostics(
         let Some((code_value, severity)) = classify(problem.code, ctx.config.schema.strict) else {
             continue;
         };
+        // Without a context no file value was resolved for this document; its
+        // one context-failure diagnostic stands in for them.
+        if problem.file_reference.is_some() && ctx.file_context().is_err() {
+            continue;
+        }
         if matches!(
             problem.code,
             ValidationProblemCode::TypeMismatch | ValidationProblemCode::ConstraintViolation
@@ -298,6 +304,10 @@ fn schema_problem_diagnostics(
             problem.message.clone(),
         );
         diagnostic.related_information = schema_origin_related(ctx, bundle, problem);
+        diagnostic.data = problem
+            .file_reference
+            .as_ref()
+            .map(|reference| resolution_failure_data(reference.resolution_failure()));
         out.push(diagnostic);
     }
 
@@ -1183,9 +1193,9 @@ mod tests {
         let config = DmlsConfig::default();
         let roots = [PathBuf::from("/w")];
         let state = OverlayState::default();
-        let overlay = state.for_document(&uri, text, path, &config, &roots);
+        let overlay = state.for_document(&uri, text, path, &config, &roots, &crate::context::test_support::resolution_for(path));
         let source_map = SourceMap::new(uri.clone(), 1, PositionEncoding::Utf16, Arc::from(text));
-        let graph = WorkspaceGraph::build(&BTreeMap::new(), 1);
+        let graph = WorkspaceGraph::build(&BTreeMap::new(), 1, &crate::context::test_support::workspace_contexts());
         let profile = ClientProfile::from_initialize(&InitializeParams::default(), PositionEncoding::Utf16);
         let ctx = DocumentContext {
             uri: &uri,
@@ -1197,6 +1207,7 @@ mod tests {
             config: &config,
             profile: &profile,
             overlay: overlay.as_ref(),
+            resolution: &crate::context::test_support::resolution_for(path),
         };
         f(&diagnostics(&ctx))
     }

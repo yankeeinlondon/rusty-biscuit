@@ -3,7 +3,8 @@
 //!
 //! Output uses the same box-drawing characters as the biscuit-terminal
 //! filesystem component (`├── `, `└── `, `│   `, four-space indent) and emits
-//! Prose-flavored markup so the caller can colorize via `Prose::new(...).render(...)`.
+//! Prose-flavored markup, one line per `\n`, so the caller can colorize via
+//! `Prose::new(...).with_line_breaks(LineBreaks::Hard).render(...)`.
 //!
 //! Files are colored by kind with the `wt list` dirty-dot palette, split by
 //! `sniff::filesystem::path_kind::is_source_code_path`. Callers cap how many

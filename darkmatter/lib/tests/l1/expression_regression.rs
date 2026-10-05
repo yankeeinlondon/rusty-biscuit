@@ -8,7 +8,6 @@ use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeOptions;
 use darkmatter::markdown::compose::conditions::evaluate_condition_against;
 use serde_json::json;
-use std::path::Path;
 
 /// Composes `content` with default options (`fail_fast` off) and requires the
 /// body expression failure to abort with `fragment` in the error: a body
@@ -17,30 +16,21 @@ use std::path::Path;
 fn assert_fatal_without_fail_fast(content: &str, fragment: &str) {
     let md: Markdown = content.into();
     let error = md
-        .compose()
+        .compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new()))
         .expect_err("an unevaluatable body expression fails composition without fail_fast");
     let message = error.to_string();
     assert!(message.contains(fragment), "expected {fragment:?} in: {message}");
 }
 
-/// Runs a closure with `AGENT` set to `value`, restoring the previous value
-/// (or unset state) afterwards.
-fn with_agent_env<F, R>(value: &str, f: F) -> R
-where
-    F: FnOnce() -> R,
-{
-    let previous = std::env::var("AGENT").ok();
-    unsafe {
-        std::env::set_var("AGENT", value);
-    }
-    let result = f();
-    unsafe {
-        match previous {
-            Some(v) => std::env::set_var("AGENT", v),
-            None => std::env::remove_var("AGENT"),
-        }
-    }
-    result
+/// Options whose context environment holds `AGENT=value`: a request takes its
+/// snapshot environment from the options, never from the process.
+fn options_with_agent(value: &str) -> ComposeOptions {
+    let mut context = darkmatter::markdown::compose::ComposeContext::capture_minimal();
+    context.env_mut().insert("AGENT".to_string(), value.to_string());
+    // Darkmatter-owned, as `ComposeOptions::new()` is, so the request captures
+    // the groups the document names.
+    ComposeOptions::new_with_context(context)
+        .with_context_authority(darkmatter::markdown::compose::ContextAuthority::DarkmatterOwned)
 }
 
 // ── Arithmetic in interpolation ────────────────────────────────────
@@ -54,7 +44,7 @@ quantity: 3
 ---
 Total: {{ (price - discount) * quantity }}"#;
     let md: Markdown = content.into();
-    let (composed, _) = md.compose().unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert!(composed.content().contains("Total: 255"));
 }
 
@@ -66,7 +56,7 @@ name: "World"
 ---
 Message: {{ greeting + ", " + name + "!" }}"#;
     let md: Markdown = content.into();
-    let (composed, _) = md.compose().unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert!(composed.content().contains("Message: Hello, World!"));
 }
 
@@ -82,7 +72,7 @@ items:
 ---
 Last item: {{ items[-1].name }}"#;
     let md: Markdown = content.into();
-    let (composed, _) = md.compose().unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert!(composed.content().contains("Last item: Third"));
 }
 
@@ -95,7 +85,7 @@ config:
 ---
 Theme: {{ config["theme"] }}"#;
     let md: Markdown = content.into();
-    let (composed, _) = md.compose().unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert!(composed.content().contains("Theme: dark"));
 }
 
@@ -111,7 +101,7 @@ data:
 ---
 First user: {{ data["users"][0].profile.name }}"#;
     let md: Markdown = content.into();
-    let (composed, _) = md.compose().unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert!(composed.content().contains("First user: Alice"));
 }
 
@@ -128,7 +118,7 @@ list:
 Value is string: {{ is_string(value) ? "yes" : "no" }}
 List is array: {{ is_array(list) ? "yes" : "no" }}"#;
     let md: Markdown = content.into();
-    let (composed, _) = md.compose().unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert!(composed.content().contains("Value is string: yes"));
     assert!(composed.content().contains("List is array: yes"));
 }
@@ -147,7 +137,7 @@ Full string: {{ is_empty(full_str) ? "empty" : "not" }}
 Empty array: {{ is_empty(empty_arr) ? "empty" : "not" }}
 Full array: {{ is_empty(full_arr) ? "empty" : "not" }}"#;
     let md: Markdown = content.into();
-    let (composed, _) = md.compose().unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert!(composed.content().contains("Empty string: empty"));
     assert!(composed.content().contains("Full string: not"));
     assert!(composed.content().contains("Empty array: empty"));
@@ -171,7 +161,7 @@ Pascal: {{ pascal_case("hello_world") }}
 Snake: {{ snake_case("helloWorld") }}
 Title: {{ title_case("hello world") }}"#;
     let md: Markdown = content.into();
-    let (composed, _) = md.compose().unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert!(composed.content().contains("Upper: HELLO WORLD"));
     assert!(composed.content().contains("Lower: hello"));
     assert!(composed.content().contains("Capitalize: Hello world"));
@@ -191,7 +181,7 @@ prefix: "rep"
 {{ starts_with(filename, prefix) ? "Matching prefix" : "No match" }}
 {{ ends_with(filename, ".pdf") ? "Is PDF" : "Not PDF" }}"#;
     let md: Markdown = content.into();
-    let (composed, _) = md.compose().unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert!(composed.content().contains("Matching prefix"));
     assert!(composed.content().contains("Is PDF"));
 }
@@ -209,7 +199,7 @@ Max: {{ max(a, b) }}
 Abs: {{ abs(b) }}
 Combined: {{ max(a, abs(b)) + min(a, abs(b)) }}"#;
     let md: Markdown = content.into();
-    let (composed, _) = md.compose().unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert!(composed.content().contains("Min: -3"));
     assert!(composed.content().contains("Max: 5"));
     assert!(composed.content().contains("Abs: 3"));
@@ -231,7 +221,7 @@ Last: {{ last(items) }}
 First via index: {{ items[0] }}
 Last via index: {{ items[-1] }}"#;
     let md: Markdown = content.into();
-    let (composed, _) = md.compose().unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert!(composed.content().contains("First: a"));
     assert!(composed.content().contains("Last: c"));
     assert!(composed.content().contains("First via index: a"));
@@ -250,7 +240,7 @@ Valid date: {{ is_date(date_str) ? "yes" : "no" }}
 Invalid date: {{ is_date(invalid) ? "yes" : "no" }}
 DateTime: {{ is_datetime("2026-05-09T10:30:00Z") ? "yes" : "no" }}"#;
     let md: Markdown = content.into();
-    let (composed, _) = md.compose().unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert!(composed.content().contains("Valid date: yes"));
     assert!(composed.content().contains("Invalid date: no"));
     assert!(composed.content().contains("DateTime: yes"));
@@ -271,7 +261,7 @@ IsDateTimeUtc: {{ is_datetime_utc(datetime_str) ? "yes" : "no" }}
 IsDateBad: {{ is_date(bad_str) ? "yes" : "no" }}
 IsDateNum: {{ is_date(num) ? "yes" : "no" }}"#;
     let md: Markdown = content.into();
-    let (composed, _) = md.compose().unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert!(composed.content().contains("IsDate: yes"));
     assert!(composed.content().contains("IsDateUtc: yes"));
     assert!(composed.content().contains("IsDateTime: yes"));
@@ -296,7 +286,7 @@ IsThisMonthUtc: {{ is_this_month_utc(distant) ? "yes" : "no" }}
 IsThisYear: {{ is_this_year(distant) ? "yes" : "no" }}
 IsThisYearUtc: {{ is_this_year_utc(distant) ? "yes" : "no" }}"#;
     let md: Markdown = content.into();
-    let (composed, _) = md.compose().unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert!(composed.content().contains("IsToday: no"));
     assert!(composed.content().contains("IsTodayUtc: no"));
     assert!(composed.content().contains("IsYesterday: no"));
@@ -319,25 +309,25 @@ fn regression_date_helpers_in_condition_mode() {
     });
 
     // Strict validators - true cases
-    assert!(evaluate_condition_against("is_date(date_str)", &data, Path::new(".")).unwrap());
-    assert!(evaluate_condition_against("is_date_utc(date_str)", &data, Path::new(".")).unwrap());
+    assert!(evaluate_condition_against("is_date(date_str)", &data, &crate::request_support::cwd_context()).unwrap());
+    assert!(evaluate_condition_against("is_date_utc(date_str)", &data, &crate::request_support::cwd_context()).unwrap());
     assert!(
-        evaluate_condition_against("is_datetime(datetime_str)", &data, Path::new(".")).unwrap()
+        evaluate_condition_against("is_datetime(datetime_str)", &data, &crate::request_support::cwd_context()).unwrap()
     );
     assert!(
-        evaluate_condition_against("is_datetime_utc(datetime_str)", &data, Path::new(".")).unwrap()
+        evaluate_condition_against("is_datetime_utc(datetime_str)", &data, &crate::request_support::cwd_context()).unwrap()
     );
 
     // Strict validators - false cases
-    assert!(!evaluate_condition_against("is_date(bad_str)", &data, Path::new(".")).unwrap());
-    assert!(!evaluate_condition_against("is_datetime(bad_str)", &data, Path::new(".")).unwrap());
+    assert!(!evaluate_condition_against("is_date(bad_str)", &data, &crate::request_support::cwd_context()).unwrap());
+    assert!(!evaluate_condition_against("is_datetime(bad_str)", &data, &crate::request_support::cwd_context()).unwrap());
 
     // Relative validators - false cases with distant date
-    assert!(!evaluate_condition_against("is_today(distant)", &data, Path::new(".")).unwrap());
-    assert!(!evaluate_condition_against("is_today_utc(distant)", &data, Path::new(".")).unwrap());
-    assert!(!evaluate_condition_against("is_yesterday(distant)", &data, Path::new(".")).unwrap());
-    assert!(!evaluate_condition_against("is_this_month(distant)", &data, Path::new(".")).unwrap());
-    assert!(!evaluate_condition_against("is_this_year(distant)", &data, Path::new(".")).unwrap());
+    assert!(!evaluate_condition_against("is_today(distant)", &data, &crate::request_support::cwd_context()).unwrap());
+    assert!(!evaluate_condition_against("is_today_utc(distant)", &data, &crate::request_support::cwd_context()).unwrap());
+    assert!(!evaluate_condition_against("is_yesterday(distant)", &data, &crate::request_support::cwd_context()).unwrap());
+    assert!(!evaluate_condition_against("is_this_month(distant)", &data, &crate::request_support::cwd_context()).unwrap());
+    assert!(!evaluate_condition_against("is_this_year(distant)", &data, &crate::request_support::cwd_context()).unwrap());
 }
 
 #[test]
@@ -349,7 +339,7 @@ date_str: "2024-06-15"
 Valid date detected
 ::end-block"#;
     let md: Markdown = content.into();
-    let (composed, _) = md.compose().unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert!(composed.content().contains("Valid date detected"));
 
     let content_bad = r#"---
@@ -359,7 +349,7 @@ bad_str: "not-a-date"
 Valid date detected
 ::end-block"#;
     let md_bad: Markdown = content_bad.into();
-    let (composed_bad, _) = md_bad.compose().unwrap();
+    let (composed_bad, _) = md_bad.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert!(!composed_bad.content().contains("Valid date detected"));
 }
 
@@ -382,7 +372,7 @@ Null key: {{ config[missing] }}
 Array key: {{ config[items] }}
 Object key: {{ config[config] }}"#;
     let md: Markdown = content.into();
-    let (composed, _) = md.compose().unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert!(composed.content().contains("Numeric key:"));
     assert!(!composed.content().contains("Numeric key: dark"));
     assert!(composed.content().contains("Float key:"));
@@ -415,7 +405,7 @@ Missing key: {{ config["missing"] }}
 Nested: {{ config["nested"]["key"] }}
 Chained: {{ config["items"][0].name }}"#;
     let md: Markdown = content.into();
-    let (composed, _) = md.compose().unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert!(composed.content().contains("String key: dark"));
     assert!(composed.content().contains("Missing key:"));
     assert!(!composed.content().contains("Missing key: value"));
@@ -446,7 +436,7 @@ Adult check: {{ users[0].age >= config["min_age"] ? "adult" : "minor" }}
 Empty tags: {{ is_empty(users[-1].tags) ? users[-1].name + " has no tags" : "has tags" }}
 Formatted: {{ config.prefix + lower(users[0].name) }}"#;
     let md: Markdown = content.into();
-    let (composed, _) = md.compose().unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert!(
         composed
             .content()
@@ -472,7 +462,7 @@ passing: 80
 Latest score passes
 ::end-block"#;
     let md: Markdown = content.into();
-    let (composed, _) = md.compose().unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert!(!composed.content().contains("Latest score passes"));
 
     let content_pass = r#"---
@@ -486,7 +476,7 @@ passing: 80
 Latest score passes
 ::end-block"#;
     let md_pass: Markdown = content_pass.into();
-    let (composed_pass, _) = md_pass.compose().unwrap();
+    let (composed_pass, _) = md_pass.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert!(composed_pass.content().contains("Latest score passes"));
 }
 
@@ -503,7 +493,7 @@ settings:
 Features enabled
 ::end-block"#;
     let md: Markdown = content.into();
-    let (composed, _) = md.compose().unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert!(composed.content().contains("Features enabled"));
 }
 
@@ -520,7 +510,7 @@ fn regression_shortcut_api_with_arithmetic_and_access() {
     let result = evaluate_condition_against(
         "items[-1] == 'c' && count + 2 <= config.max",
         &data,
-        Path::new("."),
+        &crate::request_support::cwd_context(),
     )
     .unwrap();
     assert!(result);
@@ -528,7 +518,7 @@ fn regression_shortcut_api_with_arithmetic_and_access() {
     let result2 = evaluate_condition_against(
         "is_array(items) && !is_empty(items) && length(items) * 2 > count",
         &data,
-        Path::new("."),
+        &crate::request_support::cwd_context(),
     )
     .unwrap();
     assert!(result2);
@@ -547,7 +537,7 @@ Missing bracket: {{ user["email"] || "no email" }}
 Empty first: {{ first(items) || "none" }}
 Empty last: {{ last(items) || "none" }}"#;
     let md: Markdown = content.into();
-    let (composed, _) = md.compose().unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert!(composed.content().contains("Missing user name: anonymous"));
     assert!(composed.content().contains("Missing bracket: no email"));
     assert!(composed.content().contains("Empty first: none"));
@@ -566,7 +556,7 @@ Name: {{ name || "unnamed" }}
 Title: {{ title || "untitled" }}
 Display: {{ is_empty(name) ? "No name provided" : upper(name) }}"#;
     let md: Markdown = content.into();
-    let (composed, _) = md.compose().unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert!(composed.content().contains("Name: unnamed"));
     assert!(composed.content().contains("Title: untitled"));
     assert!(composed.content().contains("Display: No name provided"));
@@ -593,7 +583,7 @@ path: foo/bar/baz/test.md
 ---
 Basename: {{ basename(doc.path) }}"#;
     let md: Markdown = content.into();
-    let (composed, _) = md.compose().unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert!(composed.content().contains("Basename: test.md"));
 }
 
@@ -602,7 +592,7 @@ fn regression_terminal_in_interpolation() {
     let content = r#"---
 Terminal: {{ terminal("<bold>x</bold>") }}"#;
     let md: Markdown = content.into();
-    let (composed, _) = md.compose().unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     // Prose renders <bold>x</bold> with ANSI SGR sequences. In composed
     // Markdown output the `[` metacharacter is escaped, so the bold open
     // sequence appears as "\x1b\\[1m" rather than the raw "\x1b[1m".
@@ -620,13 +610,12 @@ Terminal: {{ terminal("<bold>x</bold>") }}"#;
 }
 
 #[test]
-#[serial_test::serial(env_agent_model)]
 fn regression_ctx_agent_in_interpolation() {
     let content = r#"---
 ---
 Agent: {{ ctx.agent }}"#;
     let md: Markdown = content.into();
-    let (composed, _) = with_agent_env("opencode", || md.compose().unwrap());
+    let (composed, _) = md.compose_with(&crate::request_support::request(options_with_agent("opencode"))).unwrap();
     assert!(composed.content().contains("Agent: opencode"));
 }
 
@@ -647,7 +636,7 @@ Model: {{ ctx.model }}"#;
         .insert("MODEL".to_string(), "  gpt-5  ".to_string());
 
     let (composed, _) = md
-        .compose_with(ComposeOptions::new_with_context(ctx))
+        .compose_with(&crate::request_support::request(ComposeOptions::new_with_context(ctx)))
         .unwrap();
 
     assert!(composed.content().contains("Agent: codex"));
@@ -663,12 +652,11 @@ path: foo/review-1.md
 Indexed file detected
 ::end-block"#;
     let md: Markdown = content.into();
-    let (composed, _) = md.compose().unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert!(composed.content().contains("Indexed file detected"));
 }
 
 #[test]
-#[serial_test::serial(env_agent_model)]
 fn regression_page_block_with_has_skill() {
     let dir = tempfile::tempdir().unwrap();
     // Pin the tempdir as the git root so `has_skill` resolves its local skill
@@ -691,19 +679,10 @@ Skill found
         std::fs::read_to_string(&source_path).unwrap(),
     )
     .unwrap();
-    // Build the options *inside* `with_agent_env`: `ComposeOptions::new()`
-    // snapshots the process environment (via `ComposeContext::capture`) at
-    // construction time, and `ctx.agent()` prefers that captured snapshot over
-    // the live env. Constructing it before the override would freeze the agent
-    // to the ambient `AGENT` value; an unrecognized agent searches neither the
-    // user `.claude/skills` root nor the local one, hiding the pinned skill and
-    // failing this test whenever the caller's ambient `AGENT` is not a
-    // recognized agent name.
-    let (composed, _) = with_agent_env("claude", || {
-        let options =
-            darkmatter::markdown::compose::ComposeOptions::new().with_source_file(&source_path);
-        md.compose_with(options).unwrap()
-    });
+    // `has_skill` searches the agent's skill roots, so pin a recognized agent;
+    // an unrecognized one searches neither the user nor the local root.
+    let options = options_with_agent("claude").with_source_file(&source_path);
+    let (composed, _) = md.compose_with(&crate::request_support::request(options)).unwrap();
     assert!(composed.content().contains("Skill found"));
 }
 
@@ -722,7 +701,7 @@ Local skill found
 ::end-block
 Composed"#;
     let md: Markdown = content.into();
-    let (composed, _) = md.compose().unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert!(composed.content().contains("Composed"));
     assert!(!composed.content().contains("Skill found"));
     assert!(!composed.content().contains("Local skill found"));
@@ -747,7 +726,7 @@ denominator: 0
 Result: {{ numerator / denominator }}"#;
     let md: Markdown = content.into();
     let options = ComposeOptions::new().with_fail_fast(true);
-    let result = md.compose_with(options);
+    let result = md.compose_with(&crate::request_support::request(options));
     assert!(result.is_err());
     let err = result.unwrap_err();
     let err_msg = err.to_string();
@@ -767,7 +746,7 @@ denominator: 0
 Result: {{ numerator % denominator }}"#;
     let md: Markdown = content.into();
     let options = ComposeOptions::new().with_fail_fast(true);
-    let result = md.compose_with(options);
+    let result = md.compose_with(&crate::request_support::request(options));
     assert!(result.is_err());
     let err = result.unwrap_err();
     let err_msg = err.to_string();
@@ -816,7 +795,7 @@ flag: true
 Result: {{ flag + 1 }}"#;
     let md: Markdown = content.into();
     let options = ComposeOptions::new().with_fail_fast(true);
-    let result = md.compose_with(options);
+    let result = md.compose_with(&crate::request_support::request(options));
     assert!(result.is_err());
     let err = result.unwrap_err();
     let err_msg = err.to_string();
@@ -837,7 +816,7 @@ items:
 Result: {{ items + 1 }}"#;
     let md: Markdown = content.into();
     let options = ComposeOptions::new().with_fail_fast(true);
-    let result = md.compose_with(options);
+    let result = md.compose_with(&crate::request_support::request(options));
     assert!(result.is_err());
     let err = result.unwrap_err();
     let err_msg = err.to_string();
@@ -857,7 +836,7 @@ obj:
 Result: {{ obj + 1 }}"#;
     let md: Markdown = content.into();
     let options = ComposeOptions::new().with_fail_fast(true);
-    let result = md.compose_with(options);
+    let result = md.compose_with(&crate::request_support::request(options));
     assert!(result.is_err());
     let err = result.unwrap_err();
     let err_msg = err.to_string();

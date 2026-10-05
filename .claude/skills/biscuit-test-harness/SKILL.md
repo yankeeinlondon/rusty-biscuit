@@ -83,6 +83,12 @@ exit marker timed out. Consequences:
   pair.
 - The prompt is the shell's stock `PS1` (`bash-5.3$`, `host%`). Never
   grep a captured frame for a literal the stock prompt contains.
+- Never locate a command's output from its echo. tmux's bash shortens a
+  long command line with a leading `<` instead of wrapping it, so the
+  full echo (or a `bt <subcommand>` anchor) is missing. Print begin/end
+  markers around the command, assembled by `printf` so the echo never
+  spells them out; `biscuit-terminal/cli/tests/common/output_region.rs`
+  is the worked example.
 - The outer shell still runs the login profile, so a profile that
   sources an rc file unconditionally still executes it — but
   non-interactively, in a shell that is then replaced. Anything guarded
@@ -103,7 +109,7 @@ via `skip_with_reason("<X>")` when it returns `false`. No `#[ignore]`.
 | Harness | `available()` requires |
 |---------|------------------------|
 | `TmuxHarness` | `tmux` on `$PATH`. Nothing else. |
-| `WezTermHarness` | `wezterm` on `$PATH` **and** `WEZTERM_UNIX_SOCKET` set. |
+| `WezTermHarness` | `wezterm` on `$PATH`, `WEZTERM_UNIX_SOCKET` set, **and** `wezterm cli list` answering within 5 s. A later answer (a busy or hung GUI) counts as available only when `BISCUIT_TEST_REQUIRED_BACKENDS` lists `wezterm`, where "unavailable" would fail the test anyway. |
 | `KittyHarness` | `kitty` on `$PATH` **and** `KITTY_LISTEN_ON` set. |
 | `KittyInstance` (macOS) | `can_launch()`: macOS with `kitty`, `open`, `screencapture`. No host Kitty session needed. |
 | `AppleTerminalHarness` | macOS, `CI` not truthy, `osascript` can reach Terminal.app. |

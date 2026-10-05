@@ -1,6 +1,6 @@
 //! Programs section output formatting (table and JSON).
 
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::InlineProse;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::{Table as TerminalTable, TableCellContent, TableColumn};
 use biscuit_terminal::terminal::Terminal;
@@ -25,8 +25,8 @@ fn linked_name_cell(name: &str, website: &str, term: &Terminal) -> String {
         return name.to_string();
     }
 
-    // Use Prose OSC8 support so links are clickable without burning table width.
-    Prose::new(format!(r#"<a href="{website}">{name}</a>"#)).render(term)
+    // Use InlineProse OSC8 support so links are clickable without burning table width.
+    InlineProse::new(format!(r#"<a href="{website}">{name}</a>"#)).render(term)
 }
 
 fn version_allowed(include_versions: bool, source: Option<ExecutableSource>) -> bool {

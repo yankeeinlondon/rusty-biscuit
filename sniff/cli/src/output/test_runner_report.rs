@@ -7,7 +7,7 @@
 
 use std::path::Path;
 
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{InlineProse, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::repo::{TestRunnerAttribution, TestRunnerSource};
@@ -100,7 +100,7 @@ pub fn render_one(
     repo_root: &Path,
     term: &Terminal,
 ) -> String {
-    Prose::new(entry_markup(entry, verbose, multi, repo_root)).render(term)
+    InlineProse::new(entry_markup(entry, verbose, multi, repo_root)).render(term)
 }
 
 /// Markup for one entry: the bold runner name, plus a parenthetical with the

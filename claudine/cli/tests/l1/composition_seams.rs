@@ -353,10 +353,10 @@ const PREPARED_CONTEXT_CAPTURE_BASELINE: &[AllowedSite] = &[
                  `build_preflight_graph_with_invocation` instead",
     },
     AllowedSite {
-        site: "system_prompt::prepare::compose_prompt_markdown",
+        site: "commands::context::render_values_report",
         calls: 1,
-        reason: "library compatibility branch when no shared session context \
-                 exists; the session path supplies the launch capture",
+        reason: "`claudine context --values` reports the host at the request \
+                 snapshot's launch directory; it composes no document",
     },
     AllowedSite {
         site: "loop_control::target_launch::rebuild_target_launch",

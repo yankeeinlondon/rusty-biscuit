@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 
 fn compose(content: &str) -> Markdown {
     let markdown: Markdown = content.into();
-    markdown.compose().expect("document composes").0
+    markdown.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).expect("document composes").0
 }
 
 fn frontmatter_value(document: &Markdown, key: &str) -> Value {

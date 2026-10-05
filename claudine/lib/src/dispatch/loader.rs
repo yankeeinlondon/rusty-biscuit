@@ -66,6 +66,9 @@ impl RuntimeEventBinding {
 #[derive(Debug, Clone)]
 pub struct CanonicalRuntimeConfig {
     pub(crate) config: ClaudineConfig,
+    /// The process snapshot hook `when` conditions resolve file references
+    /// and `ctx.*` against.
+    pub(crate) request: darkmatter::markdown::compose::RequestSnapshot,
     pub(crate) messaging: RuntimeMessagingSettings,
     pub(crate) protect_service: Option<ProtectService>,
     pub(crate) events: HashMap<AgenticEvent, RuntimeEventBinding>,
@@ -74,6 +77,11 @@ pub struct CanonicalRuntimeConfig {
 impl CanonicalRuntimeConfig {
     pub fn config(&self) -> &ClaudineConfig {
         &self.config
+    }
+
+    /// The process snapshot this runtime was compiled for.
+    pub fn request_snapshot(&self) -> &darkmatter::markdown::compose::RequestSnapshot {
+        &self.request
     }
 
     pub fn messaging(&self) -> &RuntimeMessagingSettings {
@@ -97,6 +105,7 @@ impl CanonicalRuntimeConfig {
 pub fn compile_canonical_runtime(
     config: ClaudineConfig,
     _repo_root: Option<&Path>,
+    request: &darkmatter::markdown::compose::RequestSnapshot,
 ) -> Result<CanonicalRuntimeConfig> {
     // 1. Compile event bindings
     let compiled_matchers: HashMap<AgenticEvent, Option<RuntimeMatcher>> = compile_many(
@@ -168,6 +177,7 @@ pub fn compile_canonical_runtime(
 
     Ok(CanonicalRuntimeConfig {
         config,
+        request: request.clone(),
         messaging,
         protect_service,
         events,
@@ -344,11 +354,7 @@ fn bridge_provider_config(cfg: &MessengerProviderConfig) -> MessagingRouteConfig
 ///
 /// Returns the first existing config file path, or the default path if none exists.
 pub fn user_config_path() -> PathBuf {
-    // `std::env::home_dir` honors `$HOME`/`%USERPROFILE%` before the platform
-    // fallback. `dirs::home_dir` consults only the known-folder API on
-    // Windows, which makes an overridden home (hermetic test fixtures, or a
-    // user override) invisible there.
-    let home = std::env::home_dir().unwrap_or_else(|| PathBuf::from("~"));
+    let home = biscuit_file::home_dir().unwrap_or_else(|| PathBuf::from("~"));
 
     for name in USER_CONFIG_NAMES {
         let path = home.join(name);

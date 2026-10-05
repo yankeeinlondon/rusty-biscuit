@@ -54,7 +54,7 @@ fn values_report_captures_context_exactly_once() {
     let calls = Cell::new(0u32);
     render_values_report_with(|| {
         calls.set(calls.get() + 1);
-        ComposeContext::capture()
+        ComposeContext::capture_for_dir(crate::request::snapshot().request_dir())
     });
     assert_eq!(
         calls.get(),
@@ -481,7 +481,7 @@ fn reports_render_within_140ch_contract_at_wide_terminals() {
 /// real file could produce.
 #[test]
 fn values_report_projects_the_absent_document_identity() {
-    let context = ComposeContext::capture();
+    let context = ComposeContext::capture_for_dir(crate::request::snapshot().request_dir());
     let values = context.values();
 
     for key in ["self", "last_updated", "hash"] {

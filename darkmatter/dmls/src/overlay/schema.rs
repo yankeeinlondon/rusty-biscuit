@@ -14,6 +14,7 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeSource;
 use darkmatter::markdown::schemas::resolve::{merge_baseline, resolve_schema};
@@ -936,8 +937,9 @@ pub fn assemble(
     config: &DmlsConfig,
     workspace_roots: &[PathBuf],
     trigger_registry: Option<TriggerRegistry>,
+    file_context: &FileResolutionContext,
 ) -> Result<Option<SchemaBundle>, SchemaError> {
-    let combined = combined_baseline(doc_path, config, workspace_roots)?;
+    let combined = combined_baseline(doc_path, config, workspace_roots, file_context)?;
 
     let md: Markdown = document_text.into();
     let md = md.with_source(ComposeSource::File(doc_path.to_path_buf()));
@@ -950,15 +952,16 @@ pub fn assemble(
         extension_shapes,
         dependencies,
     } = combined;
+    // File values and `$schema` references resolve through the document's
+    // repository context, as `md compose` from the repository root resolves
+    // them.
+    let schemas = DarkmatterSchemas::new(file_context.clone());
     let mut schemas = match baseline {
-        Some(baseline) => DarkmatterSchemas::new().with_baseline_json_schema(baseline),
-        None => DarkmatterSchemas::new().with_darkmatter_baseline_json_schema(),
+        Some(baseline) => schemas.with_baseline_json_schema(baseline),
+        None => schemas.with_darkmatter_baseline_json_schema(),
     }?;
     if let Some(registry) = trigger_registry {
         schemas = schemas.with_trigger_registry(registry);
-    }
-    if let Some(dir) = doc_path.parent() {
-        schemas = schemas.with_file_ref_fallback_dir(dir.to_path_buf());
     }
 
     match schemas.effective_for(&md)? {
@@ -973,12 +976,11 @@ pub fn assemble(
     }
 }
 
-/// Selects the trigger-discovery boundary for a document.
+/// The nearest workspace folder containing a document, which gates trigger
+/// discovery (the schema roots themselves come from the document's context).
 ///
-/// The nearest containing workspace folder is authoritative. When the document
-/// is inside a Git repository whose root is at or below that folder, the
-/// repository root narrows the boundary. Documents outside all workspace
-/// folders intentionally return `None` and never discover triggers.
+/// Documents outside all workspace folders intentionally return `None` and
+/// never discover triggers.
 pub fn trigger_boundary(doc_path: &Path, workspace_roots: &[PathBuf]) -> Option<PathBuf> {
     let workspace = workspace_roots
         .iter()
@@ -1005,6 +1007,7 @@ fn combined_baseline(
     doc_path: &Path,
     config: &DmlsConfig,
     workspace_roots: &[PathBuf],
+    context: &FileResolutionContext,
 ) -> Result<CombinedBaseline, SchemaError> {
     let mut baseline: Option<Value> = None;
     let mut shapes = Vec::new();
@@ -1013,7 +1016,7 @@ fn combined_baseline(
         if !extension_matches(doc_path, extension, workspace_roots) {
             continue;
         }
-        let resolved = load_extension_schema(extension, workspace_roots)?;
+        let resolved = load_extension_schema(extension, workspace_roots, context)?;
         if let Some(SimplifiedSchema::Single(shape)) = &resolved.simplified {
             shapes.push(shape.clone());
         }
@@ -1043,13 +1046,14 @@ fn combined_baseline(
 fn load_extension_schema(
     extension: &SchemaExtensionConfig,
     workspace_roots: &[PathBuf],
+    context: &FileResolutionContext,
 ) -> Result<darkmatter::markdown::schemas::resolve::ResolvedSchema, SchemaError> {
     let path = resolve_extension_path(&extension.path, workspace_roots);
     let base_dir = path.parent().unwrap_or_else(|| Path::new(".")).to_path_buf();
     // Drive resolution through the same file-reference path a `$schema` string
     // uses, so YAML/JSON disambiguation matches document references.
     let value = Value::String(path.to_string_lossy().into_owned());
-    resolve_schema(&value, &base_dir)
+    resolve_schema(&value, &base_dir, context)
 }
 
 /// Resolves an extension's configured path: relative paths anchor on the first
@@ -1135,6 +1139,7 @@ mod tests {
             &DmlsConfig::default(),
             &[PathBuf::from("/w")],
             None,
+            &crate::context::test_support::workspace_context(),
         )
         .expect("assembles")
         .expect("has frontmatter");
@@ -1152,6 +1157,7 @@ mod tests {
             &DmlsConfig::default(),
             &[PathBuf::from("/w")],
             None,
+            &crate::context::test_support::workspace_context(),
         )
         .expect("assembles");
         assert!(bundle.is_none());
@@ -1168,6 +1174,7 @@ mod tests {
             &config,
             &[PathBuf::from("/w")],
             None,
+            &crate::context::test_support::workspace_context(),
         );
         // Outside `.claude/**`: extension never loaded, assembly succeeds.
         assert!(outside.is_ok());

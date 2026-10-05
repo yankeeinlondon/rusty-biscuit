@@ -97,7 +97,7 @@ fn format_findings(findings: &[ValidationFinding]) -> String {
 }
 
 /// Returns `true` if `kind` is a block-level node.
-fn is_block(kind: &NodeKind) -> bool {
+pub(crate) fn is_block(kind: &NodeKind) -> bool {
     matches!(
         kind,
         NodeKind::Root { .. }
@@ -118,7 +118,7 @@ fn is_block(kind: &NodeKind) -> bool {
 }
 
 /// Returns `true` if `kind` is an inline (phrasing-level) node.
-fn is_inline_kind(kind: &NodeKind) -> bool {
+pub(crate) fn is_inline_kind(kind: &NodeKind) -> bool {
     matches!(
         kind,
         NodeKind::Text { .. }
@@ -151,7 +151,7 @@ fn is_phrasing_only(kind: &NodeKind) -> bool {
 }
 
 /// A short name for a node kind, used in finding messages.
-fn kind_name(kind: &NodeKind) -> &'static str {
+pub(crate) fn kind_name(kind: &NodeKind) -> &'static str {
     match kind {
         NodeKind::Root { .. } => "Root",
         NodeKind::Heading { .. } => "Heading",
@@ -440,7 +440,8 @@ fn check_node(
     }
 
     // Kind-specific browser sub-groups: a link group belongs only on a Link
-    // node, an image group only on an Image node. The remaining browser fields
+    // node, an image group only on an Image node, and a non-default block
+    // element only on a Paragraph. The remaining browser fields
     // (inline_style, data/aria attrs) apply to any node, and the validated name
     // newtypes already guarantee safe attribute names at construction.
     if let Some(browser) = node.attrs.browser_ref() {
@@ -457,6 +458,16 @@ fn check_node(
             report.findings.push(error(
                 format!(
                     "image browser attributes are permitted only on an Image node, found on {}",
+                    kind_name(&node.kind),
+                ),
+                span.clone(),
+            ));
+        }
+        if !browser.block_element.is_default() && !matches!(node.kind, NodeKind::Paragraph { .. })
+        {
+            report.findings.push(error(
+                format!(
+                    "the block-element browser attribute is permitted only on a Paragraph node, found on {}",
                     kind_name(&node.kind),
                 ),
                 span.clone(),
@@ -1210,6 +1221,74 @@ mod tests {
                 .errors()
                 .any(|f| f.message.contains("image browser attributes are permitted only")),
         );
+    }
+
+    /// One node of every [`NodeKind`] except `Paragraph`.
+    fn every_non_paragraph_node() -> Vec<RenderNode> {
+        let depth = crate::tree::HeadingDepth::new(2).unwrap();
+        vec![
+            RenderNode::root(vec![]),
+            RenderNode::heading(depth, vec![RenderNode::text("h")]),
+            RenderNode::section(depth, vec![RenderNode::text("h")], vec![]),
+            RenderNode::block_quote(vec![]),
+            RenderNode::list(false, None, vec![]),
+            RenderNode::list_item(None, vec![]),
+            RenderNode::code(None, None, "c"),
+            RenderNode::thematic_break(),
+            RenderNode::disclosure(vec![RenderNode::text("s")], vec![], None),
+            RenderNode::table(vec![], vec![]),
+            RenderNode::table_row(vec![]),
+            RenderNode::table_cell(vec![]),
+            RenderNode::footnote_definition("1", vec![]),
+            RenderNode::text("t"),
+            RenderNode::emphasis(vec![]),
+            RenderNode::strong(vec![]),
+            RenderNode::delete(vec![]),
+            RenderNode::span(vec![], vec![]),
+            RenderNode::inline_code("c"),
+            RenderNode::link("u", None, vec![]),
+            RenderNode::image("u", None, "a"),
+            RenderNode::footnote_reference("1"),
+            RenderNode::soft_break(),
+            RenderNode::hard_break(),
+            RenderNode::html("<b>", false),
+            RenderNode::extended("mark", vec![], None),
+            RenderNode::unsupported("u"),
+        ]
+    }
+
+    #[test]
+    fn block_element_on_non_paragraph_is_an_error() {
+        use crate::tree::BlockElement;
+        let nodes = every_non_paragraph_node();
+        // Guard: the sample covers every kind but Paragraph.
+        let kinds: std::collections::BTreeSet<_> =
+            nodes.iter().map(|n| kind_name(&n.kind)).collect();
+        assert_eq!(kinds.len(), nodes.len());
+        assert!(!kinds.contains("Paragraph"));
+
+        for mut node in nodes {
+            node.attrs.browser_mut_or_default().block_element = BlockElement::Div;
+            let name = kind_name(&node.kind);
+            let report = validate(&node, ValidationMode::Full);
+            assert!(
+                report.errors().any(|f| f.message
+                    == format!(
+                        "the block-element browser attribute is permitted only on a Paragraph node, found on {name}"
+                    )),
+                "expected a placement error on {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn block_element_on_paragraph_is_valid() {
+        use crate::tree::BlockElement;
+        for element in BlockElement::ALL {
+            let mut para = RenderNode::paragraph(vec![RenderNode::text("x")]);
+            para.attrs.browser_mut_or_default().block_element = element;
+            assert!(ensure_valid(&RenderNode::root(vec![para])).is_ok(), "{element:?}");
+        }
     }
 
     #[test]

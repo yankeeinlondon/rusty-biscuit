@@ -14,9 +14,11 @@ fn write(path: &Path, contents: &str) {
 }
 
 fn resolve_file(path: &Path) -> darkmatter::markdown::schemas::resolve::ResolvedSchema {
+    let dir = path.parent().expect("schema file has a directory");
     resolve_schema(
         &json!(path.to_string_lossy()),
-        path.parent().unwrap_or_else(|| Path::new(".")),
+        dir,
+        &biscuit_file::FileResolutionContext::new(dir),
     )
     .unwrap()
 }
@@ -117,8 +119,8 @@ fn mapping_envelopes_resolve_identically_with_origin_metadata() {
     let pure_resolved = resolve_file(&pure);
     let tagged_resolved = resolve_file(&tagged);
     assert_eq!(pure_resolved.json_schema, tagged_resolved.json_schema);
-    assert_eq!(pure_resolved.referenced_files, vec![pure.canonicalize().unwrap()]);
-    assert_eq!(tagged_resolved.referenced_files, vec![tagged.canonicalize().unwrap()]);
+    assert_eq!(pure_resolved.referenced_files, vec![biscuit_file::canonicalize_simplified(&pure).unwrap()]);
+    assert_eq!(tagged_resolved.referenced_files, vec![biscuit_file::canonicalize_simplified(&tagged).unwrap()]);
     assert_eq!(pure_resolved.origin.uri.as_deref(), Some(pure.as_path()));
     assert_eq!(tagged_resolved.origin.uri.as_deref(), Some(tagged.as_path()));
 }
@@ -136,7 +138,8 @@ fn pure_sequence_is_a_whole_file_union_but_not_a_namespace() {
 
     let consumer = dir.path().join("consumer.yaml");
     write(&consumer, "$schema:\n  value: person@./union.yaml\n");
-    let error = resolve_schema(&json!(consumer.to_string_lossy()), dir.path()).unwrap_err();
+    let context = biscuit_file::FileResolutionContext::new(dir.path());
+    let error = resolve_schema(&json!(consumer.to_string_lossy()), dir.path(), &context).unwrap_err();
     assert!(matches!(error, SchemaError::SchemaDocument { .. }));
 }
 
@@ -161,8 +164,8 @@ fn named_imports_share_pure_and_tagged_mapping_namespaces() {
     let pure_resolved = resolve_file(&pure_consumer);
     let tagged_resolved = resolve_file(&tagged_consumer);
     assert_eq!(pure_resolved.json_schema, tagged_resolved.json_schema);
-    assert_eq!(pure_resolved.imports, vec![pure.canonicalize().unwrap()]);
-    assert_eq!(tagged_resolved.imports, vec![tagged.canonicalize().unwrap()]);
+    assert_eq!(pure_resolved.imports, vec![biscuit_file::canonicalize_simplified(&pure).unwrap()]);
+    assert_eq!(tagged_resolved.imports, vec![biscuit_file::canonicalize_simplified(&tagged).unwrap()]);
 }
 
 #[test]
@@ -182,8 +185,8 @@ fn tagged_schema_resolves_nested_imports_and_examples_from_its_directory() {
     );
 
     let resolved = resolve_file(&schema);
-    assert_eq!(resolved.imports, vec![types.canonicalize().unwrap()]);
-    assert_eq!(resolved.examples, vec![example.canonicalize().unwrap()]);
+    assert_eq!(resolved.imports, vec![biscuit_file::canonicalize_simplified(&types).unwrap()]);
+    assert_eq!(resolved.examples, vec![biscuit_file::canonicalize_simplified(&example).unwrap()]);
 }
 
 #[test]
@@ -196,7 +199,8 @@ fn import_cycles_remain_bounded_across_envelope_forms() {
         &tagged,
         "kind: schema\ntypes:\n  node: node@./pure.yaml\n",
     );
-    let error = resolve_schema(&json!(pure.to_string_lossy()), dir.path()).unwrap_err();
+    let context = biscuit_file::FileResolutionContext::new(dir.path());
+    let error = resolve_schema(&json!(pure.to_string_lossy()), dir.path(), &context).unwrap_err();
     assert!(matches!(error, SchemaError::ImportCycle { .. }));
 }
 
@@ -217,6 +221,7 @@ fn raw_json_schema_remains_distinct_and_cannot_supply_named_imports() {
 
     let consumer = dir.path().join("consumer.yaml");
     write(&consumer, "$schema:\n  value: value@./raw.yaml\n");
-    let error = resolve_schema(&json!(consumer.to_string_lossy()), dir.path()).unwrap_err();
+    let context = biscuit_file::FileResolutionContext::new(dir.path());
+    let error = resolve_schema(&json!(consumer.to_string_lossy()), dir.path(), &context).unwrap_err();
     assert!(matches!(error, SchemaError::AmbiguousReferenced { .. }));
 }

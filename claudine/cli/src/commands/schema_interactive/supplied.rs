@@ -143,7 +143,7 @@ mod tests {
              ---\nbody\n",
         )
         .unwrap();
-        let source = resolve_composition_source(path.to_str().unwrap()).unwrap();
+        let source = resolve_composition_source(path.to_str().unwrap(), crate::request::snapshot()).unwrap();
         let context = FileResolutionContext::new(dir.path());
         (dir, source, context)
     }

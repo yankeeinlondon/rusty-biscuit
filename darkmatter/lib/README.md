@@ -114,13 +114,16 @@ We can then use a small amount of Rust code to compose the `main.md` document:
 
 ```rust
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::compose::ComposeOptions;
+use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest, RequestSnapshot};
 
 let md = Markdown::try_from(std::path::Path::new("main.md"))?;
 let options = ComposeOptions::new()
     .with_source_file("main.md");
+// A binary snapshots its process once; a library names its request directory
+// with `RequestSnapshot::new(dir)`. See docs/topics/compose-requests.md.
+let request = ComposeRequest::prepare(options, &RequestSnapshot::from_process()?)?;
 
-let (composed, report) = md.compose_with(options)?;
+let (composed, report) = md.compose_with(&request)?;
 println!("{}", composed.content());
 ```
 
@@ -538,23 +541,25 @@ let compact = cleanup_content_compact(input);
 let loose   = cleanup_content_loose(input);
 
 // Via the compose pipeline
-use darkmatter::markdown::compose::ComposeOptions;
+use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest};
 
 let options = ComposeOptions::new()
     .with_list_spacing(ListSpacingMode::Compact);
-let (composed, report) = md.compose_with(options)?;
+let request = ComposeRequest::prepare(options, &snapshot)?;
+let (composed, report) = md.compose_with(&request)?;
 ```
 
 ### Compose Pipeline (Stage 1 + Stage 2)
 
 ```rust
-use darkmatter::markdown::compose::ComposeOptions;
+use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest, RequestSnapshot};
 
 let md = darkmatter::markdown::Markdown::try_from(std::path::Path::new("docs/root.md"))?;
 let options = ComposeOptions::new()
     .with_source_file("docs/root.md");
 
-let (composed, report) = md.compose_with(options)?;
+let request = ComposeRequest::prepare(options, &RequestSnapshot::from_process()?)?;
+let (composed, report) = md.compose_with(&request)?;
 println!("{}", report.summary());
 println!("{}", composed.content());
 ```

@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use biscuit_terminal::components::list::UnorderedList;
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{InlineProse, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable as _;
 use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
 use biscuit_terminal::discovery::detection::ColorMode;
@@ -849,7 +849,7 @@ pub fn pr_status_markup(outcome: PrOutcome, prs: &PrListing, now: u64) -> Option
 /// columns carry ahead/behind counts only when `terminal` is at least
 /// [`METRICS_MIN_WIDTH`] columns wide.
 pub fn table(facts: &TableFacts<'_>, terminal: &Terminal) -> Table {
-    let prose_cell = |markup: String| -> TableCellContent { Prose::new(markup).render(terminal).into() };
+    let prose_cell = |markup: String| -> TableCellContent { InlineProse::new(markup).render(terminal).into() };
     let target_header = match facts.target {
         Some(target) if target.reference.starts_with("origin/") => remote_badge(&target.reference),
         Some(target) => local_badge(&target.reference),
@@ -858,7 +858,7 @@ pub fn table(facts: &TableFacts<'_>, terminal: &Terminal) -> Table {
     let columns = vec![
         TableColumn::new("Worktree"),
         TableColumn::new("Branch"),
-        TableColumn::new(Prose::new(format!("-> {target_header}")).render(terminal)),
+        TableColumn::new(InlineProse::new(format!("-> {target_header}")).render(terminal)),
         TableColumn::new("-> parent"),
     ];
     let mut table = Table::new()

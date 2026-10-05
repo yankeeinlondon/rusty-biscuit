@@ -6,6 +6,7 @@ use crate::{
     html::attribute::{ClassDefinition, DomId},
     html::tag::{BlockTag, HtmlAttribute, HtmlBlockTag, HtmlVoidTag, VoidTag, link::LinkTag},
     microdata::MicrodataKey,
+    tree::SourceSpan,
 };
 
 // ---------------------------------------------------------------------------
@@ -174,6 +175,12 @@ pub struct BrowserFragment<S: FragmentState = Shape> {
     features: Vec<PageFeature>,
     metadata: HashMap<MicrodataKey, String>,
     pub dependency_links: Vec<LinkTag>,
+    /// Set on the fragment holding a render tree's raw `Html` payload, to
+    /// that node's span. A Markdown writer embedding the serialized HTML
+    /// must not re-encode this range: its consumer may not decode
+    /// character references there (script, style, comments) or may read
+    /// whitespace as syntax (unquoted attributes).
+    raw_source: Option<Box<SourceSpan>>,
     _state: PhantomData<S>,
 }
 
@@ -196,6 +203,7 @@ impl BrowserFragment<Shape> {
             features: Vec::new(),
             metadata: HashMap::new(),
             dependency_links: Vec::new(),
+            raw_source: None,
             _state: PhantomData,
         }
     }
@@ -368,9 +376,39 @@ impl BrowserFragment<Ready> {
     /// [`PopoverIdAllocator`] so a page can keep ids unique across every
     /// fragment it composes.
     pub(crate) fn render_with(&self, popover_ids: &mut PopoverIdAllocator) -> String {
-        match &self.node {
-            Some(node) => render_node(node, popover_ids),
-            None => String::new(),
+        let mut out = String::new();
+        self.write_marking_raw(popover_ids, &mut out, &mut Vec::new());
+        out
+    }
+
+    /// Marks this fragment as holding the raw `Html` payload of the render
+    /// tree node at `span` (see [`RawRange`]).
+    pub(crate) fn mark_raw_source(mut self, span: SourceSpan) -> Self {
+        self.raw_source = Some(Box::new(span));
+        self
+    }
+
+    /// Appends the fragment's HTML to `out`, as [`render_with`] writes it,
+    /// and records in `raw` the byte range of every raw `Html` payload
+    /// marked by [`mark_raw_source`] within it.
+    ///
+    /// [`render_with`]: BrowserFragment::render_with
+    /// [`mark_raw_source`]: BrowserFragment::mark_raw_source
+    pub(crate) fn write_marking_raw(
+        &self,
+        popover_ids: &mut PopoverIdAllocator,
+        out: &mut String,
+        raw: &mut Vec<RawRange>,
+    ) {
+        let start = out.len();
+        if let Some(node) = &self.node {
+            write_node(node, popover_ids, out, raw);
+        }
+        if let Some(span) = &self.raw_source {
+            raw.push(RawRange {
+                range: start..out.len(),
+                span: (**span).clone(),
+            });
         }
     }
 
@@ -385,44 +423,63 @@ impl BrowserFragment<Ready> {
     }
 }
 
-/// Recursively renders a single composable node to HTML, drawing prompted-link
-/// popover ids from `popover_ids` so they stay unique across the render.
-fn render_node(node: &ComposableNode, popover_ids: &mut PopoverIdAllocator) -> String {
+/// The byte range a raw `Html` payload occupies in serialized HTML, and the
+/// span of the render tree node it came from.
+pub(crate) struct RawRange {
+    pub(crate) range: std::ops::Range<usize>,
+    pub(crate) span: SourceSpan,
+}
+
+/// Recursively writes a single composable node's HTML to `out`, drawing
+/// prompted-link popover ids from `popover_ids` so they stay unique across
+/// the render, and recording marked raw payloads in `raw`.
+fn write_node(
+    node: &ComposableNode,
+    popover_ids: &mut PopoverIdAllocator,
+    out: &mut String,
+    raw: &mut Vec<RawRange>,
+) {
     match node {
-        ComposableNode::TextFragment(text) => crate::browser::utils::escape_text(text).into_owned(),
-        ComposableNode::RawHtml(html) => html.clone(),
-        ComposableNode::Component(fragment) => fragment.render_with(popover_ids),
+        ComposableNode::TextFragment(text) => {
+            out.push_str(&crate::browser::utils::escape_text(text))
+        }
+        ComposableNode::RawHtml(html) => out.push_str(html),
+        ComposableNode::Component(fragment) => fragment.write_marking_raw(popover_ids, out, raw),
         ComposableNode::VoidTag(void) => {
-            format!(
-                "<{}{}>",
-                void.tag.name(),
-                render_attributes(&void.attributes, None)
-            )
+            out.push('<');
+            out.push_str(void.tag.name());
+            write_attributes(out, &void.attributes, None);
+            out.push('>');
         }
         ComposableNode::BlockTag(block) => {
             let name = block.tag.name();
-            let children: String = block
-                .content
-                .children
-                .iter()
-                .map(|child| render_node(child, popover_ids))
-                .collect();
-            format!(
-                "<{name}{}>{children}</{name}>",
-                render_attributes(&block.attributes, Some(&block.base_class))
-            )
+            out.push('<');
+            out.push_str(name);
+            write_attributes(out, &block.attributes, Some(&block.base_class));
+            out.push('>');
+            for child in &block.content.children {
+                write_node(child, popover_ids, out, raw);
+            }
+            out.push_str("</");
+            out.push_str(name);
+            out.push('>');
         }
-        ComposableNode::Popover(popover) => render_popover(popover, popover_ids),
+        ComposableNode::Popover(popover) => write_popover(popover, popover_ids, out, raw),
     }
 }
 
-/// Renders a prompted-link popover, allocating its document-unique id from
+/// Writes a prompted-link popover, allocating its document-unique id from
 /// `popover_ids` and injecting it into the anchor's `interestfor` /
 /// `aria-describedby` and the prompt span's `id`.
 ///
 /// The emitted bytes match the streaming full-document writer's prompted-link
 /// markup so the fragment and streaming browser paths stay byte-identical.
-fn render_popover(popover: &PopoverNode, popover_ids: &mut PopoverIdAllocator) -> String {
+fn write_popover(
+    popover: &PopoverNode,
+    popover_ids: &mut PopoverIdAllocator,
+    out: &mut String,
+    raw: &mut Vec<RawRange>,
+) {
     let id = popover_ids.allocate(&popover.id_base);
 
     // `HtmlAttribute` is not `Clone`, so the id-dependent association attributes
@@ -430,20 +487,21 @@ fn render_popover(popover: &PopoverNode, popover_ids: &mut PopoverIdAllocator) -
     // anchor attributes. Both sub-lists emit their class first (there is none
     // here) then their entries in order, so the concatenation is byte-identical
     // to rendering one combined list (the streaming path's single list).
-    let base_attrs = render_attributes(&popover.anchor_attrs, None);
-    let id_attrs = render_attributes(
+    out.push_str(r#"<span class="dm-popover-wrapper"><a"#);
+    write_attributes(out, &popover.anchor_attrs, None);
+    write_attributes(
+        out,
         &[
             HtmlAttribute::Other("interestfor".into(), id.clone()),
             HtmlAttribute::Other("aria-describedby".into(), id.clone()),
         ],
         None,
     );
-    let anchor_children: String = popover
-        .anchor_children
-        .iter()
-        .map(|child| render_node(child, popover_ids))
-        .collect();
-    let anchor = format!("<a{base_attrs}{id_attrs}>{anchor_children}</a>");
+    out.push('>');
+    for child in &popover.anchor_children {
+        write_node(child, popover_ids, out, raw);
+    }
+    out.push_str("</a>");
 
     // `write_attributes` always emits the merged class first, so the vector
     // order below yields `class, id, popover, role` — matching the streaming
@@ -454,13 +512,11 @@ fn render_popover(popover: &PopoverNode, popover_ids: &mut PopoverIdAllocator) -
         HtmlAttribute::Other("popover".into(), "hint".to_string()),
         HtmlAttribute::Other("role".into(), "note".to_string()),
     ];
-    let prompt = format!(
-        "<span{}>{}</span>",
-        render_attributes(&prompt_attrs, None),
-        crate::browser::utils::escape_text(&popover.prompt_text)
-    );
-
-    format!(r#"<span class="dm-popover-wrapper">{anchor}{prompt}</span>"#)
+    out.push_str("<span");
+    write_attributes(out, &prompt_attrs, None);
+    out.push('>');
+    out.push_str(&crate::browser::utils::escape_text(&popover.prompt_text));
+    out.push_str("</span></span>");
 }
 
 /// Recursively validates a composable node.
@@ -474,8 +530,9 @@ fn validate_node(node: &ComposableNode) -> bool {
     }
 }
 
-/// Serializes a slice of attributes into an opening-tag attribute string
-/// (leading space included when non-empty). Attribute values are escaped.
+/// Streams the opening-tag attribute text for `attributes` into `out`, with a
+/// leading space before each emitted attribute. Attribute values are
+/// escaped.
 ///
 /// `extra_class` supplies a component wrapper class (the block's
 /// `base_class`) which is merged ahead of any explicit
@@ -484,18 +541,7 @@ fn validate_node(node: &ComposableNode) -> bool {
 ///
 /// `pub(crate)` so the direct render-tree document writer
 /// ([`render_browser_document_html`](crate::tree::render::render_browser_document_html))
-/// can stream byte-identical opening tags without building a fragment.
-pub(crate) fn render_attributes(attributes: &[HtmlAttribute], extra_class: Option<&str>) -> String {
-    let mut out = String::new();
-    write_attributes(&mut out, attributes, extra_class);
-    out
-}
-
-/// Streams the opening-tag attribute text for `attributes` into `out`, with a
-/// leading space before each emitted attribute. Byte-for-byte identical to
-/// [`render_attributes`], but writes straight into the destination buffer so
-/// the direct document writer avoids an intermediate `String` per element and
-/// the per-element class-parts vector.
+/// streams byte-identical opening tags without building a fragment.
 pub(crate) fn write_attributes(
     out: &mut String,
     attributes: &[HtmlAttribute],
@@ -687,6 +733,7 @@ impl<S: FragmentState> BrowserFragment<S> {
             features: self.features,
             metadata: self.metadata,
             dependency_links: self.dependency_links,
+            raw_source: self.raw_source,
             _state: PhantomData,
         }
     }
@@ -700,6 +747,7 @@ impl<S: FragmentState> BrowserFragment<S> {
             features: self.features,
             metadata: self.metadata,
             dependency_links: self.dependency_links,
+            raw_source: self.raw_source,
             _state: PhantomData,
         }
     }

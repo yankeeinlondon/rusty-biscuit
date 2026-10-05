@@ -2,7 +2,7 @@
 //! file-tool errors, and the `task_progress` dedup helpers.
 
 use biscuit_terminal::components::block_quote::BlockQuote;
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
 use biscuit_terminal::components::status::StatusState;
 use biscuit_terminal::terminal::Terminal;
@@ -36,7 +36,9 @@ impl EventRenderer {
         body: &ToolResultBody,
     ) -> Vec<String> {
         let mut lines = Vec::new();
+        // One row per output line, each truncated rather than joined.
         let prose = Prose::new(escape_prose(&body.text))
+            .with_line_breaks(LineBreaks::Hard)
             .with_word_wrap(WordWrap::Truncate(Some("…".into())));
         let mut block = BlockQuote::new(RenderableTerminalContent::from(prose), None::<&str>)
             .with_text_color(Color::Tailwind(Tailwind::Gray500))

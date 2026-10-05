@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 /// source paths are resolved at build time, keeping keys stable across
 /// macOS (`/var` vs `/private/var`), Linux, and Windows.
 pub(crate) fn heading_slug_key(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+    biscuit_file::canonicalize_simplified(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 /// Prepared heading slugs for every file-sourced node visited by a graph

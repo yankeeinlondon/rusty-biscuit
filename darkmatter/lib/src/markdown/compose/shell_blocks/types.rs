@@ -4,7 +4,7 @@ use std::ops::Range;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use crate::markdown::compose::shell_expansion::types::{
     ErrorHandling, ShellCommandOrigin, ShellExpansionError, ShellPipeline,
 };
@@ -212,7 +212,7 @@ impl biscuit_terminal::errors::BlockError for ShellBlockError {
                 }
                 StatusBlock::new(StatusState::Error)
                     .error_header(ErrorHeader::new("ShellBlockError", "parse failed"))
-                    .body(body)
+                    .body(Prose::new(body).with_line_breaks(LineBreaks::Hard))
                     .hint("Shell block parameters use <cyan>key=\"value\"</cyan> syntax, not <cyan>--flag</cyan> syntax.")
             }
 
@@ -239,7 +239,7 @@ impl biscuit_terminal::errors::BlockError for ShellBlockError {
                 }
                 StatusBlock::new(StatusState::Error)
                     .error_header(ErrorHeader::new("ShellBlockError", "unterminated block"))
-                    .body(body)
+                    .body(Prose::new(body).with_line_breaks(LineBreaks::Hard))
                     .hint("Add <cyan>::end-block</cyan> to close the block.")
             }
 
@@ -275,7 +275,7 @@ impl biscuit_terminal::errors::BlockError for ShellBlockError {
                             context.push_str(&format!("<dim>---</dim>\n{dimmed}\n"));
                         }
                     }
-                    body.push(Prose::new(context));
+                    body.push(Prose::new(context).with_line_breaks(LineBreaks::Hard));
 
                     let excerpt_line = origin.line_number();
                     let show_excerpt = match origin {
@@ -310,11 +310,11 @@ impl biscuit_terminal::errors::BlockError for ShellBlockError {
                     if !stderr_section.is_empty() || !stdout_section.is_empty() {
                         body.push(Prose::new(format!(
                             "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}\n<dim>Exit code:</dim> {code}{stderr_section}{stdout_section}"
-                        )));
+                        )).with_line_breaks(LineBreaks::Hard));
                     } else {
                         body.push(Prose::new(format!(
                             "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}\n<dim>Exit code:</dim> {code}"
-                        )));
+                        )).with_line_breaks(LineBreaks::Hard));
                     }
 
                     StatusBlock::new(StatusState::Error)
@@ -352,7 +352,7 @@ impl biscuit_terminal::errors::BlockError for ShellBlockError {
                     }
                     let mut block = StatusBlock::new(StatusState::Error)
                         .error_header(ErrorHeader::new("ShellBlockError", "command failed"))
-                        .body(body);
+                        .body(Prose::new(body).with_line_breaks(LineBreaks::Hard));
 
                     let hint = match source.as_ref() {
                         ShellExpansionError::ParseDirective { .. } => "Check the command syntax.",
@@ -682,5 +682,106 @@ mod tests {
         assert!(truncated.contains("line29"), "tail should be preserved; got: {truncated}");
         assert!(!truncated.contains("line0"), "head should be dropped; got: {truncated}");
         assert!(truncated.contains("… output truncated"), "truncation marker should be present; got: {truncated}");
+    }
+
+    /// Renders `err` at 80 columns and returns its body rows with the block
+    /// quote border removed.
+    fn body_rows(err: &ShellBlockError) -> (String, Vec<String>) {
+        let term = Terminal::builder().width(80).build();
+        let rendered = strip_escape_codes(err.status_block(&term).render(&term));
+        let rows = rendered
+            .lines()
+            .map(|line| line.trim_start_matches('┃').trim_start().to_string())
+            .collect();
+        (rendered, rows)
+    }
+
+    #[track_caller]
+    fn assert_rows_start_lines(err: &ShellBlockError, labels: &[&str]) {
+        let (rendered, rows) = body_rows(err);
+        for label in labels {
+            assert!(
+                rows.iter().any(|row| row.starts_with(label)),
+                "expected `{label}` to start its own line; got:\n{rendered}"
+            );
+        }
+    }
+
+    /// Each labeled row and excerpt line of a shell block error keeps its own
+    /// terminal line: the rows are joined by single newlines, which the body
+    /// renders as hard breaks.
+    #[test]
+    fn labeled_rows_render_on_their_own_lines() {
+        let excerpt = SourceExcerpt::from_text("::shell-block --x\nls\n::end-block", 1, 1, 1);
+        assert_rows_start_lines(
+            &ShellBlockError::Parse {
+                line: 1,
+                message: "unknown flag".to_string(),
+                excerpt: excerpt.clone(),
+                source_file: Some(std::path::PathBuf::from("/tmp/doc.md")),
+            },
+            &["Source:", "Line: 1", "Message:", "Context:", ">    1 |", "2 |"],
+        );
+        assert_rows_start_lines(
+            &ShellBlockError::Unterminated {
+                line: 1,
+                opening_text: "::shell-block".to_string(),
+                excerpt: excerpt.clone(),
+                source_file: None,
+            },
+            &["Opened at line: 1", "Opener:", "Context:", ">    1 |"],
+        );
+
+        let ctx = SourceContext::new(
+            std::path::PathBuf::from("/tmp/doc.md"),
+            std::path::PathBuf::from("doc.md"),
+            "::shell-block\necho one\nfalse\n::end-block\n".to_string(),
+        );
+        let failed = ShellExpansionError::ExecutionFailed {
+            ctx: Box::new(ctx.clone()),
+            command: "false".to_string(),
+            code: 1,
+            stdout: String::new(),
+            stderr: "first problem\nsecond problem".to_string(),
+            origin: ShellCommandOrigin::ShellBlock { start_line: 1, command_line: 3 },
+        };
+        assert_rows_start_lines(
+            &ShellBlockError::Command {
+                block_start_line: 1,
+                command_line: 3,
+                partial_output: Box::new(vec!["one".to_string()]),
+                excerpt: SourceExcerpt::default(),
+                source: Box::new(failed),
+                source_file: None,
+            },
+            &[
+                "Block opened at line: 1",
+                "Command at line: 3",
+                "Partial output from earlier commands:",
+                "Command: false",
+                "Exit code: 1",
+                "stderr:",
+                "first problem",
+                "second problem",
+            ],
+        );
+
+        let timeout = ShellExpansionError::Timeout {
+            ctx: Box::new(ctx),
+            command: "sleep 9".to_string(),
+            timeout: std::time::Duration::from_secs(1),
+            origin: ShellCommandOrigin::ShellBlock { start_line: 1, command_line: 3 },
+        };
+        assert_rows_start_lines(
+            &ShellBlockError::Command {
+                block_start_line: 1,
+                command_line: 3,
+                partial_output: Box::new(Vec::new()),
+                excerpt,
+                source: Box::new(timeout),
+                source_file: Some(std::path::PathBuf::from("/tmp/doc.md")),
+            },
+            &["Source:", "Block opened at line: 1", "Command at line: 3", "Context:"],
+        );
     }
 }
