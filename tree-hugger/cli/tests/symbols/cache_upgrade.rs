@@ -2,10 +2,8 @@
 //! fingerprint (the schema-2 literal key, or a schema-3 key at extractor
 //! revisions 1 to 4) is not served after the upgrade, and the entry written by the
 //! upgraded run is served on the next run. Works on the cache files directly,
-//! with `TMPDIR` (`TMP`/`TEMP` on Windows) pointed at a test-owned directory.
-//!
-//! The stderr `cache:` line cannot show this: it counts only in-process hits,
-//! and a persistent hit records nothing.
+//! with `TMPDIR` (`TMP`/`TEMP` on Windows) pointed at a test-owned directory,
+//! so a stale entry can be seeded under its historical key.
 
 use std::path::{Path, PathBuf};
 
@@ -16,7 +14,7 @@ use tempfile::TempDir;
 use crate::{PYTHON_FIXTURE, Scratch, TYPESCRIPT_FIXTURE, cache_entries, json_of, stdout_of};
 
 const FILE: &str = "typescript.ts";
-const ARGS: [&str; 3] = ["--json", "symbols", FILE];
+const ARGS: [&str; 3] = ["--json-full", "symbols", FILE];
 const STALE_NAME: &str = "staleSeededSymbol";
 const RENAMED_NAME: &str = "renamedInWarmEntry";
 
@@ -54,9 +52,9 @@ fn write_json(path: &Path, value: &Value) {
 
 /// Renames the record called `from` (name and display name) in a snapshot.
 pub(crate) fn rename_record(snapshot: &mut Value, from: &str, to: &str) {
-    let record = snapshot["symbols"]
+    let record = snapshot["records"]
         .as_array_mut()
-        .expect("snapshot symbols")
+        .expect("entry records")
         .iter_mut()
         .find(|record| record["identity"]["name"] == from)
         .unwrap_or_else(|| panic!("snapshot has no `{from}` record"));
@@ -64,13 +62,13 @@ pub(crate) fn rename_record(snapshot: &mut Value, from: &str, to: &str) {
     record["identity"]["display_name"] = Value::from(to);
 }
 
-/// A snapshot whose records are recognizably stale: schema `2.0` throughout,
-/// every access Unknown, no `static` modifier, and one record renamed.
+/// An entry whose records are recognizably stale: record schema `2.0`, every
+/// access Unknown, no `static` modifier, and one record renamed. The entry's
+/// own `schema_version` stays current, so the payload stays servable.
 fn stale_snapshot(current: &Value) -> Value {
     let mut snapshot = current.clone();
     let old_schema = serde_json::json!({ "major": 2, "minor": 0 });
-    snapshot["key"]["analyzer_fingerprint"]["schema_version"] = old_schema.clone();
-    for record in snapshot["symbols"].as_array_mut().expect("snapshot symbols") {
+    for record in snapshot["records"].as_array_mut().expect("entry records") {
         record["schema_version"] = old_schema.clone();
         record["visibility"]["level"] = Value::from("Unknown");
         if let Some(object) = record.as_object_mut() {
@@ -83,18 +81,21 @@ fn stale_snapshot(current: &Value) -> Value {
 
 /// `(name, line, kind, visibility, is_static, container_kind)` per symbol.
 fn symbol_facts(json: &Value) -> Vec<(String, Value, Value, Value, Value, Value)> {
-    let mut facts: Vec<_> = json["files"][0]["symbols"]
+    let mut facts: Vec<_> = json["indexes"][0]["symbols"]
         .as_array()
-        .expect("files[0].symbols")
+        .expect("indexes[0].symbols")
         .iter()
-        .map(|symbol| {
+        .map(|record| {
+            let is_static = record["modifiers"]
+                .as_array()
+                .is_some_and(|modifiers| modifiers.iter().any(|modifier| modifier["type"] == "Static"));
             (
-                symbol["name"].as_str().unwrap_or_default().to_string(),
-                symbol["range"]["start_line"].clone(),
-                symbol["kind"].clone(),
-                symbol.get("visibility").cloned().unwrap_or(Value::Null),
-                symbol.get("is_static").cloned().unwrap_or(Value::Bool(false)),
-                symbol.get("container_kind").cloned().unwrap_or(Value::Null),
+                record["identity"]["name"].as_str().unwrap_or_default().to_string(),
+                record["source"]["declaration_span"]["start"]["line"].clone(),
+                record["kind"].clone(),
+                record["visibility"]["level"].clone(),
+                Value::Bool(is_static),
+                record["identity"]["container_kind"].clone(),
             )
         })
         .collect();
@@ -124,9 +125,9 @@ fn warm_entry_from_the_previous_extractor_is_not_served_after_the_upgrade() {
     let fresh = json_of(&stdout_of(scratch.hug_with_temp(discovery.path(), &ARGS), &ARGS));
     let discovered_entry = only_entry(discovery.path());
     let current_snapshot = read_json(&discovered_entry);
-    let file_path = current_snapshot["key"]["file_path"]
+    let file_path = current_snapshot["file"]
         .as_str()
-        .expect("snapshot key file_path")
+        .expect("entry file")
         .to_string();
     let relative_project = discovered_entry
         .parent()
@@ -210,7 +211,7 @@ fn warm_entry_from_the_previous_extractor_is_not_served_after_the_upgrade() {
 }
 
 /// One earlier extractor revision whose entry must not be served: a file,
-/// the value a repair changed (`probe` reads it from `hug --json` output),
+/// the value a repair changed (`probe` reads it from `hug --json-full` output),
 /// and how that revision's snapshot differs from the current one.
 struct StaleRevision {
     revision: &'static str,
@@ -253,9 +254,9 @@ fn revision_key(
 
 /// The record called `name` in a snapshot; panics unless there is exactly one.
 fn record_named<'a>(snapshot: &'a mut Value, name: &str) -> &'a mut Value {
-    let mut matches: Vec<_> = snapshot["symbols"]
+    let mut matches: Vec<_> = snapshot["records"]
         .as_array_mut()
-        .expect("snapshot symbols")
+        .expect("entry records")
         .iter_mut()
         .filter(|record| record["identity"]["name"] == name)
         .collect();
@@ -267,7 +268,7 @@ fn record_named<'a>(snapshot: &'a mut Value, name: &str) -> &'a mut Value {
 /// is not served, while the same payload under the current key is (so the
 /// miss is due to the key) and the entry run 1 writes is served on run 2.
 fn assert_stale_revision_is_not_served(case: &StaleRevision) {
-    let args = ["--json", "symbols", case.file];
+    let args = ["--json-full", "symbols", case.file];
     let label = format!("revision {} `{}`", case.revision, case.file);
     let scratch = Scratch::new(&[(case.file, case.source.as_str())]);
 
@@ -276,9 +277,9 @@ fn assert_stale_revision_is_not_served(case: &StaleRevision) {
     assert_eq!((case.probe)(&fresh), case.repaired, "{label}: an uncached run reports the repaired value");
     let discovered_entry = only_entry(discovery.path());
     let current_snapshot = read_json(&discovered_entry);
-    let file_path = current_snapshot["key"]["file_path"]
+    let file_path = current_snapshot["file"]
         .as_str()
-        .expect("snapshot key file_path")
+        .expect("entry file")
         .to_string();
     let relative_project = discovered_entry
         .parent()
@@ -395,9 +396,9 @@ fn entry_from_extractor_revision_two_is_not_served_after_the_repairs() {
         repaired: Value::from("Public"),
         stale: Value::from("ModulePrivate"),
         revert: |snapshot| {
-            let nested = snapshot["symbols"]
+            let nested = snapshot["records"]
                 .as_array_mut()
-                .expect("snapshot symbols")
+                .expect("entry records")
                 .iter_mut()
                 .find(|record| {
                     record["identity"]["name"] == "scope_leak"
@@ -443,9 +444,9 @@ fn entry_from_extractor_revision_three_is_not_served_after_the_repairs() {
         repaired: Value::from("Public"),
         stale: Value::from("ModulePrivate"),
         revert: |snapshot| {
-            let definition = snapshot["symbols"]
+            let definition = snapshot["records"]
                 .as_array_mut()
-                .expect("snapshot symbols")
+                .expect("entry records")
                 .iter_mut()
                 .filter(|record| record["identity"]["name"] == "trailing_differs")
                 .max_by_key(|record| record["source"]["declaration_span"]["start_byte"].as_u64())
@@ -455,12 +456,12 @@ fn entry_from_extractor_revision_three_is_not_served_after_the_repairs() {
     });
 }
 
-/// The `identity.keyword` of the `module_function` record in a `hug --json`
+/// The `identity.keyword` of the `module_function` record in a `hug --json-full`
 /// report (`null` when absent).
 fn module_function_keyword(json: &Value) -> Value {
-    let records: Vec<&Value> = json["symbol_indexes"]
+    let records: Vec<&Value> = json["indexes"]
         .as_array()
-        .expect("symbol_indexes")
+        .expect("indexes")
         .iter()
         .flat_map(|index| index["symbols"].as_array().expect("index symbols"))
         .filter(|record| record["identity"]["name"] == "module_function")
@@ -493,11 +494,11 @@ fn entry_from_extractor_revision_four_is_not_served_after_the_repairs() {
 }
 
 /// The `semantics.is_recursive` of the `module_function` record in a
-/// `hug --json` report (`null` when absent).
+/// `hug --json-full` report (`null` when absent).
 fn module_function_is_recursive(json: &Value) -> Value {
-    let records: Vec<&Value> = json["symbol_indexes"]
+    let records: Vec<&Value> = json["indexes"]
         .as_array()
-        .expect("symbol_indexes")
+        .expect("indexes")
         .iter()
         .flat_map(|index| index["symbols"].as_array().expect("index symbols"))
         .filter(|record| record["identity"]["name"] == "module_function")

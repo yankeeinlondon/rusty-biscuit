@@ -117,7 +117,10 @@ fn is_query_empty(source: &str) -> bool {
         .all(|line| line.trim().is_empty() || line.trim().starts_with(';'))
 }
 
-fn resolve_query_text(
+/// The effective text of `language`'s `kind` query: vendored queries with
+/// their inherited queries and overlays resolved, empty when the language has
+/// no patterns of that kind.
+pub(crate) fn resolve_query_text(
     language: ProgrammingLanguage,
     kind: QueryKind,
 ) -> Result<String, TreeHuggerError> {

@@ -20,8 +20,11 @@ use crate::shared::ProgrammingLanguage;
 pub struct SourceFile {
     path: PathBuf,
     language: ProgrammingLanguage,
+    /// Whether `language` was given rather than detected from the path.
+    forced_language: bool,
     hash: String,
     source: String,
+    experimental_semantics: bool,
 }
 
 impl SourceFile {
@@ -46,6 +49,7 @@ impl SourceFile {
         language: Option<ProgrammingLanguage>,
     ) -> Result<Self, TreeHuggerError> {
         let path = path.as_ref().to_path_buf();
+        let forced_language = language.is_some();
         let source = std::fs::read_to_string(&path).map_err(|source| TreeHuggerError::Io {
             path: path.clone(),
             source,
@@ -60,9 +64,18 @@ impl SourceFile {
         Ok(Self {
             path,
             language,
+            forced_language,
             hash,
             source,
+            experimental_semantics: false,
         })
+    }
+
+    /// Enables the experimental semantic lint rules for the diagnostics this
+    /// file's analysis produces (see [`TreeFile::experimental_semantics`]).
+    pub fn experimental_semantics(mut self, enabled: bool) -> Self {
+        self.experimental_semantics = enabled;
+        self
     }
 
     pub fn path(&self) -> &Path {
@@ -71,6 +84,17 @@ impl SourceFile {
 
     pub fn language(&self) -> ProgrammingLanguage {
         self.language
+    }
+
+    /// The language when it was given to
+    /// [`read_with_language`](Self::read_with_language), `None` when it was
+    /// detected from the path.
+    pub fn forced_language(&self) -> Option<ProgrammingLanguage> {
+        self.forced_language.then_some(self.language)
+    }
+
+    pub fn uses_experimental_semantics(&self) -> bool {
+        self.experimental_semantics
     }
 
     /// The xxHash of the text, as [`TreeFile::hash`] reports it.
@@ -105,7 +129,7 @@ impl SourceFile {
                 path: self.path.clone(),
             })?;
 
-        Ok(TreeFile::from_parts(
+        let mut tree_file = TreeFile::from_parts(
             self.path,
             self.language,
             self.hash,
@@ -113,7 +137,9 @@ impl SourceFile {
             tree,
             grammar,
             grammar_id,
-        ))
+        );
+        tree_file.experimental_semantics = self.experimental_semantics;
+        Ok(tree_file)
     }
 
     /// Parses the text and runs `query` over it, through the same planning

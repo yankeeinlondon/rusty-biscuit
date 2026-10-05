@@ -15,6 +15,7 @@ mod phase6_neovim_query_reuse;
 mod query_compile;
 mod resolver_tests;
 mod symbols_adapter;
+mod symbols_cache;
 mod symbols_coverage;
 mod symbols_decl_text;
 mod symbols_declarator_wrappers;

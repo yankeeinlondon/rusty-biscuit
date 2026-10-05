@@ -1,12 +1,20 @@
 //! `hug` checks for `2026-10-03-visibility-and-kind`: representative CLI wiring
 //! of kinds, visibility and static members (test 7), and the warm-cache
-//! upgrade across a schema and an extractor revision change (test 8), and the
-//! persistent-cache reader contract for malformed symbol fields, plus the
-//! `hug symbols` output goldens over the 16-language `multi/` fixture tree.
+//! upgrade across a schema and an extractor revision change (test 8), the
+//! persistent-cache reader contract for malformed entry and symbol fields,
+//! concurrent `hug` processes sharing one entry and `--verbose` cache
+//! reporting, plus the declaration reports: the `hug symbols` goldens over
+//! the 16-language `multi/` fixture tree, the JSON envelope and its errors,
+//! `--sort` and grouping, `classes` and `--prelude`.
 
+mod cache_lookup;
 mod cache_robustness;
 mod cache_upgrade;
+mod classes;
 mod golden;
+mod order;
+mod prelude;
+mod report;
 mod wiring;
 
 use std::path::{Path, PathBuf};
@@ -77,6 +85,30 @@ impl Scratch {
         self.run(self.temp.path(), args, env)
     }
 
+    /// A `hug` process command with the same isolation as [`Self::hug`], for
+    /// tests that drive the child's pipes themselves.
+    #[allow(deprecated)] // `cargo_bin` is the area's binary-launch helper
+    pub fn process(&self, args: &[&str]) -> std::process::Command {
+        let config = self.home.path().join(".config");
+        let temp = self.temp.path();
+        let mut command = std::process::Command::new(assert_cmd::cargo::cargo_bin("hug"));
+        command
+            .args(args)
+            .current_dir(self.repo.path())
+            .env("HOME", self.home.path())
+            .env("USERPROFILE", self.home.path())
+            .env("XDG_CONFIG_HOME", &config)
+            .env("APPDATA", &config)
+            .env("LOCALAPPDATA", &config)
+            .env("TMPDIR", temp)
+            .env("TMP", temp)
+            .env("TEMP", temp)
+            .env("NO_COLOR", "1")
+            .env_remove("CLICOLOR_FORCE")
+            .env("RAYON_NUM_THREADS", "2");
+        command
+    }
+
     #[allow(deprecated)] // `cargo_bin` is the area's binary-launch helper
     fn run(&self, temp: &Path, args: &[&str], env: &[(&str, &str)]) -> Output {
         let config = self.home.path().join(".config");
@@ -94,6 +126,9 @@ impl Scratch {
             .env("TEMP", temp)
             .env("NO_COLOR", "1")
             .env_remove("CLICOLOR_FORCE")
+            // Still parallel, without one worker per core in every
+            // concurrently running test process.
+            .env("RAYON_NUM_THREADS", "2")
             .envs(env.iter().copied());
         command.output().expect("run hug")
     }

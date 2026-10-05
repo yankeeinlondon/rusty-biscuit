@@ -15,6 +15,7 @@ use crate::shared::{
 };
 
 pub mod counters;
+pub(crate) mod coverage;
 
 /// Runs the requested passes, after their prerequisites, over every kind.
 pub fn analyze_file(
@@ -124,6 +125,7 @@ pub(crate) fn run_query(
     Ok(SymbolQueryResult {
         index,
         completed_capabilities: query.required_capabilities(),
+        selected_kinds: query.selected_kinds(),
     })
 }
 

@@ -341,6 +341,91 @@ fn test_persistent_cache_recomputes_on_corrupt_entry() {
     assert!(cache.get::<SymbolSnapshot>("corrupt_key").is_none());
 }
 
+/// Every `.tmp` file under `dir`.
+fn temporary_files(dir: &std::path::Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    for shard in fs::read_dir(dir).unwrap().flatten() {
+        if let Ok(entries) = fs::read_dir(shard.path()) {
+            found.extend(
+                entries
+                    .flatten()
+                    .map(|entry| entry.path())
+                    .filter(|path| path.extension().is_some_and(|ext| ext == "tmp")),
+            );
+        }
+    }
+    found
+}
+
+#[test]
+fn persistent_put_replaces_the_entry_and_leaves_no_temporary_file() {
+    let dir = TempDir::new().unwrap();
+    let cache = PersistentCache::open(dir.path().to_path_buf(), true);
+    cache.put("ab_entry", &vec!["first"]).unwrap();
+    cache.put("ab_entry", &vec!["second", "value"]).unwrap();
+
+    assert_eq!(cache.get::<Vec<String>>("ab_entry"), Some(vec!["second".into(), "value".into()]));
+    assert!(temporary_files(dir.path()).is_empty());
+    assert_eq!(cache.get_bytes("missing").unwrap(), None, "no entry is not an error");
+}
+
+/// A write that cannot complete removes its temporary file and reports the
+/// error; nothing half-written becomes the entry.
+#[test]
+fn a_failed_persistent_put_is_an_error_and_leaves_no_temporary_file() {
+    let dir = TempDir::new().unwrap();
+    let cache = PersistentCache::open(dir.path().to_path_buf(), true);
+    // A directory where the entry file belongs: the rename cannot replace it.
+    fs::create_dir_all(dir.path().join("ab").join("ab_entry.json").join("occupied")).unwrap();
+
+    assert!(cache.put("ab_entry", &vec!["value"]).is_err());
+    assert!(temporary_files(dir.path()).is_empty());
+    assert!(cache.get::<Vec<String>>("ab_entry").is_none());
+}
+
+#[test]
+fn concurrent_persistent_puts_leave_one_complete_entry() {
+    let dir = TempDir::new().unwrap();
+    let cache = PersistentCache::open(dir.path().to_path_buf(), true);
+    let values: Vec<Vec<String>> = (0..8)
+        .map(|writer| vec![format!("writer-{writer}"); 2_000])
+        .collect();
+
+    std::thread::scope(|scope| {
+        for value in &values {
+            let (cache, values) = (&cache, &values);
+            scope.spawn(move || {
+                for _ in 0..10 {
+                    // Windows may refuse a rename racing another rename onto
+                    // the same file; a failed write is recoverable, a torn
+                    // entry is not.
+                    let _ = cache.put("ab_entry", value);
+                    if let Some(read) = cache.get::<Vec<String>>("ab_entry") {
+                        assert!(values.contains(&read), "a reader saw a mixed or partial entry");
+                    }
+                    let bytes = cache.get_bytes("ab_entry").unwrap().expect("an entry exists");
+                    assert!(
+                        serde_json::from_slice::<Vec<String>>(&bytes).is_ok(),
+                        "a reader saw a partial entry"
+                    );
+                }
+            });
+        }
+    });
+
+    let last: Vec<String> = cache.get("ab_entry").expect("an entry");
+    assert!(values.contains(&last));
+    assert!(temporary_files(dir.path()).is_empty());
+}
+
+#[test]
+fn canonical_digest_separates_fields_unambiguously() {
+    assert_ne!(canonical_digest(&["a|b", "c"]), canonical_digest(&["a", "b|c"]));
+    assert_ne!(canonical_digest(&["ab", ""]), canonical_digest(&["a", "b"]));
+    assert_ne!(canonical_digest(&[]), canonical_digest(&[""]));
+    assert_eq!(canonical_digest(&["x", "y"]), canonical_digest(&["x", "y"]));
+}
+
 // ============================================================================
 // Cache Config Tests
 // ============================================================================

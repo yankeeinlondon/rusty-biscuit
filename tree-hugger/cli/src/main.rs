@@ -1,8 +1,8 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::io::IsTerminal;
+use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
 
 use biscuit_file::to_portable_string;
 use biscuit_terminal::discovery::detection::ColorDepth;
@@ -16,25 +16,31 @@ use serde::{Deserialize, Serialize};
 use tree_hugger::adapter::{
     AdapterConfig, AdapterMetadata, ExternalDiagnosticAdapter, OxlintAdapter,
 };
-use tree_hugger::cache::{
-    AnalyzerFingerprint, CacheConfig, FileCacheKey, InMemorySymbolCache, InProcessCache,
-    PersistentCache, SymbolSnapshot,
-};
+use tree_hugger::cache::{PersistentCache, SymbolCache};
 use tree_hugger::{
-    CodeRange, Diagnostic, DiagnosticKind, DiagnosticSeverity, FieldInfo, FileSummary,
-    AnalysisPass, FileSymbolIndex, FunctionSignature, ImportSymbol, LintDiagnostic, ParameterInfo,
-    ProgrammingLanguage, RuleRegistry, RuleSelector, SchemaVersion, SourceContext, SymbolInfo,
-    SymbolKind, SyntaxDiagnostic, TreeFile, TreeHuggerError, TypeMetadata, VariantInfo,
+    Capability, CodeRange, Diagnostic, DiagnosticKind, DiagnosticSeverity, FileSummary,
+    FileSymbolIndex, ImportSymbol, LintDiagnostic, ProgrammingLanguage, RuleRegistry,
+    RuleSelector, SchemaVersion, SourceContext, SymbolQuery, SyntaxDiagnostic, TreeHuggerError,
     find_git_root, find_package_root,
 };
 use tree_hugger::god_files::{GodAnalysis, GodFiles, RefactorHint, RiskBand, SymbolBlock};
 use url::Url;
+mod classes;
+mod declarations;
 mod import_format;
+mod order;
 mod prelude;
+mod render;
+mod report;
+mod scan;
 mod scanner;
 
+use classes::MemberFilter;
+use declarations::{DeclarationScan, Declarations, Membership, ReportFormat};
 use import_format::*;
-use prelude::*;
+use order::SortOrder;
+use render::{ListingOptions, color_tag_for_kind};
+use scan::{Analyzer, CacheStats, in_file_order};
 use scanner::*;
 
 #[derive(Parser, Debug)]
@@ -51,6 +57,17 @@ struct Cli {
     /// Disable colors and hyperlinks (plain text output)
     #[arg(long, global = true)]
     plain: bool,
+
+    /// Output every scanned file's complete index as JSON, diagnostics
+    /// included (functions, types, symbols and classes only; symbol
+    /// selectors are rejected)
+    #[arg(long, global = true)]
+    json_full: bool,
+
+    /// Report persistent-cache hits, partial hits and misses, the parsing
+    /// work done, and recoverable cache failures on stderr
+    #[arg(long, global = true)]
+    verbose: bool,
 
     #[command(subcommand)]
     command: Command,
@@ -79,9 +96,10 @@ struct ScanOptions {
     #[arg(long, value_enum)]
     language: Option<LanguageArg>,
 
-    /// Disable persistent and in-process caching.
+    /// Neither read nor write the persistent symbol cache.
     ///
-    /// All files are re-parsed and re-analyzed on every invocation.
+    /// Every file is parsed and analyzed; the output is the same as a cached
+    /// run's.
     #[arg(long)]
     no_cache: bool,
 
@@ -96,14 +114,27 @@ struct ScanOptions {
     /// Group symbol output by module path (directory/module scope)
     #[arg(long)]
     group_by_module: bool,
+}
 
-    /// Sort symbols by kind before name
-    #[arg(long)]
-    sort_by_kind: bool,
+/// Declaration order, accepted only by the declaration commands.
+#[derive(clap::Args, Debug, Clone)]
+struct SortArgs {
+    /// Order of the listed declarations: `file` (by file, then source
+    /// position), `name` (case-sensitive) or `kind`. Ties fall back to file,
+    /// position, kind and ID. JSON keeps one entry per file, in path order,
+    /// and sorts the records within each.
+    #[arg(long, value_enum, value_name = "ORDER", default_value_t = SortOrder::File)]
+    sort: SortOrder,
+}
 
-    /// Sort symbols by module before other sort keys
-    #[arg(long)]
-    sort_by_module: bool,
+/// Arguments of `functions`, `types` and `symbols`.
+#[derive(clap::Args, Debug, Clone)]
+struct DeclarationArgs {
+    #[clap(flatten)]
+    common: CommonArgs,
+
+    #[clap(flatten)]
+    order: SortArgs,
 }
 
 impl Cli {
@@ -198,6 +229,9 @@ struct ClassArgs {
 
     #[clap(flatten)]
     scan: ScanOptions,
+
+    #[clap(flatten)]
+    order: SortArgs,
 }
 
 /// Arguments for the lint command
@@ -282,11 +316,11 @@ struct GodFilesArgs {
 #[derive(Subcommand, Debug, Clone)]
 enum Command {
     /// List functions in the file(s)
-    Functions(CommonArgs),
+    Functions(DeclarationArgs),
     /// List types in the file(s)
-    Types(CommonArgs),
+    Types(DeclarationArgs),
     /// List all symbols in the file(s)
-    Symbols(CommonArgs),
+    Symbols(DeclarationArgs),
     /// List imported symbols in the file(s)
     Imports(CommonArgs),
     /// List classes and their members
@@ -323,10 +357,8 @@ impl Command {
     /// Returns positional filter tokens from the subcommand.
     fn filters(&self) -> &[String] {
         match self {
-            Self::Functions(args)
-            | Self::Types(args)
-            | Self::Symbols(args)
-            | Self::Imports(args) => &args.filters,
+            Self::Functions(args) | Self::Types(args) | Self::Symbols(args) => &args.common.filters,
+            Self::Imports(args) => &args.filters,
             Self::Lint(args) => &args.filters,
             Self::Classes(args) => &args.filters,
             Self::Completions(_) | Self::GodFiles(_) => &[],
@@ -336,7 +368,7 @@ impl Command {
     /// Returns whether the `--exported` flag was set.
     fn exported(&self) -> bool {
         match self {
-            Self::Functions(args) | Self::Types(args) | Self::Symbols(args) => args.exported,
+            Self::Functions(args) | Self::Types(args) | Self::Symbols(args) => args.common.exported,
             Self::Classes(args) => args.exported,
             Self::Imports(_) | Self::Lint(_) | Self::Completions(_) | Self::GodFiles(_) => false,
         }
@@ -345,10 +377,58 @@ impl Command {
     /// Returns whether the `--prelude` flag was set.
     fn prelude(&self) -> bool {
         match self {
-            Self::Functions(args) | Self::Types(args) | Self::Symbols(args) => args.prelude,
+            Self::Functions(args) | Self::Types(args) | Self::Symbols(args) => args.common.prelude,
             Self::Classes(args) => args.prelude,
             Self::Imports(_) | Self::Lint(_) | Self::Completions(_) | Self::GodFiles(_) => false,
         }
+    }
+
+    /// Returns the scan options of a scanning subcommand.
+    fn scan_options(&self) -> Option<&ScanOptions> {
+        match self {
+            Self::Functions(args) | Self::Types(args) | Self::Symbols(args) => Some(&args.common.scan),
+            Self::Imports(args) => Some(&args.scan),
+            Self::Classes(args) => Some(&args.scan),
+            Self::Lint(args) => Some(&args.scan),
+            Self::Completions(_) | Self::GodFiles(_) => None,
+        }
+    }
+
+    /// Returns `--sort` of a declaration command.
+    fn sort(&self) -> Option<SortOrder> {
+        match self {
+            Self::Functions(args) | Self::Types(args) | Self::Symbols(args) => Some(args.order.sort),
+            Self::Classes(args) => Some(args.order.sort),
+            Self::Imports(_) | Self::Lint(_) | Self::Completions(_) | Self::GodFiles(_) => None,
+        }
+    }
+
+    /// The flags given that narrow records rather than files, which
+    /// `--json-full` rejects; positional symbol-name filters are checked by
+    /// the caller, which classifies them.
+    fn record_selector_flags(&self) -> Vec<&'static str> {
+        let mut flags = Vec::new();
+        if self.exported() {
+            flags.push("--exported");
+        }
+        if self.prelude() {
+            flags.push("--prelude");
+        }
+        if self.scan_options().is_some_and(|scan| !scan.exclude_symbols.is_empty()) {
+            flags.push("--exclude-symbols");
+        }
+        if let Self::Classes(args) = self {
+            if args.name.is_some() {
+                flags.push("--name");
+            }
+            if args.static_only {
+                flags.push("--static-only");
+            }
+            if args.instance_only {
+                flags.push("--instance-only");
+            }
+        }
+        flags
     }
 
     /// Returns the command kind for dispatching operations.
@@ -438,66 +518,6 @@ impl AnalysisOptions {
             _ => Self::default(),
         }
     }
-
-    fn fingerprint(&self) -> String {
-        format!(
-            "experimental_semantics={};deny={};warn={};allow={};strict={};external_adapters={}",
-            self.experimental_semantics,
-            selectors_fingerprint(&self.deny),
-            selectors_fingerprint(&self.warn),
-            selectors_fingerprint(&self.allow),
-            self.strict,
-            self.use_external_adapters,
-        )
-    }
-}
-
-fn selectors_fingerprint(selectors: &[RuleSelector]) -> String {
-    let mut values = selectors
-        .iter()
-        .map(|selector| match selector {
-            RuleSelector::All => "all".to_string(),
-            RuleSelector::Rule(rule) => format!("rule:{rule}"),
-            RuleSelector::Category(category) => format!("category:{category}"),
-        })
-        .collect::<Vec<_>>();
-    values.sort();
-    values.join(",")
-}
-
-/// Filter mode for symbol output.
-#[derive(Debug, Clone)]
-enum SymbolFilter {
-    /// No filtering — show all symbols
-    None,
-    /// Show only exported (public) symbols
-    Exported,
-    /// Show only symbols whose name appears in the prelude
-    Prelude(PreludeFilter),
-}
-
-/// Ordering/grouping switches for symbol rendering.
-#[derive(Debug, Clone, Copy)]
-struct SymbolRenderOptions {
-    group_by_file: bool,
-    group_by_module: bool,
-    sort_by_kind: bool,
-    sort_by_module: bool,
-}
-
-/// Summary of a class with its members partitioned by static/instance.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct ClassSummary {
-    /// The class symbol
-    pub class: SymbolInfo,
-    /// Static methods
-    pub static_methods: Vec<SymbolInfo>,
-    /// Instance methods
-    pub instance_methods: Vec<SymbolInfo>,
-    /// Static fields
-    pub static_fields: Vec<FieldInfo>,
-    /// Instance fields
-    pub instance_fields: Vec<FieldInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -537,10 +557,7 @@ enum OutputFormat {
 struct OutputConfig {
     use_colors: bool,
     use_hyperlinks: bool,
-    show_comments: bool,
 }
-
-static SOURCE_LINE_CACHE: OnceLock<Mutex<HashMap<PathBuf, Vec<String>>>> = OnceLock::new();
 
 /// Whether `CLICOLOR_FORCE` requests colored output regardless of TTY.
 ///
@@ -551,7 +568,7 @@ fn color_forced() -> bool {
 }
 
 impl OutputConfig {
-    fn new(format: OutputFormat, show_comments: bool) -> Self {
+    fn new(format: OutputFormat) -> Self {
         match format {
             OutputFormat::Pretty => {
                 // Color is enabled for an interactive TTY (honoring NO_COLOR),
@@ -562,215 +579,14 @@ impl OutputConfig {
                 Self {
                     use_colors,
                     use_hyperlinks: use_colors,
-                    show_comments,
                 }
             }
             OutputFormat::Plain | OutputFormat::Json => Self {
                 use_colors: false,
                 use_hyperlinks: false,
-                show_comments,
             },
         }
     }
-}
-
-/// Returns the color style for a symbol kind.
-fn style_for_kind(kind: SymbolKind) -> Style {
-    match kind {
-        SymbolKind::Function | SymbolKind::Method | SymbolKind::Constructor => {
-            Style::new().green()
-        }
-        SymbolKind::Type | SymbolKind::TypeAlias | SymbolKind::Class | SymbolKind::Interface => {
-            Style::new().magenta()
-        }
-        SymbolKind::Enum | SymbolKind::EnumVariant => Style::new().cyan(),
-        SymbolKind::Trait => Style::new().yellow(),
-        SymbolKind::Variable | SymbolKind::Parameter => Style::new().blue(),
-        SymbolKind::Field | SymbolKind::Property => Style::new().cyan(),
-        SymbolKind::Namespace | SymbolKind::Module => Style::new().yellow(),
-        SymbolKind::Macro => Style::new().red(),
-        SymbolKind::Constant => Style::new().bright_blue(),
-        SymbolKind::Unknown => Style::new(),
-    }
-}
-
-#[derive(Debug, Clone)]
-struct SymbolPresentation {
-    label: String,
-    style_kind: SymbolKind,
-}
-
-fn symbol_presentation(symbol: &SymbolInfo) -> SymbolPresentation {
-    if symbol.language == ProgrammingLanguage::Rust
-        && symbol.kind == SymbolKind::Type
-        && let Some(line) = source_line_for_symbol(symbol)
-    {
-        let trimmed = line.trim_start();
-        let label = if contains_word(trimmed, "struct") {
-            "struct"
-        } else if contains_word(trimmed, "union") {
-            "union"
-        } else {
-            "type"
-        };
-        return SymbolPresentation {
-            label: label.to_string(),
-            style_kind: SymbolKind::Type,
-        };
-    }
-
-    if matches!(
-        symbol.kind,
-        SymbolKind::Variable | SymbolKind::Field | SymbolKind::Constant
-    ) && let Some(token) = binding_token_for_symbol(symbol)
-    {
-        let style_kind = match token.as_str() {
-            "const" | "static" => SymbolKind::Constant,
-            "field" => SymbolKind::Field,
-            _ => symbol.kind,
-        };
-
-        return SymbolPresentation {
-            label: token,
-            style_kind,
-        };
-    }
-
-    SymbolPresentation {
-        label: symbol.kind.to_string(),
-        style_kind: symbol.kind,
-    }
-}
-
-fn binding_token_for_symbol(symbol: &SymbolInfo) -> Option<String> {
-    let line = source_line_for_symbol(symbol)?;
-    let trimmed = line.trim_start();
-
-    let token = match symbol.language {
-        ProgrammingLanguage::Rust => {
-            if symbol.name == "self" {
-                Some("self")
-            } else if trimmed.starts_with("const ") || trimmed.contains(" const ") {
-                Some("const")
-            } else if trimmed.starts_with("static ") || trimmed.contains(" static mut ") {
-                Some("static")
-            } else if trimmed.starts_with("let ") || trimmed.contains(" let ") {
-                Some("let")
-            } else if symbol.kind == SymbolKind::Field {
-                Some("field")
-            } else {
-                None
-            }
-        }
-        ProgrammingLanguage::JavaScript | ProgrammingLanguage::TypeScript => {
-            if contains_word(trimmed, "const") {
-                Some("const")
-            } else if contains_word(trimmed, "let") {
-                Some("let")
-            } else if contains_word(trimmed, "var") {
-                Some("var")
-            } else if symbol.kind == SymbolKind::Field {
-                Some("field")
-            } else {
-                None
-            }
-        }
-        ProgrammingLanguage::Swift => {
-            if contains_word(trimmed, "let") {
-                Some("let")
-            } else if contains_word(trimmed, "var") {
-                Some("var")
-            } else if symbol.kind == SymbolKind::Field {
-                Some("field")
-            } else {
-                None
-            }
-        }
-        ProgrammingLanguage::Go => {
-            if contains_word(trimmed, "const") {
-                Some("const")
-            } else if contains_word(trimmed, "var") {
-                Some("var")
-            } else if trimmed.contains(":=") {
-                Some(":=")
-            } else {
-                None
-            }
-        }
-        ProgrammingLanguage::CSharp => {
-            if contains_word(trimmed, "const") {
-                Some("const")
-            } else if contains_word(trimmed, "var") {
-                Some("var")
-            } else if symbol.kind == SymbolKind::Field
-                || (symbol.kind == SymbolKind::Variable
-                    && trimmed.ends_with(';')
-                    && !trimmed.contains('('))
-            {
-                Some("field")
-            } else {
-                None
-            }
-        }
-        ProgrammingLanguage::Python => {
-            if trimmed.starts_with("for ") {
-                Some("for")
-            } else if trimmed.contains(":=") {
-                Some(":=")
-            } else if trimmed.contains('=') {
-                Some("=")
-            } else {
-                None
-            }
-        }
-        ProgrammingLanguage::Bash | ProgrammingLanguage::Zsh => {
-            if contains_word(trimmed, "local") {
-                Some("local")
-            } else if contains_word(trimmed, "declare") {
-                Some("declare")
-            } else if contains_word(trimmed, "typeset") {
-                Some("typeset")
-            } else if contains_word(trimmed, "readonly") {
-                Some("readonly")
-            } else if contains_word(trimmed, "export") {
-                Some("export")
-            } else {
-                None
-            }
-        }
-        _ => {
-            if symbol.kind == SymbolKind::Constant {
-                Some("const")
-            } else if symbol.kind == SymbolKind::Field {
-                Some("field")
-            } else {
-                None
-            }
-        }
-    };
-
-    token.map(str::to_string)
-}
-
-fn contains_word(line: &str, word: &str) -> bool {
-    line.split(|character: char| !(character.is_alphanumeric() || character == '_'))
-        .any(|token| token == word)
-}
-
-fn source_line_for_symbol(symbol: &SymbolInfo) -> Option<String> {
-    let cache = SOURCE_LINE_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut guard = cache.lock().ok()?;
-
-    if !guard.contains_key(&symbol.file) {
-        let source = std::fs::read_to_string(&symbol.file).ok()?;
-        let lines = source.lines().map(str::to_string).collect::<Vec<_>>();
-        guard.insert(symbol.file.clone(), lines);
-    }
-
-    let lines = guard.get(&symbol.file)?;
-    lines
-        .get(symbol.range.start_line.saturating_sub(1))
-        .cloned()
 }
 
 /// Creates an OSC8 hyperlink for a file path with line number.
@@ -888,7 +704,7 @@ fn main() -> Result<(), TreeHuggerError> {
         }
         let god_files = GodFiles::new(dir);
         let analyses = god_files.analysis();
-        let output_config = OutputConfig::new(output_format, false);
+        let output_config = OutputConfig::new(output_format);
 
         match output_format {
             OutputFormat::Json => {
@@ -930,223 +746,134 @@ fn main() -> Result<(), TreeHuggerError> {
         return Ok(());
     }
 
-    // Extract scan options from the subcommand args. God-files and completions
-    // are handled earlier; every remaining subcommand carries a `ScanOptions`.
-    let (language, exclude_files, exclude_symbols, comments, no_cache, group_by_file, group_by_module, sort_by_kind, sort_by_module) = match &cli.command {
-        Command::Functions(args)
-        | Command::Types(args)
-        | Command::Symbols(args)
-        | Command::Imports(args) => (
-            args.scan.language.map(ProgrammingLanguage::from),
-            &args.scan.exclude_files,
-            &args.scan.exclude_symbols,
-            args.scan.comments,
-            args.scan.no_cache,
-            args.scan.group_by_file,
-            args.scan.group_by_module,
-            args.scan.sort_by_kind,
-            args.scan.sort_by_module,
-        ),
-        Command::Classes(args) => (
-            args.scan.language.map(ProgrammingLanguage::from),
-            &args.scan.exclude_files,
-            &args.scan.exclude_symbols,
-            args.scan.comments,
-            args.scan.no_cache,
-            args.scan.group_by_file,
-            args.scan.group_by_module,
-            args.scan.sort_by_kind,
-            args.scan.sort_by_module,
-        ),
-        Command::Lint(args) => (
-            args.scan.language.map(ProgrammingLanguage::from),
-            &args.scan.exclude_files,
-            &args.scan.exclude_symbols,
-            args.scan.comments,
-            args.scan.no_cache,
-            args.scan.group_by_file,
-            args.scan.group_by_module,
-            args.scan.sort_by_kind,
-            args.scan.sort_by_module,
-        ),
-        _ => unreachable!(),
-    };
-    let filters = cli.command.filters();
-    let output_config = OutputConfig::new(output_format, comments);
-    let render_options = SymbolRenderOptions {
-        group_by_file,
-        group_by_module,
-        sort_by_kind,
-        sort_by_module,
-    };
+    // God-files and completions are handled earlier; every remaining
+    // subcommand carries a `ScanOptions`.
+    let scan = cli
+        .command
+        .scan_options()
+        .expect("every scanning subcommand carries scan options");
+    let language = scan.language.map(ProgrammingLanguage::from);
+    let output_config = OutputConfig::new(output_format);
 
-    let scan_filters = classify_filters(filters, &command_kind, language);
-    let excluded_symbol_globs = exclude_symbols
+    let scan_filters = classify_filters(cli.command.filters(), &command_kind, language);
+    let excluded_symbol_globs = scan
+        .exclude_symbols
         .iter()
         .filter_map(|glob| normalize_excluded_symbol_glob(glob))
         .collect::<Vec<_>>();
-
-    let mut files = if scan_filters.file_filters.is_empty() {
-        collect_files(&pkg_root, &[], exclude_files, language)?
-    } else {
-        collect_files(
-            &pkg_root,
-            &scan_filters.file_filters,
-            exclude_files,
-            language,
-        )?
-    };
-
-    // Build symbol filter
-    let symbol_filter = if cli.command.exported() {
-        SymbolFilter::Exported
-    } else if cli.command.prelude() {
-        let prelude_filter = resolve_prelude_symbols(&pkg_root)?;
-        SymbolFilter::Prelude(prelude_filter)
-    } else {
-        SymbolFilter::None
-    };
-
-    if matches!(command_kind, CommandKind::Symbols)
-        && let SymbolFilter::Prelude(filter) = &symbol_filter
-    {
-        for prelude_file in filter.exports_by_file.keys() {
-            if !files.iter().any(|file| file == prelude_file) {
-                files.push(prelude_file.clone());
-            }
-        }
-        files.sort();
+    if cli.json_full {
+        reject_json_full_misuse(&cli.command, &scan_filters);
     }
 
-    let analysis_cache = InMemorySymbolCache::new(files.len().max(1));
-    let in_process_cache = InProcessCache::with_config(CacheConfig {
-        enabled: !no_cache,
-        persistent: false,
-        capacity: files.len().max(1),
-    });
-    let persistent_cache = if no_cache {
-        None
-    } else {
+    let files = collect_files(
+        &pkg_root,
+        &scan_filters.file_filters,
+        &scan.exclude_files,
+        language,
+    )?;
+
+    let symbol_cache = (!scan.no_cache).then(|| {
         let project_id = pkg_root
             .to_string_lossy()
             .replace(['/', '\\', ':', ' ', '.'], "_");
-        Some(PersistentCache::default_cache(&project_id, true))
-    };
+        SymbolCache::new(PersistentCache::default_cache(&project_id, true))
+    });
+    let analyzer = Analyzer::new(symbol_cache, language, analysis_options.experimental_semantics);
 
-    // Handle classes command separately due to different output structure
-    if let CommandKind::Classes {
-        name_filter,
-        static_only,
-        instance_only,
-    } = &command_kind
-    {
-        let mut all_class_summaries: Vec<(PathBuf, ProgrammingLanguage, Vec<ClassSummary>)> =
-            Vec::new();
-
-        for file in files {
-            let tree_file = TreeFile::with_language(&file, language)?;
-            let index = analyze_tree_file(
-                tree_file,
-                &analysis_options,
-                &analysis_cache,
-                &in_process_cache,
-                &persistent_cache,
-            )?;
-            let mut class_summaries = extract_class_summaries(
-                &index,
-                name_filter.as_deref(),
-                *static_only,
-                *instance_only,
-            )?;
-
-            // Apply symbol filter to class summaries
-            match &symbol_filter {
-                SymbolFilter::Exported => {
-                    let exported: HashSet<String> = exported_symbol_infos(&index)
-                        .into_iter()
-                        .map(|s| s.name)
-                        .collect();
-                    class_summaries.retain(|cs| exported.contains(&cs.class.name));
-                }
-                SymbolFilter::Prelude(filter) => {
-                    class_summaries.retain(|cs| filter.names.contains(&cs.class.name));
-                }
-                SymbolFilter::None => {}
+    if let Some(command) = declarations_command(&command_kind) {
+        let membership = if cli.command.exported() {
+            Membership::Exported
+        } else if cli.command.prelude() {
+            Membership::Prelude
+        } else {
+            Membership::All
+        };
+        let format = if cli.json_full {
+            ReportFormat::JsonFull
+        } else if matches!(output_format, OutputFormat::Json) {
+            ReportFormat::Json
+        } else {
+            ReportFormat::Terminal {
+                styled: output_config.use_colors,
+                show_comments: scan.comments,
             }
-
-            if !scan_filters.symbol_globs.is_empty() {
-                class_summaries.retain(|summary| {
-                    matches_symbol_filters(&summary.class.name, &scan_filters.symbol_globs)
-                });
-            }
-            if !excluded_symbol_globs.is_empty() {
-                class_summaries.retain(|summary| {
-                    !matches_symbol_filters(&summary.class.name, &excluded_symbol_globs)
-                });
-            }
-
-            if !class_summaries.is_empty() {
-                all_class_summaries.push((index.file.clone(), index.language, class_summaries));
-            }
-        }
-
-        match output_format {
-            OutputFormat::Json => {
-                let json =
-                    serde_json::to_string_pretty(&all_class_summaries).map_err(|source| {
-                        TreeHuggerError::Io {
-                            path: PathBuf::from("<stdout>"),
-                            source: std::io::Error::other(source),
-                        }
-                    })?;
-                println!("{json}");
-            }
-            OutputFormat::Pretty | OutputFormat::Plain => {
-                for (file, lang, summaries) in all_class_summaries {
-                    render_class_summaries(
-                        &file,
-                        lang,
-                        &summaries,
-                        &output_config,
-                        display_root.as_deref(),
-                    );
-                }
-            }
+        };
+        let status = declarations::run(
+            DeclarationScan {
+                command,
+                files,
+                scan_root: pkg_root,
+                git_root,
+                membership,
+                include_globs: scan_filters.symbol_globs,
+                exclude_globs: excluded_symbol_globs,
+                listing: ListingOptions {
+                    group_by_file: scan.group_by_file,
+                    group_by_module: scan.group_by_module,
+                    sort: cli.command.sort().unwrap_or_default(),
+                },
+                format,
+                verbose: cli.verbose,
+            },
+            &analyzer,
+        )?;
+        if status != 0 {
+            std::process::exit(status);
         }
         return Ok(());
     }
 
+    // `imports` and `lint` keep their own report shapes. Lint asks for
+    // diagnostics; imports need only the declarations pass, which carries
+    // the import records.
+    let query = match command_kind {
+        CommandKind::Lint { .. } => SymbolQuery::new().capabilities([Capability::Diagnostics]),
+        _ => SymbolQuery::new(),
+    };
+    let mut stats = CacheStats::new(analyzer.uses_cache());
+    let mut stderr = std::io::stderr();
+    let mut failed_files = 0usize;
     let mut summaries = Vec::new();
     let mut symbol_indexes = Vec::new();
     let mut adapter_metadata = Vec::new();
-    for file in files {
-        let tree_file = TreeFile::with_language(&file, language)?;
-        let index = analyze_tree_file(
-            tree_file,
-            &analysis_options,
-            &analysis_cache,
-            &in_process_cache,
-            &persistent_cache,
-        )?;
-        if matches!(output_format, OutputFormat::Json) {
-            symbol_indexes.push(index.clone());
-        }
-        let mut summary = summarize_file(
-            &index,
-            &command_kind,
-            &symbol_filter,
-            &scan_filters.symbol_globs,
-            &excluded_symbol_globs,
-        )?;
-        add_external_lint_diagnostics(
-            &mut summary,
-            &command_kind,
-            &pkg_root,
-            &analysis_options,
-            &mut adapter_metadata,
-        )?;
-        summaries.push(summary);
-    }
+    let _ = in_file_order::<_, ()>(
+        &files,
+        |file| analyzer.analyze(file, &query),
+        |file, analyzed| {
+            let analyzed = match analyzed {
+                Ok(analyzed) => analyzed,
+                Err(error) => {
+                    eprintln!("error: {error}");
+                    failed_files += 1;
+                    return ControlFlow::Continue(());
+                }
+            };
+            stats.record(
+                &display_path(file, display_root.as_deref()),
+                &analyzed.cache,
+                cli.verbose,
+                &mut stderr,
+            );
+            let index = analyzed.result.index;
+            let mut summary = summarize_file(&index, &command_kind);
+            if let Err(error) = add_external_lint_diagnostics(
+                &mut summary,
+                &command_kind,
+                &pkg_root,
+                &analysis_options,
+                &mut adapter_metadata,
+            ) {
+                eprintln!("error: {error}");
+                failed_files += 1;
+                return ControlFlow::Continue(());
+            }
+            if matches!(output_format, OutputFormat::Json) {
+                symbol_indexes.push(index);
+            }
+            summaries.push(summary);
+            ControlFlow::Continue(())
+        },
+    );
 
     match output_format {
         OutputFormat::Json => {
@@ -1172,87 +899,102 @@ fn main() -> Result<(), TreeHuggerError> {
         }
         OutputFormat::Pretty | OutputFormat::Plain => {
             render_adapter_warnings(&adapter_metadata, &output_config);
-            if matches!(
-                command_kind,
-                CommandKind::Functions | CommandKind::Types | CommandKind::Symbols
-            ) {
-                render_symbol_summaries(
-                    &summaries,
+            // Multi-file lint scans hide clean files; a single explicit
+            // target still shows `(no diagnostics)` as confirmation.
+            let suppress_clean_lint =
+                matches!(command_kind, CommandKind::Lint { .. }) && summaries.len() > 1;
+            let mut rendered_any = false;
+            for summary in &summaries {
+                rendered_any |= render_summary(
+                    summary,
                     &command_kind,
                     &output_config,
                     display_root.as_deref(),
-                    &git_root,
-                    render_options,
+                    suppress_clean_lint,
                 );
-            } else {
-                // Multi-file lint scans hide clean files; a single explicit
-                // target still shows `(no diagnostics)` as confirmation.
-                let suppress_clean_lint =
-                    matches!(command_kind, CommandKind::Lint { .. }) && summaries.len() > 1;
-                let mut rendered_any = false;
-                for summary in &summaries {
-                    rendered_any |= render_summary(
-                        summary,
-                        &command_kind,
-                        &output_config,
-                        display_root.as_deref(),
-                        suppress_clean_lint,
-                    );
-                }
-                if suppress_clean_lint && !rendered_any {
-                    let msg = format!("No lint diagnostics in {} files.", summaries.len());
-                    if output_config.use_colors {
-                        println!("{}", msg.green());
-                    } else {
-                        println!("{msg}");
-                    }
+            }
+            if suppress_clean_lint && !rendered_any {
+                let msg = format!("No lint diagnostics in {} files.", summaries.len());
+                if output_config.use_colors {
+                    println!("{}", msg.green());
+                } else {
+                    println!("{msg}");
                 }
             }
         }
     }
-
-    // Report cache stats
-    let cache_stats = in_process_cache.stats();
-    if cache_stats.parse_hits > 0 || cache_stats.symbol_hits > 0 {
-        if output_config.use_colors {
-            eprintln!(
-                "{} cache: {} parse hits, {} symbol hits, {} entries",
-                "▸".dimmed(),
-                cache_stats.parse_hits,
-                cache_stats.symbol_hits,
-                cache_stats.entries
-            );
-        } else {
-            eprintln!(
-                "cache: {} parse hits, {} symbol hits, {} entries",
-                cache_stats.parse_hits, cache_stats.symbol_hits, cache_stats.entries
-            );
-        }
+    if cli.verbose {
+        eprintln!("{}", stats.summary());
     }
 
-    // Exit with non-zero if lint found errors
-    if matches!(command_kind, CommandKind::Lint { .. }) {
-        let error_count: usize = summaries
-            .iter()
-            .map(|summary| {
-                summary
-                    .lint
+    // Exit with non-zero if lint found errors or a file could not be analyzed
+    let error_count: usize = summaries
+        .iter()
+        .map(|summary| {
+            summary
+                .lint
+                .iter()
+                .filter(|d| d.severity == DiagnosticSeverity::Error)
+                .count()
+                + summary
+                    .syntax
                     .iter()
                     .filter(|d| d.severity == DiagnosticSeverity::Error)
                     .count()
-                    + summary
-                        .syntax
-                        .iter()
-                        .filter(|d| d.severity == DiagnosticSeverity::Error)
-                        .count()
-            })
-            .sum();
-        if error_count > 0 {
-            std::process::exit(1);
-        }
+        })
+        .sum();
+    let lint_failed = matches!(command_kind, CommandKind::Lint { .. }) && error_count > 0;
+    if lint_failed || failed_files > 0 {
+        std::process::exit(1);
     }
 
     Ok(())
+}
+
+/// The declaration command `command` runs, if it is one.
+fn declarations_command(command: &CommandKind) -> Option<Declarations> {
+    match command {
+        CommandKind::Functions => Some(Declarations::Functions),
+        CommandKind::Types => Some(Declarations::Types),
+        CommandKind::Symbols => Some(Declarations::Symbols),
+        CommandKind::Classes {
+            name_filter,
+            static_only,
+            instance_only,
+        } => Some(Declarations::Classes {
+            name_filter: name_filter.clone(),
+            members: MemberFilter {
+                static_only: *static_only,
+                instance_only: *instance_only,
+            },
+        }),
+        CommandKind::Imports | CommandKind::Lint { .. } => None,
+    }
+}
+
+/// Exits with an argument error when `--json-full` is given to a command
+/// without declaration indexes or combined with a symbol selector: a
+/// complete index is never filtered.
+fn reject_json_full_misuse(command: &Command, scan_filters: &ScanFilters) {
+    let message = if declarations_command(&command.kind().expect("scanning command")).is_none() {
+        Some("`--json-full` applies only to `functions`, `types`, `symbols` and `classes`".to_string())
+    } else {
+        let mut selectors = command.record_selector_flags();
+        if !scan_filters.symbol_globs.is_empty() {
+            selectors.push("a symbol-name FILTER");
+        }
+        (!selectors.is_empty()).then(|| {
+            format!(
+                "`--json-full` reports complete indexes and cannot be combined with symbol selectors ({})",
+                selectors.join(", ")
+            )
+        })
+    };
+    if let Some(message) = message {
+        Cli::command()
+            .error(clap::error::ErrorKind::ArgumentConflict, message)
+            .exit();
+    }
 }
 
 fn current_dir() -> Result<PathBuf, TreeHuggerError> {
@@ -1394,19 +1136,10 @@ fn print_completions(shell: Shell) -> std::io::Result<()> {
     )
 }
 
-fn summarize_file(
-    index: &FileSymbolIndex,
-    command: &CommandKind,
-    filter: &SymbolFilter,
-    include_symbol_globs: &[String],
-    exclude_symbol_globs: &[String],
-) -> Result<FileSummary, TreeHuggerError> {
-    let all_symbols = symbol_infos_from_records(&index.symbols);
-    let imports = import_symbols_from_index(index);
-    let exports = exported_symbol_infos(index);
-    let locals = local_symbol_infos(index);
+/// The v1 view of one file for `imports` and `lint`: its imports, or its
+/// diagnostics with the lint policy applied.
+fn summarize_file(index: &FileSymbolIndex, command: &CommandKind) -> FileSummary {
     let (lint, syntax) = diagnostics_from_index(index);
-
     let mut summary = FileSummary {
         file: index.file.clone(),
         language: index.language,
@@ -1420,98 +1153,8 @@ fn summarize_file(
     };
 
     match command {
-        CommandKind::Functions => {
-            let symbols = match filter {
-                SymbolFilter::Exported => exports
-                    .clone()
-                    .into_iter()
-                    .filter(|s| s.kind.is_function())
-                    .collect(),
-                SymbolFilter::Prelude(filter) => all_symbols
-                    .clone()
-                    .into_iter()
-                    .filter(|s| s.kind.is_function() && filter.names.contains(&s.name))
-                    .collect(),
-                SymbolFilter::None => all_symbols
-                    .clone()
-                    .into_iter()
-                    .filter(|s| s.kind.is_function())
-                    .collect(),
-            };
-            summary.symbols =
-                apply_symbol_filters(symbols, include_symbol_globs, exclude_symbol_globs);
-        }
-        CommandKind::Types => {
-            let symbols = match filter {
-                SymbolFilter::Exported => exports
-                    .clone()
-                    .into_iter()
-                    .filter(|s| s.kind.is_type())
-                    .collect(),
-                SymbolFilter::Prelude(filter) => all_symbols
-                    .clone()
-                    .into_iter()
-                    .filter(|s| s.kind.is_type() && filter.names.contains(&s.name))
-                    .collect(),
-                SymbolFilter::None => all_symbols
-                    .clone()
-                    .into_iter()
-                    .filter(|s| s.kind.is_type())
-                    .collect(),
-            };
-            summary.symbols =
-                apply_symbol_filters(symbols, include_symbol_globs, exclude_symbol_globs);
-        }
-        CommandKind::Symbols => {
-            match filter {
-                SymbolFilter::Exported => {
-                    summary.symbols = exports.clone();
-                    summary.exports = exports.clone();
-                }
-                SymbolFilter::Prelude(filter) => {
-                    if let Some(prelude_exports) = filter.exports_by_file.get(&index.file) {
-                        summary.symbols = prelude_exports.clone();
-                        summary.exports = summary.symbols.clone();
-                        summary.locals.clear();
-                    } else {
-                        let name_filter = if filter.exports_by_file.is_empty() {
-                            &filter.names
-                        } else {
-                            &filter.env_only_names
-                        };
-                        summary.symbols = all_symbols
-                            .clone()
-                            .into_iter()
-                            .filter(|s| name_filter.contains(&s.name))
-                            .collect();
-                        summary.exports = exports
-                            .clone()
-                            .into_iter()
-                            .filter(|s| name_filter.contains(&s.name))
-                            .collect();
-                        summary.locals = locals
-                            .clone()
-                            .into_iter()
-                            .filter(|s| name_filter.contains(&s.name))
-                            .collect();
-                    }
-                }
-                SymbolFilter::None => {
-                    summary.symbols = all_symbols.clone();
-                    summary.imports = imports.clone();
-                    summary.exports = exports.clone();
-                    summary.locals = locals.clone();
-                }
-            }
-            summary.symbols =
-                apply_symbol_filters(summary.symbols, include_symbol_globs, exclude_symbol_globs);
-            summary.exports =
-                apply_symbol_filters(summary.exports, include_symbol_globs, exclude_symbol_globs);
-            summary.locals =
-                apply_symbol_filters(summary.locals, include_symbol_globs, exclude_symbol_globs);
-        }
         CommandKind::Imports => {
-            summary.imports = imports;
+            summary.imports = import_symbols_from_index(index);
         }
         CommandKind::Lint {
             deny,
@@ -1532,12 +1175,15 @@ fn summarize_file(
                 *experimental_semantics,
             );
         }
-        CommandKind::Classes { .. } => {
-            // Classes are handled separately in main()
+        CommandKind::Functions
+        | CommandKind::Types
+        | CommandKind::Symbols
+        | CommandKind::Classes { .. } => {
+            unreachable!("declaration commands are reported by `declarations::run`")
         }
     }
 
-    Ok(summary)
+    summary
 }
 
 fn add_external_lint_diagnostics(
@@ -1631,99 +1277,6 @@ fn lint_diagnostic_from_external(diagnostic: Diagnostic) -> Option<LintDiagnosti
     })
 }
 
-fn analyze_tree_file(
-    mut tree_file: TreeFile,
-    options: &AnalysisOptions,
-    cache: &InMemorySymbolCache,
-    in_process: &InProcessCache,
-    persistent: &Option<PersistentCache>,
-) -> Result<FileSymbolIndex, TreeHuggerError> {
-    tree_file.experimental_semantics = options.experimental_semantics;
-    let key = FileCacheKey {
-        file_path: tree_file.file.clone(),
-        language: tree_file.language,
-        file_hash: tree_file.hash.clone(),
-        analyzer_fingerprint: AnalyzerFingerprint {
-            schema_version: SchemaVersion::V4_0,
-            tree_hugger_version: env!("CARGO_PKG_VERSION").to_string(),
-            grammar_fingerprint: tree_file.language.query_name().to_string(),
-            // Moves with every extraction change, so a warm cache never serves
-            // records produced by older rules.
-            query_fingerprint: format!(
-                "locals+imports+references;extractor-revision={}",
-                tree_hugger::EXTRACTOR_REVISION
-            ),
-            config_fingerprint: options.fingerprint(),
-        },
-    };
-    let stable_key = key.stable_key();
-
-    // Try in-process cache first
-    if let Some(index) = in_process.get_symbol_index(&stable_key) {
-        return hydrate_diagnostics(&tree_file, index.as_ref().clone());
-    }
-
-    // Try persistent cache second
-    if let Some(persistent) = persistent
-        && let Some(snapshot) = persistent.get::<SymbolSnapshot>(&stable_key)
-    {
-        let index: FileSymbolIndex = snapshot.into();
-        in_process.put_symbol_index(stable_key.clone(), symbol_cache_index(&index));
-        return hydrate_diagnostics(&tree_file, index);
-    }
-
-    // Try legacy in-memory cache third
-    if let Some(snapshot) = cache.get(&key) {
-        let index: FileSymbolIndex = snapshot.as_ref().clone().into();
-        let cache_index = symbol_cache_index(&index);
-        in_process.put_symbol_index(stable_key.clone(), cache_index.clone());
-        if let Some(persistent) = persistent {
-            let _ = persistent.put(&stable_key, &SymbolSnapshot::from(cache_index));
-        }
-        return hydrate_diagnostics(&tree_file, index);
-    }
-
-    // Miss: compute and store
-    let index = tree_file.symbol_index_v2()?;
-    let cache_index = symbol_cache_index(&index);
-    let snapshot = SymbolSnapshot::from(cache_index.clone());
-    cache.put(snapshot.clone());
-    in_process.put_symbol_index(stable_key.clone(), cache_index);
-    if let Some(persistent) = persistent {
-        let _ = persistent.put(&stable_key, &snapshot);
-    }
-    Ok(index)
-}
-
-/// The cached form of an index: diagnostics are recomputed on every use, so
-/// the entry holds none and does not claim the pass.
-fn symbol_cache_index(index: &FileSymbolIndex) -> FileSymbolIndex {
-    let mut cache_index = index.clone();
-    cache_index.diagnostics.clear();
-    cache_index
-        .completed_passes
-        .retain(|pass| *pass != AnalysisPass::Diagnostics);
-    cache_index
-}
-
-fn hydrate_diagnostics(
-    tree_file: &TreeFile,
-    mut index: FileSymbolIndex,
-) -> Result<FileSymbolIndex, TreeHuggerError> {
-    index.diagnostics = tree_file.try_diagnostics()?;
-    if !index.completed_passes.contains(&AnalysisPass::Diagnostics) {
-        index.completed_passes.push(AnalysisPass::Diagnostics);
-    }
-    Ok(index)
-}
-
-fn symbol_infos_from_records(records: &[tree_hugger::SymbolRecord]) -> Vec<SymbolInfo> {
-    records
-        .iter()
-        .filter_map(|record| SymbolInfo::try_from(record.clone()).ok())
-        .collect()
-}
-
 fn import_symbols_from_index(index: &FileSymbolIndex) -> Vec<ImportSymbol> {
     index
         .imports
@@ -1758,36 +1311,6 @@ fn import_symbols_from_index(index: &FileSymbolIndex) -> Vec<ImportSymbol> {
         .collect()
 }
 
-fn exported_symbol_infos(index: &FileSymbolIndex) -> Vec<SymbolInfo> {
-    let exported_ids: HashSet<_> = index
-        .exports
-        .iter()
-        .filter_map(|export| export.symbol.id.as_ref())
-        .collect();
-
-    index
-        .symbols
-        .iter()
-        .filter(|symbol| exported_ids.contains(&symbol.id))
-        .filter_map(|symbol| SymbolInfo::try_from(symbol.clone()).ok())
-        .collect()
-}
-
-fn local_symbol_infos(index: &FileSymbolIndex) -> Vec<SymbolInfo> {
-    let exported_ids: HashSet<_> = index
-        .exports
-        .iter()
-        .filter_map(|export| export.symbol.id.as_ref())
-        .collect();
-
-    index
-        .symbols
-        .iter()
-        .filter(|symbol| !exported_ids.contains(&symbol.id))
-        .filter_map(|symbol| SymbolInfo::try_from(symbol.clone()).ok())
-        .collect()
-}
-
 fn diagnostics_from_index(index: &FileSymbolIndex) -> (Vec<LintDiagnostic>, Vec<SyntaxDiagnostic>) {
     let mut lint = Vec::new();
     let mut syntax = Vec::new();
@@ -1813,31 +1336,6 @@ fn diagnostics_from_index(index: &FileSymbolIndex) -> (Vec<LintDiagnostic>, Vec<
     }
 
     (lint, syntax)
-}
-
-fn render_symbol_doc_comment(comment: Option<&str>, config: &OutputConfig, indent: &str) {
-    if !config.show_comments {
-        return;
-    }
-
-    let Some(comment) = comment else {
-        return;
-    };
-    let trimmed = comment.trim();
-    if trimmed.is_empty() {
-        return;
-    }
-
-    for line in trimmed.lines().map(str::trim) {
-        if line.is_empty() {
-            continue;
-        }
-        if config.use_colors {
-            println!("{}{}", indent, line.dimmed());
-        } else {
-            println!("{indent}{line}");
-        }
-    }
 }
 
 /// Prints the `path (Language)` file header, with an optional hyperlink.
@@ -1914,16 +1412,7 @@ fn render_summary(
     }
 
     print_file_header(summary, config, display_root);
-    match command {
-        CommandKind::Imports => render_imports(&summary.imports, config),
-        CommandKind::Functions | CommandKind::Types | CommandKind::Symbols => {
-            render_symbols(&summary.symbols, config)
-        }
-        CommandKind::Lint { .. } => unreachable!("lint is handled above"),
-        CommandKind::Classes { .. } => {
-            // Classes are rendered separately
-        }
-    }
+    render_imports(&summary.imports, config);
 
     println!();
     true
@@ -1989,588 +1478,6 @@ fn severity_label(severity: DiagnosticSeverity) -> &'static str {
         DiagnosticSeverity::Info => "info",
         DiagnosticSeverity::Warning => "warning",
         DiagnosticSeverity::Error => "error",
-    }
-}
-
-fn render_symbol_summaries(
-    summaries: &[FileSummary],
-    command: &CommandKind,
-    config: &OutputConfig,
-    display_root: Option<&Path>,
-    git_root: &Path,
-    options: SymbolRenderOptions,
-) {
-    let packages = summarize_packages(summaries, git_root);
-    let packages_with_symbols = packages
-        .iter()
-        .filter(|(_, package_summaries)| {
-            package_summaries
-                .iter()
-                .any(|summary| !summary.symbols.is_empty())
-        })
-        .count();
-
-    if packages.len() <= 1 || packages_with_symbols <= 1 {
-        let package_summaries = summaries.iter().collect::<Vec<_>>();
-        render_symbol_summaries_for_package(
-            &package_summaries,
-            command,
-            config,
-            display_root,
-            options,
-        );
-        return;
-    }
-
-    for (package_root, package_summaries) in packages {
-        render_package_heading(&package_root, config, display_root);
-        render_symbol_summaries_for_package(
-            &package_summaries,
-            command,
-            config,
-            display_root,
-            options,
-        );
-        println!();
-    }
-}
-
-fn render_symbol_summaries_for_package(
-    summaries: &[&FileSummary],
-    command: &CommandKind,
-    config: &OutputConfig,
-    display_root: Option<&Path>,
-    options: SymbolRenderOptions,
-) {
-    let mut symbols: Vec<SymbolInfo> = summaries
-        .iter()
-        .flat_map(|summary| summary.symbols.iter().cloned())
-        .collect();
-
-    if symbols.is_empty() {
-        if config.use_colors {
-            println!("{}", "(no symbols)".dimmed());
-        } else {
-            println!("(no symbols)");
-        }
-        return;
-    }
-
-    sort_symbols(&mut symbols, options, display_root);
-
-    if options.group_by_module && options.group_by_file {
-        render_symbols_grouped_by_module_and_file(&symbols, config, display_root);
-    } else if options.group_by_module {
-        render_symbols_grouped_by_module(&symbols, config, display_root);
-    } else if options.group_by_file {
-        render_symbols_grouped_by_file(&symbols, config, display_root);
-    } else {
-        render_flat_symbol_list(&symbols, command, config, display_root);
-    }
-}
-
-fn summarize_packages<'a>(
-    summaries: &'a [FileSummary],
-    git_root: &Path,
-) -> Vec<(PathBuf, Vec<&'a FileSummary>)> {
-    let mut grouped: BTreeMap<PathBuf, Vec<&FileSummary>> = BTreeMap::new();
-
-    for summary in summaries {
-        let start = summary.file.parent().unwrap_or(summary.file.as_path());
-        let package_root = find_package_root(start, git_root);
-        grouped.entry(package_root).or_default().push(summary);
-    }
-
-    grouped.into_iter().collect()
-}
-
-fn render_package_heading(package_root: &Path, config: &OutputConfig, display_root: Option<&Path>) {
-    let package_display = display_path(package_root, display_root);
-    println!();
-    if config.use_colors {
-        println!("{}", package_display.blue().bold());
-    } else {
-        println!("{package_display}");
-    }
-    println!();
-}
-
-fn sort_symbols(
-    symbols: &mut [SymbolInfo],
-    options: SymbolRenderOptions,
-    display_root: Option<&Path>,
-) {
-    symbols.sort_by(|left, right| {
-        let left_name = left.name.to_ascii_lowercase();
-        let right_name = right.name.to_ascii_lowercase();
-
-        if options.sort_by_module {
-            let left_module = module_key_for_symbol(left, display_root);
-            let right_module = module_key_for_symbol(right, display_root);
-            let module_cmp = left_module.cmp(&right_module);
-            if !module_cmp.is_eq() {
-                return module_cmp;
-            }
-        }
-
-        if options.sort_by_kind {
-            let kind_cmp = left.kind.to_string().cmp(&right.kind.to_string());
-            if !kind_cmp.is_eq() {
-                return kind_cmp;
-            }
-        }
-
-        let name_cmp = left_name.cmp(&right_name);
-        if !name_cmp.is_eq() {
-            return name_cmp;
-        }
-
-        left.range
-            .start_line
-            .cmp(&right.range.start_line)
-            .then_with(|| left.range.start_column.cmp(&right.range.start_column))
-    });
-}
-
-fn module_key_for_symbol(symbol: &SymbolInfo, display_root: Option<&Path>) -> String {
-    let display = display_path(&symbol.file, display_root);
-    Path::new(&display)
-        .parent()
-        .map(|parent| parent.display().to_string())
-        .unwrap_or_default()
-}
-
-fn render_flat_symbol_list(
-    symbols: &[SymbolInfo],
-    _command: &CommandKind,
-    config: &OutputConfig,
-    display_root: Option<&Path>,
-) {
-    for symbol in symbols {
-        render_symbol_line(symbol, config, display_root, true);
-    }
-}
-
-fn render_symbols_grouped_by_file(
-    symbols: &[SymbolInfo],
-    config: &OutputConfig,
-    display_root: Option<&Path>,
-) {
-    let mut grouped: BTreeMap<String, Vec<SymbolInfo>> = BTreeMap::new();
-    for symbol in symbols {
-        grouped
-            .entry(display_path(&symbol.file, display_root))
-            .or_default()
-            .push(symbol.clone());
-    }
-
-    for (file, items) in grouped {
-        if config.use_colors {
-            println!("{}", file.bold());
-        } else {
-            println!("{file}");
-        }
-        for symbol in items {
-            render_symbol_line(&symbol, config, display_root, false);
-        }
-        println!();
-    }
-}
-
-fn render_symbols_grouped_by_module(
-    symbols: &[SymbolInfo],
-    config: &OutputConfig,
-    display_root: Option<&Path>,
-) {
-    let mut grouped: BTreeMap<String, Vec<SymbolInfo>> = BTreeMap::new();
-    for symbol in symbols {
-        grouped
-            .entry(module_key_for_symbol(symbol, display_root))
-            .or_default()
-            .push(symbol.clone());
-    }
-
-    for (module, items) in grouped {
-        let title = if module.is_empty() {
-            "(root)"
-        } else {
-            module.as_str()
-        };
-        if config.use_colors {
-            println!("{}", title.bold());
-        } else {
-            println!("{title}");
-        }
-        for symbol in items {
-            render_symbol_line(&symbol, config, display_root, true);
-        }
-        println!();
-    }
-}
-
-fn render_symbols_grouped_by_module_and_file(
-    symbols: &[SymbolInfo],
-    config: &OutputConfig,
-    display_root: Option<&Path>,
-) {
-    let mut grouped: BTreeMap<String, BTreeMap<String, Vec<SymbolInfo>>> = BTreeMap::new();
-    for symbol in symbols {
-        grouped
-            .entry(module_key_for_symbol(symbol, display_root))
-            .or_default()
-            .entry(display_path(&symbol.file, display_root))
-            .or_default()
-            .push(symbol.clone());
-    }
-
-    for (module, by_file) in grouped {
-        let title = if module.is_empty() {
-            "(root)"
-        } else {
-            module.as_str()
-        };
-        if config.use_colors {
-            println!("{}", title.bold());
-        } else {
-            println!("{title}");
-        }
-
-        for (file, items) in by_file {
-            if config.use_colors {
-                println!("  {}", file.underline());
-            } else {
-                println!("  {file}");
-            }
-            for symbol in items {
-                render_symbol_line(&symbol, config, display_root, false);
-            }
-        }
-
-        println!();
-    }
-}
-
-fn render_symbol_line(
-    symbol: &SymbolInfo,
-    config: &OutputConfig,
-    display_root: Option<&Path>,
-    include_file: bool,
-) {
-    let location = if include_file {
-        let path = display_path(&symbol.file, display_root);
-        format!(
-            "{}:{}:{}",
-            path, symbol.range.start_line, symbol.range.start_column
-        )
-    } else {
-        format!(
-            "[{}:{}]",
-            symbol.range.start_line, symbol.range.start_column
-        )
-    };
-
-    let location_display = if config.use_hyperlinks {
-        hyperlink(&symbol.file, symbol.range.start_line, &location)
-    } else {
-        location
-    };
-
-    let name_with_sig = format_symbol_name(symbol, symbol.language);
-    let presentation = symbol_presentation(symbol);
-    let visibility = symbol.visibility.as_ref();
-
-    if config.use_colors {
-        let kind_style = style_for_kind(presentation.style_kind);
-        let kind_part = match visibility {
-            Some(visibility) => format!(
-                "{} {}",
-                visibility.to_string().italic(),
-                presentation.label.style(kind_style)
-            ),
-            None => presentation.label.style(kind_style).to_string(),
-        };
-        println!(
-            "  - {} {} {}",
-            kind_part,
-            name_with_sig.bold(),
-            location_display.dimmed()
-        );
-    } else {
-        let kind_part = match visibility {
-            Some(visibility) => format!("{} {}", visibility, presentation.label),
-            None => presentation.label,
-        };
-        println!("  - {} {} {}", kind_part, name_with_sig, location_display);
-    }
-
-    render_symbol_doc_comment(symbol.doc_comment.as_deref(), config, "    ");
-}
-
-fn render_symbols(symbols: &[SymbolInfo], config: &OutputConfig) {
-    if symbols.is_empty() {
-        if config.use_colors {
-            println!("  {}", "(no symbols)".dimmed());
-        } else {
-            println!("  (no symbols)");
-        }
-        return;
-    }
-
-    for symbol in symbols {
-        let location = format!(
-            "[{}:{}]",
-            symbol.range.start_line, symbol.range.start_column
-        );
-        let location_display = if config.use_hyperlinks {
-            hyperlink(&symbol.file, symbol.range.start_line, &location)
-        } else {
-            location
-        };
-
-        // Format symbol name with signature for functions/methods
-        let name_with_sig = format_symbol_name(symbol, symbol.language);
-        let presentation = symbol_presentation(symbol);
-
-        let visibility = symbol.visibility.as_ref();
-
-        if config.use_colors {
-            let kind_style = style_for_kind(presentation.style_kind);
-
-            // Format visibility (italicized) + kind + name
-            let kind_part = match visibility {
-                Some(vis) => format!(
-                    "{} {}",
-                    vis.to_string().italic(),
-                    presentation.label.style(kind_style)
-                ),
-                None => presentation.label.style(kind_style).to_string(),
-            };
-
-            println!(
-                "  - {} {} {}",
-                kind_part,
-                name_with_sig.bold(),
-                location_display.dimmed()
-            );
-        } else {
-            // Plain text: visibility + kind + name
-            let kind_part = match visibility {
-                Some(vis) => format!("{} {}", vis, presentation.label),
-                None => presentation.label,
-            };
-            println!("  - {} {} {}", kind_part, name_with_sig, location_display);
-        }
-
-        render_symbol_doc_comment(symbol.doc_comment.as_deref(), config, "    ");
-    }
-}
-
-/// Formats a symbol name with its signature/metadata.
-///
-/// For functions/methods: `name(param1: T1, param2: T2) -> ReturnType`
-/// For types: `name { field1: T1, field2: T2 }` or `name { Variant1, Variant2 }`
-/// For other symbols: just the name
-fn format_symbol_name(symbol: &SymbolInfo, language: ProgrammingLanguage) -> String {
-    let base_name = if symbol.kind.is_function() {
-        match &symbol.signature {
-            Some(sig) => format_function_signature(&symbol.name, sig, language),
-            None => symbol.name.clone(),
-        }
-    } else if symbol.kind.is_type() {
-        match &symbol.type_metadata {
-            Some(meta) => format_type_signature(&symbol.name, meta, language),
-            None => symbol.name.clone(),
-        }
-    } else {
-        symbol.name.clone()
-    };
-
-    if let Some(container_name) = symbol.container_name.as_deref()
-        && matches!(
-            symbol.kind,
-            SymbolKind::Method
-                | SymbolKind::Constructor
-                | SymbolKind::Function
-                | SymbolKind::Field
-                | SymbolKind::Property
-                | SymbolKind::Constant
-                | SymbolKind::EnumVariant
-                | SymbolKind::Parameter
-        )
-    {
-        let container_label = match symbol.container_kind {
-            Some(kind) => format!("{kind} {container_name}"),
-            None => container_name.to_string(),
-        };
-        return format!("{base_name} [in {container_label}]");
-    }
-
-    base_name
-}
-
-/// Formats a function signature like: `name(param1: T1, param2: T2) -> ReturnType`
-///
-/// Note: Visibility is displayed separately before the kind (e.g., "public method").
-fn format_function_signature(
-    name: &str,
-    sig: &FunctionSignature,
-    language: ProgrammingLanguage,
-) -> String {
-    let params = format_parameters(&sig.parameters, language);
-    let return_part = format_return_type(&sig.return_type, language);
-
-    format!("{name}({params}){return_part}")
-}
-
-/// Formats function parameters as a comma-separated list.
-fn format_parameters(params: &[ParameterInfo], language: ProgrammingLanguage) -> String {
-    params
-        .iter()
-        .map(|p| format_parameter(p, language))
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-/// Formats a single parameter.
-fn format_parameter(param: &ParameterInfo, language: ProgrammingLanguage) -> String {
-    let mut result = String::new();
-
-    // Variadic prefix
-    if param.is_variadic {
-        match language {
-            ProgrammingLanguage::Python => result.push('*'),
-            ProgrammingLanguage::Go => result.push_str("..."),
-            ProgrammingLanguage::JavaScript | ProgrammingLanguage::TypeScript => {
-                result.push_str("...");
-            }
-            _ => {}
-        }
-    }
-
-    result.push_str(&param.name);
-
-    // Type annotation
-    if let Some(ty) = &param.type_annotation {
-        match language {
-            ProgrammingLanguage::Go => {
-                // Go: `name type`
-                result.push(' ');
-                result.push_str(ty);
-            }
-            _ => {
-                // Most languages: `name: type`
-                result.push_str(": ");
-                result.push_str(ty);
-            }
-        }
-    }
-
-    // Default value
-    if let Some(default) = &param.default_value {
-        result.push_str(" = ");
-        result.push_str(default);
-    }
-
-    result
-}
-
-/// Formats the return type with appropriate syntax.
-fn format_return_type(return_type: &Option<String>, language: ProgrammingLanguage) -> String {
-    match return_type {
-        Some(ty) => {
-            match language {
-                ProgrammingLanguage::Go => {
-                    // Go: ` type` (space before type, no arrow)
-                    format!(" {ty}")
-                }
-                ProgrammingLanguage::TypeScript | ProgrammingLanguage::JavaScript => {
-                    // TypeScript: `: type`
-                    format!(": {ty}")
-                }
-                _ => {
-                    // Rust, Python: ` -> type`
-                    format!(" -> {ty}")
-                }
-            }
-        }
-        None => String::new(),
-    }
-}
-
-/// Formats a type signature showing its composition.
-///
-/// For structs: `name { field1: T1, field2: T2 }`
-/// For enums: `name { Variant1, Variant2(T), Variant3 { f: T } }`
-fn format_type_signature(name: &str, meta: &TypeMetadata, language: ProgrammingLanguage) -> String {
-    let mut result = name.to_string();
-
-    // Add generic type parameters if present
-    if !meta.type_parameters.is_empty() {
-        result.push('<');
-        result.push_str(&meta.type_parameters.join(", "));
-        result.push('>');
-    }
-
-    // Format based on whether it has fields (struct-like) or variants (enum-like)
-    if !meta.variants.is_empty() {
-        let variants = format_variants(&meta.variants);
-        result.push_str(&format!(" {{ {variants} }}"));
-    } else if !meta.fields.is_empty() {
-        let fields = format_fields(&meta.fields, language);
-        result.push_str(&format!(" {{ {fields} }}"));
-    }
-
-    result
-}
-
-/// Formats struct fields for display.
-fn format_fields(fields: &[FieldInfo], language: ProgrammingLanguage) -> String {
-    fields
-        .iter()
-        .map(|f| format_field(f, language))
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-/// Formats a single field.
-fn format_field(field: &FieldInfo, language: ProgrammingLanguage) -> String {
-    match &field.type_annotation {
-        Some(ty) => match language {
-            ProgrammingLanguage::Go => format!("{} {}", field.name, ty),
-            _ => format!("{}: {}", field.name, ty),
-        },
-        None => field.name.clone(),
-    }
-}
-
-/// Formats enum variants for display.
-fn format_variants(variants: &[VariantInfo]) -> String {
-    variants
-        .iter()
-        .map(format_variant)
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-/// Formats a single enum variant.
-fn format_variant(variant: &VariantInfo) -> String {
-    if !variant.tuple_fields.is_empty() {
-        // Tuple variant: Variant(T1, T2)
-        format!("{}({})", variant.name, variant.tuple_fields.join(", "))
-    } else if !variant.struct_fields.is_empty() {
-        // Struct variant: Variant { field: T }
-        let fields: Vec<String> = variant
-            .struct_fields
-            .iter()
-            .map(|f| match &f.type_annotation {
-                Some(ty) => format!("{}: {}", f.name, ty),
-                None => f.name.clone(),
-            })
-            .collect();
-        format!("{} {{ {} }}", variant.name, fields.join(", "))
-    } else {
-        // Unit variant
-        variant.name.clone()
     }
 }
 
@@ -2853,288 +1760,6 @@ fn render_imports(imports: &[ImportSymbol], config: &OutputConfig) {
     }
 }
 
-/// Extracts class summaries from a file.
-fn extract_class_summaries(
-    index: &FileSymbolIndex,
-    name_filter: Option<&str>,
-    static_only: bool,
-    instance_only: bool,
-) -> Result<Vec<ClassSummary>, TreeHuggerError> {
-    let symbols_by_id: HashMap<_, _> = index
-        .symbols
-        .iter()
-        .map(|symbol| (&symbol.id, symbol))
-        .collect();
-
-    let mut result = Vec::new();
-
-    // Interfaces and traits own static members too: a Java interface constant
-    // is implicitly `static`, and a Rust trait declares associated functions.
-    for class_record in index.symbols.iter().filter(|symbol| {
-        matches!(
-            symbol.kind,
-            tree_hugger::SymbolKindV2::Class
-                | tree_hugger::SymbolKindV2::Type
-                | tree_hugger::SymbolKindV2::Interface
-                | tree_hugger::SymbolKindV2::Trait
-        )
-    }) {
-        let Ok(class) = SymbolInfo::try_from(class_record.clone()) else {
-            continue;
-        };
-        if let Some(filter) = name_filter
-            && !class.name.contains(filter)
-        {
-            continue;
-        }
-
-        let mut static_methods = Vec::new();
-        let mut instance_methods = Vec::new();
-
-        for member in &class_record.relations.members {
-            let Some(member_id) = member.id.as_ref() else {
-                continue;
-            };
-            let Some(member_record) = symbols_by_id.get(member_id) else {
-                continue;
-            };
-            if !matches!(
-                member_record.kind,
-                tree_hugger::SymbolKindV2::Method | tree_hugger::SymbolKindV2::Constructor
-            ) {
-                continue;
-            }
-
-            let Ok(method) = SymbolInfo::try_from((*member_record).clone()) else {
-                continue;
-            };
-            if method.is_static {
-                static_methods.push(method);
-            } else {
-                instance_methods.push(method);
-            }
-        }
-
-        // Get fields from type metadata
-        let mut static_fields = Vec::new();
-        let mut instance_fields = Vec::new();
-
-        if let Some(meta) = &class.type_metadata {
-            for field in &meta.fields {
-                if field.is_static {
-                    static_fields.push(field.clone());
-                } else {
-                    instance_fields.push(field.clone());
-                }
-            }
-        }
-
-        // Apply filters
-        if static_only {
-            instance_methods.clear();
-            instance_fields.clear();
-        }
-        if instance_only {
-            static_methods.clear();
-            static_fields.clear();
-        }
-
-        result.push(ClassSummary {
-            class,
-            static_methods,
-            instance_methods,
-            static_fields,
-            instance_fields,
-        });
-    }
-
-    Ok(result)
-}
-
-/// Renders class summaries for a file.
-fn render_class_summaries(
-    file: &Path,
-    language: ProgrammingLanguage,
-    summaries: &[ClassSummary],
-    config: &OutputConfig,
-    display_root: Option<&Path>,
-) {
-    // Render file header
-    let file_display = display_path(file, display_root);
-    let header = if config.use_hyperlinks {
-        hyperlink(file, 1, &file_display)
-    } else {
-        file_display
-    };
-
-    if config.use_colors {
-        println!("{} ({})", header.bold(), language.to_string().dimmed());
-    } else {
-        println!("{} ({})", header, language);
-    }
-
-    for summary in summaries {
-        render_class_summary(summary, language, config);
-    }
-
-    println!();
-}
-
-/// Renders a single class summary.
-fn render_class_summary(
-    summary: &ClassSummary,
-    language: ProgrammingLanguage,
-    config: &OutputConfig,
-) {
-    let class = &summary.class;
-    let location = format!("[{}:{}]", class.range.start_line, class.range.start_column);
-    let location_display = if config.use_hyperlinks {
-        hyperlink(&class.file, class.range.start_line, &location)
-    } else {
-        location
-    };
-
-    if config.use_colors {
-        println!(
-            "  {} {} {}",
-            class.kind.to_string().magenta(),
-            class.name.bold(),
-            location_display.dimmed()
-        );
-    } else {
-        println!("  {} {} {}", class.kind, class.name, location_display);
-    }
-
-    render_symbol_doc_comment(class.doc_comment.as_deref(), config, "    ");
-
-    // Render static methods
-    if !summary.static_methods.is_empty() {
-        render_member_section(
-            "Static Methods",
-            &summary.static_methods,
-            language,
-            config,
-            true,
-        );
-    }
-
-    // Render instance methods
-    if !summary.instance_methods.is_empty() {
-        render_member_section(
-            "Instance Methods",
-            &summary.instance_methods,
-            language,
-            config,
-            true,
-        );
-    }
-
-    // Render static fields
-    if !summary.static_fields.is_empty() {
-        render_field_section("Static Fields", &summary.static_fields, language, config);
-    }
-
-    // Render instance fields
-    if !summary.instance_fields.is_empty() {
-        render_field_section(
-            "Instance Fields",
-            &summary.instance_fields,
-            language,
-            config,
-        );
-    }
-}
-
-/// Renders a section of methods.
-fn render_member_section(
-    title: &str,
-    methods: &[SymbolInfo],
-    language: ProgrammingLanguage,
-    config: &OutputConfig,
-    _is_method: bool,
-) {
-    if config.use_colors {
-        println!("    {} ({})", title.yellow(), methods.len());
-    } else {
-        println!("    {} ({})", title, methods.len());
-    }
-
-    for method in methods {
-        let location = format!(
-            "[{}:{}]",
-            method.range.start_line, method.range.start_column
-        );
-        let location_display = if config.use_hyperlinks {
-            hyperlink(&method.file, method.range.start_line, &location)
-        } else {
-            location
-        };
-
-        let name_with_sig = format_symbol_name(method, language);
-
-        // Get visibility
-        let visibility = method.visibility.as_ref();
-
-        if config.use_colors {
-            let vis_str = match visibility {
-                Some(vis) => format!("{} ", vis.to_string().italic()),
-                None => String::new(),
-            };
-            println!(
-                "      - {}{} {}",
-                vis_str,
-                name_with_sig.green(),
-                location_display.dimmed()
-            );
-        } else {
-            let vis_str = match visibility {
-                Some(vis) => format!("{} ", vis),
-                None => String::new(),
-            };
-            println!("      - {}{} {}", vis_str, name_with_sig, location_display);
-        }
-
-        render_symbol_doc_comment(method.doc_comment.as_deref(), config, "        ");
-    }
-}
-
-/// Renders a section of fields.
-fn render_field_section(
-    title: &str,
-    fields: &[FieldInfo],
-    language: ProgrammingLanguage,
-    config: &OutputConfig,
-) {
-    if config.use_colors {
-        println!("    {} ({})", title.yellow(), fields.len());
-    } else {
-        println!("    {} ({})", title, fields.len());
-    }
-
-    for field in fields {
-        let field_display = format_field(field, language);
-
-        // Get visibility
-        let visibility = field.visibility.as_ref();
-
-        if config.use_colors {
-            let vis_str = match visibility {
-                Some(vis) => format!("{} ", vis.to_string().italic()),
-                None => String::new(),
-            };
-            println!("      - {}{}", vis_str, field_display.cyan());
-        } else {
-            let vis_str = match visibility {
-                Some(vis) => format!("{} ", vis),
-                None => String::new(),
-            };
-            println!("      - {}{}", vis_str, field_display);
-        }
-
-        render_symbol_doc_comment(field.doc_comment.as_deref(), config, "        ");
-    }
-}
-
 // ============================================================================
 // God-files rendering
 // ============================================================================
@@ -3375,24 +2000,6 @@ fn render_symbol_block(term: &Terminal, plain: bool, block: &SymbolBlock) {
         if remaining > 0 {
             prose_line(term, plain, 6, &format!("- <dim>…and {remaining} more</dim>"));
         }
-    }
-}
-
-/// Prose color tag for a symbol kind, mirroring [`style_for_kind`].
-fn color_tag_for_kind(kind: SymbolKind) -> Option<&'static str> {
-    match kind {
-        SymbolKind::Function | SymbolKind::Method | SymbolKind::Constructor => Some("green"),
-        SymbolKind::Type | SymbolKind::TypeAlias | SymbolKind::Class | SymbolKind::Interface => {
-            Some("magenta")
-        }
-        SymbolKind::Enum | SymbolKind::EnumVariant | SymbolKind::Field | SymbolKind::Property => {
-            Some("cyan")
-        }
-        SymbolKind::Trait | SymbolKind::Namespace | SymbolKind::Module => Some("yellow"),
-        SymbolKind::Variable | SymbolKind::Parameter => Some("blue"),
-        SymbolKind::Macro => Some("red"),
-        SymbolKind::Constant => Some("bright-blue"),
-        SymbolKind::Unknown => None,
     }
 }
 

@@ -702,12 +702,38 @@ fn plain_classes_group_rust_impl_members_under_their_struct() {
     assert_section(&members, "Rust", "PublicStruct", "fmt", "Instance Methods");
 }
 
-fn files_symbols(json: &Value) -> &Vec<Value> {
-    json["files"][0]["symbols"].as_array().expect("files[0].symbols")
+/// Every record of a `--json` report's file entries.
+fn report_records(json: &Value) -> Vec<&Value> {
+    json["files"]
+        .as_array()
+        .expect("files")
+        .iter()
+        .flat_map(|file| file["symbols"].as_array().expect("files[].symbols"))
+        .collect()
 }
 
-fn index_records(json: &Value) -> &Vec<Value> {
-    json["symbol_indexes"][0]["symbols"].as_array().expect("symbol_indexes[0].symbols")
+/// Every record of a `--json-full` report's indexes.
+fn index_records(json: &Value) -> Vec<&Value> {
+    json["indexes"]
+        .as_array()
+        .expect("indexes")
+        .iter()
+        .flat_map(|index| index["symbols"].as_array().expect("indexes[].symbols"))
+        .collect()
+}
+
+fn named<'a>(records: &[&'a Value], name: &str, context: &str) -> &'a Value {
+    records
+        .iter()
+        .copied()
+        .find(|record| record["identity"]["name"] == name)
+        .unwrap_or_else(|| panic!("{context} `{name}`: missing"))
+}
+
+fn is_static(record: &Value) -> bool {
+    record["modifiers"]
+        .as_array()
+        .is_some_and(|modifiers| modifiers.iter().any(|modifier| modifier["type"] == "Static"))
 }
 
 #[test]
@@ -716,52 +742,41 @@ fn json_symbols_carry_visibility_and_schema_4_0() {
     let json = json_of(&scratch.stdout(&["--json", "symbols", "typescript.ts"]));
 
     let schema = serde_json::json!({ "major": 4, "minor": 0 });
+    assert_eq!(json["report_schema_version"], 1, "TypeScript: report_schema_version");
     assert_eq!(json["schema_version"], schema, "TypeScript: envelope schema_version");
+    let records = report_records(&json);
+    assert!(
+        records.iter().all(|record| record["schema_version"] == schema),
+        "TypeScript: every record is schema 4.0"
+    );
+
+    let make = named(&records, "privateStaticMethod", "TypeScript");
+    assert_eq!(make["visibility"]["level"], "Private", "TypeScript `privateStaticMethod`: visibility");
+    assert!(is_static(make), "TypeScript `privateStaticMethod`: static");
     assert_eq!(
-        json["symbol_indexes"][0]["schema_version"], schema,
-        "TypeScript: symbol index schema_version"
+        make["identity"]["container_kind"], "Class",
+        "TypeScript `privateStaticMethod`: container_kind"
     );
-
-    let symbol = |name: &str| {
-        files_symbols(&json)
-            .iter()
-            .find(|symbol| symbol["name"] == name)
-            .unwrap_or_else(|| panic!("TypeScript `{name}`: missing from files[].symbols"))
-            .clone()
-    };
-
-    let make = symbol("privateStaticMethod");
-    assert_eq!(make["visibility"], "Private", "TypeScript `privateStaticMethod`: visibility");
-    assert_eq!(make["is_static"], true, "TypeScript `privateStaticMethod`: is_static");
-    assert_eq!(make["container_kind"], "Class", "TypeScript `privateStaticMethod`: container_kind");
-    assert!(
-        make["signature"].get("visibility").is_none(),
-        "TypeScript `privateStaticMethod`: visibility moved off the signature"
-    );
-    assert_eq!(symbol("ModuleAlias")["visibility"], "ModulePrivate", "TypeScript `ModuleAlias`: visibility");
-    assert_eq!(symbol("ModuleAlias")["kind"], "TypeAlias", "TypeScript `ModuleAlias`: kind");
-    assert!(
-        symbol("localValue").get("visibility").is_none(),
-        "TypeScript `localValue`: Unknown access must omit `visibility`"
+    let alias = named(&records, "ModuleAlias", "TypeScript");
+    assert_eq!(alias["visibility"]["level"], "ModulePrivate", "TypeScript `ModuleAlias`: visibility");
+    assert_eq!(alias["kind"], "TypeAlias", "TypeScript `ModuleAlias`: kind");
+    assert_eq!(
+        named(&records, "localValue", "TypeScript")["visibility"]["level"], "Unknown",
+        "TypeScript `localValue`: Unknown access"
     );
 }
 
 /// Schema 4.0 records carry the declaring keyword, the display header and
 /// `identity.container_name`, and no wall-clock timestamps or `module_path`.
+/// `declaration_text` is evidence, not display: only `--json-full` carries it.
 #[test]
 fn json_records_carry_keyword_signature_text_and_container_name() {
     let scratch = Scratch::new(&[("typescript.ts", TYPESCRIPT_FIXTURE)]);
     let stdout = scratch.stdout(&["--json", "symbols", "typescript.ts"]);
     let json = json_of(&stdout);
-    let record = |name: &str| {
-        index_records(&json)
-            .iter()
-            .find(|record| record["identity"]["name"] == name)
-            .unwrap_or_else(|| panic!("TypeScript `{name}`: missing from symbol_indexes"))
-            .clone()
-    };
+    let records = report_records(&json);
 
-    let method = record("privateStaticMethod");
+    let method = named(&records, "privateStaticMethod", "TypeScript");
     assert_eq!(method["identity"]["container_name"], "ExportedWidget", "`privateStaticMethod` container_name");
     assert!(method["identity"].get("keyword").is_none(), "a TypeScript method has no keyword");
     assert_eq!(
@@ -769,22 +784,31 @@ fn json_records_carry_keyword_signature_text_and_container_name() {
         "`privateStaticMethod` signature_text"
     );
 
-    let table = record("BOUNDARY_TABLE");
+    let table = named(&records, "BOUNDARY_TABLE", "TypeScript");
     assert_eq!(table["identity"]["keyword"], "const", "`BOUNDARY_TABLE` keyword");
     assert_eq!(table["source"]["signature_text"], "const BOUNDARY_TABLE", "`BOUNDARY_TABLE` signature_text");
     assert!(
-        table["source"]["declaration_text"].as_str().is_some_and(|text| text.contains("first: 1")),
-        "`BOUNDARY_TABLE` declaration_text keeps the initializer"
+        records.iter().all(|record| record["source"].get("declaration_text").is_none()),
+        "a default report omits declaration_text"
+    );
+
+    let full_stdout = scratch.stdout(&["--json-full", "symbols", "typescript.ts"]);
+    let full = json_of(&full_stdout);
+    let full_table = named(&index_records(&full), "BOUNDARY_TABLE", "TypeScript --json-full");
+    assert!(
+        full_table["source"]["declaration_text"].as_str().is_some_and(|text| text.contains("first: 1")),
+        "`BOUNDARY_TABLE` declaration_text keeps the initializer in --json-full"
     );
 
     for removed in ["\"module_path\"", "created_at_epoch_ms", "updated_at_epoch_ms"] {
         assert!(!stdout.contains(removed), "schema 4.0 JSON must not contain {removed}");
+        assert!(!full_stdout.contains(removed), "schema 4.0 --json-full must not contain {removed}");
     }
 }
 
 /// C and C++ JSON signatures carry the named function's own parameters: a
 /// pointer return keeps them, a returned callback's parameters never replace
-/// them, and a name under an array declarator is kept; the symbol index
+/// them, and a name under an array declarator is kept; the complete index
 /// carries the same list.
 #[test]
 fn json_c_and_cpp_signatures_carry_the_functions_own_parameters() {
@@ -792,8 +816,8 @@ fn json_c_and_cpp_signatures_carry_the_functions_own_parameters() {
                   int (*callback_return(int actual))(long returned) { return 0; }\n\
                   int array_param(int values[2]) { return 0; }\n";
     let scratch = Scratch::new(&[("signatures.c", source), ("signatures.cpp", source)]);
-    let parameter_names = |parameters: &Value| -> Vec<String> {
-        parameters
+    let parameter_names = |record: &Value| -> Vec<String> {
+        record["kind_data"]["data"]["parameters"]
             .as_array()
             .map(|parameters| {
                 parameters
@@ -805,38 +829,26 @@ fn json_c_and_cpp_signatures_carry_the_functions_own_parameters() {
     };
 
     for file in ["signatures.c", "signatures.cpp"] {
-        let json = json_of(&scratch.stdout(&["--json", "symbols", file]));
+        let json = json_of(&scratch.stdout(&["--json", "functions", file]));
+        let full = json_of(&scratch.stdout(&["--json-full", "functions", file]));
         for (name, expected) in [
             ("pointer_return", ["value"]),
             ("callback_return", ["actual"]),
             ("array_param", ["values"]),
         ] {
-            let symbol = files_symbols(&json)
-                .iter()
-                .find(|symbol| symbol["name"] == name)
-                .unwrap_or_else(|| panic!("{file} `{name}`: missing from files[].symbols"));
-            assert_eq!(
-                parameter_names(&symbol["signature"]["parameters"]),
-                expected,
-                "{file} `{name}`: files[].symbols signature parameters"
-            );
-            let record = index_records(&json)
-                .iter()
-                .find(|record| record["identity"]["name"] == name)
-                .unwrap_or_else(|| panic!("{file} `{name}`: missing from symbol_indexes"));
-            assert_eq!(
-                parameter_names(&record["kind_data"]["data"]["parameters"]),
-                expected,
-                "{file} `{name}`: symbol index parameters"
-            );
+            let record = named(&report_records(&json), name, file);
+            assert_eq!(parameter_names(record), expected, "{file} `{name}`: --json parameters");
+            let indexed = named(&index_records(&full), name, file);
+            assert_eq!(parameter_names(indexed), expected, "{file} `{name}`: --json-full parameters");
         }
     }
 }
 
-/// The legacy `files[]` symbols and the full symbol indexes agree on kind,
-/// access, `static` and container kind for every symbol.
+/// A default `--json` record is the complete index's record of the same ID,
+/// minus only what the listing did not request: kind, access, `static`,
+/// container, keyword, signature text and kind data agree for every symbol.
 #[test]
-fn json_legacy_symbols_match_the_symbol_indexes() {
+fn json_records_match_the_complete_index() {
     let files = [
         ("TypeScript", "typescript.ts", TYPESCRIPT_FIXTURE),
         ("Rust", "rust.rs", RUST_FIXTURE),
@@ -848,38 +860,35 @@ fn json_legacy_symbols_match_the_symbol_indexes() {
 
     for (language, file, _) in files {
         let json = json_of(&scratch.stdout(&["--json", "symbols", file]));
-        let records = index_records(&json);
-        let symbols = files_symbols(&json);
-        assert!(!symbols.is_empty(), "{language}: no symbols rendered");
+        let full = json_of(&scratch.stdout(&["--json-full", "symbols", file]));
+        let records = report_records(&json);
+        let indexed = index_records(&full);
+        assert!(!records.is_empty(), "{language}: no symbols reported");
+        assert_eq!(records.len(), indexed.len(), "{language}: `symbols` lists every record");
 
-        for symbol in symbols {
-            let name = symbol["name"].as_str().unwrap_or_default();
-            let line = &symbol["range"]["start_line"];
-            let record = records
+        for record in records {
+            let name = record["identity"]["name"].as_str().unwrap_or_default();
+            let full_record = indexed
                 .iter()
-                .find(|record| {
-                    record["identity"]["name"] == name
-                        && record["source"]["declaration_span"]["start"]["line"] == *line
-                })
-                .unwrap_or_else(|| panic!("{language} `{name}` (line {line}): no matching index record"));
-
-            let record_level = &record["visibility"]["level"];
-            let expected_level = match symbol.get("visibility") {
-                Some(level) => level.clone(),
-                None => Value::from("Unknown"),
-            };
-            assert_eq!(*record_level, expected_level, "{language} `{name}`: visibility");
-            assert_eq!(record["kind"], symbol["kind"], "{language} `{name}`: kind");
-            assert_eq!(
-                record["identity"].get("container_kind"),
-                symbol.get("container_kind"),
-                "{language} `{name}`: container_kind"
-            );
-            let record_static = record["modifiers"]
-                .as_array()
-                .is_some_and(|modifiers| modifiers.iter().any(|m| m["type"] == "Static"));
-            let symbol_static = symbol.get("is_static").and_then(Value::as_bool).unwrap_or(false);
-            assert_eq!(record_static, symbol_static, "{language} `{name}`: is_static");
+                .find(|candidate| candidate["id"] == record["id"])
+                .unwrap_or_else(|| panic!("{language} `{name}`: no index record with its ID"));
+            for field in [
+                &["kind"][..],
+                &["visibility", "level"],
+                &["identity", "container_kind"],
+                &["identity", "container_name"],
+                &["identity", "keyword"],
+                &["identity", "stable_key"],
+                &["source", "file_path"],
+                &["source", "declaration_span"],
+                &["source", "signature_text"],
+                &["kind_data"],
+                &["docs", "raw_doc"],
+            ] {
+                let pick = |value: &Value| field.iter().fold(value.clone(), |value, key| value[*key].clone());
+                assert_eq!(pick(record), pick(full_record), "{language} `{name}`: {field:?}");
+            }
+            assert_eq!(is_static(record), is_static(full_record), "{language} `{name}`: static");
         }
     }
 }

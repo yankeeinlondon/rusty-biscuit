@@ -1,0 +1,209 @@
+//! The persistent cache across `hug` processes: concurrent runs over one file
+//! leave one readable entry, cache use and cache failures print nothing
+//! unless `--verbose` asks, and the work each command does (parses,
+//! definition captures, diagnostics runs) as `--verbose` reports it.
+
+use std::sync::{Arc, Barrier};
+
+use serde_json::Value;
+
+use crate::cache_upgrade::read_json;
+use crate::golden::MULTI_FIXTURES;
+use crate::{PYTHON_FIXTURE, Scratch, cache_entries, json_of, stdout_of};
+
+const FILE: &str = "python.py";
+
+/// Every file under `root` whose name ends in `.tmp`.
+fn temporary_files(root: &std::path::Path) -> Vec<std::path::PathBuf> {
+    fn walk(dir: &std::path::Path, found: &mut Vec<std::path::PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, found);
+            } else if path.extension().is_some_and(|ext| ext == "tmp") {
+                found.push(path);
+            }
+        }
+    }
+    let mut found = Vec::new();
+    walk(root, &mut found);
+    found
+}
+
+/// Processes writing the same entry at once (with different diagnostics
+/// settings, so their entries differ): the last rename wins, the survivor is
+/// a complete entry whose coverage matches its contents, and the next run is
+/// served from it with the uncached result.
+#[test]
+fn concurrent_processes_leave_one_readable_entry() {
+    let scratch = Scratch::new(&[(FILE, PYTHON_FIXTURE)]);
+    let runs: [&[&str]; 6] = [
+        &["--json", "symbols", FILE],
+        &["--json", "functions", FILE],
+        &["--json", "lint", "--experimental-semantics", FILE],
+        &["--json", "types", FILE],
+        &["--json", "lint", FILE],
+        &["--json", "classes", FILE],
+    ];
+    let barrier = Arc::new(Barrier::new(runs.len()));
+    std::thread::scope(|scope| {
+        for args in runs {
+            let (scratch, barrier) = (&scratch, Arc::clone(&barrier));
+            scope.spawn(move || {
+                barrier.wait();
+                // `lint` exits non-zero when it finds errors; only a crash or
+                // unreadable output matters here.
+                let output = scratch.hug(args);
+                assert!(output.status.code().is_some(), "hug {args:?} was killed");
+                let _: Value = serde_json::from_slice(&output.stdout)
+                    .unwrap_or_else(|error| panic!("hug {args:?}: invalid JSON ({error})"));
+            });
+        }
+    });
+
+    assert!(temporary_files(scratch.temp.path()).is_empty(), "a temporary file was left");
+    let entries = cache_entries(scratch.temp.path());
+    assert_eq!(entries.len(), 1, "one entry per file: {entries:#?}");
+    // Each command writes the coverage it computed, so the survivor may be a
+    // narrow entry; whichever it is, its records are of the kinds it covers.
+    let entry = read_json(&entries[0]);
+    let covered = &entry["covered_kinds"];
+    for record in entry["records"].as_array().expect("records") {
+        assert!(
+            covered == "all" || covered.as_array().expect("kind list").contains(&record["kind"]),
+            "record {} is of a kind the entry does not cover ({covered})",
+            record["identity"]["name"]
+        );
+    }
+    let has_diagnostics = entry["completed_capabilities"]
+        .as_array()
+        .expect("capabilities")
+        .iter()
+        .any(|capability| capability == "diagnostics");
+    assert_eq!(has_diagnostics, entry["diagnostics_fingerprint"].is_string());
+
+    let args = ["--json", "symbols", FILE];
+    let uncached = json_of(&scratch.stdout(&["--json", "symbols", "--no-cache", FILE]));
+    assert_eq!(json_of(&scratch.stdout(&args)), uncached);
+}
+
+/// A warm run and a run whose cache cannot be written print nothing to
+/// stderr, and both match an uncached run.
+#[test]
+fn cache_hits_and_cache_failures_print_nothing() {
+    let scratch = Scratch::new(&[(FILE, PYTHON_FIXTURE)]);
+    let args = ["--json", "symbols", FILE];
+    let uncached = json_of(&scratch.stdout(&["--json", "symbols", "--no-cache", FILE]));
+    assert!(cache_entries(scratch.temp.path()).is_empty(), "--no-cache wrote an entry");
+
+    for run in ["cold", "warm"] {
+        let output = scratch.hug(&args);
+        assert_eq!(String::from_utf8_lossy(&output.stderr), "", "{run} run stderr");
+        assert_eq!(json_of(&stdout_of(output, &args)), uncached, "{run} run");
+    }
+    assert_eq!(cache_entries(scratch.temp.path()).len(), 1);
+
+    // A file where the cache directory belongs: nothing can be read or written.
+    let blocked = tempfile::TempDir::new().expect("blocked temp");
+    std::fs::write(blocked.path().join("tree-hugger"), "not a directory").expect("block cache");
+    let output = scratch.hug_with_temp(blocked.path(), &args);
+    assert_eq!(String::from_utf8_lossy(&output.stderr), "", "failed-write run stderr");
+    assert_eq!(json_of(&stdout_of(output, &args)), uncached, "failed-write run");
+}
+
+/// Runs `hug` and returns its stderr, failing when it exits non-zero.
+fn stderr_of_success(scratch: &Scratch, temp: &std::path::Path, args: &[&str]) -> String {
+    let output = scratch.hug_with_temp(temp, args);
+    assert!(output.status.success(), "hug {args:?}: {}", String::from_utf8_lossy(&output.stderr));
+    String::from_utf8_lossy(&output.stderr).into_owned()
+}
+
+/// With `--verbose`, the same runs print the stats line (hits, partial hits,
+/// misses and the work done) and each recoverable cache failure.
+#[test]
+fn verbose_reports_cache_use_and_cache_failures() {
+    let scratch = Scratch::new(&[(FILE, PYTHON_FIXTURE)]);
+    let temp = scratch.temp.path();
+    let args = ["--verbose", "--json", "symbols", FILE];
+
+    let cold = stderr_of_success(&scratch, temp, &args);
+    assert_eq!(cold.lines().count(), 1, "cold: only the stats line:\n{cold}");
+    assert!(cold.starts_with("cache: 0 hits, 0 partial hits, 1 misses; parsed 1 files"), "{cold}");
+    let warm = stderr_of_success(&scratch, temp, &args);
+    assert!(warm.starts_with("cache: 1 hits, 0 partial hits, 0 misses; parsed 0 files"), "{warm}");
+
+    // A corrupt entry is a miss, named with its reason.
+    std::fs::write(&cache_entries(temp)[0], "{ not json").expect("corrupt the entry");
+    let corrupt = stderr_of_success(&scratch, temp, &args);
+    assert!(corrupt.contains(&format!("cache: {FILE}: malformed entry")), "{corrupt}");
+    assert!(corrupt.contains("1 misses"), "{corrupt}");
+
+    // A cache that cannot be written reports the failed write.
+    let blocked = tempfile::TempDir::new().expect("blocked temp");
+    std::fs::write(blocked.path().join("tree-hugger"), "not a directory").expect("block cache");
+    let failed = stderr_of_success(&scratch, blocked.path(), &args);
+    assert!(failed.contains(&format!("cache: {FILE}: write failed")), "{failed}");
+
+    // `--no-cache` reports the cache as disabled.
+    let disabled = stderr_of_success(&scratch, temp, &["--verbose", "--json", "symbols", "--no-cache", FILE]);
+    assert!(disabled.starts_with("cache: disabled; parsed 1 files"), "{disabled}");
+}
+
+/// The `--verbose` stats line of a `hug` run in `scratch`.
+fn multi_stats(scratch: &Scratch, args: &[&str]) -> String {
+    let mut verbose = vec!["--verbose"];
+    verbose.extend_from_slice(args);
+    let output = scratch.hug(&verbose);
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    stderr
+        .lines()
+        .find(|line| line.starts_with("cache: "))
+        .unwrap_or_else(|| panic!("hug {args:?}: no stats line in {stderr}"))
+        .to_string()
+}
+
+/// The work counters through the CLI: each declaration command over
+/// `multi/` runs no diagnostics and one definition capture per file.
+#[test]
+fn symbol_commands_run_no_diagnostics() {
+    let scratch = Scratch::new(MULTI_FIXTURES);
+    for command in ["functions", "types", "symbols", "classes"] {
+        let uncached = multi_stats(&scratch, &["--json", command, "--no-cache"]);
+        assert!(
+            uncached.ends_with("parsed 16 files, 16 definition captures, 0 diagnostics runs"),
+            "{command}: {uncached}"
+        );
+    }
+}
+
+/// `lint` and `--json-full`, which show diagnostics, still run them.
+#[test]
+fn lint_and_json_full_run_diagnostics() {
+    let scratch = Scratch::new(MULTI_FIXTURES);
+    let lint = multi_stats(&scratch, &["--json", "lint", "--no-cache"]);
+    assert!(!lint.ends_with(" 0 diagnostics runs"), "lint runs diagnostics: {lint}");
+    let full = multi_stats(&scratch, &["--json-full", "functions", "--no-cache"]);
+    assert!(full.ends_with("16 diagnostics runs"), "--json-full runs diagnostics: {full}");
+}
+
+/// A complete warm hit parses nothing, captures nothing and runs no
+/// diagnostics, for the command that wrote the entries and for narrower
+/// ones it covers.
+#[test]
+fn complete_warm_hits_parse_nothing() {
+    let scratch = Scratch::new(MULTI_FIXTURES);
+    let cold = multi_stats(&scratch, &["--plain", "symbols"]);
+    assert!(cold.contains("16 misses") && cold.ends_with("0 diagnostics runs"), "{cold}");
+    for command in ["symbols", "functions", "types"] {
+        let warm = multi_stats(&scratch, &["--plain", command]);
+        assert!(
+            warm.starts_with(
+                "cache: 16 hits, 0 partial hits, 0 misses; parsed 0 files, 0 definition captures, 0 diagnostics runs"
+            ),
+            "{command}: {warm}"
+        );
+    }
+}

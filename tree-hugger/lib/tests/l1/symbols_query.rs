@@ -465,3 +465,58 @@ fn is_recursive_is_unknown_when_semantics_run_and_absent_otherwise() {
         "no semantics requested, no value"
     );
 }
+
+/// A wide result narrowed to a query equals that query run uncached, for
+/// every fixture and each command's kind set; a query the wide result does
+/// not cover is refused rather than answered from partial data.
+#[test]
+fn a_wide_result_narrows_to_exactly_the_uncached_narrow_query() {
+    let kind_sets: [(&str, &[SymbolKindV2]); 3] = [
+        ("functions", &FUNCTION_KINDS),
+        ("types", &TYPE_KINDS),
+        ("classes", &CLASS_KINDS),
+    ];
+    let mut compared = 0usize;
+    for path in all_fixtures().into_iter().chain(multi_fixtures()) {
+        let label = display_name(&path);
+        let wide_query = SymbolQuery::new().capabilities([Capability::Containment]);
+        let wide = SourceFile::read(&path).expect("read").query(&wide_query).expect("wide query");
+        assert_eq!(wide.selected_kinds, None, "{label}: every kind is selected");
+
+        for (set_name, kinds) in kind_sets {
+            for capabilities in [&[Capability::Declarations][..], &[Capability::Containment][..]] {
+                let query = SymbolQuery::new()
+                    .kinds(kinds.iter().copied())
+                    .capabilities(capabilities.iter().copied());
+                let uncached = SourceFile::read(&path).expect("read").query(&query).expect("query");
+                let narrowed = wide.clone().narrowed(&query).unwrap_or_else(|| {
+                    panic!("{label}: {set_name} {capabilities:?} is covered by the wide result")
+                });
+                assert_eq!(
+                    serde_json::to_value(&narrowed.index).expect("serialize"),
+                    serde_json::to_value(&uncached.index).expect("serialize"),
+                    "{label}: {set_name} with {capabilities:?}"
+                );
+                assert_eq!(narrowed.completed_capabilities, uncached.completed_capabilities);
+                assert_eq!(narrowed.selected_kinds, uncached.selected_kinds);
+                compared += uncached.index.symbols.len();
+            }
+        }
+
+        let functions = SymbolQuery::new().kinds(FUNCTION_KINDS);
+        let narrow = SourceFile::read(&path).expect("read").query(&functions).expect("query");
+        assert!(
+            narrow.clone().narrowed(&SymbolQuery::new()).is_none(),
+            "{label}: a functions-only result cannot answer an every-kind query"
+        );
+        assert!(
+            narrow.narrowed(&functions.clone().capabilities([Capability::References])).is_none(),
+            "{label}: a declarations-only result cannot answer a references query"
+        );
+        assert!(
+            wide.narrowed(&SymbolQuery::new().capabilities([Capability::Diagnostics])).is_none(),
+            "{label}: a result without diagnostics cannot answer a diagnostics query"
+        );
+    }
+    assert!(compared > 100, "too few records compared ({compared})");
+}

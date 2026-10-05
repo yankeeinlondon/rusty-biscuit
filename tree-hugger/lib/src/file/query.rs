@@ -159,6 +159,51 @@ impl SymbolQuery {
     pub fn requires(&self, capability: Capability) -> bool {
         self.capabilities.contains(&capability)
     }
+
+    pub(crate) fn kind_set(&self) -> Option<&BTreeSet<SymbolKindV2>> {
+        self.kinds.as_ref()
+    }
+
+    pub(crate) fn capability_set(&self) -> &BTreeSet<Capability> {
+        &self.capabilities
+    }
+
+    /// Whether every kind `other` selects is selected here.
+    pub(crate) fn selects_all_of(&self, other: &SymbolQuery) -> bool {
+        match (&self.kinds, &other.kinds) {
+            (None, _) => true,
+            (Some(_), None) => false,
+            (Some(mine), Some(theirs)) => theirs.is_subset(mine),
+        }
+    }
+
+    /// The capabilities `other` requires that are not required here.
+    pub(crate) fn capabilities_missing_for(&self, other: &SymbolQuery) -> BTreeSet<Capability> {
+        other
+            .capabilities
+            .difference(&self.capabilities)
+            .copied()
+            .collect()
+    }
+
+    /// The kinds and capabilities of both queries.
+    pub(crate) fn union(&self, other: &SymbolQuery) -> SymbolQuery {
+        let kinds = match (&self.kinds, &other.kinds) {
+            (Some(mine), Some(theirs)) => Some(mine.union(theirs).copied().collect()),
+            _ => None,
+        };
+        SymbolQuery {
+            kinds,
+            capabilities: self.capabilities.union(&other.capabilities).copied().collect(),
+        }
+    }
+
+    /// This query without `capability` (whose dependents must not be
+    /// required).
+    pub(crate) fn without(mut self, capability: Capability) -> SymbolQuery {
+        self.capabilities.remove(&capability);
+        self
+    }
 }
 
 /// The outcome of a [`SymbolQuery`] over one file.
@@ -171,4 +216,29 @@ pub struct SymbolQueryResult {
     /// What was computed, in canonical order: an empty facet of a capability
     /// missing here was not computed, not found empty.
     pub completed_capabilities: Vec<Capability>,
+    /// The kinds the query selected, in canonical order; `None` when it
+    /// selected every kind.
+    pub selected_kinds: Option<Vec<SymbolKindV2>>,
+}
+
+impl SymbolQueryResult {
+    /// This result reduced to exactly what `query` computes over the same
+    /// source, or `None` when `query` selects a kind or requires a capability
+    /// this result lacks.
+    ///
+    /// Lets a caller that analyzed a file once for a wide query answer a
+    /// narrower one without parsing it again.
+    pub fn narrowed(self, query: &SymbolQuery) -> Option<SymbolQueryResult> {
+        let covers_kinds = match (&self.selected_kinds, query.kind_set()) {
+            (None, _) => true,
+            (Some(_), None) => false,
+            (Some(mine), Some(theirs)) => theirs.iter().all(|kind| mine.contains(kind)),
+        };
+        let covers_capabilities = query
+            .capability_set()
+            .iter()
+            .all(|capability| self.completed_capabilities.contains(capability));
+        (covers_kinds && covers_capabilities)
+            .then(|| crate::analysis::coverage::project(self.index, query))
+    }
 }

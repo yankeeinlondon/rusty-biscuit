@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use tree_hugger::scanner::resolve_explicit_file;
-use tree_hugger::{ProgrammingLanguage, SymbolInfo};
+use tree_hugger::ProgrammingLanguage;
 
 use crate::CommandKind;
 
@@ -142,27 +142,6 @@ pub(crate) fn wildcard_match(pattern: &str, value: &str) -> bool {
     } else {
         value.ends_with(segments.last().unwrap_or(&""))
     }
-}
-
-pub(crate) fn apply_symbol_filters(
-    symbols: Vec<SymbolInfo>,
-    include_symbol_globs: &[String],
-    exclude_symbol_globs: &[String],
-) -> Vec<SymbolInfo> {
-    if include_symbol_globs.is_empty() && exclude_symbol_globs.is_empty() {
-        return symbols;
-    }
-
-    symbols
-        .into_iter()
-        .filter(|symbol| {
-            let included = include_symbol_globs.is_empty()
-                || matches_symbol_filters(&symbol.name, include_symbol_globs);
-            let excluded = !exclude_symbol_globs.is_empty()
-                && matches_symbol_filters(&symbol.name, exclude_symbol_globs);
-            included && !excluded
-        })
-        .collect()
 }
 
 // Re-export `collect_files` from the library so the CLI and lib share one

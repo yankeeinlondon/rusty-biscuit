@@ -19,6 +19,42 @@ fn hug_cmd() -> Command {
     cmd
 }
 
+/// Runs `hug` from the repository root and parses its JSON stdout.
+fn hug_json(args: &[&str]) -> Value {
+    let output = hug_cmd().args(args).output().expect("run hug");
+    assert!(
+        output.status.success(),
+        "hug {args:?} failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).expect("hug prints JSON")
+}
+
+/// Every record in every file entry's `symbols`.
+fn report_records(json: &Value) -> Vec<&Value> {
+    json["files"]
+        .as_array()
+        .expect("files")
+        .iter()
+        .flat_map(|file| file["symbols"].as_array().expect("symbols"))
+        .collect()
+}
+
+/// The record named `name` in a report.
+fn report_record<'a>(json: &'a Value, name: &str) -> &'a Value {
+    report_records(json)
+        .into_iter()
+        .find(|record| record["identity"]["name"] == name)
+        .unwrap_or_else(|| panic!("no record named {name}"))
+}
+
+/// Whether a record's member is static (its modifiers include `Static`).
+fn record_is_static(record: &Value) -> bool {
+    record["modifiers"]
+        .as_array()
+        .is_some_and(|modifiers| modifiers.iter().any(|modifier| modifier["type"] == "Static"))
+}
+
 #[test]
 fn test_help_flag() {
     hug_cmd()
@@ -274,18 +310,15 @@ fn test_language_aliases_parse_successfully() {
 #[test]
 fn test_multiple_flags_different_positions() {
     // Regression test: Multiple flags in various positions should all work
-    hug_cmd()
-        .args([
-            "--json",
-            "symbols",
-            "--language",
-            "rust",
-            "tree-hugger/cli/src/main.rs",
-        ])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("\"root_dir\""))
-        .stdout(predicate::str::contains("\"language\": \"Rust\""));
+    let json = hug_json(&[
+        "--json",
+        "symbols",
+        "--language",
+        "rust",
+        "tree-hugger/cli/src/main.rs",
+    ]);
+    assert!(json["root_dir"].is_string());
+    assert_eq!(json["files"][0]["language"], "Rust");
 }
 
 // ============================================================================
@@ -545,46 +578,35 @@ fn test_json_output_has_no_escape_codes() {
 
 #[test]
 fn test_json_contains_doc_comment() {
-    // Test that JSON output includes doc_comment field for documented symbols
-    hug_cmd()
-        .args([
-            "functions",
-            "tree-hugger/lib/tests/fixtures/sample.rs",
-            "--json",
-        ])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("\"doc_comment\""))
-        .stdout(predicate::str::contains("Greets a person by name"));
+    // Records carry the raw doc comment of documented symbols
+    let json = hug_json(&["functions", "tree-hugger/lib/tests/fixtures/sample.rs", "--json"]);
+    let doc = report_record(&json, "greet")["docs"]["raw_doc"]
+        .as_str()
+        .expect("greet has a doc comment");
+    assert!(doc.contains("Greets a person by name"), "{doc}");
 }
 
 #[test]
 fn test_json_contains_signature() {
-    // Test that JSON output includes signature field for functions
-    hug_cmd()
-        .args([
-            "functions",
-            "tree-hugger/lib/tests/fixtures/sample.rs",
-            "--json",
-        ])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("\"signature\""))
-        .stdout(predicate::str::contains("\"parameters\""));
+    // Function records carry their signature as function kind data
+    let json = hug_json(&["functions", "tree-hugger/lib/tests/fixtures/sample.rs", "--json"]);
+    let greet = report_record(&json, "greet");
+    assert_eq!(greet["kind_data"]["kind_data_type"], "Function");
+    assert!(greet["kind_data"]["data"]["parameters"].is_array(), "{greet}");
+    assert!(greet["source"]["signature_text"].is_string(), "{greet}");
 }
 
 #[test]
 fn test_json_signature_has_parameter_names() {
     // Test that function signatures include parameter names
-    hug_cmd()
-        .args([
-            "functions",
-            "tree-hugger/lib/tests/fixtures/sample.rs",
-            "--json",
-        ])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("\"name\": \"name\""));
+    let json = hug_json(&["functions", "tree-hugger/lib/tests/fixtures/sample.rs", "--json"]);
+    let names: Vec<&Value> = report_record(&json, "greet")["kind_data"]["data"]["parameters"]
+        .as_array()
+        .expect("parameters")
+        .iter()
+        .map(|parameter| &parameter["name"])
+        .collect();
+    assert!(names.contains(&&Value::from("name")), "{names:?}");
 }
 
 #[test]
@@ -631,18 +653,15 @@ fn test_classes_command_help() {
 
 #[test]
 fn test_classes_command_json_output() {
-    // Test that classes command with --json produces JSON output with class structure
-    hug_cmd()
-        .args([
-            "classes",
-            "tree-hugger/lib/tests/fixtures/signatures.java",
-            "--json",
-        ])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("\"class\""))
-        .stdout(predicate::str::contains("\"static_methods\""))
-        .stdout(predicate::str::contains("\"instance_methods\""));
+    // Containers in `symbols`, their displayed methods in `members` by ID
+    let json = hug_json(&["classes", "tree-hugger/lib/tests/fixtures/signatures.java", "--json"]);
+    let class = report_record(&json, "Signatures");
+    assert_eq!(class["kind"], "Class");
+    let members = json["files"][0]["members"][class["id"].as_str().expect("id")]
+        .as_array()
+        .expect("members of Signatures");
+    assert!(members.iter().any(record_is_static), "a static method is listed");
+    assert!(members.iter().any(|member| !record_is_static(member)), "an instance method is listed");
 }
 
 #[test]
@@ -678,36 +697,32 @@ fn test_classes_command_name_filter() {
 
 #[test]
 fn test_classes_command_static_only_filter() {
-    // Test --static-only filter
-    hug_cmd()
-        .args([
-            "classes",
-            "tree-hugger/lib/tests/fixtures/signatures.java",
-            "--static-only",
-            "--json",
-        ])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("\"static_methods\""))
-        // Should have empty instance_methods array
-        .stdout(predicate::str::contains("\"instance_methods\": []"));
+    // `members` holds only the displayed (static) members
+    let json = hug_json(&[
+        "classes",
+        "tree-hugger/lib/tests/fixtures/signatures.java",
+        "--static-only",
+        "--json",
+    ]);
+    let id = report_record(&json, "Signatures")["id"].as_str().expect("id").to_string();
+    let members = json["files"][0]["members"][&id].as_array().expect("members");
+    assert!(!members.is_empty());
+    assert!(members.iter().all(record_is_static), "{members:?}");
 }
 
 #[test]
 fn test_classes_command_instance_only_filter() {
-    // Test --instance-only filter
-    hug_cmd()
-        .args([
-            "classes",
-            "tree-hugger/lib/tests/fixtures/signatures.java",
-            "--instance-only",
-            "--json",
-        ])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("\"instance_methods\""))
-        // Should have empty static_methods array
-        .stdout(predicate::str::contains("\"static_methods\": []"));
+    // `members` holds only the displayed (instance) members
+    let json = hug_json(&[
+        "classes",
+        "tree-hugger/lib/tests/fixtures/signatures.java",
+        "--instance-only",
+        "--json",
+    ]);
+    let id = report_record(&json, "Signatures")["id"].as_str().expect("id").to_string();
+    let members = json["files"][0]["members"][&id].as_array().expect("members");
+    assert!(!members.is_empty());
+    assert!(members.iter().all(|member| !record_is_static(member)), "{members:?}");
 }
 
 #[test]
