@@ -131,13 +131,13 @@ fn fixture_files() -> Vec<PathBuf> {
     found
 }
 
-/// The full scan `find_reference_target` did before the name index: the
+/// A reference's target found by a full scan instead of the name index: the
 /// first record with the name.
 fn scan_reference_target(symbols: &[SymbolRecord], name: &str) -> Option<usize> {
     symbols.iter().position(|symbol| symbol.identity.name == name)
 }
 
-/// The full scan `find_container_symbol` did before the name index.
+/// `find_container_symbol` by a full scan instead of the name index.
 fn scan_container_symbol(
     symbols: &[SymbolRecord],
     child_idx: usize,

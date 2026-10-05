@@ -181,7 +181,7 @@ pub(crate) fn declared_parameter_count(
 
 /// Extracts a single parameter from a parameter node.
 ///
-/// Note: Go is handled separately in `extract_parameters` using `extract_go_parameters`
+/// Note: Go is handled separately in `declared_parameters` using `extract_go_parameters`
 /// because Go allows multiple identifiers per declaration (e.g., `a, b int`).
 /// Swift is handled separately using `extract_swift_parameters`.
 pub(crate) fn extract_single_parameter(
@@ -202,7 +202,7 @@ pub(crate) fn extract_single_parameter(
         ProgrammingLanguage::Java => extract_java_parameter(node, source),
         ProgrammingLanguage::C | ProgrammingLanguage::Cpp => extract_c_parameter(node, source),
         ProgrammingLanguage::CSharp => extract_csharp_parameter(node, source),
-        // Go is handled specially in extract_parameters
+        // Go is handled specially in declared_parameters
         // Swift is handled specially via extract_swift_parameters
         _ => None,
     }
@@ -950,9 +950,6 @@ pub(crate) fn extract_csharp_return_type(node: Node<'_>, source: &str) -> Option
                 .ok()
                 .map(|s| s.to_string());
         }
-
-        // Handle identifier as type (e.g., custom class names)
-        // Note: we need to check this after checking it's not the method name
     }
 
     None

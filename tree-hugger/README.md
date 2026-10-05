@@ -81,6 +81,13 @@ classified as:
 - `--group-by-file` - group symbol output by file
 - `--group-by-module` - group symbol output by module (directory scope)
 - `--sort file|name|kind` - order of declarations (default `file`: by file, then source position); replaces the removed `--sort-by-kind` and `--sort-by-module`
+- `--jsonl`, `--count`, `--stats` - JSON Lines, the number of matches, or counts and doc coverage (`--stats --json` for JSON)
+- `--format plain|table`, `--tree`, `--signatures full|short|none` - unstyled or tabular output, members nested under containers, and how much of each signature to show
+- `--file`, `--name`, `--exact` - say whether a filter is a file or a name, and match names whole
+- `--kind`, `--scope`, `--all-scopes` - narrow by kind and by scope (`hug symbols` hides locals unless `--all-scopes`)
+- `--visibility`, `--exported`, `--in` - narrow by visibility, export, or container
+- `--exclude-tests`, `--tests-only`, `--undocumented`, `--deprecated` - narrow by test code, docs, deprecation
+- `--async`, `--returns`, `--param-type`, `--min-params` - narrow functions by signature shape
 
 ### Examples
 
@@ -130,6 +137,66 @@ every file's complete `indexes`. The CLI README has a sample.
 [Symbol Reports](./docs/symbol-reports.md) describes the declaration
 commands end to end: kind sets, the JSON report and its `errors`, ordering
 and tie-breakers, `--json-full` and `--verbose`.
+
+## Release Notes: precise, filterable symbol reports
+
+The declaration commands (`functions`, `types`, `symbols`, `classes`) gain
+record selectors and new report shapes. Two changes alter existing output.
+
+- **Name filters use smart case.** A pattern without an uppercase letter now
+  ignores case; any uppercase letter makes it case-sensitive. Add `!` or
+  `--exact` to match a whole name.
+
+  ```text
+  # before: `hug functions parse` was case-sensitive
+    - public function parse_config(path: &str) -> Config src/parse.rs:1:1
+  # after: `parse` also finds ParseError; `Parse` still finds only ParseError
+    - public function parse_config(path: &str) -> Config src/parse.rs:1:1
+    - public function ParseError() src/parse.rs:6:1
+  ```
+
+- **`hug symbols` hides locals.** Parameters, function-local variables and
+  nested functions are `local` scope and are no longer listed by default
+  (over this package, 4,635 of the old 16,681 lines remain).
+  `--all-scopes` or `--scope local` brings them back; `functions` and `types`
+  still list every scope.
+
+  ```text
+  # before: hug symbols src/parse.rs
+    - public function parse_config(path: &str) -> Config src/parse.rs:1:1
+    - parameter path src/parse.rs:1:21
+    - let parsed src/parse.rs:2:9
+    - public function ParseError() -> () src/parse.rs:6:1
+  # after (add --all-scopes for the old list)
+    - public function parse_config(path: &str) -> Config src/parse.rs:1:1
+    - public function ParseError() src/parse.rs:6:1
+  ```
+
+- **New selectors:** `--kind`, `--scope`/`--all-scopes`, `--visibility`,
+  `--exported`, `--in`, `--exclude-tests`/`--tests-only`, `--undocumented`,
+  `--deprecated`, `--async`, `--returns`, `--param-type`, `--min-params`, and
+  `--file`/`--name`/`--exact` to say what a filter is. One selector path
+  serves every command and output; a filtered run reuses the cache entry an
+  unfiltered run wrote.
+- **New outputs:** `--jsonl` (one self-describing line per declaration),
+  `--count`, `--stats` (tables, or `--stats --json`), `--format plain|table`,
+  `--tree` (members under their type) and `--signatures full|short|none`.
+  Exactly one output mode is accepted per run (`--stats` composes with
+  `--json` or a `--format`); `--json --json-full` together is now an argument
+  error instead of silently meaning `--json-full`.
+- **Records carry more facts.** Every record has a `scope` (`Item`, `Member`,
+  `Local`), an `Async` modifier where declared, and a `qualified_name` in the
+  language's own spelling (`.` for Java, `::` for Rust, …), prefixed with the
+  file's path from the scan root (`src/shapes.rs#Point::norm`) unless a
+  namespace or package roots it. `--json` and `--jsonl` always compute
+  `is_test` and `is_deprecated`. Because IDs hash the qualified name, some
+  record IDs changed; existing cache entries are re-analyzed once.
+- **Interactive output wraps** at the terminal width with a hanging indent
+  (`COLUMNS` overrides the width). Forced color (`CLICOLOR_FORCE=1`) counts as
+  interactive, so it wraps too; `--plain`, `--format plain` and redirected
+  output never wrap.
+- **Source text cannot style the terminal.** Control characters in names,
+  signatures and comments print as `\u{..}` escapes.
 
 ## Release Notes: record-native symbol reports
 

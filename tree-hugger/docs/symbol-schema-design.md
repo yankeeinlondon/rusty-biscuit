@@ -122,16 +122,26 @@ pub struct SymbolRecord {
 
 **Additive 4.x fields.** `scope`, `identity.qualified_name` (now always
 present), `identity.is_namespace_rooted`, the `Async` entry of `modifiers`,
-`visibility.is_test` and the `metrics` facet were added on top of 4.0 without
-a version bump; `EXTRACTOR_REVISION` moved on instead (it is 9 now), so no
-cache entry written without them is served. The `attributes`, `type_info.generic_params`
-and the inheritance lists of `relations` stay empty.
+`visibility.is_test`, values for the existing `visibility.is_deprecated` and
+the `metrics` facet were added on top of 4.0 without a version bump;
+`EXTRACTOR_REVISION` moved on instead (it is 9 now), so no cache entry written
+without them is served. Three parts of the record are declared but still empty on every
+record: `attributes`, `type_info.generic_params`, and the type links of
+`relations` (`extends`, `overrides`, and `implements` outside Rust; see
+[Relation Facet](#relation-facet)).
 
 | Fact | When computed |
 |---|---|
 | `scope`, the `async` modifier, the in-file `qualified_name` | always, for every declaration (also those a kind selection leaves out) |
-| `visibility.is_test`, `visibility.is_deprecated` | with `Capability::Flags`; without it both are `false`, meaning "not computed" (`hug --json` and `--json-full` always ask for it) |
-| `metrics` (`parameters`, `has_docs`) | with `Capability::Metrics`, on every selected record; without it the facet is absent |
+| `visibility.is_test`, `visibility.is_deprecated` | with `Capability::Flags`; without it both are `false`, meaning "not computed" (`hug --json`, `--jsonl` and `--json-full` always ask for it) |
+| `metrics` (`parameters`, `has_docs`) | with `Capability::Metrics`, on every selected record; without it the facet is absent (`hug --json-full` and `--stats` ask for it) |
+
+Scope, `async` and the qualified name are lightweight and every record needs
+them (the qualified name feeds the ID, and scope decides the default
+listing). The flags and metrics read more of the syntax tree (attributes,
+test-file names, parameter lists, doc comments), so only a filter or report
+that uses them computes them. JSON output always asks for the flags, so a
+`false` there always means "computed and not set".
 
 ```rust
 pub enum SymbolScope { Item, Member, Local }
@@ -149,10 +159,22 @@ parameter list without a Rust `self` (a Go receiver has its own list), one
 variadic parameter counting once; it is `null` for a declaration that is not
 a function, one with no parameter list (`def area: Int` in Scala), and in
 Perl, Bash and Zsh. `has_docs` is whether `docs.raw_doc` is present; it is
-`null` in Lua, Perl, Bash and Zsh, which have no doc-comment detection. The
-flag rules and which comments count as documentation are in
-[Symbol Kinds, Visibility and `static`](./symbol-kinds-and-visibility.md#deprecation-and-test-flags). Scope rules and qualified-name spelling are in
-[Symbol Kinds, Visibility and `static`](./symbol-kinds-and-visibility.md#scope).
+`null` in Lua, Perl, Bash and Zsh, which have no doc-comment detection. A
+predicate never matches a `null` metric, so `undocumented(true)` skips a Lua
+function rather than reporting it as undocumented:
+
+```json
+"metrics": { "parameters": 2, "has_docs": false }   // Python: measured
+"metrics": { "parameters": null, "has_docs": null } // Bash: both unsupported
+                                                     // no "metrics" key: not requested
+```
+
+The flag rules are in
+[Deprecation and test flags](./symbol-kinds-and-visibility.md#deprecation-and-test-flags),
+which comments count as documentation in
+[Documentation](./symbol-kinds-and-visibility.md#documentation), and the
+metric definitions in [Metrics](./symbol-kinds-and-visibility.md#metrics).
+Scope rules are in [Scope](./symbol-kinds-and-visibility.md#scope).
 
 ### Symbol Kind and Payload
 
@@ -223,9 +245,11 @@ pub struct IdentityFacet {
 language, the file's identity, the kind, the in-file `qualified_name` and the
 record's order among records of that kind and qualified name
 (`rust::/repo/src/shapes.rs::Method::Point::norm::0`), so IDs do not depend on
-the scan root or on how the file's path was spelled. Until revision 7 the key
-used `container::name` in every language; the native spelling changed every
-ID once.
+the scan root or on how the file's path was spelled. Before revision 7 the
+key used `container::name` with `::` in every language; switching to the
+native in-file spelling changed every symbol ID, and every relation and
+export ID that points at one, once. Cache entries from before the change are
+never served, because the revision is part of the cache key.
 
 `qualified_name` is built from the file's own source with the language's
 separators (`schema::Record::load`, `com.example.Point.area`,
@@ -234,8 +258,23 @@ result adds it after the cache lookup, from the query's scan root or naming
 context (`src/shapes.rs#Point::norm`, `crate::shapes::Point::norm`), which is
 why neither is a cache-key input. `is_namespace_rooted` marks names that
 already start at a declared `package` or `namespace` and so get no prefix.
-The prefix rules are in
-[Symbol Kinds, Visibility and `static`](./symbol-kinds-and-visibility.md#qualified-names).
+
+```rust
+let query = SymbolQuery::new()
+    .naming_context(NamingContext::new("crate/src", "crate"));
+let result = cache.query(SourceFile::read("crate/src/shapes.rs")?, &query)?.result; // a SymbolCache
+// stored in the entry:  Point::norm
+// in result:            crate::shapes::Point::norm
+// result.name_prefix(): "crate::shapes::"
+```
+
+The naming context is **library-only**: `hug` never sets one, so its Rust and
+Python names always take the file form. A file outside the context's root
+falls back to the file prefix. The prefix and the query's predicates are
+applied in one last step, `SymbolQueryResult::finish`, on every result
+(cached or not), and `name_prefix()` reports the prefix so a caller can strip
+it back to the stored name. The prefix rules are in
+[Qualified names](./symbol-kinds-and-visibility.md#qualified-names).
 
 `container_name` holds the name of the symbol's nearest container (a class, trait,
 module, or the implemented type of a Rust `impl`), and `container_kind` holds
@@ -774,7 +813,7 @@ pub struct FileSymbolIndex {
 
 ## ID Strategy
 
-1. Compute `stable_key` as: `<language>::<normalized_file>::<Kind>::<qualified_name_or_name>::<sibling_ordinal>`, where `<Kind>` is the `SymbolKindV2` variant name (`Method`) and `<sibling_ordinal>` counts the earlier records in the file with the same kind, container and name (`0` for the first). For example `rust::src/shapes.rs::Method::Point::norm::0`.
+1. Compute `stable_key` as: `<language>::<file_identity>::<Kind>::<in_file_qualified_name>::<sibling_ordinal>`, where `<file_identity>` is the file's [identity](./cache-design.md#file-identity) with `\` written as `/`, `<Kind>` is the `SymbolKindV2` variant name (`Method`), the qualified name is the stored one without any display prefix, and `<sibling_ordinal>` counts the earlier records in the file with the same kind and qualified name (`0` for the first). For example `rust::/repo/src/shapes.rs::Method::Point::norm::0`.
 2. Hash `stable_key` with BLAKE3 and encode as lowercase hex.
 3. Keep both hashed `id` and unhashed `stable_key` for debugging and diff tooling.
 
@@ -974,7 +1013,15 @@ Version history:
 |---|---|
 | 2.0 | first emitted record shape; no longer emitted |
 | 3.0 | kinds decided at extraction (Constructor, Property, TypeAlias, EnumVariant no longer collapse to Unknown); visibility for every kind with the C# compound levels; `Modifier::StaticStorage`; `identity.container_kind`; `declaration_text`; Rust `relations.implements`; `is_exported` no longer derived from a Public level. Emitted on records, file indexes, CLI envelopes and analyzer fingerprints |
-| 4.0 (current) | `identity.module_path` renamed `container_name`; `identity.keyword` added; `source.signature_text` filled; `provenance.created_at_epoch_ms` and `updated_at_epoch_ms` removed. Emitted on records, file indexes, CLI envelopes and analyzer fingerprints |
+| 4.0 (current) | `identity.module_path` renamed `container_name`; `identity.keyword` added; `source.signature_text` filled; `provenance.created_at_epoch_ms` and `updated_at_epoch_ms` removed. Emitted on records, file indexes, CLI envelopes and analyzer fingerprints. Later extended, still as 4.0, with the [additive 4.x fields](#top-level-symbol-record) |
+
+The additive 4.x fields did not follow the minor-bump rule (4.1 above):
+records still say 4.0. A consumer of 4.0 output only sees new keys, but
+`scope`, `identity.qualified_name`, `identity.is_namespace_rooted` and
+`visibility.is_test` are required when a record is read back, so a record
+written before them does not deserialize. Within this crate, persisted
+records are read back only by the symbol cache, which never meets such a
+record because the extractor revision in its key changed with them.
 
 A record before and after 4.0 (other fields unchanged):
 
@@ -1015,13 +1062,15 @@ extraction rules invalidates cached records without a schema bump (see
 7. `SymbolInfo.visibility` <-> `visibility.level` (`None` <-> `Unknown`).
 8. `SymbolInfo.is_static` <-> `Modifier::Static`; `SymbolInfo.is_static_storage` <-> `Modifier::StaticStorage`.
 9. `SymbolInfo.container_name` / `container_kind` <-> `identity.container_name` / `identity.container_kind`.
+10. `SymbolInfo.scope` <-> `scope`; `SymbolInfo.is_async` <-> `Modifier::Async`.
+11. `SymbolInfo.qualified_name` / `is_namespace_rooted` <-> `identity.qualified_name` / `identity.is_namespace_rooted` (an empty v1 `qualified_name` converts as the bare name, and the ID is keyed on it).
 
 Both kind and visibility conversions are wildcard-free `match`es, so a new
 variant on one side fails to compile until the other side handles it. The
 adapter does not carry `keyword`, `declaration_text`, `signature_text`,
 `relations` or `semantics` (v1 has no field for them, so in particular no
-recursion flag), `TypeMetadata::type_parameters`, or a TypeAlias's field
-metadata.
+recursion flag), the `is_test` and `is_deprecated` flags, the `metrics`
+facet, `TypeMetadata::type_parameters`, or a TypeAlias's field metadata.
 
 ### Recommended migration phases
 

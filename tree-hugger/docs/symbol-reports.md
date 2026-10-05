@@ -1,15 +1,21 @@
 # Symbol Reports
 
 How the `hug` declaration commands (`functions`, `types`, `symbols` and
-`classes`) pick what to analyze, what their terminal and JSON output contain,
-how output is ordered, and what `--verbose` reports.
+`classes`) pick what to analyze, what their terminal, table, outline, JSON,
+JSON Lines, count and stats output contain, how output is ordered, and what
+`--verbose` reports.
 
 ```bash
 hug functions                 # every function, method and constructor in the package
 hug types --sort name         # type declarations, ordered by name
 hug functions --in TreeFile --undocumented   # undocumented members of TreeFile
-hug --json symbols src/       # every declaration under src/, as a JSON report
+hug --json symbols 'src/**'  # every declaration under src/, as a JSON report
 hug --json-full symbols       # every file's complete index, diagnostics included
+hug symbols --jsonl | jq -c .record.identity.name   # one JSON object per declaration
+hug symbols --tree            # members nested under their type
+hug functions --format table  # one table row per declaration
+hug functions --count         # just the number
+hug symbols --stats           # counts by kind, visibility and language, plus doc coverage
 hug --verbose functions       # same listing, plus cache and work stats on stderr
 ```
 
@@ -81,12 +87,25 @@ and the values of a repeatable selector are alternatives (OR). Exclusions win
 over inclusions.
 
 ```bash
+hug functions 'src/**' parse         # files under src/ (a glob), names containing "parse"
+hug functions --file src/lib.rs       # one file, even if .gitignore or a fixtures/ rule would skip it
+hug functions --name parse --exact    # the name `parse` and nothing longer
+hug functions --exclude-symbols 'test_*'      # drop names starting with test_
+hug symbols --exclude-files '**/generated/**' # drop generated files
 hug symbols --kind trait --kind interface     # only traits and interfaces
+hug symbols --scope member                    # fields, methods, … of types only
 hug symbols --all-scopes                      # locals and parameters too
-hug functions --visibility crate --visibility public --exclude-tests
-hug functions --async --returns 'Result<*' --min-params 2
-hug symbols --name '*/symbol.rs#*'            # everything in any symbol.rs
+hug functions --visibility crate --visibility public
+hug symbols --exported                        # what the module exports
 hug functions --in '*shared::SymbolInfo'      # members of one of several SymbolInfo types
+hug functions --exclude-tests                 # drop test functions and helpers in test files
+hug functions --tests-only                    # only those
+hug symbols --undocumented                    # declarations with no doc comment
+hug symbols --deprecated                      # declarations marked deprecated
+hug functions --async                         # async functions and methods
+hug functions --returns 'Result<*'            # declared return type starts with Result<
+hug functions --param-type 'Point'            # takes a Point (a receiver does not count)
+hug functions --min-params 2                  # at least two declared parameters
 ```
 
 | Selector | Keeps | Notes |
@@ -161,8 +180,11 @@ name values; the two lists intersect.
   work) is scanned even when `.gitignore` or the default test-data
   exclusions (`fixtures/`, `__fixtures__/`, `snapshots/`, `testdata/`) would
   skip it. `--exclude-files` still removes it.
-- Any other value (a glob, a directory) is used like a positional file
-  filter. A value that is not a valid file reference is an argument error.
+- Any other value (a glob) is used like a positional file filter. A value
+  that is not a valid file reference is an argument error.
+- A directory, positional or `--file`, selects nothing today: `hug functions
+  src/` reports that no source files were found. Write it as a glob instead,
+  `hug functions 'src/**'`.
 
 ### `imports`
 
@@ -207,9 +229,11 @@ flowchart LR
     cache -- "miss or partial" --> passes["only the passes<br/>the query needs:<br/>parse → bind → semantic<br/>parse → docs<br/>parse → diagnostics"]
     passes --> write["write entry back"] --> result
     result --> order["--prelude, then order<br/>(--sort)"]
-    order --> out{"output"}
-    out --> term["terminal listing"]
+    order --> out{"one output mode"}
+    out --> term["terminal listing,<br/>--tree or --format table"]
     out --> json["--json report<br/>(errors last)"]
+    out --> jsonl["--jsonl<br/>(one line per record)"]
+    out --> tally["--count / --stats<br/>(counters only)"]
 ```
 
 - A **complete cache hit** parses nothing. A **partial hit** (the entry holds
@@ -240,7 +264,43 @@ kind for everything else (`function`, `method`, `enum variant`, …). Both
 come from the record; nothing is guessed from the source line.
 
 `--plain` drops colors and hyperlinks. `--comments` adds each symbol's doc
-comment under its line. Lines never wrap, whatever the terminal width.
+comment under its line.
+
+**Wrapping.** Output to an interactive terminal wraps at the terminal's
+width, and a wrapped line continues under the item's text (a hanging
+indent). A token longer than the space left is broken with a hyphen.
+Redirected output, `--plain` and `--format plain` never wrap. A positive
+`COLUMNS` environment variable sets the width instead of the detected one,
+and forced color (`CLICOLOR_FORCE=1`) counts as interactive:
+
+```text
+$ COLUMNS=40 hug functions wide.py
+  - function summarize_quarterly_revenue(
+    regional_breakdown: dict[str, float],
+    …
+```
+
+**Signatures.** `--signatures` sets how much of each signature a text
+format shows:
+
+| Mode | Shows | Example |
+|---|---|---|
+| `short` (default) | the compact form; a type's field or variant list past four entries ends in `… +N` | `public struct Wide { a: u8, b: u8, c: u8, d: u8, … +1 }` |
+| `full` | the declaration header as written (multi-line headers on one line), in place of visibility and label | `pub fn grow(&mut self, by: u32) [in type Widget]` |
+| `none` | names only, with the container and location | `public method grow [in type Widget]` |
+
+`full` falls back to the short form for a declaration whose header was not
+extracted.
+
+**Source text is shown, never interpreted.** Names, signatures, comments and
+paths come from the scanned files. Every control character in them (an
+escape sequence, a bell, a tab) is printed as its `\u{..}` escape, and markup
+such as `**x**` or `<red>` prints as written, so a file cannot restyle the
+terminal, clear the screen or plant a link:
+
+```text
+  - function paint(color = "\u{1b}[31m<red>**x**</red>") paint.py:1:1
+```
 
 **Package sections.** When the scanned files belong to two or more packages
 (directories with a `Cargo.toml`, `package.json`, `go.mod`, `pyproject.toml`
@@ -269,6 +329,155 @@ docs-site
 
 Every `--sort` and grouping follows the same rule.
 
+## Output modes
+
+Exactly one output mode is active: the default terminal listing, `--json`,
+`--json-full`, `--jsonl`, `--count`, `--stats`, or an explicit `--format`.
+Giving two is an argument error (exit `2`). The one exception is `--stats`,
+which chooses *what* is reported and composes with *how*: with `--json`
+(the stats envelope), and with the default output, `--format table` or
+`--format plain` (the stats tables). `--plain` only drops styling, so it
+combines with every mode and changes no machine format.
+
+```bash
+hug symbols --stats --json      # accepted: the stats envelope
+hug symbols --stats --format plain   # accepted: unstyled stats tables
+hug symbols --json --jsonl      # error: `--json` and `--jsonl` are different output modes
+hug symbols --stats --sort name # error: `--sort` has no meaning for `--stats`
+```
+
+```mermaid
+flowchart TD
+    flags["output flags given"] --> stats{"--stats?"}
+    stats -- no --> one{"at most one of<br/>--json, --json-full, --jsonl,<br/>--count, --format?"}
+    one -- yes --> mode["that mode<br/>(none given: terminal listing)"]
+    one -- no --> err["argument error, exit 2"]
+    stats -- yes --> with{"also given?"}
+    with -- "nothing, --json,<br/>--format table or plain" --> smode["stats in that form"]
+    with -- "--json-full, --jsonl, --count,<br/>--sort, --signatures or --tree" --> err
+```
+
+`--sort`, `--signatures` and `--tree` are argument errors with `--stats`.
+`--tree` is terminal output only (see [Outline](#outline---tree)).
+`hug imports` has no `--jsonl`, `--count`, `--stats`, `--format`,
+`--signatures` or `--tree`.
+
+### Plain (`--format plain`)
+
+The terminal listing without colors, hyperlinks or wrapping, one declaration
+per line; the same text `--plain` gives, and the form to pipe into `grep` or
+a diff:
+
+```text
+$ hug functions --format plain
+  - public method norm(self) -> f64 [in type Point] src/shapes.rs:9:5
+  - public method scale(self, by: f64, origin: Point) [in type Point] src/shapes.rs:13:5
+  - public function load(path: &str) -> Result<Point, String> src/shapes.rs:17:1
+```
+
+### Table (`--format table`)
+
+One biscuit-terminal table per file with a selection, one row per
+declaration, in `--sort` order:
+
+```text
+┌────────────┬──────────┬────────────┬──────────────┬─────────────────────┐
+│ Location   │ Kind     │ Visibility │ Name         │ Signature           │
+├────────────┼──────────┼────────────┼──────────────┼─────────────────────┤
+│ rust.rs:9  │ method   │ public     │ new          │ (size: u32) -> Self │
+│ rust.rs:25 │ function │ public     │ build_widget │ () -> Widget        │
+└────────────┴──────────┴────────────┴──────────────┴─────────────────────┘
+```
+
+- **Location** is `file:line`, a link to the file in an interactive terminal
+  that supports OSC 8 links.
+- **Signature** follows `--signatures` (`full` shows the header as written,
+  `none` drops the column) and is the only column that wraps. A terminal too
+  narrow for the other columns gets the table at its natural width.
+- `classes` lists each selected container followed by its displayed members.
+- A table per file keeps the output streaming; a scan with no selected
+  declaration prints `(no symbols)`.
+
+### Outline (`--tree`)
+
+`functions`, `types` and `symbols` accept `--tree`, which nests each
+declaration under the container that holds it, matched by the container's
+record ID. Methods of out-of-body Rust `impl` blocks and Go receiver methods
+therefore sit under their type, and every `impl` block of a type shares it.
+The outline replaces the flat listing's `[in …]` suffix:
+
+```text
+lib.rs
+  public struct Widget { size: u32 } [2:1]
+    public field size [3:9]
+    public method new(size: u32) -> Self [7:5]
+    public method grow(self, by: u32) [13:5]
+  [in Elsewhere]
+    public method visit(self) [19:5]
+```
+
+When a declaration's container is not listed (the command does not select
+its kind, a filter dropped it, or it is declared in another file), the
+declaration sits under a marked heading such as `[in type Widget]` or
+`[in Elsewhere]`. The heading is context only: it is never a listed
+declaration and `--count` or `--stats` never counts it. Overloads stay
+separate rows in source order. Containment covers declarations the library
+links; a parameter is placed under the container its record names, which
+for a Rust method's parameters is the `impl` type.
+
+| Combination | Behavior |
+|---|---|
+| `--tree` alone | files in path order; containers and members in source order |
+| `--tree --sort name\|kind` | within each file, containers ordered, and separately the members under each container; a heading sorts by its container's name |
+| `--tree --group-by-file` | accepted, no extra effect: the outline is already per file |
+| `--tree --group-by-module` | a directory heading where the directory changes |
+| `--tree --format plain` | the outline without styles or wrapping |
+| `--tree --format table` | argument error |
+| `--tree` with `--json`, `--json-full`, `--jsonl`, `--count` or `--stats` | argument error |
+| `classes --tree` | argument error: `classes` already nests members |
+
+### `--count`
+
+The number of selected declarations, as one decimal integer and a newline,
+`0` included:
+
+```text
+$ hug functions --count
+3
+$ hug functions --count --undocumented
+2
+```
+
+`classes --count` counts selected containers, not their
+members. A failed file is still reported on stderr and makes the exit status
+`1`; the count covers the files that were analyzed.
+
+### `--stats`
+
+Counts of the selected declarations by kind, by visibility and by language,
+and their doc coverage. Every filter applies first. `classes --stats` counts
+selected containers only.
+
+```text
+┌──────────┬───────┐
+│ Kind     │ Count │
+├──────────┼───────┤
+│ function │     3 │
+│ method   │     2 │
+└──────────┴───────┘
+…
+Doc coverage: 4 of 78 documented (5.1%); 15 unavailable
+```
+
+**Doc coverage** counts `documented` declarations (`metrics.has_docs` true)
+over `total` (declarations whose `has_docs` is known). Lua, Perl, Bash and
+Zsh have no doc-comment detection: their declarations are counted as
+`unavailable`, never as documented or undocumented. The ratio is `n/a`
+(JSON `null`) when `total` is 0. Synthetic prelude exports (`--prelude`)
+count in the three tables and are reported apart as `synthetic_exports`,
+outside doc coverage. With `--stats --json`, see
+[Stats JSON](#stats-json---stats---json).
+
 ### Streaming
 
 The terminal listing is written as files are analyzed: after each batch of
@@ -284,6 +493,8 @@ listing that later files can still change:
 | `--group-by-module`, any `--sort` | one directory's group |
 | `--sort name` or `--sort kind` without grouping | one package: a name or kind order interleaves every file of the package |
 | `--prelude` | one package: a prelude lists declarations that live in other files |
+| `--jsonl`, `--format table`, `--tree` | one file |
+| `--count`, `--stats` | only the counters; the result is written at the end |
 
 For example, `hug symbols --sort name` prints nothing until each package is
 fully analyzed, and over a single-package repository that is the whole scan.
@@ -334,7 +545,9 @@ hug symbols --group-by-module --sort kind   # per directory: types first, then f
 **JSON** never reorders files. A report has one entry per file in path
 order, and `--sort` orders only the records inside each file's array, with
 the same keys and tie-breakers. This holds for `--json` (`files[].symbols`)
-and `--json-full` (`indexes[].symbols`), for every command. A full index's
+and `--json-full` (`indexes[].symbols`), for every command. `--jsonl`,
+`--format table` and `--tree` follow the same rule: files in path order,
+`--sort` within each file. A full index's
 other arrays (`imports`, `exports`, `diagnostics`) are not declarations and
 keep the order the analysis produced them in.
 
@@ -470,6 +683,46 @@ hug --json functions --language rust /work/vendor/external.rs
 An empty selection is still a complete report:
 `{"report_schema_version":1,…,"files":[],"errors":[]}`.
 
+### JSON Lines (`--jsonl`)
+
+One line per selected declaration, each a complete envelope, so a saved or
+piped line is usable without the rest of the output:
+
+```json
+{"report_schema_version":1,"schema_version":{"major":4,"minor":0},"file":"src/shapes.rs","language":"Rust","completed_passes":["Parse"],"completed_capabilities":["declarations","flags"],"record":{…}}
+```
+
+- `report_schema_version` and `schema_version` mean what they mean in the
+  `--json` envelope; `file`, `language`, `completed_passes` and
+  `completed_capabilities` repeat that file's values.
+- `record` is one record, trimmed like `--json` records (no source text).
+  Like `--json`, every line carries computed `is_test` and `is_deprecated`.
+- A `classes` line's `record` is a container, and the line adds `members`:
+  a **list** of that container's displayed members. The `--json` class
+  report keeps a `members` **map** keyed by container ID instead, because it
+  holds many containers.
+- Lines follow the JSON ordering rule (files in path order, `--sort` within
+  each file), never the order workers finish in, and stream file by file.
+- An empty selection writes nothing. A failed file is reported on stderr and
+  makes the exit status `1`, even after earlier lines were written; the
+  stream has no `errors` array.
+
+### Stats JSON (`--stats --json`)
+
+```json
+{"report_schema_version":1,"root_dir":"/work/repo",
+ "stats":{"by_kind":{"Function":3,"Method":2},"by_visibility":{"Public":5},"by_language":{"Rust":5},
+          "doc_coverage":{"documented":2,"total":4,"unavailable":1,"ratio":0.5},
+          "synthetic_exports":0},
+ "errors":[]}
+```
+
+Keys are spelled as records spell kinds, visibility levels and languages.
+There is no record `schema_version`, since the envelope holds no record.
+`ratio` is `null` when `total` is 0. `root_dir` and `errors` follow the
+`--json` rules: `errors` is always present and last, and a non-empty one
+means exit status `1`.
+
 ### `--json-full`
 
 `--json-full` has the same envelope with `indexes` in place of `files`: one
@@ -521,14 +774,18 @@ so a failure can never look like an empty success.
 
 | Exit status | When |
 |---|---|
-| `0` | every file was analyzed and the output was written; also when stdout closes early (`hug symbols \| head`), which ends the run quietly |
+| `0` | every file was analyzed and the output was written, an empty selection included; also when stdout closes early (`hug symbols \| head`), which ends the run quietly |
 | `1` | a file failed, or stdout could not be written for any other reason (`error: cannot write output`) |
-
 | `2` | an argument error |
 
+Every output mode reports a failed file on stderr and exits `1`; the modes
+with an envelope (`--json`, `--json-full`, `--stats --json`) also list it in
+`errors`, while `--jsonl`, `--count` and the terminal formats keep their
+output to the good files.
+
 A failed write to stdout, a closed pipe included, stops the run: no further
-batch of files is analyzed. The terminal listing and the JSON reports are
-flushed after every batch, so the run stops before the next batch, even when
+batch of files is analyzed. The terminal listing, tables, outlines, JSON
+Lines and the JSON reports are flushed after every batch, so the run stops before the next batch, even when
 the batch added nothing but the JSON envelope. The status is then `0` for a
 closed pipe (even if a file had failed) and `1` for any other write error.
 

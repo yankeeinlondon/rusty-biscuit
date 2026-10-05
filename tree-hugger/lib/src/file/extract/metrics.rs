@@ -9,7 +9,7 @@ use crate::shared::MetricsFacet;
 /// without a Rust `self` receiver (a Go receiver has its own list and is
 /// never counted); C, C++ and Go count unnamed parameters too
 /// ([`declared_parameter_count`]). `None` for kinds that are not functions
-/// and where no list is found ([`declared_parameters`]). `has_docs` is whether `doc` (from
+/// or where no list is found ([`declared_parameters`]). `has_docs` is whether `doc` (from
 /// [`extract_doc_comment`]) is present; `None` in Lua, Perl, Bash and Zsh,
 /// which have no doc-comment detection.
 pub(crate) fn symbol_metrics(

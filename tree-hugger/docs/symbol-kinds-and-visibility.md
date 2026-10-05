@@ -351,8 +351,25 @@ fn build(width: u32) {                 // build: Item, width: Local
 Walking out from the declaration, the first function body decides `Local`
 and the first type, trait, interface, object or `impl` decides `Member`. A
 body is decided by what owns it, so a Rust `declaration_list` is `Item` space
-under a `mod` and `Member` space under an `impl` or `trait`. The rules
-below follow from that:
+under a `mod` and `Member` space under an `impl` or `trait`.
+
+```mermaid
+flowchart TD
+    A[declaration] --> P{"parameter, or C++<br/>template type parameter?"}
+    P -- yes --> L[Local]
+    P -- no --> N{"Go receiver method, or Lua<br/>M.f / M:m / M.x = …?"}
+    N -- yes --> M[Member]
+    N -- no --> W[step out to the parent node]
+    W --> F{"function body, or a block<br/>that computes a value?"}
+    F -- yes --> L
+    F -- no --> T{"type, trait, interface, object<br/>or impl (named or not)?"}
+    T -- yes --> M
+    T -- no --> R{file root?}
+    R -- yes --> I[Item]
+    R -- "no: module or namespace<br/>bodies are walked past" --> W
+```
+
+The rules below follow from that:
 
 - A member of a type declared inside a function is a `Member`; the type
   itself is `Local`.
@@ -362,10 +379,21 @@ below follow from that:
 - A Go receiver method and a Lua `M.f`, `M:m` or `M.x = …` are `Member`
   wherever they are written: they name their owner.
 - **Parameters are `Local` only where they are extracted**: 13 languages
-  produce `Parameter` records; Perl, Bash and Zsh produce none.
+  produce `Parameter` records (Rust, TypeScript, JavaScript, Go, Python, Java,
+  C#, C, C++, Swift, Scala, PHP and Lua). Perl, Bash and Zsh produce none, so
+  `--scope local` lists no parameters there: Perl subs and shell functions
+  declare no parameter list, and names unpacked from `@_` are ordinary
+  variables.
 - A C++ template type parameter is `Local`.
 - **Bash and Zsh functions defined inside a function body are `Local`,** even
-  though the shell makes them global once the outer function runs.
+  though the shell makes them global once the outer function runs. Scope
+  follows where a declaration is written, not when it takes effect:
+
+  ```sh
+  outer() {
+    inner() { echo hi; }   # inner: Local
+  }
+  ```
 - A block that computes a value (see [Containers](#containers)) is local
   scope; a chunk-level Lua `if` or `do` block is not a function body, so its
   `local` declarations stay `Item`.
@@ -383,14 +411,15 @@ repeated locals share one); the record ID is.
 | Language | Separator | Example |
 |---|---|---|
 | Rust, C++, Perl | `::` | `schema::Record::load`, `ns::Widget::draw`, `Fixture::Greeter::greet` |
-| PHP | `\` after a namespace, `::` after a type | `App\Models\User::find` |
+| PHP | `\` after a namespace, `::` after anything else (a type or function) | `App\Models\User::find`, `App\Models\User::__construct::id` |
 | Lua | `.`, and `:` before a method | `Widget.new`, `Widget:describe` |
 | all others | `.` | `com.example.Point.area`, `Shape.area`, `outer.inner` |
 
 What becomes a segment:
 
-- extracted functions, types, modules and namespaces around the declaration;
-  a local's name includes its function (`Shape.area.self`)
+- extracted functions, types, enum variants, modules and namespaces around
+  the declaration; a local's name includes its function (`Shape.area.self`),
+  and a Rust struct-variant field its variant (`Shape::Circle::radius`)
 - a Rust `impl` block's implemented type (last path segment), a Go receiver's
   base type and a Lua table, written in the declaration
 - a TypeScript `namespace`, a Swift extension's type and a named function that
@@ -415,7 +444,7 @@ therefore never depend on where `hug` runs:
 
 | Query input | Prefix | Example |
 |---|---|---|
-| a scan root (`SymbolQuery::scan_root`; `hug` passes its own) | the file's portable path from the root, then `#` | `lib/src/symbol.rs#Symbol::new` |
+| a scan root (`SymbolQuery::scan_root`; `hug` passes its own) | the file's portable path from the root (`/`-separated, climbing with `../` for a file outside it), then `#` | `lib/src/symbol.rs#Symbol::new` |
 | none (the library default) | the file name, then `#` (the file's directory is the root) | `symbol.rs#Symbol::new` |
 | a naming context (`NamingContext::new(root, prefix)`), file below its root | the context prefix and the file's route as module segments, in the language's separator | `crate::shared::symbol::SymbolInfo::new`, `package.module.Class.method` |
 
@@ -428,8 +457,9 @@ both: one cache entry, one symbol ID, in-file name Symbol::new
 A naming context drops the file extension and adds no segment for a Rust
 `mod.rs`, a Rust `lib.rs` or `main.rs` directly in its root, or a Python
 `__init__.py`; a file outside its root gets the file prefix. Nothing guesses a
-module path: `hug` never sets a naming context, so its Rust and Python names
-always use the file form, while namespace-rooted names (`com.example.Point`)
+module path: `hug` has no naming-context option and never sets one, so its
+Rust and Python names always use the file form (`src/symbol.rs#Symbol::new`,
+`pkg/module.py#Class.method`), while namespace-rooted names (`com.example.Point`)
 take no prefix at all. `SymbolQueryResult::name_prefix()` reports the prefix a
 result's names carry, so the in-file name is the displayed name without it.
 Relation and export references (`SymbolRef::qualified_name`) keep the in-file
@@ -452,11 +482,18 @@ A declaration written `async` carries `Modifier::Async` (`SymbolInfo::is_async`)
 | JavaScript, TypeScript | `async` functions, methods, function expressions and arrow functions, and a name bound to one (`const f = async () => …`, a class field holding one) |
 | Python | `async def`, decorated or not |
 | C# | `async` methods and local functions |
-| Swift | functions, methods, initializers and protocol requirements written `async` |
+| Swift | functions, methods and protocol requirements written `async` (an `init` is not reported as a symbol, so it carries no flag) |
 
-Go, Java, C, C++, Scala, PHP, Perl, Lua, Bash and Zsh have no async
-declarations and never report it. An `async` block inside a function does not
-make the function async.
+The flag is read from the declaration's own `async` keyword, never from its
+body or its return type. A JavaScript or TypeScript name bound to a function
+value takes that function's keyword. Go, Java, C, C++, Scala, PHP, Perl, Lua,
+Bash and Zsh have no async declarations and never report it; a C++ coroutine
+is marked in its body (`co_await`), not its declaration.
+
+```rust
+async fn fetch() {}                              // async
+fn spawn() { let _ = async { fetch().await }; }  // not async: only the block is
+```
 
 ## Documentation
 
@@ -491,8 +528,8 @@ documentation.
 ## Deprecation and test flags
 
 Two flags are computed when a query asks for `Capability::Flags`, which
-`hug --json` and `--json-full` always do; without it both are `false`,
-meaning "not computed".
+`hug --json`, `--jsonl` and `--json-full` always do; without it both are
+`false`, meaning "not computed".
 
 **`visibility.is_deprecated`** is set by exactly these markers; every other
 language and form (including an ordinary comment that says "deprecated")
@@ -501,9 +538,9 @@ leaves it `false`:
 | Language | Marker |
 |---|---|
 | Rust | `#[deprecated]`, with or without arguments |
-| Java | `@Deprecated` (or `@java.lang.Deprecated`), or a `@deprecated` tag in the doc comment |
+| Java | `@Deprecated` (or `@java.lang.Deprecated`), or a doc line that starts with the `@deprecated` tag |
 | C# | `[Obsolete]`, also qualified (`System.Obsolete`) or with the `Attribute` suffix |
-| JavaScript, TypeScript, PHP | a `@deprecated` tag on its own doc line |
+| JavaScript, TypeScript, PHP | a doc line that starts with the `@deprecated` tag (`@deprecated use load()` counts; `@deprecatedSoon` or a mid-line mention does not) |
 | Go | a doc paragraph that starts with `Deprecated:` |
 | Swift | `@available(*, deprecated…)` (a single-platform `@available(iOS, deprecated: 13)` does not count) |
 | Scala | `@deprecated` (or `@scala.deprecated`) |
@@ -544,19 +581,42 @@ fn shared() {}              // not a test: compiled outside tests too
 pub fn test_helper() {}     // not a test: the name decides nothing
 ```
 
+**An out-of-line test module is not followed.** `#[cfg(test)] mod tests;`
+marks only that `mod` declaration. The file holding its body is read on its
+own, so its declarations are tests only when its path matches a file-name
+rule, and a file under `src/` never does:
+
+```rust
+// src/parser.rs
+#[cfg(test)]
+mod tests;                  // is_test
+
+// src/parser/tests.rs
+fn helper() {}              // not a test: nothing in this file says cfg(test)
+```
+
+Add `#![cfg(test)]` at the top of the other file to mark it. Only the exact
+predicate `cfg(test)` counts: `#[cfg(all(test, …))]` is not recognized.
+
 The rules are a syntax and file-name heuristic, not a claim that a test
 runner executes the symbol. Only the attributes named here are read; nothing
-is resolved through imports, and other languages report `false`.
+is resolved through imports, and other languages report `false`. There is no
+rule for Python `unittest.TestCase` subclasses or JavaScript `describe`/`it`
+calls; the file-name rules cover them in files named as tests.
 
 ## Metrics
 
-The `metrics` facet is present when a query asks for `Capability::Metrics`.
-An unsupported metric is `null`; a measured zero is `0`.
+The `metrics` facet is present when a query asks for `Capability::Metrics`,
+which `hug --json-full`, `--stats` and the `--undocumented` and `--min-params`
+filters do; without it the facet is absent. Inside a computed facet an
+unsupported metric is `null` and a measured zero is `0`. A `null` never
+matches a filter, and doc coverage counts it as unavailable rather than
+undocumented (see [Symbol Reports](./symbol-reports.md)).
 
 | Metric | Definition | `null` when |
 |---|---|---|
 | `parameters` | the declared parameters of a function, method or constructor: its own parameter list, without a Rust `self` (a Go receiver is a separate list and never counted); a variadic parameter counts once; unnamed C, C++ and Go parameters count; `(void)` and `()` are `0` | the declaration is not a function, it has no parameter list (`def area: Int` in Scala), or the language is Perl, Bash or Zsh, whose parameters are not extracted |
-| `has_docs` | whether the declaration has [documentation](#documentation) | the language is Lua, Perl, Bash or Zsh |
+| `has_docs` | whether the declaration has [documentation](#documentation): a doc comment or docstring that is not empty once its delimiters are removed; ordinary comments do not count | the language is Lua, Perl, Bash or Zsh, which have no doc-comment detection |
 
 ```python
 class Receiver:
@@ -1314,6 +1374,8 @@ These are limits of the extractor today, not of the grammars:
   class or namespace written in the definition's name (`void ns::W::f() {}`
   qualifies its locals as `k`, not `ns::W::f::k`).
 - **Scala** fields are not reported.
+- **Swift and Scala type aliases** (`typealias Alias = Int`, `type Alias =
+  Int`) are not reported, and neither is a Swift `init`.
 - **Destructuring members**: a Python class-body target nested more than one
   pattern deep or starred (`a, (b, c) = …`, `a, *rest = …`) and a Swift
   tuple-pattern property (`let (a, b) = (1, 2)`) are not reported, as

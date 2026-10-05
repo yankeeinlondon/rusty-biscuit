@@ -3,7 +3,7 @@
 //! These functions were carved out of `tree_file.rs` to separate the
 //! `TreeFile` type and its query orchestration from the large body of
 //! language-specific AST extraction logic. Submodules group helpers by
-//! responsibility; all are re-exported here so each submodule can reach the
+//! responsibility; all but `attributes` are re-exported here so each submodule can reach the
 //! others via `use super::*`.
 
 pub(crate) mod attributes;

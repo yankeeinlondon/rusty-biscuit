@@ -26,7 +26,7 @@ pub fn analyze_file(
     Ok(tree_file.query(&SymbolQuery::for_passes(requested_passes))?.index)
 }
 
-/// The work a query needs, in execution order.
+/// The work a query needs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct PassPlan {
     /// Parent and member links only, without the reference query.

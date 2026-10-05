@@ -39,8 +39,9 @@ pub(crate) fn symbol_kind_priority(kind: SymbolKind) -> u8 {
 /// name, so `symbols()`, `symbol_records()` and the CLI agree on every kind.
 ///
 /// Rules keyed on the declaration node outrank the query capture. Only the
-/// path from the name up to its declaration is inspected, never enclosing
-/// bodies: a local is not a field because its function sits in a class.
+/// path from the name up to its declaration, and for membership the bodies
+/// directly around it ([`is_direct_member`]), are inspected: a local is not a
+/// field because its function sits in a class.
 ///
 /// A member kind, from a query capture or from a rule here, is kept only for
 /// a declaration that belongs to a type; one in a function body is demoted
@@ -489,7 +490,7 @@ pub(crate) fn go_receiver_type_name(method: Node<'_>, source: &str) -> Option<St
 /// without a tag. A declaration inside one has no container rather than the
 /// named type around it.
 ///
-/// A tagless C/C++ `struct`/`union` that declares no member of its own
+/// A tagless C/C++ `struct`/`union` that declares no name of its own
 /// (`union { int a; float b; };`) is an anonymous member: its fields are
 /// members of the enclosing type, so it is not a boundary.
 pub(crate) fn is_unnamed_type_owner(node: Node<'_>) -> bool {
@@ -760,8 +761,8 @@ pub(crate) fn symbol_kind_from_capture(capture_name: &str) -> Option<SymbolKind>
         return None;
     };
 
-    // Skip context captures (e.g., function.context, type.context)
-    // These are used for extracting signatures and doc comments in Phase 3
+    // Skip context captures (e.g., function.context, type.context): they mark
+    // a name's declaration node and name no symbol of their own.
     if suffix.ends_with(".context") {
         return None;
     }

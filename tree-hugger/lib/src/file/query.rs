@@ -41,7 +41,7 @@ pub enum Capability {
     References,
     /// The semantic pass (`semantics` facet of functions and methods).
     Semantics,
-    /// The docs pass (`docs.parsed` and attached comments).
+    /// The docs pass (`docs.parsed`).
     StructuredDocs,
     /// The diagnostics pass (lint and syntax diagnostics).
     Diagnostics,

@@ -32,7 +32,7 @@ pub(crate) fn classify_filters(
                 // existing file is a file filter even when it lacks a recognized
                 // extension (e.g. an extensionless script). Without this it would
                 // be misclassified as a symbol glob and never reach the
-                // explicit-file resolver in `collect_files`.
+                // explicit-file resolver in `collect_selected_files`.
                 let forced_explicit_file =
                     language.is_some() && resolve_explicit_file(filter).is_some();
                 if is_file_filter_token(filter) || forced_explicit_file {

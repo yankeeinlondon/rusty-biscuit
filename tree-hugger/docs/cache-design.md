@@ -87,7 +87,10 @@ Nothing about the scan root reaches the stored records: JSON paths are made
 relative to it after the lookup ([symbol-reports.md](./symbol-reports.md)),
 and so is the file prefix of a qualified name
 ([Qualified names](./symbol-kinds-and-visibility.md#qualified-names)); neither
-it nor a naming context is a key input. A query's predicates (scope,
+it nor a library caller's `NamingContext` is a key input. Since neither
+changes a stored record, keying on them would only split one file's analysis
+into several identical entries, and the IDs, which are built from the in-file
+name, would be the same in all of them. A query's predicates (scope,
 visibility, names, flags, signature shape) are applied to the result after the
 lookup too: the entry always holds every record of its covered kinds under
 its in-file name, and a predicate only adds the kinds and capabilities it
@@ -260,6 +263,7 @@ flowchart TD
     P -- yes --> WR["WidenedCapabilities { parsed: false }:<br/>run those passes over the records,<br/>rewrite the entry"]
     P -- no --> WP["WidenedCapabilities { parsed: true }:<br/>parse, analyze for the union,<br/>rewrite the entry"]
     M & WK & H & WR & WP --> N["narrow the result to exactly<br/>what was requested"]
+    N --> F["finish: prefix qualified names,<br/>apply the predicates"]
 ```
 
 The passes that work from stored records alone are the docs pass, the
@@ -290,6 +294,18 @@ export targets, diagnostics, flags, metrics and each record's
 `provenance.parse_pass` are reduced to what the requested capabilities
 produce. A narrow request served from a
 wide entry is therefore identical to an uncached run of the narrow request.
+
+Only then is the result **finished** (`SymbolQueryResult::finish`, the same
+step an uncached query ends with): every qualified name that is not
+namespace-rooted gets the query's prefix, and the query's predicates drop the
+records they do not match. The entry is written before this step, so it holds
+in-file names and every record of its covered kinds:
+
+```text
+entry record:         "qualified_name": "Square::area"
+scan root repo/:      src/shapes.rs#Square::area
+scan root repo/src/:  shapes.rs#Square::area        (same entry, a Hit, same ID)
+```
 
 ## Writes are atomic
 
@@ -337,7 +353,7 @@ No entry-level field has a default:
 | `completed_capabilities` | miss | miss | miss | miss | miss | miss | miss | miss |
 | `schema_version`, `fingerprint`, `source_hash` | miss | miss | miss | miss | miss | miss | miss | miss |
 | `file`, `language` | miss | miss | miss | miss | miss | miss (`""` is another file or no language) | miss | miss |
-| `diagnostics_fingerprint` | miss | miss (contradicts `diagnostics`) | miss | miss | miss | diagnostics recomputed | miss | miss |
+| `diagnostics_fingerprint` | miss | miss (contradicts `diagnostics`) | miss | miss | miss | diagnostics recomputed (one parse; output as uncached) | miss | miss |
 | `records` | miss | miss | miss | miss | miss | **served**: no records of the covered kinds | miss | miss |
 | `imports`, `exports`, `diagnostics` | miss | miss | miss | miss | miss | **served**: the file has none | miss | miss |
 
@@ -374,7 +390,6 @@ everything else refuses the entry.
 | `relations.implements` | absent or `[]` | empty list |
 | `kind_data.data.fields` (type data) | absent or `[]` | empty field list |
 | field data `visibility` | absent or `null` | Unknown access |
-
 | `metrics.parameters`, `metrics.has_docs` | `null` | the metric is unsupported for that declaration |
 
 `schema_version`, `kind`, `scope`, `identity.qualified_name`,
@@ -385,8 +400,9 @@ qualified name) or `{}` refuses the entry, and a record `schema_version`
 other than exactly 4.0 refuses it too. In an entry that lists `metrics`, the
 `metrics` facet is required in the same way (absent, `null`, `{}` or a member
 of the wrong type refuses it), and so is each of its two keys (absent
-refuses; only `null` is served). For all twenty-two record fields
-(`modifiers` is checked twice, on a static and on an async declaration), a
+refuses; only `null` is served). For all twenty-one record fields (twenty-two
+columns: `modifiers` is checked twice, on a static and on an async
+declaration), a
 wrong type (`123`, or `"123"` for a number, or an array holding a wrong
 element), a duplicate key and invalid JSON refuse the entry. For example, an
 entry whose method record carries `"modifiers": null` is recomputed, while one
@@ -422,6 +438,8 @@ visited once per run, so they only added copies.
 | Query text, extractor revision, forced language, schema, rules and settings each miss | `each_key_input_and_stored_identity_decides_a_miss` |
 | A record of another schema version (2.0, 3.0, 4.1, 5.0) misses for the same and a wider request, never widened | `incompatible_record_schema_versions_are_misses_never_served_or_widened` |
 | Corrupt entries, absent vs `null` reasons, kind-list shapes | `a_corrupt_entry_is_a_miss_and_is_replaced`, `absent_and_null_entry_fields_report_different_reasons`, `covered_kind_lists_are_served_only_in_canonical_form` |
+| A metrics facet or a set flag without its capability, or a record without metrics under `metrics`, is `Inconsistent`; a flags-and-metrics entry serves a flags-only request | `covered_kind_lists_are_served_only_in_canonical_form`, `flags_and_metrics_are_served_only_under_their_capabilities` |
+| A filtered, prefixed query writes in-file names and every record; another scan root is a Hit with the same IDs | `lib/tests/l1/symbols_query_filters.rs` `predicates_and_prefixes_never_reach_the_cache_entry` |
 | Concurrent writers (threads and processes) | `concurrent_writers_leave_a_readable_entry_whose_coverage_matches`, `cli/tests/symbols/cache_lookup.rs`, `lib/tests/l1/cache_tests.rs` |
 | Entry and record field shapes | `cli/tests/symbols/cache_robustness.rs` |
 | Old extractor revisions and records of other schema versions are never served | `cli/tests/symbols/cache_upgrade.rs` |

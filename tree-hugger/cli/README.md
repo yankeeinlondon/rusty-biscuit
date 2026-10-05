@@ -39,6 +39,43 @@ hug imports --json "tests/fixtures/**/*.js"
 - `--group-by-file` - Group symbol output by file
 - `--group-by-module` - Group symbol output by module (the file's directory)
 - `--sort file|name|kind` - Order of the listed declarations (`functions`, `types`, `symbols` and `classes` only). `file` (the default) lists by file, then source position; `name` by the case-sensitive name; `kind` by kind (modules and types, then callables, then values). Ties fall back to file, position, kind and ID. Give it once; `lint` and `imports` reject it
+- `--jsonl` - One JSON object per selected declaration (JSON Lines); a `classes` line adds the container's `members` list
+- `--count` - Print only the number of selected declarations (`classes`: containers)
+- `--stats` - Counts by kind, visibility and language plus doc coverage, as tables; with `--json`, a stats envelope
+- `--format plain|table` - The listing without styles, links or wrapping, or one table per file (Location, Kind, Visibility, Name, Signature)
+- `--signatures full|short|none` - The declaration header as written, the compact form (default; field lists past four end in `… +N`), or names only
+- `--tree` - Nest members under their container (`functions`, `types`, `symbols`)
+
+### Selectors
+
+`functions`, `types`, `symbols` and `classes` share these record selectors.
+They combine with AND; the values of a repeated selector are alternatives.
+Names use smart case: a pattern without an uppercase letter ignores case.
+
+- `--file <PATH|GLOB>` / `--name <PATTERN>` (`-n`) - Say whether a filter is a file or a name instead of letting `hug` guess from a positional token; `--exact` matches names whole and literally
+- `--kind <KIND>` - Only these kinds (snake_case: `function`, `type_alias`, `enum_variant`, …); narrows the command's kinds, never widens them
+- `--scope item|member|local`, `--all-scopes` - Only these scopes; `symbols` hides locals (`item` and `member` by default), the other commands show every scope
+- `--visibility <LEVEL>` - Exactly this visibility (`public`, `crate`, `private`, …, `unknown`)
+- `--exported` - Only exported declarations
+- `--in <PATTERN>` - Only members of a matching container (`classes`: the container itself)
+- `--exclude-tests`, `--tests-only` - Drop, or keep only, test code and helpers in test files
+- `--undocumented`, `--deprecated` - No doc comment / marked deprecated
+- `--async`, `--returns <GLOB>`, `--param-type <GLOB>`, `--min-params <N>` - Signature shape; keeps only functions, methods and constructors
+
+```bash
+hug symbols --kind trait --exported            # exported traits
+hug functions --in Widget --undocumented        # undocumented Widget members
+hug functions --async --returns 'Result<*'      # async functions returning a Result
+hug symbols --all-scopes --name '*/lib.rs#*'    # everything in any lib.rs, locals included
+```
+
+Every selector, with examples, is in `docs/symbol-reports.md`.
+
+Exactly one output mode is active (terminal, `--json`, `--json-full`,
+`--jsonl`, `--count`, `--stats` or `--format`); `--stats` alone composes,
+with `--json` or a `--format`. Interactive output wraps at the terminal width
+(a positive `COLUMNS` overrides it); `--plain`, `--format plain` and
+redirected output never wrap. See `docs/symbol-reports.md`.
 
 The old `--sort-by-kind` and `--sort-by-module` flags are gone: `--sort kind`
 replaces the first, and the default `--sort file` (portable path, then source

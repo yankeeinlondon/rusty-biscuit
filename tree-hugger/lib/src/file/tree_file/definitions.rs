@@ -15,7 +15,7 @@ use crate::shared::{SymbolKindV2, SymbolScope};
 
 /// The kinds whose declarations get metadata (visibility, `static` flags,
 /// signature, type metadata, doc comment and the record's header texts).
-/// Declarations of other kinds keep only name, kind, span and container.
+/// Declarations of other kinds get none of it.
 #[derive(Debug, Clone)]
 pub(crate) struct MetadataSelection {
     /// `None` selects every kind.
@@ -519,8 +519,6 @@ fn resolve_container_kind(
         ContainerLookup::Node { node, fallback } => {
             Some(kinds_by_node.get(&node.id()).copied().unwrap_or(fallback))
         }
-        // Absent when the type is declared elsewhere, or when same-named
-        // declarations in this file disagree on kind.
         // The table's kind when the file's item-scoped declarations of
         // that name agree on one.
         ContainerLookup::SameFileTable => {
@@ -532,6 +530,8 @@ fn resolve_container_kind(
             let first = kinds.next()?;
             kinds.all(|kind| kind == first).then_some(first)
         }
+        // Absent when the type is declared elsewhere, or when same-named
+        // declarations in this file disagree on kind.
         ContainerLookup::SameFileType => {
             let mut kinds = symbols
                 .iter()
