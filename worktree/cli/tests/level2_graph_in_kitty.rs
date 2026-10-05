@@ -462,7 +462,10 @@ impl GraphRun {
         fs::write(
             &script,
             format!(
-                "cd '{main}'\n\
+                // A Kitty launched beside others can still be at its initial
+                // size when the shell starts; `wt` must see the requested one.
+                "for _ in $(seq 50); do [ \"$(stty size)\" = '{lines} {columns}' ] && break; sleep 0.1; done\n\
+                 cd '{main}'\n\
                  printf '\\033[16t'; IFS=';t' read -rs -d t -t 2 _ ch cw\n\
                  clear\n\
                  script -q '{rec}' env -u TERM_PROGRAM HOME='{home}' XDG_CACHE_HOME='{home}/cache' '{wt}' list\n\
