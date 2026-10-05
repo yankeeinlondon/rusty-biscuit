@@ -75,6 +75,42 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
+  - tree-hugger/lib/tests/l1/symbols_kinds.rs
+  - tree-hugger/lib/tests/l1/symbols_query.rs
+  - tree-hugger/lib/tests/l1/symbols_query_filters.rs
+  - tree-hugger/lib/tests/l1/symbols_selection_filters.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/symbols/classes.rs
+  - tree-hugger/cli/tests/symbols/filters.rs
+  - tree-hugger/cli/tests/symbols/reports.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.jsonl
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+  - tree-hugger/lib/src/file/extract/classify.rs
+  - tree-hugger/lib/src/file/extract/header/keyword.rs
+  - tree-hugger/lib/src/file/extract/qualified_name.rs
+  - tree-hugger/lib/src/file/extract/signatures.rs
+  - tree-hugger/lib/src/file/extract/type_metadata.rs
+  - tree-hugger/lib/src/file/tree_file/definitions.rs
+  - tree-hugger/lib/tests/l1/symbols_async.rs
+docs_updated_during_phase_5:
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+  - tree-hugger/docs/symbol-reports.md
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/README.md
+  - tree-hugger/lib/README.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
+  - .claude/skills/tree-hugger/query-system.md
 ---
 
 # Plan: precise kinds for previously deferred declarations
@@ -124,13 +160,13 @@ An extractor gap does not qualify.
 - [x] Every negative case in the acceptance table keeps its existing kind.
 - [x] `symbols_kinds.rs` has positive and negative assertions;
   `symbols_kind_coverage.rs` has landed cells moved out of `unsupported`.
-- [ ] `hug functions --kind constructor` selects a Java constructor and
+- [x] `hug functions --kind constructor` selects a Java constructor and
   `--kind method` excludes it. `hug types` includes aliases. `hug classes`
   and `hug symbols` agree on Go and Scala field lists.
-- [ ] A narrow-kind query equals the same kind selected from a complete
+- [x] A narrow-kind query equals the same kind selected from a complete
   index. Light records skip expensive passes. One definitions-query run per
   analysis is preserved.
-- [ ] `EXTRACTOR_REVISION` is bumped. Cache-upgrade tests prove old entries
+- [x] `EXTRACTOR_REVISION` is bumped. Cache-upgrade tests prove old entries
   are recomputed, warm lookups are hits, and a filtered result is never
   stored as full coverage.
 - [ ] `just test` and `just lint` pass in `tree-hugger/`, plus CLI goldens
@@ -453,13 +489,13 @@ concurrently as one wave because they edit different test files. The wave's
 only shared dependency is the `EXTRACTOR_REVISION` bump in the first task,
 so make that bump before starting the wave.
 
-- [ ] **Revision bump.** Bump `EXTRACTOR_REVISION` in
+- [x] **Revision bump.** Bump `EXTRACTOR_REVISION` in
   `lib/src/file/mod.rs` (currently `"10"`). Record schema and report schema
   versions stay unchanged.
 
 ### Wave 4
 
-- [ ] **Selective query tests.** Extend `symbols_query_filters.rs`,
+- [x] **Selective query tests.** Extend `symbols_query_filters.rs`,
   `symbols_query.rs` and `symbols_selection_filters.rs`.
   - For each of Constructor, EnumVariant, TypeAlias, Field and Namespace,
     a narrow-kind query equals the same kind from a complete index, under
@@ -468,7 +504,7 @@ so make that bump before starting the wave.
   - Work counters show skipped analysis stays skipped: no references,
     semantics or diagnostics for a declaration report, and one
     definitions-query run per analysis.
-- [ ] **Cache tests.** Extend `symbols_cache.rs` and the CLI's
+- [x] **Cache tests.** Extend `symbols_cache.rs` and the CLI's
   `cache_upgrade.rs`.
   - An earlier-revision entry is recomputed.
   - A warm lookup of the new records is a real hit, verified with a hit
@@ -477,7 +513,7 @@ so make that bump before starting the wave.
   - Reclassified records and affected descendants get new IDs. Unrelated
     names and IDs stay unchanged, including after a namespace becomes
     captured.
-- [ ] **CLI assertions.** Extend `tree-hugger/cli/tests/symbols/` in
+- [x] **CLI assertions.** Extend `tree-hugger/cli/tests/symbols/` in
   `classes.rs`, `filters.rs` and `reports.rs`.
   - `hug functions --kind constructor` selects a Java constructor and
     `--kind method` excludes it.
@@ -486,12 +522,12 @@ so make that bump before starting the wave.
   - `hug classes` summaries include constructors with methods. Go and Scala
     fields agree between `hug classes` and `hug symbols`.
   - Count, statistics and JSON reports all consume the same records.
-- [ ] **Golden update.** Update `tests/fixtures/golden/symbols.json` and
+- [x] **Golden update.** Update `tests/fixtures/golden/symbols.json` and
   `symbols.jsonl` only for the intended record changes, and review the diff
   line by line. An unexplained change is a bug, not a golden update.
   - Run this task after the three others, so goldens reflect the final
     record set.
-- [ ] **Checkpoint 4.** `just test` and `just lint` are green in
+- [x] **Checkpoint 4.** `just test` and `just lint` are green in
   `tree-hugger/`. Run `just test-l2` only if rendering logic changed, which
   is not expected, and use the test toolkit without focusing windows.
 
@@ -507,33 +543,33 @@ tasks run concurrently, since they edit different files.
 
 ### Wave 5
 
-- [ ] **Kind and visibility doc.** Update `docs/symbol-kinds-and-visibility.md`.
+- [x] **Kind and visibility doc.** Update `docs/symbol-kinds-and-visibility.md`.
   - Move landed cells from deferred to supported.
   - List the remaining limits: owner types, R2 constructor forms, and any
     S1 grammar limits with their snippet, grammar identity and observed
     node.
-- [ ] **Reports and schema docs.** Update `docs/symbol-reports.md` and
+- [x] **Reports and schema docs.** Update `docs/symbol-reports.md` and
   `docs/symbol-schema-design.md`.
   - Variants have no standalone payload (R3), and the field and variant list
     reconciliation rules apply.
   - Kind selectors and class summaries have a worked example.
-- [ ] **Cache doc.** Update `docs/cache-design.md` for the revision bump and
+- [x] **Cache doc.** Update `docs/cache-design.md` for the revision bump and
   the ID-change consequence.
-- [ ] **READMEs.** Update the area, library and CLI READMEs where stated
+- [x] **READMEs.** Update the area, library and CLI READMEs where stated
   support changes.
-- [ ] **Skill.** Update `.claude/skills/tree-hugger/SKILL.md` limitations and
+- [x] **Skill.** Update `.claude/skills/tree-hugger/SKILL.md` limitations and
   extraction rules.
   - `SKILL.md` already has uncommitted edits from the sibling feature, so
     edit it in place and do not overwrite.
   - Keep it under 200 lines and link to the docs.
-- [ ] **Query provenance.** Update provenance and capture inventories for
+- [x] **Query provenance.** Update provenance and capture inventories for
   every changed vendored query, including PHP's inherited `php_only`, per
   R4. Run the `query_compile` and `phase6_neovim_query_reuse` L1 tests.
-- [ ] **Drift pass.** Sweep `///` and `//!` comments and inline comments of
+- [x] **Drift pass.** Sweep `///` and `//!` comments and inline comments of
   every changed symbol. When a comment disagrees with the code, treat the
   code as correct and fix the comment. Report each drift found and how it
   was resolved.
-- [ ] **Checkpoint 5.** Run `just drift` or the `drift` skill over the
+- [x] **Checkpoint 5.** Run `just drift` or the `drift` skill over the
   changed docs and confirm that none link to a feature or fix path.
 
 ---

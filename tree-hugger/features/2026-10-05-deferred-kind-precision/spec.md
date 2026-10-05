@@ -9,33 +9,26 @@ reviewed_on: 2026-10-05
 review_iterations: 0
 human_review: false
 message_to_agent: |-
-  Phase 3 (per-language extraction) is complete; read implementation-log.md
-  "## Phase 3" first. Gates: 985/985 tests (`just test`), lint clean. Every
-  deferred cell is `landed` in symbols_kind_coverage.rs; the one grammar
-  limit (G1, Scala access-modified enum) is a demonstrated GRAMMAR_LIMITS
-  entry there, not an `unsupported` row.
+  Phase 5 (docs and skill) is complete; read implementation-log.md
+  "## Phase 5" first. Gates: 996/996 (`just test`), lint clean. Phase 5
+  changed docs, READMEs, the skill and code comments only, plus one added
+  assertion (`symbols_async`: Swift `init() async` is async).
 
-  For Phase 4:
-  - EXTRACTOR_REVISION is "13" now (the sibling session bumped it); bump
-    from the current value and add the matching StaleRevision in
-    cli/tests/symbols/cache_upgrade.rs.
-  - The CLI goldens were already regenerated and reviewed per wave (log
-    lists every record change: Go field Widget.Size, Python
-    Gadget.__init__, C++ Vector::Vector, Java Counter.Counter). Regenerate
-    after the revision bump (HUG_UPDATE_GOLDEN=1, run twice: two tests share
-    a golden file) and diff against a copy taken first, because the sibling
-    session also edits these files.
-  - F11 now affects Python, Java, C#, C++, Swift and PHP constructors: the
-    semantics facet and parse_pass skip Constructor.
-  - Per-declaration metadata rows live in
-    lib/tests/l1/symbols_deferred_metadata.rs; overloads in its
-    CONSTRUCTOR_OVERLOADS table. Reuse them rather than adding parallel
-    fixtures.
-  - Query provenance notes and the capture inventory were updated with
-    each query edit (R4), so Phase 5's provenance task only needs to
-    verify them.
-  - Doc drift for Phase 5 is listed under "Findings for Phases 4 and 5"
-    (F14: Go interface methods are not listed, contrary to the skill).
+  For Phase 6:
+  - Matrix audit: the current record of grammar limit G1 is
+    docs/symbol-kinds-and-visibility.md "Grammar limits"; R1/R2 limits are
+    in that doc's "Current limitations" and its new "Constructors" table.
+  - F14 is documented as behavior, not fixed: no Go interface lists its
+    method elements (the reader matches `method_spec`; tree-sitter-go 0.25
+    emits `method_elem`), and the spec's wording assumes they are listed.
+    Record this as a departure in the final log; do not repair the reader
+    without the author (it would change every Go interface's output).
+  - F18 (grouped Go fields ordered by record ID) is described in
+    symbol-reports.md "Ordering"; the rule is unchanged.
+  - D15: SKILL.md is 410 lines (409 before), over the plan's 200-line
+    target; a restructure is outside this feature.
+  - `just test` must be run from tree-hugger/ itself; a `cd tree-hugger`
+    from inside it silently runs a different recipe (587 tests).
 $schema:
   status: |-
     enum(

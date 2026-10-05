@@ -71,6 +71,42 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
+  - tree-hugger/lib/tests/l1/symbols_kinds.rs
+  - tree-hugger/lib/tests/l1/symbols_query.rs
+  - tree-hugger/lib/tests/l1/symbols_query_filters.rs
+  - tree-hugger/lib/tests/l1/symbols_selection_filters.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/symbols/classes.rs
+  - tree-hugger/cli/tests/symbols/filters.rs
+  - tree-hugger/cli/tests/symbols/reports.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.jsonl
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+  - tree-hugger/lib/src/file/extract/classify.rs
+  - tree-hugger/lib/src/file/extract/header/keyword.rs
+  - tree-hugger/lib/src/file/extract/qualified_name.rs
+  - tree-hugger/lib/src/file/extract/signatures.rs
+  - tree-hugger/lib/src/file/extract/type_metadata.rs
+  - tree-hugger/lib/src/file/tree_file/definitions.rs
+  - tree-hugger/lib/tests/l1/symbols_async.rs
+docs_updated_during_phase_5:
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+  - tree-hugger/docs/symbol-reports.md
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/README.md
+  - tree-hugger/lib/README.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
+  - .claude/skills/tree-hugger/query-system.md
 ---
 
 # Implementation Log for 2026-10-05-deferred-kind-precision (6 phases)
@@ -913,3 +949,426 @@ Every change is tree-sitter node logic, query text or test tables; nothing
 touches paths, processes or terminals, and the new tests use the existing
 `extract_inline` temp-file helper. No cross-OS run was made; CI covers
 Windows and WSL2 after merge.
+
+## Phase 4
+
+Selective queries, cache, CLI and goldens. Test-only apart from the revision
+bump: no extraction, ordering or rendering code changed.
+
+### Gates (2026-10-05, macOS host)
+
+- `just test` in `tree-hugger/`: 996 run, 996 passed (985 before this phase
+  plus 11 new tests).
+- `just lint`: clean.
+- `just test-l2`: not run. No rendering logic changed.
+
+### What changed, by plan task
+
+- **Revision bump.** `EXTRACTOR_REVISION` went from `"13"` to `"14"`
+  (`lib/src/file/mod.rs`). Revision 13 had been bumped by the sibling
+  session, so the Phase 2 and 3 record changes were shipped under it. Record
+  and report schema versions are unchanged, and no doc names the revision
+  number.
+- **Selective queries.** The corpus is every distinct source of
+  `DEFERRED_KIND_ROWS`, through the new `symbols_kinds::deferred_kind_sources()`,
+  so each language's deferred forms are covered without a parallel fixture.
+  - `symbols_query::deferred_kind_queries_equal_the_same_kind_of_a_full_query`:
+    for each of Constructor, EnumVariant, TypeAlias, Field and Namespace,
+    under three capability sets, the narrow query's serialized records equal
+    that kind's records from a full query, with the same passes and
+    capabilities. Work counters per narrow query: 0 parses, 1 definitions
+    capture, 0 diagnostics. A declarations-only query binds no references,
+    computes no semantics and parses no docs.
+  - `symbols_query_filters::a_wide_result_narrows_to_each_deferred_kind`:
+    a wide result (containment) narrowed to each kind, alone, re-rooted, and
+    with scope and name predicates, equals the uncached query, prefix
+    included. This is the kind-narrowing case.
+  - `symbols_query_filters::captured_namespaces_keep_their_members_names_under_a_scan_root`:
+    PHP names stay namespace-rooted (`App\inside`, never `App\App\inside`),
+    TypeScript names are file-qualified (`src/space.ts#Space.inside`), and
+    `in_container` selects a braced namespace's members. A semicolon
+    namespace contains nothing.
+  - `symbols_selection_filters::selectors_apply_to_deferred_kind_records`:
+    37 cells across 10 languages for visibility, scope, `in`, `name`,
+    `min_params`, `param_type` and `returns` on the deferred records.
+    Constructors never match `returns("*")`, because no return type is
+    invented. Overloads are counted. C++ enumerators keep Unknown access, so
+    `Visibility(Public)` selects none of them.
+- **Cache.**
+  - `symbols_cache::deferred_kind_entries_never_claim_complete_coverage_and_warm_hits_do_no_work`:
+    for each corpus source, a deferred-kinds query with a name filter that
+    keeps nothing stores every deferred-kind record. The entry's
+    `covered_kinds` is the five kinds, never `all`. The unfiltered query is
+    then a hit, and an every-kind query is `WidenedKinds` (1 parse,
+    1 capture, 0 diagnostics), after which the entry covers `all`. A
+    containment query is `WidenedCapabilities`. Then every kind, with and
+    without containment, is a `Hit` with zero work counters (the hit
+    counter, not timing) and equals an uncached query.
+  - `symbols_cache::reclassified_records_get_new_ids_and_unrelated_ids_stay`:
+    a reclassified record (Python `__init__`, C++ `W::W`, PHP
+    `__construct`, Scala `width`, C `RED`) has the ID of its new kind, not
+    the old one. Constructor parameters, a TypeScript namespace member
+    (`Space.inside`), a PHP semicolon-namespace member (`App\inside`) and a
+    Go struct keep the ID of their unchanged kind and name.
+  - `cache_upgrade::entry_from_extractor_revision_thirteen_is_not_served_after_the_repairs`
+    (CLI): the stale entry is built the way revision 13 recorded it. The
+    record `UpgradeProbe.__init__` has kind `Method`, a Method stable key,
+    and a Method-derived ID that every reference to it was rewritten to.
+    The entry is served under the current key (control), not served under
+    the revision-13 key, and the entry run 1 writes is read on run 2.
+- **CLI assertions** (shared corpus `filters::DEFERRED_FILES`, seven files):
+  - `filters::deferred_kinds_join_their_commands_and_kind_selectors`:
+    `functions --kind constructor` lists the Java, PHP, Python and Swift
+    constructors, and `functions Shapes.java --kind method` lists only
+    `tick`. `types` and `types --kind type_alias` list the Go, Scala and
+    Swift aliases. `symbols` lists namespaces, variants and fields under its
+    default scopes. Variants and fields are members and namespaces items,
+    and `functions --kind enum_variant` is empty.
+  - `classes::class_summaries_list_constructors_with_methods`: constructors
+    are members beside methods, in source order (Java `Counter`, PHP
+    `__construct`, Python `__init__`, Swift `init`). Scala fields are not
+    members.
+  - `classes::go_and_scala_field_lists_agree_with_field_records`: Go `Point`
+    and Scala `Box` field lists name the same fields as the standalone Field
+    records. The list keeps the written types (`width: Int`, `height`
+    untyped, `X int`, `Y int`, `label string`), and the terminal shows them.
+  - `reports::reports_consume_the_same_deferred_kind_records`: for seven
+    selections, `--count`, `--stats` `by_kind`, `--json` records and
+    `--jsonl` envelope IDs agree. The table and plain views show every
+    selected name.
+- **Goldens.** Copied first, then regenerated with `HUG_UPDATE_GOLDEN=1`
+  (run twice) and diffed. The only change is `extractor_version`
+  `0.1.0+rev.13` → `0.1.0+rev.14`, on 190 lines of `symbols.json` and
+  `symbols.jsonl`. The record changes were regenerated and reviewed in
+  Phase 3 (D9). A plain rerun of the 14 `golden::` tests passes.
+
+### ID change, verified against the pre-feature extractor
+
+`hug` was built from commit `22b0b55b0` (before Phase 2) in a temporary
+detached worktree, since removed. Its `--json-full` IDs were compared with
+the current build over the seven-file corpus and the whole
+`lib/tests/fixtures/symbols/` tree:
+
+- 1,000 fixture-tree IDs (and 20 corpus IDs) are unchanged.
+- Every ID that disappeared belongs to a record with the same qualified name
+  and a new kind: Method → Constructor (C++, PHP, Python), Variable →
+  EnumVariant (C, C++) and Variable → Field (Scala).
+- Every other new ID is a newly captured record.
+- No record was renamed. Parameters keep their IDs, because their keys hold
+  their own kind and qualified name. The PHP fixture's newly captured
+  `Example\Symbols` namespace changed no other record's name or ID.
+
+`reclassified_records_get_new_ids_and_unrelated_ids_stay` pins this.
+
+### Requirement-to-test mapping
+
+All new tests are L1, in declared binaries: the lib's `l1` and the CLI's
+`symbols` (both run by `just test`). No name or module segment has a tier
+marker. No new test reads a repository file; the sources are inline.
+
+| Requirement (plan Phase 4) | Test |
+|---|---|
+| Narrow kind query equals the same kind of a complete query, matching capabilities (all five kinds) | `symbols_query::deferred_kind_queries_equal_the_same_kind_of_a_full_query` |
+| Kind narrowing of a wide result | `symbols_query_filters::a_wide_result_narrows_to_each_deferred_kind` |
+| Capability widening | `symbols_cache::deferred_kind_entries_never_claim_complete_coverage_and_warm_hits_do_no_work` (`WidenedCapabilities`) |
+| Skipped analysis stays skipped; one definitions-query run | `deferred_kind_queries_equal_the_same_kind_of_a_full_query` (counters and empty facets) |
+| Namespace names, prefixes and containment through queries | `symbols_query_filters::captured_namespaces_keep_their_members_names_under_a_scan_root` |
+| Every selector on the new records | `symbols_selection_filters::selectors_apply_to_deferred_kind_records` |
+| Earlier-revision entry recomputed | `cache_upgrade::entry_from_extractor_revision_thirteen_is_not_served_after_the_repairs` |
+| Warm lookup is a real hit | lib: `Hit` with zero work counters; CLI: run 2 reads a renamed sentinel |
+| A filtered result never stored as complete coverage | `deferred_kind_entries_never_claim_complete_coverage_and_warm_hits_do_no_work` (`covered_kinds`, stored IDs, `WidenedKinds`) |
+| Reclassified records get new IDs; unrelated IDs unchanged, namespace included | `symbols_cache::reclassified_records_get_new_ids_and_unrelated_ids_stay` and the empirical comparison above |
+| `functions --kind constructor` / `--kind method`; `types` aliases; `symbols` namespaces and variants | `filters::deferred_kinds_join_their_commands_and_kind_selectors` |
+| Class summaries include constructors with methods | `classes::class_summaries_list_constructors_with_methods` |
+| Go and Scala fields agree between `classes` and `symbols` | `classes::go_and_scala_field_lists_agree_with_field_records` |
+| Count, stats, JSON and JSON Lines consume the same records | `reports::reports_consume_the_same_deferred_kind_records` |
+| Goldens only for intended changes | `golden::*` (diff reviewed above) |
+
+### Departures from the plan
+
+- **D13: the CLI revision-13 probe checks the kind and stable key, not the
+  ID.** `hug` derives an ID from the file's absolute path when it is
+  analyzed. Only the stable key is rewritten to the root-relative path, so a
+  CLI ID cannot be written into a test. This was already documented in
+  `docs/symbol-reports.md` ("Record IDs are not rewritten") and
+  `docs/cache-design.md` ("IDs follow the identity"), and the pre-feature
+  binary shows the same behavior. The ID claim is asserted in the library
+  test and by the empirical comparison above.
+- **D14: the Go and Scala field agreement compares sets.** The field list
+  is in source order. `hug symbols` lists `X` and `Y` of `X, Y int` by the
+  record-ID tie-breaker, because both records have the whole field
+  declaration as their declaration span. That tie-breaker is documented
+  ("Tie-breakers" in `docs/symbol-reports.md`) and pinned by
+  `order::equal_declaration_spans_fall_through_to_the_id_tie_breaker` (C
+  `typedef int A, B`), so the order changed between checkouts while the set
+  agreed. See F18.
+
+### Findings for Phases 5 and 6
+
+- **F18 (author decision, not a defect of this feature):** grouped Go
+  fields (`X, Y int`), like C `typedef int A, B` and Go `var a, b int`,
+  share one declaration span. `hug symbols` therefore lists them in
+  record-ID order, which differs between checkouts and is not source order.
+  It is deterministic within one checkout, as documented. A tie-breaker on
+  the name span before the ID would give source order everywhere. That is
+  a change to the documented ordering rule, `order.rs` and its test, and
+  was not made here.
+- The module doc of `cli/tests/symbols/cache_upgrade.rs` still lists only
+  revisions 1 to 6 as examples. That predates this phase and was left
+  alone.
+- Phase 5's cache-doc task: the revision is now 14. The ID consequence is
+  the one documented above. A reclassified record changes ID, and nothing
+  is renamed.
+
+### Cross-platform
+
+The new tests compare root-level file names (`Shapes.java`,
+`deferred.py`) and in-file names. They build no path with a separator, so
+there is no Windows path-comparison risk. The stable key in the CLI test is
+built by the library's `stable_symbol_key`, which writes `/`. No cross-OS
+run was made; CI covers Windows and WSL2 after merge.
+
+## Phase 5
+
+Documentation, skill, provenance and drift pass. Progress notes are appended
+per plan task; gates, mapping and departures are at the end.
+
+### Kind and visibility doc (`docs/symbol-kinds-and-visibility.md`)
+
+- Kinds table: every landed cell moved into its language row (TS enum
+  members and `namespace`/`module`; Go aliases and fields; Python, Java,
+  C#, C++, Swift and PHP constructors; Java, C#, C, C++, Scala and PHP
+  variants; Swift and Scala aliases; Scala fields; PHP namespaces). No row
+  says "not yet reported" any more.
+- New sections "Constructors" (per-language table of what is and is not a
+  constructor, R2 forms included) and "Enum variants" (one record per name,
+  no payload, uses are not variants). "Module or Namespace" now lists TS and
+  PHP and shows the name-prefix rule and the PHP semicolon-namespace
+  container rule (F2) with examples.
+- Field lists: Go fields left the "no standalone symbol" list; the pairing
+  rule (one entry, written type kept) has a Scala example; enum variant
+  lists vs standalone variants, `discriminant`, and Swift enums (Type, no
+  list) are stated.
+- Visibility table: TS/Java/C#/C++/Scala/PHP enum-member and constructor
+  defaults. `static`: constructors and variants are never static.
+- Header table: grouped Go `B int`, Go `X, y int`, Swift `init` default, C
+  enumerator, Scala case. Keywords table: `init`, `typealias`, Scala `type`
+  and `case`, TS `namespace`/`module`, PHP `case`/`namespace`; constructors
+  and enum members listed under "no keyword".
+- Current limitations rewritten: R1 owner types (with the container-kind
+  consequence), R2 constructor forms, Go embedded/anonymous-struct fields and
+  interface method elements (F14), Scala abstract types and tuple members,
+  TS `declare namespace` access (F17), standalone Field payload (F16), C++
+  `= default;` header (F15). New "Grammar limits" subsection records G1 with
+  snippet, grammar, observed node and remaining records.
+
+**Drift found and fixed (code is right):**
+
+- The header-omission table still listed grouped Go types (`type ( … )`),
+  which have per-spec headers since Phase 2. Row moved to the header table
+  with the real header (`B int`).
+- "Qualified names" said a TS `namespace` and Java/C# constructors are "not
+  extracted" naming nodes. They are extracted now; the unextracted-function
+  fallback is reached by a C# static constructor or a Java compact record
+  constructor (verified: local `k` is `C.C.k` / `R.R.k`). Doc rewritten.
+- "`async`" said a Swift `init` "is not reported, so it carries no flag".
+  `init() async` is a Constructor with `Modifier::Async` (verified with
+  `hug`). Doc fixed, and `symbols_async::async_forms_outside_the_fixtures`
+  now asserts `init` (its Swift source already declared `init() async {}`
+  but could not assert it while no record existed).
+
+### Reports and schema docs
+
+- `docs/symbol-reports.md`: new "Where each kind is listed" (kind × command
+  table) with a worked example over three files (Java, Go, Scala) showing
+  `functions --kind constructor`, `--kind method`, `types --kind type_alias`,
+  `symbols` and `classes`. Every output block was produced by `hug --plain`
+  from this tree over exactly the snippets shown, and `--count` gives `1`.
+  The section states the list/record agreement, the variant `discriminant`
+  location (R3), that variants never join a field list, and that the
+  terminal `[in …]` suffix is printed only for member kinds (Scala `Key` in
+  `object Registry` prints none, though JSON has the container; existing
+  `render::container_suffix` behavior, not changed). Ordering: a paragraph
+  on declarations sharing one span (Go `X, Y int`, C `typedef int A, B`, Go
+  `var a, b int`) reaching the ID tie-breaker (F18, described, rule
+  unchanged).
+- `docs/symbol-schema-design.md`: which payload each kind carries
+  (EnumVariant and Namespace carry `Unknown`, which is not the Unknown
+  kind) with a JSON example; constructors have no return type text; Swift
+  parameter defaults (D7); `TypeData.fields` reconciliation and the thinner
+  standalone `FieldData` (F16); `constructors` is not filled (verified:
+  never serialized); `EnumData.variants` reconciliation, `discriminant`
+  source (`value` field; Java arguments and Scala case parameters are not
+  values, verified); `aliased_type_text` as written, unresolved; grouped Go
+  alias header; selective queries keep EnumVariant metadata when Enum is
+  selected (`MetadataSelection::for_kinds`).
+
+### Cache doc (`docs/cache-design.md`)
+
+- New paragraph "IDs follow the kind and the qualified name": the stable-key
+  shape, the reclassification consequence with the Python `__init__`
+  example, parameters and namespace members keeping their IDs, and no
+  aliasing of old IDs (matches the Phase 4 empirical comparison).
+- Fingerprint example `0.1.0+rev.9` → `0.1.0+rev.14` (drift: the example
+  named a revision five bumps old). After a bump, old entries are misses
+  and recomputed; nothing is migrated.
+- Tests table: the two Phase 4 `symbols_cache` tests.
+
+### READMEs
+
+- `tree-hugger/README.md`: Go, Swift and Scala rows of the type-distinction
+  table gain `alias`; the TypeAlias bullet names Go, Swift and Scala; the
+  capture table gains `@local.definition.constructor` (added to the
+  inventory in Phase 3, D12) and `@local.definition.field`, both mapped by
+  `symbol_kind_from_capture`.
+- `tree-hugger/lib/README.md`: the `SymbolKind` comments for Constructor,
+  EnumVariant and Namespace no longer list only the pre-feature languages;
+  the mapping table's TypeAlias column gains Go, Swift and Scala; the Go
+  known limitation now states what fields are and are not reported.
+- `tree-hugger/cli/README.md`: unchanged. It makes no per-language support
+  claim; its command and `--kind` descriptions already covered
+  constructors, aliases and variants.
+
+### Skill (`.claude/skills/tree-hugger/`)
+
+- `SKILL.md` (edited in place; the sibling feature's edits are already
+  committed, so nothing was pending in it):
+  - Constructor, Field and grammar-limit rules added to "Member kinds are
+    validated": per-language constructor recognition (query, name only after
+    the method check, C++ syntax only), Scala body `val`/`var` → Field, and
+    `symbols_kind_coverage::GRAMMAR_LIMITS` for demonstrated limits.
+  - Field lists: Go fields left the reader-only list; enum variant lists are
+    completed by `align_variant_metadata`/`reconcile_variants` (Enum owners
+    only) and kept by `MetadataSelection::for_kinds`.
+  - Known limitations: constructor line rewritten for the R2 forms; Go line
+    now names embedded/anonymous-struct fields and the grouped-field order
+    (F18); Scala G1 added with a link to the docs.
+- `api-reference.md`: Namespace comment gains TS/PHP; `VariantInfo` gains
+  its `discriminant` field (drift: the struct has had it since Phase 2).
+- `query-system.md`: the classifier list names the new Constructor and Field
+  rules.
+
+**Drift found and fixed in the skill (code is right):**
+
+- "Go interface method elements are the one exception left (Go fields are
+  deferred)": no Go interface lists anything (F14), and Go fields landed.
+- "the current revision is 13", with stale revisions 6–12: revision 13 has a
+  `StaleRevision` and the current one is 14 (Phase 4).
+- `align_field_metadata` was placed in `tree_file.rs`; it is in
+  `tree_file/definitions.rs`.
+- "Enum owners are not completed": their variant lists are (Phase 2).
+- The qualified-name fallback named TS `internal_module` and Java/C#
+  constructors (see the kinds-doc drift above).
+
+`SKILL.md` was 409 lines before this phase, over the plan's 200-line target,
+and is 410 now. Bringing it under 200 means moving whole sections into
+supporting files, a restructuring outside this feature; recorded as
+departure D15.
+
+### Query provenance
+
+No query changed in this phase. The seven vendored queries changed by the
+feature (C, C#, Go, Java, `php_only`, Scala, Swift) each have a
+`vendored_locals_changes` note added with the edit in Phase 3 (D12); each
+note was re-read against `git diff 22b0b55b0 -- lib/queries/vendor` and
+matches. The TypeScript change is in the `queries/typescript/locals.scm`
+overlay, which carries no vendored provenance (R4). `query_compile`,
+`phase6_neovim_query_reuse` and the `provenance` unit tests: 66 run, 66
+passed.
+
+### Drift pass (code comments)
+
+Every symbol changed by Phases 2–4 in `lib/src` was swept (a read-only
+review of `git diff 22b0b55b0` per file, each finding then checked against
+the code here). The code was treated as correct in every case. All fixes are
+comment-only; `git diff` of these files in this phase changes no code line.
+
+| Location | Drift | Resolution |
+|---|---|---|
+| `extract/qualified_name.rs` `qualified_names`, `unextracted_name` | named TS `namespace` and Java/C# constructors as unextracted naming nodes | now names a C# static constructor and a Java compact record constructor (verified `C.C.k`, `R.R.k`); TS `internal_module` only when its capture is missing |
+| `extract/type_metadata.rs` `extract_go_interface_methods` | "Extracts method signatures from Go interface_type" | states it matches `method_spec`, which tree-sitter-go 0.25 does not produce, so it returns nothing (F14); the reader itself is unchanged |
+| `extract/classify.rs` `is_constructor_declaration` | "the one place a captured function-like declaration becomes `Constructor`" | lists its four languages and says Java, C# and Swift constructors arrive by query capture |
+| `extract/signatures.rs` `extract_swift_parameters` | "from a function_declaration" | also `init_declaration` and `protocol_function_declaration` (D7) |
+| `tree_file/definitions.rs` `MetadataSelection::for_kinds` | doc comments only for variants, no doc copy for fields | field list copies access, `static` and doc; variant list is completed from the selected enum's variants |
+| `extract/header/keyword.rs` `//!` | wrapper-keyword list lacked Scala enum cases | added |
+
+Files the sweep found clean: `declaration.rs`, `header/mod.rs`,
+`visibility/{csharp,ecma,java}.rs`, `tree_file.rs`, `shared/schema_v2/mod.rs`,
+`shared/symbol.rs`, `file/mod.rs`. No HOW-narration or format-string
+comment was added by the feature.
+
+### Checkpoint 5
+
+- No `just drift` recipe exists. The repo `drift` command is a package-wide
+  README alignment whose mechanical step is `sniff docs --package
+  tree-hugger`; it lists only `lib/README.md`, which was updated above.
+- Instead every changed doc, README and skill file was checked
+  mechanically: each relative link resolves, each `#anchor` names a heading
+  of its target, and no file links to or names a feature or fix
+  (`features/`, `fixes/`, `YYYY-MM-DD-name`). 9 files, 0 problems.
+- Every worked example in `symbol-reports.md` was produced by `hug` from
+  this tree over exactly the snippets shown.
+
+### Gates (2026-10-05, macOS host)
+
+- `just test` in `tree-hugger/`: **996 run, 996 passed**, 0 skipped, run
+  after the last edit. (Two intermediate invocations reported 587 tests:
+  the shell was already inside `tree-hugger/`, so their `cd tree-hugger`
+  did not reach this package's recipe. They are disregarded.)
+- `just lint` in `tree-hugger/`: clippy clean for `tree-hugger` and
+  `tree-hugger-cli`, after the last edit.
+- `query_compile`, `phase6_neovim_query_reuse`, `provenance`: 66/66.
+- `just test-l2`: not run; no rendering code changed.
+- No cross-OS run: the phase changes docs, comments and one assertion in an
+  existing L1 test with an inline source and no path handling.
+
+### Requirement-to-test mapping
+
+Phase 5 is documentation. Its one behavior-bearing change is a documented
+claim that had no assertion:
+
+| Claim (doc) | Test |
+|---|---|
+| A Swift `init() async` carries `async` (`symbol-kinds-and-visibility.md` "`async`") | `symbols_async::async_forms_outside_the_fixtures`: the Swift case's async names gain `init` (its source already declared `init() async {}`) |
+
+Every other new doc statement restates behavior pinned in Phases 2–4:
+kinds and containers (`symbols_kinds::DEFERRED_KIND_ROWS`, negatives),
+metadata (`symbols_deferred_metadata`), field/variant lists
+(`symbols_field_lists`, `definitions::tests::variant_lists_*`), selectors and
+reports (`filters`, `classes`, `reports` CLI tests), IDs and cache
+(`symbols_cache`), and G1 (`symbols_kind_coverage::grammar_limits_are_demonstrated`).
+Facts used in the docs that no test pins were checked with `hug` and are
+listed as such: the `[in …]` suffix only on member kinds (existing
+`render::container_suffix`), `TypeData.constructors` never filled, a Java
+constant's arguments and a Scala case's parameters not being a
+`discriminant`, and the C++ `= default;` header keeping its `;`.
+
+The new test assertion is L1 in the declared `l1` binary
+(`lib/tests/l1/main.rs` already declares `symbols_async`); no name segment
+carries a tier marker, and it reads no repository file.
+
+### Departures from the plan
+
+- **D15: `SKILL.md` stays over 200 lines.** It was 409 lines before this
+  phase and is 410 now. The plan asks to keep it under 200; doing so means
+  moving whole sections into supporting files, a restructuring unrelated to
+  this feature. Edits were made in place and net one line.
+- **D16: the CLI README is unchanged.** It makes no per-language support
+  claim, so nothing in it changed meaning.
+- **D17: one test assertion added in a docs phase** (`symbols_async`, above),
+  so the doc's `async init` claim is pinned rather than only observed.
+
+### Findings for Phase 6
+
+- **F14 is now documented as behavior, not fixed.** The spec says Go
+  interface method elements "remain the existing documented field-list
+  exception"; in fact the reader has listed nothing since tree-sitter-go
+  0.25 (it matches `method_spec`, the grammar emits `method_elem`), and the
+  method `M` itself is not a record either. Docs, skill and the reader's own
+  comment now say so. Repairing the reader would add list entries to every
+  Go interface (a golden change) and is an author decision outside this
+  feature's required scope.
+- **F18** (grouped-field order by record ID) is described in
+  `symbol-reports.md` "Ordering"; the rule is unchanged.
+- `docs/symbol-kinds-and-visibility.md` "Grammar limits" is the current
+  record of G1 that the Phase 6 matrix audit should cite.
