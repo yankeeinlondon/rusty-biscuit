@@ -7,6 +7,48 @@ reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-05
 review_iterations: 0
+human_review: false
+message_to_agent: |-
+  Phase 1 (rulings, grammar spike, baseline) is complete. Read
+  implementation-log.md "## Phase 1" before starting Phase 2. It holds the
+  S1 node table and findings F1-F10.
+
+  Rulings: R1-R7 use the plan's defaults, which match the spec's
+  recommendations, so required scope is unchanged.
+
+  Baseline: green at 949/949 tests, lint clean, on the committed tree.
+  During Phase 1 another session made uncommitted edits to tree-hugger
+  lib/cli source, goldens, docs and SKILL.md for the sibling feature
+  2026-10-03-symbol-filters-and-reports. With those edits the tree is still
+  green (954/954, lint clean). They also set EXTRACTOR_REVISION to "11", so
+  Phase 4 must bump from whatever value is current, not from "10".
+  SKILL.md and the docs carry the sibling's uncommitted edits: edit them in
+  place and never overwrite.
+
+  Grammar limit: exactly one, G1. tree-sitter-scala 0.24.0 cannot parse an
+  access modifier on a Scala 3 enum (`private enum Hidden { case H }`
+  becomes ERROR + enum_definition, and the enum is recorded Public). Keep
+  that form `unsupported` with this reason; land default-access Scala enum
+  cases normally. Every other form is a capture or classifier gap.
+
+  Hazards Phase 2 must handle:
+  - F1: TypeScript `module Mod {}` is a node of kind `module`, which
+    `is_scope_boundary` treats as Python's root. Make that rule
+    language- or root-aware.
+  - F3: Swift `init_declaration`'s name is the anonymous token "init", and
+    `typealias_declaration` uses field `name` for both the alias and its
+    target.
+  - F4: C# `static C() {}` shares `constructor_declaration`; it must stay
+    absent under R2.
+  - F6: Go `type_alias`, PHP `enum_case`, Scala
+    `simple_enum_case`/`full_enum_case`, and TypeScript
+    `enum_assignment`/`internal_module`/`module` are not recognized by
+    `resolve_declaration_node`. A bare TypeScript enum member has no
+    wrapper node.
+  - F2: PHP semicolon-namespace members have no container today, while
+    braced-namespace members do. Container is not an ID input.
+  - F5: `EnumVariantData.discriminant` is None even for `B = 2`. Decide
+    whether to fill it, which changes goldens, and log the choice.
 $schema:
   status: |-
     enum(

@@ -7,6 +7,13 @@ created: 2026-10-05
 phase: 1
 agent: claude/sonnet
 yolo: true
+packages:
+  - tree-hugger
+  - tree-hugger-cli
+source_files_during_phase_1: []
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
 ---
 
 # Plan: precise kinds for previously deferred declarations
@@ -90,23 +97,23 @@ These need a ruling before implementation. Each carries the plan's default so
 work is not blocked. A different ruling changes scope, so the author must
 confirm it.
 
-- [ ] **R1: Go and Swift owner reclassification.** The default is to follow
+- [x] **R1: Go and Swift owner reclassification.** The default is to follow
   the spec's recommendation: keep Go struct/interface and Swift
   class/enum/struct as `Type`, out of scope. Consequence: Go `Field`
   containers and Swift `Constructor` owners report kind `Type`. Choosing the
   other option requires a new acceptance table before work starts, so it is
   not implemented here.
-- [ ] **R2: Constructor breadth.** The default is the spec's recommendation:
+- [x] **R2: Constructor breadth.** The default is the spec's recommendation:
   explicit instance constructors only. Java compact record constructors, C#
   static, primary and destructor forms, and C++ out-of-class definitions
   keep current behavior and are listed as limits in the docs.
-- [ ] **R3: Where variant data lives.** `SymbolKindData` has no standalone
+- [x] **R3: Where variant data lives.** `SymbolKindData` has no standalone
   variant payload. The default is that a standalone `EnumVariant` record
   carries no kind-specific payload, with discriminant/initializer text taken
   from the declaration text and the owning enum's existing variant list. The
   variant list is reconciled with standalone records without duplicates.
   Confirm that the existing Unknown payload is the intended representation.
-- [ ] **R4: Which query file gets each capture.** Vendored `locals.scm`
+- [x] **R4: Which query file gets each capture.** Vendored `locals.scm`
   files are provenance-tracked. The default is to add new captures to the
   overlay `lib/queries/{lang}/locals.scm` where one exists, and otherwise to
   the vendored file with the provenance and capture inventory updated in the
@@ -114,17 +121,17 @@ confirm it.
   edited, and the inventory updated, wherever the PHP definitions capture
   actually originates. Confirm this against how `provenance.rs` resolves
   query layers.
-- [ ] **R5: Python constructor owner rule.** A `def __init__` counts as a
+- [x] **R5: Python constructor owner rule.** A `def __init__` counts as a
   constructor only when it is a direct class member (`is_direct_member`,
   decorated included). A class nested in a function still yields a
   constructor, since the owner is a class; `__init__` directly inside a
   function body stays Function. The same rule applies to PHP `__construct`,
   case-insensitively, with the source spelling preserved.
-- [ ] **R6: Enum-member access and static.** Java, C# and PHP enum members
+- [x] **R6: Enum-member access and static.** Java, C# and PHP enum members
   are Public. C/C++ enumerators keep Unknown access. TypeScript and Scala
   members inherit the owning enum's recorded access. No enum member gets a
   static flag. Confirm that `static` stays absent rather than false.
-- [ ] **R7: Wider measurement.** The spec requires no performance spike. Any
+- [x] **R7: Wider measurement.** The spec requires no performance spike. Any
   wider measurement, such as cost of new captures on large files, is for the
   author to decide and is not scheduled here. Any proposed new full-file
   scan or extra parse stops for review.
@@ -134,7 +141,7 @@ confirm it.
 A spike runs once, before the work it informs, and is not repeated later. The
 spec's own step 1 requires it.
 
-- [ ] **S1: Grammar node inventory.** For each required form and each
+- [x] **S1: Grammar node inventory.** For each required form and each
   negative case in the acceptance table, parse a minimal snippet with the
   pinned grammar and record the declaration node, name node, owner node,
   keyword nodes, and any parse error.
@@ -151,13 +158,13 @@ spec's own step 1 requires it.
     braced global `namespace {}`; Java enum constants with class bodies.
   - This is one host and a quick sample. Parse results are
     platform-independent, so no per-OS repetition.
-- [ ] **S2: Verdict gate.** Every form is classified as capture gap (proceed)
+- [x] **S2: Verdict gate.** Every form is classified as capture gap (proceed)
   or grammar limit (record and exclude in the owning Phase 3 task). A grammar
   limit never reaches Phase 3 as work, only as a documented test case.
 
 ### Tasks
 
-- [ ] **Baseline run.** Run `just test` and `just lint` in `tree-hugger/` and
+- [x] **Baseline run.** Run `just test` and `just lint` in `tree-hugger/` and
   record the result.
   - The working tree already holds uncommitted changes from the sibling
     feature `2026-10-03-symbol-filters-and-reports`, including edits under
@@ -165,16 +172,16 @@ spec's own step 1 requires it.
     `symbols_owner_identity.rs`. Record that exact dirty state as the
     baseline, and do not attribute its failures to this feature.
   - If the baseline is red, stop and report before continuing.
-- [ ] **Read before changing.** Load the `tree-hugger`, `rust-testing` and
+- [x] **Read before changing.** Load the `tree-hugger`, `rust-testing` and
   `os` skills. Read `classify.rs` (`refine_symbol_kind`, `member_slot`,
   `is_direct_member`, `find_symbol_container`),
   `declaration.rs::resolve_declaration_node`, `extract_type_alias_target`,
   `SymbolQuery` in `lib/src/file/query.rs`, and `cli/src/declarations.rs`
   and `cli/src/classes.rs`.
-- [ ] **Locate the capture path.** Trace how a definitions capture name
+- [x] **Locate the capture path.** Trace how a definitions capture name
   becomes a `SymbolKind` (`symbol_kind_from_capture`). Record the capture
   names the new kinds will use, and confirm every one already maps.
-- [ ] **Checkpoint 1.** Rulings R1–R7 are accepted or amended, S1's table is in
+- [x] **Checkpoint 1.** Rulings R1–R7 are accepted or amended, S1's table is in
   the implementation log, and the baseline is green.
 
 ---
