@@ -243,14 +243,16 @@ The report on this repository (debug build, 10 worktrees, no image terminal) loo
 ▌ ├─ save caches and records  [0 git]          13.3ms    3%
 ▌ ├─ table render                               1.4ms   <1%
 ▌ └─ …
-▌ Refresh worker (diagnostic, measured in the worker): complete
-▌ └─ launch 0 (complete)                      436.4ms     —
-▌    ├─ worker setup                          286.6ms     —
-▌    └─ PR refresh ‖ head refresh             149.8ms     —
-▌       ├─ PR refresh                         149.7ms     —
-▌       │  └─ PR request                       89.4ms     —
-▌       └─ default-branch refresh             142.3ms     —
-▌          └─ head check                       60.6ms     —
+▌ Refresh worker (diagnostic, measured in the worker): complete      —    —
+▌ └─ launch 0 (complete)                                         436.4ms  —
+▌    ├─ worker setup                                             286.6ms  —
+▌    └─ PR refresh ‖ head refresh                                149.8ms  —
+▌       ├─ PR refresh                                            149.7ms  —
+▌       │  ├─ PR request                                          89.4ms  —
+▌       │  └─ unattributed                                        60.3ms  —
+▌       └─ default-branch refresh                                142.3ms  —
+▌          ├─ head check                                          60.6ms  —
+▌          └─ unattributed                                        81.7ms  —
 ```
 
 #### Two kinds of children
@@ -272,7 +274,7 @@ At most one remainder is nonzero. When the children cover less than the parent, 
 
 #### Worker reports
 
-The refresh worker is a separate `wt` process, so its time is not part of the listing's total. With `--perf`, the listing asks the worker to time itself (`wt internal-refresh … --timings`); the worker writes its report into the receipt it already writes, and the listing copies it before deleting the receipt. Reports appear beneath the foreground tree as a labeled diagnostic section, one entry per launch the listing owns. A forced retry is a second entry and is never added to the first. Waiting for a report never extends the wait: a listing that ends before the worker writes its receipt (an early finish or a timeout) shows that launch as `missing`.
+The refresh worker is a separate `wt` process, so its time is not part of the listing's total. With `--perf`, the listing asks the worker to time itself (`wt internal-refresh … --timings`); the worker writes its report into the receipt it already writes, and the listing copies it before deleting the receipt. Reports appear beneath the foreground tree as a labeled diagnostic section, one entry per launch the listing owns. Nothing in the section, its heading included, shows a percentage (`—` instead), because none of it is a share of the listing's total. Otherwise it follows the same rules as the foreground: a launch and each of its parents with sequential children reconcile through an `unattributed` row (hidden under 1 ms) or an always-shown `over-attributed` row, and concurrent children such as the two halves get neither. A forced retry is a second entry and is never added to the first. Waiting for a report never extends the wait: a listing that ends before the worker writes its receipt (an early finish or a timeout) shows that launch as `missing`.
 
 | Status | Meaning |
 | --- | --- |
@@ -311,7 +313,11 @@ WT_PERF_JSON {"format_version":1,"scope":"command","total_us":359609,"spans":[�
 | `worker_reports` | document | One entry per owned launch: `launch_index` (0-based), `attempt_id`, `status`, and an optional `report` holding the worker's own document |
 | `worker_report_status` | document | The summary status; absent when no worker was followed |
 
-`worktree::timing::Timings::from_json` is the reader, and it rejects: a version other than 1, an unknown stage id, two ordinary siblings with the same id, remainders that do not reconcile, remainders on a concurrent parent, a `null` in an optional field, and trailing content. Unknown fields are ignored. The worker's report travels in the receipt's optional `durations` member, which leaves the receipt at version 1 (see [the listing docs](./cli/list.md#how-the-wait-knows-both-halves-are-done)).
+Every number fits an unsigned 64-bit integer, and the reconciliation holds exactly in that range, never against a clamped value. Two sequential children of `u64::MAX` µs under a 10 µs parent leave an excess no field can hold, so no pair of remainders makes that document valid; one child of `u64::MAX` µs under a 0 µs parent is valid, with `over_attributed_us` of `u64::MAX`. Concurrent children are never summed, so any durations under a concurrent parent are valid.
+
+The writer cannot produce such a document either: `Timings::new` and `WorkerTimings::new` return `TimingsError::Unrepresentable`, naming the span's path, when a duration or an exact remainder exceeds `u64::MAX` µs, so every `Timings` value serializes exactly. `wt list --perf` reports that error instead of a report. A worker that cannot represent its own timings writes its receipt without them, so its outcome still counts and the listing reports that launch's timings as `missing`.
+
+`worktree::timing::Timings::from_json` is the reader, and it rejects: a version other than 1, an unknown stage id, two ordinary siblings with the same id, remainders that do not reconcile (including an excess no field can hold), remainders on a concurrent parent, a `null` in an optional field, and trailing content. Unknown fields are ignored. The worker's report travels in the receipt's optional `durations` member, which leaves the receipt at version 1 (see [the listing docs](./cli/list.md#how-the-wait-knows-both-halves-are-done)).
 
 #### Reading a stage in a test
 
@@ -341,6 +347,7 @@ Never parse the human report. Never add a concurrent region's children together 
 - **A performance test** has a `perf_` name, runs serially under `just test-perf`, and may bound a stage's duration or a whole command's wall-clock time.
 - **A functional test** never uses timing as evidence, and passes without `--perf`. A test that a listing stopped at its budget proves it with the wait's scripted clock (`list::wait::tests`) and with what the listing printed, not with a duration. A test that work ran proves it with `Listing` facts (`Listing::regathered`, for example) or the `count-git` recorder, not with stage names.
 - Tests of the report itself (`perf_flag.rs`, `worktree::timing` unit tests) may read `Timings`; they check its shape and reconciliation, not its speed.
+- The human report's layout is tested in two layers. Unit tests in `cli/src/perf/tests.rs` render synthetic trees at a fixed width and check exact rows: shares, remainders under a millisecond, over-attribution, and worker sections of every status. `cli/tests/level2_list_perf.rs` runs the real `wt list --perf` in a tmux pane at 80, 100, and 120 columns against a local `origin`. It checks the structure only, because durations vary: tree connectors, `[n git]` suffixes, percentages on sequential rows, `—` on concurrent and worker rows (the worker heading included), aligned value and share columns, and no wrapped rows.
 
 #### Rows in older samples
 

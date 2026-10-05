@@ -194,6 +194,13 @@ Measurements: `worktree/docs/performance-testing.md`.
   `cli/tests/perf_flag.rs`. Never put a `#[cfg(test)]` module in
   `perf_support`: it compiles into every test binary that declares the
   module, and its `perf_` path segment strands it in `just test-perf`.
+- The human report's layout is proven at L2 by `cli/tests/level2_list_perf.rs`
+  (`remote_fixture::Fixture`, local bare `origin`, so the worker's head check
+  is real and offline). It asserts structure only: connectors, `[n git]`,
+  `%` on sequential rows, `—` on concurrent and worker rows, the worker heading
+  without `%`, per-section aligned columns, and no wrapping at 80 and 120 (100 with
+  `TERM_PROGRAM=ghostty` for `graph history`). Exact rows, sub-ms remainders,
+  and over-attribution stay L1 (`perf::tests`, `human_report_at`).
 
 - `perf_pr_request::perf_list_meets_sla_with_a_stale_answer_and_a_failing_refresh`
   is the stale timing gate: reseeds a stale store per sample and asserts every

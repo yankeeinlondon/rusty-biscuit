@@ -83,8 +83,11 @@ flowchart TD
   document ending after the listing's write; `cli/src/perf.rs` only renders
   (`human_report`, `json_record`). Stage ids are the contract; labels are
   display only and no test reads them. biscuit-terminal's `MetricsTree`
-  always prints `100%` on its root row, whatever `MetricShare` it is given, so
-  the worker section's heading shows `100%` although its rows show none.
+  prints `100%` on its root row whatever `MetricShare` it is given unless
+  built with `with_given_root_share()`; the worker section uses it so its
+  heading shows `—`. Foreground and worker rows share one projection
+  (`span_node`/`remainder_row`) that differs only in `Shares::Shown`/`Hidden`,
+  so worker parents reconcile with share-less remainder rows.
 - Pipeline shape: `read_worktrees`, `origin_lookup`, `prepare_local`, then a
   concurrent region, `remote_and_local` **only when a wait ran** (else
   `local_reads`), holding `refresh_worker` (`worker_launch`, `worker_wait`;
@@ -107,7 +110,10 @@ flowchart TD
   `Timings::from_json` rejects repeated keys, unknown stage ids, and any
   remainder that does not reconcile, so build documents through the
   builder, never by hand. A round trip drops sub-microsecond precision:
-  compare `to_json()` output, not the decoded `Timings`.
+  compare `to_json()` output, not the decoded `Timings`. The equation is
+  checked exactly in `u128`, never against a value clamped to `u64::MAX`, so
+  `Timings::new`/`WorkerTimings::new` are fallible (`Unrepresentable`) and a
+  test of an extreme value must state an excess that fits in `u64`.
 
 ## Comparison cache (`worktree::cache`)
 
