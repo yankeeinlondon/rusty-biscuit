@@ -114,7 +114,7 @@ Stores per-file `SymbolRecord` values with pass completeness metadata.
 ```rust
 pub struct SymbolSnapshot {
     pub key: FileCacheKey,
-    pub completed_passes: Vec<AnalysisPass>, // Parse, Bind, Semantic, Docs
+    pub completed_passes: Vec<AnalysisPass>, // Parse, Bind, Semantic, Docs (never Diagnostics)
     pub symbols: Vec<SymbolRecord>,
     pub imports: Vec<ImportRecord>,
     pub exports: Vec<ExportRecord>,
@@ -123,6 +123,9 @@ pub struct SymbolSnapshot {
 ```
 
 `completed_passes` enables incremental upgrading of cache entries instead of full recompute.
+It lists only passes whose output the entry holds: the CLI recomputes
+diagnostics on every use, so an entry stores none and omits the `Diagnostics`
+pass, which is added back to the reported index with the fresh diagnostics.
 
 #### Which entries are served
 

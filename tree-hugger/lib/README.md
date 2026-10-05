@@ -8,19 +8,26 @@ and packages.
 The core API for file-level symbol extraction and diagnostics.
 
 ```rust
-use tree_hugger_lib::TreeFile;
+use tree_hugger::{Capability, SourceFile, SymbolKindV2, SymbolQuery, TreeFile};
 
 let file = TreeFile::new("src/lib.rs")?;
 
 // Symbol extraction
 let symbols = file.symbols()?;           // All symbols combined
 let v2_symbols = file.symbol_records()?; // Symbol Schema v2 parse records
-let v2_index = file.symbol_index_v2()?;  // Parse -> bind -> semantic -> docs pipeline output
+let v2_index = file.symbol_index_v2()?;  // Complete index: every pass, diagnostics included
 let imports = file.imported_symbols()?;  // Import statements
 let exports = file.exported_symbols()?;  // Exported symbols
 let locals = file.local_symbols()?;      // Local definitions
 let refs = file.referenced_symbols()?;   // All identifier usages
 let reexports = file.reexported_symbols()?; // Imports that are re-exported
+
+// Selective analysis: only the kinds and work a caller needs
+let query = SymbolQuery::new()
+    .kinds([SymbolKindV2::Function, SymbolKindV2::Method])
+    .capabilities([Capability::Containment]);
+let result = SourceFile::read("src/lib.rs")?.query(&query)?; // or file.query(&query)
+// result.index.symbols holds only functions and methods; no diagnostics ran
 
 // Diagnostics
 let lint = file.lint_diagnostics();      // Pattern-based lint rules
@@ -32,7 +39,7 @@ let dead = file.dead_code();             // Unreachable code detection
 ## TreePackage
 
 ```rust
-use tree_hugger_lib::TreePackage;
+use tree_hugger::TreePackage;
 
 let package = TreePackage::new(".")?;
 let modules = package.modules();
@@ -203,7 +210,9 @@ The library provides `FileSummary` and `PackageSummary` structs for JSON output.
 used by the CLI but are also available to library consumers.
 
 Schema output (version 4.0) is exposed via `SymbolRecord` and `FileSymbolIndex`, including `schema_version`
-and `completed_passes` metadata for staged analysis.
+and `completed_passes` metadata for staged analysis. A `SymbolQuery` result adds
+`completed_capabilities`. Pass dependencies, capabilities and kind selection
+are described in [Symbol Schema Design](../docs/symbol-schema-design.md#extraction-pipeline-contract).
 
 ## Testing
 
@@ -256,7 +265,7 @@ Tree Hugger provides semantic and pattern-based lint diagnostics for all 16 supp
 ### Getting Diagnostics
 
 ```rust
-use tree_hugger_lib::TreeFile;
+use tree_hugger::TreeFile;
 
 let file = TreeFile::new("src/main.rs")?;
 let diagnostics = file.lint_diagnostics();
@@ -325,7 +334,7 @@ Supported comment styles: `//`, `#`, `--`, `;`
 Semantic rules avoid false positives by recognizing language builtins:
 
 ```rust
-use tree_hugger_lib::{is_builtin, ProgrammingLanguage};
+use tree_hugger::{is_builtin, ProgrammingLanguage};
 
 assert!(is_builtin(ProgrammingLanguage::Rust, "Option"));
 assert!(is_builtin(ProgrammingLanguage::Python, "print"));
@@ -337,7 +346,7 @@ assert!(is_builtin(ProgrammingLanguage::JavaScript, "console"));
 The library maintains builtin symbol databases for all 16 languages to avoid false positive "undefined symbol" diagnostics:
 
 ```rust
-use tree_hugger_lib::{is_builtin, ProgrammingLanguage};
+use tree_hugger::{is_builtin, ProgrammingLanguage};
 
 assert!(is_builtin(ProgrammingLanguage::Rust, "Option"));
 assert!(is_builtin(ProgrammingLanguage::Python, "print"));
@@ -350,7 +359,7 @@ assert!(is_builtin(ProgrammingLanguage::Go, "make"));
 Control flow analysis detects unreachable code after terminal statements:
 
 ```rust
-use tree_hugger_lib::{is_terminal_statement, find_dead_code_after, ProgrammingLanguage};
+use tree_hugger::{is_terminal_statement, find_dead_code_after, ProgrammingLanguage};
 
 // Detects terminal statements per language
 // Rust: panic!, unreachable!, todo!, unimplemented!, process::exit(), process::abort()

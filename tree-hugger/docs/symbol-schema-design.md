@@ -531,6 +531,18 @@ pub struct SemanticFacet {
 
 `Option<TriState>` intentionally distinguishes "not analyzed" from "analyzed unknown".
 
+`is_recursive` is `Some(Unknown)` on every function and method whenever the
+semantic pass runs, and `None` when it did not run. References are bound by
+name only (see [Extraction Pipeline Contract](#extraction-pipeline-contract)),
+which can neither prove that a same-named call targets the enclosing function
+nor that none does, so a `Yes` or `No` would be a guess:
+
+```rust
+fn countdown(n: u32) -> u32 { if n == 0 { 0 } else { countdown(n - 1) } }
+// semantic pass ran:     "semantics": { "is_recursive": "Unknown", ... }
+// semantic pass not run: "semantics": {}
+```
+
 ### Provenance Facet
 
 ```rust
@@ -705,14 +717,120 @@ pub struct FileSymbolIndex {
 
 ## Extraction Pipeline Contract
 
-The schema is designed for four passes:
+A file is analyzed in up to five passes (`AnalysisPass`):
 
-1. Parse pass (Tree-sitter): identity, source, modifiers, declared signatures, raw comments.
-2. Binding pass: symbol linking, parent/container, references, import/export edges.
-3. Semantic pass: inferred flags (purity, mutation, throws/panics, recursion).
-4. Docs pass: parse doc comments into structured `ParsedDocs`.
+1. **Parse** (Tree-sitter): identity, source, modifiers, declared signatures,
+   raw comments, and the file's import and export records.
+2. **Bind**: parent/container and members, references, dependencies,
+   referenced-by edges, export targets.
+3. **Semantic**: inferred flags (panics, recursion; see
+   [Semantic Facet](#semantic-facet)).
+4. **Docs**: doc comments parsed into structured `ParsedDocs`.
+5. **Diagnostics**: lint (pattern and semantic rules) and syntax diagnostics
+   in `FileSymbolIndex::diagnostics`.
 
-Each pass updates `provenance.parse_pass`.
+### What runs, and in which order
+
+A caller asks for the work it needs and the planner adds the prerequisites,
+removes duplicates and runs each pass once, in this order:
+
+```mermaid
+flowchart LR
+    Parse --> Bind --> Semantic
+    Parse --> Docs
+    Parse --> Diagnostics
+```
+
+| Request | Passes that run (`completed_passes`) |
+|---|---|
+| `symbol_index_with_passes(&[])` | Parse |
+| `&[Docs, Semantic, Semantic]` | Parse, Bind, Semantic, Docs |
+| `&[Diagnostics]` | Parse, Diagnostics |
+| `TreeFile::symbol_index_v2()` | Parse, Bind, Semantic, Docs, Diagnostics |
+
+`completed_passes` lists only work that ran. An index without `Diagnostics`
+has an empty `diagnostics` list because they were not computed, not because
+the file is clean. `symbol_index_v2()` is the complete-index convenience API
+and always includes diagnostics; `symbol_index_with_passes` includes them only
+when `AnalysisPass::Diagnostics` is requested.
+
+Each pass that changes a record updates its `provenance.parse_pass`
+(diagnostics change no record).
+
+### Selective queries
+
+`SymbolQuery` asks for kinds and capabilities rather than passes, through the
+same planner. `SourceFile::read(path)?.query(&query)` and
+`TreeFile::query(&query)` accept the same query:
+
+```rust
+let query = SymbolQuery::new()
+    .kinds([SymbolKindV2::Function, SymbolKindV2::Method])
+    .capabilities([Capability::Containment]);
+let result = SourceFile::read("src/lib.rs")?.query(&query)?;
+// result.index.symbols: the functions and methods only
+// result.index.completed_passes: [Parse]
+// result.completed_capabilities: [Declarations, Containment]
+```
+
+| Capability | Requires | Produces |
+|---|---|---|
+| `Declarations` (always) | — | the parse pass |
+| `Containment` | Declarations | `relations.parent`, `container`, `members` only; no reference query |
+| `References` | Containment | the bind pass |
+| `Semantics` | References | the semantic pass |
+| `StructuredDocs` | Declarations | the docs pass |
+| `Diagnostics` | Declarations | the diagnostics pass |
+
+`completed_capabilities` records work narrower than a pass, such as
+containment without references, so an empty facet can be told apart from one
+that was never computed.
+
+Kind selection skips work but never data a selected record depends on.
+Declarations of unselected kinds are still extracted with their identity,
+spans and container, because they can own or shadow a selected symbol; only
+their metadata (visibility, `static` flags, signatures, type metadata, doc
+comments, header texts) is skipped, and they are dropped from the result after
+binding. A selected method therefore keeps its unselected class as
+`relations.parent`, and its references resolve exactly as in a full query.
+When a type kind is selected, its Field, Property and Constant members keep
+their metadata too, because the type's field list copies their access and
+`static` flags. A narrow query's records equal the same records of a full
+query with the same capabilities.
+
+### Work done once per file
+
+One analysis runs the definition (locals) query once; the records, the export
+records, the reference filter and the semantic lint rules all read that one
+result. Metadata is extracted after duplicate captures of the same name and
+span are removed: the winning capture (highest kind priority, the first of
+equal priority) supplies each field, and a later equal-priority capture is
+read only for a field the winner lacks.
+
+`tree_hugger::work_counters()` counts lint-diagnostics runs, parser
+constructions and definition-query executions process-wide (atomics, so work
+on any thread is counted); tests compare two snapshots with
+`WorkCounters::since`.
+
+### Binding by name
+
+References bind by name only: a reference targets the first record with that
+name in the file, found through a name index built once per file rather than
+a scan per reference. An owner's `references`, `dependencies` and
+`referenced_by` list each target once: resolved references repeat when their
+IDs are equal, unresolved ones (no ID, such as an import) when their name and
+qualified name are equal. Two unresolved references are never equal just
+because both lack an ID:
+
+```python
+from os import path
+from sys import argv
+
+def run():          # references: path, argv (both unresolved, path once)
+    path.join("a")
+    path.join("b")
+    return argv
+```
 
 ## Serialization and Compatibility
 
@@ -773,8 +891,10 @@ extraction rules invalidates cached records without a schema bump (see
 
 Both kind and visibility conversions are wildcard-free `match`es, so a new
 variant on one side fails to compile until the other side handles it. The
-adapter does not carry `keyword`, `declaration_text`, `signature_text` or
-`relations` (v1 has no field for them), `TypeMetadata::type_parameters`, or a TypeAlias's field metadata.
+adapter does not carry `keyword`, `declaration_text`, `signature_text`,
+`relations` or `semantics` (v1 has no field for them, so in particular no
+recursion flag), `TypeMetadata::type_parameters`, or a TypeAlias's field
+metadata.
 
 ### Recommended migration phases
 
@@ -783,7 +903,8 @@ adapter does not carry `keyword`, `declaration_text`, `signature_text` or
    1. `impl From<SymbolInfo> for SymbolRecord`.
    2. `impl TryFrom<SymbolRecord> for SymbolInfo` (best effort).
 3. Update CLI `--json` to emit the schema version (done; currently 4.0).
-4. Remove v1 schema after one release cycle.
+4. The v1 API (`TreeFile::symbols()`, `SymbolInfo`) and both adapters are
+   retained; removing v1 is a separate decision.
 
 ## Testing Strategy for the New Schema
 
