@@ -72,6 +72,13 @@ Bytes read once, hashed, parsed only on demand; `hash()` always describes the
 text `parse()` parses (the file is never reread). `TreeFile::new` /
 `with_language` are wrappers over it and keep their error contract (`Io` for
 unreadable or non-UTF-8 files, `UnsupportedLanguage`, `ParseFailed`).
+`path()` is the file's `file_identity` (absolute, `.`/`..` and symlinks
+resolved via `canonicalize_simplified`), not the spelling read: every
+spelling of one file has the same path, records, IDs, cache key and entry,
+and a symlink is its target. Detection reads the identity; `Io` and
+`UnsupportedLanguage` name the spelling given. `scanner::collect_files`
+returns identities, and `hug` canonicalizes its working directory so roots
+match (Windows 8.3 short names). `tree-hugger/docs/cache-design.md#file-identity`.
 
 ```rust
 let source = SourceFile::read("src/lib.rs")?;          // or read_with_language(path, Some(lang))
@@ -117,6 +124,18 @@ bound, then dropped; their metadata is skipped. Selecting a type kind keeps
 Field/Property/Constant metadata (`align_field_metadata` needs it). A narrow
 query's records equal the same records of a full query with the same
 capabilities (`symbols_query::narrow_queries_equal_the_filtered_records_of_a_full_query`).
+
+### Caches
+
+`cache::SymbolCache` (persistent, one entry per file, computed key) is the
+only cache the CLI uses; see `tree-hugger/docs/cache-design.md`.
+`InProcessCache`, `InMemorySymbolCache`, `SymbolSnapshot` and
+`AnalyzerFingerprint` are still exported for library callers but are off the
+CLI path.
+
+`semantics.is_recursive` is `Some(TriState::Unknown)` whenever the semantic
+pass runs and `None` when it was not requested (v1 `SymbolInfo` has no
+recursion field, so nothing to map).
 
 ### Work Counters
 
@@ -474,7 +493,11 @@ pub enum TreeHuggerError {
 
 ## JSON Output Types
 
-For serialization (used by CLI `--json` output):
+The declaration commands (`functions`, `types`, `symbols`, `classes`) do not
+use these types: their `--json` report is a CLI-local envelope
+(`cli/src/report.rs`) of schema 4.0 `SymbolRecord`s, described in
+`tree-hugger/docs/symbol-reports.md`. `PackageSummary` remains the shape of
+`hug imports --json` and `hug lint --json` and of library callers:
 
 ```rust
 pub struct PackageSummary {

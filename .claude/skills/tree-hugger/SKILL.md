@@ -100,12 +100,13 @@ Access lives on `SymbolInfo::visibility` (`None` = Unknown), not on the signatur
 - **Query caching**: Global `OnceLock<QueryCache>` for thread-safe caching
 - **Builtin database**: Per-language builtin lists to avoid false positive undefined-symbol/undefined-module errors
 - **Schema v2 module, schema version 4.0**: `shared/schema_v2` with facet-based `SymbolRecord` and staged `FileSymbolIndex`; records, file indexes, CLI envelopes and analyzer fingerprints emit `SchemaVersion::V4_0` (the module keeps its historical `v2` name). Records carry no timestamps, so output and cache entries are byte-identical across runs; the container is `identity.container_name`
-- **CLI declaration reports** (`cli/src/`: `declarations.rs` drives, `order.rs`, `report.rs`, `render.rs`, `classes.rs`, `scan.rs`, `prelude.rs`; `main.rs` only wires): `Declarations::query` is each command's fixed kind set with only the capabilities it shows (`classes` adds containment; no listing runs references, semantics, docs or diagnostics); `--json-full` asks `complete_index()`. `scan::in_file_order` runs rayon chunks of `4 × threads` and delivers results in file order, so `--json` is byte-identical across thread counts and cold/warm. The JSON envelope is written piece by piece with `errors` always last; records are projected (`report::trim_record`: scan-root-relative `file_path` and stable-key path segment, no `declaration_text`/source text/attached comments; IDs untouched). The one renderer (`render::Renderer`) is `Prose` items in `UnorderedList`s with `term.fixed_width` pinned huge so nothing wraps; labels come from `identity.keyword` only for Type/Variable/Field/Constant, else the kind. `--prelude` analyzes the prelude and its targets with an every-kind query first and the scan reuses them via `SymbolQueryResult::narrowed` (one parse per file); prelude exports are synthetic records (`visibility.is_synthetic`/`is_reexported`, own ID from the prelude file). A failed file is stderr + `errors` + exit 1; a broken pipe exits 0 quietly.
+- **CLI declaration reports** (`cli/src/`: `declarations.rs` drives, `order.rs`, `report.rs`, `render.rs`, `classes.rs`, `scan.rs`, `prelude.rs`; `main.rs` only wires): `Declarations::query` is each command's fixed kind set with only the capabilities it shows (`classes` adds containment; no listing runs references, semantics, docs or diagnostics); `--json-full` asks `complete_index()`. `scan::in_file_order` runs rayon chunks of `4 × threads` and delivers results in file order, so `--json` is byte-identical across thread counts and cold/warm. The JSON envelope is written piece by piece with `errors` always last; records are projected (`report::trim_record`: scan-root-relative `file_path` and stable-key file segment, no `declaration_text`/source text/attached comments; IDs untouched). `report::portable_relative` is the one path projection (entries, `errors[].file`, records): files outside the root get `../` routes via `biscuit_file::PathIdentity`, retried with directories canonicalized (macOS `/var` vs `/private/var`), and keep their absolute portable path only when no route exists (another Windows drive/share); the key's file segment is parsed from the key itself (`{lang}::{file}::{Kind:?}::`), never matched against `source.file_path`, because prelude aliases are keyed by the prelude file but located at the target. The one renderer (`render::Renderer`) is `Prose` items in `UnorderedList`s with `term.fixed_width` pinned huge so nothing wraps; labels come from `identity.keyword` only for Type/Variable/Field/Constant, else the kind. Terminal output streams: `declarations::write_terminal` flushes after each `in_file_order` chunk (so a closed pipe stops scheduling within a chunk), `classes` writes per file, and `render::ListingStream` holds only the current unit (one file; one directory under `--group-by-module`; one package under flat `--sort name|kind` or `--prelude`) after `render::listing_order` reorders files by package, directory, path. Package sections are decided up front from `listing_order`'s package count (two or more packages in the scan, declarations or not), so nothing is held beyond the current unit; never reintroduce a layout decision that waits on later declarations, or a whole-scan accumulator ahead of the renderer. `write_json` flushes at the same chunk ends (`scan::flush_at_chunk_end`), so a closed pipe is noticed even when no entry fills the buffer. `--prelude` analyzes the prelude and its targets with an every-kind query first and the scan reuses them via `SymbolQueryResult::narrowed` (one parse per file; the reuse map, `collect_files` output, `SourceFile::path()` and the CLI roots are all `file_identity` spellings, so relative/`..`/symlinked inputs never split reuse or the cache); prelude exports are synthetic records (`visibility.is_synthetic`/`is_reexported`, own ID from the prelude file). Every output branch that writes declaration records (`--json` files, `--json-full` `index.symbols`, terminal listings, `classes` containers and member sections) orders through `order::compare`/`sort_file_records`: extraction order is not source order (C emits a typedef's inner `struct` specifier before the alias, Go a receiver parameter before its method, and Go grouped `type (…)` specs share one span, so only the ID breaks the tie). A failed file is stderr + `errors` + exit 1; a broken pipe exits 0 quietly. User-facing contract: `tree-hugger/docs/symbol-reports.md` (`order.rs` points at it); update it with any change to kind sets, envelope, order or `--verbose`.
 - **CLI filters**: `hug <subcommand> <filter...>` with all-files default scan for symbol commands. A pathless scan honors `.gitignore` and skips test-data dirs by default (`**/fixtures/**`, `**/__fixtures__/**`, `**/snapshots/**`, `**/testdata/**`); an explicit path/glob re-includes a targeted file. `lint` scans hide clean files (single-file lint still shows `(no diagnostics)`).
 
 ## Detailed Documentation
 
 - [API Reference](./api-reference.md) - Complete type definitions and methods
+- [Symbol Reports](../../../tree-hugger/docs/symbol-reports.md) - The declaration commands end to end: kind sets, query → passes → render flow, JSON envelope and `errors`, `--json-full`, `--sort` and tie-breakers, `--verbose`, exit status
 - [Symbol Kinds, Visibility and `static`](../../../tree-hugger/docs/symbol-kinds-and-visibility.md) - Per-language kinds, containers, visibility levels and defaults, the two meanings of `static`, declaration text, current limitations
 - [Query System](./query-system.md) - Tree Hugger's `.scm` queries, capture conventions, and how to extend them
 - [Diagnostics](./diagnostics.md) - Lint rules, ignore directives, dead code detection
@@ -200,10 +201,39 @@ When modifying queries or symbol extraction:
    found while writing fixtures: C# rejects an attribute between modifiers,
    and tree-sitter-zsh rejects a function body brace on the line after the
    header
+8. `lib/tests/fixtures/symbols/test_files/` holds one file per test-file
+   name rule (Go `*_test.go`, Python `test_*.py`/`*_test.py`/`conftest.py`,
+   JS/TS `*.test.*`/`*.spec.*`, Rust under a package `tests/`), listed in
+   `symbols_fixtures::TEST_FILE_FIXTURES` and guarded by
+   `symbols_coverage::every_test_file_rule_has_a_clean_fixture`. The Rust
+   one is a test in place only because it sits under this crate's `tests/`;
+   assert a non-test reading from a scratch-package copy.
+   `symbols_report_matrices` holds the scope, qualified-name, containment,
+   flags, metrics, kind-coverage and selection-filter matrices as `Pending`
+   rows (one per language, guarded by `symbols_coverage`); filling one means
+   moving it into its own module with a real row type. The test-only
+   `file::extract::scope_dump` prototypes the `Item`/`Member`/`Local` scope
+   rules (`TREE_HUGGER_SCOPE_DUMP=<file>` writes a review dump)
 
-The CLI's real-terminal `god-files` test is behind the internal
-`terminal-tests` feature. Ordinary local L1 omits its harness and target;
-`just test-l2` and CI enable it.
+The CLI's real-terminal tests are behind the internal `terminal-tests`
+feature: `level2_god_files` (the `god-files` report) and
+`level2_declarations` (the `functions`/`types`/`symbols`/`classes` renderer
+over `cli/tests/fixtures/declarations/`, run without `CLICOLOR_FORCE` so `hug`
+detects the pane's TTY). Ordinary local L1 omits their harness and targets;
+`just test-l2` and CI enable them. A new `level2_*` target needs a `[[test]]`
+entry with `required-features = ["terminal-tests"]`. Both targets read panes
+through `cli/tests/support/terminal_report.rs` (`#[path]`-included): every
+command runs between unique `printf`-printed begin/end markers, the capture
+is the pane's whole history (tmux `capture-pane -S - -J`, WezTerm
+`capture_scrollback`, Kitty `--extent=all`), and `Report::scope` keeps only
+the rows strictly between the markers, failing on a missing, repeated or
+reversed marker. A shared pane keeps earlier reports, other tests and a
+colored prompt, so never assert on a whole capture. Style checks name one
+uniquely matching row and read the cell's effective SGR state replayed from
+the capture's start (tmux re-emits only changed attributes, across rows),
+not the escapes next to the text; WezTerm's split soft wraps are rejoined
+only for the whole-line long-row check (`has_logical_row`). The helpers are
+L1-tested on synthetic captures in the `symbols` binary (`terminal_scope`).
 
 ## Resolver and Adapter Architecture (Phase 3)
 
@@ -280,7 +310,10 @@ High-confidence syntax rules require `Threshold::Zero` corpus false positives. E
   (`symbols_cache::projected_results_*` fail otherwise).
 - **Reader**: `deny_unknown_fields`, no defaults on entry fields, custom
   visitors for the coverage lists; failures are `CacheMiss::Malformed(serde
-  message)` / `Mismatched` / `Inconsistent`, never an empty result. Extend
+  message)` / `Mismatched` / `Inconsistent`, never an empty result. The entry
+  and **every record** must carry exactly `SchemaVersion::V4_0` (minor
+  included), else `Mismatched("record schema version")`; a nested
+  version-bearing value must be checked in `StoredEntry::validate`. Extend
   `cli/tests/symbols/cache_robustness.rs` (entry and record columns) for a
   new load-bearing field, and assert `CacheLookup::Hit` (not just equal
   output) in any warm-run test: a silently undecodable entry still produces
