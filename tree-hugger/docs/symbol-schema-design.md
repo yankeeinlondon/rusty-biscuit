@@ -834,10 +834,14 @@ the record of the same name (the k-th entry with the k-th record), a record
 no reader listed is added at its position, and the entry takes the record's
 doc comment and value only when the reader had none. `discriminant` is the
 member's `value` as written (Rust, C, C++, C#, TypeScript, PHP: `Off = 2`
-gives `2`). Arguments are not a value: Java `MERCURY(1.0)` and Scala
-`case Value(x: Int)` list `MERCURY` and `Value` alone, and Scala's `x` is a
-Parameter record (`Color.Value.x`). Only an Enum has a list; a Swift `enum`
-is a Type, whose `TypeData` holds no variants.
+gives `2`). Arguments are not a value: Java `MERCURY(1.0)` lists `MERCURY`
+alone. A declared payload keeps its written types: Rust `Pair(i32, String)`
+fills `tuple_fields`, and Rust `Named { x: i32 }` and Scala
+`case Value(x: Int = 1)(using o: Ord)` fill `struct_fields` (every Scala
+parameter clause, in order; a default is never a `discriminant`), while
+Scala's `x` and `o` are still Parameter records (`Color.Value.x`). Only an
+Enum has a list; a Swift `enum` is a Type, whose `TypeData` holds no
+variants.
 
 `aliased_type_text` is the alias's right-hand side as written, generics
 included (Go `type GenAlias[T any] = []T` gives `[]T`, Swift

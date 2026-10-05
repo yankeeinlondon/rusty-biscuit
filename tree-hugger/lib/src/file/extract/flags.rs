@@ -10,14 +10,16 @@ use super::*;
 /// Whether `declaration` carries its language's deprecation marker: an
 /// attribute, annotation or decorator, a `@deprecated` tag in its attached
 /// doc block (`doc`, from [`extract_doc_comment`]) or, in Go, a doc paragraph
-/// starting `Deprecated:`. Ordinary comments are never read.
+/// starting `Deprecated:`. Ordinary comments are never read. `name` is the
+/// captured name, whose own C++ declarator attributes count.
 pub(crate) fn is_deprecated(
     declaration: Node<'_>,
+    name: Node<'_>,
     doc: Option<&str>,
     language: ProgrammingLanguage,
     source: &str,
 ) -> bool {
-    let attributes = || declaration_attributes(declaration, language, source);
+    let attributes = || declaration_attributes(declaration, name, language, source);
     match language {
         ProgrammingLanguage::Rust | ProgrammingLanguage::Cpp => {
             attributes().iter().any(|attribute| attribute.name == "deprecated")
@@ -60,10 +62,11 @@ pub(crate) fn is_deprecated(
 /// `[Fact]` or `[TestMethod]`.
 pub(crate) fn has_test_attribute(
     declaration: Node<'_>,
+    name: Node<'_>,
     language: ProgrammingLanguage,
     source: &str,
 ) -> bool {
-    let attributes = || declaration_attributes(declaration, language, source);
+    let attributes = || declaration_attributes(declaration, name, language, source);
     match language {
         ProgrammingLanguage::Rust => attributes()
             .iter()
@@ -259,9 +262,11 @@ impl Fence {
 /// A Go doc paragraph (the first line, or a line after a blank one or after
 /// a code block) that starts with `Deprecated:`.
 ///
-/// `doc` is already unindented by its common prefix (as `go/doc/comment`
-/// does; see `extract_doc_comment`), so a line that is still indented
-/// belongs to a code block, never to a paragraph.
+/// `doc` is the group's text as Go reads it (`go_comment_group_text`):
+/// directive lines are already gone without leaving a blank line, so a
+/// directive neither starts nor ends a paragraph, and the text is
+/// unindented by its common prefix (as `go/doc/comment` does), so a line
+/// that is still indented belongs to a code block, never to a paragraph.
 fn has_deprecated_paragraph(doc: &str) -> bool {
     let mut paragraph_start = true;
     for line in doc.lines() {

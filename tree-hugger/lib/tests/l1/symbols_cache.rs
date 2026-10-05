@@ -977,3 +977,55 @@ impl UnionForTest for SymbolQuery {
         }
     }
 }
+
+/// The declared payload of a Scala enum case (named fields with their
+/// written types, every parameter clause) is stored and served from a warm
+/// entry, for the complete index and for an enum-only query, exactly as an
+/// uncached run computes it.
+#[test]
+fn warm_enum_case_payloads_equal_uncached_results() {
+    use crate::symbols_field_lists::{SCALA_BRACE_ENUM, SCALA_INDENTED_ENUM};
+    let sources = TempDir::new().expect("sources");
+    let cases = [
+        (SCALA_BRACE_ENUM, "Shape", "Curried", json!([["x", "Int"], ["order", "Ordering[T]"]])),
+        (SCALA_INDENTED_ENUM, "Mode", "Level", json!([["value", "Int"], ["render", "Int => String"]])),
+    ];
+    for (ordinal, (source, enum_name, variant, expected_fields)) in cases.into_iter().enumerate() {
+        let path = sources.path().join(format!("enum_{ordinal}.scala"));
+        std::fs::write(&path, source).expect("write source");
+        let dir = TempDir::new().expect("temp");
+        let cache = cache_in(&dir);
+        let complete = SymbolQuery::complete_index();
+        let (lookup, _, _) = cached(&cache, read(&path), &complete);
+        assert_eq!(lookup, CacheLookup::Miss(CacheMiss::Absent), "{enum_name}: cold");
+
+        for query in [complete.clone(), SymbolQuery::new().kinds([SymbolKindV2::Enum])] {
+            let (lookup, served, work) = cached(&cache, read(&path), &query);
+            assert_eq!(lookup, CacheLookup::Hit, "{enum_name}: warm {query:?}");
+            assert_eq!(work.parser_constructions, 0, "{enum_name}: warm {query:?}");
+            assert_eq!(served, uncached(&path, &query), "{enum_name}: warm {query:?}");
+            let owner: Vec<&Value> = served["index"]["symbols"]
+                .as_array()
+                .expect("symbols")
+                .iter()
+                .filter(|record| record["kind"] == "Enum" && record["identity"]["name"] == enum_name)
+                .collect();
+            assert_eq!(owner.len(), 1, "{enum_name}: one enum record");
+            let entry: Vec<&Value> = owner[0]["kind_data"]["data"]["variants"]
+                .as_array()
+                .expect("variants")
+                .iter()
+                .filter(|entry| entry["name"] == variant)
+                .collect();
+            assert_eq!(entry.len(), 1, "{enum_name}: one `{variant}` entry");
+            let fields: Vec<Value> = entry[0]["struct_fields"]
+                .as_array()
+                .expect("struct fields")
+                .iter()
+                .map(|field| json!([field["name"], field["type_text"]]))
+                .collect();
+            assert_eq!(Value::from(fields), expected_fields, "{enum_name}: `{variant}` payload {query:?}");
+            assert!(entry[0].get("discriminant").is_none(), "{enum_name}: `{variant}` has no discriminant");
+        }
+    }
+}

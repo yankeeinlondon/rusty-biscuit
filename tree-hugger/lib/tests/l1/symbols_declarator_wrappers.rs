@@ -2,7 +2,8 @@
 //! wrap it: an attribute after the name (`int x [[maybe_unused]];`), extra
 //! parentheses (`int (f)(int);`), and pointer, reference, array or callback
 //! layers around a member function's declarator (`int (*m(int))(long);`).
-//! A function-pointer field stays a Field, never a Method.
+//! A function-pointer field stays a Field, never a Method. A C++
+//! `[[deprecated]]` right after the name deprecates that entity alone.
 //!
 //! Every row names the symbol it expects and is looked up on both public
 //! paths (`symbols()` and the `symbol_index_v2()` records), so a declaration
@@ -298,4 +299,78 @@ fn c_and_cpp_attributed_enumerators_do_not_parse() {
             ".{extension}: `GREEN` is not parsed as a member of `Color`"
         );
     }
+}
+
+/// `(languages, source, name, container, kind, is_deprecated)`.
+type DeprecationRow = (
+    &'static [&'static str],
+    &'static str,
+    &'static str,
+    Option<&'static str>,
+    SymbolKind,
+    bool,
+);
+
+const DEPRECATION_ROWS: &[DeprecationRow] = &[
+    // An attribute right after the name appertains to the declared entity.
+    (CPP_ONLY, "struct Ctor { Ctor [[deprecated]] (int x); };\n", "Ctor", Some("Ctor"), K::Constructor, true),
+    (CPP_ONLY, "struct Owner { int method [[deprecated]] (int x); };\n", "method", Some("Owner"), K::Method, true),
+    (CPP_ONLY, "int free_fn [[deprecated]] (int x);\n", "free_fn", None, K::Function, true),
+    (CPP_ONLY, "int grouped_a [[deprecated]], grouped_b;\n", "grouped_a", None, K::Variable, true),
+    (CPP_ONLY, "int grouped_a [[deprecated]], grouped_b;\n", "grouped_b", None, K::Variable, false),
+    (CPP_ONLY, "int initialized [[deprecated]] = 1;\n", "initialized", None, K::Variable, true),
+    (CPP_ONLY, "struct Holder { int field [[deprecated]]; };\n", "field", Some("Holder"), K::Field, true),
+    (CPP_ONLY, "int (*callback [[deprecated]])(int);\n", "callback", None, K::Variable, true),
+    (CPP_ONLY, "int (*returns_callback [[deprecated]] (int))(long);\n", "returns_callback", None, K::Function, true),
+    (CPP_ONLY, "struct Out { int out(int x); };\nint Out::out [[deprecated]] (int x) { return x; }\n",
+        "out", None, K::Function, true),
+    // Another entity's attribute, or one that appertains to a type, does not count.
+    (CPP_ONLY, "int (*outer(int))(long inner [[deprecated]]);\n", "outer", None, K::Function, false),
+    (CPP_ONLY, "int function_type(int) [[deprecated]];\n", "function_type", None, K::Function, false),
+    (CPP_ONLY, "int array_type[2] [[deprecated]];\n", "array_type", None, K::Variable, false),
+    (CPP_ONLY, "int (*returned_type(int)) [[deprecated]] (long);\n", "returned_type", None, K::Function, false),
+    (CPP_ONLY, "int vendor [[gnu::deprecated]] (int x);\n", "vendor", None, K::Function, false),
+    // Controls: leading attributes and no attribute.
+    (CPP_ONLY, "struct Lead { [[deprecated]] Lead(int x); };\n", "Lead", Some("Lead"), K::Constructor, true),
+    (CPP_ONLY, "struct Owner { [[deprecated]] int method(int x); };\n", "method", Some("Owner"), K::Method, true),
+    (CPP_ONLY, "[[deprecated]] int leading_fn(int x);\n", "leading_fn", None, K::Function, true),
+    (CPP_ONLY, "struct Plain { Plain(int x); };\n", "Plain", Some("Plain"), K::Constructor, false),
+    (CPP_ONLY, "struct Owner { int method(int x); };\n", "method", Some("Owner"), K::Method, false),
+    (CPP_ONLY, "int plain_fn(int x);\n", "plain_fn", None, K::Function, false),
+    // C has no deprecation marker, in either position.
+    (C_ONLY, "int c_grouped [[deprecated]], c_other;\n", "c_grouped", None, K::Variable, false),
+    (C_ONLY, "int c_fn [[deprecated]] (int x);\n", "c_fn", None, K::Function, false),
+    (C_ONLY, "[[deprecated]] int c_leading;\n", "c_leading", None, K::Variable, false),
+];
+
+/// A C++ `[[deprecated]]` after the declared name deprecates that entity as a
+/// leading one does, and no other declarator of the declaration.
+#[test]
+fn cpp_attributes_after_the_name_deprecate_the_declared_entity() {
+    let mut failures = Vec::new();
+    for &(languages, source, name, container, kind, expected) in DEPRECATION_ROWS {
+        for extension in languages {
+            let extracted = extract_inline(source, extension);
+            let records: Vec<_> = extracted
+                .records
+                .iter()
+                .filter(|record| record.identity.name == name && record.identity.container_name.as_deref() == container)
+                .collect();
+            match records.as_slice() {
+                [record] if record.kind == SymbolKindV2::from(kind) => {
+                    if record.visibility.is_deprecated != expected {
+                        failures.push(format!(
+                            ".{extension} `{name}`: is_deprecated {}, expected {expected}",
+                            record.visibility.is_deprecated
+                        ));
+                    }
+                }
+                found => failures.push(format!(
+                    ".{extension} `{name}` in {container:?}: {:?}, expected one {kind:?}",
+                    found.iter().map(|record| record.kind).collect::<Vec<_>>()
+                )),
+            }
+        }
+    }
+    assert!(failures.is_empty(), "deprecation rows failed: {failures:#?}");
 }

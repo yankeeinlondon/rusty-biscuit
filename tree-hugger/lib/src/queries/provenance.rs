@@ -165,6 +165,7 @@ fn vendored_locals_changes(language: ProgrammingLanguage) -> &'static [&'static 
         ],
         ProgrammingLanguage::Scala => &[
             "added Scala 3 enum cases (`simple_enum_case`, `full_enum_case`) as `@local.definition.enum_variant` and concrete `type` definitions as `@local.definition.type_alias`, each with a context capture",
+            "added grouped `val`/`var` definition names (`pattern: (identifiers (identifier))`, as in `val a, b: Int = 1`) as `@local.definition.var`, one capture per name",
         ],
         ProgrammingLanguage::TypeScript
         | ProgrammingLanguage::Lua

@@ -22,13 +22,17 @@ pub(crate) struct SyntacticAttribute {
     pub(crate) arguments: Option<Vec<String>>,
 }
 
-/// The attributes written on `declaration`, in source order.
+/// The attributes written on `declaration` for the entity `name` (the
+/// captured name node), in source order.
 ///
-/// Read from Rust outer attributes, C++ `[[…]]` attribute declarations, Java
-/// and Scala annotations, C# attribute lists, Python decorators and Swift
-/// attributes; every other language has none.
+/// Read from Rust outer attributes, C++ `[[…]]` attribute declarations (the
+/// declaration's own, then those after `name` in its declarator, see
+/// [`declarator_id_attributes`]: `int a [[deprecated]], b;` gives `a` one
+/// and `b` none), Java and Scala annotations, C# attribute lists, Python
+/// decorators and Swift attributes; every other language has none.
 pub(crate) fn declaration_attributes(
     declaration: Node<'_>,
+    name: Node<'_>,
     language: ProgrammingLanguage,
     source: &str,
 ) -> Vec<SyntacticAttribute> {
@@ -36,7 +40,10 @@ pub(crate) fn declaration_attributes(
     match language {
         ProgrammingLanguage::Rust => rust_outer_attributes(declaration, source, &mut attributes),
         ProgrammingLanguage::Cpp => {
-            for list in children_of_kind(declaration, "attribute_declaration") {
+            let lists = children_of_kind(declaration, "attribute_declaration")
+                .into_iter()
+                .chain(declarator_id_attributes(declaration, name));
+            for list in lists {
                 for attribute in children_of_kind(list, "attribute") {
                     let name = match attribute.child_by_field_name("prefix") {
                         Some(prefix) => format!(

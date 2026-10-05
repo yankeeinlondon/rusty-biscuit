@@ -878,6 +878,139 @@ fn entry_from_extractor_revision_twelve_is_not_served_after_the_repairs() {
     });
 }
 
+/// `has_docs` of `ReviewSingleVar` and `ReviewGenerate`, and
+/// `is_deprecated` of `ReviewMarkedConst` and `ReviewBeforeMarker`, in a
+/// `hug --json-full` report.
+fn go_wrapped_doc_facts(output: &Value) -> Value {
+    Value::from(vec![
+        go_record(output, "ReviewSingleVar")["metrics"]["has_docs"].clone(),
+        go_record(output, "ReviewMarkedConst")["visibility"]["is_deprecated"].clone(),
+        go_record(output, "ReviewGenerate")["metrics"]["has_docs"].clone(),
+        go_record(output, "ReviewBeforeMarker")["visibility"]["is_deprecated"].clone(),
+    ])
+}
+
+fn go_record(output: &Value, name: &str) -> Value {
+    let records: Vec<&Value> = output["indexes"]
+        .as_array()
+        .expect("indexes")
+        .iter()
+        .flat_map(|index| index["symbols"].as_array().expect("index symbols"))
+        .filter(|record| record["identity"]["name"] == name)
+        .collect();
+    assert_eq!(records.len(), 1, "expected one `{name}` record");
+    records[0].clone()
+}
+
+/// Revision 14 read a Go `var` or `const` spec's doc only before the spec,
+/// so a standalone declaration's doc and its `Deprecated:` paragraph were
+/// missed, and kept `//go:` directives as doc text, so a directive alone
+/// documented its function and one before `Deprecated:` hid the marker;
+/// revision 15 reads the enclosing declaration's doc and drops directives.
+#[test]
+fn entry_from_extractor_revision_fourteen_is_not_served_after_the_repairs() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "14",
+        key: OldKey::Computed,
+        file: "wrapped.go",
+        language: "go",
+        source: format!("{}\n{}", crate::filters::GO_WRAPPED_DOCS, crate::filters::GO_DIRECTIVE_DECLARATIONS),
+        sentinel: "ReviewSingleConst",
+        probe: go_wrapped_doc_facts,
+        repaired: Value::from(vec![true, true, false, true]),
+        stale: Value::from(vec![false, false, true, false]),
+        revert: |snapshot| {
+            record_named(snapshot, "ReviewSingleVar")["metrics"]["has_docs"] = Value::from(false);
+            record_named(snapshot, "ReviewMarkedConst")["visibility"]["is_deprecated"] = Value::from(false);
+            record_named(snapshot, "ReviewGenerate")["metrics"]["has_docs"] = Value::from(true);
+            record_named(snapshot, "ReviewBeforeMarker")["visibility"]["is_deprecated"] = Value::from(false);
+        },
+    });
+}
+
+const UPGRADE_ENUM_SCALA: &str = "enum UpgradeShape {\n  case Red\n  case Point(x: Int, y: String)\n}\n";
+
+/// The `[name, type]` payload fields of `UpgradeShape.Point` in its enum's
+/// variant list, in a `hug --json-full` report.
+fn upgrade_enum_payload(output: &Value) -> Value {
+    let variants = go_record(output, "UpgradeShape")["kind_data"]["data"]["variants"].clone();
+    let point: Vec<&Value> =
+        variants.as_array().expect("variants").iter().filter(|variant| variant["name"] == "Point").collect();
+    assert_eq!(point.len(), 1, "expected one `Point` variant");
+    Value::from(
+        point[0]["struct_fields"]
+            .as_array()
+            .map(|fields| fields.iter().map(|field| serde_json::json!([field["name"], field["type_text"]])).collect::<Vec<_>>())
+            .unwrap_or_default(),
+    )
+}
+
+/// Revision 15 listed a Scala enum case declared with class parameters as a
+/// unit variant of its enum, dropping the declared payload; revision 16
+/// lists the parameters with their written types.
+#[test]
+fn entry_from_extractor_revision_fifteen_is_not_served_after_the_repairs() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "15",
+        key: OldKey::Computed,
+        file: "shape.scala",
+        language: "scala",
+        source: UPGRADE_ENUM_SCALA.to_string(),
+        sentinel: "Red",
+        probe: upgrade_enum_payload,
+        repaired: serde_json::json!([["x", "Int"], ["y", "String"]]),
+        stale: serde_json::json!([]),
+        revert: |snapshot| {
+            let variants = record_named(snapshot, "UpgradeShape")["kind_data"]["data"]["variants"]
+                .as_array_mut()
+                .expect("entry variants");
+            for variant in variants.iter_mut().filter(|variant| variant["name"] == "Point") {
+                variant.as_object_mut().expect("variant object").remove("struct_fields");
+            }
+        },
+    });
+}
+
+/// `has_docs` and `is_deprecated` of `ReviewEmpty`, `ReviewDirective` and
+/// `ReviewAbsent`, in a `hug --json-full` report.
+fn go_empty_spec_doc_facts(output: &Value) -> Value {
+    Value::from(
+        ["ReviewEmpty", "ReviewDirective", "ReviewAbsent"]
+            .into_iter()
+            .flat_map(|name| {
+                let record = go_record(output, name);
+                [record["metrics"]["has_docs"].clone(), record["visibility"]["is_deprecated"].clone()]
+            })
+            .collect::<Vec<_>>(),
+    )
+}
+
+/// Revision 16 let a Go spec whose own comment group reads as no text (a
+/// blank `//`, a directive only) inherit its group's doc and `Deprecated:`
+/// paragraph; revision 17 leaves it undocumented, and only a spec with no
+/// attached group shares the group's doc.
+#[test]
+fn entry_from_extractor_revision_sixteen_is_not_served_after_the_repairs() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "16",
+        key: OldKey::Computed,
+        file: "specs.go",
+        language: "go",
+        source: format!("package specs\n\n{}\ntype ReviewSentinel int\n", crate::filters::GO_EMPTY_SPEC_DOCS),
+        sentinel: "ReviewSentinel",
+        probe: go_empty_spec_doc_facts,
+        repaired: Value::from(vec![false, false, false, false, true, true]),
+        stale: Value::from(vec![true, true, true, true, true, true]),
+        revert: |snapshot| {
+            for name in ["ReviewEmpty", "ReviewDirective"] {
+                let record = record_named(snapshot, name);
+                record["metrics"]["has_docs"] = Value::from(true);
+                record["visibility"]["is_deprecated"] = Value::from(true);
+            }
+        },
+    });
+}
+
 const UPGRADE_PROBE_PY: &str = "\n\nclass UpgradeProbe:\n    def __init__(self, seed):\n        pass\n";
 
 /// The stable key of `UpgradeProbe.__init__` in `deferred.py` when it reports

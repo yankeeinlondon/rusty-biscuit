@@ -1,7 +1,8 @@
 //! C and C++ declarator traversal shared by every reader that needs the
 //! function a declaration declares, or the name a declarator declares:
 //! kinds (`classify.rs`), linkage (`visibility/c.rs`), signatures
-//! (`signatures.rs`) and field names (`type_metadata.rs`).
+//! (`signatures.rs`), field names (`type_metadata.rs`) and declarator
+//! attributes (`attributes.rs`).
 
 use super::*;
 
@@ -79,6 +80,65 @@ pub(crate) fn declarator_name(mut declarator: Node<'_>) -> Option<Node<'_>> {
             _ => return Some(declarator),
         }
     }
+}
+
+/// The `attribute_declaration`s written right after `name` in `declaration`'s
+/// declarator (`C [[deprecated]] (int x)`, `int a [[deprecated]], b`), which
+/// the C++ standard makes appertain to the declared entity, as leading ones
+/// do. Only the declarator holding `name` is read, along its `declarator`
+/// path (never a parameter list), and only an attribute whose declarator is
+/// the name itself behind parentheses: one after a function's parameters
+/// (`int f(int) [[a]]`), an array bound or a returned pointer's parentheses
+/// appertains to a type, not to the entity.
+pub(crate) fn declarator_id_attributes<'tree>(declaration: Node<'tree>, name: Node<'_>) -> Vec<Node<'tree>> {
+    let holds_name = |node: &Node<'_>| node.start_byte() <= name.start_byte() && name.end_byte() <= node.end_byte();
+    let mut cursor = declaration.walk();
+    let mut declarator = declaration
+        .children_by_field_name("declarator", &mut cursor)
+        .find(holds_name);
+    let mut attributes = Vec::new();
+    while let Some(layer) = declarator {
+        if !is_wrapping_declarator(layer.kind()) {
+            break;
+        }
+        if layer.kind() == "attributed_declarator" && !is_wrapping_declarator(transparent_declarator(layer).kind()) {
+            let mut layer_cursor = layer.walk();
+            attributes.extend(
+                layer
+                    .children(&mut layer_cursor)
+                    .filter(|child| child.kind() == "attribute_declaration"),
+            );
+        }
+        declarator = inner_declarator(layer).filter(holds_name);
+    }
+    attributes
+}
+
+/// A declarator that wraps another one rather than naming the entity.
+fn is_wrapping_declarator(kind: &str) -> bool {
+    matches!(
+        kind,
+        "pointer_declarator"
+            | "reference_declarator"
+            | "array_declarator"
+            | "parenthesized_declarator"
+            | "attributed_declarator"
+            | "function_declarator"
+            | "variadic_declarator"
+            | "init_declarator"
+    )
+}
+
+/// `declarator` with its parenthesized and attributed wrappers removed:
+/// `(f)` and `f [[deprecated]]` are `f`; a pointer, reference or array is
+/// kept.
+pub(crate) fn transparent_declarator(mut declarator: Node<'_>) -> Node<'_> {
+    while matches!(declarator.kind(), "parenthesized_declarator" | "attributed_declarator")
+        && let Some(inner) = inner_declarator(declarator)
+    {
+        declarator = inner;
+    }
+    declarator
 }
 
 /// The declarator a wrapping declarator wraps: its `declarator` field, or

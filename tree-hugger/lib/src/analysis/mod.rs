@@ -339,7 +339,8 @@ fn semantic_pass(index: &mut FileSymbolIndex) {
     }
 }
 
-/// Docs pass: parses raw docs into structured `ParsedDocs`.
+/// Docs pass: parses the extractor's cleaned `raw_doc` into structured
+/// `ParsedDocs`.
 fn docs_pass(index: &mut FileSymbolIndex) {
     for symbol in &mut index.symbols {
         symbol.docs = parse_docs_facet(symbol.docs.clone());
@@ -675,13 +676,11 @@ fn parse_docs_facet(mut docs: DocsFacet) -> DocsFacet {
     let mut parsed = ParsedDocs::default();
     let mut summary_lines = Vec::new();
 
+    // `raw_doc` is already cleaned by the extractor, which removed exactly
+    // the delimiters and decoration its language's doc tool removes; a `*`
+    // or `//` still at the start of a line is documentation text.
     for line in raw.lines() {
-        let trimmed = line
-            .trim()
-            .trim_start_matches("///")
-            .trim_start_matches("//")
-            .trim_start_matches('*')
-            .trim();
+        let trimmed = line.trim();
 
         if let Some(rest) = trimmed.strip_prefix("@param") {
             let value = rest.trim();

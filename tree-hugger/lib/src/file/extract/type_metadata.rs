@@ -1697,28 +1697,47 @@ pub(crate) fn extract_scala_type_parameters(node: Node<'_>, source: &str) -> Vec
 }
 
 /// The `val`/`var` definitions and declarations directly in a Scala
-/// template body, each with its written type; a destructuring pattern
-/// (`val (a, b) = …`) declares no listed field.
+/// template body, one entry per name, each with the declaration's written
+/// type: a grouped `val a, b: Int` lists `a` and `b`, both typed `Int`. A
+/// destructuring pattern (`val (a, b) = …`) declares no listed field.
 fn extract_scala_body_fields(body: Node<'_>, source: &str) -> Vec<FieldInfo> {
     let text = |node: Node<'_>| node.utf8_text(source.as_bytes()).ok().map(str::to_string);
+    let mut fields = Vec::new();
     let mut cursor = body.walk();
-    body.named_children(&mut cursor)
-        .filter_map(|member| {
-            let name = match member.kind() {
-                "val_definition" | "var_definition" => member.child_by_field_name("pattern"),
-                "val_declaration" | "var_declaration" => member.child_by_field_name("name"),
-                _ => None,
+    for member in body.named_children(&mut cursor) {
+        let names: Vec<Node<'_>> = match member.kind() {
+            "val_definition" | "var_definition" => match member.child_by_field_name("pattern") {
+                Some(pattern) if pattern.kind() == "identifier" => vec![pattern],
+                Some(pattern) if pattern.kind() == "identifiers" => {
+                    let mut names = pattern.walk();
+                    pattern
+                        .named_children(&mut names)
+                        .filter(|name| name.kind() == "identifier")
+                        .collect()
+                }
+                _ => Vec::new(),
+            },
+            "val_declaration" | "var_declaration" => {
+                let mut names = member.walk();
+                member
+                    .children_by_field_name("name", &mut names)
+                    .filter(|name| name.kind() == "identifier")
+                    .collect()
             }
-            .filter(|name| name.kind() == "identifier")?;
+            _ => Vec::new(),
+        };
+        let type_annotation = member.child_by_field_name("type").and_then(text);
+        fields.extend(names.into_iter().filter_map(|name| {
             Some(FieldInfo {
                 name: text(name)?,
-                type_annotation: member.child_by_field_name("type").and_then(text),
+                type_annotation: type_annotation.clone(),
                 doc_comment: None,
                 visibility: None,
                 is_static: false,
             })
-        })
-        .collect()
+        }));
+    }
+    fields
 }
 
 /// Extracts class parameters from Scala class_parameters.
@@ -1754,35 +1773,51 @@ pub(crate) fn extract_scala_class_parameters(node: Node<'_>, source: &str) -> Ve
     fields
 }
 
-/// Extracts enum cases from Scala enum_body.
+/// The cases of a Scala `enum_body`, in source order, one entry per name: a
+/// simple case (`case Red, Green`) is a unit variant; a full case
+/// (`case Value(x: Int)`) lists its class parameters as named payload fields
+/// with their declared types as written. Every parameter clause is flattened
+/// in order (`case V(x: Int)(using o: Ord)` lists `x` then `o`); a default
+/// (`x: Int = 1`) is part of the parameter, never a discriminant, since a
+/// Scala case has no explicit value.
 pub(crate) fn extract_scala_enum_cases(node: Node<'_>, source: &str) -> Vec<VariantInfo> {
+    let text = |node: Node<'_>| node.utf8_text(source.as_bytes()).ok().map(str::to_string);
     let mut variants = Vec::new();
-    let mut cursor = node.walk();
-
-    for child in node.children(&mut cursor) {
-        if child.kind() != "simple_enum_case" && child.kind() != "enum_case_definitions" {
+    let mut definitions = node.walk();
+    for definition in node.named_children(&mut definitions) {
+        if definition.kind() != "enum_case_definitions" {
             continue;
         }
-
-        if child.kind() == "simple_enum_case" {
-            if let Some(ident) = find_child_by_kind(child, "identifier")
-                && let Ok(name) = ident.utf8_text(source.as_bytes())
-            {
-                variants.push(VariantInfo::unit(name));
-            }
-        } else {
-            // enum_case_definitions can contain multiple cases
-            let mut inner_cursor = child.walk();
-            for inner in child.children(&mut inner_cursor) {
-                if inner.kind() == "identifier"
-                    && let Ok(name) = inner.utf8_text(source.as_bytes())
-                {
-                    variants.push(VariantInfo::unit(name));
+        let mut cases = definition.walk();
+        for case in definition.named_children(&mut cases) {
+            let Some(name) = case.child_by_field_name("name").and_then(text) else {
+                continue;
+            };
+            match case.kind() {
+                "simple_enum_case" => variants.push(VariantInfo::unit(name)),
+                "full_enum_case" => {
+                    let mut clauses = case.walk();
+                    let fields = case
+                        .children_by_field_name("class_parameters", &mut clauses)
+                        .flat_map(|clause| {
+                            let mut parameters = clause.walk();
+                            clause
+                                .named_children(&mut parameters)
+                                .filter(|parameter| parameter.kind() == "class_parameter")
+                                .collect::<Vec<_>>()
+                        })
+                        .filter_map(|parameter| {
+                            let mut field = FieldInfo::new(parameter.child_by_field_name("name").and_then(text)?);
+                            field.type_annotation = parameter.child_by_field_name("type").and_then(text);
+                            Some(field)
+                        })
+                        .collect();
+                    variants.push(VariantInfo::with_fields(name, fields));
                 }
+                _ => {}
             }
         }
     }
-
     variants
 }
 

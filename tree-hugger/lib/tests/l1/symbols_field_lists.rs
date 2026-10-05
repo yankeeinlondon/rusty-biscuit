@@ -601,6 +601,98 @@ fn scala_body_fields_pair_with_the_field_list() {
     );
 }
 
+/// Grouped Scala names (`val a, b: Int = 1`, `val e, f: Long`) are one
+/// standalone Field and one list entry each, every entry keeping the
+/// declaration's shared written type, for `val` and `var`, defined or only
+/// declared, in a class and a trait. A tuple pattern lists nothing, and a
+/// grouped method local stays out.
+#[test]
+fn scala_grouped_body_fields_are_listed_with_their_shared_type() {
+    let scala = extract_inline(
+        "class K(p: Int) {\n  val (t1, t2) = (1, 2)\n  val a, b: Int = 1\n  val u, w = 2\n  protected var c, d: String = \"\"\n  def m(): Int = {\n    val x, y = 1\n    x + y\n  }\n  val e, f: Long\n}\n\n\
+         trait T {\n  val a, b: Int = 1\n  var c, d: Int = 2\n  val e, f: Int\n  var g, h: Int\n}\n",
+        "scala",
+    );
+    assert_field_lists(
+        &scala,
+        &[
+            (
+                "K",
+                &[
+                    ("p", false, None, No),
+                    ("a", false, PUBLIC, Yes),
+                    ("b", false, PUBLIC, Yes),
+                    ("u", false, PUBLIC, Yes),
+                    ("w", false, PUBLIC, Yes),
+                    ("c", false, PROTECTED, Yes),
+                    ("d", false, PROTECTED, Yes),
+                    ("e", false, PUBLIC, Yes),
+                    ("f", false, PUBLIC, Yes),
+                ],
+            ),
+            (
+                "T",
+                &[
+                    ("a", false, PUBLIC, Yes),
+                    ("b", false, PUBLIC, Yes),
+                    ("c", false, PUBLIC, Yes),
+                    ("d", false, PUBLIC, Yes),
+                    ("e", false, PUBLIC, Yes),
+                    ("f", false, PUBLIC, Yes),
+                    ("g", false, PUBLIC, Yes),
+                    ("h", false, PUBLIC, Yes),
+                ],
+            ),
+        ],
+    );
+
+    let field_types = |type_name: &str| -> Vec<(String, Option<String>)> {
+        type_symbol(&scala, type_name)
+            .type_metadata
+            .as_ref()
+            .unwrap_or_else(|| panic!("{type_name} metadata"))
+            .fields
+            .iter()
+            .map(|field| (field.name.clone(), field.type_annotation.clone()))
+            .collect()
+    };
+    let typed = |pairs: &[(&str, Option<&str>)]| -> Vec<(String, Option<String>)> {
+        pairs
+            .iter()
+            .map(|&(name, annotation)| (name.to_string(), annotation.map(str::to_string)))
+            .collect()
+    };
+    assert_eq!(
+        field_types("K"),
+        typed(&[
+            ("p", Some("Int")),
+            ("a", Some("Int")),
+            ("b", Some("Int")),
+            ("u", None),
+            ("w", None),
+            ("c", Some("String")),
+            ("d", Some("String")),
+            ("e", Some("Long")),
+            ("f", Some("Long")),
+        ]),
+        "K field types"
+    );
+    assert_eq!(
+        field_types("T"),
+        typed(&[
+            ("a", Some("Int")),
+            ("b", Some("Int")),
+            ("c", Some("Int")),
+            ("d", Some("Int")),
+            ("e", Some("Int")),
+            ("f", Some("Int")),
+            ("g", Some("Int")),
+            ("h", Some("Int")),
+        ]),
+        "T field types"
+    );
+}
+
 /// An enum's variant list keeps each variant's explicit value as written,
 /// on `symbols()`, on the record and after the round trip back; a member
 /// without one, and a Java constant's constructor arguments, have none.
@@ -608,7 +700,7 @@ fn scala_body_fields_pair_with_the_field_list() {
 #[test]
 fn enum_variant_lists_keep_discriminant_text() {
     type Variants = &'static [(&'static str, Option<&'static str>)];
-    let cases: [(&str, &str, &str, Variants); 7] = [
+    let cases: [(&str, &str, &str, Variants); 8] = [
         ("rs", "pub enum R { A, B = 2, C }\n", "R", &[("A", None), ("B", Some("2")), ("C", None)]),
         ("c", "enum E { RED, BLUE = 2 };\n", "E", &[("RED", None), ("BLUE", Some("2"))]),
         ("cpp", "enum class Scoped { S_A, S_B = 1 << 2 };\n", "Scoped", &[("S_A", None), ("S_B", Some("1 << 2"))]),
@@ -616,6 +708,7 @@ fn enum_variant_lists_keep_discriminant_text() {
         ("ts", "enum E { Red, Blue = 2, Green = \"g\" }\n", "E", &[("Red", None), ("Blue", Some("2")), ("Green", Some("\"g\""))]),
         ("php", "<?php\nenum Suit: string { case Hearts = 'h'; case Spades = 's'; }\n", "Suit", &[("Hearts", Some("'h'")), ("Spades", Some("'s'"))]),
         ("java", "enum Planet { MERCURY(1.0), VENUS(2.0); Planet(double m) {} }\n", "Planet", &[("MERCURY", None), ("VENUS", None)]),
+        ("scala", "enum S {\n  case A, B\n  case V(x: Int = 1)\n}\n", "S", &[("A", None), ("B", None), ("V", None)]),
     ];
     for (extension, source, enum_name, expected) in cases {
         let extracted = extract_inline(source, extension);
@@ -651,6 +744,168 @@ fn enum_variant_lists_keep_discriminant_text() {
 
         let round_trip = SymbolInfo::try_from(record.clone()).expect("round trip");
         assert_eq!(of_metadata(round_trip.type_metadata.as_ref()), expected, "{label}: round trip");
+    }
+}
+
+/// One variant as `(name, discriminant, tuple payload types, named payload
+/// fields with their types)`.
+type VariantPayload = (String, Option<String>, Vec<String>, Vec<(String, Option<String>)>);
+
+fn payload_of(variant: &tree_hugger::VariantInfo) -> VariantPayload {
+    (
+        variant.name.clone(),
+        variant.discriminant.clone(),
+        variant.tuple_fields.clone(),
+        variant
+            .struct_fields
+            .iter()
+            .map(|field| (field.name.clone(), field.type_annotation.clone()))
+            .collect(),
+    )
+}
+
+fn payload_of_record(variant: &tree_hugger::EnumVariantData) -> VariantPayload {
+    (
+        variant.name.clone(),
+        variant.discriminant.clone(),
+        variant.tuple_fields.clone(),
+        variant
+            .struct_fields
+            .iter()
+            .map(|field| (field.name.clone(), field.type_text.clone()))
+            .collect(),
+    )
+}
+
+fn unit(name: &str) -> VariantPayload {
+    (name.to_string(), None, Vec::new(), Vec::new())
+}
+
+fn named(name: &str, fields: &[(&str, &str)]) -> VariantPayload {
+    let fields = fields
+        .iter()
+        .map(|&(field, type_text)| (field.to_string(), Some(type_text.to_string())))
+        .collect();
+    (name.to_string(), None, Vec::new(), fields)
+}
+
+/// `(extension, source, enum name, expected variants in source order)`.
+type PayloadCase = (&'static str, &'static str, &'static str, Vec<VariantPayload>);
+
+pub const SCALA_BRACE_ENUM: &str = "enum Shape[T] {\n  case Empty\n  case Red, Green\n  case Point(x: Int, y: String)\n  case Sized(x: Int = 1, y: List[String])\n  case Held(item: T)\n  case Curried(x: Int)(using order: Ordering[T])\n}\n";
+pub const SCALA_INDENTED_ENUM: &str = "enum Mode:\n  case Off, On\n  case Level(value: Int, render: Int => String)\n";
+
+fn payload_cases() -> Vec<PayloadCase> {
+    vec![
+        (
+            "scala",
+            SCALA_BRACE_ENUM,
+            "Shape",
+            vec![
+                unit("Empty"),
+                unit("Red"),
+                unit("Green"),
+                named("Point", &[("x", "Int"), ("y", "String")]),
+                named("Sized", &[("x", "Int"), ("y", "List[String]")]),
+                named("Held", &[("item", "T")]),
+                named("Curried", &[("x", "Int"), ("order", "Ordering[T]")]),
+            ],
+        ),
+        (
+            "scala",
+            SCALA_INDENTED_ENUM,
+            "Mode",
+            vec![unit("Off"), unit("On"), named("Level", &[("value", "Int"), ("render", "Int => String")])],
+        ),
+        (
+            "rs",
+            "pub enum R { Unit, Pair(i32, String), Named { x: i32, y: String } }\n",
+            "R",
+            vec![
+                unit("Unit"),
+                ("Pair".to_string(), None, vec!["i32".to_string(), "String".to_string()], Vec::new()),
+                named("Named", &[("x", "i32"), ("y", "String")]),
+            ],
+        ),
+    ]
+}
+
+/// An enum's variant list keeps each declared payload with its written
+/// types: a Scala full case lists its class parameters (every clause, in
+/// order) as named fields, a default value is no discriminant, a generic
+/// case keeps `T`, and unit and grouped cases stay unit, once each, in brace
+/// and indentation syntax; Rust tuple and struct variants are the controls.
+/// The payload is the same on `symbols()`, the complete record, the v1 round
+/// trip and an enum-only query, while each standalone `EnumVariant` record
+/// keeps an `Unknown` payload and each case parameter its own `Parameter`.
+#[test]
+fn enum_variant_lists_keep_declared_payload_types() {
+    use tree_hugger::{SymbolKindData, SymbolKindV2, SymbolQuery};
+    for (extension, source, enum_name, expected) in payload_cases() {
+        let label = format!("{extension}: `{enum_name}`");
+        let mut file = tempfile::Builder::new()
+            .suffix(&format!(".{extension}"))
+            .tempfile()
+            .expect("create temp source");
+        std::io::Write::write_all(&mut file, source.as_bytes()).expect("write temp source");
+        let tree_file = TreeFile::new(file.path()).expect("parse inline source");
+        let extracted = crate::symbols_fixtures::Extracted::from_tree_file(label.clone(), &tree_file);
+
+        let symbol = type_symbol(&extracted, enum_name);
+        assert_eq!(symbol.kind, SymbolKind::Enum, "{label}");
+        let metadata = symbol.type_metadata.as_ref().unwrap_or_else(|| panic!("{label}: no metadata"));
+        assert!(metadata.fields.is_empty(), "{label}: variants never enter the field list");
+        assert_eq!(metadata.variants.iter().map(payload_of).collect::<Vec<_>>(), expected, "{label}: symbols()");
+
+        let record = extracted.record(enum_name, None);
+        let SymbolKindData::Enum(data) = &record.kind_data else {
+            panic!("{label}: enum payload, got {:?}", record.kind_data);
+        };
+        assert_eq!(data.variants.iter().map(payload_of_record).collect::<Vec<_>>(), expected, "{label}: symbol_index_v2()");
+
+        let round_trip = SymbolInfo::try_from(record.clone()).expect("round trip");
+        let round_trip = round_trip.type_metadata.as_ref().unwrap_or_else(|| panic!("{label}: round-trip metadata"));
+        assert_eq!(round_trip.variants.iter().map(payload_of).collect::<Vec<_>>(), expected, "{label}: round trip");
+
+        let narrowed = tree_file.query(&SymbolQuery::new().kinds([SymbolKindV2::Enum])).expect("enum-only query");
+        let narrowed: Vec<&SymbolRecord> = narrowed
+            .index
+            .symbols
+            .iter()
+            .filter(|candidate| candidate.kind == SymbolKindV2::Enum && candidate.identity.name == enum_name)
+            .collect();
+        assert_eq!(narrowed.len(), 1, "{label}: one enum record in the enum-only query");
+        assert_eq!(
+            serde_json::to_value(&narrowed[0].kind_data).expect("serialize narrowed"),
+            serde_json::to_value(&record.kind_data).expect("serialize complete"),
+            "{label}: an enum-only query reports the complete payload"
+        );
+
+        for (variant, _, _, fields) in &expected {
+            let variant_record = extracted.record(variant, Some(enum_name));
+            assert_eq!(variant_record.kind, SymbolKindV2::EnumVariant, "{label}: `{variant}`");
+            assert!(
+                matches!(variant_record.kind_data, SymbolKindData::Unknown),
+                "{label}: `{variant}` keeps an Unknown payload, got {:?}",
+                variant_record.kind_data
+            );
+            if extension == "scala" {
+                let owner = format!("{enum_name}.{variant}.");
+                let mut parameters: Vec<String> = extracted
+                    .symbols
+                    .iter()
+                    .filter(|candidate| {
+                        candidate.kind == SymbolKind::Parameter
+                            && candidate.qualified_name == format!("{owner}{}", candidate.name)
+                    })
+                    .map(|candidate| candidate.name.clone())
+                    .collect();
+                parameters.sort();
+                let mut declared: Vec<String> = fields.iter().map(|(name, _)| name.clone()).collect();
+                declared.sort();
+                assert_eq!(parameters, declared, "{label}: `{variant}` keeps its Parameter records");
+            }
+        }
     }
 }
 

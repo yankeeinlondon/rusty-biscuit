@@ -81,9 +81,9 @@ Unknown. No construct in the test fixtures of any language reports `Unknown`.
 | Java | method → Method; explicit constructor (also in an enum or record) → Constructor | `class` → Class; `interface` → Interface; `enum` → Enum; `record` → Type | field and interface constant → Field; enum constant (`RED`, `MERCURY(1.0)`, `BLUE { … }`) → EnumVariant | `package` → Namespace |
 | C# | method → Method; explicit instance constructor (block or `=>` body, also in a struct or record, with or without `: this(…)`) → Constructor; local function → Function | `class` → Class; `interface` → Interface; `enum` → Enum; `struct`, `record` → Type | field and `event` field → Field; property → Property (in classes, structs, records and interfaces); enum member → EnumVariant | `namespace` (block and file-scoped) → Namespace |
 | C | function → Function | named `struct`/`union` tag → Type; `enum` → Enum; `typedef` → TypeAlias (also `typedef int *P;`, `typedef int (*Fn)(int);`) | struct or union field, under any pointer, array, function-pointer or attributed declarator (`**p`, `a[3]`, `(*cb)(int)`, `x [[maybe_unused]]`), and the members of an anonymous `struct`/`union` → Field; enumerator of a named, anonymous or `typedef`'d enum → EnumVariant | — |
-| C++ | function → Function; function declared or defined in a class body, whatever its return declarators (`int (*m(int))(long);`) → Method; constructor declared or defined in a class body (`C();`, `explicit C(int);`, `C() = default;`, `C(C&&) = delete;`, under `template<…>`) → Constructor | `class` → Class; `struct`, `union` → Type; `enum` → Enum; `typedef` (also behind a declarator), `using` → TypeAlias | data member, under any pointer, array, reference, function-pointer or attributed declarator, also a variable template (`template<class T> static T cache[3];`) and an anonymous union's members → Field; enumerator of a scoped or unscoped enum → EnumVariant | `namespace` → Namespace |
+| C++ | function → Function; function declared or defined in a class body, whatever its return declarators (`int (*m(int))(long);`) → Method; constructor declared or defined in a class body (`C();`, `explicit C(int);`, `C() = default;`, `C(C&&) = delete;`, under `template<…>`, with an attribute on the name `C [[deprecated]] ()` or the name in parentheses `(C)()`) → Constructor | `class` → Class; `struct`, `union` → Type; `enum` → Enum; `typedef` (also behind a declarator), `using` → TypeAlias | data member, under any pointer, array, reference, function-pointer or attributed declarator, also a variable template (`template<class T> static T cache[3];`) and an anonymous union's members → Field; enumerator of a scoped or unscoped enum → EnumVariant | `namespace` → Namespace |
 | Swift | `func` → Function; `func` in a type, extension or protocol (requirements too) → Method; `init`, `init?` and `init!` in a type, extension or protocol → Constructor, named `init` | `struct`, `class` and `enum` all → Type; `protocol` → Interface; `typealias` → TypeAlias | stored property (every binding of `var a = 1, b = 2`) and protocol property requirement → Field; `case` → EnumVariant | — |
-| Scala | `def` → Function; `def` in a class, trait, enum, object, anonymous class (`new T { … }`) or `given … with` instance → Method; an `extension` method belongs to the type around the block (a Function at top level); a `package object`'s `def` stays a Function with no container | `class`, `case class` → Class; `trait` → Trait; `enum` → Enum; `type A = B` (also generic) → TypeAlias | `val`, `var` and `lazy val`, defined or only declared, directly in a class, trait, object or enum body → Field; enum `case` (`case Red, Blue`, `case Value(x: Int)`) → EnumVariant | `object` → Module |
+| Scala | `def` → Function; `def` in a class, trait, enum, object, anonymous class (`new T { … }`) or `given … with` instance → Method; an `extension` method belongs to the type around the block (a Function at top level); a `package object`'s `def` stays a Function with no container | `class`, `case class` → Class; `trait` → Trait; `enum` → Enum; `type A = B` (also generic) → TypeAlias | `val`, `var` and `lazy val`, defined or only declared, directly in a class, trait, object or enum body → Field, one per name of a grouped `val a, b: Int` (a tuple pattern `val (a, b) = …` declares none); enum `case` (`case Red, Blue`, `case Value(x: Int)`) → EnumVariant | `object` → Module |
 | PHP | function → Function; method (also in a trait) → Method; a method named `__construct`, in any letter case → Constructor | `class` → Class; `interface` → Interface; `trait` → Trait; `enum` → Enum | property → Field; `const` → Constant (members and top-level); enum `case` (unit or backed) → EnumVariant | named `namespace`, semicolon or braced → Namespace |
 | Lua | `function` and `M.f` → Function; `function M:m()` → Method | — | — | — |
 | Perl | named `sub` → Function | — | `my`, `our`, `state` names → Variable | `package` → Module |
@@ -178,7 +178,7 @@ recognized by name, and only once the declaration is known to be a method.
 | Python | `def __init__(self, …)` in a class body, decorated or not | top-level or function-local `__init__`: Function; `__new__`: Method |
 | Java | `C(int x) {}` in a class, enum or record | `void C() {}`: Method; a compact record constructor `R { … }` and initializer blocks: not reported |
 | C# | `public C(int x) {}`, `S(int x) => X = x;` | `int C()`: Method; `static C() {}`, `~C() {}` and a primary constructor `class P(int x)`: not reported (`x` is a Parameter) |
-| C++ | `C();`, `C(int x) {}`, `C() = default;` in a class body | `~C();` and `operator bool()`: not reported; out-of-class `C::C() {}`: Function with no container |
+| C++ | `C();`, `C(int x) {}`, `C() = default;` in a class body, also with an attribute on the name or the name in parentheses (`C [[deprecated]] (int x);`, `(C)(int x);`) | `~C();` and `operator bool()`: not reported; `int m [[deprecated]] (int x);`: Method; out-of-class `C::C() {}`: Function with no container |
 | Swift | `init`, `init?`, `init!` in a type, extension or protocol | `deinit`: not reported; `static func make()`: Method |
 | PHP | `function __construct()`, any letter case | a legacy `function Legacy()` in `class Legacy`: Method; a top-level `__construct`: Function |
 
@@ -622,10 +622,10 @@ the docstring instead.
 | Language | Documentation |
 |---|---|
 | Rust | `///` and `/** … */` (`//!` documents the enclosing module, not the next item); attributes between them and the item are skipped |
-| Go | every comment in the group that ends on the line before the declaration (a blank line ends the group) |
+| Go | every comment in the group that ends on the line before the declaration (a blank line ends the group), minus its directive lines (see below) |
 | Java, JavaScript, TypeScript, PHP, Scala | `/** … */` |
 | C#, Swift | `///` and `/** … */` |
-| C, C++ | Doxygen's `///`, `//!`, `/** … */` and `/*! … */` |
+| C, C++ | Doxygen's `///`, `//!`, `/** … */` and `/*! … */`, but not their `<` forms (`///<`, `//!<`, `/**<`, `/*!<`), which document the member before them |
 | Python | the docstring: a first statement of a `def` or `class` body that is a string constant (see below) |
 | Lua, Perl, Bash, Zsh | none: these languages have no doc-comment detection |
 
@@ -637,10 +637,78 @@ export const add = (a: number, b: number) => a + b;
 function helper() {}
 ```
 
-A declaration wrapped in `export`, a JavaScript or TypeScript variable
-statement or a C++ `template<…>` header is documented before the wrapper. A
-doc comment that is empty after its delimiters are removed is no
-documentation.
+**A comment that trails code documents nothing after it** in Go, JavaScript
+and TypeScript. A comment that starts on the line where the previous code
+ends, and any comment that starts on the line where such a comment ends,
+belongs to that code: Go makes it the line comment of the previous line, and
+TypeScript's JSDoc scan, used for both languages, starts after the line
+break. Rust, Java, C#, PHP, Scala, Swift and a plain C or C++ `///` give a
+same-line doc comment to the next declaration, as their own readers do.
+
+```go
+const (
+	A = 1 // A's line comment     <- documents nothing: B is undocumented
+	B = 2
+)
+```
+
+```js
+let a = 1; /** about a */         // trails `a`: `b` is undocumented
+let b = 2;
+```
+
+```c
+struct S {
+  int a; ///< documents a, never b   <- not read: b is undocumented
+  int b;
+};
+```
+
+A declaration with no doc comments of its own is documented by those before
+the wrapper around it:
+
+- `export`, a JavaScript or TypeScript variable statement or `declare`, and a
+  C++ `template<…>` header
+- a Go `var`, `const` or `type` declaration, alone or grouped in parentheses:
+  every name in it shares the declaration's doc, and inside a group a spec's
+  own doc wins over the group's (as `go doc` reads them). A spec has its own
+  doc whenever a comment group is attached to it, even one that reads as no
+  text (a bare `//`, an empty `/* */`, only directives): that spec is
+  undocumented and does not inherit the group's doc or its `Deprecated:`
+  paragraph. Only a spec with no attached group shares the group's doc; a
+  comment separated from the spec by a blank line, or trailing the previous
+  spec on its line, is not attached
+- a C or C++ `extern "C"` that declares one function or variable; the members
+  of a braced `extern "C" { … }` block need their own docs
+- a Scala `extension` that declares one method; the methods of a collective
+  extension need their own docs
+
+```go
+// Limit documents both names.
+var Limit, Floor int
+
+// Deprecated: use Config.     <- documents A and C, and deprecates them
+const (
+	A = 1
+	// B has its own doc.       <- B's doc, not the group's
+	B = 2
+	C = 3
+	//                          <- attached but empty: D is undocumented
+	D = 4
+	//go:noinline               <- only a directive: E is undocumented
+	E = 5
+)
+
+func run() {
+	// Never documentation: a local variable has no doc.
+	var count int
+}
+```
+
+A doc comment that is empty after its delimiters are removed is no
+documentation. Outside Go, such an empty doc does not stop the climb: a
+declaration under one of the wrappers above whose own doc is empty is still
+documented by the wrapper's.
 
 **A Python docstring is a string constant, as Python decides it.** The first
 statement of the body must be one ordinary string literal, with no prefix or
@@ -667,6 +735,49 @@ A doc comment is recognized by its opening delimiter alone: `/**/` and
 `/***/` are ordinary block comments, and `////` is an ordinary line
 comment.
 
+**Block-comment decoration is removed the way each language's doc tool
+removes it.** After the delimiters go (`/**` or `/*!` and `*/`; `///`,
+`//!` or `//` for a line comment, which never loses a `*`, so `/// *`
+documents), a leading `*` on a line is either decoration or text:
+
+| Language | A leading `*` is decoration when… |
+|---|---|
+| Java, JavaScript, TypeScript, PHP, Scala, C, C++ | always: one leading `*` is removed from every line, whatever the other lines hold |
+| Rust (rustdoc) | every line after the first (the first too when it starts with `*`; leading and trailing blank lines skipped) has its first `*` at the same column with only spaces or tabs before it; a line indented differently from the first keeps its `*`, and the `*` itself goes only when nothing, a space or another `*` follows it |
+| C# (compiler) | the second line starts with spaces/tabs, `*`, spaces/tabs, and every later line shares a prefix with it that holds the `*`; a blank, unstarred or differently indented line cancels the removal for the whole comment |
+| Swift (compiler) | the comment starts with a line break and its second line is ` * ` (or a lone ` *`) at the comment's own column; then only lines with that same decoration lose it |
+| Go | never: see the Go paragraphs below |
+
+A star that is not decoration is documentation text. In Rust, C# and Swift
+a block of only stars that are not consistently placed therefore documents
+its declaration, and so does the one-line `/** * */`; in the other block
+languages both are undocumented.
+
+```rust
+/**
+ *
+  *
+*/
+pub fn misaligned() {}      // has_docs = true: the stars disagree, so one is text
+
+/**
+ *
+ *
+ */
+pub fn aligned() {}         // has_docs = false: consistent decoration only
+
+/**
+Intro
+ *b* is next
+*/
+pub fn mixed() {}           // raw doc "Intro\n*b* is next"
+```
+
+Every line of the cleaned doc is then trimmed and blank lines are dropped.
+The structured-docs pass (`docs.parsed`, from `--json-full`) reads that
+cleaned text as it is: a `*` or `//` still at the start of a line is part of
+the summary.
+
 ## Deprecation and test flags
 
 Two flags are computed when a query asks for `Capability::Flags`, which
@@ -686,7 +797,7 @@ leaves it `false`:
 | Go | a doc paragraph that starts with `Deprecated:`, in `//` or `/* */` docs alike (a blank line starts a paragraph; an indented line is a code block, not a paragraph) |
 | Swift | `@available(*, deprecated…)`: a top-level `deprecated` argument (a single-platform `@available(iOS, deprecated: 13)` and the word inside `message: "…"` do not count) |
 | Scala | `@deprecated` (or `@scala.deprecated`) |
-| C++ | `[[deprecated]]` (a vendor form such as `[[gnu::deprecated]]` does not count) |
+| C++ | `[[deprecated]]` before the declaration or right after the declared name (`C [[deprecated]] (int x);`, `int a [[deprecated]], b;` deprecates only `a`); one after a parameter list or array bound (`int f(int) [[deprecated]];`) belongs to the type and does not count, nor does a vendor form such as `[[gnu::deprecated]]` |
 | Python | the `@deprecated` decorator, bare or as `typing_extensions.deprecated` or `warnings.deprecated` |
 
 A fenced code block in a Java, JavaScript, TypeScript or PHP doc block
@@ -724,6 +835,29 @@ declaration. The whitespace prefix that every nonblank line shares is then
 removed, and a line still indented after that is a code block, so an
 indented `Deprecated:` line is example text. The first unindented line after
 a code block starts a new paragraph.
+
+A Go **directive** is not documentation. A `//` line comment with no space
+after `//` that starts `line `, `extern ` or `export `, or has the form
+`name:x` with a lowercase-letter-or-digit name and a lowercase letter or
+digit right after the colon (`//go:generate …`, `//go:noinline`,
+`//a1:b2`), is dropped before anything else is decided. A declaration whose
+group holds only directives is undocumented, and a directive leaves no blank
+line behind, so it neither starts nor ends a paragraph. `// go:noinline`,
+`//Go:noinline`, `//go: noinline`, `//go:` and `/*go:noinline*/` are prose.
+
+```go
+//go:generate echo generated     <- directive: ReviewGenerate is undocumented
+func ReviewGenerate() {}
+
+//go:generate echo generated
+// Deprecated: use New.           <- still a paragraph start: is_deprecated = true
+func ReviewBeforeMarker() {}
+
+// Intro line.
+//go:noinline
+// Deprecated: use New.           <- same paragraph as the intro: not deprecated
+func Mid() {}
+```
 
 Attributes are read from the syntax tree, not their text: a comment inside
 an attribute is ignored (`#[deprecated /* why */]`, `[Obsolete /* why */]`
@@ -1359,6 +1493,7 @@ the entry keeps the type written in the source:
 class Box(p: Int) {
   val width: Int = 1   // Field; list entry width: Int
   var height = 2       // Field; list entry height (no written type)
+  val x, y: Int = 0    // two Fields; list entries x: Int and y: Int
 }                      // p: Parameter; list entry p, no Field record
 ```
 
@@ -1400,7 +1535,23 @@ Two owners keep a narrower list:
   The variant list and the standalone EnumVariant records name the same
   variants, once each and in source order. A variant's value is the list
   entry's `discriminant` (`BLUE = 2` gives `2`), since a variant record has
-  no payload of its own. Only an Enum has a variant list: a Swift `enum` is
+  no payload of its own. A declared payload is the entry's too, with its
+  types as written: Rust tuple variants list `tuple_fields`, Rust struct
+  variants and Scala cases with class parameters list named `struct_fields`.
+  A Scala case lists every parameter clause in order, keeps a type parameter
+  unresolved (`T`), and a default (`x: Int = 1`) is not a discriminant:
+
+  ```scala
+  enum Shape[T]:
+    case Red, Green                          // Red, Green: no payload
+    case Sized(x: Int = 1, y: List[String])  // x: Int, y: List[String]
+    case Held(item: T)(using o: Ordering[T]) // item: T, o: Ordering[T]
+  ```
+
+  Each case parameter is still its own Parameter record (`Shape.Sized.x`).
+  A context parameter written by type alone (`case U(using Int)`) parses as
+  a parameter named `Int` with no type, and is listed that way. Only an
+  Enum has a variant list: a Swift `enum` is
   reported as Type and lists none, though its `case` records are still
   EnumVariants;
 - a **Rust `impl`** is not the type's body, so its associated constants are
@@ -1673,3 +1824,13 @@ reported correctly until the grammar changes:
 
 A Scala enum written without an access modifier is parsed and reported
 normally, and its cases take the enum's access.
+
+One more Scala form parses without an error but into the wrong shape. A
+grouped declaration with no initializer (`val e, f: Int`) followed on the
+next line by an unmodified `val` or `var` without a written type
+(`var z = 1`, `val (p, q) = …`) is read by tree-sitter-scala 0.24.0 as one
+definition whose type is the infix type `Int var z`: `e` and `f` are still
+Fields, but their written type is that infix text and the following member
+is lost. A single-name declaration, or a following member with a written
+type, a modifier or another keyword (`val z: Int = 1`, `lazy val z = 1`,
+`def`), parses as written.

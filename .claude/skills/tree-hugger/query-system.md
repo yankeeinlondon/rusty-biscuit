@@ -91,6 +91,13 @@ Field or Constant only from the path between the name and its own declaration
 A Python chained assignment (`first = second = 0`) is one declaration, the
 outermost `assignment`; a later target, captured only as `var`, becomes a
 Field when that statement is directly in a class body.
+A Scala grouped `val a, b: Int = 1` puts its names under one
+`pattern: (identifiers …)` and a grouped declaration `val a, b: Int` repeats
+the `name` field, so the vendored query captures each `identifier` under
+`identifiers` and `extract_scala_body_fields` reads every name
+(`children_by_field_name`), giving each list entry the shared type; a tuple
+pattern (`val (a, b) = …`) is never captured. Any reader of a declaration
+that can carry several names must enumerate them, never take the first.
 
 JS/TS quoted member names capture the `string_fragment` inside the `string`,
 so `"label": string` is reported as `label`.

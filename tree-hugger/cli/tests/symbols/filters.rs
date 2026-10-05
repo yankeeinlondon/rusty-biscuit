@@ -495,6 +495,28 @@ fn deferred_kinds_join_their_commands_and_kind_selectors() {
     assert_eq!(listed(&scratch, &["functions", "--kind", "enum_variant"]), [], "`--kind` never widens a command");
 }
 
+/// A C++ constructor whose name carries a declarator attribute, or sits in
+/// parentheses, is selected by `--kind constructor` and not by `--kind
+/// method`, like the unwrapped one; a method with the same attribute stays a
+/// method.
+#[test]
+fn wrapped_cpp_constructor_names_select_as_constructors() {
+    let scratch = Scratch::new(&[(
+        "wrapped.cpp",
+        "class C {\npublic:\n    C [[deprecated]] (int x);\n    (C)(long y);\n    C();\n    int m [[deprecated]] (int x);\n};\n",
+    )]);
+    let constructor = ("wrapped.cpp", "wrapped.cpp#C::C", "Constructor");
+    assert_eq!(
+        listed(&scratch, &["functions", "wrapped.cpp", "--kind", "constructor"]),
+        rows(&[constructor, constructor, constructor])
+    );
+    assert_eq!(
+        listed(&scratch, &["functions", "wrapped.cpp", "--kind", "method"]),
+        rows(&[("wrapped.cpp", "wrapped.cpp#C::m", "Method")]),
+        "`--kind method` excludes every constructor spelling"
+    );
+}
+
 #[test]
 fn imports_match_an_alias_or_an_original_name_and_keep_positional_files() {
     let scratch = scratch();
@@ -755,6 +777,204 @@ fn go_doc_stars_are_text_for_deprecated_undocumented_and_stats() {
     assert_eq!(coverage["ratio"].as_f64(), Some(1.0), "{coverage}");
 }
 
+/// A standalone Go `var` and `const` documented before the declaration, and
+/// the same pair whose docs are `Deprecated:` paragraphs.
+pub(crate) const GO_WRAPPED_DOCS: &str = concat!(
+    "package wrapped\n\n",
+    "// ReviewSingleVar is documented.\nvar ReviewSingleVar int\n\n",
+    "// ReviewSingleConst is documented.\nconst ReviewSingleConst = 1\n\n",
+    "// Deprecated: use ReviewSingleVar.\nvar ReviewMarkedVar int\n\n",
+    "// Deprecated: use ReviewSingleConst.\nconst ReviewMarkedConst = 1\n",
+);
+
+/// A Go `var` or `const` spec is documented by the comment before its
+/// enclosing declaration, for `--undocumented`, `--deprecated` and the doc
+/// coverage of `--stats`.
+#[test]
+fn go_var_and_const_docs_attach_through_the_declaration() {
+    let scratch = Scratch::new(&[("wrapped.go", GO_WRAPPED_DOCS)]);
+    let count = |args: &[&str]| scratch.stdout(args).trim().to_string();
+    let undocumented = ["symbols", "--file", "wrapped.go", "--name", "ReviewSingle", "--undocumented", "--count", "--no-cache"];
+    assert_eq!(count(&undocumented), "0", "hug {}", undocumented.join(" "));
+    let deprecated = ["symbols", "--file", "wrapped.go", "--name", "ReviewMarked", "--deprecated", "--count", "--no-cache"];
+    assert_eq!(count(&deprecated), "2", "hug {}", deprecated.join(" "));
+    let control = ["symbols", "--file", "wrapped.go", "--name", "ReviewSingle", "--deprecated", "--count", "--no-cache"];
+    assert_eq!(count(&control), "0", "hug {}", control.join(" "));
+
+    let stats = json_of(&scratch.stdout(&[
+        "symbols", "--file", "wrapped.go", "--name", "ReviewSingle", "--stats", "--json", "--no-cache",
+    ]));
+    let coverage = &stats["stats"]["doc_coverage"];
+    assert_eq!(coverage["documented"], 2, "{coverage}");
+    assert_eq!(coverage["total"], 2, "{coverage}");
+    assert_eq!(coverage["ratio"].as_f64(), Some(1.0), "{coverage}");
+}
+
+/// The review's Go declarations: a `//go:generate` directive alone, which
+/// is no documentation, and the same directive before a `Deprecated:`
+/// paragraph, which it does not hide.
+pub(crate) const GO_DIRECTIVE_DECLARATIONS: &str = concat!(
+    "//go:generate echo generated\nfunc ReviewGenerate() {}\n\n",
+    "//go:generate echo generated\n// Deprecated: use New.\nfunc ReviewBeforeMarker() {}\n",
+);
+
+/// Go's directives are not documentation (`CommentGroup.Text`), for
+/// `--undocumented`, `--deprecated`, the doc coverage of `--stats` and the
+/// flags of `--jsonl`.
+#[test]
+fn go_directives_are_not_documentation_for_selectors_stats_and_json_lines() {
+    let source = format!("package directives\n\n{GO_DIRECTIVE_DECLARATIONS}");
+    let scratch = Scratch::new(&[("go.go", source.as_str())]);
+    let count = |args: &[&str]| scratch.stdout(args).trim().to_string();
+    let undocumented =
+        ["functions", "--file", "go.go", "--name", "ReviewGenerate", "--exact", "--undocumented", "--count", "--no-cache"];
+    assert_eq!(count(&undocumented), "1", "hug {}", undocumented.join(" "));
+    let deprecated =
+        ["functions", "--file", "go.go", "--name", "ReviewBeforeMarker", "--exact", "--deprecated", "--count", "--no-cache"];
+    assert_eq!(count(&deprecated), "1", "hug {}", deprecated.join(" "));
+    let control =
+        ["functions", "--file", "go.go", "--name", "ReviewGenerate", "--exact", "--deprecated", "--count", "--no-cache"];
+    assert_eq!(count(&control), "0", "hug {}", control.join(" "));
+
+    let stats = json_of(&scratch.stdout(&[
+        "functions", "--file", "go.go", "--name", "ReviewGenerate", "--exact", "--stats", "--json", "--no-cache",
+    ]));
+    let coverage = &stats["stats"]["doc_coverage"];
+    assert_eq!(coverage["documented"], 0, "{coverage}");
+    assert_eq!(coverage["total"], 1, "{coverage}");
+    assert_eq!(coverage["ratio"].as_f64(), Some(0.0), "{coverage}");
+
+    let lines = scratch.stdout(&["functions", "--file", "go.go", "--jsonl", "--no-cache"]);
+    let flags: Vec<(String, bool)> = lines
+        .lines()
+        .map(|line| {
+            let value: serde_json::Value = serde_json::from_str(line).expect("JSON line");
+            let record = &value["record"];
+            (
+                record["identity"]["name"].as_str().expect("name").to_string(),
+                record["visibility"]["is_deprecated"].as_bool().expect("is_deprecated"),
+            )
+        })
+        .collect();
+    assert_eq!(
+        flags,
+        [("ReviewGenerate".to_string(), false), ("ReviewBeforeMarker".to_string(), true)],
+        "{lines}"
+    );
+}
+
+/// The review's Go type group: its doc is a `Deprecated:` paragraph, one
+/// spec's own comment is a blank `//`, one's is only a directive, and one
+/// has no comment of its own.
+pub(crate) const GO_EMPTY_SPEC_DOCS: &str = concat!(
+    "// Deprecated: use New.\ntype (\n",
+    "    //\n    ReviewEmpty int\n",
+    "    //go:noinline\n    ReviewDirective = int\n",
+    "    ReviewAbsent int\n)\n",
+);
+
+/// A Go spec whose own attached comment group reads as no text is
+/// undocumented and does not inherit its group's doc or `Deprecated:`
+/// paragraph; a spec with no attached group does, for `--undocumented`,
+/// `--deprecated`, the doc coverage of `--stats`, `--jsonl` and
+/// `--json-full`.
+#[test]
+fn empty_go_spec_comments_do_not_inherit_the_group_doc() {
+    let source = format!("package specs\n\n{GO_EMPTY_SPEC_DOCS}");
+    let scratch = Scratch::new(&[("go.go", source.as_str())]);
+    let count = |args: &[&str]| scratch.stdout(args).trim().to_string();
+    for (name, documented) in [("ReviewEmpty", false), ("ReviewDirective", false), ("ReviewAbsent", true)] {
+        let undocumented = ["types", "--file", "go.go", "--name", name, "--exact", "--undocumented", "--count", "--no-cache"];
+        let expected = if documented { "0" } else { "1" };
+        assert_eq!(count(&undocumented), expected, "hug {}", undocumented.join(" "));
+        let deprecated = ["types", "--file", "go.go", "--name", name, "--exact", "--deprecated", "--count", "--no-cache"];
+        let expected = if documented { "1" } else { "0" };
+        assert_eq!(count(&deprecated), expected, "hug {}", deprecated.join(" "));
+
+        let stats = json_of(&scratch.stdout(&[
+            "types", "--file", "go.go", "--name", name, "--exact", "--stats", "--json", "--no-cache",
+        ]));
+        let coverage = &stats["stats"]["doc_coverage"];
+        assert_eq!(coverage["documented"], u64::from(documented), "{name}: {coverage}");
+        assert_eq!(coverage["total"], 1, "{name}: {coverage}");
+        assert_eq!(coverage["ratio"].as_f64(), Some(if documented { 1.0 } else { 0.0 }), "{name}: {coverage}");
+    }
+
+    let expected = [
+        ("ReviewEmpty".to_string(), false, None),
+        ("ReviewDirective".to_string(), false, None),
+        ("ReviewAbsent".to_string(), true, Some("Deprecated: use New.".to_string())),
+    ];
+    let lines = scratch.stdout(&["types", "--file", "go.go", "--name", "Review", "--jsonl", "--no-cache"]);
+    let published: Vec<(String, bool, Option<String>)> = lines
+        .lines()
+        .map(|line| {
+            let value: serde_json::Value = serde_json::from_str(line).expect("JSON line");
+            let record = &value["record"];
+            (
+                record["identity"]["name"].as_str().expect("name").to_string(),
+                record["visibility"]["is_deprecated"].as_bool().expect("is_deprecated"),
+                record["docs"]["raw_doc"].as_str().map(str::to_string),
+            )
+        })
+        .collect();
+    assert_eq!(published, expected, "{lines}");
+
+    let full = json_of(&scratch.stdout(&["types", "--file", "go.go", "--json-full", "--no-cache"]));
+    let mut facts: Vec<(String, bool, bool)> = full["indexes"]
+        .as_array()
+        .expect("indexes")
+        .iter()
+        .flat_map(|index| index["symbols"].as_array().expect("index symbols"))
+        .filter(|record| record["kind"] != "Namespace")
+        .map(|record| {
+            (
+                record["identity"]["name"].as_str().expect("name").to_string(),
+                record["metrics"]["has_docs"].as_bool().expect("has_docs"),
+                record["visibility"]["is_deprecated"].as_bool().expect("is_deprecated"),
+            )
+        })
+        .collect();
+    facts.sort();
+    assert_eq!(
+        facts,
+        [
+            ("ReviewAbsent".to_string(), true, true),
+            ("ReviewDirective".to_string(), false, false),
+            ("ReviewEmpty".to_string(), false, false),
+        ],
+        "{full}"
+    );
+}
+
+/// The review's misaligned star-only block: the two stars sit at different
+/// columns, so Rust, C# and Swift keep at least one as documentation text.
+const MISALIGNED_STAR_BLOCK: &str = "/**\n *\n  *\n*/\n";
+
+/// A star-only block comment whose stars are not consistently placed
+/// documents its declaration in Rust, C# and Swift, whose doc tools remove
+/// only consistent decoration, for `--undocumented` and the doc coverage of
+/// `--stats`.
+#[test]
+fn misaligned_star_blocks_document_rust_csharp_and_swift_declarations() {
+    let rust = format!("{MISALIGNED_STAR_BLOCK}pub fn ReviewMisalignedSpaces() {{}}\n");
+    let csharp = format!("{MISALIGNED_STAR_BLOCK}class ReviewMisalignedSpaces {{}}\n");
+    let swift = format!("{MISALIGNED_STAR_BLOCK}func ReviewMisalignedSpaces() {{}}\n");
+    let scratch = Scratch::new(&[("lib.rs", rust.as_str()), ("Review.cs", csharp.as_str()), ("review.swift", swift.as_str())]);
+    for file in ["lib.rs", "Review.cs", "review.swift"] {
+        let selector = ["symbols", "--file", file, "--name", "ReviewMisalignedSpaces", "--exact", "--no-cache"];
+        let undocumented: Vec<&str> = selector.iter().copied().chain(["--undocumented", "--count"]).collect();
+        assert_eq!(scratch.stdout(&undocumented).trim(), "0", "hug {}", undocumented.join(" "));
+
+        let stats_args: Vec<&str> = selector.iter().copied().chain(["--stats", "--json"]).collect();
+        let stats = json_of(&scratch.stdout(&stats_args));
+        let coverage = &stats["stats"]["doc_coverage"];
+        assert_eq!(coverage["documented"], 1, "{file}: {coverage}");
+        assert_eq!(coverage["total"], 1, "{file}: {coverage}");
+        assert_eq!(coverage["ratio"].as_f64(), Some(1.0), "{file}: {coverage}");
+    }
+}
+
 /// Only a nonempty `str` constant is a Python docstring: a formatted or a
 /// bytes literal leaves its function undocumented, while an adjacent
 /// concatenation of ordinary literals documents it, both for
@@ -780,4 +1000,50 @@ fn python_docstrings_are_string_constants_for_undocumented_and_stats() {
     assert_eq!(coverage["documented"], 3, "{coverage}");
     assert_eq!(coverage["total"], 5, "{coverage}");
     assert_eq!(coverage["ratio"].as_f64(), Some(0.6), "{coverage}");
+}
+
+/// `hug --json types --kind enum` (an enum-only query) reports a Scala enum
+/// case's declared payload, with its written types, exactly as the complete
+/// index of `--json-full` does; unit and grouped cases stay unit.
+#[test]
+fn json_enum_variant_lists_keep_scala_case_payloads() {
+    let source = "enum Shape[T] {\n  case Red, Green\n  case Sized(x: Int = 1, y: List[String])\n  case Held(item: T)\n}\n";
+    let scratch = Scratch::new(&[("shape.scala", source)]);
+    let variants_of = |records: &[Value]| -> Value {
+        let owners: Vec<&Value> = records
+            .iter()
+            .filter(|record| record["kind"] == "Enum" && record["identity"]["name"] == "Shape")
+            .collect();
+        assert_eq!(owners.len(), 1, "one `Shape` record");
+        owners[0]["kind_data"]["data"]["variants"].clone()
+    };
+    let narrowed_args = ["--json", "types", "--kind", "enum", "shape.scala"];
+    let narrowed = json_of(&scratch.stdout(&narrowed_args));
+    let narrowed = variants_of(narrowed["files"][0]["symbols"].as_array().expect("files[0].symbols"));
+    let complete_args = ["--json-full", "symbols", "shape.scala"];
+    let complete = json_of(&scratch.stdout(&complete_args));
+    let complete = variants_of(complete["indexes"][0]["symbols"].as_array().expect("indexes[0].symbols"));
+    assert_eq!(narrowed, complete, "the enum-only listing reports the complete payload");
+
+    let summary: Vec<Value> = narrowed
+        .as_array()
+        .expect("variants")
+        .iter()
+        .map(|variant| {
+            let fields: Vec<Value> = variant["struct_fields"]
+                .as_array()
+                .map(|fields| fields.iter().map(|field| serde_json::json!([field["name"], field["type_text"]])).collect())
+                .unwrap_or_default();
+            serde_json::json!([variant["name"], variant.get("discriminant"), fields])
+        })
+        .collect();
+    assert_eq!(
+        Value::from(summary),
+        serde_json::json!([
+            ["Red", null, []],
+            ["Green", null, []],
+            ["Sized", null, [["x", "Int"], ["y", "List[String]"]]],
+            ["Held", null, [["item", "T"]]],
+        ])
+    );
 }

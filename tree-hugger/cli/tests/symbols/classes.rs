@@ -227,6 +227,72 @@ fn go_and_scala_field_lists_agree_with_field_records() {
     }
 }
 
+/// Grouped Scala names (`val a, b: Int = 1`, `val e, f: Long`) are each a
+/// Field record and an entry of their class's or trait's field list, every
+/// entry keeping the shared written type, in JSON and on the terminal.
+#[test]
+fn scala_grouped_field_names_keep_their_shared_type() {
+    let source = "class Pair {\n  val a, b: Int = 1\n  var c, d: String = \"\"\n  val e, f: Long\n}\n\n\
+                  trait Shape {\n  val w, h: Double\n  var x, y: Int = 0\n}\n";
+    let scratch = Scratch::new(&[("grouped.scala", source)]);
+    let classes = json_of(&scratch.stdout(&["--json", "classes", "grouped.scala"]));
+    let field_records = json_of(&scratch.stdout(&["--json", "symbols", "--kind", "field", "grouped.scala"]));
+    let records: Vec<&Value> = field_records["files"]
+        .as_array()
+        .expect("files")
+        .iter()
+        .flat_map(|file| file["symbols"].as_array().expect("symbols"))
+        .collect();
+    let mut compared = Vec::new();
+    for file in classes["files"].as_array().expect("files") {
+        for container in file["symbols"].as_array().expect("symbols") {
+            let name = container["identity"]["name"].as_str().expect("name").to_string();
+            let listed: Vec<(String, Value)> = container["kind_data"]["data"]["fields"]
+                .as_array()
+                .expect("a field list")
+                .iter()
+                .map(|field| (field["name"].as_str().expect("field name").to_string(), field["type_text"].clone()))
+                .collect();
+            // Each grouped name has its own declaration span, so both
+            // listings are in source order.
+            let standalone: Vec<String> = records
+                .iter()
+                .filter(|record| record["identity"]["container_name"] == container["identity"]["name"])
+                .map(|record| record["identity"]["name"].as_str().expect("name").to_string())
+                .collect();
+            let listed_names: Vec<String> = listed.iter().map(|(field, _)| field.clone()).collect();
+            assert_eq!(listed_names, standalone, "`{name}`: field list and Field records");
+            compared.push((name, listed));
+        }
+    }
+    let typed = |pairs: &[(&str, &str)]| -> Vec<(String, Value)> {
+        pairs.iter().map(|(name, ty)| (name.to_string(), Value::from(*ty))).collect()
+    };
+    compared.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(
+        compared,
+        [
+            (
+                "Pair".to_string(),
+                typed(&[("a", "Int"), ("b", "Int"), ("c", "String"), ("d", "String"), ("e", "Long"), ("f", "Long")])
+            ),
+            ("Shape".to_string(), typed(&[("w", "Double"), ("h", "Double"), ("x", "Int"), ("y", "Int")])),
+        ]
+    );
+
+    let terminal = scratch.stdout(&["--plain", "classes", "grouped.scala"]);
+    for line in [
+        "- public a: Int",
+        "- public b: Int",
+        "- public d: String",
+        "- public f: Long",
+        "- public h: Double",
+        "- public y: Int",
+    ] {
+        assert!(terminal.contains(line), "`{line}` in:\n{terminal}");
+    }
+}
+
 /// Two modules each declare `Boxed` with its own `impl`: every class
 /// projection lists each `work` under its own `Boxed`, by container ID.
 #[test]

@@ -1018,3 +1018,637 @@ fn go_doc_text_keeps_literal_stars() {
         assert!(deprecated(name), "control: `{name}` is deprecated");
     }
 }
+
+/// One Go declaration-wrapper row: the declarations of `source` and, per
+/// name, `(has_docs, is_deprecated)`.
+struct GoWrapperRow {
+    source: &'static str,
+    expected: &'static [(&'static str, bool, bool)],
+}
+
+/// Go documents a `var`, `const` or `type` spec with its own doc, else with
+/// the doc before its declaration or group (`go/doc`): standalone,
+/// multi-name, grouped and spec-documented forms of all three wrappers, with
+/// `Deprecated:` paragraphs read from the same doc.
+const GO_WRAPPER_MATRIX: &[GoWrapperRow] = &[
+    GoWrapperRow {
+        source: "// WrapVar is documented.\nvar WrapVar int\n\n// Deprecated: use WrapVar.\nvar WrapVarOld int\n",
+        expected: &[("WrapVar", true, false), ("WrapVarOld", true, true)],
+    },
+    GoWrapperRow {
+        source: "// WrapConst is documented.\nconst WrapConst = 1\n\n// Deprecated: use WrapConst.\nconst WrapConstOld = 1\n",
+        expected: &[("WrapConst", true, false), ("WrapConstOld", true, true)],
+    },
+    GoWrapperRow {
+        source: "// WrapType is documented.\ntype WrapType int\n\n// Deprecated: use WrapType.\ntype WrapTypeOld = WrapType\n",
+        expected: &[("WrapType", true, false), ("WrapTypeOld", true, true)],
+    },
+    GoWrapperRow {
+        source: "// Deprecated: use WrapVar.\nvar WrapMultiA, WrapMultiB int\n\n\
+                 // WrapMultiC and WrapMultiD are documented.\nconst WrapMultiC, WrapMultiD = 1, 2\n",
+        expected: &[
+            ("WrapMultiA", true, true),
+            ("WrapMultiB", true, true),
+            // Only a `const` spec's first name is extracted, so `WrapMultiD`
+            // has no record.
+            ("WrapMultiC", true, false),
+        ],
+    },
+    GoWrapperRow {
+        source: "// Deprecated: use WrapVar.\nvar (\n\tWrapGroupVarA int\n\tWrapGroupVarB int\n)\n\n\
+                 // The group is documented.\nconst (\n\tWrapGroupConstA = 1\n\tWrapGroupConstB = 2\n)\n\n\
+                 // Deprecated: use WrapType.\ntype (\n\tWrapGroupTypeA int\n\tWrapGroupTypeB = WrapGroupTypeA\n)\n",
+        expected: &[
+            ("WrapGroupVarA", true, true),
+            ("WrapGroupVarB", true, true),
+            ("WrapGroupConstA", true, false),
+            ("WrapGroupConstB", true, false),
+            ("WrapGroupTypeA", true, true),
+            ("WrapGroupTypeB", true, true),
+        ],
+    },
+    GoWrapperRow {
+        source: "// The group is documented.\nvar (\n\t// Deprecated: use WrapVar.\n\tWrapOwnVarA int\n\tWrapOwnVarB int\n)\n\n\
+                 // Deprecated: use WrapConst.\nconst (\n\t// WrapOwnConstA has its own doc.\n\tWrapOwnConstA = 1\n\
+                 \tWrapOwnConstB = 2\n)\n\n\
+                 // The group is documented.\ntype (\n\tWrapOwnTypeA int\n\t// Deprecated: use WrapType.\n\tWrapOwnTypeB int\n)\n\n\
+                 var (\n\t// WrapLoneVar has its own doc.\n\tWrapLoneVar int\n\tWrapLoneVarBare int\n)\n",
+        expected: &[
+            ("WrapOwnVarA", true, true),
+            ("WrapOwnVarB", true, false),
+            ("WrapOwnConstA", true, false),
+            ("WrapOwnConstB", true, true),
+            ("WrapOwnTypeA", true, false),
+            ("WrapOwnTypeB", true, true),
+            ("WrapLoneVar", true, false),
+            ("WrapLoneVarBare", false, false),
+        ],
+    },
+    GoWrapperRow {
+        source: "var WrapBareVar int\n\nconst WrapBareConst = 1\n\ntype WrapBareType int\n\n\
+                 // A detached comment.\n\nvar WrapDetachedVar int\n",
+        expected: &[
+            ("WrapBareVar", false, false),
+            ("WrapBareConst", false, false),
+            ("WrapBareType", false, false),
+            ("WrapDetachedVar", false, false),
+        ],
+    },
+    GoWrapperRow {
+        source: "// WrapFunc is documented.\nfunc WrapFunc() {\n\t// A local doc is never attached.\n\tvar wrapLocal int\n\t_ = wrapLocal\n}\n\n\
+                 // Deprecated: use WrapFunc.\nfunc WrapFuncOld() {}\n\n\
+                 // WrapStruct is documented.\ntype WrapStruct struct {\n\t// Deprecated: use Other.\n\tWrapField int\n\tWrapBareField int\n}\n\n\
+                 // WrapMethod is documented.\nfunc (WrapStruct) WrapMethod() {}\n",
+        expected: &[
+            ("WrapFunc", true, false),
+            ("wrapLocal", false, false),
+            ("WrapFuncOld", true, true),
+            ("WrapStruct", true, false),
+            ("WrapField", true, true),
+            ("WrapBareField", false, false),
+            ("WrapMethod", true, false),
+        ],
+    },
+];
+
+/// Every `GO_WRAPPER_MATRIX` row appended to a copy of the primary Go
+/// fixture, read through `has_docs` and `is_deprecated` (locals included).
+#[test]
+fn go_specs_are_documented_through_their_declaration() {
+    let fixture = std::fs::read_to_string(primary_fixture(L::Go).expect("primary fixture")).expect("read fixture");
+    let rows: String = GO_WRAPPER_MATRIX.iter().map(|row| format!("\n{}", row.source)).collect();
+    let dir = TempDir::new().expect("temp dir");
+    let path = dir.path().join("go.go");
+    std::fs::write(&path, format!("{fixture}{rows}")).expect("write snippet");
+    let errors = TreeFile::new(&path).expect("parse").syntax_diagnostics();
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let records = records_of(&path, &SymbolQuery::new().capabilities([Capability::Flags, Capability::Metrics]));
+    let mismatches: Vec<String> = GO_WRAPPER_MATRIX
+        .iter()
+        .flat_map(|row| row.expected.iter())
+        .filter_map(|&(name, has_docs, deprecated)| {
+            let matching: Vec<&SymbolRecord> =
+                records.iter().filter(|record| record.identity.name == name).collect();
+            assert_eq!(matching.len(), 1, "expected one `{name}` record");
+            let record = matching[0];
+            let actual = (
+                record.metrics.as_ref().and_then(|metrics| metrics.has_docs),
+                record.visibility.is_deprecated,
+            );
+            (actual != (Some(has_docs), deprecated))
+                .then(|| format!("{name}: {actual:?}, expected ({has_docs}, {deprecated})"))
+        })
+        .collect();
+    assert!(mismatches.is_empty(), "{mismatches:#?}");
+}
+
+/// One Go doc-group row of the directive matrix: the comment lines before
+/// each declaration site and the resulting `(has_docs, is_deprecated)`.
+struct GoDirectiveRow {
+    name: &'static str,
+    doc: &'static [&'static str],
+    has_docs: bool,
+    deprecated: bool,
+}
+
+/// `CommentGroup.Text` drops an unspaced `//` directive (`line `, `extern `,
+/// `export `, `[a-z0-9]+:[a-z0-9]`) before presence and paragraphs are
+/// decided, without leaving a paragraph break; spaced, uppercase,
+/// colon-ended and block-comment lookalikes stay prose.
+const GO_DIRECTIVE_MATRIX: &[GoDirectiveRow] = &[
+    GoDirectiveRow { name: "None", doc: &[], has_docs: false, deprecated: false },
+    GoDirectiveRow { name: "Empty", doc: &["//"], has_docs: false, deprecated: false },
+    GoDirectiveRow { name: "Prose", doc: &["// It is documented."], has_docs: true, deprecated: false },
+    GoDirectiveRow { name: "Generate", doc: &["//go:generate echo generated"], has_docs: false, deprecated: false },
+    GoDirectiveRow { name: "Build", doc: &["//go:build linux"], has_docs: false, deprecated: false },
+    GoDirectiveRow { name: "Noinline", doc: &["//go:noinline"], has_docs: false, deprecated: false },
+    GoDirectiveRow { name: "Line", doc: &["//line original.go:1"], has_docs: false, deprecated: false },
+    GoDirectiveRow { name: "LineTrailingSpace", doc: &["//line "], has_docs: false, deprecated: false },
+    GoDirectiveRow { name: "Extern", doc: &["//extern External"], has_docs: false, deprecated: false },
+    GoDirectiveRow { name: "Export", doc: &["//export Exported"], has_docs: false, deprecated: false },
+    GoDirectiveRow { name: "Tool", doc: &["//tool:directive"], has_docs: false, deprecated: false },
+    GoDirectiveRow { name: "Digits", doc: &["//a1:b2"], has_docs: false, deprecated: false },
+    GoDirectiveRow { name: "TwoDirectives", doc: &["//go:noinline", "//go:nosplit"], has_docs: false, deprecated: false },
+    GoDirectiveRow {
+        name: "ProseDirective",
+        doc: &["// It is documented.", "//go:noinline"],
+        has_docs: true,
+        deprecated: false,
+    },
+    GoDirectiveRow {
+        name: "DirectiveMarker",
+        doc: &["//go:generate echo generated", "// Deprecated: use New."],
+        has_docs: true,
+        deprecated: true,
+    },
+    GoDirectiveRow {
+        name: "IntroBlankDirectiveMarker",
+        doc: &["// It is documented.", "//", "//go:noinline", "// Deprecated: use New."],
+        has_docs: true,
+        deprecated: true,
+    },
+    GoDirectiveRow {
+        name: "MarkerDirective",
+        doc: &["// Deprecated: use New.", "//go:noinline"],
+        has_docs: true,
+        deprecated: true,
+    },
+    GoDirectiveRow {
+        name: "IntroDirectiveMarker",
+        doc: &["// It is documented.", "//go:noinline", "// Deprecated: use New."],
+        has_docs: true,
+        deprecated: false,
+    },
+    GoDirectiveRow { name: "SpacedLookalike", doc: &["// go:noinline"], has_docs: true, deprecated: false },
+    GoDirectiveRow {
+        name: "SpacedLookalikeMarker",
+        doc: &["// go:noinline", "// Deprecated: use New."],
+        has_docs: true,
+        deprecated: false,
+    },
+    GoDirectiveRow { name: "Uppercase", doc: &["//Go:noinline"], has_docs: true, deprecated: false },
+    GoDirectiveRow { name: "SpaceAfterColon", doc: &["//go: noinline"], has_docs: true, deprecated: false },
+    GoDirectiveRow { name: "NothingAfterColon", doc: &["//go:"], has_docs: true, deprecated: false },
+    GoDirectiveRow { name: "LineWithoutSpace", doc: &["//line"], has_docs: true, deprecated: false },
+    GoDirectiveRow { name: "Block", doc: &["/*go:noinline*/"], has_docs: true, deprecated: false },
+];
+
+/// A Go declaration site: how a row's declaration named `name` is written
+/// after its doc lines, and whether it sits indented inside a group or
+/// struct (`Some(opening)`, closed by `)` or `}`).
+struct GoSite {
+    suffix: &'static str,
+    group: Option<&'static str>,
+    declaration: fn(&str) -> String,
+}
+
+const GO_DIRECTIVE_SITES: &[GoSite] = &[
+    GoSite { suffix: "Func", group: None, declaration: |name| format!("func {name}() {{}}") },
+    GoSite { suffix: "Method", group: None, declaration: |name| format!("func (DirectiveReceiver) {name}() {{}}") },
+    GoSite { suffix: "Type", group: None, declaration: |name| format!("type {name} struct{{}}") },
+    GoSite { suffix: "Alias", group: None, declaration: |name| format!("type {name} = int") },
+    GoSite { suffix: "Var", group: None, declaration: |name| format!("var {name} int") },
+    GoSite { suffix: "Const", group: None, declaration: |name| format!("const {name} = 1") },
+    GoSite {
+        suffix: "Field",
+        group: Some("type DirectiveFields struct {"),
+        declaration: |name| format!("{name} int"),
+    },
+    GoSite { suffix: "VarSpec", group: Some("var ("), declaration: |name| format!("{name} int") },
+    GoSite { suffix: "ConstSpec", group: Some("const ("), declaration: |name| format!("{name} = 1") },
+    GoSite { suffix: "TypeSpec", group: Some("type ("), declaration: |name| format!("{name} int") },
+];
+
+/// Comments that end on the line where the previous code ends are that
+/// code's line comment (`go/parser`) and document nothing after them; the
+/// group after them still documents the next declaration.
+const GO_TRAILING_ROWS: &[GoWrapperRow] = &[
+    GoWrapperRow {
+        source: "const (\n\tTrailConstA = 1 // A note.\n\tTrailConstB = 2 // Deprecated: a note.\n\tTrailConstC = 3\n)\n",
+        expected: &[("TrailConstA", false, false), ("TrailConstB", false, false), ("TrailConstC", false, false)],
+    },
+    GoWrapperRow {
+        source: "var trailVarA = 1 // A note.\nvar TrailVarB = 2\n\nconst trailConstD = 1 // Deprecated: a note.\nconst TrailConstE = 2\n",
+        expected: &[("TrailVarB", false, false), ("TrailConstE", false, false)],
+    },
+    GoWrapperRow {
+        source: "type TrailStruct struct {\n\tTrailFieldA int // A note.\n\tTrailFieldB int\n}\n\n\
+                 func TrailFuncA() {} // Deprecated: a note.\nfunc TrailFuncB() {}\n",
+        expected: &[("TrailFieldB", false, false), ("TrailFuncB", false, false)],
+    },
+    GoWrapperRow {
+        source: "var (\n\tTrailThenDocA = 1 // A note.\n\t// Deprecated: use New.\n\tTrailThenDocB = 2\n)\n\n\
+                 var trailBlock = 1 /* A note\n   spanning lines. */ // Still trailing.\nvar TrailAfterBlock = 2\n\n\
+                 var trailSameLine = 1 /* A note. */ /* Another. */\nvar TrailAfterTwo = 2\n",
+        expected: &[
+            ("TrailThenDocB", true, true),
+            ("TrailAfterBlock", false, false),
+            ("TrailAfterTwo", false, false),
+        ],
+    },
+];
+
+/// Every `GO_DIRECTIVE_MATRIX` row at every `GO_DIRECTIVE_SITES` site, and
+/// the `GO_TRAILING_ROWS`, appended to a copy of the primary Go fixture and
+/// read through `has_docs` and `is_deprecated`.
+#[test]
+fn go_directives_and_trailing_comments_are_not_documentation() {
+    let fixture = std::fs::read_to_string(primary_fixture(L::Go).expect("primary fixture")).expect("read fixture");
+    let mut source = format!("{fixture}\ntype DirectiveReceiver struct{{}}\n");
+    let mut expected: Vec<(String, bool, bool)> = Vec::new();
+    for site in GO_DIRECTIVE_SITES {
+        let indent = if site.group.is_some() { "\t" } else { "" };
+        source.push('\n');
+        if let Some(opening) = site.group {
+            source.push_str(opening);
+            source.push('\n');
+        }
+        for row in GO_DIRECTIVE_MATRIX {
+            let name = format!("Directive{}{}", row.name, site.suffix);
+            for line in row.doc {
+                source.push_str(&format!("{indent}{line}\n"));
+            }
+            source.push_str(&format!("{indent}{}\n\n", (site.declaration)(&name)));
+            expected.push((name, row.has_docs, row.deprecated));
+        }
+        if let Some(opening) = site.group {
+            source.push_str(if opening.ends_with('{') { "}\n" } else { ")\n" });
+        }
+    }
+    for row in GO_TRAILING_ROWS {
+        source.push_str(&format!("\n{}", row.source));
+        expected.extend(row.expected.iter().map(|&(name, docs, deprecated)| (name.to_string(), docs, deprecated)));
+    }
+    let dir = TempDir::new().expect("temp dir");
+    let path = dir.path().join("go.go");
+    std::fs::write(&path, &source).expect("write snippet");
+    let errors = TreeFile::new(&path).expect("parse").syntax_diagnostics();
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let records = records_of(&path, &SymbolQuery::new().capabilities([Capability::Flags, Capability::Metrics]));
+    let mismatches: Vec<String> = expected
+        .iter()
+        .filter_map(|(name, has_docs, deprecated)| {
+            let matching: Vec<&SymbolRecord> =
+                records.iter().filter(|record| &record.identity.name == name).collect();
+            assert_eq!(matching.len(), 1, "expected one `{name}` record");
+            let actual = (
+                matching[0].metrics.as_ref().and_then(|metrics| metrics.has_docs),
+                matching[0].visibility.is_deprecated,
+            );
+            (actual != (Some(*has_docs), *deprecated))
+                .then(|| format!("{name}: {actual:?}, expected ({has_docs}, {deprecated})"))
+        })
+        .collect();
+    assert!(mismatches.is_empty(), "{mismatches:#?}");
+}
+
+/// One own-comment shape of the Go spec-attachment matrix: the comment lines
+/// directly before a spec inside a group documented `Deprecated: group
+/// doc.`, and the spec's resulting `has_docs`, `is_deprecated` and raw doc.
+struct GoAttachmentRow {
+    name: &'static str,
+    lines: &'static [&'static str],
+    has_docs: bool,
+    deprecated: bool,
+    raw: Option<&'static str>,
+}
+
+const GROUP_DOC: Option<&str> = Some("Deprecated: group doc.");
+
+/// `go/doc` falls back to the group's doc only when a spec has no attached
+/// comment group: an attached group that reads as no text (blank, empty
+/// block, directives only) leaves the spec undocumented, while an absent,
+/// detached (blank line) or lookalike-directive comment keeps today's
+/// result.
+const GO_SPEC_ATTACHMENT_MATRIX: &[GoAttachmentRow] = &[
+    GoAttachmentRow { name: "Absent", lines: &[], has_docs: true, deprecated: true, raw: GROUP_DOC },
+    GoAttachmentRow { name: "Empty", lines: &["//"], has_docs: false, deprecated: false, raw: None },
+    GoAttachmentRow { name: "Whitespace", lines: &["//   "], has_docs: false, deprecated: false, raw: None },
+    GoAttachmentRow { name: "EmptyBlock", lines: &["/* */"], has_docs: false, deprecated: false, raw: None },
+    GoAttachmentRow { name: "BlankBlock", lines: &["/*", "", "*/"], has_docs: false, deprecated: false, raw: None },
+    GoAttachmentRow {
+        name: "Generate",
+        lines: &["//go:generate echo generated"],
+        has_docs: false,
+        deprecated: false,
+        raw: None,
+    },
+    GoAttachmentRow { name: "Build", lines: &["//go:build linux"], has_docs: false, deprecated: false, raw: None },
+    GoAttachmentRow { name: "Noinline", lines: &["//go:noinline"], has_docs: false, deprecated: false, raw: None },
+    GoAttachmentRow { name: "Line", lines: &["//line original.go:1"], has_docs: false, deprecated: false, raw: None },
+    GoAttachmentRow { name: "Extern", lines: &["//extern External"], has_docs: false, deprecated: false, raw: None },
+    GoAttachmentRow { name: "Export", lines: &["//export Exported"], has_docs: false, deprecated: false, raw: None },
+    GoAttachmentRow { name: "Tool", lines: &["//tool:directive"], has_docs: false, deprecated: false, raw: None },
+    GoAttachmentRow { name: "Digits", lines: &["//a1:b2"], has_docs: false, deprecated: false, raw: None },
+    GoAttachmentRow {
+        name: "OwnProse",
+        lines: &["// It is documented."],
+        has_docs: true,
+        deprecated: false,
+        raw: Some("It is documented."),
+    },
+    GoAttachmentRow {
+        name: "OwnMarker",
+        lines: &["// Deprecated: use New."],
+        has_docs: true,
+        deprecated: true,
+        raw: Some("Deprecated: use New."),
+    },
+    GoAttachmentRow {
+        name: "Detached",
+        lines: &["// Detached prose.", ""],
+        has_docs: true,
+        deprecated: true,
+        raw: GROUP_DOC,
+    },
+    GoAttachmentRow {
+        name: "SpacedLookalike",
+        lines: &["// go:noinline"],
+        has_docs: true,
+        deprecated: false,
+        raw: Some("go:noinline"),
+    },
+    GoAttachmentRow {
+        name: "Uppercase",
+        lines: &["//Go:noinline"],
+        has_docs: true,
+        deprecated: false,
+        raw: Some("Go:noinline"),
+    },
+    GoAttachmentRow {
+        name: "SpaceAfterColon",
+        lines: &["//go: noinline"],
+        has_docs: true,
+        deprecated: false,
+        raw: Some("go: noinline"),
+    },
+    GoAttachmentRow { name: "NothingAfterColon", lines: &["//go:"], has_docs: true, deprecated: false, raw: Some("go:") },
+    GoAttachmentRow {
+        name: "Block",
+        lines: &["/*go:noinline*/"],
+        has_docs: true,
+        deprecated: false,
+        raw: Some("go:noinline"),
+    },
+];
+
+/// A grouped Go spec site of the attachment matrix: the group keyword, the
+/// spec written for a base name, and the names it extracts (both names of a
+/// multi-name `var`; only the first of a multi-name `const`).
+struct GoSpecSite {
+    suffix: &'static str,
+    keyword: &'static str,
+    spec: fn(&str) -> String,
+    names: fn(&str) -> Vec<String>,
+}
+
+const GO_SPEC_ATTACHMENT_SITES: &[GoSpecSite] = &[
+    GoSpecSite { suffix: "Type", keyword: "type", spec: |name| format!("{name} int"), names: |name| vec![name.into()] },
+    GoSpecSite { suffix: "Alias", keyword: "type", spec: |name| format!("{name} = int"), names: |name| vec![name.into()] },
+    GoSpecSite { suffix: "Var", keyword: "var", spec: |name| format!("{name} int"), names: |name| vec![name.into()] },
+    GoSpecSite { suffix: "Const", keyword: "const", spec: |name| format!("{name} = 1"), names: |name| vec![name.into()] },
+    GoSpecSite {
+        suffix: "MultiVar",
+        keyword: "var",
+        spec: |name| format!("{name}A, {name}B int"),
+        names: |name| vec![format!("{name}A"), format!("{name}B")],
+    },
+    GoSpecSite {
+        suffix: "MultiConst",
+        keyword: "const",
+        spec: |name| format!("{name}A, {name}B = 1, 2"),
+        names: |name| vec![format!("{name}A")],
+    },
+];
+
+/// Every `GO_SPEC_ATTACHMENT_MATRIX` shape at every
+/// `GO_SPEC_ATTACHMENT_SITES` site, each spec alone in a group documented
+/// `// Deprecated: group doc.`, appended to a copy of the primary Go
+/// fixture and read through `has_docs`, `is_deprecated` and the raw doc.
+#[test]
+fn go_spec_attachments_decide_group_doc_fallback_even_when_empty() {
+    let fixture = std::fs::read_to_string(primary_fixture(L::Go).expect("primary fixture")).expect("read fixture");
+    let mut source = fixture;
+    let mut expected: Vec<(String, &GoAttachmentRow)> = Vec::new();
+    for site in GO_SPEC_ATTACHMENT_SITES {
+        for row in GO_SPEC_ATTACHMENT_MATRIX {
+            let name = format!("Attach{}{}", row.name, site.suffix);
+            source.push_str(&format!("\n// Deprecated: group doc.\n{} (\n", site.keyword));
+            for line in row.lines {
+                source.push_str(&format!("\t{line}\n"));
+            }
+            source.push_str(&format!("\t{}\n)\n", (site.spec)(&name)));
+            expected.extend((site.names)(&name).into_iter().map(|name| (name, row)));
+        }
+    }
+    let dir = TempDir::new().expect("temp dir");
+    let path = dir.path().join("go.go");
+    std::fs::write(&path, &source).expect("write snippet");
+    let errors = TreeFile::new(&path).expect("parse").syntax_diagnostics();
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let records = records_of(&path, &SymbolQuery::new().capabilities([Capability::Flags, Capability::Metrics]));
+    let mismatches: Vec<String> = expected
+        .iter()
+        .filter_map(|(name, row)| {
+            let matching: Vec<&SymbolRecord> =
+                records.iter().filter(|record| &record.identity.name == name).collect();
+            assert_eq!(matching.len(), 1, "expected one `{name}` record");
+            let actual = (
+                matching[0].metrics.as_ref().and_then(|metrics| metrics.has_docs),
+                matching[0].visibility.is_deprecated,
+                matching[0].docs.raw_doc.as_deref(),
+            );
+            (actual != (Some(row.has_docs), row.deprecated, row.raw))
+                .then(|| format!("{name}: {actual:?}, expected ({}, {}, {:?})", row.has_docs, row.deprecated, row.raw))
+        })
+        .collect();
+    assert_eq!(expected.len(), GO_SPEC_ATTACHMENT_MATRIX.len() * 7, "every site and name is checked");
+    assert!(mismatches.is_empty(), "{mismatches:#?}");
+}
+
+/// `(name, has_docs, is_deprecated)` of one declaration.
+type DocFacts = (&'static str, Option<bool>, bool);
+
+/// Snippets for the other doc readers, by `(source, extension, [(name,
+/// has_docs, is_deprecated)])`. JavaScript and TypeScript read JSDoc only
+/// after the line break that ends the previous code, and Doxygen's `<` forms
+/// document the member before them, so neither documents the next
+/// declaration. The remaining rows are clean controls: Rust, Java, C#, PHP
+/// and a plain C/C++ `///` attach a same-line doc to the next declaration,
+/// and `go:noinline` text is only Go's directive.
+const TRAILING_DOC_CASES: &[(&str, &str, &[DocFacts])] = &[
+    (
+        "let jsA = 1; /** @deprecated a note */\nlet jsB = 2;\nlet jsC = 3; /* x */ /** y */\nlet jsD = 4;\n\
+         /** @deprecated own doc */\nlet jsE = 5;\nlet jsF = 6; /** a\n  note */ /** b */\nlet jsG = 7;\n",
+        "js",
+        &[("jsB", Some(false), false), ("jsD", Some(false), false), ("jsE", Some(true), true), ("jsG", Some(false), false)],
+    ),
+    (
+        "class TsC {\n  a = 1; /** @deprecated a note */\n  b = 2;\n  /** own doc */\n  c = 3;\n}\n\
+         function tsF() {} /** @deprecated a note */\nfunction tsG() {}\n",
+        "ts",
+        &[("b", Some(false), false), ("c", Some(true), false), ("tsG", Some(false), false)],
+    ),
+    (
+        "struct CS {\n  int a; ///< note a\n  int b; //!< note b\n  int c; /**< note c */\n  int d; /*!< note d */\n  int e;\n  /// own doc\n  int f;\n  int g; /// plain\n  int h;\n};\n",
+        "c",
+        &[
+            ("b", Some(false), false),
+            ("c", Some(false), false),
+            ("d", Some(false), false),
+            ("e", Some(false), false),
+            ("f", Some(true), false),
+            ("h", Some(true), false),
+        ],
+    ),
+    (
+        "struct CppS {\n  int a; ///< note a\n  int b;\n  //!< misplaced\n  int c;\n  //go:noinline\n  int d;\n  ///go:noinline\n  int e;\n};\n",
+        "cpp",
+        &[("b", Some(false), false), ("c", Some(false), false), ("d", Some(false), false), ("e", Some(true), false)],
+    ),
+    (
+        "//go:noinline\npub fn rust_plain() {}\n///go:noinline\npub fn rust_doc() {}\npub struct RustS {\n    pub a: i32, /// next\n    pub b: i32,\n}\n",
+        "rs",
+        &[("rust_plain", Some(false), false), ("rust_doc", Some(true), false), ("b", Some(true), false)],
+    ),
+    (
+        "class CsS {\n  //go:noinline\n  public void CsPlain() {}\n  ///go:noinline\n  public void CsDoc() {}\n  public int a; /// next\n  public int b;\n}\n",
+        "cs",
+        &[("CsPlain", Some(false), false), ("CsDoc", Some(true), false), ("b", Some(true), false)],
+    ),
+    ("//go:noinline\nfunc swiftPlain() {}\n///go:noinline\nfunc swiftDoc() {}\n", "swift", &[("swiftPlain", Some(false), false), ("swiftDoc", Some(true), false)]),
+    (
+        "class J {\n  //go:noinline\n  void javaPlain() {}\n  /**go:noinline*/\n  void javaDoc() {}\n  int a; /** @deprecated next */\n  int b;\n}\n",
+        "java",
+        &[("javaPlain", Some(false), false), ("javaDoc", Some(true), false), ("b", Some(true), true)],
+    ),
+    (
+        "<?php\n//go:noinline\nfunction phpPlain() {}\n/**go:noinline*/\nfunction phpDoc() {}\n",
+        "php",
+        &[("phpPlain", Some(false), false), ("phpDoc", Some(true), false)],
+    ),
+    (
+        "object S {\n  //go:noinline\n  def scalaPlain: Int = 1\n  /**go:noinline*/\n  def scalaDoc: Int = 1\n}\n",
+        "scala",
+        &[("scalaPlain", Some(false), false), ("scalaDoc", Some(true), false)],
+    ),
+    (
+        "//go:noinline\nfunction jsPlain() {}\n/**go:noinline*/\nfunction jsDoc() {}\n",
+        "js",
+        &[("jsPlain", Some(false), false), ("jsDoc", Some(true), false)],
+    ),
+    (
+        "# Deprecated: a note.\ndef py_plain():\n    pass\n\ndef py_doc():\n    \"\"\"Deprecated: a note.\"\"\"\n",
+        "py",
+        &[("py_plain", Some(false), false), ("py_doc", Some(true), false)],
+    ),
+    ("-- Deprecated: a note.\nfunction lua_fn() end\n", "lua", &[("lua_fn", None, false)]),
+    ("# Deprecated: a note.\nsub perl_fn { }\n", "pl", &[("perl_fn", None, false)]),
+    ("# Deprecated: a note.\nbash_fn() { :; }\n", "sh", &[("bash_fn", None, false)]),
+    ("# Deprecated: a note.\nzsh_fn() { :; }\n", "zsh", &[("zsh_fn", None, false)]),
+];
+
+#[test]
+fn doc_readers_skip_comments_their_language_does_not_attach() {
+    for (source, extension, expected) in TRAILING_DOC_CASES {
+        let dir = TempDir::new().expect("temp dir");
+        let path = dir.path().join(format!("snippet.{extension}"));
+        std::fs::write(&path, source).expect("write snippet");
+        let errors = TreeFile::new(&path).expect("parse").syntax_diagnostics();
+        assert!(errors.is_empty(), "{source}: {errors:?}");
+        let records = records_of(&path, &SymbolQuery::new().capabilities([Capability::Flags, Capability::Metrics]));
+        for &(name, has_docs, deprecated) in *expected {
+            let record = records
+                .iter()
+                .find(|record| record.identity.name == name)
+                .unwrap_or_else(|| panic!("{source}: no `{name}`"));
+            let actual = (record.metrics.as_ref().and_then(|metrics| metrics.has_docs), record.visibility.is_deprecated);
+            assert_eq!(actual, (has_docs, deprecated), "{extension}: `{name}` (has_docs, is_deprecated)");
+        }
+    }
+}
+
+/// Other declaration wrappers, by snippet: `(source, extension, documented,
+/// undocumented)`. A C/C++ `extern "C"` declaration and a single-method
+/// Scala `extension` are documented before the wrapper; a braced linkage
+/// block's or a collective extension's doc documents none of its members.
+/// The remaining rows are controls for wrappers that already climb.
+const DOC_WRAPPER_CASES: &[(&str, &str, &[&str], &[&str])] = &[
+    (
+        "/** d */\nextern \"C\" int cppLinked(void);\n\n/** d */\nextern \"C\" {\n/** d */\nint cppOwnDoc(void);\nint cppInBlock(void);\n}\n\n\
+         /** d */\ntemplate <class T> T cppTemplate(T t) { return t; }\n",
+        "cpp",
+        &["cppLinked", "cppOwnDoc", "cppTemplate"],
+        &["cppInBlock"],
+    ),
+    ("/** d */\nextern \"C\" int cLinked(void);\n", "c", &["cLinked"], &[]),
+    (
+        "object Ext {\n  /** d */\n  extension (s: String) def scalaSingle: Int = 1\n  /** d */\n  extension (s: Int)\n    /** own */\n    \
+         def scalaOwn: Int = 1\n    def scalaCollective: Int = 1\n}\n",
+        "scala",
+        &["scalaSingle", "scalaOwn"],
+        &["scalaCollective"],
+    ),
+    ("/** d */\nexport const jsA = 1, jsB = 2;\n/** d */\nvar jsV = 1, jsW = 2;\n", "js", &["jsA", "jsB", "jsV", "jsW"], &[]),
+    (
+        "/** d */\nexport const tsA = 1, tsB = 2;\n/** d */\ndeclare const tsDeclared: number;\n",
+        "ts",
+        &["tsA", "tsB", "tsDeclared"],
+        &[],
+    ),
+    ("/// d\n#[allow(dead_code)]\npub static RUST_STATIC: i32 = 1;\n", "rs", &["RUST_STATIC"], &[]),
+    ("class J {\n  /** d */\n  @Deprecated private int javaA, javaB;\n}\n", "java", &["javaA", "javaB"], &[]),
+    ("class S {\n  /// d\n  [Obsolete] public int csA, csB;\n}\n", "cs", &["csA", "csB"], &[]),
+    ("<?php\n/** d */\nconst PHP_A = 1, PHP_B = 2;\n", "php", &["PHP_A", "PHP_B"], &[]),
+    ("/// d\npublic let swiftA = 1, swiftB = 2\n", "swift", &["swiftA", "swiftB"], &[]),
+];
+
+#[test]
+fn declaration_wrappers_pass_their_doc_to_a_single_declaration() {
+    for (source, extension, documented, undocumented) in DOC_WRAPPER_CASES {
+        let dir = TempDir::new().expect("temp dir");
+        let path = dir.path().join(format!("snippet.{extension}"));
+        std::fs::write(&path, source).expect("write snippet");
+        let errors = TreeFile::new(&path).expect("parse").syntax_diagnostics();
+        assert!(errors.is_empty(), "{source}: {errors:?}");
+        let records = records_of(&path, &SymbolQuery::new().capabilities([Capability::Metrics]));
+        let has_docs = |name: &str| {
+            records
+                .iter()
+                .find(|record| record.identity.name == name)
+                .unwrap_or_else(|| panic!("{source}: no `{name}`"))
+                .metrics
+                .as_ref()
+                .and_then(|metrics| metrics.has_docs)
+        };
+        for name in *documented {
+            assert_eq!(has_docs(name), Some(true), "{extension}: `{name}` is documented");
+        }
+        for name in *undocumented {
+            assert_eq!(has_docs(name), Some(false), "{extension}: `{name}` is undocumented");
+        }
+    }
+}

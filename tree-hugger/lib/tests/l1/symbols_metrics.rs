@@ -444,3 +444,281 @@ fn undocumented_selection_skips_languages_without_doc_detection() {
     }
     assert_eq!(undocumented, [("lib.rs", "undocumented".to_string())]);
 }
+
+/// One documentation shape of the block-decoration matrix: the comment
+/// (written at the declaration's indentation), then the expected
+/// `(has_docs, raw doc)` under a doc tool that removes a block comment's
+/// leading stars only when they are consistent (Rust, C#, Swift) and under
+/// one that removes a leading star from every line (Java, JavaScript,
+/// TypeScript, Scala, PHP, C, C++). A `None` raw doc is not asserted.
+struct DecorationShape {
+    name: &'static str,
+    doc: &'static str,
+    consistent: (bool, Option<&'static str>),
+    per_line: (bool, Option<&'static str>),
+}
+
+const DECORATION_SHAPES: &[DecorationShape] = &[
+    DecorationShape { name: "Blank", doc: "/** */", consistent: (false, None), per_line: (false, None) },
+    DecorationShape {
+        name: "Aligned",
+        doc: "/**\n *\n *\n */",
+        consistent: (false, None),
+        per_line: (false, None),
+    },
+    DecorationShape {
+        name: "Misaligned",
+        doc: "/**\n *\n  *\n*/",
+        consistent: (true, None),
+        per_line: (false, None),
+    },
+    DecorationShape {
+        name: "TabSpace",
+        doc: "/**\n *\n\t*\n*/",
+        consistent: (true, None),
+        per_line: (false, None),
+    },
+    DecorationShape {
+        name: "SingleStar",
+        doc: "/** * */",
+        consistent: (true, Some("*")),
+        per_line: (false, None),
+    },
+    DecorationShape {
+        name: "MixedProse",
+        doc: "/**\nIntro\n *b* is next\n*/",
+        consistent: (true, Some("Intro\n*b* is next")),
+        per_line: (true, Some("Intro\nb* is next")),
+    },
+    DecorationShape {
+        name: "Plain",
+        doc: "/** Plain doc. */",
+        consistent: (true, Some("Plain doc.")),
+        per_line: (true, Some("Plain doc.")),
+    },
+    DecorationShape {
+        name: "Decorated",
+        doc: "/**\n * Starred text.\n */",
+        consistent: (true, Some("Starred text.")),
+        per_line: (true, Some("Starred text.")),
+    },
+    // `per_line` is for a language with `///` docs (C, C++); the other
+    // per-line languages have no `///` form and report it undocumented.
+    DecorationShape { name: "LineStar", doc: "/// *", consistent: (true, Some("*")), per_line: (true, Some("*")) },
+];
+
+/// One language of the decoration matrix: its file extension, the source
+/// around the declarations (`{decls}`), each declaration family as a
+/// template (`{doc}` at column `indent`, `{S}` the shape name), and which
+/// decoration rule its doc tool follows.
+struct DecorationLanguage {
+    extension: &'static str,
+    wrap: fn(&str) -> String,
+    families: &'static [(&'static str, usize, &'static str)],
+    consistent: bool,
+    triple_slash: bool,
+}
+
+const DECORATION_LANGUAGES: &[DecorationLanguage] = &[
+    DecorationLanguage {
+        extension: "rs",
+        wrap: |decls| decls.to_string(),
+        families: &[
+            ("fn_{S}", 0, "{doc}\npub fn fn_{S}() {}\n"),
+            ("Type{S}", 0, "{doc}\npub struct Type{S} {\n{field}}\n"),
+            ("field_{S}", 4, "{doc}\n    pub field_{S}: i32,\n"),
+            ("method_{S}", 4, "impl Type{S} {\n{doc}\n    pub fn method_{S}(&self) {}\n}\n"),
+            ("CONST_{S}", 0, "{doc}\npub const CONST_{S}: i32 = 1;\n"),
+            ("STATIC_{S}", 0, "{doc}\npub static STATIC_{S}: i32 = 1;\n"),
+        ],
+        consistent: true,
+        triple_slash: true,
+    },
+    DecorationLanguage {
+        extension: "cs",
+        wrap: |decls| decls.to_string(),
+        families: &[
+            ("Class{S}", 0, "{doc}\npublic class Class{S} {\n{field}}\n"),
+            ("Method{S}", 4, "{doc}\n    public void Method{S}() {}\n"),
+            ("field{S}", 4, "{doc}\n    public int field{S};\n"),
+            ("Property{S}", 4, "{doc}\n    public int Property{S} { get; set; }\n"),
+        ],
+        consistent: true,
+        triple_slash: true,
+    },
+    DecorationLanguage {
+        extension: "swift",
+        wrap: |decls| decls.to_string(),
+        families: &[
+            ("func{S}", 0, "{doc}\nfunc func{S}() {}\n"),
+            ("Type{S}", 0, "{doc}\nstruct Type{S} {\n{field}}\n"),
+            ("method{S}", 4, "{doc}\n    func method{S}() {}\n"),
+            ("stored{S}", 4, "{doc}\n    var stored{S}: Int = 1\n"),
+            ("let{S}", 0, "{doc}\nlet let{S} = 1\n"),
+            ("var{S}", 0, "{doc}\nvar var{S} = 1\n"),
+        ],
+        consistent: true,
+        triple_slash: true,
+    },
+    DecorationLanguage {
+        extension: "java",
+        wrap: |decls| format!("class JavaHolder {{\n{decls}}}\n"),
+        families: &[("method{S}", 4, "{doc}\n    void method{S}() {}\n")],
+        consistent: false,
+        triple_slash: false,
+    },
+    DecorationLanguage {
+        extension: "js",
+        wrap: |decls| decls.to_string(),
+        families: &[("fn{S}", 0, "{doc}\nfunction fn{S}() {}\n")],
+        consistent: false,
+        triple_slash: false,
+    },
+    DecorationLanguage {
+        extension: "ts",
+        wrap: |decls| decls.to_string(),
+        families: &[("fn{S}", 0, "{doc}\nfunction fn{S}(): void {}\n")],
+        consistent: false,
+        triple_slash: false,
+    },
+    DecorationLanguage {
+        extension: "scala",
+        wrap: |decls| format!("object ScalaHolder {{\n{decls}}}\n"),
+        families: &[("method{S}", 2, "{doc}\n  def method{S}: Int = 1\n")],
+        consistent: false,
+        triple_slash: false,
+    },
+    DecorationLanguage {
+        extension: "php",
+        wrap: |decls| format!("<?php\n{decls}"),
+        families: &[("fn{S}", 0, "{doc}\nfunction fn{S}() {}\n")],
+        consistent: false,
+        triple_slash: false,
+    },
+    DecorationLanguage {
+        extension: "c",
+        wrap: |decls| decls.to_string(),
+        families: &[("fn{S}", 0, "{doc}\nint fn{S}(void) { return 0; }\n")],
+        consistent: false,
+        triple_slash: true,
+    },
+    DecorationLanguage {
+        extension: "cpp",
+        wrap: |decls| decls.to_string(),
+        families: &[("fn{S}", 0, "{doc}\nint fn{S}(void) { return 0; }\n")],
+        consistent: false,
+        triple_slash: true,
+    },
+];
+
+/// `doc` with every line indented by `indent` spaces, so the comment sits
+/// at the declaration's column and keeps its own relative layout.
+fn indented(doc: &str, indent: usize) -> String {
+    let pad = " ".repeat(indent);
+    doc.lines().map(|line| format!("{pad}{line}")).collect::<Vec<_>>().join("\n")
+}
+
+/// The source of one decoration-matrix file: every family of `language`
+/// documented by every shape. A family whose template holds `{field}` is a
+/// container and receives the shape's member families (indent above 0).
+fn decoration_source(language: &DecorationLanguage) -> String {
+    let containers: Vec<_> = language.families.iter().filter(|(_, _, template)| template.contains("{field}")).collect();
+    let mut decls = String::new();
+    for shape in DECORATION_SHAPES {
+        let render = |(_, indent, template): &(&str, usize, &str)| {
+            template.replace("{doc}", &indented(shape.doc, *indent)).replace("{S}", shape.name)
+        };
+        let members: String = language
+            .families
+            .iter()
+            .filter(|(_, indent, template)| *indent > 0 && !template.starts_with("impl"))
+            .map(render)
+            .collect();
+        for family in language.families {
+            if containers.iter().any(|container| container.0 == family.0) {
+                decls.push_str(&render(family).replace("{field}", &members));
+            } else if family.1 == 0 || family.2.starts_with("impl") || containers.is_empty() {
+                decls.push_str(&render(family));
+            }
+        }
+    }
+    (language.wrap)(&decls)
+}
+
+/// Rust (rustdoc), C# (the compiler's common pattern) and Swift (its
+/// comment-column decoration) remove a block comment's leading stars only
+/// when they are consistent, so a star-only block indented differently, a
+/// tab against spaces, a first-line star and a star in unstarred prose are
+/// documentation text, at every declaration family. Java, JavaScript,
+/// TypeScript, Scala, PHP, C and C++ keep their per-line convention: one
+/// leading star is decoration on every line. `/// *` documents in every
+/// language with `///` docs.
+#[test]
+fn block_decoration_is_removed_only_where_the_doc_tool_removes_it() {
+    let mut mismatches = Vec::new();
+    for language in DECORATION_LANGUAGES {
+        let source = decoration_source(language);
+        let dir = TempDir::new().expect("temp dir");
+        let path = dir.path().join(format!("decoration.{}", language.extension));
+        std::fs::write(&path, &source).expect("write source");
+        let errors = tree_hugger::TreeFile::new(&path).expect("parse").syntax_diagnostics();
+        assert!(errors.is_empty(), "{}: {errors:?}\n{source}", language.extension);
+        let records = metrics_records(&path);
+        for shape in DECORATION_SHAPES {
+            let (has_docs, raw) = match (language.consistent, shape.name) {
+                (false, "LineStar") if !language.triple_slash => (false, None),
+                (true, _) => shape.consistent,
+                (false, _) => shape.per_line,
+            };
+            for (template, _, _) in language.families {
+                let name = template.replace("{S}", shape.name);
+                let Some(record) = records.iter().find(|record| record.identity.name == name) else {
+                    mismatches.push(format!("{}: no `{name}`", language.extension));
+                    continue;
+                };
+                let actual = record.metrics.and_then(|metrics| metrics.has_docs);
+                if actual != Some(has_docs) {
+                    mismatches.push(format!("{}: `{name}` has_docs {actual:?}, expected {has_docs}", language.extension));
+                }
+                if let Some(raw) = raw
+                    && record.docs.raw_doc.as_deref() != Some(raw)
+                {
+                    mismatches.push(format!(
+                        "{}: `{name}` raw doc {:?}, expected {raw:?}",
+                        language.extension, record.docs.raw_doc
+                    ));
+                }
+            }
+        }
+    }
+    assert!(mismatches.is_empty(), "{mismatches:#?}");
+}
+
+/// The docs pass reads the extractor's cleaned doc: a star or `//` left at
+/// the start of a line is text, so the summary keeps it (Markdown emphasis
+/// and bold, a Go list item) in every language family.
+#[test]
+fn structured_doc_summaries_keep_literal_leading_stars() {
+    let cases: &[(&str, &str, &str, &str)] = &[
+        ("/**\nIntro\n *b* is next\n*/\npub fn mixed() {}\n", "rs", "mixed", "Intro *b* is next"),
+        ("/// **Bold** text\npub fn bold() {}\n", "rs", "bold", "**Bold** text"),
+        ("/// * listed\nclass A { void Listed() {} }\n", "cs", "A", "* listed"),
+        ("/// *only*\nfunc only() {}\n", "swift", "only", "*only*"),
+        ("/**\n * **Bold** text\n */\nfunction bold() {}\n", "js", "bold", "**Bold** text"),
+        ("/// // not a marker\nint slashes(void) { return 0; }\n", "c", "slashes", "// not a marker"),
+        ("package p\n\n// * item\nfunc Item() {}\n", "go", "Item", "* item"),
+    ];
+    let query = SymbolQuery::new().capabilities([Capability::StructuredDocs]);
+    for (source, extension, name, summary) in cases {
+        let dir = TempDir::new().expect("temp dir");
+        let path = dir.path().join(format!("snippet.{extension}"));
+        std::fs::write(&path, source).expect("write snippet");
+        let records = SourceFile::read(&path).expect("read").query(&query).expect("query").index.symbols;
+        let record = records
+            .iter()
+            .find(|record| record.identity.name == *name)
+            .unwrap_or_else(|| panic!("{source}: no `{name}`"));
+        let actual = record.docs.parsed.as_ref().and_then(|parsed| parsed.summary.as_deref());
+        assert_eq!(actual, Some(*summary), "{extension}: `{name}`");
+    }
+}

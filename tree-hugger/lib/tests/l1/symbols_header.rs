@@ -644,6 +644,39 @@ fn the_documented_comparison_rows_hold() {
 
 /// Declaring keywords of constructs the per-language fixtures do not hold,
 /// one inline source each.
+/// Each name of a grouped Scala `val`/`var` is its own record with its own
+/// name span, and shares the declaration's keyword, header and doc comment:
+/// the header holds every name, so it contains each record's own.
+#[test]
+fn scala_grouped_names_share_their_declarations_header() {
+    let extracted = extract_inline(
+        "class C {\n  /** Pair. */\n  val a, b: Int = 1\n  var u, w = 2\n  val e, f: Long\n}\n",
+        "scala",
+    );
+    let cases = [
+        ("a", "val", "val a, b: Int", (3, 7)),
+        ("b", "val", "val a, b: Int", (3, 10)),
+        ("u", "var", "var u, w", (4, 7)),
+        ("w", "var", "var u, w", (4, 10)),
+        ("e", "val", "val e, f: Long", (5, 7)),
+        ("f", "val", "val e, f: Long", (5, 10)),
+    ];
+    for (name, keyword, header, (line, column)) in cases {
+        let record = extracted.record(name, Some("C"));
+        assert_eq!(record.identity.keyword.as_deref(), Some(keyword), "`{name}` keyword");
+        assert_eq!(record.source.signature_text.as_deref(), Some(header), "`{name}` header");
+        let start = record.source.name_span.as_ref().expect("name span").start;
+        assert_eq!((start.line, start.column), (line, column), "`{name}` name span");
+    }
+    for name in ["a", "b"] {
+        assert_eq!(
+            extracted.symbol(name, Some("C")).doc_comment.as_deref(),
+            Some("Pair."),
+            "`{name}` doc comment"
+        );
+    }
+}
+
 #[test]
 fn less_common_declarations_report_their_keyword() {
     let cases: &[(&str, &str, &str, Option<&str>, &str)] = &[

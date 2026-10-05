@@ -1759,6 +1759,7 @@ impl TreeFile {
             let flags = (wanted && facts.flags).then(|| {
                 let is_deprecated = is_deprecated(
                     declaration,
+                    name,
                     symbol.doc_comment.as_deref(),
                     self.language,
                     &self.source,
@@ -1767,7 +1768,7 @@ impl TreeFile {
                 // the package layout around it, which the cache does not
                 // key on; `SymbolQueryResult::finish` applies them after
                 // lookup.
-                let is_test = has_test_attribute(declaration, self.language, &self.source)
+                let is_test = has_test_attribute(declaration, name, self.language, &self.source)
                     || (self.language == ProgrammingLanguage::Rust
                         && is_in_rust_cfg_test(declaration, &self.source));
                 (is_test, is_deprecated)

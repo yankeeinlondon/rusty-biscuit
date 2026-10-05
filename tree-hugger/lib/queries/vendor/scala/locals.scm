@@ -66,6 +66,17 @@
 (var_definition
   pattern: (identifier) @local.definition.var)
 
+; Grouped names (`val a, b: Int = 1`) sit under one `identifiers` pattern;
+; each is its own definition. A tuple pattern (`val (a, b) = …`) is not
+; captured.
+(val_definition
+  pattern: (identifiers
+    (identifier) @local.definition.var))
+
+(var_definition
+  pattern: (identifiers
+    (identifier) @local.definition.var))
+
 (val_declaration
   name: (identifier) @local.definition.var)
 

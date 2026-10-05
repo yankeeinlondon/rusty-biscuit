@@ -314,6 +314,24 @@ fn scala_static_stops_at_the_nearest_owning_type() {
     assert_static(&scala, "innerObjectProbe", Some("Inner"), true, false);
 }
 
+/// Every name of a grouped Scala `val`/`var` takes its owner's member
+/// `static`: static in an object, instance in a class, trait or enum.
+#[test]
+fn scala_grouped_fields_take_their_owners_static() {
+    let scala = extract_inline(
+        "object O {\n  val a, b: Int = 1\n  var c, d: Int = 2\n}\n\
+         class K {\n  val a, b: Int = 1\n  var c, d: Int = 2\n}\n\
+         trait T {\n  val a, b: Int\n  var c, d: Int\n}\n\
+         enum E {\n  case V\n  val a, b: Int = 1\n  var c, d: Int = 2\n}\n",
+        "scala",
+    );
+    for (owner, is_static) in [("O", true), ("K", false), ("T", false), ("E", false)] {
+        for name in ["a", "b", "c", "d"] {
+            assert_static(&scala, name, Some(owner), is_static, false);
+        }
+    }
+}
+
 /// Review finding 4 sweep: a typed `self` receiver (`self: Box<Self>`) makes
 /// a Rust method an instance method; a parameter merely named like `self`
 /// does not.

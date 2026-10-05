@@ -255,6 +255,29 @@ pub type InlineKindRow = (
 /// record named `name` has `kind`; the name may be absent or another kind.
 pub type InlineNegativeRow = (ProgrammingLanguage, &'static str, &'static str, SymbolKind);
 
+/// Grouped Scala `val`/`var` names, defined and only declared: every name is
+/// its own Field of the owner.
+const SCALA_GROUPED_CLASS: &str = "class K {\n  val a, b: Int = 1\n  var c, d: Int = 2\n  val e, f: Int\n  var g, h: Int\n}\n";
+const SCALA_GROUPED_TRAIT: &str = "trait T {\n  val a, b: Int = 1\n  var c, d: Int = 2\n  val e, f: Int\n  var g, h: Int\n}\n";
+const SCALA_GROUPED_OBJECT: &str = "object O {\n  val a, b: Int = 1\n  var c, d: Int = 2\n}\n";
+const SCALA_GROUPED_ENUM: &str = "enum E {\n  case V\n  val a, b: Int = 1\n  var c, d: Int = 2\n}\n";
+/// A grouped `val` in a method body is a local Variable like a single one;
+/// a tuple pattern declares no field.
+const SCALA_GROUPED_LOCALS: &str = "class K {\n  val (t1, t2) = (1, 2)\n  def m(): Int = {\n    val x, y = 1\n    val z = 2\n    x + y + z\n  }\n}\n";
+
+/// C++ constructors whose name is wrapped in a declarator attribute or
+/// parentheses (`C [[deprecated]] (int x)`, `(C)(int x)`), one per form:
+/// each is the same Constructor as its unwrapped spelling.
+pub const CPP_WRAPPED_CONSTRUCTORS: &[&str] = &[
+    "class C {\npublic:\n    C [[deprecated]] ();\n};\n",
+    "class C {\npublic:\n    C [[deprecated]] (int x) {}\n};\n",
+    "class C {\npublic:\n    C [[deprecated]] () = default;\n};\n",
+    "class C {\npublic:\n    C [[deprecated]] (int x) = delete;\n};\n",
+    "class C {\npublic:\n    template <class T> C [[deprecated]] (T x) {}\n};\n",
+    "class C {\npublic:\n    explicit C [[deprecated]] (int x);\n};\n",
+    "class C {\npublic:\n    (C)(int x);\n};\n",
+];
+
 /// Precise kinds of declarations once deferred, one section per language;
 /// a language's rows are added to its own section only.
 pub const DEFERRED_KIND_ROWS: &[InlineKindRow] = &[
@@ -330,6 +353,18 @@ pub const DEFERRED_KIND_ROWS: &[InlineKindRow] = &[
     (L::Cpp, "enum Unscoped { U_A, U_B = 2 };\n", "U_B", K::EnumVariant, Some("Unscoped"), Some(K::Enum)),
     (L::Cpp, "enum class Scoped : int { S_A };\n", "S_A", K::EnumVariant, Some("Scoped"), Some(K::Enum)),
     (L::Cpp, "class C {\n    enum Inner { IA };\n};\n", "IA", K::EnumVariant, Some("Inner"), Some(K::Enum)),
+    // An attribute or parentheses around the declared name change nothing:
+    // the constructor stays one and a method with a return type stays a
+    // method (the negatives keep destructors, conversion operators and
+    // out-of-class definitions from becoming constructors).
+    (L::Cpp, CPP_WRAPPED_CONSTRUCTORS[0], "C", K::Constructor, Some("C"), Some(K::Class)),
+    (L::Cpp, CPP_WRAPPED_CONSTRUCTORS[1], "C", K::Constructor, Some("C"), Some(K::Class)),
+    (L::Cpp, CPP_WRAPPED_CONSTRUCTORS[2], "C", K::Constructor, Some("C"), Some(K::Class)),
+    (L::Cpp, CPP_WRAPPED_CONSTRUCTORS[3], "C", K::Constructor, Some("C"), Some(K::Class)),
+    (L::Cpp, CPP_WRAPPED_CONSTRUCTORS[4], "C", K::Constructor, Some("C"), Some(K::Class)),
+    (L::Cpp, CPP_WRAPPED_CONSTRUCTORS[5], "C", K::Constructor, Some("C"), Some(K::Class)),
+    (L::Cpp, CPP_WRAPPED_CONSTRUCTORS[6], "C", K::Constructor, Some("C"), Some(K::Class)),
+    (L::Cpp, "class C {\npublic:\n    int m [[deprecated]] (int x);\n};\n", "m", K::Method, Some("C"), Some(K::Class)),
     // C++: already landed elsewhere, kept as regression.
     (L::Cpp, "using Alias = int;\n", "Alias", K::TypeAlias, None, None),
     (L::Cpp, "namespace space {\nint inside;\n}\n", "space", K::Namespace, None, None),
@@ -359,6 +394,31 @@ pub const DEFERRED_KIND_ROWS: &[InlineKindRow] = &[
     (L::Scala, "enum Color {\n  case Red\n  val code = 1\n}\n", "code", K::Field, Some("Color"), Some(K::Enum)),
     // A case's parameter is named under the case (`Color.Value.x`).
     (L::Scala, "enum Color {\n  case Value(x: Int)\n}\n", "x", K::Parameter, Some("Color"), Some(K::Enum)),
+    // Grouped names: one Field per name, for every owner and keyword.
+    (L::Scala, SCALA_GROUPED_CLASS, "a", K::Field, Some("K"), Some(K::Class)),
+    (L::Scala, SCALA_GROUPED_CLASS, "b", K::Field, Some("K"), Some(K::Class)),
+    (L::Scala, SCALA_GROUPED_CLASS, "c", K::Field, Some("K"), Some(K::Class)),
+    (L::Scala, SCALA_GROUPED_CLASS, "d", K::Field, Some("K"), Some(K::Class)),
+    (L::Scala, SCALA_GROUPED_CLASS, "e", K::Field, Some("K"), Some(K::Class)),
+    (L::Scala, SCALA_GROUPED_CLASS, "f", K::Field, Some("K"), Some(K::Class)),
+    (L::Scala, SCALA_GROUPED_CLASS, "g", K::Field, Some("K"), Some(K::Class)),
+    (L::Scala, SCALA_GROUPED_CLASS, "h", K::Field, Some("K"), Some(K::Class)),
+    (L::Scala, SCALA_GROUPED_TRAIT, "a", K::Field, Some("T"), Some(K::Trait)),
+    (L::Scala, SCALA_GROUPED_TRAIT, "b", K::Field, Some("T"), Some(K::Trait)),
+    (L::Scala, SCALA_GROUPED_TRAIT, "c", K::Field, Some("T"), Some(K::Trait)),
+    (L::Scala, SCALA_GROUPED_TRAIT, "d", K::Field, Some("T"), Some(K::Trait)),
+    (L::Scala, SCALA_GROUPED_TRAIT, "e", K::Field, Some("T"), Some(K::Trait)),
+    (L::Scala, SCALA_GROUPED_TRAIT, "f", K::Field, Some("T"), Some(K::Trait)),
+    (L::Scala, SCALA_GROUPED_TRAIT, "g", K::Field, Some("T"), Some(K::Trait)),
+    (L::Scala, SCALA_GROUPED_TRAIT, "h", K::Field, Some("T"), Some(K::Trait)),
+    (L::Scala, SCALA_GROUPED_OBJECT, "a", K::Field, Some("O"), Some(K::Module)),
+    (L::Scala, SCALA_GROUPED_OBJECT, "b", K::Field, Some("O"), Some(K::Module)),
+    (L::Scala, SCALA_GROUPED_OBJECT, "c", K::Field, Some("O"), Some(K::Module)),
+    (L::Scala, SCALA_GROUPED_OBJECT, "d", K::Field, Some("O"), Some(K::Module)),
+    (L::Scala, SCALA_GROUPED_ENUM, "a", K::Field, Some("E"), Some(K::Enum)),
+    (L::Scala, SCALA_GROUPED_ENUM, "b", K::Field, Some("E"), Some(K::Enum)),
+    (L::Scala, SCALA_GROUPED_ENUM, "c", K::Field, Some("E"), Some(K::Enum)),
+    (L::Scala, SCALA_GROUPED_ENUM, "d", K::Field, Some("E"), Some(K::Enum)),
     // PHP: a semicolon namespace contains nothing; a braced one contains its
     // members.
     (L::Php, "<?php\nclass C {\n    public function __construct($x = 1) {}\n}\n", "__construct", K::Constructor, Some("C"), Some(K::Class)),
@@ -438,6 +498,11 @@ pub const DEFERRED_KIND_NEGATIVES: &[InlineNegativeRow] = &[
     (L::Cpp, "class C {\n  operator bool() const;\n};\n", "C", K::Constructor),
     (L::Cpp, "class C {\n  void method();\n};\n", "method", K::Constructor),
     (L::Cpp, "class C {};\nC::C() {}\n", "C", K::Constructor),
+    (L::Cpp, "class C {};\nC::C [[deprecated]] () {}\n", "C", K::Constructor),
+    (L::Cpp, "class C {\n  ~C [[deprecated]] ();\n};\n", "C", K::Constructor),
+    (L::Cpp, "class C {\n  [[deprecated]] operator bool() const;\n};\n", "C", K::Constructor),
+    (L::Cpp, "class C {\n  int m [[deprecated]] (int x);\n};\n", "m", K::Constructor),
+    (L::Cpp, "class C {\n  int (m)(int x);\n};\n", "m", K::Constructor),
     (L::Cpp, "class C {\n    static C make();\n};\n", "make", K::Constructor),
     (L::Cpp, "class C {\n    C &operator=(const C &other);\n};\n", "operator=", K::Constructor),
     (L::Cpp, "C make();\n", "make", K::Constructor),
@@ -457,6 +522,9 @@ pub const DEFERRED_KIND_NEGATIVES: &[InlineNegativeRow] = &[
     (L::Scala, "class K {\n  def g(): Int = { var inner = 1; inner }\n}\n", "inner", K::Field),
     (L::Scala, "val top = 1\n", "top", K::Field),
     (L::Scala, "class K {\n  val (d1, d2) = (1, 2)\n}\n", "d1", K::Field),
+    (L::Scala, SCALA_GROUPED_LOCALS, "t1", K::Field),
+    (L::Scala, SCALA_GROUPED_LOCALS, "x", K::Field),
+    (L::Scala, SCALA_GROUPED_LOCALS, "y", K::Field),
     (L::Scala, "object O {\n  def m(): Int = 1\n}\n", "m", K::Field),
     // PHP
     (L::Php, "<?php\nfunction __construct() {}\n", "__construct", K::Constructor),
@@ -525,6 +593,34 @@ fn deferred_kinds_get_their_scope() {
 #[test]
 fn deferred_kind_counterexamples_keep_their_kinds() {
     assert_inline_negative_rows(DEFERRED_KIND_NEGATIVES);
+}
+
+/// `(language, source, owner kind, members)`: a source whose owner has no
+/// name, and the `(name, kind)` of each member it declares.
+type UnnamedOwnerCase = (ProgrammingLanguage, &'static str, SymbolKind, &'static [(&'static str, SymbolKind)]);
+
+/// A PHP global `namespace {}` block and an anonymous C enum have no name,
+/// so neither yields an owner record, and their members name no container.
+#[test]
+fn unnamed_namespaces_and_enums_invent_no_owner() {
+    let cases: &[UnnamedOwnerCase] = &[
+        (L::Php, "<?php\nnamespace {\n    function global_fn() {}\n}\n", K::Namespace, &[("global_fn", K::Function)]),
+        (L::C, "enum { ANON_A, ANON_B };\n", K::Enum, &[("ANON_A", K::EnumVariant), ("ANON_B", K::EnumVariant)]),
+    ];
+    for &(language, source, owner_kind, members) in cases {
+        let extracted = extract_inline(source, language.extensions()[0]);
+        assert!(
+            extracted.symbols.iter().all(|symbol| symbol.kind != owner_kind),
+            "{language:?} {source:?}: an unnamed {owner_kind:?} in symbols()"
+        );
+        assert!(
+            extracted.records.iter().all(|record| record.kind != SymbolKindV2::from(owner_kind)),
+            "{language:?} {source:?}: an unnamed {owner_kind:?} in symbol_index_v2()"
+        );
+        for &(name, kind) in members {
+            extracted.assert_kind(name, None, kind, None);
+        }
+    }
 }
 
 /// Test 6: no symbol of any fixture reports `SymbolKind::Unknown`. An entry
@@ -905,6 +1001,28 @@ fn swift_function_local_binding_is_a_variable_not_a_field() {
         SymbolKind::Field,
         Some(SymbolKind::Type),
     );
+}
+
+/// A grouped `val` in a method body names two local Variables, with the same
+/// kind, scope and container as a single-name `val` beside it; a tuple pattern in the class body
+/// declares no symbol at all.
+#[test]
+fn scala_grouped_locals_are_variables_like_single_ones() {
+    let scala = extract_inline(SCALA_GROUPED_LOCALS, "scala");
+    for name in ["x", "y", "z"] {
+        scala.assert_kind(name, Some("K"), SymbolKind::Variable, Some(SymbolKind::Class));
+        assert_eq!(scala.record(name, Some("K")).scope, SymbolScope::Local, "`{name}` scope");
+    }
+    for name in ["t1", "t2"] {
+        assert!(
+            scala.symbols.iter().all(|symbol| symbol.name != name),
+            "tuple-pattern name `{name}` is extracted"
+        );
+        assert!(
+            scala.records.iter().all(|record| record.identity.name != name),
+            "tuple-pattern name `{name}` has a record"
+        );
+    }
 }
 
 #[test]

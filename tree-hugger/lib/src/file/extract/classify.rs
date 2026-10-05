@@ -175,20 +175,24 @@ fn is_constructor_declaration(
                 && is_direct_member(declaration)
                 && node_text(name, source).is_some_and(|text| text.eq_ignore_ascii_case("__construct"))
         }
-        // A class member with no return type whose declarator declares a
-        // plain identifier: a destructor (`destructor_name`), a conversion
-        // operator (`operator_cast`) and an out-of-class `C::C()`
-        // (`qualified_identifier`) do not qualify, and the name is never
-        // compared with the class's.
+        // A class member with no return type whose function declarator
+        // declares a plain identifier, looking through attributes and
+        // parentheses only (`C [[deprecated]] ()`, `(C)()`): a destructor
+        // (`destructor_name`), a conversion operator (`operator_cast`) and an
+        // out-of-class `C::C()` (`qualified_identifier`) do not qualify, and
+        // the name is never compared with the class's.
         ProgrammingLanguage::Cpp => {
             matches!(declaration.kind(), "declaration" | "field_declaration" | "function_definition")
                 && declaration.child_by_field_name("type").is_none()
                 && is_direct_member(declaration)
-                && declaration
-                    .child_by_field_name("declarator")
-                    .filter(|declarator| declarator.kind() == "function_declarator")
-                    .and_then(|declarator| declarator.child_by_field_name("declarator"))
-                    .is_some_and(|declared| declared.kind() == "identifier" && declared == name)
+                && name.kind() == "identifier"
+                && declared_function_named(declaration, name).is_some_and(|declared| {
+                    declared.name == name
+                        && declaration
+                            .child_by_field_name("declarator")
+                            .map(transparent_declarator)
+                            == Some(declared.function)
+                })
         }
         _ => false,
     }
