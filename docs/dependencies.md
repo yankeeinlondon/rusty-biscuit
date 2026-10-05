@@ -38,9 +38,12 @@
   deliberately** — it resolves to rustls (with `rustls-platform-verifier`, so
   the OS trust store) under reqwest 0.13 and to native-tls under 0.12, so
   dropping it would silently switch a TLS backend. `messenger/lib` moved to
-  0.13 on 2026-10-03, which took native-tls and OpenSSL out of the workspace
-  graph entirely; that is what lets `claudine-cli` build for Linux, musl
-  included, with no `libssl`. reqwest 0.12 remains only in
+  0.13 on 2026-10-03, which took native-tls out of the workspace graph and
+  OpenSSL out of every shipped CLI on every target; that is what lets
+  `claudine-cli` build for Linux, musl included, with no `libssl`.
+  `openssl-sys` remains only on Linux, through `git2`'s HTTPS transport, a
+  dev-dependency of `darkmatter` (check with
+  `cargo tree --workspace --target all -e normal,build,dev -i openssl-sys`). reqwest 0.12 remains only in
   `biscuit-location`, `schematic-oauth` (pinned by `oauth2 5.0`), and
   `chromiumoxide 0.7`, all on rustls. What `system-proxy` provided was narrow: a *manually* configured
   HTTP/HTTPS `host:port` from macOS System Settings or the Windows
