@@ -198,12 +198,17 @@ mod tests {
         for text in [
             "<b>{x}</b> a\\b plain",
             "_draft_.md",
-            "**bold** `code_span` [link](target) *star*",
+            "**bold** [link](target) *star*",
             r#"lifecycle retry: "quoted" _loop_count"#,
             "git log --format=%s *_test*",
         ] {
             assert_eq!(rendered(&prose_escape(text)), text, "{text:?}");
         }
+    }
+
+    #[test]
+    fn a_backtick_code_span_renders_as_code_with_its_contents_literal() {
+        assert_eq!(rendered(&prose_escape("**bold** `code_span *x*`")), "**bold** code_span *x*");
     }
 
     #[test]

@@ -879,7 +879,7 @@ fn schema_load_hint_appears_inside_block_quote_border() {
     let term = Terminal::new_optimistic(80);
     let rendered = strip_escape_codes(err.report_block_error(&term));
 
-    let hint_token = "Verify the `$schema` path";
+    let hint_token = "Verify the $schema path";
     let hint_lines: Vec<&str> = rendered
         .lines()
         .filter(|l| l.contains(hint_token))

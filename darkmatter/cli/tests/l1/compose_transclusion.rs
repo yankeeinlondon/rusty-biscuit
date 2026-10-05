@@ -433,7 +433,7 @@ fn compose_env_anchored_child_is_bounded_by_the_variable() {
 
     let escape = compose("escape.md");
     let stdout = String::from_utf8_lossy(&escape.stdout);
-    let stderr = String::from_utf8_lossy(&escape.stderr);
+    let stderr = biscuit_test_harness::strip_ansi(&String::from_utf8_lossy(&escape.stderr));
     let collapsed = stderr.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(!escape.status.success(), "stdout: {stdout}");
     assert!(!stdout.contains("outside-content"), "{stdout}");

@@ -490,7 +490,8 @@ mod tests {
         // Assert
         let repo = biscuit_terminal::prelude::strip_escape_codes(repo);
         let tags = biscuit_terminal::prelude::strip_escape_codes(tags);
-        assert_eq!(repo, "TheBloke/Llama-2-7B-GGUF");
+        // Without OSC 8 support a link degrades to its Markdown spelling.
+        assert_eq!(repo, "[TheBloke/Llama-2-7B-GGUF](https://huggingface.co/TheBloke/Llama-2-7B-GGUF)");
         assert_eq!(tags, " image input   mlx   tool ");
     }
 }

@@ -216,10 +216,15 @@ fn prose_escape_neutralizes_template_and_bold_tokens() {
         "{{variable}}",
         "**bold**",
         "Error: {{url}} and **token**",
-        "_leading_ underscore and `code_span`",
+        "_leading_ underscore",
     ] {
         assert_eq!(rendered_plain(&prose_escape(text)), text);
     }
+}
+
+#[test]
+fn prose_escape_renders_a_code_span_as_code_with_its_contents_literal() {
+    assert_eq!(rendered_plain(&prose_escape("_leading_ and `code_span`")), "_leading_ and code_span");
 }
 
 // =====================================================================
