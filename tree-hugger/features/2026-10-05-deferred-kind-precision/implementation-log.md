@@ -107,6 +107,77 @@ skills_files_updated_during_phase_5:
   - .claude/skills/tree-hugger/SKILL.md
   - .claude/skills/tree-hugger/api-reference.md
   - .claude/skills/tree-hugger/query-system.md
+source_files_during_phase_6:
+  - tree-hugger/lib/tests/l1/symbols_kinds.rs
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
+source_code:
+  - tree-hugger/lib/src/file/extract/classify.rs
+  - tree-hugger/lib/src/file/extract/declaration.rs
+  - tree-hugger/lib/src/file/extract/header/mod.rs
+  - tree-hugger/lib/src/file/extract/type_metadata.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/tree_file/definitions.rs
+  - tree-hugger/lib/src/shared/schema_v2/mod.rs
+  - tree-hugger/lib/src/shared/symbol.rs
+  - tree-hugger/lib/tests/l1/symbols_field_lists.rs
+  - tree-hugger/lib/tests/l1/symbols_header.rs
+  - tree-hugger/lib/tests/l1/symbols_kinds.rs
+  - tree-hugger/lib/tests/l1/symbols_qualified_names.rs
+  - tree-hugger/lib/tests/l1/symbols_query_filters.rs
+  - tree-hugger/lib/tests/l1/symbols_scope.rs
+  - tree-hugger/cli/tests/symbols/order.rs
+  - tree-hugger/lib/queries/typescript/locals.scm
+  - tree-hugger/lib/queries/vendor/c/locals.scm
+  - tree-hugger/lib/queries/vendor/c_sharp/locals.scm
+  - tree-hugger/lib/queries/vendor/go/locals.scm
+  - tree-hugger/lib/queries/vendor/java/locals.scm
+  - tree-hugger/lib/queries/vendor/php_only/locals.scm
+  - tree-hugger/lib/queries/vendor/scala/locals.scm
+  - tree-hugger/lib/queries/vendor/swift/locals.scm
+  - tree-hugger/lib/src/file/extract/header/keyword.rs
+  - tree-hugger/lib/src/file/extract/qualified_name.rs
+  - tree-hugger/lib/src/file/extract/signatures.rs
+  - tree-hugger/lib/src/file/extract/visibility/csharp.rs
+  - tree-hugger/lib/src/file/extract/visibility/ecma.rs
+  - tree-hugger/lib/src/file/extract/visibility/java.rs
+  - tree-hugger/lib/src/queries/inventory.rs
+  - tree-hugger/lib/src/queries/provenance.rs
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/symbols_declarator_wrappers.rs
+  - tree-hugger/lib/tests/l1/symbols_deferred_metadata.rs
+  - tree-hugger/lib/tests/l1/symbols_function_locals.rs
+  - tree-hugger/lib/tests/l1/symbols_kind_coverage.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols-signatures-full.plain
+  - tree-hugger/cli/tests/fixtures/golden/symbols-stats.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.jsonl
+  - tree-hugger/cli/tests/fixtures/golden/symbols.plain
+  - tree-hugger/cli/tests/fixtures/golden/symbols.stats
+  - tree-hugger/cli/tests/fixtures/golden/symbols.table
+  - tree-hugger/cli/tests/fixtures/golden/symbols.tree
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
+  - tree-hugger/lib/tests/l1/symbols_query.rs
+  - tree-hugger/lib/tests/l1/symbols_selection_filters.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/symbols/classes.rs
+  - tree-hugger/cli/tests/symbols/filters.rs
+  - tree-hugger/cli/tests/symbols/reports.rs
+  - tree-hugger/lib/tests/l1/symbols_async.rs
+documentation:
+  - tree-hugger/docs/symbol-schema-design.md
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+  - tree-hugger/docs/symbol-reports.md
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/README.md
+  - tree-hugger/lib/README.md
+  - .claude/skills/tree-hugger/query-system.md
+completed_phase: 6
+implemented: true
 ---
 
 # Implementation Log for 2026-10-05-deferred-kind-precision (6 phases)
@@ -1372,3 +1443,170 @@ carries a tier marker, and it reads no repository file.
   `symbol-reports.md` "Ordering"; the rule is unchanged.
 - `docs/symbol-kinds-and-visibility.md` "Grammar limits" is the current
   record of G1 that the Phase 6 matrix audit should cite.
+
+## Phase 6
+
+Final validation and close. One test was added (below); no library, CLI,
+query, doc or skill file changed.
+
+### Gates (2026-10-05, macOS host)
+
+- `just test` in `tree-hugger/`: **996 run, 996 passed** (23 slow), 0
+  skipped, before the Phase 6 test was added. The count matches the
+  package's own recipe (not the 587-test `CDPATH` trap noted in Phase 5).
+- **Final gates, after adding `unnamed_namespaces_and_enums_invent_no_owner`:**
+  `just test` **997 run, 997 passed** (9 slow), 0 skipped, the new test
+  among them; `just lint` clean. The first lint after adding the test failed
+  on `clippy::type_complexity` (the inline tuple type of its case table);
+  the type became the `UnnamedOwnerCase` alias and lint passed.
+- `just lint` in `tree-hugger/`: clippy clean for `tree-hugger` and
+  `tree-hugger-cli`.
+- `just test-l2`: not run. Phase 4 found no rendering change, and no phase
+  changed rendering code.
+
+### Matrix audit
+
+The spec's acceptance table was walked row by row against
+`lib/tests/l1/symbols_kinds.rs` (`DEFERRED_KIND_ROWS` positives,
+`DEFERRED_KIND_NEGATIVES` negatives) and
+`lib/tests/l1/symbols_kind_coverage.rs` (`KIND_COVERAGE_MATRIX`,
+`GRAMMAR_LIMITS`).
+
+| Language | Cells (spec) | Positive rows | Negative rows (spec boundaries) | Coverage matrix |
+|---|---|---|---|---|
+| TypeScript | EnumVariant, Namespace | `Red`/`Blue`, const enum, quoted member, local enum; `namespace`, `module`, `declare namespace`, nested, dotted `A.B` | property `Red`, object `constructor`, `export * as`, `import * as`, `declare module "x"`, object/interface `Red` | both `landed` |
+| Go | TypeAlias, Field | `Alias`, grouped `Grouped`, generic alias; `X`/`Y`, grouped struct, generic struct, function-local struct | `Defined` stays Type, interface `M`, receiver `r`, parameter `p`, embedded, anonymous-struct, alias-of-struct, literal, value of `S` | both `landed` |
+| Python | Constructor | class, decorated, function-local class, conditional class; `__new__` stays Method | top-level and function-local `__init__`, `__new__`, `@classmethod` factory, `__init_subclass__`, `init`, `__init__ = None` | `landed` |
+| Java | Constructor, EnumVariant | class, enum, record, local class ctors; `RED`/`BLUE`, constant with body, nested enum; `inBody` has no enum container | `void C()`, compact record ctor, initializer blocks, factory, `static final RED`, `E.RED` use | both `landed` |
+| C# | Constructor, EnumVariant | class, expression-bodied struct, record; `Red`/`Blue`, attributed member; primary-ctor parameter stays Parameter | method `C` with return type, static ctor, destructor, primary ctor, factory, `const Red` | both `landed` |
+| C | EnumVariant | named, anonymous, typedef'd, struct-nested, function-local enums | variable from `RED`, function using `RED`, `#define RED` | both forms `landed` |
+| C++ | Constructor, EnumVariant | declared, defined, `= default`, `= delete`, template-wrapped (member and class template), `explicit`, namespaced, local struct; unscoped, scoped, class-nested enumerators | destructor, conversion operator, method, out-of-class `C::C()`, static factory, `operator=`, free function, variable from `RED` | both `landed` |
+| Swift | Constructor, TypeAlias | `init`, `init?`, `init!`, extension, enum, protocol requirement; top-level, generic, enum-nested `typealias` | `deinit`, static factory, `associatedtype` (with and without default), `initialize`, `make` | both `landed` |
+| Scala | EnumVariant, TypeAlias, Field | `case Red, Blue`, `case Value(x)`, indentation-syntax enum; object and trait `type`; object/trait/class/enum `val`/`var`/`lazy val`; case parameter stays Parameter | abstract `type Element`, method-local `val`/`var`, class parameters (`p`, `val q`), top-level `val`, destructuring, `def` | all `landed`; G1 in `GRAMMAR_LIMITS` |
+| PHP | Constructor, EnumVariant, Namespace | `__construct`, `__Construct`, `__CONSTRUCT` (trait); unit and backed cases; semicolon and braced namespaces with member containers | top-level `__construct`, legacy ctor, `use` imports, static factory, `__constructor`, enum `const`, global `namespace {}` | all `landed` |
+
+Result: every cell is `landed`; no `unsupported` entry remains in any
+row. The one recorded limit, G1 (Scala enum case of an access-modified
+enum), is a `GRAMMAR_LIMITS` entry demonstrated by its own failing parse
+(`grammar_limits_are_demonstrated`) and documented in
+`docs/symbol-kinds-and-visibility.md` "Grammar limits". No limit is filed as
+"language has no construct": the `no_construct` lists of the ten languages
+were checked and none names a kind this feature landed for that language.
+
+**Gap found and closed.** Two boundaries were only half pinned:
+
+- PHP: "a global `namespace {}` block has no invented name". The negative
+  row only asserted that `global_fn` is not a Namespace; a record of
+  another name (or an empty name) with kind Namespace would have passed.
+- C: "an anonymous enum gains no invented owner name". The positive row
+  asserted that `ANON_B` has no container, but not that no `Enum` record
+  was invented beside it.
+
+Behavior was already right (checked with the tree's `hug symbols --plain`:
+only `ANON_A`, `ANON_B` and `global_fn`, no owner). Added
+`symbols_kinds::unnamed_namespaces_and_enums_invent_no_owner`, which
+asserts on both public paths (`symbols()` and `symbol_index_v2()`) that
+neither source yields any Namespace/Enum record and that the members keep
+their kinds with no container. It is L1, in the declared `l1` binary
+(`symbols_kinds` is already a `mod` of `lib/tests/l1/main.rs`), with no
+tier marker and no repository file read.
+
+**Count discrepancy in the plan (not a defect).** The plan's summary says
+"25 deferred cells", but its own list (Constructor 6, EnumVariant 7,
+TypeAlias 3, Field 2, Namespace 2) and the spec's table total **20**. All
+20 are landed. The plan was left as written.
+
+### Cross-platform
+
+The `os` skill was loaded. The feature's CLI tests (`classes.rs`,
+`filters.rs`, `reports.rs`, `cache_upgrade.rs`, `order.rs`) were scanned for
+path-sensitive assertions. Every file name they compare (`Shapes.java`,
+`shapes.go`, `model.scala`, `space.ts`, `app.php`, `c.py`) is written at the
+scratch root, so no expected value contains a path separator. The
+backslashes in `App\Service::__construct` and `App\Suit::Hearts` are PHP
+namespace separators inside qualified names, not filesystem paths. The
+stable key in `cache_upgrade.rs` comes from the library's
+`stable_symbol_key`, which writes `/`. No cross-OS run was made: the risk
+the plan names is absent, and the spec adds no CI environments, so
+push-time CI covers Windows and WSL2 after merge, with any failure fixed
+forward.
+
+### Close-out summary
+
+**Rows and forms delivered per phase.**
+
+- Phase 1: no code. Baseline (949/949), rulings R1–R7, capture path, S1
+  grammar inventory, S2 verdict (one limit, G1).
+- Phase 2: shared plumbing. Constructor/variant/field/namespace scope and
+  container rules, `discriminant` on `VariantInfo` (F5), variant and field
+  list reconciliation (`align_variant_metadata`, `reconcile_variants`,
+  `align_field_metadata`), `MetadataSelection::for_kinds`, `module` no
+  longer a scope boundary by kind (F1).
+- Phase 3: every cell of the table above, in three waves (TS/Go/Python/C;
+  Java/C#/C++; Swift/Scala/PHP), with the extra forms in D11, provenance
+  notes (D12) and goldens (D9).
+- Phase 4: `EXTRACTOR_REVISION` 13 → 14; narrow-vs-complete query tests for
+  all five kinds; cache upgrade, warm-hit and coverage tests; CLI selector,
+  class-summary and report agreement tests; goldens reviewed.
+- Phase 5: docs, READMEs, skill, provenance check, comment drift pass; one
+  `symbols_async` assertion (D17).
+- Phase 6: gates, matrix audit, the unnamed-owner test above,
+  cross-platform scan.
+
+**S1 and the final limit list.** S1's table is in "S1: Grammar node
+inventory" (Phase 1). The final limit list is one grammar limit, **G1**
+(Scala, tree-sitter-scala 0.24.0, `private enum Hidden { case H }` parses as
+`ERROR(access_modifier)` + `enum_definition`; `Hidden` and `H` remain,
+both Public). Scope limits by ruling (not grammar limits): R1 owner kinds
+(Go/Swift owners stay `Type`) and R2 constructor breadth (Java compact
+record, C# static/primary constructors and destructors, C++ out-of-class
+definitions keep current behavior). Both are in
+`docs/symbol-kinds-and-visibility.md` "Current limitations" and
+"Constructors".
+
+**Departures from the spec and plan.** D1–D4 (Phase 2), D5–D12 (Phase 3),
+D13–D14 (Phase 4), D15–D17 (Phase 5), each recorded in its phase's
+"Departures from the plan". The ones that touch the spec's wording rather
+than the plan's mechanics:
+
+- **F14, spec wording.** The spec says Go interface method elements
+  "remain the existing documented field-list exception". In fact the Go
+  interface reader has listed nothing since tree-sitter-go 0.25 (it matches
+  `method_spec`; the grammar emits `method_elem`). Docs, skill and the
+  reader's comment now describe that. Repairing it would change every Go
+  interface's output and is left to the author.
+- **F18.** Grouped Go fields (`X, Y int`) share one declaration span, so
+  `hug symbols` orders them by record ID, not source order. The rule is
+  documented and unchanged.
+- **D4.** Variant reconciliation applies to `Enum` owners only; a Swift
+  enum (`Type` under R1) gets no variant list.
+- **D15.** `SKILL.md` is 410 lines, over the plan's 200-line target.
+- **F11, F15, F16, F17** are pre-existing behaviors documented, not
+  changed (constructors lose the `semantics` facet; C++ `= default;` header
+  keeps its `;`; standalone `Field` payload is thinner than the list
+  entry; TS `declare namespace` access is Unknown).
+
+**Rulings R1–R7.** Resolved in Phase 1 ("Rulings R1–R7"): plan defaults
+kept for R1, R2, R5, R6; R3 and R4 confirmed against the code (R3's
+`discriminant` gap closed in Phase 2 as F5); R7 not scheduled.
+
+**Drift found and how it was resolved.** Phase 2: `signature_text`'s doc.
+Phase 5: six code-comment drifts (table in "Drift pass"), three in the
+kinds doc, one in the cache doc example revision, five in the skill. In
+every case the code was treated as correct and the comment or doc was
+fixed. Phase 6 found no new drift.
+
+### Requirement-to-test mapping (Phase 6)
+
+| Requirement | Test |
+|---|---|
+| PHP global `namespace {}` has no invented name (spec, PHP row) | `symbols_kinds::unnamed_namespaces_and_enums_invent_no_owner` |
+| C anonymous enum gains no invented owner (spec, C row) | same test; plus the existing `ANON_B` container `None` row |
+| Every other acceptance-table row | the existing tests named in the audit table |
+
+### Hand-off
+
+- The feature stays in its active directory. No agent ran `just complete`
+  or moved it to `_completed`. Nothing was committed or staged.
+- The spec's `status` is left as written; the pipeline reads
+  `implemented: true` and `implemented_by`, which were set.

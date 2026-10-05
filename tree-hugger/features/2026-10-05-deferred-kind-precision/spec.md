@@ -6,29 +6,10 @@ status: draft-spec
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-05
-review_iterations: 0
+review_iterations: 1
 human_review: false
-message_to_agent: |-
-  Phase 5 (docs and skill) is complete; read implementation-log.md
-  "## Phase 5" first. Gates: 996/996 (`just test`), lint clean. Phase 5
-  changed docs, READMEs, the skill and code comments only, plus one added
-  assertion (`symbols_async`: Swift `init() async` is async).
-
-  For Phase 6:
-  - Matrix audit: the current record of grammar limit G1 is
-    docs/symbol-kinds-and-visibility.md "Grammar limits"; R1/R2 limits are
-    in that doc's "Current limitations" and its new "Constructors" table.
-  - F14 is documented as behavior, not fixed: no Go interface lists its
-    method elements (the reader matches `method_spec`; tree-sitter-go 0.25
-    emits `method_elem`), and the spec's wording assumes they are listed.
-    Record this as a departure in the final log; do not repair the reader
-    without the author (it would change every Go interface's output).
-  - F18 (grouped Go fields ordered by record ID) is described in
-    symbol-reports.md "Ordering"; the rule is unchanged.
-  - D15: SKILL.md is 410 lines (409 before), over the plan's 200-line
-    target; a restructure is outside this feature.
-  - `just test` must be run from tree-hugger/ itself; a `cd tree-hugger`
-    from inside it silently runs a different recipe (587 tests).
+implemented: true
+implemented_by: "claude/opus"
 $schema:
   status: |-
     enum(

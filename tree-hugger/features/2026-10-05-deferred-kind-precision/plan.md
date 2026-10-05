@@ -111,6 +111,77 @@ skills_files_updated_during_phase_5:
   - .claude/skills/tree-hugger/SKILL.md
   - .claude/skills/tree-hugger/api-reference.md
   - .claude/skills/tree-hugger/query-system.md
+source_files_during_phase_6:
+  - tree-hugger/lib/tests/l1/symbols_kinds.rs
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
+source_code:
+  - tree-hugger/lib/src/file/extract/classify.rs
+  - tree-hugger/lib/src/file/extract/declaration.rs
+  - tree-hugger/lib/src/file/extract/header/mod.rs
+  - tree-hugger/lib/src/file/extract/type_metadata.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/tree_file/definitions.rs
+  - tree-hugger/lib/src/shared/schema_v2/mod.rs
+  - tree-hugger/lib/src/shared/symbol.rs
+  - tree-hugger/lib/tests/l1/symbols_field_lists.rs
+  - tree-hugger/lib/tests/l1/symbols_header.rs
+  - tree-hugger/lib/tests/l1/symbols_kinds.rs
+  - tree-hugger/lib/tests/l1/symbols_qualified_names.rs
+  - tree-hugger/lib/tests/l1/symbols_query_filters.rs
+  - tree-hugger/lib/tests/l1/symbols_scope.rs
+  - tree-hugger/cli/tests/symbols/order.rs
+  - tree-hugger/lib/queries/typescript/locals.scm
+  - tree-hugger/lib/queries/vendor/c/locals.scm
+  - tree-hugger/lib/queries/vendor/c_sharp/locals.scm
+  - tree-hugger/lib/queries/vendor/go/locals.scm
+  - tree-hugger/lib/queries/vendor/java/locals.scm
+  - tree-hugger/lib/queries/vendor/php_only/locals.scm
+  - tree-hugger/lib/queries/vendor/scala/locals.scm
+  - tree-hugger/lib/queries/vendor/swift/locals.scm
+  - tree-hugger/lib/src/file/extract/header/keyword.rs
+  - tree-hugger/lib/src/file/extract/qualified_name.rs
+  - tree-hugger/lib/src/file/extract/signatures.rs
+  - tree-hugger/lib/src/file/extract/visibility/csharp.rs
+  - tree-hugger/lib/src/file/extract/visibility/ecma.rs
+  - tree-hugger/lib/src/file/extract/visibility/java.rs
+  - tree-hugger/lib/src/queries/inventory.rs
+  - tree-hugger/lib/src/queries/provenance.rs
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/symbols_declarator_wrappers.rs
+  - tree-hugger/lib/tests/l1/symbols_deferred_metadata.rs
+  - tree-hugger/lib/tests/l1/symbols_function_locals.rs
+  - tree-hugger/lib/tests/l1/symbols_kind_coverage.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols-signatures-full.plain
+  - tree-hugger/cli/tests/fixtures/golden/symbols-stats.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.jsonl
+  - tree-hugger/cli/tests/fixtures/golden/symbols.plain
+  - tree-hugger/cli/tests/fixtures/golden/symbols.stats
+  - tree-hugger/cli/tests/fixtures/golden/symbols.table
+  - tree-hugger/cli/tests/fixtures/golden/symbols.tree
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
+  - tree-hugger/lib/tests/l1/symbols_query.rs
+  - tree-hugger/lib/tests/l1/symbols_selection_filters.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/symbols/classes.rs
+  - tree-hugger/cli/tests/symbols/filters.rs
+  - tree-hugger/cli/tests/symbols/reports.rs
+  - tree-hugger/lib/tests/l1/symbols_async.rs
+documentation:
+  - tree-hugger/docs/symbol-schema-design.md
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+  - tree-hugger/docs/symbol-reports.md
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/README.md
+  - tree-hugger/lib/README.md
+  - .claude/skills/tree-hugger/query-system.md
+completed_phase: 6
+implemented: true
 ---
 
 # Plan: precise kinds for previously deferred declarations
@@ -153,7 +224,7 @@ An extractor gap does not qualify.
 
 ### Done means all of the following hold
 
-- [ ] Every required form in the acceptance table is extracted with its kind,
+- [x] Every required form in the acceptance table is extracted with its kind,
   container, access, static flag, signature and header, or has a recorded
   grammar limit (snippet, grammar identity, observed node, remaining
   behavior) in the implementation log and current docs.
@@ -169,11 +240,11 @@ An extractor gap does not qualify.
 - [x] `EXTRACTOR_REVISION` is bumped. Cache-upgrade tests prove old entries
   are recomputed, warm lookups are hits, and a filtered result is never
   stored as full coverage.
-- [ ] `just test` and `just lint` pass in `tree-hugger/`, plus CLI goldens
+- [x] `just test` and `just lint` pass in `tree-hugger/`, plus CLI goldens
   updated only for intended record changes.
-- [ ] Docs, READMEs, skill and query provenance are updated; the
+- [x] Docs, READMEs, skill and query provenance are updated; the
   implementation log records every departure from the spec.
-- [ ] The feature stays in its active directory for author review. No agent
+- [x] The feature stays in its active directory for author review. No agent
   moves it to `_completed`.
 
 ### Input Robustness Matrix
@@ -576,25 +647,25 @@ tasks run concurrently, since they edit different files.
 
 ## Phase 6: Final validation and close
 
-- [ ] **Full gates.** Run `just test` and `just lint` in `tree-hugger/`. Run
+- [x] **Full gates.** Run `just test` and `just lint` in `tree-hugger/`. Run
   `just test-l2` only if Phase 4 found rendering changes.
-- [ ] **Matrix audit.** Walk the spec's acceptance table row by row, and
+- [x] **Matrix audit.** Walk the spec's acceptance table row by row, and
   confirm each has a positive test, a negative test, and a coverage-matrix
   status of `landed`, or `unsupported` with a recorded reason. Check that no
   limit is filed as "language has no construct".
-- [ ] **Cross-platform check.** Parse results and tests here are
+- [x] **Cross-platform check.** Parse results and tests here are
   platform-independent, but confirm there are no path-sensitive assertions
   in the new CLI tests, since Windows path comparison is the known trap.
   Load the `os` skill first. The spec adds no CI environments, so push-time
   CI covers Windows and WSL2 after merge and any failure is fixed forward.
-- [ ] **Implementation log.** Complete
+- [x] **Implementation log.** Complete
   `implementation-log.md` with:
   - the rows and forms delivered per phase;
   - S1's table and the final limit list;
   - every departure from the spec;
   - the resolved rulings R1–R7;
   - the drift found and how it was resolved.
-- [ ] **Hand-off.** Set the spec status to `implemented` only if the author's
+- [x] **Hand-off.** Set the spec status to `implemented` only if the author's
   workflow expects it, and leave the feature in its active directory. No
   agent runs `just complete` or moves it to `_completed`. Do not commit
   unless explicitly asked.
