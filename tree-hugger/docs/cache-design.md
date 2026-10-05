@@ -85,9 +85,13 @@ cd tree-hugger/lib && hug --json symbols src/symbol.rs       # hit: same entry, 
 
 Nothing about the scan root reaches the stored records: JSON paths are made
 relative to it after the lookup ([symbol-reports.md](./symbol-reports.md)),
-and so will the planned file prefix of a qualified name
+and so is the file prefix of a qualified name
 ([Qualified names](./symbol-kinds-and-visibility.md#qualified-names)); neither
-it nor a naming context is a key input. `<temp>` comes from `TMPDIR`
+it nor a naming context is a key input. A query's predicates (scope,
+visibility, names, flags, signature shape) are applied to the result after the
+lookup too: the entry always holds every record of its covered kinds under
+its in-file name, and a predicate only adds the kinds and capabilities it
+reads to what the lookup must cover. `<temp>` comes from `TMPDIR`
 (`TMP`/`TEMP` on Windows), which is how the CLI tests isolate the cache. Old entries are never deleted by
 `hug`; clearing the directory is always safe.
 
@@ -149,7 +153,8 @@ different directories, since the identity is absolute.
 
 The same identity is used everywhere `hug` compares files:
 
-- `scanner::collect_files` returns identities, so a file named twice under
+- `scanner::collect_files` and `collect_selected_files` (which adds the
+  files `hug --file` names) return identities, so a file named twice under
   different spellings, or named and also matched by a glob, is analyzed and
   listed once;
 - `hug` resolves its working directory to its identity before deriving the
@@ -174,7 +179,7 @@ file's records, imports, exports and every analysis pass but diagnostics:
 | Input | Where it comes from | Changes when |
 |---|---|---|
 | schema version | `SchemaVersion::V4_0` | the record shape changes |
-| implementation version | crate version and `EXTRACTOR_REVISION` (`0.1.0+rev.8`) | extraction code changes |
+| implementation version | crate version and `EXTRACTOR_REVISION` (`0.1.0+rev.9`) | extraction code changes |
 | grammar identity | the compiled grammar: name, declared version (if any), ABI, node-kind, field and parse-state counts | a grammar crate is upgraded |
 | grammar ID | the grammar variant (`typescript` or `tsx`, …) | the file's grammar variant differs |
 | query text | the effective `locals`, `imports` and `references` query text, with inherited vendored queries and overlays resolved | a `.scm` file the analysis compiles changes |

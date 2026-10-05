@@ -123,7 +123,7 @@ pub struct SymbolRecord {
 **Additive 4.x fields.** `scope`, `identity.qualified_name` (now always
 present), `identity.is_namespace_rooted`, the `Async` entry of `modifiers`,
 `visibility.is_test` and the `metrics` facet were added on top of 4.0 without
-a version bump; `EXTRACTOR_REVISION` moved on instead (it is 8 now), so no
+a version bump; `EXTRACTOR_REVISION` moved on instead (it is 9 now), so no
 cache entry written without them is served. The `attributes`, `type_info.generic_params`
 and the inheritance lists of `relations` stay empty.
 
@@ -229,11 +229,13 @@ ID once.
 
 `qualified_name` is built from the file's own source with the language's
 separators (`schema::Record::load`, `com.example.Point.area`,
-`App\Models\User::find`). A file or module **prefix** is not stored: it is
-**planned** as a query input applied after the cache lookup, which is why
-neither the scan root nor a library caller's naming context is a cache-key
-input. `is_namespace_rooted` marks names that already start at a declared
-`package` or `namespace` and so will get no prefix.
+`App\Models\User::find`). A file or module **prefix** is not stored: a query
+result adds it after the cache lookup, from the query's scan root or naming
+context (`src/shapes.rs#Point::norm`, `crate::shapes::Point::norm`), which is
+why neither is a cache-key input. `is_namespace_rooted` marks names that
+already start at a declared `package` or `namespace` and so get no prefix.
+The prefix rules are in
+[Symbol Kinds, Visibility and `static`](./symbol-kinds-and-visibility.md#qualified-names).
 
 `container_name` holds the name of the symbol's nearest container (a class, trait,
 module, or the implemented type of a Rust `impl`), and `container_kind` holds
@@ -672,6 +674,11 @@ pub struct FunctionData {
 }
 ```
 
+`return_info.type_text` and each parameter's `type_text` are the type text
+the source declares, never an inferred one: a Rust function without `->` and
+a Go function without a result have no return type text (before revision 9,
+Rust reported `()` and a Go method its own parameter list).
+
 ### Type/Class/Interface/Trait Data
 
 ```rust
@@ -856,6 +863,51 @@ The same query can be served from the persistent cache:
 result, reading the file's entry when it covers the query's kinds and
 capabilities and widening the entry when it does not (see
 [Cache Design](./cache-design.md)).
+
+Predicates select records within the kinds. Each is applied to the result
+after analysis and cache lookup, so it never changes a cache entry or an ID;
+a list predicate matches when any of its values does, and every predicate must
+match:
+
+```rust
+let query = SymbolQuery::new()
+    .kinds([SymbolKindV2::Function, SymbolKindV2::Method])
+    .scopes([SymbolScope::Item, SymbolScope::Member])
+    .visibility(VisibilityLevel::Public)
+    .exclude_tests(true)
+    .name(NamePattern::new("parse"))
+    .scan_root("tree-hugger");
+```
+
+| Predicate | Keeps | Pushes into the plan |
+|---|---|---|
+| `scopes([..])` | records in one of the scopes | — |
+| `visibility(level)` (repeatable) | records whose level is exactly one of them; `Unknown` matches only `Unknown` | — |
+| `exported(true)` | `visibility.is_exported` records | — |
+| `exclude_tests(true)` / `tests_only(true)` (the last call wins) | records whose `is_test` is false / true | `Flags` |
+| `deprecated(true)` | `is_deprecated` records | `Flags` |
+| `undocumented(true)` | records whose `metrics.has_docs` is `Some(false)`; `None` never matches | `Metrics` |
+| `is_async(true)` | functions with the `Async` modifier | function kinds |
+| `returns(glob)` | functions whose declared return type text matches | function kinds |
+| `param_type(glob)` | functions with a parameter (not a Rust `self`) whose declared type text matches | function kinds |
+| `min_params(n)` | functions whose `metrics.parameters` is at least `n`; `None` never matches | function kinds, `Metrics` |
+| `in_container(pattern)` (repeatable) | records whose `container_name` matches; a qualified pattern matches the enclosing declaration's qualified name | — |
+| `name(pattern)` (repeatable) | records whose name matches; a qualified pattern matches the displayed `qualified_name` | — |
+| `exclude_name(pattern)` (repeatable) | drops matching records; wins over every inclusion | — |
+
+"Function kinds" are Function, Method and Constructor, intersected with any
+kind selection whatever order the builder calls come in; a pushed capability
+appears in `completed_capabilities`. A `NamePattern` uses smart case (no
+uppercase letter: case-insensitive), matches a substring unless it has `*`
+(whole-string wildcard) or is exact (`NamePattern::exact` or a trailing `!`:
+whole-string, `*` literal), and is qualified when it holds `#` or the
+language's separator. Type globs (`glob_match`) are whole-string and
+case-sensitive. `SymbolQuery::matches(record)` applies the same predicates to
+any record.
+
+A filtered result narrows (`narrowed`) only to a query with the same
+predicates and the same prefix; an unfiltered one narrows to any covered
+query and is re-prefixed for it.
 
 Kind selection skips work but never data a selected record depends on.
 Declarations of unselected kinds are still extracted with their identity,

@@ -324,8 +324,10 @@ impl Foreign { fn f(&self) {} }                  // container Foreign, no kind
 
 ## Scope
 
-Every declaration has a **scope** that says where it sits, for presentation
-(hiding `Local` declarations from `hug symbols` by default is **planned**).
+Every declaration has a **scope** that says where it sits, for presentation:
+`hug symbols` hides `Local` declarations unless `--scope local` or
+`--all-scopes` asks for them, and `--scope` selects any scope in every
+declaration command (see [Symbol Reports](./symbol-reports.md#selecting-declarations)).
 It is decided by the nearest *semantic* declaration around it, not by the
 nearest brace:
 
@@ -405,13 +407,34 @@ PHP `namespace` (file-scoped or block), a named C++ `namespace` and a Perl
 is not complete without its file. A Perl package name is absolute wherever it
 is written.
 
-The stored name is only the **in-file** part. Prefixing an unrooted name with
-its file (`src/symbol.rs#schema::Record`) or with a caller-supplied module
-path is **planned**: it is applied after a cache lookup, from query inputs
-that are not part of the cache key, so the stored name, the record ID and the
-cache entry never depend on where `hug` runs. `hug` will always use the file
-form for Rust and Python, because a file path alone cannot prove a module
-path.
+**What you see is the in-file name behind a prefix.** The cache stores only
+the in-file name. A query result puts a prefix in front of every name that is
+not namespace-rooted, after the cache lookup, from query inputs that are not
+part of the cache key. The stored name, the record ID and the cache entry
+therefore never depend on where `hug` runs:
+
+| Query input | Prefix | Example |
+|---|---|---|
+| a scan root (`SymbolQuery::scan_root`; `hug` passes its own) | the file's portable path from the root, then `#` | `lib/src/symbol.rs#Symbol::new` |
+| none (the library default) | the file name, then `#` (the file's directory is the root) | `symbol.rs#Symbol::new` |
+| a naming context (`NamingContext::new(root, prefix)`), file below its root | the context prefix and the file's route as module segments, in the language's separator | `crate::shared::symbol::SymbolInfo::new`, `package.module.Class.method` |
+
+```text
+scan root tree-hugger/      ->  lib/src/symbol.rs#Symbol::new
+scan root tree-hugger/lib/  ->  src/symbol.rs#Symbol::new
+both: one cache entry, one symbol ID, in-file name Symbol::new
+```
+
+A naming context drops the file extension and adds no segment for a Rust
+`mod.rs`, a Rust `lib.rs` or `main.rs` directly in its root, or a Python
+`__init__.py`; a file outside its root gets the file prefix. Nothing guesses a
+module path: `hug` never sets a naming context, so its Rust and Python names
+always use the file form, while namespace-rooted names (`com.example.Point`)
+take no prefix at all. `SymbolQueryResult::name_prefix()` reports the prefix a
+result's names carry, so the in-file name is the displayed name without it.
+Relation and export references (`SymbolRef::qualified_name`) keep the in-file
+name: a referenced record may not be in the result, and its namespace root is
+then unknown.
 
 **IDs derive from the qualified name.** A record's ID is a digest of the
 language, the file's [identity](./cache-design.md#file-identity), the kind,
@@ -799,6 +822,15 @@ modules because Node wraps each one in a function, so its top-level
 declarations stay private to the file. `package.json`'s `"type"` field is not
 read, so extraction never looks beyond the one file.
 
+A function bound to a top-level `const` or `let` has the access, and the
+export, of the declaration that binds it:
+
+```javascript
+// lib.js (a module)
+export const load = async () => 1;  // Public, exported
+const helper = (value) => value;    // ModulePrivate
+```
+
 ```javascript
 // script.js: no module evidence
 function helper() {}             // Unknown
@@ -892,7 +924,8 @@ class Shape {
 
 `visibility.is_exported` comes only from export syntax and the bind pass,
 never from a Public level: a top-level declaration inside a JavaScript or
-TypeScript `export`, or a Rust item with a `pub…` modifier. Members (methods,
+TypeScript `export` (each name of `export const a = 1, f = () => …;`
+included), or a Rust item with a `pub…` modifier. Members (methods,
 constructors, fields, properties, enum variants) are never marked exported. A
 Public Java class or TypeScript class method is not exported. Converting a
 `SymbolInfo` to a record always gives `is_exported: false`, because

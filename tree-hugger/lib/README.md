@@ -8,7 +8,9 @@ and packages.
 The core API for file-level symbol extraction and diagnostics.
 
 ```rust
-use tree_hugger::{Capability, SourceFile, SymbolKindV2, SymbolQuery, TreeFile};
+use tree_hugger::{
+    Capability, NamePattern, SourceFile, SymbolKindV2, SymbolQuery, SymbolScope, TreeFile,
+};
 
 let file = TreeFile::new("src/lib.rs")?;
 
@@ -28,6 +30,14 @@ let query = SymbolQuery::new()
     .capabilities([Capability::Containment]);
 let result = SourceFile::read("src/lib.rs")?.query(&query)?; // or file.query(&query)
 // result.index.symbols holds only functions and methods; no diagnostics ran
+
+// Predicates, applied after analysis and the cache (never part of an entry)
+let query = SymbolQuery::new()
+    .scopes([SymbolScope::Item, SymbolScope::Member])
+    .exclude_tests(true)                 // also computes the test flag
+    .name(NamePattern::new("parse"))     // smart case: matches `parseWidth`, `ParseError`
+    .scan_root(".");                     // qualified names read `src/lib.rs#Parser::parse`
+let result = SourceFile::read("src/lib.rs")?.query(&query)?;
 
 // Diagnostics
 let lint = file.lint_diagnostics();      // Pattern-based lint rules
@@ -135,7 +145,10 @@ pub struct SymbolInfo {
 - `scope` is decided by the nearest semantic declaration (a parameter and
   anything in a function body is `Local`); `qualified_name` joins the
   enclosing named declarations with the language's own separators and is
-  what the record ID is derived from. Both are described in
+  what the record ID is derived from. A query result shows it behind a file
+  prefix (`symbol.rs#Record::load`) or a `NamingContext` module path
+  (`crate::symbol::Record::load`) unless it starts at a declared namespace.
+  Both are described in
   [Symbol Kinds, Visibility and `static`](../docs/symbol-kinds-and-visibility.md#scope).
 
 ### Visibility
@@ -232,8 +245,12 @@ used by the CLI but are also available to library consumers.
 
 Schema output (version 4.0) is exposed via `SymbolRecord` and `FileSymbolIndex`, including `schema_version`
 and `completed_passes` metadata for staged analysis. A `SymbolQuery` result adds
-`completed_capabilities` and `selected_kinds`, and `narrowed` answers a
-narrower query from it without parsing again. Pass dependencies, capabilities and kind selection
+`completed_capabilities`, `selected_kinds` and `name_prefix()`, and `narrowed` answers a
+narrower query from it without parsing again. The predicates (`scopes`,
+`visibility`, `exported`, `exclude_tests`/`tests_only`, `undocumented`,
+`deprecated`, `is_async`, `returns`, `param_type`, `min_params`,
+`in_container`, `name`, `exclude_name`) and the matchers (`NamePattern`,
+`glob_match`) are listed in [Symbol Schema Design](../docs/symbol-schema-design.md#selective-queries). Pass dependencies, capabilities and kind selection
 are described in [Symbol Schema Design](../docs/symbol-schema-design.md#extraction-pipeline-contract).
 `cache::SymbolCache` serves the same queries from one persistent entry per
 file, parsing only when the entry lacks a requested kind or capability; see

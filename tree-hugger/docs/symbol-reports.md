@@ -7,6 +7,7 @@ how output is ordered, and what `--verbose` reports.
 ```bash
 hug functions                 # every function, method and constructor in the package
 hug types --sort name         # type declarations, ordered by name
+hug functions --in TreeFile --undocumented   # undocumented members of TreeFile
 hug --json symbols src/       # every declaration under src/, as a JSON report
 hug --json-full symbols       # every file's complete index, diagnostics included
 hug --verbose functions       # same listing, plus cache and work stats on stderr
@@ -18,8 +19,9 @@ come after it.
 
 ## The four commands and what they analyze
 
-Each command asks the library for a fixed set of kinds and only the analysis
-work its output needs. Nothing a listing does not show is computed: no
+Each command asks the library for a fixed set of kinds (narrowed by
+`--kind`) and only the analysis work its output and its filters need.
+Nothing a listing does not show or filter on is computed: no
 listing runs lint or syntax diagnostics, reference resolution, semantic
 analysis or structured documentation. That is why a listing is far cheaper
 than `hug lint`.
@@ -28,7 +30,7 @@ than `hug lint`.
 |---|---|---|
 | `functions` | Function, Method, Constructor | none |
 | `types` | Type, Class, Interface, Enum, Trait, TypeAlias | none |
-| `symbols` | every kind | none |
+| `symbols` | every kind, `item` and `member` scopes only (no locals) unless `--scope`/`--all-scopes` | none |
 | `classes` | Class, Type, Interface, Trait as containers; Method and Constructor as their members | containment (links each member to its container) |
 
 Kind names are the library's `SymbolKind` values; a Rust `struct` or a C
@@ -55,8 +57,16 @@ src/shapes.rs (Rust)
   visibility and `static` flag even though Field, Property and Constant
   records are not part of the command's kind set.
 - Members of a Rust `impl` block appear under the type they implement.
-- `--static-only` and `--instance-only` keep only that half; `--name <TEXT>`
-  keeps containers whose name contains the text.
+- `--static-only` and `--instance-only` keep only that half; together they
+  are an argument error.
+- The [selectors](#selecting-declarations) split between containers and
+  members: kind, scope, name, `--in`, visibility, export, test, docs and
+  deprecation filters choose **containers** (`--in Box` selects the container
+  named `Box`), while `--async`, `--returns`, `--param-type`, `--min-params`
+  and `--static-only`/`--instance-only` choose the **members** displayed. A
+  selected container may show no member, and a signature filter hides the
+  field sections (fields have no signature). To filter members by kind,
+  visibility or docs, use `hug functions --in Box` instead.
 - A member is static when it needs no instance (a Java `static` method, a
   Rust associated function, a C# `const`). Storage `static`, such as a C++
   function-local `static`, never makes a member static.
@@ -64,38 +74,139 @@ src/shapes.rs (Rust)
 `imports` and `lint` are not declaration commands: they keep their own
 output, accept no `--sort` and never print the report described below.
 
-### Narrowing the listing
+## Selecting declarations
 
-- **Positional filters** are either file filters (paths, globs, extensions
-  such as `src/**/*.rs` or `rs`) or symbol-name filters: `cache` (contains),
-  `*cache*` (wildcard) or `cache!` (exact name).
-- `--exclude-files` and `--exclude-symbols` take globs.
-- `--exported` keeps exported (public) declarations.
-- `--prelude` keeps the names a package re-exports from its Rust prelude
-  (`src/prelude.rs`, `src/prelude/mod.rs`, or the same under a direct child
-  package), plus any comma-separated names in the `PRELUDE` environment
-  variable. Each prelude re-export is listed as its own record under the
-  alias name, marked synthetic and re-exported (`visibility.is_synthetic`,
-  `is_reexported`), with its own ID. When the target is found the record
-  takes its kind, keyword, doc comment and declaration location; otherwise
-  it sits at the `pub use` line with kind Unknown. The prelude and its
-  targets are analyzed once and reused by the scan; a target outside the
-  scan is resolved but not listed.
+Every declaration command accepts the same selectors; they combine with AND,
+and the values of a repeatable selector are alternatives (OR). Exclusions win
+over inclusions.
 
-These filters choose records after analysis; they never change the kind set
-or the work done.
+```bash
+hug symbols --kind trait --kind interface     # only traits and interfaces
+hug symbols --all-scopes                      # locals and parameters too
+hug functions --visibility crate --visibility public --exclude-tests
+hug functions --async --returns 'Result<*' --min-params 2
+hug symbols --name '*/symbol.rs#*'            # everything in any symbol.rs
+hug functions --in '*shared::SymbolInfo'      # members of one of several SymbolInfo types
+```
+
+| Selector | Keeps | Notes |
+|---|---|---|
+| positional `FILTER` | files (a path with `/`, a glob, a name with a source extension such as `lib.rs` or `*.rs`) or names (anything else) | a name filter is a `--name` |
+| `--file PATH\|GLOB` | scans that file, directory pattern or glob | never taken for a name; see below |
+| `--name PATTERN`, `-n` | records whose name matches | see [Name patterns](#name-patterns) |
+| `--exact` | — | `--name`, positional names and `--in` match whole and literally |
+| `--exclude-symbols PATTERN` | drops records whose name matches | name pattern rules; a trailing `!` is exact |
+| `--exclude-files GLOB` | drops files | also drops a file named by `--file` |
+| `--kind KIND` | records of that kind | snake_case `SymbolKind` names: `function`, `type_alias`, `enum_variant`, …; narrows the command's kinds, never widens them (`hug types --kind function` lists nothing); an unknown name is an argument error |
+| `--scope item\|member\|local` | records in that scope | replaces the default; `symbols` defaults to `item` and `member`, the other commands to every scope |
+| `--all-scopes` | every scope | conflicts with `--scope` |
+| `--visibility LEVEL` | records with exactly that level | `public`, `protected`, `private`, `internal`, `package`, `crate`, `module_private`, `protected_internal`, `private_protected`, `unknown`; `unknown` matches only Unknown, never public or private |
+| `--exported` | exported records (`is_exported`, re-exports included) | independent of `--visibility`: a public method is usually not a module export |
+| `--in PATTERN` | members of a container whose name matches | the immediate container (`container_name`); a qualified pattern matches the enclosing declaration's qualified name |
+| `--exclude-tests` / `--tests-only` | non-test / test-only records | mutually exclusive; uses the test rules in [Symbol Kinds](./symbol-kinds-and-visibility.md) |
+| `--undocumented` | records with no doc comment | never matches Lua, Perl, Bash or Zsh, which have no doc-comment detection |
+| `--deprecated` | records marked deprecated | |
+| `--async` | `async` functions, methods and constructors | |
+| `--returns GLOB` | functions whose **declared** return type matches | whole-string, case-sensitive, `*` wildcard; no declared type never matches |
+| `--param-type GLOB` | functions with a non-receiver parameter whose declared type matches | Rust `self` is skipped |
+| `--min-params N` | functions with at least N declared parameters | an unsupported count never matches |
+
+The four signature selectors (`--async` to `--min-params`) keep only
+functions, methods and constructors, whatever `--kind` says.
+
+`hug symbols` hides locals by default: over `tree-hugger/` it lists under a
+third of the declarations `--all-scopes` lists (parameters, function-local
+variables and nested functions are locals). `functions` and `types` keep every
+scope, so a nested function stays discoverable.
+
+### Name patterns
+
+Names use **smart case**: a pattern with no uppercase letter ignores case, any
+uppercase letter makes it case-sensitive. Case folding works on whole
+characters, so `ünï` also matches `Ünï_big`.
+
+| Pattern | Matches |
+|---|---|
+| `parse` | any name containing `parse`, `Parse`, `PARSE`, … |
+| `Parse` | names containing exactly `Parse` |
+| `parse*` | names starting with `parse` (a `*` makes the pattern cover the whole name) |
+| `parse!` or `--exact parse` | the name `parse` (any case), and nothing longer |
+| `--exact 'a*'` | the name `a*`: `*` is literal under `--exact` |
+
+A pattern containing `#` or the language's qualified-name separator (`::`
+in Rust, C++, Perl and PHP; `.` elsewhere) matches the displayed
+**qualified name**, which starts with the file's path from the scan root
+(`src/symbol.rs#SymbolInfo::new`) unless the language roots it in a
+namespace (a C++ `namespace`, a Java `package`). A wildcard pattern is
+anchored at the start of that name, so:
+
+```bash
+hug symbols --name 'symbol.rs#*'      # a symbol.rs at the scan root only
+hug symbols --name '*/symbol.rs#*'    # a symbol.rs anywhere below it
+hug functions --name 'Widget::*'      # nothing: the name starts with its file
+hug functions --name '*Widget::*'     # every Widget member
+hug symbols --name 'geometry::*'      # a C++ namespace: no file prefix
+```
+
+### `--file` and `--name` versus positional filters
+
+A positional token is guessed to be a file or a name. `--file` and `--name`
+say which it is, so a name with a `/` (a file-qualified pattern) or a file
+without a source extension can be given. File values are alternatives, as are
+name values; the two lists intersect.
+
+- A `--file` value naming an existing file (relative to the working
+  directory, then the repository root; `~/`, `./` and the other
+  [file reference](../../biscuit-file/docs/topics/file-references.md) forms
+  work) is scanned even when `.gitignore` or the default test-data
+  exclusions (`fixtures/`, `__fixtures__/`, `snapshots/`, `testdata/`) would
+  skip it. `--exclude-files` still removes it.
+- Any other value (a glob, a directory) is used like a positional file
+  filter. A value that is not a valid file reference is an argument error.
+
+### `imports`
+
+`imports` takes only file filters positionally, and `--file`, `--name`,
+`--exact` and `--exclude-symbols`. An import matches when its local name, its
+alias or its original name matches, so both `--name HashMap` and `--name Map`
+find `use std::collections::HashMap as Map;`. A qualified pattern
+(`std::collections::*`) matches the whole original path.
+
+### `--prelude`
+
+`--prelude` keeps the names a package re-exports from its Rust prelude
+(`src/prelude.rs`, `src/prelude/mod.rs`, or the same under a direct child
+package), plus any comma-separated names in the `PRELUDE` environment
+variable. Each prelude re-export is listed as its own record under the
+alias name, marked synthetic and re-exported (`visibility.is_synthetic`,
+`is_reexported`), with its own ID. When the target is found the record
+takes its kind, keyword, doc comment and declaration location; otherwise
+it sits at the `pub use` line with kind Unknown. The prelude and its
+targets are analyzed once and reused by the scan; a target outside the
+scan is resolved but not listed. The selectors apply to these records too.
+
+### Selectors and the cache
+
+Kinds narrow what is extracted, and a selector that reads the test,
+deprecation or metric facts asks for them (`--undocumented` and
+`--min-params` compute the `metrics` facet, `--exclude-tests`,
+`--tests-only` and `--deprecated` the flags), but every other predicate, and
+the qualified-name prefix, is applied to each file's result **after** the
+cache lookup. A filtered run therefore reuses the entry an unfiltered run
+wrote, and two runs from different scan roots share one entry and the same
+IDs; only the displayed prefix differs.
 
 ## The flow of one run
 
 ```mermaid
 flowchart LR
-    cmd["command<br/>(functions, types,<br/>symbols, classes)"] --> query["SymbolQuery<br/>kind set + capabilities"]
+    cmd["command + selectors<br/>(functions, types,<br/>symbols, classes)"] --> query["SymbolQuery<br/>kind set + capabilities<br/>+ predicates"]
     query --> scan["parallel scan<br/>one task per file"]
     scan --> cache{"persistent<br/>cache entry?"}
-    cache -- "complete hit" --> result["per-file result<br/>(selected records)"]
+    cache -- "complete hit" --> result["per-file result<br/>(prefix + predicates<br/>applied)"]
     cache -- "miss or partial" --> passes["only the passes<br/>the query needs:<br/>parse → bind → semantic<br/>parse → docs<br/>parse → diagnostics"]
     passes --> write["write entry back"] --> result
-    result --> order["filter and order<br/>(--sort, name filters,<br/>--exported, --prelude)"]
+    result --> order["--prelude, then order<br/>(--sort)"]
     order --> out{"output"}
     out --> term["terminal listing"]
     out --> json["--json report<br/>(errors last)"]
@@ -260,7 +371,7 @@ orders the containers, and each container's method sections (and its JSON
           "scope": "Member",
           "identity": {
             "name": "norm",
-            "qualified_name": "Point::norm",
+            "qualified_name": "src/shapes.rs#Point::norm",
             "is_namespace_rooted": false,
             "container_name": "Point",
             "container_kind": "Type",
@@ -285,7 +396,11 @@ orders the containers, and each container's method sections (and its JSON
 records also carry spans, modifiers (`Static`, `Async`, …), the rest of the
 visibility facet, type information, kind-specific data and provenance.
 `scope` and `qualified_name` are described in
-[Symbol Kinds, Visibility and `static`](./symbol-kinds-and-visibility.md#scope).)
+[Symbol Kinds, Visibility and `static`](./symbol-kinds-and-visibility.md#scope).
+A `qualified_name` that does not start at a declared namespace or package
+carries the file's path from the scan root plus `#`, so running from
+another directory changes only that prefix and `file_path`; the `id` and the
+cache entry stay the same.)
 
 | Field | Meaning |
 |---|---|
@@ -364,10 +479,13 @@ every capability (the test and deprecation flags and the `metrics` facet
 included), imports, exports, diagnostics and `declaration_text`.
 
 Because it reports everything, `--json-full` rejects any flag that narrows
-records (exit `2`): a symbol-name filter, `--exclude-symbols`, `--exported`,
-`--prelude`, and for `classes` `--name`, `--static-only` and
-`--instance-only`. File selectors (paths, globs, `--exclude-files`,
-`--language`), `--sort` and `--no-cache` are allowed. `lint` and `imports`
+records (exit `2`): a symbol-name filter, `--name`, `--exclude-symbols`,
+`--exported`, `--prelude`, `--kind`, `--scope`, `--all-scopes`,
+`--visibility`, `--in`, `--exclude-tests`, `--tests-only`, `--undocumented`,
+`--deprecated`, `--async`, `--returns`, `--param-type`, `--min-params`, and
+for `classes` `--static-only` and `--instance-only`. File selectors (paths,
+globs, `--file`, `--exclude-files`, `--language`), `--exact`, `--sort` and
+`--no-cache` are allowed. `lint` and `imports`
 reject `--json-full`.
 
 ```bash
