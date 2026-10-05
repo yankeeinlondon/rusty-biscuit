@@ -3,7 +3,7 @@
 //! the miss carries biscuit-file's literal-glob hint. A plain missing name and
 //! a failure other than a miss do not.
 
-use crate::common::CliProcessFixture;
+use crate::common::{CliProcessFixture, unwrapped};
 
 /// Text unique to the literal-glob hint.
 const HINT: &str = "::file-links";
@@ -25,15 +25,6 @@ fn compose(fixture: &CliProcessFixture, argument: &str) -> (bool, String) {
         .output()
         .expect("md must run");
     (output.status.success(), unwrapped(&String::from_utf8_lossy(&output.stderr)))
-}
-
-/// `stderr` with the error block's frame and line wrapping removed, so a
-/// phrase the renderer wrapped (`::file-` / `links`) reads as authored.
-fn unwrapped(stderr: &str) -> String {
-    biscuit_terminal::utils::escape_codes::strip_escape_codes(stderr)
-        .lines()
-        .map(|line| line.trim_start_matches(['┃', ' ']).trim_end())
-        .collect()
 }
 
 /// Writes `body` as `cwd/page.md` and composes it.

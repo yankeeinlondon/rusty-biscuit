@@ -27,6 +27,17 @@ use std::sync::{
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
+/// `stderr` with an error block's frame and line wrapping removed, so a
+/// phrase the renderer wrapped (a path split at a hyphen) reads as authored.
+/// The block wraps at its own width whatever the terminal's, and the wrap
+/// point moves with the temporary directory's length on each OS.
+pub fn unwrapped(stderr: &str) -> String {
+    biscuit_terminal::utils::escape_codes::strip_escape_codes(stderr)
+        .lines()
+        .map(|line| line.trim_start_matches(['┃', ' ']).trim_end())
+        .collect()
+}
+
 pub fn md_file(content: &str) -> tempfile::NamedTempFile {
     let mut tmp = tempfile::NamedTempFile::new().unwrap();
     write!(tmp, "{}", content).unwrap();
