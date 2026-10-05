@@ -40,11 +40,13 @@ pub(crate) fn extract_parameters(
     declared_parameters(node, name, language, source).unwrap_or_default()
 }
 
-/// The parameters of the declaration's own parameter list, or `None` when
-/// no parameter list was found: the declaration has none (a JavaScript
-/// name bound to a function value), or the language's
-/// parameters are not extracted (Perl, Bash, Zsh). `Some` of an empty list
-/// is a known empty list.
+/// The parameters of the declaration's own parameter list (every list of a
+/// curried Scala `def`), or `None` when no parameter list was found: the
+/// declaration has none (a JavaScript name bound to a function value), or
+/// the language's parameters are not extracted (Perl, Bash, Zsh). `Some` of
+/// an empty list is a known empty list. A parameter bound by a pattern is
+/// listed under the pattern's text; only C/C++ and Go leave unnamed
+/// parameters out (see [`declared_parameter_count`]).
 pub(crate) fn declared_parameters(
     node: Node<'_>,
     name: Node<'_>,
@@ -80,18 +82,31 @@ pub(crate) fn declared_parameters(
         return Some(vec![ParameterInfo::new(name)]);
     }
 
-    let params_node = parameter_list_node(node, name, language, params_node_kind)?;
+    // A curried Scala `def f(a: A)(b: B)` declares every list's
+    // parameters, `implicit`/`using` lists included.
+    let lists: Vec<Node<'_>> = if language == ProgrammingLanguage::Scala {
+        let mut cursor = node.walk();
+        node.children(&mut cursor)
+            .filter(|child| child.kind() == params_node_kind)
+            .collect()
+    } else {
+        vec![parameter_list_node(node, name, language, params_node_kind)?]
+    };
+    if lists.is_empty() {
+        return None;
+    }
 
     let mut parameters = Vec::new();
-    let mut cursor = params_node.walk();
-
-    for child in params_node.children(&mut cursor) {
-        // Go needs special handling: a single parameter_declaration can define
-        // multiple parameters (e.g., `a, b int` defines both `a` and `b`)
-        if language == ProgrammingLanguage::Go {
-            parameters.extend(extract_go_parameters(child, source));
-        } else if let Some(param) = extract_single_parameter(child, language, source) {
-            parameters.push(param);
+    for list in lists {
+        let mut cursor = list.walk();
+        for child in list.children(&mut cursor) {
+            // Go needs special handling: a single parameter_declaration can define
+            // multiple parameters (e.g., `a, b int` defines both `a` and `b`)
+            if language == ProgrammingLanguage::Go {
+                parameters.extend(extract_go_parameters(child, source));
+            } else if let Some(param) = extract_single_parameter(child, language, source) {
+                parameters.push(param);
+            }
         }
     }
 
@@ -208,6 +223,10 @@ pub(crate) fn extract_single_parameter(
     }
 }
 
+/// A Rust parameter is named by its whole pattern as written (`(a, b)`,
+/// `_`, `S { x }`), so a destructuring or wildcard parameter is listed and
+/// counted like an identifier. A receiver (`&self`, or a `self: Box<Self>`
+/// pattern) is named `self`.
 pub(crate) fn extract_rust_parameter(node: Node<'_>, source: &str) -> Option<ParameterInfo> {
     let kind = node.kind();
 
@@ -215,16 +234,32 @@ pub(crate) fn extract_rust_parameter(node: Node<'_>, source: &str) -> Option<Par
         return Some(ParameterInfo::new("self"));
     }
 
+    // C-variadic `...` in a foreign function, named by its pattern if any.
+    if kind == "variadic_parameter" {
+        let name = node
+            .child_by_field_name("pattern")
+            .and_then(|pattern| pattern.utf8_text(source.as_bytes()).ok())
+            .unwrap_or("...");
+        return Some(ParameterInfo {
+            name: name.to_string(),
+            type_annotation: None,
+            default_value: None,
+            is_variadic: true,
+        });
+    }
+
     if kind != "parameter" {
         return None;
     }
 
-    let name = find_child_by_kind(node, "identifier")
-        .and_then(|n| n.utf8_text(source.as_bytes()).ok())
-        .map(|s| s.to_string())?;
+    let name = node
+        .child_by_field_name("pattern")
+        .and_then(|pattern| pattern.utf8_text(source.as_bytes()).ok())?
+        .to_string();
 
-    // Find the type annotation - could be various type node kinds
-    let type_annotation = find_rust_type_node(node)
+    let type_annotation = node
+        .child_by_field_name("type")
+        .or_else(|| find_rust_type_node(node))
         .and_then(|n| n.utf8_text(source.as_bytes()).ok())
         .map(|s| s.to_string());
 
@@ -353,54 +388,51 @@ pub(crate) fn find_go_type_node(node: Node<'_>) -> Option<Node<'_>> {
         .find(|child| GO_TYPE_KINDS.contains(&child.kind()))
 }
 
+/// A JavaScript/TypeScript parameter is named by its binding as written:
+/// an identifier, or a whole object/array pattern (`{x}`, `[a, b]`); a rest
+/// parameter by what follows `...`. A TypeScript `this` parameter declares
+/// the receiver's type, not an argument, and is skipped.
 pub(crate) fn extract_js_parameter(
     node: Node<'_>,
     kind: &str,
     source: &str,
 ) -> Option<ParameterInfo> {
-    // Check if this is a rest/variadic parameter
-    let is_rest = kind == "rest_pattern" || find_child_by_kind(node, "rest_pattern").is_some();
+    let text = |node: Node<'_>| node.utf8_text(source.as_bytes()).ok().map(str::to_string);
 
-    let name = if kind == "rest_pattern" {
-        find_child_by_kind(node, "identifier")
-    } else if kind == "identifier" {
-        Some(node)
-    } else if kind == "assignment_pattern" {
-        node.child_by_field_name("left")
-    } else if kind == "required_parameter" || kind == "optional_parameter" {
-        // For required_parameter containing rest_pattern: ...names
-        if let Some(rest) = find_child_by_kind(node, "rest_pattern") {
-            find_child_by_kind(rest, "identifier")
-        } else {
-            find_child_by_kind(node, "identifier")
-        }
-    } else {
+    let (binding, default_value) = match kind {
+        "identifier" | "object_pattern" | "array_pattern" | "rest_pattern" => (node, None),
+        "assignment_pattern" => (
+            node.child_by_field_name("left")?,
+            node.child_by_field_name("right").and_then(text),
+        ),
+        "required_parameter" | "optional_parameter" => (
+            node.child_by_field_name("pattern")?,
+            node.child_by_field_name("value").and_then(text),
+        ),
+        _ => return None,
+    };
+    if binding.kind() == "this" {
         return None;
-    };
+    }
 
-    let name = name
-        .and_then(|n| n.utf8_text(source.as_bytes()).ok())
-        .map(|s| s.to_string())?;
-
-    // For TypeScript, try to get type annotation
-    let type_annotation = find_child_by_kind(node, "type_annotation")
-        .and_then(|ta| ta.child(1)) // Skip the colon
-        .and_then(|n| n.utf8_text(source.as_bytes()).ok())
-        .map(|s| s.to_string());
-
-    let default_value = if kind == "assignment_pattern" {
-        node.child_by_field_name("right")
-            .and_then(|n| n.utf8_text(source.as_bytes()).ok())
-            .map(|s| s.to_string())
+    let is_variadic = binding.kind() == "rest_pattern";
+    let name = if is_variadic {
+        binding.named_child(0).and_then(text)?
     } else {
-        None
+        text(binding)?
     };
+
+    // The `type` field is the whole `: T` annotation.
+    let type_annotation = node
+        .child_by_field_name("type")
+        .and_then(|annotation| annotation.named_child(0))
+        .and_then(text);
 
     Some(ParameterInfo {
         name,
         type_annotation,
         default_value,
-        is_variadic: is_rest,
+        is_variadic,
     })
 }
 

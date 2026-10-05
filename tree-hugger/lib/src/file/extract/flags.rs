@@ -112,18 +112,24 @@ fn has_inner_cfg_test(host: Node<'_>, source: &str) -> bool {
         .any(|attribute| is_cfg_test(&rust_attribute(attribute, source)))
 }
 
+/// `cfg(test)`: the one argument is the bare `test` predicate (comments
+/// inside the parentheses are not tokens, so `cfg(/* why */ test)` counts).
 fn is_cfg_test(attribute: &SyntacticAttribute) -> bool {
     attribute.name == "cfg"
         && attribute
             .arguments
             .as_deref()
-            .is_some_and(|arguments| arguments.split_whitespace().collect::<String>() == "test")
+            .is_some_and(|arguments| arguments == ["test"])
 }
 
 /// Whether every declaration of the file at `path` is test-only code by its
 /// name: Go `*_test.go`; Python `test_*.py`, `*_test.py` and `conftest.py`;
 /// JavaScript and TypeScript `*.test.*` and `*.spec.*`; Rust files below the
 /// `tests/` directory of the nearest enclosing Cargo package.
+///
+/// The Rust rule reads the filesystem, so its answer can change while the
+/// file does not: call it after cache lookup (`SymbolQueryResult::finish`),
+/// never while building records that are stored.
 pub(crate) fn is_test_file(path: &Path, language: ProgrammingLanguage) -> bool {
     let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
         return false;
@@ -175,7 +181,9 @@ fn csharp_attribute_is(attribute: &SyntacticAttribute, names: &[&str]) -> bool {
     names.contains(&last)
 }
 
-/// `@available(*, deprecated…)`: deprecated on every platform.
+/// `@available(*, deprecated…)`: deprecated on every platform. Only a
+/// top-level argument that is `deprecated` or `deprecated: …` counts, never
+/// the word inside a `message:` string.
 fn is_swift_unconditional_deprecation(attribute: &SyntacticAttribute) -> bool {
     if attribute.name != "available" {
         return false;
@@ -183,20 +191,29 @@ fn is_swift_unconditional_deprecation(attribute: &SyntacticAttribute) -> bool {
     let Some(arguments) = attribute.arguments.as_deref() else {
         return false;
     };
-    let mut parts = arguments.split(',').map(str::trim);
-    parts.next() == Some("*")
-        && parts.any(|part| {
-            part.strip_prefix("deprecated")
-                .is_some_and(|rest| rest.is_empty() || rest.trim_start().starts_with(':'))
+    arguments.first().is_some_and(|first| first == "*")
+        && arguments[1..].iter().any(|argument| {
+            argument
+                .strip_prefix("deprecated")
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with(':'))
         })
 }
 
 /// A doc line (after the comment delimiters) that is a `@deprecated` tag.
+/// Lines inside a fenced code block (`` ``` `` or `~~~`) are example text,
+/// not tags.
 fn has_deprecated_tag(doc: &str) -> bool {
+    let mut in_fence = false;
     doc.lines().any(|line| {
-        line.trim()
-            .strip_prefix("@deprecated")
-            .is_some_and(|rest| rest.is_empty() || rest.starts_with(char::is_whitespace))
+        let line = line.trim();
+        if line.starts_with("```") || line.starts_with("~~~") {
+            in_fence = !in_fence;
+            return false;
+        }
+        !in_fence
+            && line
+                .strip_prefix("@deprecated")
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with(char::is_whitespace))
     })
 }
 

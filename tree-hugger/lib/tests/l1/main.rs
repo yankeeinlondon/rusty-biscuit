@@ -32,6 +32,7 @@ mod symbols_kind_coverage;
 mod symbols_kinds;
 mod symbols_member_wrappers;
 mod symbols_metrics;
+mod symbols_owner_identity;
 mod symbols_qualified_names;
 mod symbols_query;
 mod symbols_query_filters;

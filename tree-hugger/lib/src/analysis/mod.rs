@@ -510,10 +510,20 @@ impl OwnerSymbolNode {
     }
 }
 
-/// Finds the record a child's container names: the smallest same-named
-/// declaration enclosing the child (the first of equal size), else (for
-/// members declared outside their type, such as Rust `impl` members) the
-/// first same-named declaration of the recorded container kind.
+/// Finds the record a child's container names.
+///
+/// The container is the smallest declaration called `container_name` that
+/// encloses the child (the first of equal size). A member declared outside
+/// its type (a Rust `impl` member, a Swift extension member) is matched by
+/// identity instead: among the records of the recorded container kind, the
+/// one whose in-file qualified name qualifies the child's (longest first),
+/// else the only one. Same-named owners in different modules or types are
+/// never confused: when several candidates remain and none qualifies the
+/// child, there is no container.
+///
+/// A qualified `container_name` (Swift `extension Left.Repeated`) that no
+/// record is called is looked up by its last segment and, without a
+/// qualifying match, must be the tail of the candidate's qualified name.
 fn find_container_symbol(
     symbols: &[SymbolRecord],
     names: &NameIndex,
@@ -521,8 +531,14 @@ fn find_container_symbol(
     container_name: &str,
 ) -> Option<usize> {
     let child = &symbols[child_idx];
+    // A record may itself carry a dotted name (C# `namespace A.B`).
+    let bare = if names.named(container_name).is_empty() {
+        last_name_segment(container_name)
+    } else {
+        container_name
+    };
     let candidates = names
-        .named(container_name)
+        .named(bare)
         .iter()
         .copied()
         .filter(|&idx| idx != child_idx);
@@ -540,10 +556,75 @@ fn find_container_symbol(
 
     enclosing.or_else(|| {
         let container_kind = child.identity.container_kind?;
-        candidates
-            .into_iter()
-            .find(|&idx| symbols[idx].kind == container_kind)
+        let of_kind: Vec<usize> = candidates
+            .filter(|&idx| symbols[idx].kind == container_kind)
+            .collect();
+        nearest_qualifying_owner(symbols, child, &of_kind).or_else(|| {
+            let named: Vec<usize> = of_kind
+                .into_iter()
+                .filter(|&idx| {
+                    bare == container_name
+                        || ends_with_segments(&symbols[idx].identity.qualified_name, container_name)
+                })
+                .collect();
+            (named.len() == 1).then(|| named[0])
+        })
     })
+}
+
+/// Of `candidates`, the owner whose qualified name qualifies the child's:
+/// the longest such name, and among equal names (two Lua `local M = {}`
+/// tables in different blocks) the nearest declaration before the child,
+/// else the first after it.
+fn nearest_qualifying_owner(
+    symbols: &[SymbolRecord],
+    child: &SymbolRecord,
+    candidates: &[usize],
+) -> Option<usize> {
+    let child_start = i64::from(child.source.declaration_span.start_byte);
+    candidates
+        .iter()
+        .copied()
+        .filter(|&idx| qualifies(&symbols[idx].identity.qualified_name, &child.identity.qualified_name))
+        .max_by_key(|&idx| {
+            let start = i64::from(symbols[idx].source.declaration_span.start_byte);
+            let nearness = if start <= child_start { start } else { -start - 1 };
+            (symbols[idx].identity.qualified_name.len(), start <= child_start, nearness)
+        })
+}
+
+/// Separators between qualified-name segments.
+const NAME_SEPARATORS: [&str; 4] = ["::", ".", "\\", ":"];
+
+/// The last segment of a possibly qualified name (`Left.Repeated` →
+/// `Repeated`).
+fn last_name_segment(name: &str) -> &str {
+    name.rsplit(['.', ':', '\\'])
+        .next()
+        .unwrap_or(name)
+}
+
+/// `owner` is a whole-segment prefix of `child` (`a::B` qualifies
+/// `a::B::f`, not `a::Bc::f`).
+fn qualifies(owner: &str, child: &str) -> bool {
+    child.strip_prefix(owner).is_some_and(|rest| {
+        NAME_SEPARATORS.iter().any(|separator| {
+            rest.strip_prefix(separator)
+                .is_some_and(|name| !name.is_empty() && !name.starts_with(':'))
+        })
+    })
+}
+
+/// `tail` is a whole-segment suffix of `name` (`Left.Repeated` ends
+/// `Outer.Left.Repeated`).
+fn ends_with_segments(name: &str, tail: &str) -> bool {
+    name == tail
+        || name.strip_suffix(tail).is_some_and(|head| {
+            NAME_SEPARATORS.iter().any(|separator| {
+                head.strip_suffix(separator)
+                    .is_some_and(|qualifier| !qualifier.is_empty() && !qualifier.ends_with(':'))
+            })
+        })
 }
 
 fn find_export_target(

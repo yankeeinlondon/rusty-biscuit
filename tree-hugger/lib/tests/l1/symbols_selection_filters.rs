@@ -565,3 +565,48 @@ fn selection_filters_keep_exactly_the_expected_declarations() {
     }
     assert!(failures.is_empty(), "selection filters:\n{}", failures.join("\n"));
 }
+
+/// `(extension, source, predicate)`: the predicate keeps the one function
+/// `patterned`, whose parameters are bound by patterns or spread across
+/// curried lists rather than named one per list.
+type PatternedCell = (&'static str, &'static str, Predicate);
+
+const RUST_PATTERNED: &str = "pub fn patterned((a, b): (u32, u32), _: String) {}\n";
+const TS_PATTERNED: &str = "export function patterned({x}: {x:number}, [a,b]: number[]) {}\n";
+const JS_PATTERNED: &str = "export function patterned({x}, [a,b]) {}\n";
+const SCALA_PATTERNED: &str = "object O {\n  def patterned(a: Int)(b: String): Int = a\n}\n";
+
+const PATTERNED_CELLS: &[PatternedCell] = &[
+    ("rs", RUST_PATTERNED, P::MinParams(2)),
+    ("rs", RUST_PATTERNED, P::ParamType("(u32, u32)")),
+    ("rs", RUST_PATTERNED, P::ParamType("String")),
+    ("ts", TS_PATTERNED, P::MinParams(2)),
+    ("ts", TS_PATTERNED, P::ParamType("number[]")),
+    ("js", JS_PATTERNED, P::MinParams(2)),
+    ("scala", SCALA_PATTERNED, P::MinParams(2)),
+    ("scala", SCALA_PATTERNED, P::ParamType("String")),
+];
+
+#[test]
+fn signature_predicates_select_patterned_and_curried_parameters() {
+    let mut failures = Vec::new();
+    for (extension, source, predicate) in PATTERNED_CELLS {
+        let dir = TempDir::new().expect("temp dir");
+        let path = dir.path().join(format!("patterned.{extension}"));
+        std::fs::write(&path, source).expect("write snippet");
+        let query = predicate.apply(SymbolQuery::new().name(NamePattern::new("patterned")));
+        let actual: Vec<String> = SourceFile::read(&path)
+            .expect("read snippet")
+            .query(&query)
+            .expect("query")
+            .index
+            .symbols
+            .iter()
+            .map(|record| record.identity.name.clone())
+            .collect();
+        if actual != ["patterned"] {
+            failures.push(format!(".{extension} {predicate:?}: got {actual:?}"));
+        }
+    }
+    assert!(failures.is_empty(), "patterned selections:\n{}", failures.join("\n"));
+}

@@ -5,7 +5,8 @@ use tempfile::TempDir;
 
 use crate::TreeFile;
 use crate::analysis::{
-    NameIndex, OwnerSymbolIndex, RefSet, analyze_file, export_record, find_container_symbol,
+    NameIndex, OwnerSymbolIndex, RefSet, analyze_file, ends_with_segments, export_record,
+    find_container_symbol, last_name_segment, nearest_qualifying_owner, qualifies,
     find_export_target,
 };
 use crate::shared::{
@@ -144,12 +145,17 @@ fn scan_container_symbol(
     container_name: &str,
 ) -> Option<usize> {
     let child = &symbols[child_idx];
+    let bare = if symbols.iter().any(|symbol| symbol.identity.name == container_name) {
+        container_name
+    } else {
+        last_name_segment(container_name)
+    };
     let enclosing = symbols
         .iter()
         .enumerate()
         .filter(|(idx, candidate)| {
             *idx != child_idx
-                && candidate.identity.name == container_name
+                && candidate.identity.name == bare
                 && candidate.source.declaration_span.start_byte
                     <= child.source.declaration_span.start_byte
                 && candidate.source.declaration_span.end_byte
@@ -166,10 +172,22 @@ fn scan_container_symbol(
 
     enclosing.or_else(|| {
         let container_kind = child.identity.container_kind?;
-        symbols.iter().enumerate().position(|(idx, candidate)| {
-            idx != child_idx
-                && candidate.identity.name == container_name
-                && candidate.kind == container_kind
+        let of_kind: Vec<usize> = (0..symbols.len())
+            .filter(|&idx| {
+                idx != child_idx
+                    && symbols[idx].identity.name == bare
+                    && symbols[idx].kind == container_kind
+            })
+            .collect();
+        nearest_qualifying_owner(symbols, child, &of_kind).or_else(|| {
+            let named: Vec<usize> = of_kind
+                .into_iter()
+                .filter(|&idx| {
+                    bare == container_name
+                        || ends_with_segments(&symbols[idx].identity.qualified_name, container_name)
+                })
+                .collect();
+            (named.len() == 1).then(|| named[0])
         })
     })
 }
@@ -258,16 +276,52 @@ fn name_index_keeps_the_first_of_equal_candidates() {
     assert_eq!(find_container_symbol(&symbols, &names, 3, "Owner"), Some(1));
     assert_eq!(scan_container_symbol(&symbols, 3, "Owner"), Some(1));
 
-    // Not enclosed: the first same-named record of the recorded kind.
+    // Not enclosed: of the recorded kind, the record whose qualified name
+    // qualifies the child's, never merely the first of the name.
     symbols[3].source.declaration_span.start_byte = 500;
     symbols[3].source.declaration_span.end_byte = 510;
     symbols[3].identity.container_kind = Some(SymbolKindV2::Function);
+    symbols[0].identity.qualified_name = "left::Owner".to_string();
+    symbols[1].identity.qualified_name = "right::Owner".to_string();
+    symbols[2].identity.qualified_name = "right::Ownerx".to_string();
+    symbols[3].identity.qualified_name = "right::Owner::child".to_string();
+    let names = NameIndex::new(&symbols);
+    assert_eq!(find_container_symbol(&symbols, &names, 3, "Owner"), Some(1));
+    assert_eq!(scan_container_symbol(&symbols, 3, "Owner"), Some(1));
+
+    // Several candidates and none qualifies the child: no container.
+    symbols[3].identity.qualified_name = "elsewhere::Owner::child".to_string();
+    assert_eq!(find_container_symbol(&symbols, &names, 3, "Owner"), None);
+    assert_eq!(scan_container_symbol(&symbols, 3, "Owner"), None);
+
+    // The only candidate of the kind is the container even unqualified.
+    symbols[3].identity.container_kind = Some(SymbolKindV2::Class);
+    symbols[0].kind = SymbolKindV2::Class;
     let names = NameIndex::new(&symbols);
     assert_eq!(find_container_symbol(&symbols, &names, 3, "Owner"), Some(0));
-    assert_eq!(scan_container_symbol(&symbols, 3, "Owner"), Some(0));
-    symbols[3].identity.container_kind = Some(SymbolKindV2::Class);
-    let names = NameIndex::new(&symbols);
+
+    // A qualified container name is matched by its tail segments.
+    assert_eq!(find_container_symbol(&symbols, &names, 3, "left::Owner"), Some(0));
+    assert_eq!(find_container_symbol(&symbols, &names, 3, "right::Owner"), None);
+    symbols[3].identity.container_kind = Some(SymbolKindV2::Enum);
     assert_eq!(find_container_symbol(&symbols, &names, 3, "Owner"), None);
+}
+
+#[test]
+fn qualified_name_segments_match_whole_segments_only() {
+    assert!(qualifies("a::B", "a::B::f"));
+    assert!(qualifies("Left.Repeated", "Left.Repeated.a"));
+    assert!(qualifies("N", "N:f"));
+    assert!(qualifies("Ns", "Ns\\f"));
+    assert!(!qualifies("a::B", "a::Bc::f"));
+    assert!(!qualifies("a::B", "a::B"));
+    assert!(!qualifies("a::B", "a::B::"));
+    assert!(ends_with_segments("Outer.Left.Repeated", "Left.Repeated"));
+    assert!(ends_with_segments("Left.Repeated", "Left.Repeated"));
+    assert!(!ends_with_segments("XLeft.Repeated", "Left.Repeated"));
+    assert_eq!(last_name_segment("Left.Repeated"), "Repeated");
+    assert_eq!(last_name_segment("a::b::C"), "C");
+    assert_eq!(last_name_segment("C"), "C");
 }
 
 fn reference(id: Option<&str>, name: &str, qualified_name: Option<&str>) -> SymbolRef {

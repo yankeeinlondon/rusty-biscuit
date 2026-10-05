@@ -9,6 +9,7 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 use tempfile::TempDir;
+use tree_hugger::cache::{CacheLookup, PersistentCache, SymbolCache};
 use tree_hugger::{
     Capability, ProgrammingLanguage, SourceFile, SymbolQuery, SymbolRecord, TreeFile,
 };
@@ -313,12 +314,89 @@ fn the_rust_tests_directory_rule_needs_a_package() {
     assert!(in_place.iter().all(|record| record.visibility.is_test));
 }
 
-/// Marker and attribute forms the fixtures do not hold: `(source, extension,
-/// deprecated, tests, neither)` by name.
+/// `(name, is_test)` per record, sorted.
+fn test_flags(records: &[SymbolRecord]) -> Vec<(String, bool)> {
+    let mut flags: Vec<(String, bool)> = records
+        .iter()
+        .map(|record| (in_file_name(record).to_string(), record.visibility.is_test))
+        .collect();
+    flags.sort();
+    flags
+}
+
+/// The file-wide test rules are applied after cache lookup: a cache hit over
+/// an unchanged file follows a manifest added above it, a nearer one, and
+/// their removal exactly as fresh analysis does, while the stored entry
+/// keeps only the source-derived flags (`#[test]`, `cfg(test)`).
+#[test]
+fn cached_test_flags_follow_the_package_layout() {
+    let dir = TempDir::new().expect("temp dir");
+    let file = dir.path().join("tests").join("sample.rs");
+    std::fs::create_dir_all(file.parent().expect("parent")).expect("tests dir");
+    std::fs::write(&file, "pub fn helper() {}\n#[test]\nfn checks() {}\n").expect("write source");
+    let cache = SymbolCache::new(PersistentCache::open(dir.path().join("cache"), true));
+    let outer = dir.path().join("Cargo.toml");
+    let nearer = dir.path().join("tests").join("Cargo.toml");
+    let manifest = "[package]\nname = \"sample\"\n";
+    let query = flags_query();
+
+    let cold = cache.query(SourceFile::read(&file).expect("read"), &query).expect("cold query");
+    assert!(matches!(cold.lookup, CacheLookup::Miss(_)), "{:?}", cold.lookup);
+    let step = |label: &str, helper_is_test: bool| {
+        let warm = cache.query(SourceFile::read(&file).expect("read"), &query).expect("warm query");
+        assert!(matches!(warm.lookup, CacheLookup::Hit), "{label}: {:?}", warm.lookup);
+        let fresh = records_of(&file, &query);
+        assert_eq!(test_flags(&warm.result.index.symbols), test_flags(&fresh), "{label}: warm vs fresh");
+        assert_eq!(
+            test_flags(&fresh),
+            [("checks".to_string(), true), ("helper".to_string(), helper_is_test)],
+            "{label}"
+        );
+        // A narrower query answered from the result reapplies nothing new.
+        let narrowed = warm.result.narrowed(&query).expect("same query narrows");
+        assert_eq!(test_flags(&narrowed.index.symbols), test_flags(&fresh), "{label}: narrowed");
+    };
+
+    step("no manifest", false);
+    std::fs::write(&outer, manifest).expect("outer manifest");
+    step("outer manifest", true);
+    std::fs::write(&nearer, manifest).expect("nearer manifest");
+    step("nearer manifest", false);
+    std::fs::remove_file(&nearer).expect("remove nearer");
+    step("nearer removed", true);
+    std::fs::remove_file(&outer).expect("remove outer");
+    step("outer removed", false);
+}
+
+/// The name rules are applied after lookup too: on a cache hit every
+/// declaration of a test-named Go, Python or TypeScript file is a test.
+#[test]
+fn cached_test_file_name_rules_hold_on_a_hit() {
+    let dir = TempDir::new().expect("temp dir");
+    let cache = SymbolCache::new(PersistentCache::open(dir.path().join("cache"), true));
+    for (name, source) in [
+        ("point_test.go", "package point\n\nfunc helper() {}\n"),
+        ("test_point.py", "def helper():\n    pass\n"),
+        ("point.spec.ts", "export function helper() {}\n"),
+    ] {
+        let file = dir.path().join(name);
+        std::fs::write(&file, source).expect("write source");
+        cache.query(SourceFile::read(&file).expect("read"), &flags_query()).expect("cold");
+        let warm = cache.query(SourceFile::read(&file).expect("read"), &flags_query()).expect("warm");
+        assert!(matches!(warm.lookup, CacheLookup::Hit), "{name}: {:?}", warm.lookup);
+        let flags = test_flags(&warm.result.index.symbols);
+        assert!(flags.iter().any(|(record, _)| record.ends_with("helper")), "{name}: {flags:?}");
+        assert!(flags.iter().all(|(_, is_test)| *is_test), "{name}: {flags:?}");
+    }
+}
+
+/// `(source, extension, deprecated, tests, neither)` by name.
+type FlagCase = (&'static str, &'static str, &'static [&'static str], &'static [&'static str], &'static [&'static str]);
+
+/// Marker and attribute forms the fixtures do not hold.
 #[test]
 fn flag_forms_outside_the_fixtures() {
-    type Case = (&'static str, &'static str, &'static [&'static str], &'static [&'static str], &'static [&'static str]);
-    let cases: &[Case] = &[
+    let cases: &[FlagCase] = &[
         (
             "#[tokio::test]\nasync fn async_test() {}\n#[cfg(all(test, unix))]\nfn all_test() {}\n#[deprecated = \"x\"]\nstruct Old;\nstruct S {\n    #[deprecated]\n    old_field: u8,\n}\n",
             "rs",
@@ -378,6 +456,91 @@ fn flag_forms_outside_the_fixtures() {
         ),
         ("[[deprecated]] int old_variable = 1;\n", "cpp", &["old_variable"], &[], &[]),
     ];
+    assert_flag_cases(cases);
+}
+
+/// Markers are read from syntax: a marker word inside a string or another
+/// attribute's argument never counts, and a genuine marker separated from
+/// its neighbors by comments, quoted commas or a doc paragraph break still
+/// does.
+#[test]
+fn marker_boundaries_follow_syntax_not_text() {
+    let cases: &[FlagCase] = &[
+        (
+            "class C {\n  @available(*, message: \"hello, deprecated, world\")\n  func decoy() {}\n  @available(*, deprecated, message: \"old, deprecated, gone\")\n  func real() {}\n  @available(*, /* why */ deprecated)\n  func commented() {}\n}\n",
+            "swift",
+            &["real", "commented"],
+            &[],
+            &["decoy"],
+        ),
+        (
+            "#[cfg(/* rationale */ test)]\nmod checks {\n    pub fn helper() {}\n}\n#[cfg(test /* trailing */)]\nfn trailing() {}\n#[cfg(any(test, /* c */ unix))]\nfn any_test() {}\n#[/* x */ test]\nfn commented_test() {}\n#[tokio:: /* c */ test]\nasync fn qualified_test() {}\n#[deprecated /* c */]\nfn commented_deprecated() {}\n#[doc = \"deprecated, test\"]\nfn doc_decoy() {}\n",
+            "rs",
+            &["commented_deprecated"],
+            &["checks", "helper", "trailing", "commented_test", "qualified_test"],
+            &["any_test", "doc_decoy"],
+        ),
+        (
+            "package p\n\n/* OldBlock documents OldBlock.\n\nDeprecated: use New.\n*/\nfunc OldBlock() {}\n\n/* Deprecated: use New. */\nfunc FirstBlock() {}\n\n// OldLines documents OldLines.\n//\n// Deprecated: use New.\nfunc OldLines() {}\n\n/* MidBlock says\nDeprecated: mid-paragraph.\n*/\nfunc MidBlock() {}\n\n// MidLines says\n// Deprecated: mid-paragraph.\nfunc MidLines() {}\n",
+            "go",
+            &["OldBlock", "FirstBlock", "OldLines"],
+            &[],
+            &["MidBlock", "MidLines"],
+        ),
+        (
+            "[[deprecated(\"old, deprecated\")]] int quoted = 1;\n[[nodiscard(\"deprecated\")]] int decoy();\n[[nodiscard, deprecated]] int listed();\n[[/* c */ deprecated]] int commented = 2;\n",
+            "cpp",
+            &["quoted", "listed", "commented"],
+            &[],
+            &["decoy"],
+        ),
+        (
+            "class C {\n    [Obsolete /* c */] int Old;\n    [Test, Fact] void Both() { }\n    [NUnit. /* c */ Framework.Test] void Qualified() { }\n    [Description(\"Obsolete, Test\")] int Decoy;\n}\n",
+            "cs",
+            &["Old"],
+            &["Both", "Qualified"],
+            &["Decoy"],
+        ),
+        (
+            "class C {\n    @java.lang. /* c */ Deprecated int old;\n    @org. /* c */ junit.Test void qualified() {}\n    @SuppressWarnings(\"Deprecated, Test\") int decoy;\n}\n",
+            "java",
+            &["old"],
+            &["qualified"],
+            &["decoy"],
+        ),
+        (
+            "object O {\n  @deprecated /* c */ (\"x\", \"1\") def old(): Int = 1\n  @nowarn(\"deprecated\") def decoy(): Int = 2\n}\n",
+            "scala",
+            &["old"],
+            &[],
+            &["decoy"],
+        ),
+        (
+            "@(deprecated)\ndef wrapped():\n    pass\n\n@(\n    warnings.deprecated  # why\n)\ndef commented():\n    pass\n\n@decorate(\"deprecated, test\")\ndef decoy():\n    pass\n",
+            "py",
+            &["wrapped", "commented"],
+            &[],
+            &["decoy"],
+        ),
+        (
+            "/**\n * Example:\n * ```\n * @deprecated\n * ```\n */\nexport function fenced() {}\n/** Mark it with `@deprecated` sparingly. */\nexport function codeSpan() {}\n/**\n * \"@deprecated\" in quotes.\n */\nexport function quoted() {}\n/// @deprecated\nexport function lineComment() {}\n/**\n * ```\n * code\n * ```\n * @deprecated after the fence\n */\nexport function afterFence() {}\n",
+            "ts",
+            &["afterFence"],
+            &[],
+            &["fenced", "codeSpan", "quoted", "lineComment"],
+        ),
+        (
+            "<?php\n/**\n * ```\n * @deprecated\n * ```\n */\nfunction fenced() {}\n/**\n * @deprecated use other\n */\nfunction old() {}\n",
+            "php",
+            &["old"],
+            &[],
+            &["fenced"],
+        ),
+    ];
+    assert_flag_cases(cases);
+}
+
+fn assert_flag_cases(cases: &[FlagCase]) {
     for (source, extension, deprecated, tests, neither) in cases {
         let dir = TempDir::new().expect("temp dir");
         let path = dir.path().join(format!("snippet.{extension}"));

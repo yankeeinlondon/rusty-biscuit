@@ -31,7 +31,8 @@ pub(crate) struct QualifiedName {
 ///
 /// A symbol's prefix is its nearest enclosing *naming* declaration: another
 /// extracted function, type, enum variant, module or namespace (whose own
-/// qualified name is reused), a Rust `impl` block (its self type), a named
+/// qualified name is reused), a Rust `impl` block (its self type's path as
+/// written, see [`rust_impl_prefix`]), a named
 /// node that is not extracted (a TypeScript `namespace`, a Java or C#
 /// constructor), or a container the extractor knows but does not list as a
 /// symbol (a Swift extension). The
@@ -100,10 +101,10 @@ fn is_namespace_node_kind(kind: &str) -> bool {
 enum Prefix<'tree> {
     /// Another extracted symbol, by index.
     Symbol(usize),
-    /// A named node that is not an extracted symbol; the walk continues from
-    /// `node`.
+    /// Named nodes that are not extracted symbols (outermost first); the
+    /// walk continues from `node`.
     Named {
-        segment: Segment,
+        segments: Vec<Segment>,
         node: Node<'tree>,
     },
     /// The file root, with the file-level namespace in force there.
@@ -159,8 +160,8 @@ impl<'tree> Builder<'_, 'tree> {
             }
             match self.prefix(index, node) {
                 Prefix::Symbol(owner) => break Some(self.qualified(owner, memo)),
-                Prefix::Named { segment, node: next } => {
-                    segments.insert(0, segment);
+                Prefix::Named { segments: named, node: next } => {
+                    segments.splice(0..0, named);
                     node = next;
                 }
                 // A file-level namespace statement is not inside itself.
@@ -191,23 +192,22 @@ impl<'tree> Builder<'_, 'tree> {
                 Some(&owner) if owner != index => return Prefix::Symbol(owner),
                 Some(_) => {}
                 None if self.language == ProgrammingLanguage::Rust && node.kind() == "impl_item" => {
-                    if let Some(text) = impl_self_type_name(node, self.source) {
-                        let segment = Segment { text, is_namespace: false };
-                        return Prefix::Named { segment, node };
+                    if let Some(prefix) = rust_impl_prefix(node, self.source) {
+                        return prefix;
                     }
                 }
                 None if is_unnamed_type_owner(node) => return Prefix::Unnamed,
                 None => {
                     if let Some(text) = self.unextracted_name(node) {
-                        let segment = Segment { text, is_namespace: false };
-                        return Prefix::Named { segment, node };
+                        let segments = vec![Segment { text, is_namespace: false }];
+                        return Prefix::Named { segments, node };
                     }
                     if let Some(container) = ancestor_container(node, self.language, self.source) {
-                        let segment = Segment {
+                        let segments = vec![Segment {
                             text: container.name,
                             is_namespace: is_namespace_node_kind(node.kind()),
-                        };
-                        return Prefix::Named { segment, node };
+                        }];
+                        return Prefix::Named { segments, node };
                     }
                 }
             }
@@ -251,6 +251,55 @@ impl<'tree> Builder<'_, 'tree> {
     }
 }
 
+/// The prefix a Rust `impl` block gives its members: the self type's path as
+/// written (`impl right::Repeated` → `right::Repeated`), so a qualified self
+/// type keeps the module that tells same-named types apart. The path is read
+/// relative to the enclosing module: each leading `super` continues the walk
+/// above one more enclosing `mod`, a leading `crate` roots it at the file,
+/// and `self` is dropped.
+fn rust_impl_prefix<'tree>(impl_item: Node<'tree>, source: &str) -> Option<Prefix<'tree>> {
+    let path = impl_self_type_path(impl_item, source)?;
+    let mut node = impl_item;
+    let mut written = path.as_slice();
+    while let Some((first, rest)) = written.split_first()
+        && !rest.is_empty()
+    {
+        match first.as_str() {
+            "crate" => {
+                while let Some(parent) = node.parent() {
+                    node = parent;
+                }
+            }
+            "super" => {
+                let mut ancestor = node.parent();
+                while let Some(candidate) = ancestor
+                    && candidate.kind() != "mod_item"
+                {
+                    ancestor = candidate.parent();
+                }
+                node = match ancestor {
+                    Some(module) => module,
+                    None => {
+                        let mut root = node;
+                        while let Some(parent) = root.parent() {
+                            root = parent;
+                        }
+                        root
+                    }
+                };
+            }
+            "self" => {}
+            _ => break,
+        }
+        written = rest;
+    }
+    let segments = written
+        .iter()
+        .map(|text| Segment { text: text.clone(), is_namespace: false })
+        .collect();
+    Some(Prefix::Named { segments, node })
+}
+
 /// The separator a language writes between a qualifier and the name after
 /// it.
 fn separator(language: ProgrammingLanguage, after_namespace: bool, is_lua_method: bool) -> &'static str {
@@ -264,17 +313,25 @@ fn separator(language: ProgrammingLanguage, after_namespace: bool, is_lua_method
 }
 
 /// The namespace or package a file-level statement before `top` puts it in:
-/// the nearest preceding Java `package`, Go or Scala package clause, C#
-/// file-scoped namespace, PHP `namespace X;` or Perl `package X;`.
+/// the nearest preceding Java `package`, Go package clause, C# file-scoped
+/// namespace, PHP `namespace X;` or Perl `package X;` (a later one replaces an
+/// earlier one), or every preceding Scala package clause, outermost first
+/// (`package outer` then `package inner` is `outer.inner`: Scala clauses
+/// nest).
 fn file_namespace_before(top: Node<'_>, language: ProgrammingLanguage, source: &str) -> Option<String> {
+    let mut clauses = Vec::new();
     let mut sibling = Some(top);
     while let Some(candidate) = sibling {
         if let Some(name) = file_level_namespace(candidate, language, source) {
-            return Some(name);
+            if language != ProgrammingLanguage::Scala {
+                return Some(name);
+            }
+            clauses.push(name);
         }
         sibling = candidate.prev_sibling();
     }
-    None
+    clauses.reverse();
+    (!clauses.is_empty()).then(|| clauses.join("."))
 }
 
 fn file_level_namespace(node: Node<'_>, language: ProgrammingLanguage, source: &str) -> Option<String> {

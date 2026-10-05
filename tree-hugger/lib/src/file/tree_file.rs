@@ -1738,7 +1738,6 @@ impl TreeFile {
         let mut ordinals: HashMap<(SymbolKindV2, String), u32> = HashMap::new();
         let mut records = Vec::new();
         let mut implemented_traits = Vec::new();
-        let is_test_file = facts.flags && is_test_file(&self.file, self.language);
         for ExtractedSymbol {
             symbol,
             anchor,
@@ -1764,8 +1763,11 @@ impl TreeFile {
                     self.language,
                     &self.source,
                 );
-                let is_test = is_test_file
-                    || has_test_attribute(declaration, self.language, &self.source)
+                // The file-wide rules (`is_test_file`) read the path and
+                // the package layout around it, which the cache does not
+                // key on; `SymbolQueryResult::finish` applies them after
+                // lookup.
+                let is_test = has_test_attribute(declaration, self.language, &self.source)
                     || (self.language == ProgrammingLanguage::Rust
                         && is_in_rust_cfg_test(declaration, &self.source));
                 (is_test, is_deprecated)

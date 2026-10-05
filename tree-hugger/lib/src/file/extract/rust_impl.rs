@@ -19,6 +19,40 @@ pub(crate) fn impl_self_type_name(impl_item: Node<'_>, source: &str) -> Option<S
     last_path_segment(impl_item.child_by_field_name("type")?, source)
 }
 
+/// The self type's path as written, one entry per segment, without generic
+/// arguments (`impl<T> right::Wrapper<T>` → `["right", "Wrapper"]`), for the
+/// qualified name. Path keywords (`crate`, `self`, `super`) are kept for the
+/// caller to resolve. A self type that is not a path (tuple, array,
+/// qualified `<T as Trait>` path) is its last segment alone, as in
+/// [`impl_self_type_name`], which stays the bare container name.
+pub(crate) fn impl_self_type_path(impl_item: Node<'_>, source: &str) -> Option<Vec<String>> {
+    let self_type = impl_item.child_by_field_name("type")?;
+    path_segments(self_type, source)
+        .filter(|segments| !segments.is_empty())
+        .or_else(|| last_path_segment(self_type, source).map(|segment| vec![segment]))
+}
+
+fn path_segments(node: Node<'_>, source: &str) -> Option<Vec<String>> {
+    match node.kind() {
+        "generic_type" | "reference_type" | "pointer_type" => {
+            path_segments(node.child_by_field_name("type")?, source)
+        }
+        "scoped_type_identifier" | "scoped_identifier" => {
+            let mut segments = match node.child_by_field_name("path") {
+                Some(path) => path_segments(path, source)?,
+                None => Vec::new(),
+            };
+            segments.extend(path_segments(node.child_by_field_name("name")?, source)?);
+            Some(segments)
+        }
+        "type_identifier" | "identifier" | "primitive_type" | "crate" | "self" | "super" => {
+            let text = node.utf8_text(source.as_bytes()).ok()?.trim();
+            (!text.is_empty()).then(|| vec![text.to_string()])
+        }
+        _ => None,
+    }
+}
+
 /// The implemented trait's name, by the same rule as the self type
 /// (`impl fmt::Display for Point` → `Display`); `None` for an inherent impl.
 pub(crate) fn impl_trait_name(impl_item: Node<'_>, source: &str) -> Option<String> {

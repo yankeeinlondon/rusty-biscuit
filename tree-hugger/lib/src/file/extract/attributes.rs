@@ -1,21 +1,25 @@
 //! A declaration's attributes, annotations and decorators, read only as far
 //! as the deprecation and test flags need: each one's full syntactic name and
-//! raw argument text. Arguments are never evaluated, imports never resolved
-//! and macros never expanded, and nothing here fills the record's
-//! `attributes` facet.
+//! its top-level arguments. Both are read from the syntax tree, so comments
+//! anywhere in an attribute are skipped and a comma inside a string or a
+//! nested list never splits an argument. Arguments are never evaluated,
+//! imports never resolved and macros never expanded, and nothing here fills
+//! the record's `attributes` facet.
 
 use super::*;
 
 /// One attribute as written: `#[tokio::test]` is `tokio::test` with no
-/// arguments, `@Deprecated(since = "9")` is `Deprecated` with
-/// `since = "9"`.
+/// arguments, `@Deprecated(since = "9")` is `Deprecated` with the one
+/// argument `since="9"`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SyntacticAttribute {
-    /// The path as written, whitespace removed.
+    /// The path as written, whitespace and comments removed.
     pub(crate) name: String,
-    /// The text between the argument delimiters (or after `=` in Rust's
-    /// `#[name = value]`), trimmed; `None` without arguments.
-    pub(crate) arguments: Option<String>,
+    /// The top-level arguments between the delimiters (Rust's
+    /// `#[name = value]` has the value as its one argument), each as
+    /// [`token_text`]; `None` without an argument list. `cfg(any(test, x))`
+    /// has the one argument `any(test,x)`.
+    pub(crate) arguments: Option<Vec<String>>,
 }
 
 /// The attributes written on `declaration`, in source order.
@@ -37,13 +41,13 @@ pub(crate) fn declaration_attributes(
                     let name = match attribute.child_by_field_name("prefix") {
                         Some(prefix) => format!(
                             "{}::{}",
-                            compact_text(prefix, source),
+                            token_text(prefix, source),
                             field_text(attribute, "name", source)
                         ),
                         None => field_text(attribute, "name", source),
                     };
                     let arguments = find_child_by_kind(attribute, "argument_list")
-                        .map(|arguments| delimited_text(arguments, source));
+                        .map(|arguments| delimited_arguments(arguments, source));
                     attributes.push(SyntacticAttribute { name, arguments });
                 }
             }
@@ -80,7 +84,7 @@ pub(crate) fn declaration_attributes(
                     attributes.push(SyntacticAttribute {
                         name: field_text(attribute, "name", source),
                         arguments: find_child_by_kind(attribute, "attribute_argument_list")
-                            .map(|arguments| delimited_text(arguments, source)),
+                            .map(|arguments| delimited_arguments(arguments, source)),
                     });
                 }
             }
@@ -91,7 +95,7 @@ pub(crate) fn declaration_attributes(
                 .filter(|parent| parent.kind() == "decorated_definition")
             {
                 for decorator in children_of_kind(decorated, "decorator") {
-                    if let Some(expression) = decorator.named_child(0) {
+                    if let Some(expression) = first_named_non_comment(decorator) {
                         attributes.push(python_decorator(expression, source));
                     }
                 }
@@ -143,18 +147,16 @@ pub(crate) fn rust_outer_attributes(
 
 /// A Rust `attribute` node: its path, then a token tree or `= value`.
 pub(crate) fn rust_attribute(attribute: Node<'_>, source: &str) -> SyntacticAttribute {
-    let name = attribute
-        .named_child(0)
-        .map(|path| compact_text(path, source))
+    let name = first_named_non_comment(attribute)
+        .map(|path| token_text(path, source))
         .unwrap_or_default();
     let arguments = attribute
         .child_by_field_name("arguments")
-        .map(|arguments| delimited_text(arguments, source))
+        .map(|arguments| delimited_arguments(arguments, source))
         .or_else(|| {
             attribute
                 .child_by_field_name("value")
-                .and_then(|value| value.utf8_text(source.as_bytes()).ok())
-                .map(|value| value.trim().to_string())
+                .map(|value| vec![token_text(value, source)])
         });
     SyntacticAttribute { name, arguments }
 }
@@ -165,24 +167,29 @@ fn annotation_attribute(annotation: Node<'_>, source: &str) -> SyntacticAttribut
         name: field_text(annotation, "name", source),
         arguments: annotation
             .child_by_field_name("arguments")
-            .map(|arguments| delimited_text(arguments, source)),
+            .map(|arguments| delimited_arguments(arguments, source)),
     }
 }
 
-/// A Python decorator expression: a name, a dotted name or a call of one.
+/// A Python decorator expression: a name, a dotted name or a call of one,
+/// read through any parentheses around it (`@(deprecated)`).
 fn python_decorator(expression: Node<'_>, source: &str) -> SyntacticAttribute {
     match expression.kind() {
+        "parenthesized_expression" => match first_named_non_comment(expression) {
+            Some(inner) => python_decorator(inner, source),
+            None => SyntacticAttribute { name: String::new(), arguments: None },
+        },
         "call" => SyntacticAttribute {
             name: expression
                 .child_by_field_name("function")
-                .map(|function| compact_text(function, source))
+                .map(|function| token_text(function, source))
                 .unwrap_or_default(),
             arguments: expression
                 .child_by_field_name("arguments")
-                .map(|arguments| delimited_text(arguments, source)),
+                .map(|arguments| delimited_arguments(arguments, source)),
         },
         _ => SyntacticAttribute {
-            name: compact_text(expression, source),
+            name: token_text(expression, source),
             arguments: None,
         },
     }
@@ -192,16 +199,16 @@ fn python_decorator(expression: Node<'_>, source: &str) -> SyntacticAttribute {
 /// children between its parentheses.
 fn swift_attribute(attribute: Node<'_>, source: &str) -> SyntacticAttribute {
     let name = find_child_by_kind(attribute, "user_type")
-        .map(|name| compact_text(name, source))
+        .map(|name| token_text(name, source))
         .unwrap_or_default();
     let mut cursor = attribute.walk();
     let children: Vec<Node<'_>> = attribute.children(&mut cursor).collect();
     let open = children.iter().position(|child| child.kind() == "(");
     let close = children.iter().rposition(|child| child.kind() == ")");
     let arguments = match (open, close) {
-        (Some(open), Some(close)) if open < close => source
-            .get(children[open].end_byte()..children[close].start_byte())
-            .map(|text| text.trim().to_string()),
+        (Some(open), Some(close)) if open < close => {
+            Some(split_arguments(&children[open + 1..close], source))
+        }
         _ => None,
     };
     SyntacticAttribute { name, arguments }
@@ -216,26 +223,69 @@ fn children_of_kind<'tree>(node: Node<'tree>, kind: &str) -> Vec<Node<'tree>> {
 
 fn field_text(node: Node<'_>, field: &str, source: &str) -> String {
     node.child_by_field_name(field)
-        .map(|child| compact_text(child, source))
+        .map(|child| token_text(child, source))
         .unwrap_or_default()
 }
 
-/// A node's text with all whitespace removed (`org . junit . Test` reads as
-/// `org.junit.Test`).
-fn compact_text(node: Node<'_>, source: &str) -> String {
-    node.utf8_text(source.as_bytes())
-        .unwrap_or_default()
-        .chars()
-        .filter(|character| !character.is_whitespace())
-        .collect()
+fn is_comment(node: Node<'_>) -> bool {
+    matches!(
+        node.kind(),
+        "comment" | "line_comment" | "block_comment" | "multiline_comment"
+    )
 }
 
-/// The text inside a delimited node (`(…)`, `[…]`, `{…}`), trimmed.
-fn delimited_text(node: Node<'_>, source: &str) -> String {
-    let text = node.utf8_text(source.as_bytes()).unwrap_or_default().trim();
-    let mut characters = text.chars();
-    match (characters.next(), characters.next_back()) {
-        (Some('(' | '[' | '{'), Some(')' | ']' | '}')) => text[1..text.len() - 1].trim().to_string(),
-        _ => text.to_string(),
+fn first_named_non_comment(node: Node<'_>) -> Option<Node<'_>> {
+    let mut cursor = node.walk();
+    node.named_children(&mut cursor).find(|child| !is_comment(*child))
+}
+
+/// A node's tokens joined with no separator, comments and the whitespace
+/// between tokens dropped (`org . /* c */ junit . Test` reads as
+/// `org.junit.Test`). A token's own text, such as a string literal's
+/// content, is kept as written.
+fn token_text(node: Node<'_>, source: &str) -> String {
+    let mut text = String::new();
+    push_tokens(node, source, &mut text);
+    text
+}
+
+fn push_tokens(node: Node<'_>, source: &str, text: &mut String) {
+    if is_comment(node) {
+        return;
     }
+    if node.child_count() == 0 {
+        text.push_str(node.utf8_text(source.as_bytes()).unwrap_or_default().trim());
+        return;
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        push_tokens(child, source, text);
+    }
+}
+
+/// The top-level arguments of a delimited node (`(…)`, `[…]`, `{…}`, a Rust
+/// token tree): its children between the first and last, split at `,`.
+fn delimited_arguments(node: Node<'_>, source: &str) -> Vec<String> {
+    let mut cursor = node.walk();
+    let children: Vec<Node<'_>> = node.children(&mut cursor).collect();
+    match children.len() {
+        0..=2 => Vec::new(),
+        count => split_arguments(&children[1..count - 1], source),
+    }
+}
+
+/// Sibling nodes split at their own `,` tokens, each argument as
+/// [`token_text`]; comments are skipped and an empty argument (a trailing
+/// comma) is dropped.
+fn split_arguments(children: &[Node<'_>], source: &str) -> Vec<String> {
+    let mut arguments = vec![String::new()];
+    for child in children {
+        if child.kind() == "," {
+            arguments.push(String::new());
+        } else if let Some(current) = arguments.last_mut() {
+            push_tokens(*child, source, current);
+        }
+    }
+    arguments.retain(|argument| !argument.is_empty());
+    arguments
 }

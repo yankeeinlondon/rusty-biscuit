@@ -292,6 +292,26 @@ fn metric_forms_outside_the_fixtures() {
         ("void unnamed_cpp(int, double) {}\n", "cpp", "unnamed_cpp", Some(2), Some(false)),
         ("package p\n\nfunc Unnamed(int, string) {}\n", "go", "Unnamed", Some(2), Some(false)),
         ("package p\n\nfunc Grouped(a, b int, rest ...string) {}\n", "go", "Grouped", Some(3), Some(false)),
+        // A parameter bound by a pattern counts like one bound by a name.
+        ("pub fn patterned((a, b): (u32, u32), _: String) {}\n", "rs", "patterned", Some(2), Some(false)),
+        ("struct T;\nimpl T { fn boxed(self: Box<Self>, n: u8) {} }\n", "rs", "boxed", Some(1), Some(false)),
+        ("extern \"C\" { fn vlog(format: *const u8, ...); }\n", "rs", "vlog", Some(2), Some(false)),
+        ("export function patterned({x}: {x:number}, [a,b]: number[]) {}\n", "ts", "patterned", Some(2), Some(false)),
+        ("function restPattern(d = 1, ...[r, s]: number[]) {}\n", "ts", "restPattern", Some(2), Some(false)),
+        // A TypeScript `this` parameter is not counted.
+        ("function withThis(this: Window, a: number) {}\n", "ts", "withThis", Some(1), Some(false)),
+        ("function patterned({x}, [a,b]) {}\n", "js", "patterned", Some(2), Some(false)),
+        ("function defaultsAndRest({y} = {}, ...[r, s]) {}\n", "js", "defaultsAndRest", Some(2), Some(false)),
+        // Every list of a curried `def` counts, `using`/`implicit` included.
+        ("object O {\n  def patterned(a: Int)(b: String): Int = a\n}\n", "scala", "patterned", Some(2), Some(false)),
+        ("object O {\n  def contextual(a: Int)(b: Int)(implicit c: Ctx): Int = a\n}\n", "scala", "contextual", Some(3), Some(false)),
+        // Sibling shapes already measured: Python separators and splats,
+        // PHP promoted and variadic parameters, C# `params`, a Java receiver.
+        ("def py_shapes(a, /, b, *, c: str, d=1, *args, **kw):\n    pass\n", "py", "py_shapes", Some(6), Some(false)),
+        ("<?php\nclass A { function __construct(private int $p, string ...$rest) {} }\n", "php", "__construct", Some(2), Some(false)),
+        ("class A { void Cs(int a, params string[] b, ref int c) {} }\n", "cs", "Cs", Some(3), Some(false)),
+        ("class A { void j(A this, int a, String... b) {} }\n", "java", "j", Some(2), Some(false)),
+        ("func swiftShapes(_ a: Int, b c: String, d: Int...) {}\n", "swift", "swiftShapes", Some(3), Some(false)),
     ];
     for (source, extension, name, parameters, has_docs) in cases {
         let dir = TempDir::new().expect("temp dir");
@@ -305,6 +325,98 @@ fn metric_forms_outside_the_fixtures() {
         assert_eq!(
             record.metrics,
             Some(MetricsFacet { parameters: *parameters, has_docs: *has_docs }),
+            "{source}: `{name}`"
+        );
+    }
+}
+
+/// A Python docstring is the first statement of a `def` or `class` body
+/// when it is a nonempty `str` constant: ordinary literals (any quoting,
+/// `r`/`u` prefixes) and their adjacent concatenation. Bytes and formatted
+/// literals are expressions; emptiness is read from the source, never by
+/// evaluating escapes. Each form is checked on a function and a class.
+#[test]
+fn python_docstrings_are_nonempty_string_constants() {
+    let forms: &[(&str, bool)] = &[
+        (r#""docs""#, true),
+        (r#"'docs'"#, true),
+        (r#""""Triple.""""#, true),
+        (r#"r"raw \d""#, true),
+        (r#"R"raw""#, true),
+        (r#"u"unicode""#, true),
+        (r#""A""#, true),
+        (r#""doc" "umented""#, true),
+        (r#""" "umented""#, true),
+        (r#"("parenthesized")"#, true),
+        (r#"f"docs""#, false),
+        (r#"F"docs""#, false),
+        (r#"rf"docs""#, false),
+        (r#"fR"docs""#, false),
+        (r#"t"docs""#, false),
+        (r#"b"docs""#, false),
+        (r#"rb"docs""#, false),
+        (r#"Br"docs""#, false),
+        (r#""doc" f"umented""#, false),
+        (r#""doc" b"umented""#, false),
+        (r#""""#, false),
+        (r#""" """#, false),
+        (r#""   ""#, false),
+        (r#"""" """"#, false),
+        ("1", false),
+    ];
+    let dir = TempDir::new().expect("temp dir");
+    for (index, (literal, documented)) in forms.iter().enumerate() {
+        for (keyword, name, kind) in [
+            ("def", "function", SymbolKindV2::Function),
+            ("class", "Class", SymbolKindV2::Class),
+        ] {
+            let header = if keyword == "def" { format!("def {name}():") } else { format!("class {name}:") };
+            let source = format!("{header}\n    {literal}\n    pass\n");
+            let path = dir.path().join(format!("docs_{index}_{keyword}.py"));
+            std::fs::write(&path, &source).expect("write snippet");
+            let records = metrics_records(&path);
+            let record = records
+                .iter()
+                .find(|record| record.identity.name == name && record.kind == kind)
+                .unwrap_or_else(|| panic!("{source}: no `{name}`"));
+            assert_eq!(
+                record.metrics.and_then(|metrics| metrics.has_docs),
+                Some(*documented),
+                "{source}"
+            );
+        }
+    }
+}
+
+/// Documentation comments are decided by their opening delimiter, and an
+/// empty one documents nothing.
+#[test]
+fn doc_comment_delimiters_at_their_edges() {
+    let cases: &[(&str, &str, &str, bool)] = &[
+        ("/***/\nfn stars() {}\n", "rs", "stars", false),
+        ("/**/\nfn empty_block() {}\n", "rs", "empty_block", false),
+        ("/** */\nfn blank_block() {}\n", "rs", "blank_block", false),
+        ("//// Four slashes.\nfn four() {}\n", "rs", "four", false),
+        ("/***/\nclass Stars {}\n", "java", "Stars", false),
+        ("/**/\nfunction emptyBlock() {}\n", "ts", "emptyBlock", false),
+        ("/** Doc. */\nfunction documented() {}\n", "js", "documented", true),
+        ("///\nclass A { void Empty() {} }\n", "cs", "A", false),
+        ("/**/\nint empty_c(void) { return 0; }\n", "c", "empty_c", false),
+        ("//!\nint empty_bang(void) { return 0; }\n", "cpp", "empty_bang", false),
+        ("package p\n\n//\nfunc EmptyGo() {}\n", "go", "EmptyGo", false),
+    ];
+    for (source, extension, name, documented) in cases {
+        let dir = TempDir::new().expect("temp dir");
+        let path = dir.path().join(format!("snippet.{extension}"));
+        std::fs::write(&path, source).expect("write snippet");
+        let records = metrics_records(&path);
+        let record = records
+            .iter()
+            .find(|record| record.identity.name == *name)
+            .unwrap_or_else(|| panic!("{source}: no `{name}`"));
+        assert_eq!(
+            record.metrics.and_then(|metrics| metrics.has_docs),
+            Some(*documented),
             "{source}: `{name}`"
         );
     }

@@ -10,7 +10,9 @@
 //! functions and methods; the docs pass sets `docs.parsed`. Flags and
 //! metrics are read from the syntax tree while records are built, so adding
 //! either needs a parse; without them a record's `is_test` and
-//! `is_deprecated` are `false` and it has no `metrics` facet. Each pass also
+//! `is_deprecated` are `false` and it has no `metrics` facet. The file-wide
+//! test rules are not part of any stored result: `SymbolQueryResult::finish`
+//! applies them after projection. Each pass also
 //! stamps `provenance.parse_pass`, which [`stamp_parse_pass`] recomputes.
 //! `symbols_cache::projected_results_equal_uncached_queries` (and its `multi/` twin) pin the
 //! equivalence for every fixture.

@@ -2,7 +2,8 @@
 //! declarator: declarator wrappers around the function (returned pointers,
 //! references, arrays and callbacks) neither erase its parameters nor
 //! substitute a returned function's, and each parameter's name is found under
-//! any declarator chain.
+//! any declarator chain. Parameters bound by a pattern rather than an
+//! identifier keep the pattern and its declared type.
 
 use tree_hugger::{ParameterInfo, SymbolInfo};
 
@@ -156,4 +157,61 @@ fn cpp_default_pack_and_variadic_parameters_keep_their_details() {
     let tail = parameters("tail");
     assert_eq!(names(&tail), ["first", "..."], "`tail`: names");
     assert!(tail[1].is_variadic, "`tail`: the variadic tail is variadic");
+}
+
+/// `(extension, source, function name, expected (name, type text, variadic))`.
+type PatternRow = (&'static str, &'static str, &'static str, &'static [(&'static str, Option<&'static str>, bool)]);
+
+/// Parameters whose binding is not a plain identifier keep their pattern as
+/// written for a name and their declared type: destructuring, wildcards,
+/// rest patterns, and every list of a curried Scala `def`.
+const PATTERN_MATRIX: &[PatternRow] = &[
+    ("rs", "pub fn patterned((a, b): (u32, u32), _: String) {}\n", "patterned",
+        &[("(a, b)", Some("(u32, u32)"), false), ("_", Some("String"), false)]),
+    ("rs", "fn more(&r: &u8, S { x }: S, mut m: u8) {}\n", "more",
+        &[("&r", Some("&u8"), false), ("S { x }", Some("S"), false), ("m", Some("u8"), false)]),
+    // A typed `self` pattern is the receiver.
+    ("rs", "struct T;\nimpl T { fn boxed(self: Box<Self>, n: u8) {} }\n", "boxed",
+        &[("self", Some("Box<Self>"), false), ("n", Some("u8"), false)]),
+    ("ts", "export function patterned({x}: {x:number}, [a,b]: number[]) {}\n", "patterned",
+        &[("{x}", Some("{x:number}"), false), ("[a,b]", Some("number[]"), false)]),
+    ("ts", "function restPattern(d = 1, ...[r, s]: number[]) {}\n", "restPattern",
+        &[("d", None, false), ("[r, s]", Some("number[]"), true)]),
+    // A TypeScript `this` parameter types the receiver; it is no argument.
+    ("ts", "function withThis(this: Window, a: number) {}\n", "withThis", &[("a", Some("number"), false)]),
+    ("js", "function patterned({x}, [a,b], {y} = {}, ...[r, s]) {}\n", "patterned",
+        &[("{x}", None, false), ("[a,b]", None, false), ("{y}", None, false), ("[r, s]", None, true)]),
+    ("scala", "object O {\n  def patterned(a: Int)(b: String): Int = a\n}\n", "patterned",
+        &[("a", Some("Int"), false), ("b", Some("String"), false)]),
+    ("scala", "object O {\n  def contextual(a: Int)(using c: Ctx): Int = a\n}\n", "contextual",
+        &[("a", Some("Int"), false), ("c", Some("Ctx"), false)]),
+];
+
+#[test]
+fn patterned_parameters_keep_their_pattern_and_type_text() {
+    let mut failures = Vec::new();
+    for (extension, source, name, expected) in PATTERN_MATRIX {
+        let extracted = extract_inline(source, extension);
+        let functions = functions_named(&extracted, name);
+        if functions.is_empty() {
+            failures.push(format!(".{extension} `{name}`: no function symbol"));
+        }
+        for (path, symbol) in functions {
+            let actual: Option<Vec<(String, Option<String>, bool)>> = symbol.signature.as_ref().map(|signature| {
+                signature
+                    .parameters
+                    .iter()
+                    .map(|parameter| (parameter.name.clone(), parameter.type_annotation.clone(), parameter.is_variadic))
+                    .collect()
+            });
+            let wanted: Vec<(String, Option<String>, bool)> = expected
+                .iter()
+                .map(|(name, type_text, variadic)| (name.to_string(), type_text.map(str::to_string), *variadic))
+                .collect();
+            if actual.as_ref() != Some(&wanted) {
+                failures.push(format!(".{extension} `{name}` ({path}): {actual:?}, expected {wanted:?}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "pattern rows failed: {failures:#?}");
 }

@@ -5,9 +5,11 @@ use crate::shared::MetricsFacet;
 
 /// The metrics of a function-like or other declaration.
 ///
-/// `parameters` is the length of the declaration's own parameter list,
-/// without a Rust `self` receiver (a Go receiver has its own list and is
-/// never counted); C, C++ and Go count unnamed parameters too
+/// `parameters` is the length of the declaration's own parameter list (all
+/// curried Scala lists), whatever binds each parameter (an identifier, a
+/// destructuring pattern or `_`), without a Rust `self` receiver (a Go
+/// receiver has its own list, and Java and TypeScript receiver parameters
+/// are never listed); C, C++ and Go count unnamed parameters too
 /// ([`declared_parameter_count`]). `None` for kinds that are not functions
 /// or where no list is found ([`declared_parameters`]). `has_docs` is whether `doc` (from
 /// [`extract_doc_comment`]) is present; `None` in Lua, Perl, Bash and Zsh,

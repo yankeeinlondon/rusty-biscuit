@@ -8,6 +8,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::file::extract::is_test_file;
 use crate::file::filter::{FUNCTION_LIKE_KINDS, RecordFilter};
 use crate::file::naming::{Naming, NamingContext};
 use crate::file::pattern::NamePattern;
@@ -45,9 +46,11 @@ pub enum Capability {
     StructuredDocs,
     /// The diagnostics pass (lint and syntax diagnostics).
     Diagnostics,
-    /// `visibility.is_test` and `visibility.is_deprecated`, read from
-    /// attributes, doc comments and the file name while the declarations are
-    /// extracted.
+    /// `visibility.is_test` and `visibility.is_deprecated`. Attributes, doc
+    /// comments and Rust `cfg(test)` are read while the declarations are
+    /// extracted (and cached); the file-wide test rules (file name, Rust
+    /// package `tests/`) are applied to every result after analysis or cache
+    /// lookup.
     Flags,
     /// The `metrics` facet (`parameters` and `has_docs`), read while the
     /// declarations are extracted.
@@ -460,8 +463,22 @@ impl SymbolQueryResult {
         self.name_prefix.as_deref().unwrap_or_default()
     }
 
-    /// Applies `query`'s naming inputs (once) and predicates.
+    /// Applies the file-wide test classification, `query`'s naming inputs
+    /// (once) and predicates.
+    ///
+    /// The file-wide test rules ([`is_test_file`]) read the file's path and,
+    /// for Rust, the nearest `Cargo.toml` above it. Neither analysis nor the
+    /// cache stores their outcome (a manifest can appear, move or vanish
+    /// while the source and its entry stay unchanged), so they are applied
+    /// here, once per result, before the predicates read `is_test`.
     pub(crate) fn finish(mut self, query: &SymbolQuery) -> Self {
+        if self.completed_capabilities.contains(&Capability::Flags)
+            && is_test_file(&self.index.file, self.index.language)
+        {
+            for record in &mut self.index.symbols {
+                record.visibility.is_test = true;
+            }
+        }
         if self.name_prefix.is_none() {
             let prefix = query.naming.prefix_for(&self.index.file, self.index.language);
             for record in &mut self.index.symbols {

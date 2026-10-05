@@ -139,7 +139,15 @@ pub(crate) fn is_doc_comment_text(text: &str, language: ProgrammingLanguage) -> 
 }
 
 /// The docstring of a Python `def` or `class` (decorated or not): the
-/// string that is the first statement of its body.
+/// first statement of its body when that statement is a nonempty string
+/// constant, as Python itself decides.
+///
+/// A docstring is one ordinary string literal (no prefix, `r`, `u`; any
+/// quoting) or an adjacent concatenation of them, optionally parenthesized.
+/// A bytes (`b`) or formatted (`f`, `t`) literal is an expression, not a
+/// docstring, and so is a concatenation containing one. The text is the
+/// literal parts' source content joined and trimmed, never evaluated: `""`
+/// and whitespace are undocumented, an escape such as `"\u0041"` is not.
 fn python_docstring(node: Node<'_>, source: &str) -> Option<String> {
     let definition = if node.kind() == "decorated_definition" {
         node.child_by_field_name("definition")?
@@ -153,15 +161,62 @@ fn python_docstring(node: Node<'_>, source: &str) -> Option<String> {
     if first.kind() != "expression_statement" || first.named_child_count() != 1 {
         return None;
     }
-    let string = first.named_child(0).filter(|child| child.kind() == "string")?;
-    let mut cursor = string.walk();
-    let content: String = string
-        .named_children(&mut cursor)
-        .filter(|child| child.kind() == "string_content")
-        .filter_map(|child| child.utf8_text(source.as_bytes()).ok())
-        .collect();
+    let mut expression = first.named_child(0)?;
+    while expression.kind() == "parenthesized_expression" {
+        expression = single_non_comment_child(expression)?;
+    }
+    let parts: Vec<Node<'_>> = match expression.kind() {
+        "string" => vec![expression],
+        "concatenated_string" => {
+            let mut cursor = expression.walk();
+            expression
+                .named_children(&mut cursor)
+                .filter(|child| child.kind() != "comment")
+                .collect()
+        }
+        _ => return None,
+    };
+    let mut content = String::new();
+    for part in parts {
+        if part.kind() != "string" || !is_unicode_python_literal(part, source) {
+            return None;
+        }
+        let mut cursor = part.walk();
+        for child in part.named_children(&mut cursor) {
+            if child.kind() == "string_content" {
+                content.push_str(child.utf8_text(source.as_bytes()).ok()?);
+            }
+        }
+    }
     let content = content.trim();
     (!content.is_empty()).then(|| content.to_string())
+}
+
+/// The only named child of `node` other than comments.
+fn single_non_comment_child(node: Node<'_>) -> Option<Node<'_>> {
+    let mut cursor = node.walk();
+    let mut children = node
+        .named_children(&mut cursor)
+        .filter(|child| child.kind() != "comment");
+    let only = children.next()?;
+    children.next().is_none().then_some(only)
+}
+
+/// Whether a Python `string` node is an ordinary (`str`) literal: its
+/// prefix, read from the `string_start` token before the quote, has neither
+/// a bytes (`b`) nor a formatted (`f`, `t`) letter.
+fn is_unicode_python_literal(string: Node<'_>, source: &str) -> bool {
+    let Some(start) = string
+        .child(0)
+        .filter(|child| child.kind() == "string_start")
+        .and_then(|child| child.utf8_text(source.as_bytes()).ok())
+    else {
+        return false;
+    };
+    start
+        .chars()
+        .take_while(|character| !matches!(character, '"' | '\''))
+        .all(|character| matches!(character.to_ascii_lowercase(), 'r' | 'u'))
 }
 
 /// Removes a doc comment's delimiters.
@@ -169,7 +224,10 @@ fn clean_doc_comment(comment: &str, language: ProgrammingLanguage) -> String {
     let trimmed = comment.trim();
     if trimmed.starts_with("/*") && trimmed.ends_with("*/") && trimmed.len() >= 4 {
         let opener = if trimmed.starts_with("/**") || trimmed.starts_with("/*!") { 3 } else { 2 };
-        return clean_block_comment(&trimmed[opener.min(trimmed.len() - 2)..trimmed.len() - 2]);
+        return clean_block_comment(
+            &trimmed[opener.min(trimmed.len() - 2)..trimmed.len() - 2],
+            language,
+        );
     }
     let line = ["///", "//!", "//"]
         .iter()
@@ -182,15 +240,28 @@ fn clean_doc_comment(comment: &str, language: ProgrammingLanguage) -> String {
     line.trim().to_string()
 }
 
-/// The lines of a block comment's body without their leading `*`, blank
-/// lines dropped.
-fn clean_block_comment(body: &str) -> String {
-    body.lines()
+/// The lines of a block comment's body without their leading `*`. Blank
+/// lines are dropped, except that Go keeps those between text lines: they
+/// separate the paragraphs its `Deprecated:` rule reads.
+fn clean_block_comment(body: &str, language: ProgrammingLanguage) -> String {
+    let lines: Vec<&str> = body
+        .lines()
         .map(|line| {
             let line = line.trim();
             line.strip_prefix('*').map_or(line, str::trim)
         })
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n")
+        .collect();
+    if language != ProgrammingLanguage::Go {
+        return lines
+            .into_iter()
+            .filter(|line| !line.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n");
+    }
+    let first = lines.iter().position(|line| !line.is_empty());
+    let last = lines.iter().rposition(|line| !line.is_empty());
+    match (first, last) {
+        (Some(first), Some(last)) => lines[first..=last].join("\n"),
+        _ => String::new(),
+    }
 }
