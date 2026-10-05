@@ -178,13 +178,15 @@ not a readiness gate for this review.
 
 - `just lint`: passed for both packages.
 - `just check-tier-coverage tree-hugger`: passed; zero stranded tests.
-- Full Level 1 test result: pending the reduced-concurrency run.
+- `RAYON_NUM_THREADS=2 just test --test-threads 2`: **1,021 passed, 0 skipped**
+  across five binaries; 372.241 seconds.
 
 The initial `just test` run passed 554 tests and timed out in the existing
 `file_identity::god_files_paths_are_relative_to_any_spelling_of_the_root`
-test; fail-fast left 466 tests unrun. The follow-up uses
+test; fail-fast left 466 tests unrun. The follow-up used
 `RAYON_NUM_THREADS=2 just test --test-threads 2` to check the entire area with
-less contention. The timeout is recorded here rather than counted as a
+less contention. That same test passed in 13.612 seconds, and the entire
+rerun passed. The initial timeout is recorded here rather than counted as a
 passing run.
 
 Current documentation describes grouped Scala fields, wrapped C++
