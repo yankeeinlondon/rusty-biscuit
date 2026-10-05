@@ -7,6 +7,45 @@ reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-05
 review_iterations: 0
+human_review: false
+message_to_agent: |-
+  Phase 1 (gate) is done; read `## Phase 1` of implementation-log.md before
+  starting. Key facts:
+
+  - Baseline on macOS: `just test` 1021/1021 green, `just lint` green. One
+    load-sensitive test (`file_identity::god_files_paths_are_relative_to_any_spelling_of_the_root`)
+    timed out at 30 s only while another cargo build ran; it passed on rerun.
+  - Versions: schema is still `SchemaVersion::V4_0`, so Phase 2 adds `V4_1`.
+    `EXTRACTOR_REVISION` is "17" (lib/src/file/mod.rs:24), not "10" as the
+    plan says: bump to "18" and add revision 17 as a `StaleRevision` with
+    `OldKey::Computed` in the CLI cache-upgrade tests.
+  - Rulings 2-9 proceed on the plan defaults. Ruling 1 (C#/Swift/Scala mixed
+    base lists) is still OPEN: the author has not accepted the spec's
+    recommendation. It blocks only tasks 6.5-6.7. If no answer has been
+    recorded by Phase 6, build everything else and leave those three open.
+  - Demonstrated grammar limits: Python PEP 696 type-parameter defaults
+    (tree-sitter-python 0.25.0) and TypeScript `in`/`out` variance
+    (tree-sitter-typescript 0.23.2) do not parse.
+  - Open design point for Phase 3: tree-sitter-cpp 0.23.4 parses a
+    concept-constrained parameter `template <std::integral T>` as a plain
+    `parameter_declaration`, the same shape as a non-type `template <int N>`.
+    Syntax alone cannot tell them apart when the declared type is a named
+    (non-primitive) type. Do not guess a kind from spelling. Either leave
+    such parameters at the conservative reading and record it as a
+    documented limitation, or resolve the type against a same-file `concept`
+    declaration only. Log whichever you choose.
+  - Grammar quirks the generic and relation readers must handle are listed in
+    the probe tables. Swift puts a type-parameter bound and a function return
+    type under a field misnamed `name`. Scala invariant type parameters have
+    no wrapper node, and a Scala function's type parameters sit under the
+    field `parameters:`. In a Scala `extends_clause`, the anonymous `with`
+    tokens also carry field `type:`. A TS `extends_clause` splits the target
+    into `value:` and `type_arguments:`. A TS exported class's decorator
+    sits on the `export_statement`. On a Python `type` alias, only the
+    `left:` side holds parameters (the right side also produces
+    `type_parameter` nodes). C# class type parameters have no field name,
+    while interface ones do. A C# `arrow_expression_clause` body includes
+    `=>`.
 $schema:
   status: |-
     enum(

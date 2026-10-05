@@ -7,6 +7,11 @@ created: 2026-10-05
 phase: 1
 agent: claude/sonnet
 yolo: true
+packages: []
+source_files_during_phase_1: []
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
 ---
 
 # Plan: generics, inheritance, modifiers, attributes and body line counts
@@ -133,7 +138,7 @@ Rulings the spec leaves open or implicit. Each carries the plan's default.
 
 ### Spike
 
-- [ ] **1.2 Grammar probe** (runs once; informs Phases 3–5; not repeated)
+- [x] **1.2 Grammar probe** (runs once; informs Phases 3–5; not repeated)
     - For each of the 16 languages, parse one small snippet per applicable
       column (type parameters with bound/default/variance, base lists,
       decorators/attributes, expression-bodied callables, abstract/virtual/
@@ -148,11 +153,11 @@ Rulings the spec leaves open or implicit. Each carries the plan's default.
 
 ### Tasks
 
-- [ ] **1.1 Prerequisite check** (sequential, first)
+- [x] **1.1 Prerequisite check** (sequential, first)
     - Run `just test` and `just lint` in `tree-hugger/`; record the baseline
       (failures here are pre-existing and must be listed, not fixed silently).
     - Record the current `SchemaVersion` constant, `EXTRACTOR_REVISION`
-      (currently `"10"`), and which kinds from deferred-kind-precision exist.
+      (currently `"10"`; actually `"17"` at Phase 1, see the log), and which kinds from deferred-kind-precision exist.
     - Locate and list the exact files each later phase touches (see below) and
       confirm they exist: `lib/src/shared/schema_v2/{facets,mod}.rs`,
       `lib/src/file/extract/{attributes,classify,declaration,modifiers,
@@ -160,7 +165,7 @@ Rulings the spec leaves open or implicit. Each carries the plan's default.
       `lib/src/file/tree_file/definitions.rs`, `lib/src/file/query.rs`,
       `lib/src/analysis/coverage.rs`, `lib/src/cache/symbol_cache.rs`,
       `cli/src/{classes,declarations,render}.rs`.
-- [ ] **1.3 Author sign-off on rulings** (sequential, after 1.1 and 1.2)
+- [x] **1.3 Author sign-off on rulings** (sequential, after 1.1 and 1.2)
     - Present the nine rulings (especially 1) and the probe table; record the
       answers in `implementation-log.md`. Proceed on defaults for any
       unanswered ruling except 1, which only gates 6.5–6.7.
