@@ -40,26 +40,34 @@ depends-on:
   - 2026-10-03-visibility-and-kind
 human_review: false
 message_to_agent: |-
-  Phase 1 notes for Phase 2 (details in implementation-log.md, Phase 1):
-  - EXTRACTOR_REVISION is "6" (not "5"); Phase 2 bumps it to "7". Revision 6 introduced the
-    computed SymbolCache key, so cache_upgrade gets no new hard-coded literal case; the revision
-    is pinned as a key input by symbols_cache::each_key_input_and_stored_identity_decides_a_miss.
-  - The scope rules are prototyped in the test-only lib/src/file/extract/scope_dump.rs
-    (`proposed_scope`). Phase 2.2 should move that function into the real classifier
-    (next to classify.rs, exposed through DeclarationContext) and point the dump tests at it,
-    keeping the snippet table as regression cases; do not keep two classifiers.
-  - Rulings taken in the dump review (author may override): a C++ template type parameter is
-    Local; Lua `M:m`, `M.f` and `M.x = ...` are Member; a Rust `mod` declared inside a function
-    is Local together with everything in it. For the last one, today's is_local_declaration
-    disagrees (it stops at `declaration_list`), so a symbol in such a module still gets a
-    visibility; resolve `declaration_list` by its parent there too.
-  - Containment gaps for the Containment matrix: Go methods, Lua `M:m`/`M.f`, JS/TS object-literal
-    and class-expression methods and Scala `given ... with` members have no container today.
-  - Locals carry inconsistent containers across languages (C#/Java/C++: enclosing class or
-    namespace; Perl: enclosing sub; most others: none). This feeds in-file qualified names.
-  - The seven report matrices are Pending skeletons in lib/tests/l1/symbols_report_matrices.rs;
-    move each into its own module with a real row type when filling it, and delete `Pending`
-    with the last one. Test-file fixtures are in lib/tests/fixtures/symbols/test_files/.
+  Phase 3 notes for Phase 4+ (details in implementation-log.md, Phase 3; Phase 2 notes there too):
+  - EXTRACTOR_REVISION is now "8" (doc-comment detection was rewritten: records' docs.raw_doc
+    changed). cache_upgrade has OldKey::Computed cases for revisions 6 and 7; a further bump adds
+    another the same way.
+  - Capability::Flags (visibility.is_test / is_deprecated) and Capability::Metrics (metrics facet:
+    parameters, has_docs) exist; both appended to Capability::ALL, both require only Declarations,
+    both computed in TreeFile::records_from (RecordFacts) for wanted kinds, no extra pass. Ruling 3
+    departure: ONE Metrics capability computes both metrics (no metric set). Phase 4 predicates:
+    --undocumented / --min-params need Metrics, --exclude-tests / --deprecated need Flags; a
+    has_docs of None must never match --undocumented (Lua/Perl/Bash/Zsh).
+  - Both need the syntax tree, so cache widening by either is WidenedCapabilities { parsed: true }.
+    StoredEntry::validate rejects a facet/true flag without its capability and a missing facet
+    under metrics.
+  - CLI: Declarations::query(format) adds Flags when ReportFormat::always_computes_flags (Json,
+    JsonFull). Phase 6 JSON Lines must join that match arm. --json completed_capabilities is now
+    ["declarations", "flags"] (goldens regenerated).
+  - Matrices filled: symbols_flags (FLAGS_MATRIX, runs on a temp copy: the in-place Rust fixture is
+    under lib/tests/ so every record is is_test there), symbols_metrics (METRICS_MATRIX),
+    symbols_kind_coverage (KIND_COVERAGE_MATRIX: unsupported vs landed FEAT cells). Only
+    SELECTION_FILTER_MATRIX remains Pending (phase 4); the coverage guard now requires pending
+    rows to name phase 4.
+  - Fixtures end with a "Flags and metrics" block per language; reuse its names (documented_pair,
+    undocumented_none, deprecated_api, test_helper, variadic, ...) for selection-filter rows.
+  - Found in passing: three FEAT cells already extract precisely (C++ `using` aliases and
+    namespaces, Lua `M:m` methods); they are asserted as `landed` and were removed from the
+    unscheduled deferred-kind-precision entry (pre-authorized stale-entry correction).
+  - No Windows evidence again: the build-win-native rig failed _storage_preflight (disk
+    headroom). Linux cross-check passes for tree-hugger and tree-hugger-cli.
 ---
 
 # Precise, filterable symbol reports

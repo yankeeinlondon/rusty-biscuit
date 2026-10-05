@@ -23,15 +23,19 @@ cells here.
 | Java | Constructor; EnumVariant |
 | C# | Constructor; EnumVariant |
 | C | EnumVariant |
-| C++ | Constructor; EnumVariant; TypeAlias; Namespace |
+| C++ | Constructor; EnumVariant |
 | Swift | Constructor; TypeAlias |
 | Scala | EnumVariant; TypeAlias; Field |
 | PHP | Constructor; EnumVariant; Namespace |
-| Lua | Method |
 
 Constructors outside TypeScript and JavaScript are still reported as `Method`
-or are absent. C++ `typedef`/`using` already report `TypeAlias` as a side
-effect of the fix's shared C typedef capture, but the cell was not asserted.
+or are absent.
+
+Three cells the fix marked `FEAT` already extract precisely as a side effect
+of other work, and `2026-10-03-symbol-filters-and-reports` asserts them as
+landed: C++ `typedef`/`using` (`TypeAlias`, from the shared C typedef
+capture), C++ `namespace` (`Namespace`) and Lua `M:m` (`Method`). They are no
+longer part of this entry.
 
 The fix's `LIM` cells (Go interface and struct reported as `Type`; Swift
 class, enum and struct reported as `Type`) are documented extractor limits,

@@ -4,7 +4,7 @@ feature: symbol-filters-and-reports
 spec: spec.md
 total_phases: 7
 created: 2026-10-05
-phase: 1
+phase: 3
 agent: claude/sonnet
 yolo: true
 source_files_during_phase_1:
@@ -29,8 +29,129 @@ docs_created_during_phase_1:
   - tree-hugger/features/2026-10-03-symbol-filters-and-reports/scope-dump.md
 skills_files_updated_during_phase_1:
   - .claude/skills/tree-hugger/SKILL.md
+source_files_during_phase_2:
+  - tree-hugger/lib/src/shared/schema_v2/kinds.rs
+  - tree-hugger/lib/src/shared/schema_v2/facets.rs
+  - tree-hugger/lib/src/shared/schema_v2/mod.rs
+  - tree-hugger/lib/src/shared/symbol.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/tree_file/definitions.rs
+  - tree-hugger/lib/src/file/extract/mod.rs
+  - tree-hugger/lib/src/file/extract/scope.rs
+  - tree-hugger/lib/src/file/extract/qualified_name.rs
+  - tree-hugger/lib/src/file/extract/modifiers.rs
+  - tree-hugger/lib/src/file/extract/classify.rs
+  - tree-hugger/lib/src/file/extract/declaration.rs
+  - tree-hugger/lib/src/file/extract/scope_dump.rs
+  - tree-hugger/lib/src/file/extract/static_flags/mod.rs
+  - tree-hugger/lib/src/file/extract/visibility/mod.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/tests.rs
+  - tree-hugger/lib/src/cache/symbol_cache.rs
+  - tree-hugger/lib/src/god_files/analysis.rs
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/symbols_adapter.rs
+  - tree-hugger/lib/tests/l1/symbols_async.rs
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
+  - tree-hugger/lib/tests/l1/symbols_containment.rs
+  - tree-hugger/lib/tests/l1/symbols_coverage.rs
+  - tree-hugger/lib/tests/l1/symbols_header.rs
+  - tree-hugger/lib/tests/l1/symbols_kinds.rs
+  - tree-hugger/lib/tests/l1/symbols_qualified_names.rs
+  - tree-hugger/lib/tests/l1/symbols_report_matrices.rs
+  - tree-hugger/lib/tests/l1/symbols_scope.rs
+  - tree-hugger/lib/tests/l1/symbols_visibility.rs
+  - tree-hugger/lib/tests/fixtures/symbols/bash.sh
+  - tree-hugger/lib/tests/fixtures/symbols/c_sharp.cs
+  - tree-hugger/lib/tests/fixtures/symbols/cpp.cpp
+  - tree-hugger/lib/tests/fixtures/symbols/go.go
+  - tree-hugger/lib/tests/fixtures/symbols/java.java
+  - tree-hugger/lib/tests/fixtures/symbols/javascript.js
+  - tree-hugger/lib/tests/fixtures/symbols/lua.lua
+  - tree-hugger/lib/tests/fixtures/symbols/python.py
+  - tree-hugger/lib/tests/fixtures/symbols/rust.rs
+  - tree-hugger/lib/tests/fixtures/symbols/scala.scala
+  - tree-hugger/lib/tests/fixtures/symbols/swift.swift
+  - tree-hugger/lib/tests/fixtures/symbols/typescript.ts
+  - tree-hugger/lib/tests/fixtures/symbols/zsh.zsh
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/src/prelude.rs
+  - tree-hugger/cli/src/report.rs
+  - tree-hugger/cli/tests/symbols/cache_lookup.rs
+  - tree-hugger/cli/tests/symbols/cache_robustness.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.plain
+docs_updated_during_phase_2:
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/docs/symbol-reports.md
+  - tree-hugger/lib/README.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
+source_files_during_phase_3:
+  - tree-hugger/lib/src/file/query.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/tree_file/definitions.rs
+  - tree-hugger/lib/src/file/extract/mod.rs
+  - tree-hugger/lib/src/file/extract/attributes.rs
+  - tree-hugger/lib/src/file/extract/flags.rs
+  - tree-hugger/lib/src/file/extract/metrics.rs
+  - tree-hugger/lib/src/file/extract/doc_comments.rs
+  - tree-hugger/lib/src/file/extract/signatures.rs
+  - tree-hugger/lib/src/file/extract/declaration.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/coverage.rs
+  - tree-hugger/lib/src/cache/symbol_cache.rs
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/symbols_flags.rs
+  - tree-hugger/lib/tests/l1/symbols_metrics.rs
+  - tree-hugger/lib/tests/l1/symbols_kind_coverage.rs
+  - tree-hugger/lib/tests/l1/symbols_report_matrices.rs
+  - tree-hugger/lib/tests/l1/symbols_coverage.rs
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
+  - tree-hugger/lib/tests/l1/symbols_query.rs
+  - tree-hugger/lib/tests/fixtures/symbols/bash.sh
+  - tree-hugger/lib/tests/fixtures/symbols/c.c
+  - tree-hugger/lib/tests/fixtures/symbols/c_sharp.cs
+  - tree-hugger/lib/tests/fixtures/symbols/cpp.cpp
+  - tree-hugger/lib/tests/fixtures/symbols/go.go
+  - tree-hugger/lib/tests/fixtures/symbols/java.java
+  - tree-hugger/lib/tests/fixtures/symbols/javascript.js
+  - tree-hugger/lib/tests/fixtures/symbols/lua.lua
+  - tree-hugger/lib/tests/fixtures/symbols/perl.pl
+  - tree-hugger/lib/tests/fixtures/symbols/php.php
+  - tree-hugger/lib/tests/fixtures/symbols/python.py
+  - tree-hugger/lib/tests/fixtures/symbols/rust.rs
+  - tree-hugger/lib/tests/fixtures/symbols/scala.scala
+  - tree-hugger/lib/tests/fixtures/symbols/swift.swift
+  - tree-hugger/lib/tests/fixtures/symbols/typescript.ts
+  - tree-hugger/lib/tests/fixtures/symbols/zsh.zsh
+  - tree-hugger/cli/src/declarations.rs
+  - tree-hugger/cli/tests/symbols/report.rs
+  - tree-hugger/cli/tests/symbols/cache_lookup.rs
+  - tree-hugger/cli/tests/symbols/cache_robustness.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+docs_updated_during_phase_3:
+  - tree-hugger/features/_unscheduled/deferred-kind-precision/spec.md
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/docs/symbol-reports.md
+  - tree-hugger/lib/README.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
 packages:
   - tree-hugger
+  - tree-hugger-cli
 ---
 
 # Plan: precise, filterable symbol reports
@@ -199,7 +320,7 @@ Changes record shape and IDs, so `EXTRACTOR_REVISION` is bumped once, here.
 
 ### Wave 1 (single owner, shared types)
 
-- [ ] **2.1 Schema additions**
+- [x] **2.1 Schema additions**
     - Add `SymbolScope { Item, Member, Local }` and `SymbolRecord::scope`;
       fill the `async` entry of the existing `Modifier` facet; add
       `visibility.is_test` (default false, Phase 3 fills it); add the optional
@@ -208,11 +329,11 @@ Changes record shape and IDs, so `EXTRACTOR_REVISION` is bumped once, here.
     - Keep the attribute, generic and relation facets empty.
     - Update the v1↔v2 adapter (`shared/schema_v2/mod.rs`) and its
       round-trip test.
-- [ ] **2.2 Scope classifier core**
+- [x] **2.2 Scope classifier core**
     - Implement one scope classifier next to `classify.rs`, decided by the
       parent node kind as the dump established; expose it on
       `DeclarationContext` (add a field there rather than rescanning).
-- [ ] **2.3 In-file qualified-name builder core**
+- [x] **2.3 In-file qualified-name builder core**
     - Containers joined with the language's native separator (`::` Rust/C++,
       `.` Java/C#/Python/TS/JS/Go/Scala/Swift/PHP-per-language as the spec
       table gives), plus explicit package/namespace, inline Rust `mod` blocks.
@@ -223,10 +344,10 @@ Changes record shape and IDs, so `EXTRACTOR_REVISION` is bumped once, here.
 
 ### Wave 2 (parallel by language group A-D)
 
-- [ ] **2.4 Per-language extraction (group A)** Rust, Go, Python, Bash, Zsh, Perl
-- [ ] **2.5 Per-language extraction (group B)** TypeScript, JavaScript, Lua, PHP
-- [ ] **2.6 Per-language extraction (group C)** Java, C#, Scala, Swift
-- [ ] **2.7 Per-language extraction (group D)** C, C++
+- [x] **2.4 Per-language extraction (group A)** Rust, Go, Python, Bash, Zsh, Perl
+- [x] **2.5 Per-language extraction (group B)** TypeScript, JavaScript, Lua, PHP
+- [x] **2.6 Per-language extraction (group C)** Java, C#, Scala, Swift
+- [x] **2.7 Per-language extraction (group D)** C, C++
     - Each group: wire the scope classifier cases, `async` modifier (only
       where the language has async syntax), and qualified-name construction;
       extend its fixtures (async declaration, same-named methods on two
@@ -239,12 +360,12 @@ Changes record shape and IDs, so `EXTRACTOR_REVISION` is bumped once, here.
 
 ### Wave 3 (sequential cleanup)
 
-- [ ] **2.8 Rewrite superseded expectations**
+- [x] **2.8 Rewrite superseded expectations**
     - Existing tests and goldens asserting `container::name` for `.`
       languages, and any ID literals derived from it, are rewritten (spec
       pre-authorizes this). Regenerate goldens with `HUG_UPDATE_GOLDEN=1`
       only after reviewing the diff is limited to those changes.
-- [ ] **2.9 Cache wiring and robustness**
+- [x] **2.9 Cache wiring and robustness**
     - Store scope and the in-file name in cache entries; project them through
       `analysis::coverage::project`. Extend `cache_robustness.rs` per the
       matrix below.
@@ -286,14 +407,14 @@ revision.
 
 ### Wave 1 (single owner)
 
-- [ ] **3.1 Capability plumbing**
+- [x] **3.1 Capability plumbing**
     - Add `Capability::Flags` and `Capability::Metrics` (ruling 3) to the
       planner (`analysis/mod.rs`), the cache coverage rules (partial hit,
       `completed_capabilities`) and `analysis::coverage::project`; extend the
       `projected_results_*` tests for both.
     - A flag-only request must not run diagnostics, references or the
       structured docs pass.
-- [ ] **3.2 Attribute reader core**
+- [x] **3.2 Attribute reader core**
     - Shared helper that reads a declaration's attributes/annotations/
       decorators/doc tags into full syntactic name plus raw argument text,
       without evaluating arguments, resolving imports or expanding macros.
@@ -301,10 +422,10 @@ revision.
 
 ### Wave 2 (parallel by language group A-D)
 
-- [ ] **3.3 Group A** (Rust, Go, Python, Bash, Zsh, Perl)
-- [ ] **3.4 Group B** (TypeScript, JavaScript, Lua, PHP)
-- [ ] **3.5 Group C** (Java, C#, Scala, Swift)
-- [ ] **3.6 Group D** (C, C++)
+- [x] **3.3 Group A** (Rust, Go, Python, Bash, Zsh, Perl)
+- [x] **3.4 Group B** (TypeScript, JavaScript, Lua, PHP)
+- [x] **3.5 Group C** (Java, C#, Scala, Swift)
+- [x] **3.6 Group D** (C, C++)
     - `is_deprecated` from the spec's marker table only (Rust `#[deprecated]`,
       Java `@Deprecated` or `@deprecated` tag, C# `[Obsolete]`, JS/TS/PHP
       `@deprecated` in the attached doc block, Go `Deprecated:` paragraph,
@@ -330,13 +451,13 @@ revision.
 
 ### Wave 3 (sequential)
 
-- [ ] **3.7 JSON always requests flags**
+- [x] **3.7 JSON always requests flags**
     - `--json` and `--jsonl` always request `Flags`, so `false` means
       "computed and not set"; assert the capability appears in
       `completed_capabilities`. (JSON Lines emission itself lands in Phase 6;
       here wire the request for `--json` and leave the JSONL hook in the
       shared request builder.)
-- [ ] **3.8 Cache robustness rows for the new capability fields** per the
+- [x] **3.8 Cache robustness rows for the new capability fields** per the
       Phase 2 matrix; add the `Inconsistent` cross-check tests.
 
 **Validation checkpoint 3:** Flags and Metrics matrices complete for all 16
