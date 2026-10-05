@@ -134,6 +134,10 @@ pub enum Commands {
         /// The attempt id to record (default: a new one)
         #[arg(long, value_name = "ID")]
         attempt: Option<String>,
+
+        /// Measure the attempt into its receipt (`wt list --perf` asks)
+        #[arg(long)]
+        timings: bool,
     },
 }
 
