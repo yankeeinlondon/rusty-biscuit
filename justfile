@@ -116,6 +116,18 @@ pre-push *selectors="":
 cross-check *args:
     @./scripts/cross-check.sh {{ args }}
 
+# Retire build-host clones that `cross-check` no longer needs (this host's
+# clones whose worktree is gone, and any clone with no run in
+# CROSS_CHECK_MAX_AGE_DAYS, default 3) on every declared host, and report each
+# host's free space and clone sizes before and the space reclaimed after.
+# Usage: just cross-check-refresh [--os linux|windows|wsl|macos|all] [--dry-run]
+cross-check-refresh *args:
+    @./scripts/cross-check-refresh.sh {{ args }}
+
+# run Level 1 tests for the clone-pruning rules cross-check and cross-check-refresh share
+cross-check-test:
+    @./scripts/cross-check-hosts-tests.sh
+
 # run Level 1 tests for the .githooks/pre-push shell hook itself
 test-pre-push-hook:
     @./.githooks/tests/test-pre-push.sh
