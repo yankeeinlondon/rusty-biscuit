@@ -9,6 +9,7 @@
 mod adapter_tests;
 mod cache_tests;
 mod corpus_tests;
+mod file_identity;
 mod lint_diagnostics;
 mod phase1_diagnostics;
 mod phase6_neovim_query_reuse;
@@ -27,6 +28,7 @@ mod symbols_header;
 mod symbols_kinds;
 mod symbols_member_wrappers;
 mod symbols_query;
+mod symbols_report_matrices;
 mod symbols_signatures;
 mod symbols_static;
 mod symbols_visibility;

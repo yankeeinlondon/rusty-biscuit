@@ -231,7 +231,7 @@ pub(crate) fn is_local_declaration(declaration: Node<'_>, language: ProgrammingL
 ///
 /// Python, Lua, Perl and the shells reuse `block` for class bodies or for
 /// statements whose definitions stay global, so they have no entry here.
-fn is_local_scope_kind(kind: &str, language: ProgrammingLanguage) -> bool {
+pub(crate) fn is_local_scope_kind(kind: &str, language: ProgrammingLanguage) -> bool {
     match language {
         ProgrammingLanguage::Scala => {
             matches!(kind, "block" | "indented_block" | "case_block")

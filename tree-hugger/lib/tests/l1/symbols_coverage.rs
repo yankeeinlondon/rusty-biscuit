@@ -1,15 +1,17 @@
 //! Every supported language is covered by a primary symbol fixture and by
 //! rows in the kind, visibility, keyword and signature-text matrices (and the
-//! static matrix, where it has static members), and every symbol fixture is
-//! valid input.
+//! static matrix, where it has static members), and in each report matrix
+//! (`symbols_report_matrices`), and every symbol fixture is valid input.
 
 use tree_hugger::{ProgrammingLanguage, SymbolKind, TreeFile};
 
 use crate::symbols_fixtures::{
-    all_fixtures, display_name, multi_fixture_dir, multi_fixtures, primary_fixture,
+    TEST_FILE_FIXTURES, all_fixtures, display_name, multi_fixture_dir, multi_fixtures,
+    primary_fixture, test_file_fixture_dir,
 };
 use crate::symbols_header::{KEYWORD_MATRIX, SHAPES, SIGNATURE_MATRIX};
 use crate::symbols_kinds::KIND_MATRIX;
+use crate::symbols_report_matrices::PENDING_MATRICES;
 use crate::symbols_static::{STATIC_LANGUAGES, STATIC_MATRIX};
 use crate::symbols_visibility::VISIBILITY_MATRIX;
 
@@ -130,5 +132,51 @@ fn every_language_has_matrix_rows() {
             "{} has no static-matrix row",
             language.name()
         );
+    }
+}
+
+/// Exactly one row per language in every report matrix: a missing row fails
+/// closed, and a repeated one would let a later phase fill the wrong row.
+#[test]
+fn every_language_has_one_row_in_each_report_matrix() {
+    // Non-vacuity: scope, qualified names, containment, flags, metrics, kind
+    // coverage and selection filters.
+    assert_eq!(PENDING_MATRICES.len(), 7, "report matrices: {:?}", PENDING_MATRICES.iter().map(|(name, _)| name).collect::<Vec<_>>());
+    for (matrix, rows) in PENDING_MATRICES {
+        for language in ProgrammingLanguage::all() {
+            let count = rows.iter().filter(|row| row.0 == language).count();
+            assert_eq!(count, 1, "{matrix} has {count} row(s) for {}", language.name());
+        }
+        // Library matrices are filled by the library phases (2-4); a row
+        // naming any other phase points at work no phase will do.
+        for (language, pending) in *rows {
+            assert!(
+                (2..=4).contains(&pending.phase),
+                "{matrix} row for {} names phase {}",
+                language.name(),
+                pending.phase
+            );
+        }
+    }
+}
+
+/// Every test-file name rule has a fixture that parses cleanly and declares
+/// at least a test and a helper.
+#[test]
+fn every_test_file_rule_has_a_clean_fixture() {
+    let dir = test_file_fixture_dir();
+    for (rule, relative) in TEST_FILE_FIXTURES {
+        let path = dir.join(relative);
+        let tree_file = TreeFile::new(&path)
+            .unwrap_or_else(|error| panic!("{rule}: {} failed to load: {error}", path.display()));
+        let errors = tree_file.syntax_diagnostics();
+        assert!(errors.is_empty(), "{rule}: {} has syntax errors: {errors:?}", path.display());
+        let functions = tree_file
+            .symbols()
+            .expect("extract symbols")
+            .into_iter()
+            .filter(|symbol| symbol.kind == SymbolKind::Function)
+            .count();
+        assert!(functions >= 2, "{rule}: {} declares {functions} function(s), want a test and a helper", path.display());
     }
 }

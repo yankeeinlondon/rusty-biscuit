@@ -36,6 +36,29 @@ pub fn all_fixtures() -> Vec<PathBuf> {
     fixtures
 }
 
+/// One fixture per test-file name rule, as `(rule, path under
+/// tests/fixtures/symbols/test_files/)`. Each file holds a test and a
+/// non-test helper; both are test-only code because of the file name.
+///
+/// The Rust file reads as a test in place only because it sits under this
+/// crate's `tests/`; a non-test reading needs a copy in a scratch package.
+pub const TEST_FILE_FIXTURES: &[(&str, &str)] = &[
+    ("Go *_test.go", "go/point_test.go"),
+    ("Python test_*.py", "python/test_point.py"),
+    ("Python *_test.py", "python/point_test.py"),
+    ("Python conftest.py", "python/conftest.py"),
+    ("JavaScript *.test.*", "javascript/point.test.js"),
+    ("JavaScript *.spec.*", "javascript/point.spec.js"),
+    ("TypeScript *.test.*", "typescript/point.test.ts"),
+    ("TypeScript *.spec.*", "typescript/point.spec.ts"),
+    ("Rust package tests/", "rust/tests/point.rs"),
+];
+
+/// The directory holding [`TEST_FILE_FIXTURES`].
+pub fn test_file_fixture_dir() -> PathBuf {
+    manifest_dir!().join("tests/fixtures/symbols/test_files")
+}
+
 /// The 16-language tree for multi-file, ordering, parallel and CLI golden
 /// tests; one file per language, some under `nested/`.
 pub fn multi_fixture_dir() -> PathBuf {

@@ -13,6 +13,8 @@ pub(crate) mod doc_comments;
 pub(crate) mod header;
 pub(crate) mod navigation;
 pub(crate) mod rust_impl;
+#[cfg(test)]
+mod scope_dump;
 pub(crate) mod signatures;
 pub(crate) mod static_flags;
 pub(crate) mod type_metadata;
