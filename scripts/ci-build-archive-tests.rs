@@ -1016,7 +1016,10 @@ fn fixture_sidecars(dir: &Path) -> PathBuf {
 struct Produced {
     out: PathBuf,
     target: PathBuf,
+    /// The checkout a consumer verifies against.
     workspace: PathBuf,
+    /// The checkout the producer compiled; the manifest records its path.
+    producer_workspace: PathBuf,
     manifest_path: PathBuf,
     manifest: Manifest,
     plan: PathBuf,
@@ -1062,6 +1065,7 @@ fn produce_fixture(dir: &Path) -> Produced {
         out,
         target,
         workspace: dir.join("workspace"),
+        producer_workspace: dir.join("workspace"),
         manifest_path,
         manifest,
         plan,
@@ -1071,11 +1075,16 @@ fn produce_fixture(dir: &Path) -> Produced {
 
 const FIXTURE_MANIFEST: &str = "build-archive-portability-local-host-0f1e2d3c4b5a6978.manifest.json";
 
-/// The fixture as one shared build produced it, with a private copy of its
-/// `out` directory in `dir`, for a test that reads or tampers with the
-/// archive and manifest but needs no build of its own. Its workspace and
-/// target directory are the shared build's: read them, never change them.
-/// A test that hides or edits either calls [`produce_fixture`].
+/// The fixture as one shared build produced it, with private copies of its
+/// `out` directory and checkout in `dir`, for a test that reads or tampers
+/// with the archive and manifest but needs no build of its own. Its target
+/// directory is the shared build's: read it, never change it. A test that
+/// hides or edits it calls [`produce_fixture`].
+///
+/// The consumer checkout is a copy (with its Git history, so its tree
+/// matches the manifest) because `verify --workspace` runs `cargo nextest`
+/// inside it, which must not happen inside the target directory the shared
+/// build lives in.
 ///
 /// Every test is its own process, so the build is shared through the target
 /// directory: the first test to take the lock builds it, keyed by the shipped
@@ -1087,10 +1096,13 @@ fn shared_fixture(dir: &Path) -> Produced {
     copy_tree(&shared.join("out"), &out);
     let manifest_path = out.join(FIXTURE_MANIFEST);
     let manifest = read_manifest(&manifest_path).expect("the shared manifest must parse");
+    let workspace = dir.join("workspace");
+    copy_tree(&shared.join("workspace"), &workspace);
     Produced {
         out,
         target: shared.join("target"),
-        workspace: shared.join("workspace"),
+        workspace,
+        producer_workspace: shared.join("workspace"),
         manifest_path,
         manifest,
         plan: shared.join("plan.json"),
@@ -2022,7 +2034,7 @@ fn a_key_this_producer_does_not_own_is_refused() {
 fn the_manifest_records_the_workspace_the_producer_compiled_at() {
     let dir = Scratch::new("producer-workspace");
     let produced = shared_fixture(dir.path());
-    let expected = canonical_path(&produced.workspace)
+    let expected = canonical_path(&produced.producer_workspace)
         .expect("the fixture workspace resolves")
         .to_string_lossy()
         .replace(std::path::MAIN_SEPARATOR, "/");
