@@ -9,46 +9,33 @@ reviewed_on: 2026-10-05
 review_iterations: 0
 human_review: false
 message_to_agent: |-
-  Phase 1 (rulings, grammar spike, baseline) is complete. Read
-  implementation-log.md "## Phase 1" before starting Phase 2. It holds the
-  S1 node table and findings F1-F10.
+  Phase 3 (per-language extraction) is complete; read implementation-log.md
+  "## Phase 3" first. Gates: 985/985 tests (`just test`), lint clean. Every
+  deferred cell is `landed` in symbols_kind_coverage.rs; the one grammar
+  limit (G1, Scala access-modified enum) is a demonstrated GRAMMAR_LIMITS
+  entry there, not an `unsupported` row.
 
-  Rulings: R1-R7 use the plan's defaults, which match the spec's
-  recommendations, so required scope is unchanged.
-
-  Baseline: green at 949/949 tests, lint clean, on the committed tree.
-  During Phase 1 another session made uncommitted edits to tree-hugger
-  lib/cli source, goldens, docs and SKILL.md for the sibling feature
-  2026-10-03-symbol-filters-and-reports. With those edits the tree is still
-  green (954/954, lint clean). They also set EXTRACTOR_REVISION to "11", so
-  Phase 4 must bump from whatever value is current, not from "10".
-  SKILL.md and the docs carry the sibling's uncommitted edits: edit them in
-  place and never overwrite.
-
-  Grammar limit: exactly one, G1. tree-sitter-scala 0.24.0 cannot parse an
-  access modifier on a Scala 3 enum (`private enum Hidden { case H }`
-  becomes ERROR + enum_definition, and the enum is recorded Public). Keep
-  that form `unsupported` with this reason; land default-access Scala enum
-  cases normally. Every other form is a capture or classifier gap.
-
-  Hazards Phase 2 must handle:
-  - F1: TypeScript `module Mod {}` is a node of kind `module`, which
-    `is_scope_boundary` treats as Python's root. Make that rule
-    language- or root-aware.
-  - F3: Swift `init_declaration`'s name is the anonymous token "init", and
-    `typealias_declaration` uses field `name` for both the alias and its
-    target.
-  - F4: C# `static C() {}` shares `constructor_declaration`; it must stay
-    absent under R2.
-  - F6: Go `type_alias`, PHP `enum_case`, Scala
-    `simple_enum_case`/`full_enum_case`, and TypeScript
-    `enum_assignment`/`internal_module`/`module` are not recognized by
-    `resolve_declaration_node`. A bare TypeScript enum member has no
-    wrapper node.
-  - F2: PHP semicolon-namespace members have no container today, while
-    braced-namespace members do. Container is not an ID input.
-  - F5: `EnumVariantData.discriminant` is None even for `B = 2`. Decide
-    whether to fill it, which changes goldens, and log the choice.
+  For Phase 4:
+  - EXTRACTOR_REVISION is "13" now (the sibling session bumped it); bump
+    from the current value and add the matching StaleRevision in
+    cli/tests/symbols/cache_upgrade.rs.
+  - The CLI goldens were already regenerated and reviewed per wave (log
+    lists every record change: Go field Widget.Size, Python
+    Gadget.__init__, C++ Vector::Vector, Java Counter.Counter). Regenerate
+    after the revision bump (HUG_UPDATE_GOLDEN=1, run twice: two tests share
+    a golden file) and diff against a copy taken first, because the sibling
+    session also edits these files.
+  - F11 now affects Python, Java, C#, C++, Swift and PHP constructors: the
+    semantics facet and parse_pass skip Constructor.
+  - Per-declaration metadata rows live in
+    lib/tests/l1/symbols_deferred_metadata.rs; overloads in its
+    CONSTRUCTOR_OVERLOADS table. Reuse them rather than adding parallel
+    fixtures.
+  - Query provenance notes and the capture inventory were updated with
+    each query edit (R4), so Phase 5's provenance task only needs to
+    verify them.
+  - Doc drift for Phase 5 is listed under "Findings for Phases 4 and 5"
+    (F14: Go interface methods are not listed, contrary to the skill).
 $schema:
   status: |-
     enum(

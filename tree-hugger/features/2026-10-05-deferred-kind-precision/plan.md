@@ -14,6 +14,67 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - tree-hugger/lib/src/file/extract/classify.rs
+  - tree-hugger/lib/src/file/extract/declaration.rs
+  - tree-hugger/lib/src/file/extract/header/mod.rs
+  - tree-hugger/lib/src/file/extract/type_metadata.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/tree_file/definitions.rs
+  - tree-hugger/lib/src/shared/schema_v2/mod.rs
+  - tree-hugger/lib/src/shared/symbol.rs
+  - tree-hugger/lib/tests/l1/symbols_field_lists.rs
+  - tree-hugger/lib/tests/l1/symbols_header.rs
+  - tree-hugger/lib/tests/l1/symbols_kinds.rs
+  - tree-hugger/lib/tests/l1/symbols_qualified_names.rs
+  - tree-hugger/lib/tests/l1/symbols_query_filters.rs
+  - tree-hugger/lib/tests/l1/symbols_scope.rs
+  - tree-hugger/cli/tests/symbols/order.rs
+docs_updated_during_phase_2:
+  - tree-hugger/docs/symbol-schema-design.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
+source_files_during_phase_3:
+  - tree-hugger/lib/queries/typescript/locals.scm
+  - tree-hugger/lib/queries/vendor/c/locals.scm
+  - tree-hugger/lib/queries/vendor/c_sharp/locals.scm
+  - tree-hugger/lib/queries/vendor/go/locals.scm
+  - tree-hugger/lib/queries/vendor/java/locals.scm
+  - tree-hugger/lib/queries/vendor/php_only/locals.scm
+  - tree-hugger/lib/queries/vendor/scala/locals.scm
+  - tree-hugger/lib/queries/vendor/swift/locals.scm
+  - tree-hugger/lib/src/file/extract/classify.rs
+  - tree-hugger/lib/src/file/extract/header/keyword.rs
+  - tree-hugger/lib/src/file/extract/header/mod.rs
+  - tree-hugger/lib/src/file/extract/qualified_name.rs
+  - tree-hugger/lib/src/file/extract/signatures.rs
+  - tree-hugger/lib/src/file/extract/type_metadata.rs
+  - tree-hugger/lib/src/file/extract/visibility/csharp.rs
+  - tree-hugger/lib/src/file/extract/visibility/ecma.rs
+  - tree-hugger/lib/src/file/extract/visibility/java.rs
+  - tree-hugger/lib/src/file/tree_file/definitions.rs
+  - tree-hugger/lib/src/queries/inventory.rs
+  - tree-hugger/lib/src/queries/provenance.rs
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/symbols_declarator_wrappers.rs
+  - tree-hugger/lib/tests/l1/symbols_deferred_metadata.rs
+  - tree-hugger/lib/tests/l1/symbols_field_lists.rs
+  - tree-hugger/lib/tests/l1/symbols_function_locals.rs
+  - tree-hugger/lib/tests/l1/symbols_kind_coverage.rs
+  - tree-hugger/lib/tests/l1/symbols_kinds.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols-signatures-full.plain
+  - tree-hugger/cli/tests/fixtures/golden/symbols-stats.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.jsonl
+  - tree-hugger/cli/tests/fixtures/golden/symbols.plain
+  - tree-hugger/cli/tests/fixtures/golden/symbols.stats
+  - tree-hugger/cli/tests/fixtures/golden/symbols.table
+  - tree-hugger/cli/tests/fixtures/golden/symbols.tree
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 ---
 
 # Plan: precise kinds for previously deferred declarations
@@ -60,8 +121,8 @@ An extractor gap does not qualify.
   container, access, static flag, signature and header, or has a recorded
   grammar limit (snippet, grammar identity, observed node, remaining
   behavior) in the implementation log and current docs.
-- [ ] Every negative case in the acceptance table keeps its existing kind.
-- [ ] `symbols_kinds.rs` has positive and negative assertions;
+- [x] Every negative case in the acceptance table keeps its existing kind.
+- [x] `symbols_kinds.rs` has positive and negative assertions;
   `symbols_kind_coverage.rs` has landed cells moved out of `unsupported`.
 - [ ] `hug functions --kind constructor` selects a Java constructor and
   `--kind method` excludes it. `hug types` includes aliases. `hug classes`
@@ -193,7 +254,7 @@ queries and small classifier arms rather than new owner searches. This
 phase is sequential because every task edits `classify.rs`,
 `declaration.rs` or `extract/mod.rs`.
 
-- [ ] **Kind settlement before selection.** Confirm `SymbolQuery` settles
+- [x] **Kind settlement before selection.** Confirm `SymbolQuery` settles
   Constructor, EnumVariant, TypeAlias, Field and Namespace kinds before kind
   selection, including light records that skip expensive metadata.
   - A narrow constructor or alias query must match the same kind selected
@@ -201,14 +262,14 @@ phase is sequential because every task edits `classify.rs`,
   - Add the failing L1 test first (narrow vs complete) in
     `symbols_query_filters.rs`, using one already-supported construct such as
     a TypeScript constructor.
-- [ ] **Owner and wrapper rules.** Extend `member_slot`,
+- [x] **Owner and wrapper rules.** Extend `member_slot`,
   `is_direct_member` and `resolve_declaration_node` for the new wrapper forms
   found in S1: enum body wrappers, Go `type_spec` inside grouped
   `type_declaration`, and C++ template-wrapped declarations.
   - Do not add a per-reader owner search.
   - Preserve unnamed-owner boundaries: anonymous structs, and enum constants
     with class bodies.
-- [ ] **Constructor classification hook.** Add one place in
+- [x] **Constructor classification hook.** Add one place in
   `classify_symbol_kind` that turns a Function or Method into Constructor
   after the declaration is established as a direct member. Name checks
   (`__init__`, `__construct`) apply only after that. The existing
@@ -217,11 +278,11 @@ phase is sequential because every task edits `classify.rs`,
   - Constructors must not become static for lacking a receiver. Check the
     `static_flags` code paths for Python, Swift, PHP and C++.
   - Do not invent a return type from the owner.
-- [ ] **Alias target.** Generalize `extract_type_alias_target` so it takes
+- [x] **Alias target.** Generalize `extract_type_alias_target` so it takes
   the right-hand type text for Go `type A = B`, Swift `typealias`, and Scala
   `type A = B`, including generic and grouped forms. Never resolve the
   target and never copy target fields.
-- [ ] **Variant and field reconciliation.** Reconcile an enum's existing
+- [x] **Variant and field reconciliation.** Reconcile an enum's existing
   variant list with standalone `EnumVariant` records, and a type's field
   list with standalone `Field` records, without duplicates or lost type
   annotations.
@@ -230,20 +291,20 @@ phase is sequential because every task edits `classify.rs`,
     and never become Field records.
   - Extend `symbols_field_lists.rs` first, and keep the existing expectations
     as regression.
-- [ ] **Namespace name and container rule.** Keep the full declared name,
+- [x] **Namespace name and container rule.** Keep the full declared name,
   the existing separators and the namespace-root rule. Adding a Namespace
   record must not double-prefix its members (`App\inside` in PHP,
   `Space.inside` in TypeScript). A namespace is never its own container.
   Unrelated names and IDs must not change only because a namespace is now
   captured.
-- [ ] **Test scaffolding.** Add a table-driven fixture helper to
+- [x] **Test scaffolding.** Add a table-driven fixture helper to
   `symbols_kinds.rs` taking `(language, source, expected name, kind,
   container)`, and a matching negative helper.
   - The helper asserts through the public `symbol_index_v2()` result, as the
     coverage matrix does, so Phase 3 tasks only add rows.
   - Reserve a section per language so concurrent Phase 3 tasks edit
     disjoint lines.
-- [ ] **Checkpoint 2.** `just test` and `just lint` are green in
+- [x] **Checkpoint 2.** `just test` and `just lint` are green in
   `tree-hugger/`. No kind has changed yet, so every existing golden stays
   unchanged. Any golden diff here is a plumbing bug.
 
@@ -283,7 +344,7 @@ sub-task is tracked in its own checkbox.
 
 ### Wave 1: TypeScript, Go, Python, C
 
-- [ ] **TypeScript.** Covers EnumVariant and Namespace.
+- [x] **TypeScript.** Covers EnumVariant and Namespace.
   - `enum E { Red, Blue = 2 }`: each member is an EnumVariant that inherits
     the owning enum's recorded access, with the initializer retained.
   - `namespace Space {}` and `module Space {}` are Namespace, and nested
@@ -293,7 +354,7 @@ sub-task is tracked in its own checkbox.
     string-named ambient `declare module "x"`.
   - Check the JavaScript fallthrough, since TypeScript shares the ecma
     query.
-- [ ] **Go.** Covers TypeAlias and Field.
+- [x] **Go.** Covers TypeAlias and Field.
   - `type Alias = int`, alone and in a grouped `type ( ... )` block, is
     TypeAlias with its target text.
   - Each named field in `type S struct { X, Y int }` is a Field with
@@ -302,26 +363,26 @@ sub-task is tracked in its own checkbox.
   - Negatives: `type Defined int` stays Type; receivers, parameters and
     interface method elements are not fields; embedded fields and fields in
     anonymous struct types keep current behavior.
-- [ ] **Python.** Covers Constructor.
+- [x] **Python.** Covers Constructor.
   - A directly declared `def __init__(self, value)` is Constructor,
     decorated included. Defaults and parameters are retained and the
     constructor is not static.
   - Negatives: top-level or function-local `__init__` stays Function;
     `__new__` and factory classmethods keep their kinds.
-- [ ] **C.** Covers EnumVariant.
+- [x] **C.** Covers EnumVariant.
   - Each enumerator of `enum E { RED, BLUE = 2 };` is an EnumVariant with
     Unknown access and initializer text.
   - An anonymous enum gives variants with no invented container.
   - Negative: a variable initialized from `RED`.
   - C is shared with C++, so keep an eye on the C++ enumerator capture. Land
     the capture in the shared C query and let C++ verify it in Wave 2.
-- [ ] **Checkpoint 3a.** Merge the four tasks. `just test` and `just lint`
+- [x] **Checkpoint 3a.** Merge the four tasks. `just test` and `just lint`
   are green, and the coverage matrix cells for these rows are landed or
   limited with a reason.
 
 ### Wave 2: Java, C#, C++
 
-- [ ] **Java.** Covers Constructor and EnumVariant.
+- [x] **Java.** Covers Constructor and EnumVariant.
   - `class C { C(int x) {} }` is Constructor with overloads kept as
     separate records.
   - Each constant of `enum E { RED, BLUE }` is a Public EnumVariant.
@@ -329,13 +390,13 @@ sub-task is tracked in its own checkbox.
     enum constant's anonymous body must not become members of the enclosing
     enum.
   - The compact record constructor is out of scope per R2.
-- [ ] **C#.** Covers Constructor and EnumVariant.
+- [x] **C#.** Covers Constructor and EnumVariant.
   - `public C(int x) {}` is Constructor, including struct and record
     constructors with a body or an expression body.
   - Each member of `enum E { Red, Blue = 2 }` is a Public EnumVariant.
   - Negatives: a method named `C` with a return type; destructors, static
     constructors and primary constructors keep current behavior per R2.
-- [ ] **C++.** Covers Constructor and EnumVariant.
+- [x] **C++.** Covers Constructor and EnumVariant.
   - In-class `C();`, `C(int x) {}`, `C() = default;` and `C() = delete;` are
     Constructor, including template-wrapped declarations.
   - Scoped and unscoped enumerators are EnumVariant with Unknown access,
@@ -346,11 +407,11 @@ sub-task is tracked in its own checkbox.
     resolve class ownership by name alone.
   - Regression: the already-landed C++ typedef/`using` TypeAlias, C++
     `namespace`, and Lua `M:m` keep passing as non-deliverables.
-- [ ] **Checkpoint 3b.** Merge and run `just test` and `just lint`.
+- [x] **Checkpoint 3b.** Merge and run `just test` and `just lint`.
 
 ### Wave 3: Swift, Scala, PHP
 
-- [ ] **Swift.** Covers Constructor and TypeAlias.
+- [x] **Swift.** Covers Constructor and TypeAlias.
   - `init`, `init?` and `init!` in types and extensions are Constructor,
     retaining the source name `init` with the existing parameter metrics.
   - `typealias Alias = Int` is TypeAlias with a target.
@@ -358,7 +419,7 @@ sub-task is tracked in its own checkbox.
     requirements without an alias.
   - Existing Class/Enum/Type distinctions stay unchanged per R1, so owners
     keep kind `Type`.
-- [ ] **Scala.** Covers EnumVariant, TypeAlias and Field.
+- [x] **Scala.** Covers EnumVariant, TypeAlias and Field.
   - `case Red, Blue` and `case Value(x: Int)` in a Scala 3 `enum` are
     EnumVariant, inheriting the owning enum's access.
   - `type Alias = Int` is TypeAlias with a target.
@@ -368,7 +429,7 @@ sub-task is tracked in its own checkbox.
   - Negatives: abstract `type Element`, method-local `val`/`var` (stay
     Variable), and class parameters, which keep Parameter records and
     field-list behavior.
-- [ ] **PHP.** Covers Constructor, EnumVariant and Namespace.
+- [x] **PHP.** Covers Constructor, EnumVariant and Namespace.
   - A direct method named `__construct`, case-insensitive with the source
     spelling preserved, is Constructor.
   - Unit and backed enum cases are Public EnumVariant.
@@ -379,7 +440,7 @@ sub-task is tracked in its own checkbox.
     no invented name.
   - Edit the query that PHP actually inherits (`php_only`) and update its
     capture inventory per R4.
-- [ ] **Checkpoint 3c.** Merge, then run the full `just test` and `just
+- [x] **Checkpoint 3c.** Merge, then run the full `just test` and `just
   lint`. Confirm every cell in the spec's deferred table is landed or
   recorded as a limit.
 
