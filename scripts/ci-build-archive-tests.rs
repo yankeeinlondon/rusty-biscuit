@@ -1158,8 +1158,9 @@ fn verify_fixture(produced: &Produced, extra: &[&str]) -> (bool, Value) {
         .args(extra)
         .output()
         .expect("running ci-build verify");
-    let verdict: Value =
-        serde_json::from_slice(&output.stdout).expect("the verdict is a JSON document");
+    let verdict: Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|err| {
+        panic!("the verdict is a JSON document ({err}); stderr:\n{}", String::from_utf8_lossy(&output.stderr))
+    });
     (output.status.success(), verdict)
 }
 
