@@ -41,48 +41,27 @@ related:
   - 2026-10-03-symbol-filters-and-reports
 human_review: false
 message_to_agent: |-
-  Phases 1-3 are done; read the "## Phase 3" section of
-  implementation-log.md before starting Phase 4. Points that affect later
-  phases:
+  Phases 1-5 are done; read the "## Phase 5" section of
+  implementation-log.md before starting Phase 6. Points that affect it:
 
-  - `EXTRACTOR_REVISION` is "6". The next bump must add a `StaleRevision`
-    case for revision 6 in `cli/tests/symbols/cache_upgrade.rs`;
-    `revision_key(schema, revision, ..)` now takes the revision's record
-    schema ("4.0" for revisions 5 and 6).
-  - The library API Phase 4 and 5 build on: `SourceFile::read` /
-    `read_with_language` (bytes read and hashed once; `hash()`), `.parse()`,
-    `.query(&SymbolQuery)`; `TreeFile::query`; `SymbolQuery::new()` (all
-    kinds, Declarations), `.kinds(..)`, `.capabilities(..)` (closed under
-    prerequisites), `complete_index()`, `for_passes()`, `selected_kinds()`,
-    `required_capabilities()`, `selects()`, `requires()`.
-    `SymbolQueryResult { index, completed_capabilities }`; `index.symbols`
-    holds only the selected kinds. `Capability` serializes snake_case and
-    `SymbolKindV2` now derives `Ord`, so both have a canonical order for
-    the cache coverage record.
-  - Coverage for Phase 4: a query result's coverage is (selected kinds,
-    `completed_capabilities`). `Containment` without `References` does not
-    add `Bind` to `completed_passes`, so store capabilities, not passes, as
-    coverage. Imports and exports always come with `Declarations`.
-  - Work counters: `tree_hugger::work_counters()` and `WorkCounters::since`
-    (atomics: `diagnostics_runs`, `parser_constructions`,
-    `definition_captures`). A "complete warm hit records zero parser
-    constructions" test can use them in-process. The CLI runs in a separate
-    process, so a CLI-level counter test needs the CLI to report them (for
-    example under `--verbose` or a test-only environment variable); nothing
-    does that yet.
-  - The CLI still analyzes through `symbol_index_v2()` (Phase 5 switches it
-    to queries). Its cached entry now drops `Diagnostics` from
-    `completed_passes` (diagnostics are never stored) and
-    `hydrate_diagnostics` adds the pass back.
-    `cache_robustness::the_cache_entry_claims_only_the_passes_it_holds` pins
-    that; Phase 4 replaces the entry format and should keep the rule that
-    recorded coverage matches contents.
-  - Shell gotcha (still true): `cd` is a zoxide alias here and can jump to
-    /Volumes/coding/personal/rusty-biscuit. Use absolute paths.
-  - Cross-checks: Linux passed. The Windows rig (build-win-native) still
-    fails its Cargo storage preflight (automatic reclaim cannot restore the
-    headroom), so Windows could not be checked locally; someone needs to free
-    space there (see the `storage-strategy` skill).
+  - The CLI is record-native: `cli/src/declarations.rs` runs the four
+    declaration commands (per-command `SymbolQuery`, rayon chunks delivered
+    in file order, JSON envelope with trailing `errors`, one renderer in
+    `render.rs`). `--sort file|name|kind`, `--json-full` and `--verbose`
+    exist; `--sort-by-kind`/`--sort-by-module` are gone.
+  - `docs/symbol-reports.md` does not exist yet (Phase 6 Wave 1). The CLI
+    README already documents the envelope, `--sort`, `--json-full` and
+    `--verbose`; use it and the Phase 5 log "Behavior as built" section as
+    the source. Do not link features/fixes from docs.
+  - `hug --verbose` prints a stats line with parse / definition-capture /
+    diagnostics-run counts; use it for the performance sample's work
+    evidence. Under tests, `Scratch` pins RAYON_NUM_THREADS=2.
+  - JSON size: 2.72 MB on the Phase 1 baseline input (exported at commit
+    60e3b841), 3.10 MB on today's larger tree; record both in the sample.
+  - Record IDs still hash the absolute path (spec forbids altering IDs);
+    logged as a follow-up, not a Phase 6 task.
+  - Windows cross-check could not run (host storage preflight); only
+    compile evidence exists for Windows.
 ---
 
 # Fast, deterministic symbol reports on v2 records

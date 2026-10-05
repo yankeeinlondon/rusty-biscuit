@@ -110,9 +110,75 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
   - .claude/skills/tree-hugger/SKILL.md
   - .claude/skills/tree-hugger/api-reference.md
+source_files_during_phase_4:
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/coverage.rs
+  - tree-hugger/lib/src/cache/mod.rs
+  - tree-hugger/lib/src/cache/symbol_cache.rs
+  - tree-hugger/lib/src/file/query.rs
+  - tree-hugger/lib/src/file/source_file.rs
+  - tree-hugger/lib/src/queries/mod.rs
+  - tree-hugger/lib/src/shared/diagnostic_metadata.rs
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/cache_tests.rs
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/tests/symbols/main.rs
+  - tree-hugger/cli/tests/symbols/cache_lookup.rs
+  - tree-hugger/cli/tests/symbols/cache_robustness.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+docs_updated_during_phase_4:
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/lib/README.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
 packages:
   - tree-hugger
   - tree-hugger-cli
+source_files_during_phase_5:
+  - tree-hugger/lib/src/file/query.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/coverage.rs
+  - tree-hugger/lib/tests/l1/symbols_query.rs
+  - tree-hugger/cli/Cargo.toml
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/src/classes.rs
+  - tree-hugger/cli/src/declarations.rs
+  - tree-hugger/cli/src/order.rs
+  - tree-hugger/cli/src/prelude.rs
+  - tree-hugger/cli/src/render.rs
+  - tree-hugger/cli/src/report.rs
+  - tree-hugger/cli/src/scan.rs
+  - tree-hugger/cli/src/scanner.rs
+  - tree-hugger/cli/tests/cli.rs
+  - tree-hugger/cli/tests/symbols/main.rs
+  - tree-hugger/cli/tests/symbols/cache_lookup.rs
+  - tree-hugger/cli/tests/symbols/cache_robustness.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/symbols/classes.rs
+  - tree-hugger/cli/tests/symbols/golden.rs
+  - tree-hugger/cli/tests/symbols/order.rs
+  - tree-hugger/cli/tests/symbols/prelude.rs
+  - tree-hugger/cli/tests/symbols/report.rs
+  - tree-hugger/cli/tests/symbols/wiring.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.plain
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+docs_updated_during_phase_5:
+  - tree-hugger/README.md
+  - tree-hugger/cli/README.md
+  - tree-hugger/lib/README.md
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+  - tree-hugger/docs/refactor.md
+  - docs/dependencies.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
 ---
 
 # Implementation Log for 2026-10-03-symbol-improvements (6 phases)
@@ -742,3 +808,486 @@ format. The only persisted change is which passes a cache entry lists, and
 - `just test-l2` not run: Phase 3 adds no L2 test and does not touch the
   `god-files` terminal path.
 - No pre-existing failures.
+
+## Phase 4
+
+Persistent cache with complete keys. Entries below are written as the work
+lands.
+
+### Wave 1 and the CLI wiring
+
+- **Fingerprint** (`lib/src/cache/symbol_cache.rs`, `FingerprintInputs`):
+  a computed `PassFingerprint` per (language, grammar): schema `4.0`,
+  `<crate version>+rev.<EXTRACTOR_REVISION>`, the grammar's own identity
+  (`Language::name`, declared version when present, ABI, node-kind, field and
+  parse-state counts — read from the compiled grammar, nothing hand-written),
+  the grammar ID, and the effective text of the `locals`, `imports` and
+  `references` queries (inherited and overlay text resolved by the same
+  `resolve_query_text` the analysis compiles). Query text is injectable
+  (`FingerprintInputs::with_query_text`, `SymbolCache::with_query_text`).
+  Diagnostics have their own fingerprint (lint + comments query text, a
+  digest of the built-in rule metadata, `experimental_semantics`); it is
+  stored inside the entry, not in the key, so rules and lint settings affect
+  only the diagnostics pass (spec A7).
+- **Key** = `canonical_digest(["symbols", path with `/` separators, source
+  xxHash, forced language or "detected", records fingerprint digest])`. Kinds
+  and capabilities are not inputs. `canonical_digest` (new, `cache/mod.rs`)
+  length-prefixes each field before BLAKE3, and `PassFingerprint::digest` now
+  uses it (its old `format!` joined schema minor and crate version with no
+  separator). All digests go through `biscuit-hash`, already a normal
+  dependency of `tree-hugger`; no dependency was added, so no dependency doc
+  changed.
+- **Entry** (Ruling 6): `schema_version`, `fingerprint`, `file` (path exactly
+  as analyzed, since records repeat it), `language`, `source_hash`,
+  `covered_kinds` (`"all"` or a non-empty strictly ascending kind list),
+  `completed_capabilities` (non-empty, strictly ascending, closed under
+  prerequisites), `diagnostics_fingerprint` (required, nullable), `records`,
+  `imports`, `exports`, `diagnostics`. Read with `deny_unknown_fields` and no
+  defaults; after decoding, schema/fingerprint/file/language/hash must match
+  and contents must match coverage (diagnostics only with the capability,
+  every record's kind covered).
+- **Atomic write**: `PersistentCache::put` writes `<key>.<pid>.<n>.tmp` in
+  the shard directory and renames it over the entry; on failure the temp
+  file is removed. `PersistentCache::get_bytes` (new) separates "no entry"
+  from an I/O error.
+- **CLI**: `analyze_file` reads a `SourceFile` once, then
+  `SymbolCache::query(source, &SymbolQuery::complete_index())`; `--no-cache`
+  calls `SourceFile::query` (no reads, no writes). `InMemorySymbolCache`,
+  `InProcessCache` and the stderr `cache:` stats line (which counted only
+  in-process hits) are gone from the scan; the library types remain. The old
+  `AnalysisOptions::fingerprint` went with them: deny/warn/allow/strict are
+  applied after analysis, and `experimental_semantics` is in the diagnostics
+  fingerprint. Before this change every warm run parsed each file (the
+  `TreeFile` was built before the lookup) and recomputed diagnostics.
+
+### Defect found: stored diagnostics never round-tripped
+
+`DiagnosticMetadata` omits `is_enabled_by_default` and
+`requires_experimental_semantics` when `false` but required both when
+reading. Nothing read a stored diagnostic before, so it was latent; once
+entries stored diagnostics, every file with a diagnostic from a
+default-off rule produced an unreadable entry and was silently recomputed.
+`golden::json_symbols_over_multi_are_identical_across_runs` stayed green
+because a recompute gives the same output. Fixed with `#[serde(default)]` on
+both fields (the serializer itself defines absent as `false`). The
+per-language cache test asserts the warm lookup is a `Hit`, not only equal
+output, so this class of failure is caught.
+
+### Wave 2: lookup, merge and write-back
+
+- `SymbolCache::query(SourceFile, &SymbolQuery) -> CachedQueryResult
+  { result, lookup, write_error }`. `lookup` is `Hit`,
+  `WidenedCapabilities { parsed }`, `WidenedKinds` or `Miss(CacheMiss)`;
+  `CacheMiss` is `Absent`, `Unreadable`, `Malformed(serde message)`,
+  `Mismatched(field)` or `Inconsistent(what)`.
+- **Narrowing** (`lib/src/analysis/coverage.rs`, `project`): every result,
+  hit or computed, is reduced to exactly the request: unselected kinds
+  dropped; containment links, reference edges, export targets, `semantics`,
+  `docs.parsed` and diagnostics cleared when not requested; each record's
+  `provenance.parse_pass` recomputed (Docs > Semantic for functions/methods >
+  Bind > Parse). This is what makes a wide entry serve a narrow command with
+  `--no-cache`-identical output. It relies on two facts checked over every
+  fixture: `visibility.is_exported` is the same before and after binding,
+  and `docs.comments` is never changed by the docs pass when a raw doc
+  exists.
+- **Record-only widening** (`add_record_passes`): docs, semantics (when
+  references are stored) and containment (when every kind is stored) run
+  over the stored records with no parse. References and diagnostics parse
+  and re-run the query for the union, definitions capture included, because
+  binding and semantic lint consume the live definitions (tree nodes cannot
+  be cached).
+- A query selecting no kinds is computed but not stored (an entry must name
+  at least one kind).
+- `SourceFile` gained `forced_language()` (a key input) and
+  `experimental_semantics(bool)` (carried into the parsed `TreeFile`, and
+  into the diagnostics fingerprint).
+
+### Decisions and departures
+
+| Decision | Choice | Why |
+|---|---|---|
+| "Run only the missing passes" | Literal for docs, semantics and all-kind containment; references and diagnostics re-parse and recapture | Binding needs every kind as a candidate owner and the reference query's live tree; semantic lint needs the definitions' syntax nodes. Neither is cacheable. The lookup reports which happened (`parsed`) |
+| Diagnostics in the entry | Stored, with a diagnostics fingerprint inside the entry | Spec A7: rules and settings affect only the passes that use them. Keying on them would split one file's entry per lint setting |
+| Empty `records` | Served when coverage is valid (a file with no records of the covered kinds) | The reader cannot tell it from an edited entry without a checksum; entries are written atomically, and truncation is malformed JSON. Recorded in the docs table |
+| Unordered or repeated coverage lists | Miss | The writer always emits strictly ascending lists; a reader that normalized would accept shapes no writer produces |
+| `PassFingerprint::digest` encoding | Changed to `canonical_digest` | Spec: unambiguous canonical encoding. No stored data uses the old digest |
+| Entry `file` | Exact path string, validated; key uses `/` separators | The records repeat the path, so an entry for another spelling would print the wrong path |
+| CLI request | Still the complete index for every command | Phase 5 switches commands to per-command queries; with diagnostics stored, a warm complete-index run already parses nothing |
+| CLI work-counter visibility | Not added | The counters are proven in-process (library tests). Phase 5's `--verbose` is the place to report hits/parses |
+| Stale-revision test for revision 6 | Not added | The old key formula is retired; the computed key cannot be hard-coded. The revision is pinned as a fingerprint input in `symbols_cache` |
+| Windows rename races | Concurrency tests accept a failed write, never a torn read | `MoveFileExW` can refuse a rename racing another onto the same file; the cache reports it as `write_error` by contract |
+
+`docs/cache-design.md` was a pre-implementation draft (SQLite, L1–L4 layers,
+`--cache-stats`) describing behavior that never existed; it was rewritten as
+the current record: usage, key, fingerprint tables, entry format, a lookup
+flow diagram, atomic writes, both robustness tables, and what is not cached.
+
+### Tests added
+
+- `lib/tests/l1/symbols_cache.rs` (L1, declared in `tests/l1/main.rs`):
+  - `every_fixture_is_a_complete_warm_hit_equal_to_an_uncached_run` — the
+    "Cache correctness" per-language row (21 primary fixtures + 16 `multi/`):
+    cold `Miss(Absent)`, warm `Hit` with all work counters zero, both equal
+    to uncached
+  - `projected_results_equal_uncached_queries` /
+    `projected_results_over_multi_equal_uncached_queries` — a complete entry
+    narrowed to each capability alone, all capabilities, and Method-only at
+    both ends equals the uncached query; non-vacuity counts of stripped
+    references and parsed docs
+  - `widening_capabilities_runs_only_the_missing_passes` — six rows (docs,
+    semantics, all-kind containment: no parse; narrow containment,
+    references, diagnostics: one parse, one capture, diagnostics runs as
+    expected); one entry recording the union; then first, second and union
+    queries are hits
+  - `widening_kinds_reextracts_once_for_the_union` — one parse, one capture;
+    `covered_kinds` is the sorted union; three later queries hit
+  - `each_key_input_and_stored_identity_decides_a_miss` — edited locals
+    text, forced language, source edit (new key → `Absent`); extractor
+    revision in the fingerprint; edited lint text and experimental semantics
+    keep the key, serve listings, recompute diagnostics; stored schema,
+    fingerprint, source hash, file and language each `Mismatched`
+  - `a_corrupt_entry_is_a_miss_and_is_replaced` (truncated, empty, not JSON)
+  - `absent_and_null_entry_fields_report_different_reasons` (seven fields)
+  - `covered_kind_lists_are_served_only_in_canonical_form` (list shapes
+    from a narrow entry, plus a record of an uncovered kind)
+  - `concurrent_writers_leave_a_readable_entry_whose_coverage_matches`
+    (six threads, five rounds, independent handles)
+  - `a_disabled_store_neither_reads_nor_writes`
+- `lib/tests/l1/cache_tests.rs`: atomic replace with no temp file left;
+  failed put removes its temp file; concurrent puts never expose a partial
+  entry; `canonical_digest` separation.
+- `cli/tests/symbols/cache_robustness.rs`: matrix extended with seven entry
+  columns (`covered_kinds`, `completed_capabilities`, `schema_version`,
+  `fingerprint`, `source_hash`, `diagnostics_fingerprint`, `records`) ×
+  nine shapes, from a real `hug` entry; `the_cache_entry_claims_only_the_
+  passes_it_holds` replaced by `the_cache_entry_records_the_coverage_it_holds`
+  (entries now store diagnostics with their capability and fingerprint).
+- `cli/tests/symbols/cache_lookup.rs` (new, declared in `main.rs`):
+  `concurrent_processes_leave_one_readable_entry` (six concurrent `hug`
+  processes, mixed commands and lint settings) and
+  `cache_hits_and_cache_failures_print_nothing` (cold, warm and
+  unwritable-cache runs: empty stderr, uncached output; `--no-cache` writes
+  nothing).
+- `cache_upgrade.rs`: adapted to the entry layout (`file`, `records`); the
+  stale payload keeps the entry's current `schema_version`, since the reader
+  now checks it.
+
+Mutation checks (each reverted): keeping references, members, semantics,
+parsed docs or export IDs in the projection, or stamping `Bind` instead of
+`Semantic`, failed the projection tests; allowing narrow containment from
+records failed the widening test; ignoring the diagnostics fingerprint failed
+the key test; accepting empty, unordered or repeated kind lists, or records
+of uncovered kinds, failed the kind-list test; a plain `fs::write` instead of
+temp + rename failed the concurrent put test (3/3 runs); flipping two entry
+matrix cells failed exactly those cells.
+
+### Input Robustness Matrix (cache entry reader)
+
+Outcomes are asserted through the public CLI result (served vs. equal to
+`--no-cache`) by `cache_robustness::persisted_symbol_fields_are_served_or_recomputed_per_shape`,
+with a control row (the unedited entry is served). The library adds the
+reason text (absent vs null) and the list form of `covered_kinds`.
+
+| Shape | `covered_kinds` | `completed_capabilities` | `schema_version` | `fingerprint` | `source_hash` | `diagnostics_fingerprint` | `records` |
+|---|---|---|---|---|---|---|---|
+| control | served | served | served | served | served | served | served |
+| absent | miss | miss | miss | miss | miss | miss | miss |
+| null | miss | miss | miss | miss | miss | miss (inconsistent) | miss |
+| wrong type | miss | miss | miss | miss | miss | miss | miss |
+| one wrong element | miss | miss | miss | miss | miss | miss | miss |
+| every element wrong | miss | miss | miss | miss | miss | miss | miss |
+| empty | miss (`[]`) | miss | miss (`{}`) | miss | miss | diagnostics recomputed (miss) | served, no records |
+| duplicate key | miss | miss | miss | miss | miss | miss | miss |
+| trailing content | miss | miss | miss | miss | miss | miss | miss |
+
+Smell grep over `cache/symbol_cache.rs`, `analysis/coverage.rs`,
+`file/source_file.rs`: no `#[serde(default)]`, `unwrap_or_default()` or
+`.ok()` on a load-bearing parse; the one `filter_map` reads the rule
+registry's own IDs. `diagnostics_fingerprint` is `Option<String>` read
+through a required-but-nullable deserializer, so absent and null differ. The
+one `#[serde(default)]` added (`DiagnosticMetadata`'s two flags) matches the
+serializer's own encoding of `false` as absent.
+
+### Requirement → test mapping (Phase 4)
+
+| Requirement | Test(s) |
+|---|---|
+| Complete warm hit: no parse, no analysis | `symbols_cache::every_fixture_is_a_complete_warm_hit_…` (counters all zero) |
+| Warm == `--no-cache` per language | same; `cache_lookup::cache_hits_and_cache_failures_print_nothing`; `golden::json_symbols_over_multi_are_identical_across_runs` |
+| Kinds/passes not in the key; narrow↔broad equal uncached | `symbols_cache::projected_results_*`, `widening_*` |
+| Capability widening: one entry, only missing passes | `widening_capabilities_runs_only_the_missing_passes` |
+| Kind widening: re-extracted once; third narrow run hits | `widening_kinds_reextracts_once_for_the_union` |
+| Query text, extractor revision, language override, schema → miss | `each_key_input_and_stored_identity_decides_a_miss`, `cache_upgrade::*` |
+| Rules affect only diagnostics | `each_key_input_…` (lint text, experimental semantics) |
+| Corrupt/incompatible = miss, never empty | `a_corrupt_entry_…`, `absent_and_null_…`, `cache_robustness::*` |
+| Atomic write, last rename wins, readable survivor | `cache_tests::concurrent_persistent_puts_…`, `symbols_cache::concurrent_writers_…`, `cache_lookup::concurrent_processes_…` |
+| `--no-cache` bypasses reads and writes | `a_disabled_store_neither_reads_nor_writes`, `cache_lookup::cache_hits_…` |
+| Quiet cache failures | `cache_lookup::cache_hits_and_cache_failures_print_nothing` |
+
+### Gates run
+
+- `just test` (tree-hugger + tree-hugger-cli L1): **767/767 passed** (750 at
+  Phase 3 close + 11 `symbols_cache` + 4 `cache_tests` + 2 `cache_lookup`;
+  one `cache_robustness` test replaced). The projection test was split in
+  two after hitting nextest's 30 s timeout under full-suite load.
+- `just lint`: clean.
+- `just check-tier-coverage tree-hugger`: 0 stranded.
+- `just cross-check tree-hugger --os linux` (629/629) and
+  `just cross-check tree-hugger-cli --os linux`: pass.
+- `just cross-check tree-hugger --os windows`: **not run**. The storage
+  preflight on build-win-native refused again (15.9 GiB free, 50 GiB
+  required, automatic reclaim insufficient); not overridden, nothing deleted.
+  Windows-relevant behavior: `std::fs::rename` replaces an existing entry on
+  Windows (`MoveFileExW` with replace) and std opens files with
+  `FILE_SHARE_DELETE`, so readers do not block it; a rename racing another
+  rename may fail, which the cache reports as `write_error` and the tests
+  accept. Windows CI on `main` runs these tests.
+- `just test-l2` not run: no L2 test added; the `god-files` terminal path is
+  untouched.
+- No pre-existing failures.
+
+## Phase 5
+
+CLI on records: per-command queries, the versioned JSON report, `--sort`,
+`--verbose`, the parallel scan, prelude reuse and one renderer. Entries below
+are written as the work lands.
+
+### Waves 1–3 (code)
+
+- **Library:** `SymbolQueryResult` gained `selected_kinds` and
+  `narrowed(&SymbolQuery) -> Option<_>`, which projects a wide result to a
+  narrower query through the same `coverage::project` the cache uses and
+  refuses (`None`) a query the result does not cover. Prelude reuse needs it
+  under `--no-cache`, where there is no cache entry to narrow.
+- **New CLI modules** (`main.rs` only wires): `order.rs` (`SortOrder`, the
+  D7 kind order, `portable_path_cmp`, tie-breakers), `report.rs` (streamed
+  envelope, `ReportError`, path relativization), `render.rs` (the one
+  renderer), `classes.rs` (container summaries), `scan.rs` (`Analyzer`,
+  `in_file_order`, `CacheStats`), `declarations.rs` (the four declaration
+  commands end to end). `prelude.rs` was rewritten on records.
+- **Removed from `main.rs`:** `render_symbols`, `render_symbol_line`,
+  `symbol_presentation`, `binding_token_for_symbol`, `SOURCE_LINE_CACHE`,
+  `source_line_for_symbol`, the v1 `ClassSummary` and every
+  `render_*`/`format_*` helper they used, `analyze_file`, `SymbolFilter`,
+  `SymbolRenderOptions`, `--sort-by-kind`, `--sort-by-module`;
+  `scanner::apply_symbol_filters` (no caller left).
+
+### Behavior as built
+
+- **Queries** (`Declarations::query`): `functions` = Function/Method/
+  Constructor, `types` = Type/Class/Interface/Enum/Trait/TypeAlias,
+  `symbols` = every kind, all with Declarations only; `classes` = Class/Type/
+  Interface/Trait + Method/Constructor with Containment; `--json-full` =
+  `complete_index()`; `lint` = Declarations + Diagnostics; `imports` =
+  Declarations (import records come with it).
+- **Parallel scan** (`scan::in_file_order`): rayon `par_iter` over chunks of
+  `4 × current_num_threads()` (Ruling 1), each chunk delivered in file order
+  before the next starts. `lint` and `imports` use the same driver. Cache
+  stats come back with each result (no thread-locals); work counts are the
+  library's process-wide atomics, read once at the end.
+- **File order:** files are sorted by their scan-root-relative portable path,
+  compared component by component (`a/b.rs` before `a-c.rs`), for JSON and
+  terminal alike.
+- **JSON** (`--json`): compact, written with `serde_json::to_writer` to a
+  locked `BufWriter`, envelope head first, one entry per file with a match,
+  `errors` last. `root_dir` is the resolved scan root (`pkg_root`, the
+  directory files are collected from); terminal paths stay relative to the
+  Git root as before.
+- **Errors:** a file that fails to read or analyze is written to stderr as
+  `error: <message>` in file order, becomes one `errors` entry, and the run
+  exits `1`. Before, the first failing file aborted the whole run with a
+  `Debug`-printed error; `lint` and `imports` now also continue past a failed
+  file (stderr, exit `1`), their JSON shape unchanged.
+- **Output failures:** a broken pipe ends the run with status `0` and no
+  message; any other stdout write error prints `error: cannot write output`
+  and exits `1`.
+- **`--verbose`:** `cache: <path>: <reason>` for every non-`Absent` miss,
+  `cache: <path>: write failed: <error>` for a failed write, then one line
+  `cache: H hits, P partial hits, M misses[, R reused in this run]; parsed N
+  files, C definition captures, D diagnostics runs` (`cache: disabled; …`
+  under `--no-cache`). Adding the work counts to the stats line is how CLI
+  tests prove "zero diagnostics", "no duplicate parse" and "a warm hit parses
+  nothing" end to end.
+- **`--json-full` rejection** (Ruling 2, as recorded in Phase 1): symbol-name
+  positional filters (classified by the scan's own file/symbol classifier),
+  `--exclude-symbols`, `--exported`, `--prelude`, and for `classes` `--name`,
+  `--static-only`, `--instance-only`; also `--json-full` on `lint`/`imports`.
+  All exit `2` through clap's `ArgumentConflict`. `--sort` and file selectors
+  are allowed.
+- **Classes** (Ruling 3): `members` holds the flag-filtered (displayed)
+  methods and constructors, in source order, keyed by container ID.
+  `--sort` orders containers within each file; members keep source order.
+- **Prelude** (Ruling 4): synthetic records use the existing
+  `visibility.is_synthetic` (plus `is_reexported`, `is_exported`); no schema
+  field was added. They take the alias name, the target's kind, keyword, doc
+  comment and declaration location (`use` location when unresolved, kind
+  `Unknown`, or a text-inferred kind), and an ID from
+  `stable_symbol_key(language, prelude file, kind, "prelude-export::<name>",
+  ordinal)`. Target lookup uses the every-kind index (exported records first,
+  all records when the module exports none), as before.
+- **Renderer:** `Prose` lines inside `UnorderedList` sections (bullet `- `,
+  doc comments as hanging-indent continuation lines), indented 2 (listing) or
+  6 (class members). biscuit-terminal's list re-wraps items at the terminal
+  width even when the item's `Prose` says `WordWrap::None` (found with a
+  probe); the renderer pins `Terminal::fixed_width` to 1,000,000 so today's
+  unwrapped layout holds. Plain output is rendered on a no-color terminal and
+  stripped of escapes; OSC 8 links are emitted only when the terminal
+  reports link support.
+
+### Decisions and departures
+
+| Decision | Choice | Why |
+|---|---|---|
+| Label source | `identity.keyword` for Type, Variable, Field, Constant (the kinds the old renderer guessed from source text); the kind label for every other kind | Keeps the layout (`public method`, `function`) while deleting the source-line guess. Using the keyword everywhere would print `fn`/`def`/`func` for every function |
+| Relation targets | Not re-sorted | They are already built in source / first-seen order from vectors; hash maps are lookups only. Byte-identity tests (threads, cold/warm, two runs) pin determinism; re-sorting would lose the first-seen meaning |
+| `docs.comments` in default `--json` | Dropped | The `Capability` docs assign attached comments to the docs pass, which no listing requests, and in a declarations-only record the one comment repeats `raw_doc` twice (~200 KB of the functions report). `--json-full` keeps them |
+| `identity.stable_key` path | Rewritten scan-root-relative in both reports; ID unchanged | Spec D1: every machine-readable path is portable and scan-root-relative. The key no longer re-derives the ID (which hashes the analyzed absolute path) |
+| Record IDs | Unchanged, still derived from the absolute path | The spec forbids altering IDs. Consequence: IDs differ between checkouts at different paths; the JSON golden numbers them (`<id-N>`). Recorded as a follow-up below |
+| JSON formatting | Compact (one line) | The spec names `serde_json::to_writer`; pretty printing would cost ~40% more bytes against the 3 MB target. The golden is a canonical pretty rendering of the parsed report |
+| Parallel `lint`/`imports` | Same driver as the declaration commands | Plan: "par_iter per file"; their report shape is untouched |
+| `--sort` on `classes` | Orders containers per file; members keep source order | The spec defines `--sort` over declarations; class sections are a presentation of one container |
+| Group-by-file group order | Portable path order (component-wise), not `BTreeMap` string order | One path order everywhere; equal for every name without `-`/`.` before a separator |
+| Library change | `SymbolQueryResult.selected_kinds` + `narrowed` | Needed for prelude reuse under `--no-cache`; checked (refuses an uncovered query) rather than trusted |
+
+### Output differences (deliberate; goldens regenerated)
+
+`symbols.plain` was regenerated once. The set of lines is unchanged except
+for the labels, and the order is now file, then source position (96 lines
+moved). Label changes, all from `identity.keyword`:
+
+| Before | After |
+|---|---|
+| `internal type Meter` (Swift) | `internal struct Meter` |
+| `module-private variable M`, `default_size` (Lua) | `module-private local …` |
+| `variable $queue`, `$size`, `$default_size` (Perl) | `my …` |
+| `type point` ×3 (C) | `struct point` |
+| `= MAX_SIZE` (Python; the Phase 1 label defect) | `variable MAX_SIZE` |
+
+The Go `Grow(amount int) (amount int)` return defect noted in Phase 1 is a
+record signature issue and is unchanged. `symbols.json` is new.
+
+### JSON size
+
+| Input | `hug --json functions` |
+|---|---|
+| Phase 1 baseline tree (commit `60e3b841`, exported read-only to `/tmp`; 94 files with functions, 1,580 functions) | **2,722,600 B (2.72 MB)**, was 39.2 MB |
+| Today's `tree-hugger/` (113 files, 1,784 functions) | 3,104,400 B (3.10 MB) |
+
+The target is met on the baseline input it was set on; today's tree is 13%
+larger in functions (≈1.74 KB per function). The largest remaining parts of
+a record are kind data (parameters), spans (declaration, name, body),
+`type_info` views that repeat the return type, and the always-serialized
+visibility booleans; trimming those would change the record schema or drop
+data the spec keeps, so it is left for a deliberate decision.
+
+### Tests added or rewritten
+
+New (all L1, in the `tree-hugger-cli` `symbols` binary unless noted; every
+file is declared in `tests/symbols/main.rs`):
+
+- `tree-hugger::l1 symbols_query::a_wide_result_narrows_to_exactly_the_uncached_narrow_query`
+  (every fixture × functions/types/classes × two capability sets; refusals)
+- `golden::json_symbols_over_multi_match_the_golden`,
+  `json_symbols_over_multi_are_identical_with_one_thread`,
+  `json_full_over_multi_is_identical_with_one_thread`,
+  `json_symbols_over_multi_are_identical_cold_and_warm`
+- `report.rs`: envelope and record round trip; kind sets; empty selection;
+  failed file (`--json`, `--json-full`, terminal); failure order with 1 and
+  8 workers; `--json-full` indexes; `--json-full` rejections (10 cases);
+  broken pipe
+- `order.rs`: each `--sort` against a test-side oracle; the `Widget` tie;
+  JSON file order with per-file sort (`--json` and `--json-full`); sort
+  within file and directory groups; argument errors (8 cases)
+- `classes.rs`: interface/trait containers and `members`; static/instance
+  sections and both flags; container fields equal to the complete index
+  without Field/Property/Constant selected
+- `prelude.rs`: synthetic alias at its declaration (own ID), unresolved
+  re-export, `PRELUDE` names, target outside the scan, one parse per file
+  (uncached and cached)
+- `cache_lookup.rs`: `verbose_reports_cache_use_and_cache_failures`,
+  `symbol_commands_run_no_diagnostics`, `lint_and_json_full_run_diagnostics`,
+  `complete_warm_hits_parse_nothing`
+- `order.rs` unit test in the binary: `portable_paths_order_directory_by_directory`
+
+Rewritten for the new shape (pre-authorized): seven `cli.rs` JSON tests
+(parsed-JSON assertions on records instead of v1 fields and pretty-print
+substrings); `wiring.rs` JSON tests (the "legacy symbols match the indexes"
+test became `json_records_match_the_complete_index`, `--json` vs
+`--json-full` by ID); `cache_robustness.rs` and `cache_upgrade.rs` probe
+through `--json-full` and read `indexes` (same cells, same outcomes);
+`concurrent_processes_leave_one_readable_entry` now asserts the survivor's
+records are of kinds it covers (narrow commands write narrow entries, so
+"all" is no longer guaranteed).
+
+Mutation checks (each reverted): scanning without prelude reuse failed
+`prelude_and_scan_parse_each_file_once`; exiting `1` on a broken pipe failed
+`a_closed_stdout_ends_the_run_quietly`; reversing file order failed the
+order, failure-order, failed-file and JSON golden tests.
+
+### Requirement → test mapping (Phase 5)
+
+| Requirement | Test(s) |
+|---|---|
+| Per-command kind sets, no diagnostics in listings | `report::functions_and_types_select_exactly_their_kind_sets`, `cache_lookup::symbol_commands_run_no_diagnostics` |
+| `lint`/`--json-full` still run diagnostics | `cache_lookup::lint_and_json_full_run_diagnostics`, `report::json_full_reports_complete_indexes` |
+| Complete warm hit parses nothing | `cache_lookup::complete_warm_hits_parse_nothing` |
+| Envelope, `errors` last, round trip, no `declaration_text` | `report::the_json_envelope_…`, `wiring::json_records_carry_keyword_…` |
+| Empty selection `files: []` | `report::an_empty_selection_is_an_empty_files_array` |
+| Failed file: listed good files, one error, stderr, exit 1 | `report::a_failed_file_is_reported_…` |
+| Deterministic parallel error order | `report::failures_are_reported_in_file_order_with_any_thread_count` |
+| `--json-full` indexes and rejections | `report::json_full_reports_complete_indexes`, `report::json_full_rejects_…` |
+| Classes `members` and sections | `classes::*`, `cli.rs` classes tests |
+| Parallel == single thread; cold == warm | `golden::json_*_identical_with_one_thread`, `golden::json_symbols_over_multi_are_identical_cold_and_warm` |
+| Goldens | `golden::plain_symbols_over_multi_match_the_golden`, `golden::json_symbols_over_multi_match_the_golden` |
+| Orders, tie-breakers, groups, JSON file order | `order::*` |
+| Removed/misused `--sort` flags are argument errors | `order::removed_and_misplaced_sort_flags_are_argument_errors` |
+| Broken pipe exits quietly | `report::a_closed_stdout_ends_the_run_quietly` |
+| Quiet stderr / `--verbose` | `cache_lookup::cache_hits_and_cache_failures_print_nothing`, `cache_lookup::verbose_reports_cache_use_and_cache_failures` |
+| Prelude aliases, unresolved, env names, outside targets, no duplicate parse | `prelude::*` |
+| Wide → narrow result equals uncached | `symbols_query::a_wide_result_narrows_…` (library) |
+| Portable paths (os skill) | envelope test (`/`-separated, relative), failure-order test (native separators normalized), goldens |
+
+The Input Robustness Matrix does not apply: Phase 5 adds no reader of a
+persisted or configuration format (the cache reader is unchanged; its matrix
+test was ported to the new probe with identical cells).
+
+A stdout write error other than a broken pipe (for example `/dev/full`) is
+handled (`error: cannot write output`, exit 1) but not tested: no portable
+way to produce it.
+
+### Gates run
+
+- `just test` (tree-hugger + tree-hugger-cli L1): **797/797 passed**.
+- `just lint`: clean.
+- `just test-l2`: 3/3 passed (the Kitty case returns at once, as when Kitty
+  is unavailable).
+- `just check-tier-coverage tree-hugger`: 0 stranded.
+- `just cross-check tree-hugger-cli --os linux`: 167/167 passed.
+- `just cross-check tree-hugger-cli --os windows`: **not run**: storage
+  preflight on the Windows host refused again (15.6 GiB free, 50 GiB
+  required; automatic sweep freed nothing); not overridden, nothing deleted.
+  Compile evidence only: `cargo check -p tree-hugger-cli --tests --target
+  x86_64-pc-windows-gnu` passes. Windows-sensitive points: JSON paths go
+  through `to_portable_string`, file ordering compares portable strings, the
+  failure-order test normalizes `\` in stderr. Windows CI on `main` covers
+  behavior.
+- WSL not run (follows Linux code paths; nightly CI covers it).
+- No pre-existing failures.
+
+### Incidents
+
+- Two test-only edits were silently skipped because `cd` (a zoxide alias in
+  this shell) failed inside a `&&` chain; caught by re-checking, re-applied
+  with absolute paths.
+- First full-suite run: three new tests timed out at 30 s. Each `hug` started
+  one rayon worker per core inside 16 concurrent test processes; `Scratch`
+  now pins `RAYON_NUM_THREADS=2`, and the two longest tests were split.
+
+### Follow-ups for Phase 6 and later
+
+- Record IDs hash the analyzed absolute path, so they differ between
+  checkouts; a future `naming context` or ID scheme should decide whether
+  IDs become root-independent.
+- Phase 6 writes `docs/symbol-reports.md`; this phase updated the READMEs,
+  cache design, schema design and dependency docs only where they had
+  become wrong.

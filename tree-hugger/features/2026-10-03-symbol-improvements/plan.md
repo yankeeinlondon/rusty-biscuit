@@ -4,7 +4,7 @@ feature: symbol-improvements
 spec: spec.md
 total_phases: 6
 created: 2026-10-04
-phase: 3
+phase: 5
 agent: claude/sonnet
 yolo: true
 source_files_during_phase_1:
@@ -112,6 +112,72 @@ docs_updated_during_phase_3:
   - tree-hugger/lib/README.md
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
+source_files_during_phase_4:
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/coverage.rs
+  - tree-hugger/lib/src/cache/mod.rs
+  - tree-hugger/lib/src/cache/symbol_cache.rs
+  - tree-hugger/lib/src/file/query.rs
+  - tree-hugger/lib/src/file/source_file.rs
+  - tree-hugger/lib/src/queries/mod.rs
+  - tree-hugger/lib/src/shared/diagnostic_metadata.rs
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/cache_tests.rs
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/tests/symbols/main.rs
+  - tree-hugger/cli/tests/symbols/cache_lookup.rs
+  - tree-hugger/cli/tests/symbols/cache_robustness.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+docs_updated_during_phase_4:
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/lib/README.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
+source_files_during_phase_5:
+  - tree-hugger/lib/src/file/query.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/coverage.rs
+  - tree-hugger/lib/tests/l1/symbols_query.rs
+  - tree-hugger/cli/Cargo.toml
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/src/classes.rs
+  - tree-hugger/cli/src/declarations.rs
+  - tree-hugger/cli/src/order.rs
+  - tree-hugger/cli/src/prelude.rs
+  - tree-hugger/cli/src/render.rs
+  - tree-hugger/cli/src/report.rs
+  - tree-hugger/cli/src/scan.rs
+  - tree-hugger/cli/src/scanner.rs
+  - tree-hugger/cli/tests/cli.rs
+  - tree-hugger/cli/tests/symbols/main.rs
+  - tree-hugger/cli/tests/symbols/cache_lookup.rs
+  - tree-hugger/cli/tests/symbols/cache_robustness.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/symbols/classes.rs
+  - tree-hugger/cli/tests/symbols/golden.rs
+  - tree-hugger/cli/tests/symbols/order.rs
+  - tree-hugger/cli/tests/symbols/prelude.rs
+  - tree-hugger/cli/tests/symbols/report.rs
+  - tree-hugger/cli/tests/symbols/wiring.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.plain
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+docs_updated_during_phase_5:
+  - tree-hugger/README.md
+  - tree-hugger/cli/README.md
+  - tree-hugger/lib/README.md
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+  - tree-hugger/docs/refactor.md
+  - docs/dependencies.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
   - .claude/skills/tree-hugger/SKILL.md
   - .claude/skills/tree-hugger/api-reference.md
 packages:
@@ -465,7 +531,7 @@ its table in `docs/cache-design.md` updated.
 
 ### Wave 1 (sequential)
 
-- [ ] **Fingerprint and key**
+- [x] **Fingerprint and key**
     - Compute the fingerprint from: schema, grammar version/identity, actual
       effective query text (inherited queries and overlays) via an
       **injectable** query-text input, relevant config, `EXTRACTOR_REVISION`.
@@ -476,7 +542,7 @@ its table in `docs/cache-design.md` updated.
     - Use `biscuit-hash` for every digest with an unambiguous canonical
       encoding; add it as a normal dependency to the tree-hugger packages that
       need it; update dependency docs.
-- [ ] **Entry format and atomic write**
+- [x] **Entry format and atomic write**
     - Entry records covered kinds and completed capabilities (Ruling 6).
     - `PersistentCache::put`: temp file in the same directory, then rename;
       last rename wins; corrupt/incompatible = miss (never empty success);
@@ -484,17 +550,17 @@ its table in `docs/cache-design.md` updated.
 
 ### Wave 2 (parallel, after Wave 1)
 
-- [ ] **Lookup/merge logic**
+- [x] **Lookup/merge logic**
     - Three outcomes: complete hit (no parse, no analysis); missing
       capabilities only (run only those passes, write merged entry); missing
       kinds (re-extract once for the union, write wider entry). Full-index
       requests cannot reuse an entry lacking relations, docs or diagnostics.
     - Wired through `SourceFile::query` so one hash read feeds lookup and parse.
-- [ ] **Remove in-process layers from the CLI scan path**
+- [x] **Remove in-process layers from the CLI scan path**
     - Drop `InMemorySymbolCache` / `InProcessCache` from the single-visit scan
       (keep the library APIs). Prelude keeps a request-local result map
       (Phase 5).
-- [ ] **Cache tests**
+- [x] **Cache tests**
     - Edited query text, extractor revision, language override, schema each → a
       miss. Narrow→broad and broad→narrow match uncached results. After a
       capability-widening run: one entry, only missing passes ran; after
@@ -506,10 +572,10 @@ its table in `docs/cache-design.md` updated.
 
 ### Validation checkpoint 4
 
-- [ ] Complete warm hit: zero parser constructions (counter).
-- [ ] `docs/cache-design.md` documents the single layer, computed fingerprint,
+- [x] Complete warm hit: zero parser constructions (counter).
+- [x] `docs/cache-design.md` documents the single layer, computed fingerprint,
       partial-hit write-back and the updated robustness table.
-- [ ] `just test`, `just lint` green.
+- [x] `just test`, `just lint` green.
 
 ---
 
@@ -521,7 +587,7 @@ wires.
 
 ### Wave 1 (sequential)
 
-- [ ] **Argument surface**
+- [x] **Argument surface**
     - Add `rayon` to tree-hugger-cli (pre-authorized).
     - Global `--verbose` on `Cli`.
     - `--sort file|name|kind` on only `functions`, `types`, `symbols`,
@@ -529,20 +595,20 @@ wires.
       `--sort-by-kind` and `--sort-by-module`; repeated `--sort`,
       `--sort container`, and `--sort` on `lint`/`imports` are argument errors.
     - Update shell completions and help text.
-- [ ] **Per-command queries**
+- [x] **Per-command queries**
     - Map each command to its fixed kind set and capabilities (functions,
       types, classes with containment, symbols all kinds); `lint` requests
       diagnostics.
 
 ### Wave 2 (parallel: disjoint new modules)
 
-- [ ] **Order module**
+- [x] **Order module**
     - Keys per spec D7: file → start → end → kind (spec's kind order) → ID;
       `name` is case-sensitive written name; relation targets sorted
       deterministically. JSON: file entries always in portable path order;
       `--sort` orders only within a file's `symbols`. Groups
       (`--group-by-file`, `--group-by-module`) are independent of `--sort`.
-- [ ] **Report/JSON module**
+- [x] **Report/JSON module**
     - Envelope `{report_schema_version: 1, schema_version: {4,0}, root_dir,
       files:[{file, language, completed_passes, completed_capabilities,
       symbols}], errors:[{file, kind, message}]}`; `errors` always last and
@@ -557,7 +623,7 @@ wires.
       record IDs; `imports` and `lint` keep their current JSON shapes.
     - Stream with `serde_json::to_writer` to locked buffered stdout; broken pipe
       exits quietly; write error stops work.
-- [ ] **Renderer**
+- [x] **Renderer**
     - One CLI-local renderer built on `biscuit-terminal` `Prose` and
       `UnorderedList`, fed from records (keyword, signature, visibility,
       container); keeps today's layout, compact signatures, OSC 8 hyperlinks and
@@ -569,14 +635,14 @@ wires.
 
 ### Wave 3 (after Wave 2)
 
-- [ ] **Parallel scan driver**
+- [x] **Parallel scan driver**
     - `par_iter` per file in chunks (Ruling 1), results collected in file order;
       per-worker parser/state; counters returned with each result or atomics;
       failures reported in file order, each also on stderr, nonzero exit.
     - `--verbose` gates the cache-stats line (persistent hits / partial hits /
       misses) and recoverable cache-failure messages; analysis errors,
       lint adapter warnings and argument errors always print.
-- [ ] **Prelude reuse**
+- [x] **Prelude reuse**
     - Two-phase: analyze prelude files, discover targets, then scan; reuse a
       request-local map of complete indexes; analyze out-of-scan targets on
       demand without emitting them; preserve aliases and locations, unresolved
@@ -586,29 +652,31 @@ wires.
 
 ### Tests (L1; parallel authors, separate files under `cli/tests/`)
 
-- [ ] Goldens: `cli/tests/fixtures/golden/symbols.plain` and `symbols.json` over
+- [x] Goldens: `cli/tests/fixtures/golden/symbols.plain` and `symbols.json` over
       `multi/`, compared after `strip_ansi_codes` and path redaction.
-- [ ] Envelope, failed-file (unreadable/unparsable scratch file: good files
+- [x] Envelope, failed-file (unreadable/unparsable scratch file: good files
       listed, one `errors` entry, stderr, nonzero), `--json-full` rejection,
       class report `members`.
-- [ ] Parallel == single-thread (`RAYON_NUM_THREADS=1`) byte-identical; cold
+- [x] Parallel == single-thread (`RAYON_NUM_THREADS=1`) byte-identical; cold
       then warm byte-identical.
-- [ ] Order tests (all sort values, groups, JSON file-order invariance, argument
+- [x] Order tests (all sort values, groups, JSON file-order invariance, argument
       errors) and classes tests.
-- [ ] Output failures: broken pipe, file errors, deterministic parallel error
+- [x] Output failures: broken pipe, file errors, deterministic parallel error
       order; no terminal focus.
-- [ ] Quiet stderr: warm run and failed-cache-write run print nothing without
+- [x] Quiet stderr: warm run and failed-cache-write run print nothing without
       `--verbose`; with it, print stats line and failure message.
-- [ ] Prelude tests: aliases, unresolved re-exports, env names, targets outside
+- [x] Prelude tests: aliases, unresolved re-exports, env names, targets outside
       the scan, no duplicate parse (counter).
-- [ ] Path-rendering tests follow the `os` skill (load it before touching
+- [x] Path-rendering tests follow the `os` skill (load it before touching
       path-comparison code).
 
 ### Validation checkpoint 5
 
-- [ ] `just test`, `just test-l2`, `just lint` green.
-- [ ] `hug --json functions` in `tree-hugger/` is under 3 MB.
-- [ ] Removed flags/`--sort` misuse yield argument errors.
+- [x] `just test`, `just test-l2`, `just lint` green.
+- [x] `hug --json functions` in `tree-hugger/` is under 3 MB. (2.72 MB on the
+      Phase 1 baseline input, 1,580 functions; today's larger tree, 1,784
+      functions, is 3.10 MB. See the Phase 5 log.)
+- [x] Removed flags/`--sort` misuse yield argument errors.
 
 ---
 
