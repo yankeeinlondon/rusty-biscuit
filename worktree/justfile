@@ -26,7 +26,7 @@ CYAN := '\033[36m'
 
 PACKAGE := "Worktree"
 LIBRARY := lowercase(PACKAGE)
-CLI := lowercase(PACKAGE) + "-cli"
+CLI := "git-wt-cli"
 DOCS := ""
 TODAY := `date +%F`
 

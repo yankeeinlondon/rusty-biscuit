@@ -23,7 +23,7 @@ RED := '\033[31m'
 DOCS := ""
 PACKAGE := "sniff"
 LIB := lowercase(PACKAGE)
-CLI := LIB + "-cli"
+CLI := "sniff-detection-cli"
 
 default:
     #!/usr/bin/env bash

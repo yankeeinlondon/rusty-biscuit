@@ -565,7 +565,10 @@ fn resolve_agent_preference(value: Option<&str>) -> Agent {
 
 fn build_package_context(metadata: &Metadata, package_area: &str) -> PackageContext {
     let workspace_package_names = workspace_package_names(metadata);
-    let (library, cli) = infer_area_packages(package_area, &workspace_package_names);
+    let (library, inferred_cli) = infer_area_packages(package_area, &workspace_package_names);
+    // A CLI's package name need not be `<area>-cli` (`worktree/cli` is
+    // `git-wt-cli`), but its manifest always lives at `<area>/cli/`.
+    let cli = area_cli_package(metadata, package_area).unwrap_or(inferred_cli);
     let dependency_lines = workspace_dependency_lines(metadata);
     let dependency_context = dependency_lines
         .get(&library)
@@ -589,6 +592,21 @@ fn workspace_package_names(metadata: &Metadata) -> Vec<String> {
         .filter(|pkg| workspace_ids.contains(&pkg.id))
         .map(|pkg| pkg.name.clone())
         .collect()
+}
+
+/// The workspace member whose manifest is `<area>/cli/Cargo.toml`, if any.
+fn area_cli_package(metadata: &Metadata, package_area: &str) -> Option<String> {
+    let manifest = metadata
+        .workspace_root
+        .join(package_area)
+        .join("cli")
+        .join("Cargo.toml");
+    let workspace_ids: BTreeSet<&PackageId> = metadata.workspace_members.iter().collect();
+    metadata
+        .packages
+        .iter()
+        .find(|pkg| workspace_ids.contains(&pkg.id) && pkg.manifest_path == manifest)
+        .map(|pkg| pkg.name.to_string())
 }
 
 fn infer_area_packages(package_area: &str, workspace_package_names: &[String]) -> (String, String) {
