@@ -38,6 +38,28 @@ packages:
 depends-on:
   - 2026-10-03-symbol-improvements
   - 2026-10-03-visibility-and-kind
+human_review: false
+message_to_agent: |-
+  Phase 1 notes for Phase 2 (details in implementation-log.md, Phase 1):
+  - EXTRACTOR_REVISION is "6" (not "5"); Phase 2 bumps it to "7". Revision 6 introduced the
+    computed SymbolCache key, so cache_upgrade gets no new hard-coded literal case; the revision
+    is pinned as a key input by symbols_cache::each_key_input_and_stored_identity_decides_a_miss.
+  - The scope rules are prototyped in the test-only lib/src/file/extract/scope_dump.rs
+    (`proposed_scope`). Phase 2.2 should move that function into the real classifier
+    (next to classify.rs, exposed through DeclarationContext) and point the dump tests at it,
+    keeping the snippet table as regression cases; do not keep two classifiers.
+  - Rulings taken in the dump review (author may override): a C++ template type parameter is
+    Local; Lua `M:m`, `M.f` and `M.x = ...` are Member; a Rust `mod` declared inside a function
+    is Local together with everything in it. For the last one, today's is_local_declaration
+    disagrees (it stops at `declaration_list`), so a symbol in such a module still gets a
+    visibility; resolve `declaration_list` by its parent there too.
+  - Containment gaps for the Containment matrix: Go methods, Lua `M:m`/`M.f`, JS/TS object-literal
+    and class-expression methods and Scala `given ... with` members have no container today.
+  - Locals carry inconsistent containers across languages (C#/Java/C++: enclosing class or
+    namespace; Perl: enclosing sub; most others: none). This feeds in-file qualified names.
+  - The seven report matrices are Pending skeletons in lib/tests/l1/symbols_report_matrices.rs;
+    move each into its own module with a real row type when filling it, and delete `Pending`
+    with the last one. Test-file fixtures are in lib/tests/fixtures/symbols/test_files/.
 ---
 
 # Precise, filterable symbol reports
