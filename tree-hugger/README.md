@@ -119,12 +119,61 @@ hug lint "src/**/*.rs" --lint-only
 `completed_passes`, `completed_capabilities` and the selected `symbols`
 records; `classes` adds `members` keyed by container ID) and a trailing
 `errors` array that lists every file that could not be analyzed. Paths are
-`/`-separated and relative to `root_dir`. `--json-full` replaces `files` with
+`/`-separated and relative to `root_dir`, including a file outside it
+(`../vendor/lib.rs`). `--json-full` replaces `files` with
 every file's complete `indexes`. The CLI README has a sample.
 
 `imports` and `lint` keep their own shape: `schema_version`, `root_dir`,
 `language`, `files` (v1 `FileSummary` entries with `imports`, `lint` and
 `syntax`), `symbol_indexes` and `adapter_metadata`.
+
+[Symbol Reports](./docs/symbol-reports.md) describes the declaration
+commands end to end: kind sets, the JSON report and its `errors`, ordering
+and tie-breakers, `--json-full` and `--verbose`.
+
+## Release Notes: record-native symbol reports
+
+The declaration commands (`functions`, `types`, `symbols`, `classes`) now
+read the library's schema 4.0 records directly and analyze only what they
+show.
+
+- **Faster.** No listing runs lint, references or semantic analysis, files
+  are analyzed in parallel, and a warm cache hit parses nothing. On this
+  package, `hug functions --no-cache` went from 1.86 s to 0.12 s and a warm
+  `hug functions` from 1.08 s to 0.04 s; peak memory of `hug symbols` over
+  the whole monorepo fell from 3.48 GB to 1.95 GB.
+- **New default order.** Declarations are listed by file, then source
+  position, instead of alphabetically. `--sort name` and `--sort kind` give
+  the other orders; `--sort-by-kind` and `--sort-by-module` are removed.
+
+  ```text
+  # before: alphabetical across files
+    - public method area(self) -> f64 [in type Circle] src/shapes.rs:12:5
+    - public struct Circle { radius: f64 } src/shapes.rs:3:1
+  # after (default --sort file): file, then position
+    - public struct Circle { radius: f64 } src/shapes.rs:3:1
+    - public method area(self) -> f64 [in type Circle] src/shapes.rs:12:5
+  ```
+
+- **New JSON shape.** `--json` prints a versioned report holding only the
+  command's records, with paths relative to `root_dir` and a trailing
+  `errors` array. The old shape carried every file's full index, timestamps
+  and absolute paths (39 MB for `hug --json functions` on this package, now
+  2.7 MB on the same files), and its output changed on every run.
+
+  ```text
+  # before: {"schema_version":…,"files":[…],"symbol_indexes":[…every record…],…}
+  # after:  {"report_schema_version":1,"schema_version":{"major":4,"minor":0},
+  #          "root_dir":"…","files":[{"file":"src/shapes.rs","symbols":[…]}],"errors":[]}
+  ```
+
+- **`--json-full`** prints every file's complete index when you need it.
+- **Labels come from the source's keyword.** `struct Meter`, `my $queue`,
+  `local M` replace guesses such as `type Meter` or `= MAX_SIZE`.
+- **A failed file no longer aborts the run.** It is printed to stderr, listed
+  in `errors`, and makes `hug` exit `1`; the other files are still reported.
+- **Quiet by default.** Cache problems are recoverable and silent;
+  `--verbose` reports them with a cache and work stats line.
 
 ## Query Vendoring
 
@@ -166,15 +215,17 @@ Tree Hugger maintains comprehensive test coverage across all supported languages
 
 ### Running Tests
 
+Tests run through `just` (nextest), from `tree-hugger/`:
+
 ```bash
-# Run all library tests
-cargo test -p tree-hugger-lib
+# Library and CLI unit/integration tests (L1)
+just test
 
-# Run CLI tests
-cargo test -p tree-hugger-cli
+# Real-terminal tests (L2)
+just test-l2
 
-# Run a specific test
-cargo test -p tree-hugger-lib -- distinguishes_rust_struct_from_enum
+# Clippy over both packages
+just lint
 ```
 
 ### Test Fixtures

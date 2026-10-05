@@ -78,6 +78,14 @@ Declarations are listed by file, then source position; `--sort name` and
 for types, variables, fields and constants (`struct`, `let`, `const`, `my`,
 `local`, ...), read from the record, and the kind otherwise.
 
+The listing is printed as files are analyzed, so `hug symbols | head` stops
+the scan after a batch or two. Flat `--sort name` and `--sort kind` listings
+are the exception, as is `--prelude`: each package is printed once it is fully
+analyzed. When the scanned files span two or more packages, the listing has
+one section per package (`(no symbols)` for a package without declarations);
+that is decided from the files before any is analyzed, so it never delays
+output.
+
 #### Visibility labels
 
 The label is the access declared or implied at the declaration:
@@ -142,8 +150,9 @@ With `--json`, `functions`, `types`, `symbols` and `classes` print one report:
   `completed_capabilities` say what was computed. `--json-full` has the same
   envelope with complete per-file `indexes` (every kind, every pass,
   diagnostics and `declaration_text`) in place of `files`.
-- Every path is `/`-separated and relative to `root_dir`; record IDs are
-  unchanged by that.
+- Every path is `/`-separated and relative to `root_dir`, including a file
+  outside it (`../vendor/lib.rs`); record IDs are unchanged by that. A file on
+  another Windows drive keeps its absolute path (`D:/vendor/lib.rs`).
 - `errors` is always present and always last. Each failed file is one entry
   (`file`, `kind` — the error variant in snake case such as `io` — and
   `message`), is also written to stderr, and makes `hug` exit `1`.
@@ -152,6 +161,10 @@ With `--json`, `functions`, `types`, `symbols` and `classes` print one report:
 
 `imports` and `lint` keep their own JSON shape: `files` (per-file summaries
 of imports or diagnostics), `symbol_indexes` and `adapter_metadata`.
+
+[Symbol Reports](../docs/symbol-reports.md) covers the declaration commands
+in depth: what each command analyzes, the flow from query to output, ordering
+and grouping, streaming, failed files and exit status, and `--verbose`.
 
 ## Symbol Kinds
 

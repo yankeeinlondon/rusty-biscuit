@@ -35,7 +35,7 @@ This design proposes a new Rust schema that treats symbol metadata as composable
 
 1. Facet composition over giant optional structs.
 2. Loss-minimizing capture: keep raw text and structured forms.
-3. Incremental enrichment: parse -> bind -> infer -> doc parse.
+3. Incremental enrichment: parse -> bind -> semantic; parse -> docs; parse -> diagnostics.
 4. Language portability with language-specific extension slots.
 5. Stable public schema with explicit version field.
 
@@ -154,8 +154,14 @@ pub enum SymbolKindData {
     Field(FieldData),
     Module(ModuleData),
     Variable(VariableData),
-    Parameter(ParameterData),
+    Parameter(ParameterSymbolData),
     Unknown,
+}
+
+pub struct ParameterSymbolData {
+    pub name: String,
+    pub position: u16,
+    pub type_text: Option<String>,
 }
 ```
 
@@ -366,24 +372,21 @@ pub struct DocTag {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ParsedDocs {
     pub summary: Option<String>,
-    pub description: Option<String>,
     pub params: Vec<DocParam>,
     pub returns: Option<String>,
-    pub throws: Vec<String>,
-    pub examples: Vec<String>,
-    pub remarks: Option<String>,
-    pub deprecated_message: Option<String>,
-    pub since: Option<String>,
     pub tags: Vec<DocTag>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DocsFacet {
-    pub comments: Vec<AttachedComment>,
     pub raw_doc: Option<String>,
-    pub parsed: ParsedDocs,
+    pub comments: Vec<AttachedComment>,
+    pub parsed: Option<ParsedDocs>, // None until the docs pass runs
 }
 ```
+
+**Planned:** dedicated `description`, `throws`, `examples`, `remarks`,
+`deprecated_message` and `since` fields; today such tags land in `tags`.
 
 This preserves raw and parsed docs to avoid information loss.
 
@@ -393,9 +396,7 @@ This preserves raw and parsed docs to avoid information loss.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Attribute {
     pub name: String,
-    pub arguments: Vec<String>,
-    pub raw_text: Option<String>,
-    pub span: Option<TextSpan>,
+    pub value: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -697,9 +698,11 @@ pub struct VariableData {
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileSymbolIndex {
+    pub schema_version: SchemaVersion,
     pub file: std::path::PathBuf,
     pub language: ProgrammingLanguage,
     pub file_hash: String,
+    pub completed_passes: Vec<AnalysisPass>, // only the passes that ran
     pub symbols: Vec<SymbolRecord>,
     pub imports: Vec<ImportRecord>,
     pub exports: Vec<ExportRecord>,
@@ -707,12 +710,12 @@ pub struct FileSymbolIndex {
 }
 ```
 
-`ImportRecord` and `ExportRecord` should also use `SymbolRef` to align with `RelationFacet`.
+`ImportRecord` and `ExportRecord` carry a `symbol: SymbolRef`, aligned with `RelationFacet`.
 
 ## ID Strategy
 
-1. Compute `stable_key` as: `<language>::<normalized_file>::<kind>::<qualified_name_or_path>::<declaration_span_start_byte>`.
-2. Hash `stable_key` (BLAKE3 recommended) and encode as lowercase hex.
+1. Compute `stable_key` as: `<language>::<normalized_file>::<Kind>::<qualified_name_or_name>::<sibling_ordinal>`, where `<Kind>` is the `SymbolKindV2` variant name (`Method`) and `<sibling_ordinal>` counts the earlier records in the file with the same kind, container and name (`0` for the first). For example `rust::src/shapes.rs::Method::Point::norm::0`.
+2. Hash `stable_key` with BLAKE3 and encode as lowercase hex.
 3. Keep both hashed `id` and unhashed `stable_key` for debugging and diff tooling.
 
 ## Extraction Pipeline Contract
@@ -853,6 +856,10 @@ def run():          # references: path, argv (both unresolved, path once)
 4. Version schema with `SchemaVersion` and bump:
    1. `minor` for additive fields.
    2. `major` for breaking changes (renames, semantic changes, enum variant removals).
+5. Readers of persisted data apply their own rule on top: the symbol cache
+   serves an entry only when the entry and every record in it are exactly the
+   current version, minor included, and recomputes anything else (see
+   [the cache design](./cache-design.md#schema-versions)).
 
 Version history:
 
@@ -877,7 +884,7 @@ A record before and after 4.0 (other fields unchanged):
               "keyword": "fn" },
 "source": { "declaration_text": "fn fmt(&self, f: &mut Formatter) -> Result",
             "signature_text": "fn fmt(&self, f: &mut Formatter) -> Result" },
-"provenance": { "extractor": "tree-sitter", "extractor_version": "0.1.0+rev.5",
+"provenance": { "extractor": "tree-sitter", "extractor_version": "0.1.0+rev.6",
                 "parse_pass": "docs" }
 ```
 

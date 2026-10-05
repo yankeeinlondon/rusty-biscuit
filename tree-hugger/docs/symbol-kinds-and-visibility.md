@@ -33,7 +33,7 @@ flowchart LR
     CONT --> V1["SymbolInfo<br/>TreeFile::symbols()"]
     HEADER --> V2["SymbolRecord<br/>TreeFile::symbol_records()"]
     V1 <-->|adapter| V2
-    V1 --> CLI["hug output"]
+    V2 --> CLI["hug output"]
 ```
 
 The two models are:
@@ -1004,6 +1004,16 @@ though its `declaration_text` and `signature_text` do not contain it:
 ```go
 const Limit = 3 // keyword "const", signature_text "Limit"
 ```
+
+### Labels in `hug` output
+
+`hug` prints the keyword as the label before a name only for Type,
+Variable, Field and Constant records, whose kind name alone would hide the
+construct (`struct Point`, `let total`, `my $queue`, `local M`). Every other
+kind, and a record without a keyword, is labeled with its kind (`function`,
+`method`, `enum variant`), so a Rust function prints `function parse`, not
+`fn parse`. A container suffix always names the container's kind:
+`[in type Point]`.
 
 ## Current limitations
 
