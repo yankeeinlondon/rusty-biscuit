@@ -237,7 +237,11 @@ feature: `level2_god_files` (the `god-files` report) and
 over `cli/tests/fixtures/declarations/`, run without `CLICOLOR_FORCE` so `hug`
 detects the pane's TTY; the styling scenarios pin `COLUMNS=10000`, while
 `check_wrapping`/`check_table` assert `hug`'s own wrapping at the pane width
-(`Pane::cols`) and at an injected `COLUMNS`). Ordinary local L1 omits their harness and targets;
+(`Pane::cols`) and at an injected `COLUMNS`; `check_outline`, `check_stats`,
+`check_signature_modes` and `check_classes_table` compare `--tree`, `--stats`,
+`--signatures full|none` and `classes --format table` row for row and need an
+80-column pane). Every styled view a feature adds needs a check here, called
+from all three backend entry points. Ordinary local L1 omits their harness and targets;
 `just test-l2` and CI enable them. A new `level2_*` target needs a `[[test]]`
 entry with `required-features = ["terminal-tests"]`. Both targets read panes
 through `cli/tests/support/terminal_report.rs` (`#[path]`-included): every
