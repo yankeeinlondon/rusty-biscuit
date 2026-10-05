@@ -84,6 +84,14 @@ flowchart TD
   sequential, so they plus `unattributed` equal the total exactly; an excess
   is shown as `perf::OVER_ATTRIBUTED`, never clipped. Record new overlapping
   work as a group child, never as a top-level row.
+- `worktree::timing` is the library's typed replacement (not yet wired into
+  `wt list`): `Stage` ids are the contract, labels are display only. Traps:
+  `SpanList::push` of a stage already present **adds into it**, so only push
+  non-overlapping repeats; remainders are computed in whole microseconds, and
+  only a span with sequential children reconciles (a leaf or a concurrent
+  parent carries zero remainders); `Timings::from_json` rejects repeated
+  keys, unknown stage ids, and any remainder that does not reconcile, so
+  build documents through the builder, never by hand.
 
 ## Comparison cache (`worktree::cache`)
 
