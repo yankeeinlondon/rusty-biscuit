@@ -100,14 +100,23 @@ copy the launch scope back (`with_launch_magic_scope`, as
 `MdRequest::document_context` does); Claudine completion uses
 `claudine::composition::derive_request_context_for_source`, composition's
 policy.
+The library and DMLS runners take every form at every depth. The `md` and
+Claudine runners are processes, so they take only `PROCESS_FORMS` (beside,
+`^`, configured `@`, `~`, tree escape: one per context input) at the deepest
+depth plus the absolute-opened document, and one glob row; a spawn per cell
+made the full cross product cost minutes of CPU while re-testing shared
+resolution code. Add a process row only for a new context input.
 `EntryPoint::MdArgument(MdRoute)` is one entry point per `md` route that
 reads a file argument (render, compose, clean, toc, get, set, rm, hash, both
 delta slots, graph, edit, validate refs, schema validate/detect/triggers,
 code-block `--file` and default); each route is observed through its own
-result (heading, title, hash, reported path, `Document:` line), Table 2 adds
-an absolute path, the four malformed introducers with matching literal files
-(`ParityFixture::write_route_files`), and `./@`, and the mutating routes
-(`rm`, `edit`) run serially on a restored fixture.
+result (heading, title, hash, reported path, `Document:` line). `compose`
+runs the process forms from both launch directories plus an absolute path,
+the four malformed introducers with matching literal files
+(`ParityFixture::write_route_files`), and `./@`; every other route runs one
+cell (`^area-doc.md` from the package), enough to fail a route that bypasses
+the shared reader. The mutating routes (`rm`, `edit`) run serially on a
+restored fixture.
 Glob rows (`Row::GlobDocument`/`GlobValue`, `GlobForm` × `GlobConsumer`)
 cover `::file-links`, `find_files()`, and `match()` validation (Table 1) and
 `match()` completion and caller-value validation (Table 2) against written-out

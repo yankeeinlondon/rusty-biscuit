@@ -570,7 +570,8 @@ context's environment so Darkmatter's alignment keeps them.
 `cli/tests/l1/context_construction_guard.rs` hold the rule (one `from_process`,
 in `request.rs`; no construction; no `Option` context; every ambient read
 allowlisted with its reason), and `cli/tests/l1/entry_point_parity.rs` runs
-Darkmatter's parity matrix through `claudine compose --dry-run` (documents, the
+the process subset of Darkmatter's parity matrix (one reference form per
+context input) through `claudine compose --dry-run` (documents, the
 prompt argument, and a `target=<value>` schema value) and through
 `claudine __complete` (the committed prompt argument, whose `$schema`
 suggestions name the file it resolved). A failed schema `file` value, a

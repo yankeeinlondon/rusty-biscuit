@@ -49,6 +49,13 @@
 //! meets the same expectation, so entry points that pass agree with each
 //! other.
 //!
+//! Only the in-process entry points (the library and DMLS) run every form at
+//! every depth. A process entry point (`md`, `claudine`) runs the forms that
+//! each depend on one context input ([`PROCESS_FORMS`]) at one depth, and an
+//! `md` route other than `compose` runs one cell: resolution is shared code, so
+//! a process can only disagree through the context it builds, and every
+//! process cell costs a spawn.
+//!
 //! Rows come from an exhaustive `match` over [`EntryPoint`] (no `_` arm), so a
 //! new entry point without rows does not compile, and each runner matches the
 //! same enum, so it does not compile in any runner either.
@@ -213,19 +220,20 @@ impl EntryPoint {
                     .concat()
             }
             Self::MdCompose => [
-                document_rows(self, &[File, Code, TocLinking, SchemaFile], &Form::ALL, false),
-                glob_document_rows(self, COMPOSED_GLOBS),
+                process_document_rows(self, &[File, SchemaFile]),
+                one_glob_document_row(self, FileLinks),
             ]
             .concat(),
             Self::MdSchemaValidate => {
-                [document_rows(self, &[SchemaFile], &Form::ALL, false), glob_document_rows(self, &[MatchValidation])]
-                    .concat()
+                [process_document_rows(self, &[SchemaFile]), one_glob_document_row(self, MatchValidation)].concat()
             }
             // A quoted `'~/…'` argument is the only `~` spelling `md` sees.
             // Rows (a) and (b) test the opened document's own references, so
-            // only composition, which reads them, runs them.
-            Self::MdArgument(route) => {
-                let mut rows = value_rows(self, &Form::ALL, route == MdRoute::Compose);
+            // only composition, which reads them, runs them. Every other route
+            // opens its argument through the same reader, so one cell that
+            // needs the reader's context fails any route that bypasses it.
+            Self::MdArgument(MdRoute::Compose) => {
+                let mut rows = value_rows(self, PROCESS_FORMS, true);
                 for launch in Launch::ALL {
                     for value in Supplied::ARGUMENT_ONLY {
                         rows.push(Row::Value(ValueCell { entry: self, value, launch }));
@@ -233,6 +241,11 @@ impl EntryPoint {
                 }
                 rows
             }
+            Self::MdArgument(_) => vec![Row::Value(ValueCell {
+                entry: self,
+                value: Supplied::Form(Form::RepositoryScoped),
+                launch: Launch::Package,
+            })],
             // DMLS evaluates no expression and lists no `::file-links` glob;
             // it validates `match()`.
             Self::DmlsDiagnostics => {
@@ -244,18 +257,18 @@ impl EntryPoint {
             Self::DmlsDefinition => document_rows(self, EDITOR, &Form::ALL, false),
             Self::DmlsCodeActions => document_rows(self, EDITOR, &Form::ALL, false),
             Self::ClaudineComposition => [
-                document_rows(self, &[File, Code, TocLinking, SchemaFile], &Form::ALL, false),
-                glob_document_rows(self, COMPOSED_GLOBS),
+                process_document_rows(self, &[File, SchemaFile]),
+                one_glob_document_row(self, FileLinks),
             ]
             .concat(),
             // The value is the prompt itself, so the notes documents' own
             // references (rows (a) and (b)) are composition's, not completion's.
             Self::ClaudineCompletion => {
-                [value_rows(self, &Form::ALL, false), glob_value_rows(self, &[MatchCompletion])].concat()
+                [value_rows(self, PROCESS_FORMS, false), one_glob_value_row_per_launch(self, MatchCompletion)].concat()
             }
-            Self::ClaudinePromptArgument => value_rows(self, &Form::ALL, true),
+            Self::ClaudinePromptArgument => value_rows(self, PROCESS_FORMS, true),
             Self::ClaudineSuppliedValue => {
-                [value_rows(self, &Form::ALL, false), glob_value_rows(self, &[MatchValidation])].concat()
+                [value_rows(self, PROCESS_FORMS, false), one_glob_value_row_per_launch(self, MatchValidation)].concat()
             }
             Self::ClaudineChooser => glob_value_rows(self, &[MatchCompletion]),
         }
@@ -747,6 +760,57 @@ fn document_rows(entry: EntryPoint, consumers: &[Consumer], forms: &[Form], thro
         }
     }
     rows
+}
+
+/// The forms a process entry point (`md`, `claudine`) runs. Resolution is
+/// shared code the in-process runners cover form by form; a process can only
+/// differ in the context it builds, so each form here depends on one context
+/// input: the document's folder, the repository root and package catalog, the
+/// configured `@` root, the home directory, and the tree boundary. Every
+/// process cell is a spawn, which is why the process tables stay this small.
+const PROCESS_FORMS: &[Form] = &[
+    Form::BareBeside,
+    Form::RepositoryScoped,
+    Form::ConfiguredMagic,
+    Form::Home,
+    Form::TreeEscape,
+];
+
+/// [`document_rows`] for a process entry point: [`PROCESS_FORMS`] at the
+/// deepest depth, plus the document opened by its absolute path, whose
+/// `../../outside.md` must not meet a boundary.
+fn process_document_rows(entry: EntryPoint, consumers: &[Consumer]) -> Vec<Row> {
+    let mut rows = Vec::new();
+    for &consumer in consumers {
+        for &form in PROCESS_FORMS {
+            rows.push(Row::Document(DocumentCell {
+                entry,
+                consumer,
+                placement: Placement::Repository(form, Depth::Three),
+            }));
+        }
+        rows.push(Row::Document(DocumentCell {
+            entry,
+            consumer,
+            placement: Placement::OpenedByAbsolutePath(NotesReference::Outside),
+        }));
+    }
+    rows
+}
+
+fn one_glob_document_row(entry: EntryPoint, consumer: GlobConsumer) -> Vec<Row> {
+    glob_document_rows(entry, &[consumer]).into_iter().take(1).collect()
+}
+
+fn one_glob_value_row_per_launch(entry: EntryPoint, consumer: GlobConsumer) -> Vec<Row> {
+    let form = GlobForm::ALL
+        .into_iter()
+        .find(|form| form.reaches(consumer))
+        .expect("every glob consumer reads some glob form");
+    Launch::ALL
+        .into_iter()
+        .map(|launch| Row::GlobValue(GlobValueCell { entry, consumer, form, launch }))
+        .collect()
 }
 
 fn glob_document_rows(entry: EntryPoint, consumers: &[GlobConsumer]) -> Vec<Row> {
