@@ -1,3 +1,17 @@
+---
+kind: feature
+name: deferred-kind-precision
+date: 2026-10-05
+status: draft-spec
+area: tree-hugger
+packages:
+  - tree-hugger
+  - tree-hugger-cli
+depends-on:
+  - 2026-10-03-visibility-and-kind
+  - 2026-10-03-symbol-filters-and-reports
+---
+
 # Spec: Kind Precision Deferred by the Visibility-and-Kind Fix
 
 ## Problem
@@ -42,12 +56,17 @@ class, enum and struct reported as `Type`) are documented extractor limits,
 not grammar limits. They are candidates for the same work but were not
 assigned to any feature.
 
-## Why deferred
+## Scheduling
+
+Scheduled 2026-10-05, first of the seven features split out of
+`2026-10-03-symbol-improvements` and `2026-10-03-symbol-filters-and-reports`.
+It goes first because it changes which records exist and what kind they
+carry, and every later feature (type relations, complexity, references,
+report formats) reports on those records.
 
 Each cell needs its own extraction and grammar review, and grammar support
-cannot be guaranteed in advance. Bundling them would have expanded
-`2026-10-03-symbol-filters-and-reports` well beyond its filtering and
-reporting purpose.
+cannot be guaranteed in advance. A cell the grammar cannot support is
+recorded as a grammar limit in the kind matrix, not dropped silently.
 
 ## Prerequisites
 
@@ -62,5 +81,5 @@ reporting purpose.
 - Each landed cell updates the kind matrix test (`KIND_MATRIX`), the
   per-language fixtures and `tree-hugger/docs/symbol-kinds-and-visibility.md`
   together.
-- A named subset can be scheduled; it needs an explicit per-language
-  acceptance table and leaves the remainder here.
+- The plan needs an explicit per-language acceptance table and may phase the
+  work by language.

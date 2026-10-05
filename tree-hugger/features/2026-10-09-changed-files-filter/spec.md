@@ -1,3 +1,16 @@
+---
+kind: feature
+name: changed-files-filter
+date: 2026-10-09
+status: draft-spec
+area: tree-hugger
+packages:
+  - tree-hugger-cli
+  - sniff
+depends-on:
+  - 2026-10-03-symbol-filters-and-reports
+---
+
 # Spec: `--changed` File Selection for Symbol Reports
 
 ## Problem
@@ -34,10 +47,13 @@ nonignored untracked files.
   successful empty report, even where the scanner ordinarily reports
   `NoSourceFiles`.
 
-## Why deferred
+## Scheduling
 
-It is independent of the performance and filtering work and may need a sniff
-API extension, which widens the change beyond the tree-hugger area.
+Scheduled 2026-10-09. It is independent of the record-level features before
+it and is placed next to `2026-10-10-stats-package-grouping`, the other
+feature that reaches into sniff, so any sniff API work for the two happens
+back to back. It may need a sniff API extension, which widens the change
+beyond the tree-hugger area; that extension is in scope.
 
 ## Prerequisites
 

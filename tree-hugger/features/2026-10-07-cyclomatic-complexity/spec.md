@@ -1,10 +1,25 @@
+---
+kind: feature
+name: cyclomatic-complexity
+date: 2026-10-07
+status: draft-spec
+area: tree-hugger
+packages:
+  - tree-hugger
+  - tree-hugger-cli
+depends-on:
+  - 2026-10-03-symbol-filters-and-reports
+  - 2026-10-06-symbol-type-relations
+---
+
 # Spec: Per-Symbol Cyclomatic Complexity
 
 ## Problem
 
 Symbol reports carry basic metrics (`parameters` and `has_docs` after
-`2026-10-03-symbol-filters-and-reports`; `lines` from the unscheduled
-`symbol-type-relations` feature), but no measure of control-flow complexity.
+`2026-10-03-symbol-filters-and-reports`; `lines` from
+`2026-10-06-symbol-type-relations`), but no measure of control-flow
+complexity.
 
 ## What was proposed
 
@@ -15,17 +30,23 @@ Add `cyclomatic` to the `metrics` facet: decision points + 1 for a callable
 body, excluding nested callable/type bodies. Unavailable rules or a missing
 body give `None`; a computed value is never invented.
 
-## Why deferred
+## Scheduling
 
-A correct syntax-based definition needs a reviewed decision-point list per
-language, which is a review effort of its own and would have delayed the other
-metrics.
+Scheduled 2026-10-07, after `2026-10-06-symbol-type-relations`, which adds the
+`lines` metric to the same `metrics` facet and matrix row.
+
+It was first deferred because a correct syntax-based definition needs a
+reviewed decision-point list per language, a review effort of its own. That
+review is the core of this feature; the open question below decides how it is
+staged.
 
 ## Prerequisites
 
 - `2026-10-03-symbol-filters-and-reports` (the `metrics` facet and its
   absence semantics: unrequested is absent, unsupported is `None`, measured
   zero is `Some(0)`).
+- `2026-10-06-symbol-type-relations` (the `lines` metric and its matrix
+  column).
 
 ## Open question carried over: complexity rules per language
 

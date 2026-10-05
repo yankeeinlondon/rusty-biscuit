@@ -1,3 +1,17 @@
+---
+kind: feature
+name: symbol-type-relations
+date: 2026-10-06
+status: draft-spec
+area: tree-hugger
+packages:
+  - tree-hugger
+  - tree-hugger-cli
+depends-on:
+  - 2026-10-03-symbol-filters-and-reports
+  - 2026-10-05-deferred-kind-precision
+---
+
 # Spec: Generics, Inheritance, Modifiers, Attributes and Line Counts in Symbol Records
 
 ## Problem
@@ -5,9 +19,23 @@
 After `2026-10-03-symbol-filters-and-reports`, `SymbolRecord` carries scope,
 qualified names, the `async` and `static` modifiers, `is_deprecated`,
 `is_test`, and the `parameters` and `has_docs` metrics. Several v2 facets that
-already exist in the schema stay empty: generic parameters, `extends` and
-`implements` relations, the remaining modifiers and the raw attribute list. No
-metric reports a callable's body size.
+already exist in the schema are empty or nearly so:
+
+- **`type_info.generic_params`** is always empty. The older `TypeMetadata`
+  collects Rust type-parameter names as plain strings
+  (`extract_rust_type_parameters` in `lib/src/file/extract/type_metadata.rs`),
+  but nothing maps them into the v2 facet, and no other language is read.
+- **`relations.extends`** is always empty.
+- **`relations.implements`** is filled in one case only: each member of a
+  Rust `impl Trait for Type` block records the trait, with the trait's ID
+  when exactly one trait of that name is declared in the same file
+  (`lib/src/file/extract/rust_impl.rs`, applied in
+  `lib/src/file/tree_file.rs`). The implementing type itself carries no
+  relation, and no other language's `implements` or Swift conformance is
+  recorded.
+- **The remaining modifiers and the raw attribute list** are empty.
+
+No metric reports a callable's body size.
 
 ## What was proposed
 
@@ -15,7 +43,8 @@ Proposed in `2026-10-03-symbol-filters-and-reports` (items B3, B4 and B7) and
 moved here by the author on 2026-10-04.
 
 - **Generic parameters (`type_info.generic_params`):** name, kind (type,
-  lifetime, const), bounds and default.
+  lifetime, const), bounds and default. This replaces the Rust-only string
+  list as the source of generic-parameter data in v2 records.
 - **Inheritance (`relations.extends`, `relations.implements`):** for example
   `class A extends B`, `impl Trait for Type`, `implements I`, Swift
   conformance. Preserve written base names and generic arguments even when
@@ -45,19 +74,33 @@ moved here by the author on 2026-10-04.
 - **Outline relations:** show the container's declared inheritance relations
   on its `--tree` container line.
 
-## Why deferred
+## Scheduling
 
-No filter or report in `2026-10-03-symbol-filters-and-reports` consumes these
-facts. The author limited that feature to metadata a flag uses, so every
-extracted fact is justified and tested by a consumer. Each item here is an
-additive facet or metric under the schema's minor-version rule and can land
-later without breaking reports.
+Scheduled 2026-10-06, after `2026-10-05-deferred-kind-precision`, so that
+constructors, enum variants and type aliases carry their precise kinds before
+relations and modifiers are attached to them. `2026-10-07-cyclomatic-complexity`
+follows and shares the `metrics` row this feature extends with `lines`.
+
+It was first deferred because no filter or report consumed these facts. The
+author ruled on 2026-10-05 that a missing consumer is not a reason to defer:
+the facts have to be available before callers can start using them. Each item
+is an additive facet or metric under the schema's minor-version rule.
 
 ## Prerequisites
 
 - `2026-10-03-symbol-filters-and-reports` (the `metrics` facet and its absence
   semantics, the attribute parsing behind `is_deprecated` and `is_test`, and
   `--tree`).
+- `2026-10-05-deferred-kind-precision` (precise kinds for the records these
+  relations and modifiers attach to).
+
+## Open questions
+
+- **Member-level `implements` on Rust impl members.** Today the trait is
+  recorded on each member of the impl block. Once the implementing type
+  carries the relation, decide whether members keep their copy (it tells a
+  reader which trait a method satisfies) or drop it so the relation has one
+  home.
 
 ## Notes
 
@@ -69,5 +112,3 @@ later without breaking reports.
   inheritance" row (generic parameters with bounds; same-file bases get
   correct IDs, external or ambiguous bases keep text without invented IDs), a
   modifier/attribute row, and a `lines` column in the metrics row.
-- Each new facet needs a filter or report that uses it, or an explicit
-  library-only justification, before it is scheduled.

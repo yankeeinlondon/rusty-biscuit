@@ -1,3 +1,18 @@
+---
+kind: feature
+name: scoped-references
+date: 2026-10-08
+status: draft-spec
+area: tree-hugger
+packages:
+  - tree-hugger
+  - tree-hugger-cli
+depends-on:
+  - 2026-10-03-symbol-improvements
+  - 2026-10-03-symbol-filters-and-reports
+  - 2026-10-05-deferred-kind-precision
+---
+
 # Spec: Scope-Aware References and `hug refs`
 
 ## Problem
@@ -60,11 +75,17 @@ qualified name using smart case; multiple matches are an ambiguity error that
 lists locations and IDs and accepts `--id`. No matches succeeds with an empty
 report. Filter the target after analyzing full lexical context.
 
-## Why deferred
+## Scheduling
 
-Nothing in `hug` or any other package in the monorepo consumes reference data
-today, so the work has no current customer. Its cost is uncertain: it touches
-every language's resolution rules and possibly vendored queries.
+Scheduled 2026-10-08, after `2026-10-05-deferred-kind-precision` (constructors
+and other newly precise kinds are call and usage targets) and the two metric
+features, so the record shape is settled before occurrences reference it.
+
+It was first deferred because nothing in the monorepo consumed reference data.
+The author ruled on 2026-10-05 that a missing consumer is not a reason to
+defer: callers cannot adopt reference data that does not exist. The cost is
+still uncertain, since it touches every language's resolution rules and
+possibly vendored queries; the spike below sizes it.
 
 ## Prerequisites
 
@@ -72,6 +93,7 @@ every language's resolution rules and possibly vendored queries.
   capabilities, `is_recursive` reporting `Unknown`).
 - `2026-10-03-symbol-filters-and-reports` for qualified names (B5) and
   smart-case matching, which `hug refs` selection uses.
+- `2026-10-05-deferred-kind-precision` (precise kinds for reference targets).
 
 ## Notes
 
@@ -82,8 +104,9 @@ every language's resolution rules and possibly vendored queries.
   capture name.
 - **Suggested first step:** a half-day spike that builds a scope tree for Rust
   and TypeScript from those captures and counts how many references change
-  target compared with first-match binding. The count decides whether the
-  full feature is worth scheduling.
+  target compared with first-match binding. The result shapes the plan (which
+  languages the captures cover well and where language-specific scopes are
+  needed); it does not decide whether the feature goes ahead.
 - **Testing (from the pre-split draft):** per-language matrix asserting that
   shadowing follows language scope/order rules, unrelated receiver calls are
   unresolved and not recursion, and occurrences retain spans, owner,
