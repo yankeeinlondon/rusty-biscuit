@@ -184,6 +184,20 @@ fn the_human_report_names_the_stages_and_both_renderers_describe_one_tree() {
     for label in ["Performance", "startup", "refresh worker ‖ local reads", "graph history  [9 git]", "table render"] {
         assert!(human.contains(label), "{label} missing from {human}");
     }
-    let stages = |timings: &Timings| timings.spans().iter().map(Span::stage).collect::<Vec<_>>();
-    assert_eq!(stages(&decoded), stages(&timings));
+    // The JSON's span tree, labeled, is the human tree less its remainder
+    // rows, at every depth.
+    #[derive(Debug, PartialEq)]
+    struct Labeled(String, Vec<Labeled>);
+    fn from_spans(spans: &[Span]) -> Vec<Labeled> {
+        spans.iter().map(|span| Labeled(span_label(span), from_spans(span.children()))).collect()
+    }
+    fn from_rows(node: &MetricNode) -> Vec<Labeled> {
+        node.children
+            .iter()
+            .filter(|row| row.label != UNATTRIBUTED && row.label != OVER_ATTRIBUTED)
+            .map(|row| Labeled(row.label.clone(), from_rows(row)))
+            .collect()
+    }
+    assert_eq!(from_rows(&report_tree(&timings)), from_spans(decoded.spans()));
+    assert_eq!(decoded, timings);
 }

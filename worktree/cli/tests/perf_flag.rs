@@ -8,9 +8,9 @@ use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 
-use perf_support::{FakeGitea, GiteaReply, MixedFixture, WorkerReaper, perf_rows, perf_timings, stage_at, stage_from_perf};
+use perf_support::{FakeGitea, GiteaReply, MixedFixture, WorkerReaper, perf_timings, stage_at};
 use serial_test::serial;
-use worktree::timing::{Scope, Span, Stage, Timings, WorkerReportStatus};
+use worktree::timing::{Scope, Span, SpanList, Stage, Timings, WorkerReportStatus};
 
 fn temp_repo() -> tempfile::TempDir {
     let dir = tempfile::tempdir().expect("create temp dir");
@@ -204,43 +204,135 @@ fn the_json_record_is_the_final_line_after_the_listing() {
     assert!(!record.contains('\u{1b}') && !record.contains('\r'), "{record:?}");
 }
 
-/// The shape `wt list --perf` renders for a listing with remote work: the
-/// group's label contains its first child's.
-const NESTED: &str = "\
-\u{1b}[33m▌\u{1b}[0m \u{1b}[1mPerformance\u{1b}[0m                      330.0ms  100%
-\u{1b}[33m▌\u{1b}[0m ├─ pr gather                       11.7ms    4%
-\u{1b}[33m▌\u{1b}[0m ├─ remote wait ‖ local gather     300.2ms   91%
-\u{1b}[33m▌\u{1b}[0m │  ├─ remote wait                 290.1ms     —
-\u{1b}[33m▌\u{1b}[0m │  ├─ pr reread                     0.3ms     —
-\u{1b}[33m▌\u{1b}[0m │  ├─ list gather                 150.0ms     —
-\u{1b}[33m▌\u{1b}[0m │  └─ graph gather                175.0ms     —
-\u{1b}[33m▌\u{1b}[0m ├─ table render                     0.5ms   \u{1b}[2m<1%\u{1b}[0m
-\u{1b}[33m▌\u{1b}[0m └─ unattributed                    17.6ms    5%
-";
-
-#[test]
-fn the_stage_reader_picks_the_nested_child_never_the_group_containing_its_name() {
-    assert_eq!(stage_from_perf(NESTED, "remote wait"), Some(Duration::from_micros(290_100)));
-    assert_eq!(stage_from_perf(NESTED, "remote wait ‖ local gather"), Some(Duration::from_micros(300_200)));
-    assert_eq!(stage_from_perf(NESTED, "list gather"), Some(Duration::from_micros(150_000)));
-    assert_eq!(stage_from_perf(NESTED, "gather"), None, "labels match whole, never as substrings");
+/// A well-formed record no real listing writes: one `startup` span.
+fn decoy_record() -> String {
+    let mut spans = SpanList::sequential();
+    spans.push(Span::new(Stage::Startup, Duration::from_micros(3)));
+    format!("WT_PERF_JSON {}", Timings::new(Scope::Command, Duration::from_micros(7), spans).to_json())
 }
 
+/// Whether [`perf_timings`] refuses `output`.
+fn refused(output: &str) -> bool {
+    std::panic::catch_unwind(|| perf_timings(output)).is_err()
+}
+
+/// The reader takes the final nonempty line, split on LF or CRLF, and
+/// nothing earlier: a decoy record above it is never read.
 #[test]
-fn report_rows_carry_their_depth() {
-    let shape: Vec<_> = perf_rows(NESTED).into_iter().map(|row| (row.depth, row.label)).collect();
-    let expected = [
-        (0, "Performance"),
-        (1, "pr gather"),
-        (1, "remote wait ‖ local gather"),
-        (2, "remote wait"),
-        (2, "pr reread"),
-        (2, "list gather"),
-        (2, "graph gather"),
-        (1, "table render"),
-        (1, "unattributed"),
-    ];
-    assert_eq!(shape, expected.map(|(depth, label)| (depth, label.to_string())));
+fn the_reader_takes_only_the_final_record_with_lf_or_crlf() {
+    let repo = temp_repo();
+    let (real, _) = json_report(repo.path(), &[]);
+    let record = format!("WT_PERF_JSON {}", real.to_json());
+    let output = format!("listing\n{}\nmore listing\n\n{record}\n", decoy_record());
+
+    assert_eq!(perf_timings(&output), real);
+    assert_eq!(perf_timings(&output.replace('\n', "\r\n")), real, "a pseudo-terminal's CRLF");
+    assert_eq!(perf_timings(&format!("{record}\r\n\r\n  \r\n")), real, "trailing blank lines are skipped");
+}
+
+/// A missing or malformed final record is refused, even when an earlier
+/// line holds a well-formed one.
+#[test]
+fn the_reader_refuses_a_missing_or_malformed_final_record() {
+    let decoy = decoy_record();
+    assert!(!refused(&decoy), "control: the decoy alone is a record");
+
+    for (case, output) in [
+        ("no output", String::new()),
+        ("only blank lines", "\n\r\n \n".to_string()),
+        ("a record, then listing text", format!("{decoy}\nlisting\n")),
+        ("no prefix", format!("{}\n", decoy.trim_start_matches("WT_PERF_JSON "))),
+        ("truncated JSON", format!("listing\n{}\n", &decoy[..decoy.len() - 1])),
+        ("trailing content", format!("{decoy} x\n")),
+        ("a lowercase prefix", format!("{}\n", decoy.replacen("WT_PERF_JSON", "wt_perf_json", 1))),
+    ] {
+        assert!(refused(&output), "{case}: {output:?}");
+    }
+}
+
+/// A commit subject that resembles the record appears in the listing above
+/// it and is never taken for it; without `--perf` the same listing has no
+/// record at all.
+#[test]
+fn a_commit_message_resembling_the_record_is_never_taken_for_it() {
+    let repo = temp_repo();
+    let parent = tempfile::tempdir().expect("create temp dir");
+    let feature = parent.path().join("feature");
+    run_git(repo.path(), &["worktree", "add", "-b", "feature-a", feature.to_str().unwrap()]);
+    run_git(&feature, &["commit", "--allow-empty", "-m", &decoy_record()]);
+    let short = "WT_PERF_JSON {\"";
+
+    let (timings, stderr) = json_report(&feature, &["-v"]);
+
+    let (listing, _) = stderr.trim_end().rsplit_once('\n').expect("a listing, then the record");
+    assert!(listing.contains(short), "control: the subject is in the listing: {listing}");
+    assert!(timings.span(&[Stage::VerboseRender]).is_some(), "the real record: {timings:#?}");
+
+    let output = assert_cmd::Command::cargo_bin("wt")
+        .unwrap()
+        .current_dir(&feature)
+        .env_remove("TERM_PROGRAM")
+        .env_remove("KITTY_WINDOW_ID")
+        .args(["list", "-v"])
+        .output()
+        .expect("wt list -v runs");
+    let plain = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success() && plain.contains(short), "{plain}");
+    assert!(refused(&plain), "no --perf, no record: {plain}");
+}
+
+/// Captured through a pseudo-terminal, every line ends in CRLF; the record is
+/// still the final line and decodes.
+#[cfg(unix)]
+#[test]
+fn a_pseudo_terminal_capture_ends_in_the_record() {
+    let repo = temp_repo();
+    let wt = assert_cmd::cargo::cargo_bin("wt");
+    let inner = format!("exec '{}' list --perf=json", wt.display().to_string().replace('\'', r"'\''"));
+    let mut script = Command::new("script");
+    if cfg!(target_os = "macos") {
+        script.args(["-q", "/dev/null", "/bin/sh", "-c", &inner]);
+    } else {
+        script.args(["-qec", &format!("/bin/sh -c \"{inner}\""), "/dev/null"]);
+    }
+    let output = script
+        .current_dir(repo.path())
+        .env_remove("TERM_PROGRAM")
+        .env_remove("KITTY_WINDOW_ID")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("script runs");
+    let captured = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "{captured}");
+
+    assert!(captured.trim_end().contains("\r\nWT_PERF_JSON {"), "a CRLF capture: {captured:?}");
+    let timings = perf_timings(&captured);
+    assert_eq!(timings.scope(), Scope::Command);
+    assert!(timings.span(&[Stage::LocalReads, Stage::LocalGather]).is_some(), "{timings:#?}");
+}
+
+/// Two runs of one listing, one per renderer, show the same stages in the
+/// same order: every span of the JSON record is a row of the human report.
+#[test]
+fn the_human_and_json_reports_of_one_listing_show_the_same_stages() {
+    let repo = temp_repo();
+    let (timings, _) = json_report(repo.path(), &[]);
+    let human = assert_cmd::Command::cargo_bin("wt")
+        .unwrap()
+        .current_dir(repo.path())
+        .env_remove("TERM_PROGRAM")
+        .env_remove("KITTY_WINDOW_ID")
+        .env("NO_COLOR", "1")
+        .args(["list", "--perf"])
+        .output()
+        .expect("wt list --perf runs");
+    let human = String::from_utf8_lossy(&human.stderr);
+    let report = &human[human.find("Performance").expect("a human report")..];
+
+    let mut rows = report.lines();
+    for stage in all_stages(&timings) {
+        assert!(rows.any(|row| row.contains(stage.label())), "`{stage}` missing or out of order:\n{report}");
+    }
 }
 
 #[test]
