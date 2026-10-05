@@ -145,6 +145,78 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
   - .claude/skills/tree-hugger/SKILL.md
   - .claude/skills/tree-hugger/api-reference.md
+source_files_during_phase_4:
+  - tree-hugger/lib/src/file/pattern.rs
+  - tree-hugger/lib/src/file/naming.rs
+  - tree-hugger/lib/src/file/filter.rs
+  - tree-hugger/lib/src/file/query.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/src/file/source_file.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/extract/signatures.rs
+  - tree-hugger/lib/src/file/extract/classify.rs
+  - tree-hugger/lib/src/file/extract/visibility/ecma.rs
+  - tree-hugger/lib/src/lib.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/coverage.rs
+  - tree-hugger/lib/src/cache/symbol_cache.rs
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/symbols_coverage.rs
+  - tree-hugger/lib/tests/l1/symbols_export.rs
+  - tree-hugger/lib/tests/l1/symbols_fixtures.rs
+  - tree-hugger/lib/tests/l1/symbols_flags.rs
+  - tree-hugger/lib/tests/l1/symbols_metrics.rs
+  - tree-hugger/lib/tests/l1/symbols_qualified_names.rs
+  - tree-hugger/lib/tests/l1/symbols_visibility.rs
+  - tree-hugger/lib/tests/l1/symbols_query_filters.rs
+  - tree-hugger/lib/tests/l1/symbols_selection_filters.rs
+  - tree-hugger/lib/tests/l1/symbols_report_matrices.rs
+  - tree-hugger/cli/src/declarations.rs
+  - tree-hugger/cli/src/report.rs
+  - tree-hugger/cli/src/scanner.rs
+  - tree-hugger/cli/tests/symbols/cache_lookup.rs
+  - tree-hugger/cli/tests/symbols/cache_robustness.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/symbols/order.rs
+  - tree-hugger/cli/tests/symbols/wiring.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.plain
+docs_updated_during_phase_4:
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/docs/symbol-reports.md
+  - tree-hugger/lib/README.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
+source_files_during_phase_5:
+  - tree-hugger/lib/src/scanner.rs
+  - tree-hugger/cli/src/selection.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/src/declarations.rs
+  - tree-hugger/cli/src/classes.rs
+  - tree-hugger/cli/src/scanner.rs
+  - tree-hugger/cli/tests/symbols/filters.rs
+  - tree-hugger/cli/tests/symbols/main.rs
+  - tree-hugger/cli/tests/symbols/prelude.rs
+  - tree-hugger/cli/tests/symbols/classes.rs
+  - tree-hugger/cli/tests/symbols/wiring.rs
+  - tree-hugger/cli/tests/symbols/report.rs
+  - tree-hugger/cli/tests/symbols/order.rs
+  - tree-hugger/cli/tests/cli.rs
+  - tree-hugger/cli/tests/level2_declarations.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.plain
+docs_updated_during_phase_5:
+  - tree-hugger/docs/symbol-reports.md
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+  - tree-hugger/docs/cache-design.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
 packages:
   - tree-hugger
   - tree-hugger-cli
@@ -687,3 +759,382 @@ capability), `lib/README.md`, `.claude/skills/tree-hugger/SKILL.md` and
   Cargo `tests/` rule (`Path::ancestors`/`strip_prefix`, component compare)
   and its temp-dir test, which assumes no `Cargo.toml` above the temp dir.
 - No pre-existing failures; nothing skipped.
+
+## Phase 4
+
+`SymbolQuery` predicates, the smart-case matcher, the post-lookup
+qualified-name prefix and the one library record filter.
+`EXTRACTOR_REVISION` is now **`"9"`** (two return-type repairs found by the
+selection-filter matrix, below).
+
+### Design: unfinished vs finished results
+
+The plan asked for predicates and naming inputs "applied after the cache
+lookup, excluded from the cache key". Implemented as one rule:
+
+- `run_query`, `coverage::project` and the new crate-private
+  `SourceFile::analyze` return **unfinished** results: in-file
+  `qualified_name`, every record of the effective kinds.
+  `SymbolCache` analyzes and stores only unfinished indexes.
+- `SymbolQueryResult::finish(query)` (crate-private; called by
+  `TreeFile::query`, `SourceFile::query`, `SymbolCache::query` and
+  `narrowed`) prefixes every name that is not `is_namespace_rooted` once,
+  then applies the record filter. The result remembers the prefix
+  (`name_prefix()`, public) and the applied predicates (private).
+- `narrowed` strips the old prefix, projects, and finishes for the new
+  query. A **filtered** result narrows only to the same predicates under the
+  same prefix (a qualified-name predicate matched under that prefix; the
+  dropped records cannot come back); an unfiltered one narrows to any
+  covered query and is re-prefixed. `hug --prelude` relies on the
+  unfiltered case.
+
+### 4.1 Query predicates
+
+`SymbolQuery` now keeps the requested kinds/capabilities separately from the
+effective ones and recomputes the effective sets (`settle`) after every
+builder call, so pushdown is independent of call order:
+
+| Predicate | Pushes |
+|---|---|
+| `scopes`, `visibility` (repeatable, exact), `exported`, `in_container`, `name`, `exclude_name` | nothing |
+| `exclude_tests` / `tests_only` (last call wins), `deprecated` | `Flags` |
+| `undocumented` | `Metrics` |
+| `is_async`, `returns`, `param_type` | kinds ∩ Function/Method/Constructor |
+| `min_params` | function kinds and `Metrics` |
+
+`union`/`without` (cache coverage) build predicate-free queries.
+`SymbolQuery::matches(record)` exposes the filter.
+
+**Departures from the plan's 4.1 list:**
+
+- `exported(bool)` added (not in the plan's list): `--exported` is an
+  existing CLI filter that spec C3 keeps and C10 puts on the one path, so
+  Phase 5 needs it in the library filter.
+- **No library file selector.** Files are chosen before analysis
+  (`collect_files`, Phase 5.5); a per-record file predicate inside a
+  one-file query would duplicate discovery and do no work. Phase 5 keeps file
+  selection in discovery.
+
+### 4.2 Smart-case matcher
+
+Moved into the library (`lib/src/file/pattern.rs`): `NamePattern` (smart
+case, substring unless `*` = whole-string glob, exact via `NamePattern::exact`
+or a trailing `!` with `*` literal, case folded with `to_lowercase` on both
+sides so no offset splits a character) and `glob_match` (whole-string,
+case-sensitive; also the type globs). `is_qualified_for(language)`: a
+pattern holding `#` or the language's separator matches the displayed
+`qualified_name`, otherwise the bare name.
+
+**Bug fixed on the way:** the CLI's `wildcard_match` treated a pattern with
+no `*` as "prefix and suffix", so `hug symbols parse_width_spec!` also matched
+`parse_width_spec_parse_width_spec`. The CLI's `wildcard_match` is deleted;
+its one caller (`matches_symbol_filters`) calls `tree_hugger::glob_match`,
+which keeps the CLI's case-sensitive semantics until Phase 5.2 replaces the
+whole CLI filter path with the library predicates.
+
+### 4.3 Post-lookup qualified-name prefix
+
+`lib/src/file/naming.rs`: `NamingContext::new(root, prefix)` and the prefix
+rule (`Naming::prefix_for`): a naming context's module path for a file below
+its root (extension dropped; Rust `mod.rs`, root `lib.rs`/`main.rs` and
+Python `__init__.py` add no segment), else the file's portable path from the
+scan root (default: the file's own directory) plus `#`.
+
+- **`portable_relative` moved from `cli/src/report.rs` into the library**
+  (re-exported by `report.rs`), so the prefix and every CLI path use one
+  projection. Its four unit tests moved with it.
+- **The CLI now passes its scan root** (`declarations::run`), so `hug --json`
+  shows `nested/python.py#MAX_SIZE` rather than a default file-name prefix.
+  Prelude synthetic exports get the prelude file's prefix.
+- `SymbolRef::qualified_name` (relations, export targets) **keeps the in-file
+  name**: a referenced record may not be in the result, and its
+  namespace-rootedness is then unknown. Documented.
+- The library default (no scan root) prefixes the file name, per spec B5
+  ("the standalone library defaults to the file's parent as its root"), so
+  `symbol_index_v2()` / `TreeFile::query` results changed too.
+
+### 4.4 Library record filter
+
+`lib/src/file/filter.rs::RecordFilter::matches`: AND of every predicate; a
+list matches when any value does; exclusions win. Shape predicates select
+function-like kinds only; missing type text never matches; `param_type`
+skips a Rust `self`; `has_docs`/`parameters` of `None` never match;
+`in_container` needs a `container_name`, and a qualified pattern matches the
+record's qualified name minus its own name and separator.
+
+### 4.5 Selection-filter matrix
+
+New module `symbols_selection_filters` (`SELECTION_FILTER_MATRIX`), replacing
+the last `Pending` skeleton: `symbols_report_matrices.rs` is deleted and the
+coverage guard lists eight filled matrices. Each row is a list of cells
+`(region, predicates, expected in-file names | Err(reason) = matches
+nothing)`, evaluated through `SourceFile::query` on an isolated copy over
+the fixture's "Flags and metrics" block (`B`) or the whole file (`F`, for
+async declarations, declared return types and named types). Every row must
+cover all 14 predicate kinds (asserted). Every expected set was checked
+against the fixture source.
+
+**Bugs the matrix found (fixed, revision 8 → 9):**
+
+| Finding | Fix | Regression test |
+|---|---|---|
+| Rust: a function without `->` reported return type `()` (an inferred type, not declared text; spec C7) | `extract_rust_return_type` reads the `return_type` field only | matrix `rust.rs B [Returns("*")]` = none; `cache_upgrade::entry_from_extractor_revision_eight_is_not_served_after_the_repairs` |
+| Go: a method's **parameter list** was its return type (the receiver list counted as the first `parameter_list`); `hug` printed `Grow(amount int) (amount int)` | `extract_go_return_type` reads the `result` field only | matrix `go.go B [Returns("*")]`; golden `symbols.plain` |
+| JS/TS: a function bound to a top-level `const` (`const f = () => …`) had visibility Unknown instead of ModulePrivate/Public | the top-level climb passes through `variable_declarator` | `symbols_visibility` rows `asyncArrow` (TS, JS), `documentedArrow` |
+| JS/TS: `export const f = () => …` and JS `export const X = 1` were not `is_exported` | `is_exported_definition` climbs declarators before checking the export parent | `symbols_export::export_follows_export_syntax_not_access` (+5 asserts); golden `DEFAULT_LABEL` |
+
+The visibility and export fixes change extracted records too and ride on the
+same revision bump.
+
+**Observed, not changed** (recorded as matrix cells with a reason):
+`is_exported` is set only for Rust and JS/TS; Java `int... rest` and PHP
+`int ...$rest` produce no parameter *record* (metrics and signatures do
+count them); shell nested functions have no `container_name` (so `--in
+outer_function` matches nothing, while the qualified name includes it);
+Swift `@available(iOS, deprecated:)` is not a deprecation.
+
+### Superseded expectations
+
+Rewritten because the displayed name now carries the prefix:
+`symbols_qualified_names` (displayed = `{file}#{in-file}` unless rooted),
+`symbols_flags`/`symbols_metrics` (key by `symbols_fixtures::in_file_name`),
+`cache_lookup::a_run_from_another_scan_root_hits_the_same_entry_with_the_same_ids`
+(same ID and in-file name; prefixes `sub/python.py#` vs `python.py#`),
+`cache_robustness` (qualified-name control value), the revision-6
+`cache_upgrade` probe. Because of the return-type repair: `order.rs` and
+`wiring.rs` lines lose `-> ()`. Goldens regenerated after review:
+`symbols.json` (`qualified_name` prefixes, `+rev.9`, the two return types,
+`DEFAULT_LABEL` exported), `symbols.plain` (two lines).
+
+### Requirement-to-test mapping
+
+| Requirement | Test |
+|---|---|
+| each predicate per language, n/a = nothing (16 rows × 14 predicates) | `symbols_selection_filters::selection_filters_keep_exactly_the_expected_declarations` |
+| pushdown of kinds/capabilities, order independence, last test selection wins | `symbols_query_filters::predicates_push_down_only_the_kinds_and_capabilities_they_read` |
+| metrics/flags filters never force diagnostics; one capture per file | `symbols_query_filters::a_filtered_query_runs_no_diagnostics` |
+| predicates and prefix never reach the entry; another scan root is a `Hit` with the same IDs and its own prefix | `symbols_query_filters::predicates_and_prefixes_never_reach_the_cache_entry` |
+| narrowing to a filtered, re-rooted query equals uncached; filtered results refuse other predicates/prefixes | `symbols_query_filters::a_wide_result_narrows_to_a_filtered_query_with_its_own_prefix` |
+| naming context: `crate::shared::symbol::SymbolInfo::new`, `package.module.Class.method`; IDs unchanged; rooted names unprefixed | `symbols_query_filters::a_naming_context_names_modules_without_changing_ids` |
+| non-ASCII smart case through records (`ünï`/`Ünï`, `ß`, exact) | `symbols_query_filters::non_ascii_names_match_with_smart_case` |
+| matcher unit cases incl. Turkish `İ`, `ẞ`, CJK, literal-equality bug | `file::pattern::tests::*` (4) |
+| qualified `--in` disambiguation, smart case on `--in` | `symbols_query_filters::qualified_container_patterns_disambiguate_repeated_names` |
+| prefix and naming-context rules, `portable_relative` | `file::naming::tests::*` (6, four moved from the CLI) |
+| CLI JSON carries the scan-root prefix | `golden::json_symbols_over_multi_match_the_golden`, `cache_lookup::a_run_from_another_scan_root_…` |
+
+Input robustness matrix: not applicable. No persisted field or reader
+changed shape; the predicates and naming inputs are in-memory query inputs.
+Code-smell grep over the new modules: no `#[serde(default)]`,
+`unwrap_or_default`, `.ok()` or `filter_map(.. as_str())` on a load-bearing
+value.
+
+### Docs and skill
+
+`docs/symbol-kinds-and-visibility.md` (the prefix is current behavior, with
+the scan-root/default/naming-context table; JS/TS `const` arrow access and
+export), `docs/symbol-schema-design.md` (predicate table, `NamePattern`
+rules, `narrowed`, declared-only return types, revision 9),
+`docs/cache-design.md` (predicates are post-lookup, `rev.9`),
+`docs/symbol-reports.md` (JSON example and prefix note), `lib/README.md`,
+`.claude/skills/tree-hugger/SKILL.md` and `api-reference.md`.
+
+### Verification
+
+- `just test`: 879 run, 879 passed, 0 skipped (872 before the new modules).
+- `just test-l2`: 6 passed. `just lint`: clean (one `type_complexity` fixed
+  with a type alias). `just check-tier-coverage tree-hugger`: 0 stranded.
+- New doctests (`glob_match`, `NamePattern`, `NamingContext`,
+  `SymbolQuery`): `cargo test --doc -p tree-hugger` passes.
+- `just cross-check tree-hugger --os linux` and `tree-hugger-cli --os linux`:
+  pass.
+- Windows: `just cross-check tree-hugger --os windows` failed
+  `_storage_preflight` again; nothing was overridden or deleted. OS-sensitive
+  code this phase: `portable_relative` moved unchanged (its Windows-only
+  drive test moved with it) and `NamingContext` routes through
+  `biscuit_file::PathIdentity`.
+- No pre-existing failures; nothing skipped.
+
+## Phase 5
+
+CLI filters on the one library path. No library behavior changed except
+file discovery (`collect_selected_files`); `EXTRACTOR_REVISION` stays `"9"`.
+
+### 5.1 Flags
+
+New module `cli/src/selection.rs`:
+
+- `SelectionArgs` (flattened into `functions`/`types`/`symbols` and
+  `classes`): `--kind` (repeatable; `KindArg`, `#[value(rename_all =
+  "snake_case")]`, so `type_alias` parses and `type-alias` is an argument
+  error), `--scope` (repeatable) / `--all-scopes` (conflict), `--visibility`
+  (repeatable; `VisibilityArg` snake_case), `--in` (repeatable),
+  `--exclude-tests` / `--tests-only` (conflict), `--undocumented`,
+  `--deprecated`, `--async`, `--returns`, `--param-type`, `--min-params`.
+- `TargetArgs` (`--file`, `--name`/`-n`, `--exact`), flattened into
+  `SelectionArgs` and into the new `ImportArgs`.
+- `classes --static-only` now `conflicts_with = "instance_only"`.
+- `symbols` defaults to `Item` + `Member` (`SYMBOLS_DEFAULT_SCOPES` in
+  `declarations.rs`); the other commands start with every scope.
+  `--exported` stays its own `is_exported` predicate.
+- Completions are dynamic (`CompleteEnv` over `Cli::command`), so the new
+  flags and their values complete without a change: checked with
+  `COMPLETE=fish hug -- hug symbols --ki` → `--kind`, `--kind type_` →
+  `type_alias`, `imports --e` → `--exact`.
+- Unit tests in `selection.rs` pin that `KindArg`/`VisibilityArg` cover every
+  `SymbolKindV2`/`VisibilityLevel` variant under its serialized name in
+  snake_case (19 and 10 values).
+
+### 5.2 One filter path
+
+- `Declarations::query(format, &Selection)`: command kinds ∩ `--kind`,
+  scopes, identity predicates, shape predicates and `--in` as `SymbolQuery`
+  predicates. The library applies them after the cache
+  (`SymbolQueryResult::finish`), so records are filtered once, before
+  presentation.
+- Deleted: `scanner::normalize_symbol_glob`, `normalize_excluded_symbol_glob`,
+  `matches_symbol_filters`, `DeclarationScan::{include_globs, exclude_globs}`,
+  `Membership` (now `prelude: bool`; `--exported` is a predicate), the
+  `classes --name` substring filter. Positional name tokens and
+  `--exclude-symbols` are `NamePattern`s.
+- `prepare` keeps only `--prelude`. A prelude file's synthetic exports
+  replace its records after the library filtered them, so `prepare` applies
+  `query.selects(kind) && query.matches(record)` to them
+  (`prelude::selectors_apply_to_prelude_exports`).
+- The plan's `cli/src/main.rs:1056-1084` reference was stale: that code had
+  already moved into `declarations::prepare` and `scanner.rs` during
+  `2026-10-03-symbol-improvements`; those are what was replaced.
+
+### 5.3 `classes`
+
+`classes::ClassSelection` holds three queries: `containers` (container kinds
+∩ `--kind`, scopes, identity predicates), `within` (`--in` patterns as names
+of the container itself, ANDed with `--name`), and `members` (shape
+predicates over Method/Constructor). The analysis query carries no predicate:
+selected container kinds ∪ member kinds, `Containment`, and the capabilities
+both filters need. A shape predicate hides the field sections (fields have no
+signature to match). `--json` keeps the existing `members` map keyed by
+container ID; a container with no member left has an empty list.
+`Declarations::Classes` boxes the selection (`clippy::large_enum_variant`).
+
+### 5.4 `imports`
+
+`ImportArgs` = positional file filters + `TargetArgs` + `ScanOptions`.
+`ImportSelection` filters `index.imports` (so the summary and the JSON
+`symbol_indexes` agree): a pattern matches the local name, the alias, or the
+original name's last segment (`std::collections::HashMap` → `HashMap`,
+`App\Models\User` → `User`), and a qualified pattern (`std::collections::*`)
+matches the whole original path. `--exclude-symbols` applies here too.
+
+### 5.5 `--file` / `--name`
+
+`selection::resolve_file_selectors`: a glob (`*`, `?`, `[`) joins the walker
+inputs like a positional file filter; any other value goes through
+`biscuit_file::FileReference::new(..).resolve_in_context(&FileResolutionContext::new(cwd))`.
+A value resolving to a file is an explicit target; one that resolves to
+nothing (a directory pattern) joins the walker inputs; a resolution error (for
+example `~someone/x.rs`) is an argument error (exit 2). `is_glob` ignores the
+`?` of a Windows verbatim prefix (`\\?\C:\…`; `os` skill, windows-paths trap
+12), unit-tested in `selection::tests::file_values_are_globs_only_with_a_wildcard`.
+
+Library: `scanner::collect_selected_files(root, inputs, explicit_files,
+excluded, language)` (`collect_files` delegates with no explicit files).
+Explicit files bypass `.gitignore` and the default fixture exclusions, are
+still removed by `--exclude-files`, never widen the scan (no inputs + explicit
+files = only those files), and come back as `file_identity`.
+
+### 5.6 Superseded tests
+
+| Test | Change | Why |
+|---|---|---|
+| `classes::static_and_instance_sections_follow_the_member_flags` | both flags → argument error (exit 2) | plan 5.1 conflict |
+| `cli::test_filter_help_describes_path_wildcard_and_exact_matching` | `fuzzy` → smart-case wording | C5 |
+| `wiring::plain_symbols_omit_the_visibility_prefix_for_unknown_access`, `json_symbols_carry_visibility_and_schema_4_0`, `json_records_match_the_complete_index` | `symbols --all-scopes` | they assert locals (`localValue`, every index record) |
+| `report::functions_and_types_select_exactly_their_kind_sets` | oracle is `symbols --all-scopes` | `types` keeps a local type that default `symbols` hides |
+| `order::each_sort_order_lists_declarations_by_its_keys_and_tie_breakers` | `--all-scopes` on its three runs | tie-breaker cases are parameters (locals) |
+| `level2_declarations` (`symbols --group-by-file` scenario) | `--all-scopes` | asserts parameter rows and their label style |
+| goldens `symbols.plain`, `symbols.json` | regenerated | default `symbols` drops the 29 local lines (parameters, `local`/`my` variables, a parameter's `struct point`, a Zsh assignment inside a function), each checked against the fixture |
+
+### 5.7 Focused cases
+
+New module `cli/tests/symbols/filters.rs` (declared in the `symbols`
+binary's `main.rs`; L1) plus one prelude case:
+
+| Requirement | Test |
+|---|---|
+| `symbols` hides locals; `--all-scopes` adds exactly the locals; `--scope local`; three explicit scopes = `--all-scopes`; other commands keep locals; `--scope` + `--all-scopes` conflict | `filters::symbols_hides_locals_until_scopes_say_otherwise` |
+| AND across filters, OR within `--name`/`--file`, exclusions win, shape filters, `--exclude-tests` + `--tests-only` conflict | `filters::filters_intersect_and_values_within_a_list_are_alternatives` |
+| smart case, `!`, `--exact` (case kept, `*` literal), `*` glob, non-ASCII `ünï`/`Ünï`, smart-case exclusion | `filters::names_match_with_smart_case_and_exact_matching_including_non_ascii` |
+| `--name` vs positional (`*/deep.py#*` positionally is a file glob), `*.rs` vs `--name *_rs`, `--file` on gitignored / fixture / `./` / glob / several, `--exclude-files` still wins, invalid file reference | `filters::file_and_name_flags_bypass_positional_classification` |
+| file-qualified `--name` anchored at the prefix (leading `*` for files below the root), Rust `Widget::*` vs `*Widget::*`, C++ namespace-rooted `geometry::*`, `--in` plain/qualified/smart-case/exact | `filters::qualified_name_patterns_anchor_at_the_displayed_name` |
+| `classes`: containers vs members, `--in`, `--undocumented`, `--kind class`/`function`, zero-member container listed, fields hidden under a shape filter | `filters::classes_select_containers_and_members_separately` |
+| `--kind type_alias`, no widening, empty selection, unknown `--kind`/`--visibility` values | `filters::kind_selection_narrows_the_command_set_and_rejects_unknown_kinds` |
+| `imports --name` alias / original / exact / qualified / exclusion; positional stays a file; `imports` rejects `--kind`, `--exported` | `filters::imports_match_an_alias_or_an_original_name_and_keep_positional_files` |
+| `--undocumented` never Bash (`has_docs == None`), `--tests-only`/`--exclude-tests`/`--deprecated`, `--visibility unknown`, `--exported` vs `--visibility public` | `filters::test_docs_and_deprecation_filters_use_the_computed_flags` |
+| empty selections exit 0 (JSON and plain); a failing file still exits 1 with `errors` | `filters::empty_selections_succeed_and_analysis_errors_still_fail` |
+| `--json-full` rejects all 14 new selectors; accepts `--file`/`--exact` | `filters::json_full_rejects_every_record_selector` |
+| filtered run is a complete `Hit` on the unfiltered entry; another scan root: same IDs, own prefix, one entry | `filters::selectors_never_reach_the_cache_entry` |
+| selectors on prelude synthetic exports | `prelude::selectors_apply_to_prelude_exports` |
+| kind/scope resolution, import last segment, value-enum coverage, `--file` glob detection | `selection::tests::*` (5) |
+
+Stale-revision entry after the bump: covered by Phase 4's
+`cache_upgrade::entry_from_extractor_revision_eight_is_not_served_after_the_repairs`
+(no revision change this phase).
+
+Input robustness matrix: not applicable. No file format, config or persisted
+field is read or changed; the new inputs are command-line values, whose
+malformed shapes (unknown kind/visibility, conflicting flags, invalid file
+reference) are covered above.
+
+### Departures and decisions
+
+- **`imports` no longer accepts `--exported`/`--prelude`.** They came with
+  the shared `CommonArgs` and were silently ignored; `ImportArgs` drops them,
+  so they are argument errors now.
+- **`--exclude-symbols` follows the name rules** (spec C5: "inclusion and
+  exclusion patterns"): a plain value is a smart-case substring, not the
+  literal whole name it was before (`--exclude-symbols foo` now also drops
+  `foo_bar`; `foo!` keeps the old meaning). `--exact` does not apply to
+  exclusions (ruling 8 lists `--name`, positional names and `--in`).
+- **`--in` is repeatable** (alternatives), like the other list selectors.
+- **`-n` is now on every declaration command** (it was `classes`-only).
+- **Doc drift fixed (code wins):** `docs/symbol-reports.md` and the
+  positional FILTER help said a bare extension such as `rs` is a file filter;
+  `is_file_filter_token` takes only paths, globs and names with a source
+  extension (`lib.rs`, `*.rs`). The docs and help now say so.
+- **An empty file set is still an error.** `--file x --exclude-files x`
+  leaves no file and fails with `NoSourceFiles`, as positional filters always
+  did; "empty selections succeed" (spec) is about records.
+- **Checkpoint numbers.** `hug symbols` over `tree-hugger/` now prints 4,388
+  lines and `--all-scopes` 15,711; `--scope local` 11,335. The spec's 2,550 /
+  8,593 were measured on a smaller tree; the ratio is the same (28% vs 30%).
+
+### Docs and skill
+
+`docs/symbol-reports.md` (new "Selecting declarations" section: selector
+table, name patterns, `--file`/`--name`, `imports`, `--prelude`, selectors and
+the cache; `classes` container/member split; `--json-full` rejection list;
+flow diagram), `docs/symbol-kinds-and-visibility.md` (locals hidden by
+default: **planned** marker removed), `docs/cache-design.md`
+(`collect_selected_files` returns identities),
+`.claude/skills/tree-hugger/SKILL.md` (selector path bullet),
+`api-reference.md` (`collect_selected_files`).
+
+### Verification
+
+- `just test`: 897 run, 897 passed, 0 skipped (879 at the end of Phase 4;
+  +13 in `filters`/`prelude`, +5 `selection` unit tests).
+- `just test-l2`: 6 passed. `just lint`: clean (fixed
+  `bool_assert_comparison` in a test and `large_enum_variant` by boxing
+  `ClassSelection`). `just check-tier-coverage tree-hugger`: 0 stranded; the
+  new tests are L1 (`symbols` binary, no tier marker).
+- `just cross-check tree-hugger-cli --os linux`: 216 passed (6 L2 skipped);
+  `just cross-check tree-hugger --os linux`: 680 passed.
+- Windows: `just cross-check tree-hugger-cli --os windows` failed
+  `_storage_preflight` again (host disk headroom, as in Phase 4); nothing
+  overridden or deleted. OS-sensitive code this phase: `--file` resolution
+  (`FileReference` + `file_identity`) and `is_glob`; the tests use relative
+  `/`-separated values only.
+- Validation checkpoint 5: `hug symbols` over `tree-hugger/` 4,388 lines,
+  `--all-scopes` 15,711 (see Departures for the spec's older numbers).
+- No pre-existing failures; nothing skipped.
+

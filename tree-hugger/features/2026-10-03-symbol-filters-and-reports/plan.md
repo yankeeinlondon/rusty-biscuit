@@ -4,7 +4,7 @@ feature: symbol-filters-and-reports
 spec: spec.md
 total_phases: 7
 created: 2026-10-05
-phase: 3
+phase: 5
 agent: claude/sonnet
 yolo: true
 source_files_during_phase_1:
@@ -147,6 +147,78 @@ docs_updated_during_phase_3:
   - tree-hugger/lib/README.md
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
+source_files_during_phase_4:
+  - tree-hugger/lib/src/file/pattern.rs
+  - tree-hugger/lib/src/file/naming.rs
+  - tree-hugger/lib/src/file/filter.rs
+  - tree-hugger/lib/src/file/query.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/src/file/source_file.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/extract/signatures.rs
+  - tree-hugger/lib/src/file/extract/classify.rs
+  - tree-hugger/lib/src/file/extract/visibility/ecma.rs
+  - tree-hugger/lib/src/lib.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/coverage.rs
+  - tree-hugger/lib/src/cache/symbol_cache.rs
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/symbols_coverage.rs
+  - tree-hugger/lib/tests/l1/symbols_export.rs
+  - tree-hugger/lib/tests/l1/symbols_fixtures.rs
+  - tree-hugger/lib/tests/l1/symbols_flags.rs
+  - tree-hugger/lib/tests/l1/symbols_metrics.rs
+  - tree-hugger/lib/tests/l1/symbols_qualified_names.rs
+  - tree-hugger/lib/tests/l1/symbols_visibility.rs
+  - tree-hugger/lib/tests/l1/symbols_query_filters.rs
+  - tree-hugger/lib/tests/l1/symbols_selection_filters.rs
+  - tree-hugger/lib/tests/l1/symbols_report_matrices.rs
+  - tree-hugger/cli/src/declarations.rs
+  - tree-hugger/cli/src/report.rs
+  - tree-hugger/cli/src/scanner.rs
+  - tree-hugger/cli/tests/symbols/cache_lookup.rs
+  - tree-hugger/cli/tests/symbols/cache_robustness.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/symbols/order.rs
+  - tree-hugger/cli/tests/symbols/wiring.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.plain
+docs_updated_during_phase_4:
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/docs/symbol-reports.md
+  - tree-hugger/lib/README.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
+source_files_during_phase_5:
+  - tree-hugger/lib/src/scanner.rs
+  - tree-hugger/cli/src/selection.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/src/declarations.rs
+  - tree-hugger/cli/src/classes.rs
+  - tree-hugger/cli/src/scanner.rs
+  - tree-hugger/cli/tests/symbols/filters.rs
+  - tree-hugger/cli/tests/symbols/main.rs
+  - tree-hugger/cli/tests/symbols/prelude.rs
+  - tree-hugger/cli/tests/symbols/classes.rs
+  - tree-hugger/cli/tests/symbols/wiring.rs
+  - tree-hugger/cli/tests/symbols/report.rs
+  - tree-hugger/cli/tests/symbols/order.rs
+  - tree-hugger/cli/tests/cli.rs
+  - tree-hugger/cli/tests/level2_declarations.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.plain
+docs_updated_during_phase_5:
+  - tree-hugger/docs/symbol-reports.md
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+  - tree-hugger/docs/cache-design.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
   - .claude/skills/tree-hugger/SKILL.md
   - .claude/skills/tree-hugger/api-reference.md
 packages:
@@ -471,7 +543,7 @@ hit, not a miss.
 
 ### Wave 1 (parallelizable; disjoint files)
 
-- [ ] **4.1 Query predicates**
+- [x] **4.1 Query predicates**
     - Extend `SymbolQuery` with `.scopes()`, `.visibility()` (repeatable, exact
       level; Unknown matches only Unknown), `.exclude_tests()`/`.tests_only()`,
       `.undocumented()`, `.deprecated()`, `.is_async()`, `.returns()`,
@@ -479,7 +551,7 @@ hit, not a miss.
       selectors. Library defaults select all kinds and scopes.
     - The query carries the scan root and the optional naming context as
       post-lookup inputs, excluded from the cache key.
-- [ ] **4.2 Smart-case matcher**
+- [x] **4.2 Smart-case matcher**
     - Extend the current wildcard matcher (`wildcard_match` in
       `cli/src/scanner.rs`, or move it into the library if the library filter
       needs it) per spec C5 and rulings 7-8: all-lowercase insensitive, any
@@ -487,7 +559,7 @@ hit, not a miss.
       no new dependency. Case-fold pattern and candidate consistently without
       slicing UTF-8; non-ASCII regression cases (e.g. `Ünï`, `ß`, Turkish
       dotted İ).
-- [ ] **4.3 Post-lookup qualified-name prefix**
+- [x] **4.3 Post-lookup qualified-name prefix**
     - After cache lookup, prepend the naming-context prefix, or the portable
       scan-root-relative path plus `#` (`/` separators, no lowercasing);
       explicit-namespace names get no prefix. IDs untouched. Library-only
@@ -496,7 +568,7 @@ hit, not a miss.
 
 ### Wave 2 (sequential)
 
-- [ ] **4.4 Library record filter**
+- [x] **4.4 Library record filter**
     - One filter function applying all predicates to records; shape
       predicates select function-like declarations only (including
       constructors); missing type text never matches; `--param-type` needs a
@@ -504,7 +576,7 @@ hit, not a miss.
     - Predicate pushdown: kind intersection and the capabilities each
       predicate needs go into the planner so a filter never forces work it
       does not need (metrics never force diagnostics).
-- [ ] **4.5 Selection-filters matrix**
+- [x] **4.5 Selection-filters matrix**
     - One test per language row: each predicate returns exactly the expected
       symbol set for that language's fixture; "matches nothing" asserted where
       the construct is n/a.
@@ -518,7 +590,7 @@ languages; non-ASCII matcher tests green; `just lint` clean.
 
 ### Wave 1 (single owner: clap surface)
 
-- [ ] **5.1 Flags**
+- [x] **5.1 Flags**
     - Add `--kind` (repeatable, snake_case `SymbolKindV2` names; unknown is an
       argument error; intersects the command set, never widens),
       `--scope` (repeatable) and `--all-scopes` (conflicts with `--scope`),
@@ -534,22 +606,22 @@ languages; non-ASCII matcher tests green; `just lint` clean.
 
 ### Wave 2 (parallel; disjoint modules)
 
-- [ ] **5.2 One filter path for declaration commands**
+- [x] **5.2 One filter path for declaration commands**
     - Replace the per-command kind-and-filter logic in `summarize_file` and
       the filtering at `cli/src/main.rs:1056-1084` with the shared library
       query/filter from Phase 4; records are filtered once before
       presentation.
-- [ ] **5.3 `classes` semantics**
+- [x] **5.3 `classes` semantics**
     - Kind, scope, name, visibility, test, docs and deprecation filters select
       containers; `--in` matches the container's own name; async, return/param
       type, parameter count and static/instance select displayed members. A
       selected container may have zero members. `--json` stores a `members`
       map keyed by container ID.
-- [ ] **5.4 `imports` selectors**
+- [x] **5.4 `imports` selectors**
     - Name and file filters; `--name` matches alias or original name
       (`--name HashMap` and `--name Map` both find `use … HashMap as Map`).
       Positional tokens stay file-only.
-- [ ] **5.5 Explicit file/name selectors**
+- [x] **5.5 Explicit file/name selectors**
     - `--file`/`--name` bypass `is_file_filter_token`; file and name lists
       intersect, values within a list are alternatives, exclusions win.
       File references go through `biscuit_file::FileReference`; `.gitignore`
@@ -559,10 +631,10 @@ languages; non-ASCII matcher tests green; `just lint` clean.
 
 ### Wave 3 (sequential)
 
-- [ ] **5.6 Rewrite superseded CLI tests**
+- [x] **5.6 Rewrite superseded CLI tests**
     - Case-sensitive matching expectations, locals shown by default, old
       `classes` filtering, the static/instance flag combination.
-- [ ] **5.7 Focused CLI cases**
+- [x] **5.7 Focused CLI cases**
     - Filter intersections and conflicts; exact vs smart-case including
       non-ASCII; `--file`/`--name` vs positional; file-qualified and
       namespace `--name` including the leading `*`; class/member counts;

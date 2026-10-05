@@ -40,34 +40,25 @@ depends-on:
   - 2026-10-03-visibility-and-kind
 human_review: false
 message_to_agent: |-
-  Phase 3 notes for Phase 4+ (details in implementation-log.md, Phase 3; Phase 2 notes there too):
-  - EXTRACTOR_REVISION is now "8" (doc-comment detection was rewritten: records' docs.raw_doc
-    changed). cache_upgrade has OldKey::Computed cases for revisions 6 and 7; a further bump adds
-    another the same way.
-  - Capability::Flags (visibility.is_test / is_deprecated) and Capability::Metrics (metrics facet:
-    parameters, has_docs) exist; both appended to Capability::ALL, both require only Declarations,
-    both computed in TreeFile::records_from (RecordFacts) for wanted kinds, no extra pass. Ruling 3
-    departure: ONE Metrics capability computes both metrics (no metric set). Phase 4 predicates:
-    --undocumented / --min-params need Metrics, --exclude-tests / --deprecated need Flags; a
-    has_docs of None must never match --undocumented (Lua/Perl/Bash/Zsh).
-  - Both need the syntax tree, so cache widening by either is WidenedCapabilities { parsed: true }.
-    StoredEntry::validate rejects a facet/true flag without its capability and a missing facet
-    under metrics.
-  - CLI: Declarations::query(format) adds Flags when ReportFormat::always_computes_flags (Json,
-    JsonFull). Phase 6 JSON Lines must join that match arm. --json completed_capabilities is now
-    ["declarations", "flags"] (goldens regenerated).
-  - Matrices filled: symbols_flags (FLAGS_MATRIX, runs on a temp copy: the in-place Rust fixture is
-    under lib/tests/ so every record is is_test there), symbols_metrics (METRICS_MATRIX),
-    symbols_kind_coverage (KIND_COVERAGE_MATRIX: unsupported vs landed FEAT cells). Only
-    SELECTION_FILTER_MATRIX remains Pending (phase 4); the coverage guard now requires pending
-    rows to name phase 4.
-  - Fixtures end with a "Flags and metrics" block per language; reuse its names (documented_pair,
-    undocumented_none, deprecated_api, test_helper, variadic, ...) for selection-filter rows.
-  - Found in passing: three FEAT cells already extract precisely (C++ `using` aliases and
-    namespaces, Lua `M:m` methods); they are asserted as `landed` and were removed from the
-    unscheduled deferred-kind-precision entry (pre-authorized stale-entry correction).
-  - No Windows evidence again: the build-win-native rig failed _storage_preflight (disk
-    headroom). Linux cross-check passes for tree-hugger and tree-hugger-cli.
+  Phase 5 notes for Phase 6+ (details in implementation-log.md, Phases 4-5):
+  - All record selectors are on one path: cli/src/selection.rs (SelectionArgs/TargetArgs ->
+    Selection -> SymbolQuery predicates). Declarations::query(format, &Selection) builds the
+    analysis query; the library filters after the cache (SymbolQueryResult::finish). Only
+    --prelude is applied in declarations::prepare (it also runs query.selects/matches on the
+    prelude's synthetic exports). Do not reintroduce CLI-side name matching.
+  - `classes` uses classes::ClassSelection (boxed in Declarations::Classes): container
+    predicates + --kind, --in as the container's own name, shape predicates on members.
+    count/stats for classes (6.4) must count the containers ClassSelection selects.
+  - `symbols` defaults to Item+Member scopes (SYMBOLS_DEFAULT_SCOPES). Any new test or golden
+    that expects locals from `symbols` must pass --all-scopes (6.8 goldens over multi/ will
+    otherwise omit parameters). The current symbols.plain/json goldens are default-scope.
+  - `--json-full` rejection lists come from SelectionArgs::given_flags(); 6.7's output-mode
+    validation should live next to reject_json_full_misuse in main.rs.
+  - ReportFormat::always_computes_flags is the hook for --jsonl (6.1).
+  - `imports` now has its own ImportArgs (positional files, --file/--name/--exact,
+    ScanOptions); `imports --stats` (6.4) will need an argument error there.
+  - Windows evidence still missing: build-win-native fails _storage_preflight (disk headroom).
+    Linux cross-check passes for tree-hugger and tree-hugger-cli.
 ---
 
 # Precise, filterable symbol reports
