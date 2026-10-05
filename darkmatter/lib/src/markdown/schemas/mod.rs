@@ -596,7 +596,7 @@ impl DarkmatterSchemas {
         // Keep eager-file validation on the same request-scoped candidate plan
         // as expression-side `file_exists` and `frontmatter` resolution.
         let validator =
-            self.cache.validator_for(&merged_json, Some(&base_dir), &self.file_resolution_context)?;
+            self.cache.validator_for_shared(&merged_json, Some(&base_dir), &self.file_resolution_context)?;
         let arm_validators = build_arm_validators(
             &merged_json,
             &self.cache,

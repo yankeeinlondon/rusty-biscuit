@@ -24,7 +24,7 @@
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Arc, Mutex, OnceLock, Weak},
 };
 
 use indexmap::IndexMap;
@@ -96,7 +96,14 @@ impl Default for ValidatorCache {
 }
 
 struct CacheInner {
-    entries: HashMap<u64, CacheEntry>,
+    /// Validators by key. The key omits parts of [`JudgedIn`] (a document
+    /// and its transcluded children share one), so a slot holds every
+    /// validator whose `judged_in` differs rather than replacing one with
+    /// another and recompiling on each alternation.
+    entries: HashMap<u64, Vec<CacheEntry>>,
+    /// Content hashes of shared schemas, by allocation. The `Weak` keeps the
+    /// allocation from being reused for another schema while it is listed.
+    schema_hashes: Vec<(Weak<Value>, u64)>,
     tick: u64,
     capacity: usize,
 }
@@ -184,6 +191,7 @@ impl ValidatorCache {
         Self {
             inner: Arc::new(Mutex::new(CacheInner {
                 entries: HashMap::new(),
+                schema_hashes: Vec::new(),
                 tick: 0,
                 capacity: cap,
             })),
@@ -231,8 +239,51 @@ impl ValidatorCache {
         base_dir: Option<&Path>,
         context: &biscuit_file::FileResolutionContext,
     ) -> Result<Arc<Validator>, SchemaError> {
+        self.validator_for_hashed(schema, schema_content_hash(schema), base_dir, context)
+    }
+
+    /// [`Self::validator_for`] for a schema shared through an `Arc`: its
+    /// content is hashed once per allocation rather than on every lookup,
+    /// which matters for a large schema (the Darkmatter baseline) that every
+    /// compose phase looks up again.
+    ///
+    /// ## Errors
+    ///
+    /// As [`Self::validator_for`].
+    pub fn validator_for_shared(
+        &self,
+        schema: &Arc<Value>,
+        base_dir: Option<&Path>,
+        context: &biscuit_file::FileResolutionContext,
+    ) -> Result<Arc<Validator>, SchemaError> {
+        let content = self.shared_schema_hash(schema);
+        self.validator_for_hashed(schema, content, base_dir, context)
+    }
+
+    fn shared_schema_hash(&self, schema: &Arc<Value>) -> u64 {
+        let pointer = Arc::as_ptr(schema);
+        {
+            let guard = self.inner.lock().expect("validator cache lock poisoned");
+            if let Some((_, hash)) = guard.schema_hashes.iter().find(|(weak, _)| weak.as_ptr() == pointer) {
+                return *hash;
+            }
+        }
+        let hash = schema_content_hash(schema);
+        let mut guard = self.inner.lock().expect("validator cache lock poisoned");
+        guard.schema_hashes.retain(|(weak, _)| weak.strong_count() > 0);
+        guard.schema_hashes.push((Arc::downgrade(schema), hash));
+        hash
+    }
+
+    fn validator_for_hashed(
+        &self,
+        schema: &Value,
+        content: u64,
+        base_dir: Option<&Path>,
+        context: &biscuit_file::FileResolutionContext,
+    ) -> Result<Arc<Validator>, SchemaError> {
         let judged_in = JudgedIn::Context(Box::new(context.clone()), self.caller_origins.clone());
-        let key = canonical_hash(schema, base_dir, self.file_ref_fallback_dir.as_deref(), &judged_in);
+        let key = canonical_hash(content, base_dir, self.file_ref_fallback_dir.as_deref(), &judged_in);
         // Fast path: hit.
         if let Some(hit) = self.lookup(&key, &judged_in) {
             return Ok(hit);
@@ -260,7 +311,7 @@ impl ValidatorCache {
     /// Propagates [`SchemaError::BuildValidator`] when `jsonschema` rejects
     /// the schema.
     pub fn structural_validator_for(&self, schema: &Value) -> Result<Arc<Validator>, SchemaError> {
-        let key = canonical_hash(schema, None, None, &JudgedIn::Syntax);
+        let key = canonical_hash(schema_content_hash(schema), None, None, &JudgedIn::Syntax);
         if let Some(hit) = self.lookup(&key, &JudgedIn::Syntax) {
             return Ok(hit);
         }
@@ -273,10 +324,11 @@ impl ValidatorCache {
         let mut guard = self.inner.lock().expect("validator cache lock poisoned");
         guard.tick = guard.tick.wrapping_add(1);
         let tick = guard.tick;
-        let entry = guard.entries.get_mut(key)?;
-        if &entry.judged_in != judged_in {
-            return None;
-        }
+        let entry = guard
+            .entries
+            .get_mut(key)?
+            .iter_mut()
+            .find(|entry| &entry.judged_in == judged_in)?;
         entry.last_used = tick;
         Some(entry.validator.clone())
     }
@@ -286,24 +338,27 @@ impl ValidatorCache {
         guard.tick = guard.tick.wrapping_add(1);
         let tick = guard.tick;
         let cap = guard.capacity;
-        guard.entries.insert(
-            key,
-            CacheEntry {
-                validator,
-                judged_in,
-                last_used: tick,
-            },
-        );
-        while guard.entries.len() > cap {
-            if let Some(victim_key) = guard
+        let slot = guard.entries.entry(key).or_default();
+        slot.retain(|entry| entry.judged_in != judged_in);
+        slot.push(CacheEntry {
+            validator,
+            judged_in,
+            last_used: tick,
+        });
+        while guard.entries.values().map(Vec::len).sum::<usize>() > cap {
+            let Some((victim_key, victim_index)) = guard
                 .entries
                 .iter()
-                .min_by_key(|(_, e)| e.last_used)
-                .map(|(k, _)| *k)
-            {
-                guard.entries.remove(&victim_key);
-            } else {
+                .flat_map(|(key, slot)| slot.iter().enumerate().map(move |(index, entry)| (*key, index, entry.last_used)))
+                .min_by_key(|(_, _, last_used)| *last_used)
+                .map(|(key, index, _)| (key, index))
+            else {
                 break;
+            };
+            let slot = guard.entries.get_mut(&victim_key).expect("victim slot exists");
+            slot.remove(victim_index);
+            if slot.is_empty() {
+                guard.entries.remove(&victim_key);
             }
         }
     }
@@ -324,7 +379,9 @@ impl ValidatorCache {
             .lock()
             .expect("validator cache lock poisoned")
             .entries
-            .len()
+            .values()
+            .map(Vec::len)
+            .sum()
     }
 
     /// Reports whether the cache is empty.
@@ -1248,20 +1305,22 @@ fn default_capacity() -> usize {
 /// security boundary. An accidental collision could only serve a wrong
 /// validator, and XXH64's collision resistance over these small distinct inputs
 /// is more than adequate (repo convention — [`biscuit_hash`]).
+/// Hash of a schema's content: identical `Value`s serialize to identical
+/// bytes, so equal schemas share a hash.
+fn schema_content_hash(schema: &Value) -> u64 {
+    biscuit_hash::xx_hash_bytes(&serde_json::to_vec(schema).expect("schema serialises to JSON"))
+}
+
 fn canonical_hash(
-    schema: &Value,
+    content: u64,
     base_dir: Option<&Path>,
     fallback: Option<&Path>,
     judged_in: &JudgedIn,
 ) -> u64 {
-    // `serde_json::to_vec` is stable per the active feature set; this is
-    // sufficient for cache identity (false misses are tolerable, false hits
-    // are not — which `to_vec` guarantees because identical Values
-    // serialise to identical bytes).
-    let mut bytes = serde_json::to_vec(schema).expect("schema serialises to JSON");
-    // Domain-separate each anchor from the schema bytes (and from each other)
-    // so a schema ending in bytes that collide with a path prefix cannot alias
-    // a different (schema, base_dir, fallback) triple.
+    let mut bytes = content.to_le_bytes().to_vec();
+    // Domain-separate each anchor from the schema hash (and from each other)
+    // so path bytes cannot alias a different (schema, base_dir, fallback)
+    // triple.
     bytes.push(0xff);
     if let Some(dir) = base_dir {
         bytes.extend_from_slice(dir.to_string_lossy().as_bytes());
@@ -1358,6 +1417,27 @@ mod tests {
             !third.is_valid(&instance),
             "the repository-less request still judges without the repository",
         );
+    }
+
+    /// A document and the child it transcludes share a key (only their
+    /// source paths differ), so alternating between them must reuse both
+    /// validators rather than recompile on each switch.
+    #[test]
+    fn cache_keeps_contexts_sharing_a_key_without_recompiling() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let schema = Arc::new(trivial_schema());
+        let parent = biscuit_file::FileResolutionContext::new(dir.path()).with_source_path(dir.path().join("parent.md"));
+        let child = biscuit_file::FileResolutionContext::new(dir.path()).with_source_path(dir.path().join("child.md"));
+
+        let cache = ValidatorCache::with_capacity(4);
+        let parent_first = cache.validator_for_shared(&schema, Some(dir.path()), &parent).unwrap();
+        let child_first = cache.validator_for_shared(&schema, Some(dir.path()), &child).unwrap();
+        let parent_again = cache.validator_for_shared(&schema, Some(dir.path()), &parent).unwrap();
+        let child_again = cache.validator_for_shared(&schema, Some(dir.path()), &child).unwrap();
+
+        assert!(Arc::ptr_eq(&parent_first, &parent_again));
+        assert!(Arc::ptr_eq(&child_first, &child_again));
+        assert_eq!(cache.len(), 2);
     }
 
     #[test]

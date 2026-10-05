@@ -160,7 +160,11 @@ pub(crate) fn prepare_schemas(
         schemas = schemas.with_file_ref_fallback_dir(fallback);
     }
     schemas = schemas.with_caller_input_records(&caller_input_records(options));
-    if let Some(baseline) = options.baseline_schema.clone() {
+    if options.baseline_is_darkmatter_default {
+        schemas = schemas.with_darkmatter_baseline_json_schema().map_err(|err| {
+            prepare_error(format!("schema could not be prepared: {err}"), err)
+        })?;
+    } else if let Some(baseline) = options.baseline_schema.clone() {
         schemas = schemas.with_baseline(baseline).map_err(|err| {
             prepare_error(format!("schema could not be prepared: {err}"), err)
         })?;
