@@ -76,6 +76,82 @@ docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
   - .claude/skills/worktree/list-remote.md
   - .claude/skills/os/build-hosts.md
+source_files_during_phase_6:
+  - worktree/cli/tests/perf_support/mod.rs
+  - worktree/cli/tests/perf_flag.rs
+  - worktree/cli/tests/list_prs.rs
+  - worktree/cli/src/perf/tests.rs
+  - worktree/lib/src/list/tests/pipeline/timings.rs
+docs_updated_during_phase_6:
+  - worktree/docs/performance-testing.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - .claude/skills/worktree/testing.md
+source_files_during_phase_7:
+  - worktree/cli/tests/perf_support/graph.rs
+docs_updated_during_phase_7:
+  - worktree/docs/performance-testing.md
+  - worktree/docs/cli/list.md
+  - worktree/docs/git-graph.md
+  - worktree/README.md
+  - docs/dependencies.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+  - .claude/skills/worktree/git-graph.md
+  - .claude/skills/worktree/list.md
+source_code:
+  - worktree/lib/src/lib.rs
+  - worktree/lib/src/timing.rs
+  - worktree/lib/src/timing/tests.rs
+  - worktree/lib/src/git.rs
+  - worktree/lib/src/git/calls/tests.rs
+  - worktree/lib/src/fast_forward.rs
+  - worktree/lib/src/live_remote.rs
+  - worktree/lib/src/listing.rs
+  - worktree/lib/src/worktree.rs
+  - worktree/lib/src/graph.rs
+  - worktree/lib/src/graph/topology.rs
+  - worktree/lib/src/graph/tests.rs
+  - worktree/lib/src/list.rs
+  - worktree/lib/src/list/tests.rs
+  - worktree/lib/src/list/tests/pipeline.rs
+  - worktree/lib/src/list/tests/pipeline/timings.rs
+  - worktree/lib/src/list/wait.rs
+  - worktree/lib/src/list/wait/tests.rs
+  - worktree/lib/src/list/wait/tests/reports.rs
+  - worktree/lib/src/remote_head.rs
+  - worktree/lib/src/strict_json.rs
+  - worktree/lib/benches/list_status.rs
+  - worktree/cli/src/args.rs
+  - worktree/cli/src/lib.rs
+  - worktree/cli/src/main.rs
+  - worktree/cli/src/perf.rs
+  - worktree/cli/src/perf/tests.rs
+  - worktree/cli/src/commands/git_graph.rs
+  - worktree/cli/src/commands/git_graph/tests.rs
+  - worktree/cli/src/commands/list.rs
+  - worktree/cli/src/commands/list/progress.rs
+  - worktree/cli/src/commands/list/progress/tests.rs
+  - worktree/cli/src/commands/list/tests.rs
+  - worktree/cli/src/commands/list_table.rs
+  - worktree/cli/src/commands/refresh_worker.rs
+  - worktree/cli/tests/perf_support/mod.rs
+  - worktree/cli/tests/perf_support/graph.rs
+  - worktree/cli/tests/perf_flag.rs
+  - worktree/cli/tests/perf_pr_request.rs
+  - worktree/cli/tests/perf_graph_stages.rs
+  - worktree/cli/tests/list_prs.rs
+  - worktree/cli/tests/cache_warm_path.rs
+  - worktree/cli/tests/cache_cold_path.rs
+  - worktree/cli/tests/snapshots/list_flags__global_flag_completions.snap
+documentation:
+  - worktree/docs/performance-testing.md
+  - worktree/docs/cli/list.md
+  - worktree/docs/git-graph.md
+  - worktree/README.md
+  - docs/dependencies.md
+completed_phase: 7
+implemented: true
 packages:
   - worktree
   - worktree-cli
@@ -751,3 +827,322 @@ with `mod reports;` in `lib/src/list/wait/tests.rs`, and
 - **Not updated (Phase 7):** `worktree/docs/performance-testing.md` still
   needs the full rewrite Phase 7 schedules. It should now also describe the
   worker section and the receipt `durations`.
+
+## Phase 6
+
+### Starting state
+
+Phase 4 had already moved every perf consumer onto `--perf=json`
+(`perf_timings`, `stage_at`, `local_gather`), so this phase was deletion,
+two functional-test cleanups, and the missing feature and isolation tests.
+
+### Perf helper (`cli/tests/perf_support/mod.rs`)
+
+- Deleted `list_gather_from_perf`, `PerfRow`, `perf_rows`, `perf_row`,
+  `stage_from_perf`, `parse_perf_duration`, `strip_ansi`, and the module's
+  `#[cfg(test)] mod tests`. `perf_timings` (final nonempty line, LF or CRLF,
+  strict decode, panics on a missing or malformed record) and `stage_at` (the
+  path-lookup convenience) stay.
+- **Finding:** `perf_support::tests` ran only in `just test-perf`, because
+  the `perf_support` path segment matches the `perf_` tier filter, and it ran
+  once per test binary that declares the module (9 binaries). That explains
+  the drop in `just test-perf` from 32 to 14 tests and in L1 skips from 32 to
+  14. The skill now says not to put tests in `perf_support`.
+- `rg 'stage_from_perf|perf_rows|list_gather_from_perf'` outside `fixes/`
+  finds nothing. To get there I replaced one line in
+  `worktree/docs/performance-testing.md` ("Reading a stage in a test") and
+  one paragraph in the skill's `testing.md`. The page's full rewrite is still
+  Phase 7's job.
+
+### Functional test cleanups (`cli/tests/list_prs.rs`)
+
+- **`list_with` passed `--perf=json` to every `list_prs.rs` test,** not only
+  the two named in the spec. It now runs plain `wt list`, so every
+  `list_prs.rs` functional test passes without `--perf`.
+- `a_held_live_head_check_holds_the_listing_only_until_its_deadline`: the
+  `refresh_worker < 5 s` bound is gone. The `.output()`-returns-while-held,
+  lock, single-worker, caption, request, and store assertions are unchanged.
+- `a_held_pr_request_with_nothing_stored_ends_at_the_budget_with_only_the_hint`:
+  the `3 s ≤ refresh_worker < 5 s` bound is gone. The held-request and hint
+  assertions are unchanged.
+- The scripted-clock budget proofs already existed, so I added none:
+  `list::wait::tests::the_budget_ends_the_wait_with_the_last_phase_seen`
+  covers the held head check (head running at the budget), and
+  `…::the_budget_ends_the_wait_with_the_head_finished_and_the_pr_half_running`
+  covers the held PR request with the head finished. Both assert the end
+  within 50 ms of `ORDINARY_BUDGET` on the fake clock. The real bounds stay
+  in `perf_pr_request::perf_a_held_live_head_check_costs_the_listing_only_its_wait`
+  and `…::perf_a_held_pr_request_costs_the_listing_only_its_wait`. A comment
+  in each functional test names both.
+- **Audit:** outside `perf_`-named tests and `perf_flag.rs`, no test in
+  `cli/tests`, `cli/src`, or `lib/src` passes `--perf`, sets
+  `timings: true`, or calls `perf_timings`/`stage_at`/`local_gather`/
+  `MixedFixture::list_gather_duration`. `cache_warm_path.rs` and
+  `cache_cold_path.rs` each hold one test, and both are `perf_`-named.
+  `cli/src/commands/list/tests.rs`'s stage checks test the report's
+  shape, which the spec allows; they do not prove behavior.
+
+### `perf_flag.rs` feature tests
+
+Already covered before this phase: stderr only and empty stdout, no report on
+listing errors (both formats), the framed record after the listing, invalid
+values (exit 2), `--perf json` not consuming a subcommand, disabled mode,
+and the local-only top level reconciling (strict decode). Added:
+
+- `the_reader_takes_only_the_final_record_with_lf_or_crlf`: the output has a
+  decoy record earlier, and trailing blank lines after the real one. Run
+  with LF and with CRLF, the reader returns the real record.
+- `the_reader_refuses_a_missing_or_malformed_final_record`: the control is
+  that the decoy alone decodes. Refused: no output, only blank lines, a
+  record followed by listing text, no prefix, truncated JSON, trailing
+  content, and a lowercase prefix.
+- `a_commit_message_resembling_the_record_is_never_taken_for_it`: a linked
+  worktree whose commit subject is a well-formed record. `wt list -v
+  --perf=json` shows the subject in the listing (control) and the reader
+  returns the real document, which has `verbose_render`. Plain `wt list -v`
+  shows the same subject and the reader refuses it.
+- `a_pseudo_terminal_capture_ends_in_the_record` (`#[cfg(unix)]`, through
+  `script`): the capture has `\r\nWT_PERF_JSON {` and decodes.
+- `the_human_and_json_reports_of_one_listing_show_the_same_stages`: two
+  runs, one per renderer. Every span of the JSON record, depth first, is a
+  human row in the same order. Durations are not compared.
+- Same synthetic tree (`cli/src/perf/tests.rs`,
+  `the_human_report_names_the_stages_and_both_renderers_describe_one_tree`):
+  this unit test now compares the whole labeled tree from `report_tree`,
+  without its remainder rows, against the decoded JSON's span tree at every
+  depth, and asserts the decoded document equals the original. **Ruling:** I
+  added no `insta` snapshot. A snapshot test has to live in an integration
+  test, which would need the private `perf` module exposed from the CLI
+  library target, plus a width parameter on `human_report`. A structural
+  comparison checks the same agreement without that new API, so I chose it.
+- Mutation check, run once and reverted: when the reader takes the first
+  line containing the prefix, the three reader tests above fail.
+
+### Library isolation tests (`lib/src/list/tests/pipeline/timings.rs`)
+
+- `assert_reconciles`, which every path test calls (no origin, remote, no
+  worker, regather, `--ff`, `-v`), now also asserts the document holds no
+  command or worker stage. Seventeen stages are listed in `NOT_LIBRARY`.
+- `concurrent_listings_of_two_repositories_mix_no_spans_or_counts`: two
+  repositories that differ (graph versus `-v`, an extra worktree), each
+  listed alone and then both at once on two threads behind a barrier. Each
+  document's span tree, with its `git` count at every node, equals the one
+  from its solo run. A control asserts the two shapes differ, so mixing
+  would show, and the current directory is unchanged afterwards. The test
+  passed in 6 of 6 repeated runs.
+- On and off giving identical facts and `git` calls was already covered by
+  `timings_on_and_off_do_the_same_work_and_show_the_same_facts` (Phase 4).
+
+### Requirement → test mapping
+
+| Requirement (plan Phase 6 / spec §4–5, Tests) | Test |
+| --- | --- |
+| Final nonempty line only; LF and CRLF | `perf_flag::the_reader_takes_only_the_final_record_with_lf_or_crlf` |
+| Reject a missing or malformed final record; never search earlier text | `perf_flag::the_reader_refuses_a_missing_or_malformed_final_record` |
+| A commit message resembling the prefix is not mistaken | `perf_flag::a_commit_message_resembling_the_record_is_never_taken_for_it` |
+| CRLF (pty) capture | `perf_flag::a_pseudo_terminal_capture_ends_in_the_record` |
+| Human and JSON describe the same stages (real runs) | `perf_flag::the_human_and_json_reports_of_one_listing_show_the_same_stages` |
+| Both renderers on the same synthetic tree | `perf::tests::the_human_report_names_the_stages_and_both_renderers_describe_one_tree` |
+| Report on stderr only, stdout empty, disabled emits nothing, errors emit none, framed after the listing, flag values | existing `perf_flag` tests (listed above) |
+| Library reports exclude CLI stages | `assert_reconciles` in all six `list::tests::pipeline::timings` path tests |
+| Concurrent calls mix no spans or counts and leave the cwd alone | `list::tests::pipeline::timings::concurrent_listings_of_two_repositories_mix_no_spans_or_counts` |
+| Timings on and off: identical facts and Git calls | `…::timings_on_and_off_do_the_same_work_and_show_the_same_facts` (existing) |
+| Held-check and held-PR functional tests carry no timing evidence; scripted clock proves the budget | `list_prs` (both tests) + `list::wait::tests::the_budget_ends_the_wait_*` (existing) |
+
+Placement: every new test is L1. No path segment starts with a tier
+marker, and `perf_flag` is a test binary name, which the `perf_` filter
+does not match. `worktree-cli` builds its integration tests automatically
+(no `autotests = false`). `just check-tier-coverage worktree` reports 0
+stranded tests.
+
+### Gates
+
+- `just lint` (worktree): clean.
+- `just test`: 1070/1070 passed, 14 skipped. Phase 5 ended at 1066; this
+  phase added 1 library and 5 `perf_flag` tests and deleted 2.
+- `just test-perf`: 14/14 passed. The drop from 32 is the 18 deleted
+  `perf_support::tests` copies.
+- `just test-l2`: 39/39 passed.
+- Cross-OS: `just cross-check worktree-cli --os linux --features
+  terminal-tests` passed 592/592, including the pty test with the Linux
+  `script -qec` form. `just cross-check worktree --os linux --features
+  count-git` passed 532/532, including the concurrency test. Windows and
+  WSL2 were not run. The pty test is `#[cfg(unix)]`, the CRLF reader test
+  is pure and runs everywhere, and nothing new touches paths or `cfg`.
+- Pre-existing failures: none.
+
+## Phase 7
+
+### Docs
+
+- **`worktree/docs/performance-testing.md`**: rewrote the `--perf` section
+  (the "Runtime `--perf` flag" heading is kept, so the anchors in
+  `docs/cli/list.md` and `docs/git-graph.md` still resolve). It now covers the
+  two forms; who measures what, with a Mermaid flow from
+  `ListOptions::timings` through the library and CLI documents to both
+  renderers and both kinds of test; the full stage table (id, label, what it
+  measures, with the CLI-only stages marked) and the worker stage table; a
+  real report from this checkout; the two child kinds, reconciliation, and
+  `git` counts; worker reports and their six statuses; `--perf=json` framing
+  and the version-1 schema with the decoder's rejections; reading a stage by
+  path (library and process examples); the perf/functional test rule; and a
+  table mapping the old row names to stage paths, because the dated
+  measurement tables are historical records and keep their old names. The
+  same page also had stale stage names and paths outside that section, which
+  I corrected: the graph gather and wait links now point into `lib/src`, the
+  bench paragraph describes `worktree::list::gather` instead of
+  `list_worktrees()`, the cache gates read `local_gather`, the graph-stage
+  section names `graph_history` and `graph_render`, and the PR-request and
+  live-head bullets use stage ids. The page does not link to or name this
+  fix.
+- **Drift fixed on the same page:** `perf_subprocess_counts_meet_sla` was
+  said to run "in the ambient `rusty-biscuit` checkout" from `list.rs`. The
+  test is in `cli/src/commands/list/tests.rs` and runs on a fixture with one
+  linked worktree, so I corrected the doc to match the code.
+  `graph_and_verbose_share_one_merge_base` moved to `lib/src/graph/tests.rs`.
+  The page's frontmatter `hash` was already stale on `main`; it is now
+  recomputed with `md hash`, and `last_updated` is 2026-10-04.
+- **`worktree/docs/cli/list.md`**: the `--perf[=human|json]` row now states
+  that stdout stays empty, a failing listing prints no report, and the JSON
+  line follows an empty line and is the last nonempty stderr line. The
+  receipt-timings paragraph was already current (Phase 5).
+- **`worktree/docs/git-graph.md`**: the "Who does what" table now says the
+  library gathers (`lib/src/graph.rs`, `graph/topology.rs`) and the CLI
+  converts (`to_git_graph`), and that the library uses its own types. The
+  `--perf` paragraph describes the `graph history` row (`graph_history`) and
+  its sequential sub-steps with `git` counts. The Tests section names both
+  test files.
+- **`worktree/README.md`**: the `--perf` paragraph says to read only the final
+  line and that the library returns the same document (scope `library`). The
+  bench sentence now describes `worktree::list::gather`.
+- **`docs/dependencies.md`**: no crate was added or removed on this branch
+  (`git diff main...HEAD -- worktree/lib/Cargo.toml worktree/cli/Cargo.toml`
+  is empty). The `worktree/lib` line now says it holds the listing pipeline,
+  graph gathering, and timings, and has no terminal dependency. The `worktree`
+  area has no per-area `dependencies.md`.
+
+### Skill
+
+- `git-graph.md` "Division of labor" said `commands/git_graph.rs` gathers.
+  It now says the library gathers in its own types, the CLI's `to_git_graph`
+  converts, and names where each kind of test lives.
+- `list.md`: added the `MetricsTree` root-share trap (below).
+- `testing.md` (perf/functional split, Phase 6) and `list-remote.md`
+  (receipt timings, unchanged waits, Phase 5) were already current. I added
+  nothing to `list-remote.md`, which is at the 300-line split threshold.
+  The router's "shared modules compiled twice" note still holds: `perf` is
+  still declared in both `cli/src/lib.rs` and `cli/src/main.rs`.
+
+### Comment drift pass
+
+I grepped `lib/src`, `cli/src`, `cli/tests`, and `lib/benches` for the old row
+names (`pre-dispatch`, `pr gather`, `remote wait`, `list gather`,
+`graph gather`, `pr reread`, `list regather`), the deleted helpers, and the
+old module paths (`commands::list::wait`, `git_graph::gather`,
+`git_graph/topology`). I also read the module docs of `lib/src/list.rs`,
+`lib/src/list/wait.rs`, `lib/src/graph.rs`, `cli/src/commands/git_graph.rs`,
+`cli/src/commands/refresh_worker.rs`, and `cli/src/perf.rs`.
+
+- **Drift found and fixed:** `cli/tests/perf_support/graph.rs`'s module doc
+  named the `graph gather` and `graph image render (biscuit-terminal)` stages
+  of `wt list --perf`. It now names `graph_history` and `graph_render` of
+  `wt list --perf=json`. This change is comment only.
+- The other hits use "remote wait" or "list gather" as ordinary English (in
+  panic messages on thread joins and in test docs), not as stage names. They
+  are accurate and I left them unchanged.
+
+### Finding: the worker section's heading shows `100%`
+
+`MetricsTree` (biscuit-terminal) always renders its root row's share as
+`100%` (`collect_rows`, `is_root`), whatever `MetricShare` it is given.
+`perf::worker_tree` builds the worker section as its own tree, so its heading,
+`Refresh worker (diagnostic, measured in the worker): complete`, shows `—` and
+then `100%`. Every row beneath it shows `—`. Spec §3 says to render worker
+reports "without percentages", and Acceptance 5 says "no foreground share".
+The worker rows meet that, but the heading does not quite. Fixing it needs
+either a biscuit-terminal option to leave the root's share blank or a
+different layout in `perf.rs`. Both change shared rendering code, which is
+outside a docs phase, so I did not attempt either. I recorded the finding for
+review and as a trap in the skill's `list.md`, and the doc's example report
+omits that column on the heading.
+
+### Departures from the spec (docs follow the code; spec left as written)
+
+Collected from Phases 1–6:
+
+- `WorkerReport` carries a `LaunchReport` enum rather than `status` plus
+  `Option<report>`; the serialized shape is the spec's (Phase 1).
+- `worker_report_status` is absent when no worker was followed, and `null` is
+  rejected (Phase 1).
+- Counting needed hooks in `fast_forward::merge_ff_only` and
+  `live_remote::run_transport` as well as `git.rs` (Phase 2).
+- `regather` holds `prepare_local` and then a `local_reads` concurrent group,
+  because the closed stage list has no other id for that group (Phase 4).
+- `head_check` covers the API request and its Git fallback, but not the
+  phase-record write between them, which falls into `head_refresh`'s
+  remainder. Worker spans are timed by wrapping the injected seams (Phase 5).
+- The reader infers `complete` or `partial` from the halves present; the
+  worker writes no status (Phase 5).
+- No `insta` snapshot compares the two renderers. A structural comparison in
+  `cli/src/perf/tests.rs` keeps the `perf` module private (Phase 6).
+- The worker heading's `100%` (above, Phase 7).
+
+### Rulings taken at their defaults
+
+R1–R9 (Phase 1) were all taken at the plan's defaults; the gaps they left are
+recorded there. The spike S1 outcome (a thread-local counter stack, with
+tasks that return their scoped counts) is in Phase 1, "Spike S1".
+
+### Warm-run `unattributed` observations
+
+Phase 4 recorded the three required runs (153, 156, and 146 µs at the top
+level, each hidden). I repeated them on the final tree, using the debug
+build from `fix-wt-skill` with stderr captured (no graph), after one warm-up
+run:
+
+| Run | Total | Top-level `unattributed` | `remote_and_local` | `refresh_worker` | `local_gather` | Worker report |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| 1 | 372.3 ms | 95 µs | 327.1 ms | 320.9 ms | 196.9 ms | complete |
+| 2 | 373.7 ms | 89 µs | 328.8 ms | 323.1 ms | 195.8 ms | complete |
+| 3 | 346.8 ms | 89 µs | 302.3 ms | 295.8 ms | 186.7 ms | complete |
+
+On every run the top-level row is hidden (under 1 ms), and no
+over-attribution appeared.
+
+### Acceptance
+
+| # | Item | Evidence |
+| --- | --- | --- |
+| 1 | `worktree::list` exposes the pipeline with `ListOptions.timings`; `wt list --perf` sets it; `perf.rs` only renders | `lib/src/list.rs` (`gather`, `ListOptions::timings`, `Listing::timings`); Phase 4, "CLI"; `cli/src/perf.rs` has only `time`, `json_record`, `human_report`, and the tree builders |
+| 2 | Typed `Stage` with id and label in `worktree::timing`; labels are no lookup key | `lib/src/timing.rs` `stages!` table; Phase 6 deleted every label scraper, and `rg 'stage_from_perf\|perf_rows\|list_gather_from_perf'` outside `fixes/` finds nothing |
+| 3 | Exact reconciliation in integer µs; over-attribution surfaced; three warm runs logged | `timing::tests` (Phase 1), `assert_reconciles` in every library path test (Phase 6), the strict decode in every `perf_flag` test; runs in Phase 4 and above |
+| 4 | `graph_history` shows sub-steps with `git` counts | Phase 4 pty run (`graph_history` [40 git] = 1 + 0 + 1 + 38); `lib/src/graph/tests.rs::a_counting_scope_sees_every_call_of_a_threaded_graph_gather`; the graph path test in `list::tests::pipeline::timings` |
+| 5 | Worker reports are diagnostics with no foreground share; missing/adopted/invalid are explicit; return is never delayed | `list::wait::tests::reports` (9 tests, untimed and timed), `perf_flag::a_perf_listing_carries_its_workers_own_report`; the worker rows show `—`. **Caveat:** the section heading shows `100%` (finding above) |
+| 6 | No test reads the human report; functional tests use outcomes; real bounds stay in `perf_` tests | Phase 6 audit and deletions; `list_prs` runs without `--perf` |
+| 7 | No terminal dependency; no output; behavior preserved; no extra Git or network calls | `cargo tree -p worktree -e normal,build` has no `biscuit-terminal` (and `--all-features` has none of `biscuit-terminal`, `ratatui`, or `crossterm`); the only `print!`-family calls under `lib/src` are the two `eprintln!` calls inside `#[cfg(test)]` modules (`include/copy.rs`, `remove/inventory.rs`); `timings_on_and_off_do_the_same_work_and_show_the_same_facts` |
+| 8 | `just test`, `just test-perf`, `just test-l2`, `just lint` pass | Gates below |
+
+### Requirement → test mapping
+
+This phase changed docs, the skill, and one comment. It changed no
+behavior, so it added no tests. The behavior the docs describe is covered by
+the tests in the Phase 1–6 mappings. Every claim on the rewritten page was
+checked against the code or a run: the stage table against `stages!`, the
+schema against the `Wire*` types, the framing against `json_record` and
+`perf_timings`, `--perf json` against
+`perf_flag::the_perf_value_needs_an_equals_sign_and_a_known_format` (exit
+2), and the example report against a real run.
+
+### Gates
+
+- `just lint` (worktree): clean.
+- `just test`: 1070/1070 passed, 14 skipped.
+- `just test-perf`: 14/14 passed.
+- `just test-l2`: 39/39 passed.
+- Cross-OS: not run. This phase changed one doc comment and no code; the
+  Phase 6 Linux cross-checks still cover the code.
+- Pre-existing failures: none.
+
+Implementation complete, ready for review. The fix was not moved to
+`_completed`, and the spec's `status` was left unchanged: the author's
+process gives that change to the author.

@@ -25,32 +25,19 @@ reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-04
 review_iterations: 0
 clarified: false
-implemented: false
+implemented: true
 human_review: false
 message_to_agent: |-
-    Phase 5 (done): worker durations travel in the receipt. `wt list --perf` passes `--timings` to the
-    worker (`LaunchArgs::timings`, set from `WaitRequest::timings` = `ListOptions::timings`). The worker
-    times setup and both halves, with `pr_request`, `head_check`, and `head_fetch` timed by wrapping the injected
-    seams (refresh_worker.rs `TimedPrSource`/`TimedBranchHeads`/`TimedGit`); half closures now take
-    `(main, Option<&Steps>)`. `Receipt::durations: LaunchReport` is decoded only after the outcome is
-    accepted (`remote_head::receipt_durations`); complete vs partial is inferred from which halves the
-    document holds (`LaunchReport::from_worker`), and `decode_report` rejects a stated status that disagrees.
-    The wait keeps each launch's report from the receipt it already polls (`Follow::keep_report`) into
-    `WaitEnd::worker_reports` (empty unless timed); `list::worker_reports` makes the summary
-    (adopted = followed head id has no entry; origin change empties it), and `run_pipeline` copies it onto
-    the command document. `perf_flag::a_perf_listing_carries_its_workers_own_report` is the end-to-end test.
-    Every existing WaitEnd/Receipt/LaunchArgs/WaitRequest literal in tests gained the new field.
-    For Phase 6 (unchanged from Phase 4's note): `perf_support::perf_timings`/`stage_at`/`local_gather` exist
-    and every consumer already reads `--perf=json`. Still to do: delete `perf_rows`, `stage_from_perf`,
-    `list_gather_from_perf` and their self-tests (`perf_flag.rs` NESTED tests, `perf_support::tests`), drop
-    `--perf=json` and the refresh_worker bound from the two `list_prs.rs` held-request functional tests
-    (scripted wait clock instead; `lib/src/list/wait/tests.rs` already has budget tests to point at), and
-    finish the `perf_flag.rs` feature list (CRLF pty, misleading prefix in a commit message).
-    For Phase 7: `worktree/docs/performance-testing.md` still needs its full rewrite and should now also
-    describe the worker section and the receipt `durations`; `.claude/skills/worktree/list-remote.md` is at
-    300 lines, so give remote timing its own page if more is added. `build-linux` cross-check still fails
-    in archive mode on read-only `.rmeta` links in the `fix-wt-skill` standing clone (os skill
-    build-hosts.md has the fix, which needs SSH); see the Phase 5 log for the native-path result.
+    Phase 7 (final, done): implementation complete, ready for review. Docs rewritten
+    (`worktree/docs/performance-testing.md` `--perf` section: stage table, child kinds, worker reports,
+    `--perf=json` framing and schema, reading a stage by path, perf/functional split, old-row-name map;
+    plus `docs/cli/list.md`, `docs/git-graph.md`, `README.md`, `docs/dependencies.md`) and skill pages
+    `git-graph.md`/`list.md` updated. One open finding for review: biscuit-terminal's `MetricsTree`
+    always prints `100%` on its root row, so the human report's worker-section heading shows `100%`
+    although spec §3 says worker reports render without percentages (the rows themselves show `—`).
+    Fixing it touches shared rendering (a biscuit-terminal option for a blank root share, or a different
+    layout in `cli/src/perf.rs`); details in the implementation log, Phase 7. The spec `status` was left
+    unchanged for the author.
 related:
     - 2026-06-14-perf-measurement
     - 2026-10-03-list-overlap-and-keyless-notice

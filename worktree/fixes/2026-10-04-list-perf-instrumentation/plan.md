@@ -77,6 +77,82 @@ docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
   - .claude/skills/worktree/list-remote.md
   - .claude/skills/os/build-hosts.md
+source_files_during_phase_6:
+  - worktree/cli/tests/perf_support/mod.rs
+  - worktree/cli/tests/perf_flag.rs
+  - worktree/cli/tests/list_prs.rs
+  - worktree/cli/src/perf/tests.rs
+  - worktree/lib/src/list/tests/pipeline/timings.rs
+docs_updated_during_phase_6:
+  - worktree/docs/performance-testing.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - .claude/skills/worktree/testing.md
+source_files_during_phase_7:
+  - worktree/cli/tests/perf_support/graph.rs
+docs_updated_during_phase_7:
+  - worktree/docs/performance-testing.md
+  - worktree/docs/cli/list.md
+  - worktree/docs/git-graph.md
+  - worktree/README.md
+  - docs/dependencies.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+  - .claude/skills/worktree/git-graph.md
+  - .claude/skills/worktree/list.md
+source_code:
+  - worktree/lib/src/lib.rs
+  - worktree/lib/src/timing.rs
+  - worktree/lib/src/timing/tests.rs
+  - worktree/lib/src/git.rs
+  - worktree/lib/src/git/calls/tests.rs
+  - worktree/lib/src/fast_forward.rs
+  - worktree/lib/src/live_remote.rs
+  - worktree/lib/src/listing.rs
+  - worktree/lib/src/worktree.rs
+  - worktree/lib/src/graph.rs
+  - worktree/lib/src/graph/topology.rs
+  - worktree/lib/src/graph/tests.rs
+  - worktree/lib/src/list.rs
+  - worktree/lib/src/list/tests.rs
+  - worktree/lib/src/list/tests/pipeline.rs
+  - worktree/lib/src/list/tests/pipeline/timings.rs
+  - worktree/lib/src/list/wait.rs
+  - worktree/lib/src/list/wait/tests.rs
+  - worktree/lib/src/list/wait/tests/reports.rs
+  - worktree/lib/src/remote_head.rs
+  - worktree/lib/src/strict_json.rs
+  - worktree/lib/benches/list_status.rs
+  - worktree/cli/src/args.rs
+  - worktree/cli/src/lib.rs
+  - worktree/cli/src/main.rs
+  - worktree/cli/src/perf.rs
+  - worktree/cli/src/perf/tests.rs
+  - worktree/cli/src/commands/git_graph.rs
+  - worktree/cli/src/commands/git_graph/tests.rs
+  - worktree/cli/src/commands/list.rs
+  - worktree/cli/src/commands/list/progress.rs
+  - worktree/cli/src/commands/list/progress/tests.rs
+  - worktree/cli/src/commands/list/tests.rs
+  - worktree/cli/src/commands/list_table.rs
+  - worktree/cli/src/commands/refresh_worker.rs
+  - worktree/cli/tests/perf_support/mod.rs
+  - worktree/cli/tests/perf_support/graph.rs
+  - worktree/cli/tests/perf_flag.rs
+  - worktree/cli/tests/perf_pr_request.rs
+  - worktree/cli/tests/perf_graph_stages.rs
+  - worktree/cli/tests/list_prs.rs
+  - worktree/cli/tests/cache_warm_path.rs
+  - worktree/cli/tests/cache_cold_path.rs
+  - worktree/cli/tests/snapshots/list_flags__global_flag_completions.snap
+documentation:
+  - worktree/docs/performance-testing.md
+  - worktree/docs/cli/list.md
+  - worktree/docs/git-graph.md
+  - worktree/README.md
+  - docs/dependencies.md
+completed_phase: 7
+implemented: true
 packages:
   - worktree
   - worktree-cli
@@ -287,40 +363,40 @@ Depends on Phases 1 and 3 (wait core in library). Disjoint from Phase 4's render
 
 ### Wave 1 (parallel by file group)
 
-- [ ] **Perf helper** (`cli/tests/perf_support/mod.rs`): add a helper that runs `wt list --perf=json`, selects the final nonempty line (splitting CRLF as well as LF), strips `WT_PERF_JSON `, and deserializes into `worktree::timing::Timings`; reject a missing or malformed final record; never search earlier text. Add a path-lookup convenience. Delete `perf_rows`, `stage_from_perf`, `list_gather_from_perf`.
+- [x] **Perf helper** (`cli/tests/perf_support/mod.rs`): add a helper that runs `wt list --perf=json`, selects the final nonempty line (splitting CRLF as well as LF), strips `WT_PERF_JSON `, and deserializes into `worktree::timing::Timings`; reject a missing or malformed final record; never search earlier text. Add a path-lookup convenience. Delete `perf_rows`, `stage_from_perf`, `list_gather_from_perf`.
 - [x] **Migrate perf consumers** (split among agents): `perf_graph_stages.rs`, `perf_pr_request.rs`, `cache_warm_path.rs`, `cache_cold_path.rs` (their `perf_` tests), `perf_flag.rs`, and `list_prs.rs` perf tests. Mapping: `list gather` → `local_gather`; `remote wait` → `refresh_worker`; `pr gather` → `origin_lookup`; graph gather/render keep their boundaries. Bounds and sampling unchanged; never sum concurrent children as an old elapsed span.
-- [ ] **Functional test cleanups**
+- [x] **Functional test cleanups**
   - `list_prs::a_held_live_head_check_holds_the_listing_only_until_its_deadline`: keep `.output()` returning while the request and worker lock stay held plus the timeout presentation; drop the `remote wait` row bound; prove the budget with the scripted wait clock in library tests (add if missing); rely on existing `perf_` held-check tests for the real bound; add no whole-command bound.
   - `list_prs::a_held_pr_request_with_nothing_stored_ends_at_the_budget_with_only_the_hint`: keep held-request and hint assertions; scripted clock proves expiry.
   - Audit for any remaining functional test that passes `--perf` or calls shared perf helpers (including `perf_`-named tests living in `cache_*_path.rs`); every functional test must pass without `--perf`.
 
 ### Wave 2
 
-- [ ] **`perf_flag.rs` feature tests**: report on stderr only; stdout empty; no report on listing errors; human and JSON describe the same stages; top level reconciles; framed record after listing output; misleading prefix text in a commit message not mistaken; CRLF (pty) capture; invalid flag values exit 2; `--perf json` does not eat a subcommand; disabled mode emits nothing. Compare both renderers on the same synthetic tree (snapshots live in integration tests because CLI modules compile twice).
-- [ ] **Library isolation tests**: library reports exclude CLI stages; two concurrent calls with different repo paths mix no spans or counts and leave cwd alone; timings on/off give identical facts and identical git calls.
+- [x] **`perf_flag.rs` feature tests**: report on stderr only; stdout empty; no report on listing errors; human and JSON describe the same stages; top level reconciles; framed record after listing output; misleading prefix text in a commit message not mistaken; CRLF (pty) capture; invalid flag values exit 2; `--perf json` does not eat a subcommand; disabled mode emits nothing. Compare both renderers on the same synthetic tree (snapshots live in integration tests because CLI modules compile twice).
+- [x] **Library isolation tests**: library reports exclude CLI stages; two concurrent calls with different repo paths mix no spans or counts and leave cwd alone; timings on/off give identical facts and identical git calls.
 
 ### Checkpoint 6
 
-- [ ] `just test`, `just test-perf`, `just test-l2`, `just lint`. `rg 'stage_from_perf|perf_rows|list_gather_from_perf'` finds nothing. Tests keep terminal/browser windows from taking focus.
+- [x] `just test`, `just test-perf`, `just test-l2`, `just lint`. `rg 'stage_from_perf|perf_rows|list_gather_from_perf'` finds nothing. Tests keep terminal/browser windows from taking focus.
 
 ## Phase 7: Docs, skill, and review readiness
 
 ### Wave 1 (parallel; disjoint files)
 
-- [ ] `worktree/docs/performance-testing.md`: stage table (id, label, measures), two child kinds plus worker observations, `--perf=json` schema and framing, how a perf test reads a stage by path; remove `stage_from_perf` guidance. Include a Mermaid flow and a compact example per rule (audience: developer with no repo experience); do not link to or name this fix.
-- [ ] `worktree/docs/cli/list.md` (`--perf[=human|json]`, stderr framing), `worktree/docs/git-graph.md` (`graph_history` row and sub-steps; graph gather now in the library), `worktree/README.md` (`--perf` paragraph), `worktree/docs/dependencies.md` (and lib/cli per-area files) for crate moves.
-- [ ] `.claude/skills/worktree/`: `list.md` and `git-graph.md` (pipeline and gather in the library), `testing.md` (perf/functional split rule), `list-remote.md` (optional receipt timings, unchanged waits); adjust the router "shared modules compiled twice" note if `perf` changes.
-- [ ] **Comment drift pass** over every moved or changed symbol's `///`/`//!` and inline comments (repo rule); delete stale ones and report any drift found.
+- [x] `worktree/docs/performance-testing.md`: stage table (id, label, measures), two child kinds plus worker observations, `--perf=json` schema and framing, how a perf test reads a stage by path; remove `stage_from_perf` guidance. Include a Mermaid flow and a compact example per rule (audience: developer with no repo experience); do not link to or name this fix.
+- [x] `worktree/docs/cli/list.md` (`--perf[=human|json]`, stderr framing), `worktree/docs/git-graph.md` (`graph_history` row and sub-steps; graph gather now in the library), `worktree/README.md` (`--perf` paragraph), `worktree/docs/dependencies.md` (and lib/cli per-area files) for crate moves.
+- [x] `.claude/skills/worktree/`: `list.md` and `git-graph.md` (pipeline and gather in the library), `testing.md` (perf/functional split rule), `list-remote.md` (optional receipt timings, unchanged waits); adjust the router "shared modules compiled twice" note if `perf` changes.
+- [x] **Comment drift pass** over every moved or changed symbol's `///`/`//!` and inline comments (repo rule); delete stale ones and report any drift found.
 
 ### Wave 2
 
-- [ ] **Final validation**: `just test`, `just test-perf`, `just test-l2`, `just lint` in `worktree/`; `cargo tree -p worktree` free of biscuit-terminal; grep that the library prints nothing (`println!`, `eprintln!`, `print!`).
-- [ ] **Implementation log** (`implementation-log.md` in the fix dir): spike S1 outcome, the three warm-run `unattributed` observations, departures from the spec (docs corrected, spec left as written), and rulings taken at their defaults.
-- [ ] **Status**: set spec status to `implemented` only if the author's process says an agent does so; otherwise leave it. Stop at "implementation complete, ready for review"; do not move the fix to `_completed`.
+- [x] **Final validation**: `just test`, `just test-perf`, `just test-l2`, `just lint` in `worktree/`; `cargo tree -p worktree` free of biscuit-terminal; grep that the library prints nothing (`println!`, `eprintln!`, `print!`).
+- [x] **Implementation log** (`implementation-log.md` in the fix dir): spike S1 outcome, the three warm-run `unattributed` observations, departures from the spec (docs corrected, spec left as written), and rulings taken at their defaults.
+- [x] **Status**: set spec status to `implemented` only if the author's process says an agent does so; otherwise leave it. Stop at "implementation complete, ready for review"; do not move the fix to `_completed`.
 
 ### Checkpoint 7
 
-- [ ] Every Acceptance item 1–8 is checked off against evidence in the log.
+- [x] Every Acceptance item 1–8 is checked off against evidence in the log.
 
 ## Dependency Overview
 
