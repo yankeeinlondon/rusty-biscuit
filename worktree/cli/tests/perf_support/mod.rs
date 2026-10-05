@@ -1,4 +1,4 @@
-//! Shared fixtures and `--perf` parsing for the cache SLA and PR integration
+//! Shared fixtures and the `--perf=json` reader for the cache SLA and PR integration
 //! tests, plus the local network stand-ins ([`ProxyStub`], [`FakeGitea`],
 //! [`HoldingOrigin`]) and refresh-worker helpers the PR tests use.
 //!
@@ -818,55 +818,6 @@ pub fn local_gather(timings: &Timings) -> Option<Duration> {
         .or_else(|| stage_at(timings, &[Stage::LocalReads, Stage::LocalGather]))
 }
 
-/// Extract the `list gather` stage duration from rendered `--perf` output.
-pub fn list_gather_from_perf(stderr: &str) -> Option<Duration> {
-    stage_from_perf(stderr, "list gather")
-}
-
-/// One row of a rendered `--perf` report.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PerfRow {
-    /// 0 for the `Performance` root, 1 for a top-level stage or group, 2 for
-    /// a group's child.
-    pub depth: usize,
-    pub label: String,
-    pub duration: Duration,
-}
-
-/// Every report row in rendered `--perf` output, in order. Lines that are not
-/// report rows (the listing above the report) are skipped.
-pub fn perf_rows(stderr: &str) -> Vec<PerfRow> {
-    strip_ansi(stderr).lines().filter_map(perf_row).collect()
-}
-
-/// A report row: the quote border, then tree connectors (three columns per
-/// level), the label, and the duration as the first token that parses as one.
-fn perf_row(line: &str) -> Option<PerfRow> {
-    let body = line.trim_start().strip_prefix('▌')?.trim_start_matches(' ');
-    let connectors = body.chars().take_while(|c| matches!(c, '│' | '├' | '└' | '─' | ' ')).count();
-    let rest: String = body.chars().skip(connectors).collect();
-    let tokens: Vec<&str> = rest.split_whitespace().collect();
-    let at = tokens.iter().position(|token| parse_perf_duration(token).is_some())?;
-    (at > 0).then(|| PerfRow {
-        depth: connectors.div_ceil(3),
-        label: tokens[..at].join(" "),
-        duration: parse_perf_duration(tokens[at]).expect("position found a duration"),
-    })
-}
-
-/// The duration of the one row labeled exactly `stage`, at any depth.
-///
-/// Labels are matched whole, so a group such as `remote wait ‖ local gather`
-/// is never read as its `remote wait` child. Panics when two rows share the
-/// label, rather than picking one.
-pub fn stage_from_perf(stderr: &str, stage: &str) -> Option<Duration> {
-    let rows = perf_rows(stderr);
-    let mut matching = rows.iter().filter(|row| row.label == stage);
-    let found = matching.next()?;
-    assert!(matching.next().is_none(), "two `{stage}` rows in the --perf report:\n{rows:#?}");
-    Some(found.duration)
-}
-
 /// A local stand-in for an HTTPS proxy, so a PR request never leaves the host.
 /// Dropping it closes every held connection and every later one.
 pub struct ProxyStub {
@@ -1500,86 +1451,4 @@ fn gitea_pulls_json(prs: &[(u64, &str)]) -> String {
         })
         .collect();
     serde_json::Value::Array(pulls).to_string()
-}
-
-/// Parse a metrics-tree duration token such as `216.0ms`, `39.0µs`, or `1.2s`.
-///
-/// ## Returns
-///
-/// `None` for tokens that are not durations (e.g. the trailing `64%` share).
-pub fn parse_perf_duration(token: &str) -> Option<Duration> {
-    // `ms` / `µs` / `us` / `ns` must be tried before the bare `s` suffix, which
-    // would otherwise strip the trailing `s` of `ms` and misparse the rest.
-    let (number, divisor) = if let Some(rest) = token.strip_suffix("ms") {
-        (rest, 1e3)
-    } else if let Some(rest) = token.strip_suffix("µs") {
-        (rest, 1e6)
-    } else if let Some(rest) = token.strip_suffix("us") {
-        (rest, 1e6)
-    } else if let Some(rest) = token.strip_suffix("ns") {
-        (rest, 1e9)
-    } else {
-        (token.strip_suffix('s')?, 1.0)
-    };
-    let value: f64 = number.parse().ok()?;
-    Some(Duration::from_secs_f64(value / divisor))
-}
-
-/// Remove ANSI CSI/OSC escape sequences, preserving multibyte glyphs.
-fn strip_ansi(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c != '\u{1b}' {
-            out.push(c);
-            continue;
-        }
-        match chars.peek() {
-            // CSI: ESC [ ... <final letter>
-            Some('[') => {
-                chars.next();
-                while let Some(&next) = chars.peek() {
-                    chars.next();
-                    if next.is_ascii_alphabetic() {
-                        break;
-                    }
-                }
-            }
-            // OSC: ESC ] ... BEL
-            Some(']') => {
-                chars.next();
-                while let Some(&next) = chars.peek() {
-                    chars.next();
-                    if next == '\u{07}' {
-                        break;
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    out
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_known_duration_units() {
-        assert_eq!(parse_perf_duration("216.0ms"), Some(Duration::from_micros(216_000)));
-        assert_eq!(parse_perf_duration("39.0µs"), Some(Duration::from_nanos(39_000)));
-        assert_eq!(parse_perf_duration("1.5s"), Some(Duration::from_millis(1500)));
-        assert_eq!(parse_perf_duration("64%"), None);
-        assert_eq!(parse_perf_duration("gather"), None);
-    }
-
-    #[test]
-    fn finds_list_gather_line_in_rendered_perf() {
-        let sample = "\u{1b}[33m▌\u{1b}[0m ├─ list gather   \u{1b}[1m216.0ms\u{1b}[0m   64%\n";
-        assert_eq!(
-            list_gather_from_perf(sample),
-            Some(Duration::from_micros(216_000))
-        );
-    }
 }
