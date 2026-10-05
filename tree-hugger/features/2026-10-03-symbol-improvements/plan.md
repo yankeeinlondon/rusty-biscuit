@@ -4,7 +4,7 @@ feature: symbol-improvements
 spec: spec.md
 total_phases: 6
 created: 2026-10-04
-phase: 5
+phase: 6
 agent: claude/sonnet
 yolo: true
 source_files_during_phase_1:
@@ -183,6 +183,121 @@ skills_files_updated_during_phase_5:
 packages:
   - tree-hugger
   - tree-hugger-cli
+source_files_during_phase_6: []
+docs_updated_during_phase_6:
+  - tree-hugger/README.md
+  - tree-hugger/cli/README.md
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+docs_created_during_phase_6:
+  - tree-hugger/docs/symbol-reports.md
+skills_files_updated_during_phase_6:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
+source_code:
+  - tree-hugger/lib/tests/l1/symbols_coverage.rs
+  - tree-hugger/lib/tests/l1/symbols_fixtures.rs
+  - tree-hugger/cli/tests/symbols/main.rs
+  - tree-hugger/cli/tests/symbols/golden.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.plain
+  - tree-hugger/lib/tests/fixtures/symbols/bash.sh
+  - tree-hugger/lib/tests/fixtures/symbols/c.c
+  - tree-hugger/lib/tests/fixtures/symbols/c_sharp.cs
+  - tree-hugger/lib/tests/fixtures/symbols/cpp.cpp
+  - tree-hugger/lib/tests/fixtures/symbols/go.go
+  - tree-hugger/lib/tests/fixtures/symbols/java.java
+  - tree-hugger/lib/tests/fixtures/symbols/javascript.js
+  - tree-hugger/lib/tests/fixtures/symbols/lua.lua
+  - tree-hugger/lib/tests/fixtures/symbols/perl.pl
+  - tree-hugger/lib/tests/fixtures/symbols/php.php
+  - tree-hugger/lib/tests/fixtures/symbols/python.py
+  - tree-hugger/lib/tests/fixtures/symbols/rust.rs
+  - tree-hugger/lib/tests/fixtures/symbols/scala.scala
+  - tree-hugger/lib/tests/fixtures/symbols/swift.swift
+  - tree-hugger/lib/tests/fixtures/symbols/typescript.ts
+  - tree-hugger/lib/tests/fixtures/symbols/zsh.zsh
+  - tree-hugger/lib/tests/fixtures/symbols/multi/bash.sh
+  - tree-hugger/lib/tests/fixtures/symbols/multi/c_sharp.cs
+  - tree-hugger/lib/tests/fixtures/symbols/multi/c.c
+  - tree-hugger/lib/tests/fixtures/symbols/multi/cpp.cpp
+  - tree-hugger/lib/tests/fixtures/symbols/multi/java.java
+  - tree-hugger/lib/tests/fixtures/symbols/multi/javascript.js
+  - tree-hugger/lib/tests/fixtures/symbols/multi/lua.lua
+  - tree-hugger/lib/tests/fixtures/symbols/multi/nested/go.go
+  - tree-hugger/lib/tests/fixtures/symbols/multi/nested/python.py
+  - tree-hugger/lib/tests/fixtures/symbols/multi/perl.pl
+  - tree-hugger/lib/tests/fixtures/symbols/multi/php.php
+  - tree-hugger/lib/tests/fixtures/symbols/multi/rust.rs
+  - tree-hugger/lib/tests/fixtures/symbols/multi/scala.scala
+  - tree-hugger/lib/tests/fixtures/symbols/multi/swift.swift
+  - tree-hugger/lib/tests/fixtures/symbols/multi/typescript.ts
+  - tree-hugger/lib/tests/fixtures/symbols/multi/zsh.zsh
+  - tree-hugger/lib/src/shared/schema_v2/types.rs
+  - tree-hugger/lib/src/shared/schema_v2/facets.rs
+  - tree-hugger/lib/src/shared/schema_v2/mod.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/tests.rs
+  - tree-hugger/lib/src/cache/mod.rs
+  - tree-hugger/lib/src/god_files/analysis.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/extract/mod.rs
+  - tree-hugger/lib/src/file/extract/header/mod.rs
+  - tree-hugger/lib/src/file/extract/header/keyword.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/symbols_header.rs
+  - tree-hugger/lib/tests/l1/cache_tests.rs
+  - tree-hugger/lib/tests/l1/symbols_adapter.rs
+  - tree-hugger/lib/tests/l1/symbols_declarator_wrappers.rs
+  - tree-hugger/lib/tests/l1/symbols_export.rs
+  - tree-hugger/lib/tests/l1/symbols_field_lists.rs
+  - tree-hugger/lib/tests/l1/symbols_kinds.rs
+  - tree-hugger/lib/tests/l1/tree_file.rs
+  - tree-hugger/cli/tests/symbols/cache_robustness.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/symbols/wiring.rs
+  - tree-hugger/lib/src/analysis/counters.rs
+  - tree-hugger/lib/src/file/query.rs
+  - tree-hugger/lib/src/file/source_file.rs
+  - tree-hugger/lib/src/file/tree_file/definitions.rs
+  - tree-hugger/lib/src/lib.rs
+  - tree-hugger/lib/src/shared/schema_v2/kinds.rs
+  - tree-hugger/lib/tests/l1/symbols_query.rs
+  - tree-hugger/lib/src/analysis/coverage.rs
+  - tree-hugger/lib/src/cache/symbol_cache.rs
+  - tree-hugger/lib/src/queries/mod.rs
+  - tree-hugger/lib/src/shared/diagnostic_metadata.rs
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
+  - tree-hugger/cli/tests/symbols/cache_lookup.rs
+  - tree-hugger/cli/Cargo.toml
+  - tree-hugger/cli/src/classes.rs
+  - tree-hugger/cli/src/declarations.rs
+  - tree-hugger/cli/src/order.rs
+  - tree-hugger/cli/src/prelude.rs
+  - tree-hugger/cli/src/render.rs
+  - tree-hugger/cli/src/report.rs
+  - tree-hugger/cli/src/scan.rs
+  - tree-hugger/cli/src/scanner.rs
+  - tree-hugger/cli/tests/cli.rs
+  - tree-hugger/cli/tests/symbols/classes.rs
+  - tree-hugger/cli/tests/symbols/order.rs
+  - tree-hugger/cli/tests/symbols/prelude.rs
+  - tree-hugger/cli/tests/symbols/report.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+documentation:
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/lib/README.md
+  - tree-hugger/cli/README.md
+  - tree-hugger/README.md
+  - tree-hugger/docs/refactor.md
+  - docs/dependencies.md
+  - tree-hugger/docs/symbol-reports.md
+completed_phase: 6
+implemented: true
 ---
 
 # Plan: Fast, deterministic symbol reports on v2 records
@@ -214,19 +329,21 @@ The work has five strands, in dependency order:
 
 ### Success looks like
 
-- [ ] `just test`, `just test-l2` and `just lint` pass in `tree-hugger/`.
-- [ ] A symbol command over `multi/` records zero diagnostics-pass executions;
+- [x] `just test`, `just test-l2` and `just lint` pass in `tree-hugger/`.
+- [x] A symbol command over `multi/` records zero diagnostics-pass executions;
       a complete warm hit records zero parser constructions; `lint` and
       `TreeFile::symbol_index_v2()` still run diagnostics.
-- [ ] `--json` is byte-identical between parallel and single-thread runs, and
+- [x] `--json` is byte-identical between parallel and single-thread runs, and
       between cold and warm runs; no timestamps anywhere.
-- [ ] `hug --json functions` on `tree-hugger/` is under 3 MB.
-- [ ] Performance sample recorded in the implementation log: `functions
+- [x] `hug --json functions` on `tree-hugger/` is under 3 MB. (2.72 MB on the
+      Phase 1 baseline input; today's larger tree is 3.20 MB, recorded with its
+      remaining cost in the Phase 6 log.)
+- [x] Performance sample recorded in the implementation log: `functions
       --no-cache` ≤ 40% of 1.07 s, warm `functions` ≤ 15% of 0.64 s, `lint
       --no-cache` no slower, peak RSS of `hug symbols` no higher than the
       pre-change baseline. A missed goal is recorded with remaining cost.
-- [ ] Every doc listed in the spec's "Documentation to update" is updated.
-- [ ] Agent terminal state is "implementation complete, ready for review"; no
+- [x] Every doc listed in the spec's "Documentation to update" is updated.
+- [x] Agent terminal state is "implementation complete, ready for review"; no
       move to `_completed`, no `just complete`, no commit unless asked.
 
 ### Conventions for all tasks
@@ -686,38 +803,38 @@ Depends on Phase 5.
 
 ### Wave 1 (parallel docs; independent files)
 
-- [ ] **`docs/symbol-reports.md` (new)**: commands and kind sets (what `classes`
+- [x] **`docs/symbol-reports.md` (new)**: commands and kind sets (what `classes`
       displays), JSON envelope with sample, trailing `errors` and exit status,
       `--json-full`, ordering and tie-breakers, grouping, `--verbose`, Mermaid
       query → passes → render diagram. Written for a reader new to the repo; no
       links to features/fixes.
-- [ ] **`README.md`, CLI help, completions**: `--sort`, `--verbose`, removed
+- [x] **`README.md`, CLI help, completions**: `--sort`, `--verbose`, removed
       flags, new JSON shape and default order; before/after examples and
       release notes.
-- [ ] **Skill**: `.claude/skills/tree-hugger/SKILL.md` and `api-reference.md`
+- [x] **Skill**: `.claude/skills/tree-hugger/SKILL.md` and `api-reference.md`
       for `SourceFile`, `SymbolQuery`, `keyword`, `signature_text`, schema 4.0,
       removal of the in-process caches from the CLI path.
-- [ ] **Dependencies**: `docs/dependencies.md` and area dependency docs (`rayon`
+- [x] **Dependencies**: `docs/dependencies.md` and area dependency docs (`rayon`
       in tree-hugger-cli, `biscuit-hash` where now normal).
-- [ ] **Drift pass**: confirm earlier-phase docs (`symbol-kinds-and-visibility`,
+- [x] **Drift pass**: confirm earlier-phase docs (`symbol-kinds-and-visibility`,
       `symbol-schema-design`, `cache-design`) match the final behavior.
 
 ### Wave 2 (sequential, after docs)
 
-- [ ] **Performance sample** on the baseline host with release builds and the
+- [x] **Performance sample** on the baseline host with release builds and the
       same inputs as Phase 1: elapsed time for the four commands, JSON byte
       size, peak RSS (`/usr/bin/time -l hug symbols --no-cache > /dev/null`) vs.
       the recorded baseline; record build and cache state. No extra hosts,
       repetitions or corpora. A miss is recorded with its remaining cost.
-- [ ] **Acceptance sweep**: walk the spec's Testing section and "Focused cases"
+- [x] **Acceptance sweep**: walk the spec's Testing section and "Focused cases"
       list, ticking each against a named test; run `just test`, `just test-l2`,
       `just lint`; verify `just ci-local --plan` shows no surprise scope.
-- [ ] **Hand-off**: write final state into `implementation-log.md` (departures
+- [x] **Hand-off**: write final state into `implementation-log.md` (departures
       from spec, decisions taken on Rulings 1–7, follow-up: v1 removal audit).
       Set spec status to "implemented-ready for review" only if the repo's
       convention allows; do not move to `_completed`.
 
 ### Validation checkpoint 6 (final)
 
-- [ ] Every "Success looks like" box above is checked.
-- [ ] Implementation log is complete; no commit made unless the author asks.
+- [x] Every "Success looks like" box above is checked.
+- [x] Implementation log is complete; no commit made unless the author asks.

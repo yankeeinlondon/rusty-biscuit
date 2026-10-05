@@ -2,14 +2,15 @@
 kind: feature
 name: symbol-improvements
 date: 2026-10-03
-status: finalized-spec
+status: implemented
 clarified: true
 clarified_by: claude/opus
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-03
 review_note: "the clarification process served as a review"
-review_iterations: 0
+review_iterations: 3
+completed: true
 needs_rulings: false
 $schema:
   status: |-
@@ -39,29 +40,31 @@ depends-on:
   - 2026-10-03-visibility-and-kind
 related:
   - 2026-10-03-symbol-filters-and-reports
+implemented: true
+implemented_by: claude/opus
 human_review: false
 message_to_agent: |-
-  Phases 1-5 are done; read the "## Phase 5" section of
-  implementation-log.md before starting Phase 6. Points that affect it:
+  All six phases are implemented; the plan is fully checked off. The state is
+  "implementation complete, ready for review". Do not move this directory to
+  `_completed` and do not run `just complete`; the author does that after the
+  review cycle.
 
-  - The CLI is record-native: `cli/src/declarations.rs` runs the four
-    declaration commands (per-command `SymbolQuery`, rayon chunks delivered
-    in file order, JSON envelope with trailing `errors`, one renderer in
-    `render.rs`). `--sort file|name|kind`, `--json-full` and `--verbose`
-    exist; `--sort-by-kind`/`--sort-by-module` are gone.
-  - `docs/symbol-reports.md` does not exist yet (Phase 6 Wave 1). The CLI
-    README already documents the envelope, `--sort`, `--json-full` and
-    `--verbose`; use it and the Phase 5 log "Behavior as built" section as
-    the source. Do not link features/fixes from docs.
-  - `hug --verbose` prints a stats line with parse / definition-capture /
-    diagnostics-run counts; use it for the performance sample's work
-    evidence. Under tests, `Scratch` pins RAYON_NUM_THREADS=2.
-  - JSON size: 2.72 MB on the Phase 1 baseline input (exported at commit
-    60e3b841), 3.10 MB on today's larger tree; record both in the sample.
-  - Record IDs still hash the absolute path (spec forbids altering IDs);
-    logged as a follow-up, not a Phase 6 task.
-  - Windows cross-check could not run (host storage preflight); only
-    compile evidence exists for Windows.
+  For a reviewer, read "## Hand-off: final state" at the end of
+  implementation-log.md first. It lists how Rulings 1-7 were applied, every
+  departure from this spec, and the follow-ups. The points most worth a
+  reviewer's attention:
+
+  - Performance: every target is met (functions --no-cache 6.6% of before,
+    warm 4.1%, lint 12.8%, peak RSS 1.95 GB vs 3.48 GB). The JSON size target
+    (under 3 MB) is met on the Phase 1 baseline input (2.72 MB) but today's
+    larger tree gives 3.20 MB; trimming further is a schema decision.
+  - Ruling 4 departed: prelude records use the existing
+    `visibility.is_synthetic`, so no field was added.
+  - The spec's "v1 adapter maps is_recursive to false" has no subject; v1
+    `SymbolInfo` has no recursion field.
+  - Phase 6 changed docs only (new `tree-hugger/docs/symbol-reports.md`, plus
+    README, skill and drift fixes in three docs). Windows has compile-only
+    local evidence; Windows CI on `main` covers behavior.
 ---
 
 # Fast, deterministic symbol reports on v2 records

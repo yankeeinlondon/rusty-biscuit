@@ -179,6 +179,121 @@ docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
   - .claude/skills/tree-hugger/SKILL.md
   - .claude/skills/tree-hugger/api-reference.md
+source_files_during_phase_6: []
+docs_updated_during_phase_6:
+  - tree-hugger/README.md
+  - tree-hugger/cli/README.md
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+docs_created_during_phase_6:
+  - tree-hugger/docs/symbol-reports.md
+skills_files_updated_during_phase_6:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
+source_code:
+  - tree-hugger/lib/tests/l1/symbols_coverage.rs
+  - tree-hugger/lib/tests/l1/symbols_fixtures.rs
+  - tree-hugger/cli/tests/symbols/main.rs
+  - tree-hugger/cli/tests/symbols/golden.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.plain
+  - tree-hugger/lib/tests/fixtures/symbols/bash.sh
+  - tree-hugger/lib/tests/fixtures/symbols/c.c
+  - tree-hugger/lib/tests/fixtures/symbols/c_sharp.cs
+  - tree-hugger/lib/tests/fixtures/symbols/cpp.cpp
+  - tree-hugger/lib/tests/fixtures/symbols/go.go
+  - tree-hugger/lib/tests/fixtures/symbols/java.java
+  - tree-hugger/lib/tests/fixtures/symbols/javascript.js
+  - tree-hugger/lib/tests/fixtures/symbols/lua.lua
+  - tree-hugger/lib/tests/fixtures/symbols/perl.pl
+  - tree-hugger/lib/tests/fixtures/symbols/php.php
+  - tree-hugger/lib/tests/fixtures/symbols/python.py
+  - tree-hugger/lib/tests/fixtures/symbols/rust.rs
+  - tree-hugger/lib/tests/fixtures/symbols/scala.scala
+  - tree-hugger/lib/tests/fixtures/symbols/swift.swift
+  - tree-hugger/lib/tests/fixtures/symbols/typescript.ts
+  - tree-hugger/lib/tests/fixtures/symbols/zsh.zsh
+  - tree-hugger/lib/tests/fixtures/symbols/multi/bash.sh
+  - tree-hugger/lib/tests/fixtures/symbols/multi/c_sharp.cs
+  - tree-hugger/lib/tests/fixtures/symbols/multi/c.c
+  - tree-hugger/lib/tests/fixtures/symbols/multi/cpp.cpp
+  - tree-hugger/lib/tests/fixtures/symbols/multi/java.java
+  - tree-hugger/lib/tests/fixtures/symbols/multi/javascript.js
+  - tree-hugger/lib/tests/fixtures/symbols/multi/lua.lua
+  - tree-hugger/lib/tests/fixtures/symbols/multi/nested/go.go
+  - tree-hugger/lib/tests/fixtures/symbols/multi/nested/python.py
+  - tree-hugger/lib/tests/fixtures/symbols/multi/perl.pl
+  - tree-hugger/lib/tests/fixtures/symbols/multi/php.php
+  - tree-hugger/lib/tests/fixtures/symbols/multi/rust.rs
+  - tree-hugger/lib/tests/fixtures/symbols/multi/scala.scala
+  - tree-hugger/lib/tests/fixtures/symbols/multi/swift.swift
+  - tree-hugger/lib/tests/fixtures/symbols/multi/typescript.ts
+  - tree-hugger/lib/tests/fixtures/symbols/multi/zsh.zsh
+  - tree-hugger/lib/src/shared/schema_v2/types.rs
+  - tree-hugger/lib/src/shared/schema_v2/facets.rs
+  - tree-hugger/lib/src/shared/schema_v2/mod.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/tests.rs
+  - tree-hugger/lib/src/cache/mod.rs
+  - tree-hugger/lib/src/god_files/analysis.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/extract/mod.rs
+  - tree-hugger/lib/src/file/extract/header/mod.rs
+  - tree-hugger/lib/src/file/extract/header/keyword.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/symbols_header.rs
+  - tree-hugger/lib/tests/l1/cache_tests.rs
+  - tree-hugger/lib/tests/l1/symbols_adapter.rs
+  - tree-hugger/lib/tests/l1/symbols_declarator_wrappers.rs
+  - tree-hugger/lib/tests/l1/symbols_export.rs
+  - tree-hugger/lib/tests/l1/symbols_field_lists.rs
+  - tree-hugger/lib/tests/l1/symbols_kinds.rs
+  - tree-hugger/lib/tests/l1/tree_file.rs
+  - tree-hugger/cli/tests/symbols/cache_robustness.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/symbols/wiring.rs
+  - tree-hugger/lib/src/analysis/counters.rs
+  - tree-hugger/lib/src/file/query.rs
+  - tree-hugger/lib/src/file/source_file.rs
+  - tree-hugger/lib/src/file/tree_file/definitions.rs
+  - tree-hugger/lib/src/lib.rs
+  - tree-hugger/lib/src/shared/schema_v2/kinds.rs
+  - tree-hugger/lib/tests/l1/symbols_query.rs
+  - tree-hugger/lib/src/analysis/coverage.rs
+  - tree-hugger/lib/src/cache/symbol_cache.rs
+  - tree-hugger/lib/src/queries/mod.rs
+  - tree-hugger/lib/src/shared/diagnostic_metadata.rs
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
+  - tree-hugger/cli/tests/symbols/cache_lookup.rs
+  - tree-hugger/cli/Cargo.toml
+  - tree-hugger/cli/src/classes.rs
+  - tree-hugger/cli/src/declarations.rs
+  - tree-hugger/cli/src/order.rs
+  - tree-hugger/cli/src/prelude.rs
+  - tree-hugger/cli/src/render.rs
+  - tree-hugger/cli/src/report.rs
+  - tree-hugger/cli/src/scan.rs
+  - tree-hugger/cli/src/scanner.rs
+  - tree-hugger/cli/tests/cli.rs
+  - tree-hugger/cli/tests/symbols/classes.rs
+  - tree-hugger/cli/tests/symbols/order.rs
+  - tree-hugger/cli/tests/symbols/prelude.rs
+  - tree-hugger/cli/tests/symbols/report.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+documentation:
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/lib/README.md
+  - tree-hugger/cli/README.md
+  - tree-hugger/README.md
+  - tree-hugger/docs/refactor.md
+  - docs/dependencies.md
+  - tree-hugger/docs/symbol-reports.md
+completed_phase: 6
+implemented: true
 ---
 
 # Implementation Log for 2026-10-03-symbol-improvements (6 phases)
@@ -1291,3 +1406,255 @@ way to produce it.
 - Phase 6 writes `docs/symbol-reports.md`; this phase updated the READMEs,
   cache design, schema design and dependency docs only where they had
   become wrong.
+
+## Phase 6
+
+Documentation, performance sample, acceptance. Implemented by claude/opus on
+2026-10-04. Entries are written as the work lands.
+
+### Performance sample
+
+- **Tree:** `b76a33baa` (`feat/symbols`, clean; Phase 5 closed). **Build:**
+  `cargo build --release -p tree-hugger-cli` (workspace `release` profile),
+  copied to `/tmp/th-baseline/hug-post`. **Baseline binary:** the Phase 1
+  release build of `60e3b841` kept at `/tmp/th-baseline/hug-pre`.
+- **Host:** the Phase 1 host (Apple M4 Max, 16 cores, macOS). Load average
+  24 → 14 during the timing run (lower than Phase 1's 38–45).
+- **Method:** as Phase 1 recommended, both binaries timed back-to-back in one
+  hyperfine invocation (`-N --warmup 1 --runs 5`) in `tree-hugger/`, so both
+  see the same load and the same inputs (today's tree: 131 files). Each binary
+  had its own `TMPDIR` cache; the warm runs follow hyperfine's warmup run.
+  `-i` was passed, so every command was re-run once by hand: all exit `0`,
+  `pre` and `post` print the same line counts (`functions` 1,853, `imports`
+  773, `lint` 8), and the `lint` and `imports` outputs are byte-identical
+  between the binaries.
+
+| Command (in `tree-hugger/`) | Pre (`60e3b841`) | Post | Ratio | Target | Met |
+|---|---|---|---|---|---|
+| `hug functions --no-cache` | 1.859 s ± 0.015 | 0.123 s ± 0.004 | 6.6% | ≤ 40% | yes |
+| `hug functions` (warm) | 1.078 s ± 0.004 | 0.044 s ± 0.001 | 4.1% | ≤ 15% | yes |
+| `hug lint --no-cache` | 1.883 s ± 0.050 | 0.241 s ± 0.050 | 12.8% | no slower | yes |
+| `hug imports --no-cache` | 1.852 s ± 0.020 | 0.100 s ± 0.004 | 5.4% | (reference) | — |
+
+The post numbers include the parallel scan. To separate parallelism from the
+removed work, the post binary was also timed with `RAYON_NUM_THREADS=1`:
+`functions --no-cache` 0.435 s (23% of pre), `lint --no-cache` 0.782 s (42%),
+warm `functions` 0.055 s (5.1%). Every target holds on one thread too. User
+CPU tells the same story: `functions --no-cache` uses 0.56 s of CPU across
+workers against 1.82 s before.
+
+**Work evidence** (`hug --verbose`, post binary, `tree-hugger/`):
+
+| Run | Stats line |
+|---|---|
+| `functions --no-cache` | `cache: disabled; parsed 131 files, 131 definition captures, 0 diagnostics runs` |
+| `lint --no-cache` | `cache: disabled; parsed 131 files, 131 definition captures, 131 diagnostics runs` |
+| `functions` (warm) | `cache: 131 hits, 0 partial hits, 0 misses; parsed 0 files, 0 definition captures, 0 diagnostics runs` |
+
+**Peak RSS** (repository root, `/usr/bin/time -l hug symbols --no-cache >
+/dev/null`, post binary, one run): **1,950,662,656 B (1.95 GB)**, elapsed
+8.51 s (23.55 s user), against the Phase 1 baseline of 3.48 GB (184–275 s).
+Target "no higher than baseline": met, 56% of baseline. The baseline was not
+re-measured (the plan compares against the recorded figure).
+
+**JSON size** (`hug --json functions --no-cache`):
+
+| Input | Pre | Post | Target |
+|---|---|---|---|
+| Phase 1 baseline tree (`git archive 60e3b841 tree-hugger` into `/tmp/th-perf/base`, `git init` so the scan has a root) | 38,688,247 B | **2,722,595 B (2.72 MB)** | < 3 MB: met |
+| Today's `tree-hugger/` (131 files) | 46,774,604 B | 3,197,216 B (3.20 MB) | over by 0.20 MB |
+
+The target was set on the baseline input and is met there. Today's tree has
+more functions (the phases added code and tests); the remaining cost per
+record is the one recorded in Phase 5 (kind data, three spans, `type_info`
+views repeating the return type, always-serialized visibility booleans).
+Trimming it is a schema decision, not a Phase 6 task. `hug --json symbols` on
+today's tree is 15,564,617 B (was 50.0 MB on the smaller baseline tree);
+`hug symbols` prints 13,114 lines.
+
+### Documentation (Wave 1)
+
+- **`tree-hugger/docs/symbol-reports.md` (new).** Commands and kind sets
+  (with what `classes` displays), narrowing filters and `--prelude`, a
+  Mermaid query → cache → passes → order → output diagram, terminal labels,
+  `--sort` orders, tie-breakers, path order, grouping, JSON file order, the
+  JSON envelope with a real (abridged) sample, field table, what default
+  reports omit, `--json-full` and its rejections, failed files and the exit
+  status table, `--verbose`. Samples were produced with the release binary
+  over a scratch repo, not written by hand. No feature/fix is linked or named.
+  `cli/src/order.rs` already pointed at this page.
+- **READMEs.** `tree-hugger/README.md`: link to the new page; a "Release
+  Notes: record-native symbol reports" section (speed figures from the
+  sample, new default order with a before/after listing, new JSON shape with
+  before/after envelope, `--json-full`, keyword labels, failed files, quiet
+  stderr); its "Running Tests" section still said `cargo test -p
+  tree-hugger-lib` (wrong package name, not nextest) and now lists `just
+  test` / `just test-l2` / `just lint`. `cli/README.md`: link to the new
+  page (it already documented `--sort`, `--verbose`, `--json-full`, the
+  envelope and the removed flags).
+- **CLI help and completions:** already current (Phase 5). `hug functions
+  --help` documents `--sort` and its tie-breakers, `hug --help` documents
+  `--verbose`, `--sort-by-kind` is rejected. Completions are clap's dynamic
+  completions, generated from the same definitions, so they need no edit.
+- **Skill.** `SKILL.md`: the new page in "Detailed Documentation" and in the
+  CLI declaration-reports bullet. `api-reference.md`: a "Caches" section
+  (`SymbolCache` is the only CLI cache; `InProcessCache`,
+  `InMemorySymbolCache`, `SymbolSnapshot`, `AnalyzerFingerprint` are
+  library-only), `is_recursive` (`Some(Unknown)` / `None`), and the "JSON
+  Output Types" section no longer claims `PackageSummary` is every CLI
+  `--json` (only `imports`/`lint`). `SourceFile`, `SymbolQuery`, `keyword`,
+  `signature_text` and schema 4.0 were already documented in earlier phases.
+- **Dependencies:** no change needed. `docs/dependencies.md` already records
+  `rayon` in `tree-hugger-cli` (Phase 5) and `biscuit-hash` as a CLI
+  dev-dependency; `biscuit-hash` was already a normal `tree-hugger`
+  dependency before this feature (checked against `60e3b841`'s
+  `lib/Cargo.toml`). The area has no `docs/dependencies.md`.
+
+### Drift pass
+
+A read-only subagent compared `cache-design.md`, `symbol-schema-design.md`
+and `symbol-kinds-and-visibility.md` with the code; every finding was
+re-checked against the cited source before editing. In each case the code
+was taken as correct.
+
+| Doc | Drift | Resolution |
+|---|---|---|
+| cache-design | "`lint` and `--json-full` add diagnostics" | `--json-full` asks for every capability |
+| cache-design | `--verbose` section omitted `cache: disabled;`, `reused in this run` and that an absent entry is not listed | Added |
+| cache-design | Key "a digest of four things" (code also hashes a fixed `symbols` tag) | Says so |
+| symbol-schema-design | Design principle "parse -> bind -> infer -> doc parse" | The real pass graph |
+| symbol-schema-design | `Parameter(ParameterData)` | `ParameterSymbolData` with its fields |
+| symbol-schema-design | `ParsedDocs` listed six fields that do not exist; `DocsFacet.parsed` not optional | Real fields; the others marked **planned** (today they land in `tags`) |
+| symbol-schema-design | `Attribute { name, arguments, raw_text, span }` | `{ name, value }` |
+| symbol-schema-design | `FileSymbolIndex` missing `schema_version`, `completed_passes` | Added |
+| symbol-schema-design | Import/export records "should" use `SymbolRef` | They do |
+| symbol-schema-design | Stable key ends in the declaration start byte; "BLAKE3 recommended" | Ends in the sibling ordinal (same kind, container, name), kind's variant name; BLAKE3 is what is used; example added |
+| symbol-schema-design | 4.0 example showed `rev.5` | `rev.6` |
+| symbol-kinds-and-visibility | Diagram drew `SymbolInfo → hug output` | `SymbolRecord → hug output` (the CLI renders records since Phase 5) |
+| symbol-kinds-and-visibility | No statement of which kinds `hug` labels with the keyword | New "Labels in `hug` output" subsection |
+
+Most schema-design drifts predate this feature; they were fixed because
+`docs/` is the current record. Checked and clean: no doc names a feature/fix
+or links into `features/`/`fixes/`; `EXTRACTOR_REVISION` (6) matches
+`cache-design.md`; schema 4.0, `container_name`, `keyword`,
+`signature_text`, no timestamps, the Capability table and `is_recursive`
+match. `docs/symbol-schema.md` mentions `module_path`, but it is a generic
+design essay, not this library's record schema; left alone.
+`docs/prelude-semantics.md` is likewise a research note, so the new page
+describes `--prelude` itself instead of linking it. No test reads any of
+the edited docs (grep of both packages' tests and sources).
+
+### Acceptance sweep (spec "Testing" and "Focused cases")
+
+| Spec case | Test(s) (L1 unless marked) |
+|---|---|
+| Keyword matrix, every language; a keyword in a comment never labels | `tree-hugger::l1 symbols_header::keyword_matrix_holds_for_every_language`, `a_keyword_inside_a_comment_never_becomes_the_keyword`, `less_common_declarations_report_their_keyword` |
+| Signature matrix; contiguous sub-range; exclusions; `None` not the body | `symbols_header::signature_matrix_holds_for_every_language`, `every_fixture_signature_is_a_contiguous_part_of_its_declaration_text`, `headers_that_cannot_be_isolated_are_none`, `the_documented_comparison_rows_hold` |
+| Coverage guard (fixture + matrix row per language; `multi/`) | `symbols_coverage::every_language_has_matrix_rows`, `every_language_has_a_primary_symbols_fixture`, `every_symbols_fixture_parses_without_syntax_errors`, `multi_tree_has_one_clean_file_per_language` |
+| Cache correctness per language (warm = `--no-cache`) | `symbols_cache::every_fixture_is_a_complete_warm_hit_equal_to_an_uncached_run` |
+| Goldens (`symbols.plain`, `symbols.json`) | `tree-hugger-cli::symbols golden::plain_symbols_over_multi_match_the_golden`, `golden::json_symbols_over_multi_match_the_golden` |
+| `functions`/`types` kind sets; `classes` `symbols` + `members` | `report::functions_and_types_select_exactly_their_kind_sets`, `classes::classes_summarize_classes_types_interfaces_and_traits` |
+| JSON envelope, round trip, no `declaration_text`; `--json-full` indexes and selector rejection; empty selection | `report::the_json_envelope_holds_only_selected_records_and_ends_with_errors`, `report::json_full_reports_complete_indexes`, `report::json_full_rejects_symbol_selectors_and_other_commands`, `report::an_empty_selection_is_an_empty_files_array` |
+| JSON with a failed file (`--json`, `--json-full`, stderr, exit) | `report::a_failed_file_is_reported_last_on_stderr_and_in_the_exit_status` |
+| Performance counters: zero diagnostics over `multi/`, one capture per file, warm hit zero parses, `lint`/`symbol_index_v2()` still diagnose | `symbols_query::a_symbol_query_over_multi_runs_no_diagnostics_and_one_capture_per_file`, `symbols_query::the_complete_index_and_lint_still_run_diagnostics_from_one_capture`, `cache_lookup::symbol_commands_run_no_diagnostics`, `cache_lookup::complete_warm_hits_parse_nothing`, `cache_lookup::lint_and_json_full_run_diagnostics` |
+| Parallel = single thread | `golden::json_symbols_over_multi_are_identical_with_one_thread`, `golden::json_full_over_multi_is_identical_with_one_thread` |
+| Two runs identical, cold then warm | `golden::json_symbols_over_multi_are_identical_cold_and_warm`, `golden::json_symbols_over_multi_are_identical_across_runs` |
+| Cache: query text, revision, language, schema each a miss; kinds/capabilities change coverage not key; widening runs only missing work; third narrow run a hit; corrupt and concurrent writes | `symbols_cache::each_key_input_and_stored_identity_decides_a_miss`, `projected_results_equal_uncached_queries`, `projected_results_over_multi_equal_uncached_queries`, `widening_capabilities_runs_only_the_missing_passes`, `widening_kinds_reextracts_once_for_the_union`, `a_corrupt_entry_is_a_miss_and_is_replaced`, `concurrent_writers_leave_a_readable_entry_whose_coverage_matches`; CLI `cache_lookup::concurrent_processes_leave_one_readable_entry`, `cache_robustness::*` |
+| Binding: index = full scan; distinct unresolved refs kept; `is_recursive` `Unknown`/`None` | `tree-hugger` unit `analysis::tests::name_index_selects_the_same_targets_as_a_full_scan`, `name_index_keeps_the_first_of_equal_candidates`; `symbols_query::distinct_unresolved_references_are_all_kept`, `is_recursive_is_unknown_when_semantics_run_and_absent_otherwise`. The spec's "v1 adapter maps both to `false`" has no subject: v1 `SymbolInfo` has no recursion field (Phase 3 decision) |
+| Prelude: aliases, unresolved, env names, outside targets, no duplicate parse | `prelude::prelude_exports_are_synthetic_records_at_their_declarations`, `prelude_environment_names_select_declarations`, `a_target_outside_the_scan_is_resolved_but_not_listed`, `prelude_and_scan_parse_each_file_once` |
+| Order: each `--sort`, tie-breakers, groups, JSON file order, argument errors | `order::each_sort_order_lists_declarations_by_its_keys_and_tie_breakers`, `sort_name_keeps_same_named_types_together_in_path_order`, `sort_orders_declarations_within_file_and_directory_groups`, `json_keeps_file_order_and_sorts_within_each_file`, `removed_and_misplaced_sort_flags_are_argument_errors` |
+| Classes: interface/trait containers, static/instance sections, field flags without member kinds | `classes::*` (three tests) |
+| Output failures: broken pipe, file errors, deterministic parallel error order | `report::a_closed_stdout_ends_the_run_quietly`, `report::failures_are_reported_in_file_order_with_any_thread_count` |
+| Quiet stderr; `--verbose` stats and failure messages | `cache_lookup::cache_hits_and_cache_failures_print_nothing`, `cache_lookup::verbose_reports_cache_use_and_cache_failures` |
+| Performance sample | this section, above |
+
+Every case maps to a named test that exists and passed in the gate run
+below. Phase 6 adds no code and so no new test; the Input Robustness Matrix
+does not apply (no reader changed).
+
+### Gates run
+
+- `just test` (tree-hugger + tree-hugger-cli L1): **797/797 passed**
+  (58 s).
+- `just lint`: exit 0, no warnings.
+- `just test-l2`: 3/3 passed (tmux, WezTerm; Kitty returns at once as when
+  unavailable).
+- `just check-tier-coverage tree-hugger`: 0 stranded.
+- `just ci-local --plan`: only `tree-hugger` and `tree-hugger-cli` cells,
+  plus two narrowed test-input cells (`sniff` for `Cargo.lock`,
+  `test-toolkit` for `docs/dependencies.md`), both from earlier phases'
+  changes. No surprise scope.
+- Cross-OS: not run in this phase. Phase 6 changes documentation only; the
+  Phase 5 evidence stands (Linux cross-check 167/167; Windows compile-only,
+  host storage preflight refused; WSL via nightly CI).
+- No pre-existing failures.
+
+### Incidents
+
+- The verification loop for the hyperfine runs first failed with `unexpected
+  argument '--no-cache'`: zsh does not word-split an unquoted `$c` (the same
+  trap Phase 1 recorded). Hyperfine itself splits its command strings, so its
+  timings were valid; the hand-run re-check used `${=c}`.
+- `cd tree-hugger` from inside `tree-hugger/` again jumped (zoxide) to
+  `/Volumes/coding/personal/rusty-biscuit/tree-hugger`; two read-only greps
+  ran there. Caught by a missing file; everything after used absolute paths.
+
+## Hand-off: final state
+
+**Implementation complete, ready for review.** All six phases are
+implemented; the spec directory stays where it is (the author moves it to
+`_completed` after review), and nothing was committed in this phase.
+
+### Rulings 1–7, as finally applied
+
+| # | Ruling | Outcome |
+|---|---|---|
+| 1 | Chunks of `4 × current_num_threads()`, delivered in file order | Built (`scan::in_file_order`). Peak RSS of whole-repo `hug symbols` fell from 3.48 GB to 1.95 GB |
+| 2 | Symbol selectors rejected by `--json-full` | Built with the Phase 1 list (name filters classified by the scan's own classifier, `--exclude-symbols`, `--exported`, `--prelude`, `classes` `--name`/`--static-only`/`--instance-only`); `lint`/`imports` reject `--json-full` too |
+| 3 | `classes --json` `members` hold the flag-filtered set | Built |
+| 4 | Marker for synthetic prelude records | **Departure:** no new field. The existing `visibility.is_synthetic` (with `is_reexported`) carries it, so the schema stayed at 4.0 without an additive field |
+| 5 | `is_recursive` `Unknown` | Built: `Some(Unknown)` whenever semantics run, `None` otherwise. v1 has no field, so there is nothing to map |
+| 6 | Coverage encoding (`covered_kinds` `"all"` or ascending list, `completed_capabilities`, malformed = miss) | Built; unordered or repeated lists are a miss too |
+| 7 | Adapters read `container_name`; `--group-by-module` groups by directory | Built as ruled |
+
+### Departures from the spec (all recorded in their phase sections)
+
+- Prelude marker reuses `visibility.is_synthetic` (Ruling 4, above).
+- "Run only the missing passes" is literal for docs, semantics and
+  containment; references and diagnostics re-parse on a partial hit, since
+  their inputs (live tree, syntax nodes) are not cacheable (Phase 4).
+- Imports are always part of `Declarations`; no imports capability. Phase 3
+  left the question to this sample: `imports --no-cache` now takes 0.10 s
+  (5.4% of before) against 0.12 s for `functions`, so a separate capability
+  would save almost nothing. Not added.
+- Default `--json` drops `docs.comments` (attached comments belong to the
+  docs pass no listing requests) and rewrites `identity.stable_key`'s path
+  segment scan-root-relative; IDs are unchanged (Phase 5).
+- The JSON size target is met on the input it was set on (2.72 MB) but not
+  on today's larger tree (3.20 MB); the remaining per-record cost is listed
+  above and needs a schema decision.
+- The spec's "v1 adapter maps `is_recursive` to `false`" does not apply:
+  v1 has no such field.
+
+### Follow-ups
+
+1. **v1 removal audit** (spec Open Question "Removing v1 from the library").
+   Remaining v1 users seen in this work: `cli/src/prelude.rs` builds the
+   synthetic record through `SymbolRecord::from(SymbolInfo { … })` and
+   resolves exports with v1 `SymbolInfo`/`SymbolKind`; `cli/src/render.rs`
+   converts `SymbolKindV2` to v1 `SymbolKind` for labels and colors;
+   `imports` and `lint` still emit the v1 `PackageSummary`/`FileSummary`
+   JSON; `TreeFile::symbols()` and the v1↔v2 adapter remain public, and the
+   in-process caches (`InProcessCache`, `InMemorySymbolCache`,
+   `SymbolSnapshot`, `AnalyzerFingerprint`) have no CLI caller. An audit
+   should list every public v1 entry point with its callers before deciding.
+2. **Root-independent record IDs.** IDs hash the analyzed absolute path, so
+   the same file has different IDs in two checkouts (Phase 5).
+3. **Record size.** Trimming kind data, spans, repeated `type_info` views
+   and always-serialized visibility booleans would bring today's
+   `--json functions` under 3 MB; it is a schema change.
+4. **Windows behavior evidence.** Only compile evidence exists locally
+   (host storage preflight); the first push to `main` runs Windows CI.
+5. Pre-existing, noticed only: the Go `Grow(amount int) (amount int)` return
+   in the signature (Phase 1), and `skills/tree-hugger/diagnostics.md` still
+   importing from `tree_hugger_lib` (Phase 3).
