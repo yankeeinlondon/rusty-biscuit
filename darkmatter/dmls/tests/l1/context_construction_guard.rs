@@ -23,5 +23,5 @@ fn production_source_builds_contexts_only_through_the_builder() {
     // include above (`source-inputs` in Cargo.toml).
     let _ = include_str!("../../../cli/tests/common/context_guard.rs");
     let _ = include_str!("../../../cli/tests/common/source_scan.rs");
-    context_guard::assert_guarded("dmls", &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), ALLOWLIST);
+    context_guard::assert_guarded("dmls", &biscuit_test_harness::manifest_dir!().join("src"), ALLOWLIST);
 }

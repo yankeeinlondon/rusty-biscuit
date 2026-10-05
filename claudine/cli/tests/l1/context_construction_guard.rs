@@ -196,7 +196,7 @@ fn production_source_builds_contexts_only_through_the_builder() {
     let _ = include_str!("../../../../darkmatter/cli/tests/common/source_scan.rs");
     context_guard::assert_guarded(
         "claudine-cli",
-        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+        &biscuit_test_harness::manifest_dir!().join("src"),
         ALLOWLIST,
     );
 }

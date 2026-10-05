@@ -5690,7 +5690,7 @@ class RealWorkspaceDocumentationOnlyTests(unittest.TestCase):
     #: read by any test, which a document like `docs/topics/ci-cd.md` is.
     LEVELS = (
         "docs/comment-quality.md",
-        "darkmatter/docs/topics/caching.md",
+        "darkmatter/README.md",
         "biscuit-file/README.md",
     )
 
@@ -5910,6 +5910,7 @@ class RealWorkspaceRetirementScopeTests(unittest.TestCase):
                 "claudine-gen",
                 "darkmatter",
                 "darkmatter-cli",
+                "dmls",
                 "messenger",
                 "messenger-cli",
                 "model-citizen",
