@@ -1,7 +1,7 @@
 ---
 total_phases: 7
 created: 2026-10-04
-phase: 1
+phase: 2
 agent: claude/sonnet
 yolo: true
 source_files_during_phase_1:
@@ -12,6 +12,18 @@ docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1:
   - .claude/skills/worktree/list.md
+source_files_during_phase_2:
+  - worktree/lib/src/git.rs
+  - worktree/lib/src/git/calls/tests.rs
+  - worktree/lib/src/fast_forward.rs
+  - worktree/lib/src/live_remote.rs
+  - worktree/lib/src/listing.rs
+  - worktree/lib/src/worktree.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/worktree/SKILL.md
+  - .claude/skills/worktree/testing.md
 packages:
   - worktree
 ---
@@ -120,16 +132,16 @@ Depends on Phase 1 spike S1. Independent of Phase 3 beyond the shared `lib/src/g
 
 ### Wave 1 (single agent; one file)
 
-- [ ] **Counter scope** (`lib/src/git.rs`)
+- [x] **Counter scope** (`lib/src/git.rs`)
   - Scoped counter, separate from the `count-git` recorder and failure injection. Count at the lowest spawning helper (including byte-output helpers) once per actual subprocess start; a failed spawn or injected failure counts none; a nonzero exit counts.
   - Nested scopes each include their descendants; a parent counts each child call once.
   - Unrelated threads do not count; spawned tasks receive an explicit handle and return counts that are aggregated after joining.
   - Disabled path: the always-compiled hook does only an inactive-scope check (no allocation, no atomics beyond a thread-local read).
-- [ ] **Counter tests** (per spec): nested scopes, unrelated thread excluded, scoped threaded aggregation, failed spawn/injected failure excluded, nonzero exit counted, byte helpers counted once, disabled collection, recorder unchanged. Run with and without `count-git`.
+- [x] **Counter tests** (per spec): nested scopes, unrelated thread excluded, scoped threaded aggregation, failed spawn/injected failure excluded, nonzero exit counted, byte helpers counted once, disabled collection, recorder unchanged. Run with and without `count-git`.
 
 ### Checkpoint 2
 
-- [ ] Existing recorder-backed tests unchanged and green; `just test`, `just lint`.
+- [x] Existing recorder-backed tests unchanged and green; `just test`, `just lint`.
 
 ## Phase 3: Move the pipeline and graph gathering into the library (timings disabled)
 
@@ -143,7 +155,7 @@ Goal: pure relocation with behavior unchanged and every existing test green, **b
   - Do not change algorithms (lane placement, repeated assembly, holder search).
   - Move the matching tests from `git_graph/tests.rs`; keep rendering tests in the CLI.
   - Check the `worktree` dependency set: no biscuit-terminal. Update `worktree/docs/dependencies.md` for any crate moves.
-- [ ] **Wait core split** (agent B)
+- [x] **Wait core split** (agent B)
   - Split the spinner adapter out of `cli/src/commands/list/wait.rs` (it imports biscuit-terminal) so the wait core is terminal-free; spinner stays in the CLI behind `on_phase`.
   - Move the wait core and its `WaitEnv`/scripted-clock tests to the library (`lib/src/list/wait.rs`).
 

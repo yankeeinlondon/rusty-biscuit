@@ -11,6 +11,18 @@ docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1:
   - .claude/skills/worktree/list.md
+source_files_during_phase_2:
+  - worktree/lib/src/git.rs
+  - worktree/lib/src/git/calls/tests.rs
+  - worktree/lib/src/fast_forward.rs
+  - worktree/lib/src/live_remote.rs
+  - worktree/lib/src/listing.rs
+  - worktree/lib/src/worktree.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/worktree/SKILL.md
+  - .claude/skills/worktree/testing.md
 packages:
   - worktree
 ---
@@ -194,3 +206,114 @@ any path segment), so `just test` runs them.
 - Not run: `just test-l2`, `just test-perf` (no CLI or pipeline change in
   this phase), cross-OS checks (no OS-specific code; R8).
 - `just check-tier-coverage` not needed: no new tier-marked tests.
+
+## Phase 2
+
+### What was built
+
+`worktree::git::calls` (new public module inside `lib/src/git.rs`, tests in
+`lib/src/git/calls/tests.rs`), a per-thread scoped count of **started** Git
+processes, separate from `recorder` and failure injection. This follows the
+Phase 1 spike's decision (thread-local stack, no `Arc`/atomics).
+
+- `CallScope::enter()` pushes a counter on this thread's stack; `finish()`
+  (or drop) pops it, adds its total to the enclosing scope, and returns it,
+  so nested scopes include their descendants and the parent counts each call
+  once. `calls()` reads the running count. A scope leaked with `mem::forget`
+  is folded into the next scope that closes, so it cannot keep absorbing
+  calls. `CallScope` is `!Send`.
+- `TaskHandle::current()` (taken on the spawner) → `handle.run(task)` on the
+  spawned thread → `(value, count)` → `calls::joined(..)` on the spawner adds
+  the count after joining. With no scope open on the spawner, `run` opens
+  nothing and returns 0. If `run` is used on a thread that already has a
+  scope open (no spawn happened), it returns 0 so the call is not counted
+  twice.
+- `is_counting()`, `add_joined(n)` are public; `started()` and `output(cmd)`
+  are `pub(crate)` hooks. With no scope open, `started()` is one thread-local
+  access (no allocation, no atomics).
+
+### Where Git is counted
+
+Counted once, after the process started (a failed spawn counts nothing; an
+injected failure returns before spawning; a nonzero exit counts):
+
+| Spawn site | Hook |
+| --- | --- |
+| `git_rev_parse` (via `repo_info`; not recorded) | `calls::output` |
+| `git_command_status` (`git_command`, `git_command_allow_no_match`) | `calls::output` |
+| `git_command_in` | `calls::output` |
+| `git_from_output` | `calls::output` |
+| `git_from_bytes_status` (`git_from`, `git_from_raw`, `git_from_bytes`, `git_from_bytes_with_env`, `git_from_bytes_allow_no_match`) | `calls::started()` after `spawn()` |
+| `fast_forward::merge_ff_only` | `calls::output` |
+| `live_remote::run_transport` | `calls::started()` after `spawn()` |
+
+`calls::output` is `spawn()` + `wait_with_output()` with stdin null and
+stdout/stderr piped, which is what `Command::output()` did at every one of
+these sites, so behavior is unchanged.
+
+**Departure from the plan text:** the plan scoped Phase 2 to one file
+(`lib/src/git.rs`). Two other library helpers start Git outside `git.rs`
+(`fast_forward::merge_ff_only`, `live_remote::run_transport`), so the spec's
+"count at the lowest spawning helper" needed a one-line hook in each. Without
+them, `--ff` would undercount. I also passed `TaskHandle` through the four
+library thread-spawn sites the spike listed (`listing::compare_live`;
+`worktree::gather_dirtiness`, `compare_tree`, `WorktreeList::gather_local`).
+Without that, a scope around the local gather would report a count that looks
+complete but is wrong. In `compare_live` the two joins were reordered (the
+`merge-tree` result is joined before the `rev-list` result's `?`), so an early
+return cannot drop the `merge-tree` count. The result is unchanged. The CLI
+spawn sites (`cli/src/commands/list.rs:511,577`, `git_graph.rs:1071`,
+`git_graph/topology.rs:439`) are still unpropagated. They move into the
+library in Phase 3 and must use `TaskHandle` there.
+
+### Requirement → test mapping
+
+| Requirement (spec "Tests" / plan) | Test |
+| --- | --- |
+| nested scopes include descendants; parent counts each call once | `git::calls::tests::nested_scopes_each_include_their_descendants`, `a_dropped_scope_adds_its_count_to_the_enclosing_one` |
+| unrelated thread excluded; concurrent scopes do not mix | `git::calls::tests::a_call_on_an_unrelated_thread_is_not_counted` |
+| scoped threaded aggregation | `git::calls::tests::spawned_tasks_return_counts_that_add_to_the_spawner_after_joining`, `a_task_handle_run_without_spawning_counts_once`, `the_library_spawn_sites_return_their_tasks_counts`, `listing::repo_tests::a_counting_scope_sees_every_call_of_a_threaded_local_gather` |
+| failed spawn / injected failure excluded | `git::calls::tests::a_failed_spawn_or_an_injected_failure_counts_nothing` (missing working dir for 5 helpers incl. the transport; `fail_matching` for `git_command`) |
+| nonzero exit counted | `git::calls::tests::a_process_that_exits_nonzero_is_counted`, `the_transport_counts_its_own_process_and_its_config_read` (failing row) |
+| byte helpers / wrappers counted once | `git::calls::tests::every_helper_counts_one_start_however_it_is_wrapped` (10 helpers, each exactly 1) |
+| `--ff` and transport spawn sites counted | `a_fast_forward_counts_every_git_process_it_starts` (count == recorder, includes `merge`), `the_transport_counts_its_own_process_and_its_config_read` (count == recorder + 1) |
+| disabled collection | `git::calls::tests::with_no_scope_open_nothing_is_counted` |
+| recorder unchanged | `git::calls::tests::the_recorder_still_logs_every_requested_call_while_counting` (recorder still logs the injected failure and the failed spawn; counter = 1), plus all existing recorder-backed tests unchanged and green |
+
+All 14 are L1 tests in the `worktree` lib target (no tier marker in any path
+segment). Tests touching the global recorder or `fail_matching` are
+`#[serial_test::serial]`.
+
+**Mutation checks:** I replaced `counted.run(..)` with an uncounted task in
+`gather_dirtiness`, and `the_library_spawn_sites_return_their_tasks_counts`
+failed (0 ≠ 3). I did the same to the `merge-tree` task in `compare_live`,
+and `a_counting_scope_sees_every_call_of_a_threaded_local_gather` failed
+(7 ≠ 10). A first version of `finish()` read the count before folding in a
+leaked inner scope; `a_dropped_scope_adds_its_count_to_the_enclosing_one`
+caught it, and I fixed it.
+
+**Finding:** `live_remote::run_transport` starts **two** Git processes: a
+recorded `config --get core.sshCommand` read (unless `GIT_SSH_COMMAND` is
+set), then the unrecorded transport. A future `head_check`/`pr_request`
+`git_calls` figure will include both.
+
+Input Robustness Matrix: not applicable (no parser or format reader changed).
+
+### Gates
+
+- `just lint` (worktree): clean. `cargo clippy -p worktree --all-targets`: no warnings.
+- `just test` (worktree): 1120/1120 passed, 32 skipped.
+- Counter tests with `--features count-git` and with `--no-default-features`: 14/14 each.
+- Doc example `git::calls` (`no_run`) compiles (`cargo test -p worktree --doc calls`).
+- `just test-l2`, `just test-perf`: not run; no CLI or pipeline output changed in this phase.
+- Cross-OS: `just cross-check worktree --os windows` **did not run**. The
+  storage preflight refused because `build-win-native` has 15.4 GiB free and
+  needs 50 GiB; the automatic sweep freed 0. `--os linux` **did not run**
+  either: `build-linux` failed compiling a dependency with `output file
+  .../target/release/deps/libprofiling-….rmeta is not writeable`. Both are
+  host problems, not code failures. The code is pure `std` (thread-locals,
+  `Command`) with no `cfg` branches. The one OS-sensitive assumption is that a
+  missing `current_dir` makes `spawn()` fail on Windows (it does:
+  `CreateProcessW` rejects the directory). Pull-request CI runs Linux, and a
+  push to `main` runs Windows.
+- `just check-tier-coverage`: not needed; no tier-marked tests added.

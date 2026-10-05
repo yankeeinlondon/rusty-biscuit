@@ -44,6 +44,17 @@ message_to_agent: |-
     The implementation log lists every thread-spawn site Phase 2-4 must propagate the scope through,
     including ones inside the library (listing.rs, worktree.rs), and notes that `git_rev_parse` spawns
     Git without the recorder but must still be counted.
+    Phase 2 (done): `worktree::git::calls` counts started Git processes per thread. Open a scope with
+    `let scope = calls::CallScope::enter();` and read `scope.finish()`. Every library Git helper is
+    already hooked (git.rs helpers, `fast_forward::merge_ff_only`, `live_remote::run_transport`), and
+    the library spawn sites (`compare_live`, `gather_dirtiness`, `compare_tree`, `gather_local`)
+    already pass the scope to their threads. For EVERY thread you move or add in Phase 3 (cli list.rs
+    511/577, git_graph.rs 1071, topology.rs 439): take `let handle = calls::TaskHandle::current();`
+    before spawning, run the body as `handle.run(|| ..)`, and wrap each join in `calls::joined(..)`.
+    Otherwise those calls silently drop out of the count. Guard test:
+    `listing::repo_tests::a_counting_scope_sees_every_call_of_a_threaded_local_gather` (count equals
+    recorder length); add an equivalent for the moved graph and pipeline gathers. Note that
+    `run_transport` starts 2 processes (a `config` read plus the transport).
 related:
     - 2026-06-14-perf-measurement
     - 2026-10-03-list-overlap-and-keyless-notice
