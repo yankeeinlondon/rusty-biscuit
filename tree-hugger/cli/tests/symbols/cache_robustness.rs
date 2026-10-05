@@ -490,3 +490,40 @@ fn check_column(
     }
     failures
 }
+
+/// A cache entry records only the passes whose output it holds: diagnostics
+/// are recomputed on every use, so the entry neither stores them nor lists
+/// the `Diagnostics` pass, and a warm run still reports both.
+#[test]
+fn the_cache_entry_claims_only_the_passes_it_holds() {
+    const SOURCE: &str = "import os\n\n\ndef unused_import_owner():\n    return 1\n";
+    let scratch = Scratch::new(&[("lint_me.py", SOURCE)]);
+    let args = ["--json", "symbols", "lint_me.py"];
+    let uncached = json_of(&scratch.stdout(&["--json", "symbols", "--no-cache", "lint_me.py"]));
+    let cold = json_of(&scratch.stdout(&args));
+
+    let entry = read_json(&only_entry(scratch.temp.path()));
+    assert_eq!(entry["completed_passes"], json!(["Parse", "Bind", "Semantic", "Docs"]));
+    assert!(
+        entry["diagnostics"].as_array().is_none_or(Vec::is_empty),
+        "the entry stores no diagnostics"
+    );
+
+    let warm = json_of(&scratch.stdout(&args));
+    for (label, output) in [("cold", &cold), ("warm", &warm)] {
+        assert_eq!(output, &uncached, "{label} run must match an uncached run");
+        let index = &output["symbol_indexes"][0];
+        assert_eq!(
+            index["completed_passes"],
+            json!(["Parse", "Bind", "Semantic", "Docs", "Diagnostics"]),
+            "{label}"
+        );
+        let rules: Vec<&str> = index["diagnostics"]
+            .as_array()
+            .expect("diagnostics")
+            .iter()
+            .filter_map(|diagnostic| diagnostic["rule"].as_str())
+            .collect();
+        assert_eq!(rules, ["unused-import"], "{label}");
+    }
+}

@@ -214,6 +214,8 @@ fn warm_entry_from_the_previous_extractor_is_not_served_after_the_upgrade() {
 /// and how that revision's snapshot differs from the current one.
 struct StaleRevision {
     revision: &'static str,
+    /// The record schema of that revision's key (`3.0` through revision 4).
+    schema: &'static str,
     file: &'static str,
     language: &'static str,
     source: String,
@@ -226,13 +228,20 @@ struct StaleRevision {
 }
 
 /// The persistent-cache key `hug` used at an earlier extractor `revision`
-/// (schema `3.0`), hard-coded rather than computed from the current revision:
+/// whose records carried `schema` (`3.0` through revision 4, `4.0` from
+/// revision 5), hard-coded rather than computed from the current revision:
 /// the same `FileCacheKey::stable_key` formula as [`historical_key`] with a
 /// `query_fingerprint` of `locals+imports+references;extractor-revision=<N>`.
-fn revision_key(revision: &str, file_path: &str, source: &str, language: &str) -> String {
+fn revision_key(
+    schema: &str,
+    revision: &str,
+    file_path: &str,
+    source: &str,
+    language: &str,
+) -> String {
     let options = "experimental_semantics=false;deny=;warn=;allow=;strict=false;external_adapters=false";
     let analyzer = blake3_hash(&format!(
-        "3.0|{}|{language}|locals+imports+references;extractor-revision={revision}|{options}",
+        "{schema}|{}|{language}|locals+imports+references;extractor-revision={revision}|{options}",
         env!("CARGO_PKG_VERSION")
     ));
     let file_hash = format!("{:x}", xx_hash(source));
@@ -282,7 +291,7 @@ fn assert_stale_revision_is_not_served(case: &StaleRevision) {
         .and_then(|stem| stem.to_str())
         .expect("entry key")
         .to_string();
-    let old_key = revision_key(case.revision, &file_path, &case.source, case.language);
+    let old_key = revision_key(case.schema, case.revision, &file_path, &case.source, case.language);
     assert_ne!(old_key, current_key, "{label}: the revision must differ from the current one");
 
     let mut stale = current_snapshot.clone();
@@ -341,6 +350,7 @@ fn decoy_is_static(json: &Value) -> Value {
 fn entry_from_extractor_revision_one_is_not_served_after_the_repairs() {
     assert_stale_revision_is_not_served(&StaleRevision {
         revision: "1",
+        schema: "3.0",
         file: "python.py",
         language: "python",
         source: format!(
@@ -376,6 +386,7 @@ fn nested_scope_leak_visibility(json: &Value) -> Value {
 fn entry_from_extractor_revision_two_is_not_served_after_the_repairs() {
     assert_stale_revision_is_not_served(&StaleRevision {
         revision: "2",
+        schema: "3.0",
         file: "linkage.cpp",
         language: "cpp",
         source: SCOPE_LEAK_SOURCE.to_string(),
@@ -423,6 +434,7 @@ fn trailing_differs_definition_visibility(json: &Value) -> Value {
 fn entry_from_extractor_revision_three_is_not_served_after_the_repairs() {
     assert_stale_revision_is_not_served(&StaleRevision {
         revision: "3",
+        schema: "3.0",
         file: "templates.cpp",
         language: "cpp",
         source: TRAILING_RETURN_SOURCE.to_string(),
@@ -463,6 +475,7 @@ fn module_function_keyword(json: &Value) -> Value {
 fn entry_from_extractor_revision_four_is_not_served_after_the_repairs() {
     assert_stale_revision_is_not_served(&StaleRevision {
         revision: "4",
+        schema: "3.0",
         file: "python.py",
         language: "python",
         source: PYTHON_FIXTURE.to_string(),
@@ -475,6 +488,41 @@ fn entry_from_extractor_revision_four_is_not_served_after_the_repairs() {
                 .as_object_mut()
                 .expect("record identity");
             identity.remove("keyword");
+        },
+    });
+}
+
+/// The `semantics.is_recursive` of the `module_function` record in a
+/// `hug --json` report (`null` when absent).
+fn module_function_is_recursive(json: &Value) -> Value {
+    let records: Vec<&Value> = json["symbol_indexes"]
+        .as_array()
+        .expect("symbol_indexes")
+        .iter()
+        .flat_map(|index| index["symbols"].as_array().expect("index symbols"))
+        .filter(|record| record["identity"]["name"] == "module_function")
+        .collect();
+    assert_eq!(records.len(), 1, "expected one `module_function` record");
+    records[0]["semantics"].get("is_recursive").cloned().unwrap_or(Value::Null)
+}
+
+/// Revision 5 guessed `is_recursive` (`No` for a function that does not call
+/// its own name); revision 6 reports `Unknown`, since name-only binding
+/// proves neither.
+#[test]
+fn entry_from_extractor_revision_five_is_not_served_after_the_repairs() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "5",
+        schema: "4.0",
+        file: "python.py",
+        language: "python",
+        source: PYTHON_FIXTURE.to_string(),
+        sentinel: "MODULE_CONSTANT",
+        probe: module_function_is_recursive,
+        repaired: Value::from("Unknown"),
+        stale: Value::from("No"),
+        revert: |snapshot| {
+            record_named(snapshot, "module_function")["semantics"]["is_recursive"] = Value::from("No");
         },
     });
 }

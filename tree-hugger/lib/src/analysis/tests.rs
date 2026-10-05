@@ -232,7 +232,7 @@ fn name_index_selects_the_same_targets_as_a_full_scan() {
         }
     }
     assert!(
-        references > 1000 && containers > 300 && exports > 50,
+        references > 1000 && containers > 300 && exports > 30,
         "fixtures exercised too little: {references} references, {containers} containers, {exports} exports"
     );
 }

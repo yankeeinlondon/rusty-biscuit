@@ -22,7 +22,7 @@ use tree_hugger::cache::{
 };
 use tree_hugger::{
     CodeRange, Diagnostic, DiagnosticKind, DiagnosticSeverity, FieldInfo, FileSummary,
-    FileSymbolIndex, FunctionSignature, ImportSymbol, LintDiagnostic, ParameterInfo,
+    AnalysisPass, FileSymbolIndex, FunctionSignature, ImportSymbol, LintDiagnostic, ParameterInfo,
     ProgrammingLanguage, RuleRegistry, RuleSelector, SchemaVersion, SourceContext, SymbolInfo,
     SymbolKind, SyntaxDiagnostic, TreeFile, TreeHuggerError, TypeMetadata, VariantInfo,
     find_git_root, find_package_root,
@@ -1695,9 +1695,14 @@ fn analyze_tree_file(
     Ok(index)
 }
 
+/// The cached form of an index: diagnostics are recomputed on every use, so
+/// the entry holds none and does not claim the pass.
 fn symbol_cache_index(index: &FileSymbolIndex) -> FileSymbolIndex {
     let mut cache_index = index.clone();
     cache_index.diagnostics.clear();
+    cache_index
+        .completed_passes
+        .retain(|pass| *pass != AnalysisPass::Diagnostics);
     cache_index
 }
 
@@ -1706,6 +1711,9 @@ fn hydrate_diagnostics(
     mut index: FileSymbolIndex,
 ) -> Result<FileSymbolIndex, TreeHuggerError> {
     index.diagnostics = tree_file.try_diagnostics()?;
+    if !index.completed_passes.contains(&AnalysisPass::Diagnostics) {
+        index.completed_passes.push(AnalysisPass::Diagnostics);
+    }
     Ok(index)
 }
 

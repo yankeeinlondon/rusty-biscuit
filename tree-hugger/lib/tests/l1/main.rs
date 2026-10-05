@@ -25,6 +25,7 @@ mod symbols_function_locals;
 mod symbols_header;
 mod symbols_kinds;
 mod symbols_member_wrappers;
+mod symbols_query;
 mod symbols_signatures;
 mod symbols_static;
 mod symbols_visibility;

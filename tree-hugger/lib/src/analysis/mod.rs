@@ -306,27 +306,26 @@ fn semantic_pass(index: &mut FileSymbolIndex) {
             continue;
         }
 
-        let mut semantics = SemanticFacet::default();
-        // Name-only binding can neither prove that a same-named call targets
-        // this function nor that none does.
-        semantics.is_recursive = Some(TriState::Unknown);
-
         let panics = symbol
             .relations
             .references
             .iter()
             .any(|reference| reference.name == "panic" || reference.name == "panic!");
 
-        semantics.may_panic = Some(if panics {
-            TriState::Yes
-        } else {
-            TriState::Unknown
-        });
-        semantics.may_throw = Some(TriState::Unknown);
-        semantics.mutates_self = Some(TriState::Unknown);
-        semantics.mutates_arguments = Some(TriState::Unknown);
-
-        symbol.semantics = semantics;
+        symbol.semantics = SemanticFacet {
+            // Name-only binding can neither prove that a same-named call
+            // targets this function nor that none does.
+            is_recursive: Some(TriState::Unknown),
+            may_panic: Some(if panics {
+                TriState::Yes
+            } else {
+                TriState::Unknown
+            }),
+            may_throw: Some(TriState::Unknown),
+            mutates_self: Some(TriState::Unknown),
+            mutates_arguments: Some(TriState::Unknown),
+            ..SemanticFacet::default()
+        };
         symbol.provenance.parse_pass = AnalysisPass::Semantic.as_str().to_string();
     }
 }
