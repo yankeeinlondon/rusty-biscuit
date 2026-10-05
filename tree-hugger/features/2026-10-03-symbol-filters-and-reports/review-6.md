@@ -17,6 +17,7 @@ implemented_by: claude/opus
 description: "A **feature** review of `2026-10-03-symbol-filters-and-reports/spec.md`"
 feature: 2026-10-03-symbol-filters-and-reports/review-6.md
 previous: 2026-10-03-symbol-filters-and-reports/review-5.md
+next: 2026-10-03-symbol-filters-and-reports/review-7.md
 ---
 
 The feature is **not production ready**. Review-5's reported cases are repaired, but one unblocked documentation-precedence finding remains. An attached empty or directive-only Go comment incorrectly inherits its declaration group's documentation and deprecation marker. No human design decision is required.

@@ -277,3 +277,14 @@ The implementation of review cycle 6 has completed successfully in about 25 minu
 - a Go multi-name `const a, b = …` spec still extracts only its first name. That limit is in extraction scope, and the review explicitly does not ask to change it
 
 The files changed in this cycle are `tree-hugger/lib/src/file/extract/doc_comments.rs`, `tree-hugger/lib/src/file/mod.rs`, `tree-hugger/lib/tests/l1/symbols_flags.rs`, `tree-hugger/cli/tests/symbols/filters.rs`, `tree-hugger/cli/tests/symbols/cache_upgrade.rs`, `tree-hugger/docs/symbol-kinds-and-visibility.md` and `.claude/skills/tree-hugger/SKILL.md`.
+
+## Implementation of Review Findings #7
+
+> **started at:** 2026-10-05T16:52:58-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in 'tree-hugger/features/2026-10-03-symbol-filters-and-reports/review-7.md'
+- this is iteration 7 of the review-to-implement cycle
+- starting the work on 'Required post-feature performance sample has no recorded results' at 16:53:40
+        - defect class: a completion record (checked plan task, `completed_phase` frontmatter) asserts a required verification step is done while the measurements that step must produce are missing from the record
+        - discovery: the prerequisite's method (its implementation log, Phase 1 baseline and Phase 6 sample) is a back-to-back `hyperfine -N --warmup 1 --runs 5` of a pre and a post release binary in `tree-hugger/`, `/usr/bin/time -l hug symbols --no-cache` from the repository root for peak RSS, and `hug --json functions --no-cache` bytes on the Phase 1 baseline tree (`git archive 60e3b841 tree-hugger`) and today's tree
+        - discovery: the prerequisite's post binary (`b76a33baa`) is still at `/tmp/th-baseline/hug-post`; host load at start is 38 (1 min) / 128 (15 min), so only same-invocation ratios are meaningful
