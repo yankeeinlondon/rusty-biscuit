@@ -723,10 +723,14 @@ fn concurrent_listings_of_two_repositories_stay_apart_and_leave_the_cwd_alone() 
     };
     assert_eq!(current(&a), Some(Some("feature-a".into())), "the first listing is from its feature checkout");
     assert_eq!(current(&b), Some(Some("main".into())), "the second from its main checkout");
-    assert_eq!(a.main_checkout.as_deref(), Some(first.main.as_path()));
-    assert_eq!(b.main_checkout.as_deref(), Some(second.main.as_path()));
+    // Git reports the resolved path (`/private/var/...` for a macOS temp dir).
+    let canonical = |path: Option<&Path>| path.and_then(|path| path.canonicalize().ok());
+    assert_eq!(canonical(a.main_checkout.as_deref()), canonical(Some(&first.main)));
+    assert_eq!(canonical(b.main_checkout.as_deref()), canonical(Some(&second.main)));
     assert_eq!(a.list.refs().local("feature-a"), Some(first.sha("feature-a").as_str()));
     assert_eq!(b.list.refs().local("feature-a"), Some(second.sha("feature-a").as_str()));
     assert!(a.verbose.is_some(), "a feature checkout has verbose details");
     assert!(b.graph.is_some() && b.verbose.is_none(), "a main checkout has a base view and no verbose details");
 }
+
+mod timings;

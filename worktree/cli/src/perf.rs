@@ -1,340 +1,155 @@
-use std::time::{Duration, Instant};
+//! Renders a [`Timings`] document for `wt list --perf`; the measuring is the
+//! `worktree` library's ([`worktree::timing`]) and the listing command's.
+//!
+//! The human report is a metrics tree. A sequential child shows its share of
+//! its parent; a concurrent child shows none, since it overlapped its
+//! siblings. Each sequential parent gets a generated `unattributed` row (hidden
+//! under [`UNATTRIBUTED_FLOOR`]) or an `over-attributed` row (always shown),
+//! so every level visibly reconciles. Worker reports are a separate,
+//! labeled diagnostic section with no shares: they were measured in another
+//! process and are not part of the foreground total.
+
+use std::time::Duration;
 
 use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::metrics_tree::{MetricNode, MetricShare, MetricValue, MetricsTree};
 use biscuit_terminal::components::renderable::TerminalRenderable as _;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::color::{Color, Tailwind};
+use worktree::timing::{ChildrenKind, LaunchReport, Span, SpanList, Stage, Timings, WorkerReportStatus};
 
-/// The row shown in place of `unattributed` when the top-level rows add up to
-/// more than the elapsed time. Top-level rows are recorded for sequential,
-/// non-overlapping spans, so this row means a caller recorded overlapping
-/// work at the top level instead of inside a group.
-pub(crate) const OVER_ATTRIBUTED: &str = "over-attributed (overlapping top-level rows)";
+/// The prefix of the one `--perf=json` line; consumers take the final
+/// nonempty stderr line and deserialize what follows it.
+pub(crate) const JSON_PREFIX: &str = "WT_PERF_JSON ";
 
-/// Collects per-stage timings and renders a reconciling performance report.
-///
-/// Top-level rows are sequential spans of the process: they and
-/// `unattributed` sum exactly to the total elapsed time. A group
-/// ([`PerfCollector::record_group`]) is one top-level row whose duration is
-/// its own measured elapsed time; its children ran concurrently inside that
-/// span, so they are diagnostic only: shown with durations, never with a
-/// share, and never added to the total.
-pub(crate) struct PerfCollector {
-    process_start: Instant,
-    rows: Vec<Row>,
-}
+/// A human `unattributed` row shorter than this is not shown.
+pub(crate) const UNATTRIBUTED_FLOOR: Duration = Duration::from_millis(1);
 
-struct Row {
-    name: &'static str,
-    elapsed: Duration,
-    children: Vec<(&'static str, Duration)>,
-}
+pub(crate) const UNATTRIBUTED: &str = "unattributed";
+pub(crate) const OVER_ATTRIBUTED: &str = "over-attributed";
+const WORKER_HEADING: &str = "Refresh worker (diagnostic, measured in the worker)";
 
-impl PerfCollector {
-    pub(crate) fn new(process_start: Instant) -> Self {
-        Self {
-            process_start,
-            rows: Vec::new(),
-        }
-    }
-
-    /// Records one sequential top-level stage.
-    pub(crate) fn record(&mut self, name: &'static str, elapsed: Duration) {
-        self.record_group(name, elapsed, Vec::new());
-    }
-
-    /// Records a top-level group: `elapsed` is the group's own measured span
-    /// (not a sum or maximum of `children`), and each child is a concurrent
-    /// task measured inside it.
-    pub(crate) fn record_group(
-        &mut self,
-        name: &'static str,
-        elapsed: Duration,
-        children: Vec<(&'static str, Duration)>,
-    ) {
-        self.rows.push(Row {
-            name,
-            elapsed,
-            children,
-        });
-    }
-
-    pub(crate) fn emit(&self) {
-        eprint!("{}", self.render());
-    }
-
-    /// Every recorded name with its duration, a group followed by its
-    /// children.
-    #[cfg(test)]
-    pub(crate) fn recorded_stages(&self) -> Vec<(&'static str, Duration)> {
-        self.rows
-            .iter()
-            .flat_map(|row| std::iter::once((row.name, row.elapsed)).chain(row.children.iter().copied()))
-            .collect()
-    }
-
-    fn render(&self) -> String {
-        let tree = self.build_perf_tree();
-        let wall = tree.total;
-        let metrics = MetricsTree::new(to_metric_node(&tree, wall, 0));
-
-        let term_width = Terminal::default().width();
-        let inner_width = term_width.saturating_sub(2);
-        let rendered = metrics.render_optimistic(Some(inner_width));
-
-        let mut block = BlockQuote::from(rendered)
-            .with_left_block_color(Color::Tailwind(Tailwind::Yellow400))
-            .with_border("▌ ")
-            .render_optimistic(Some(term_width));
-        if !block.ends_with('\n') {
-            block.push('\n');
-        }
-        block
-    }
-
-    pub(crate) fn build_perf_tree(&self) -> PerfNode {
-        reconcile(self.process_start.elapsed(), &self.rows)
+/// Runs `work` as `stage` into `steps`, or only runs it.
+pub(crate) fn time<T>(steps: Option<&mut SpanList>, stage: Stage, work: impl FnOnce() -> T) -> T {
+    match steps {
+        Some(steps) => steps.time(stage, work),
+        None => work(),
     }
 }
 
-/// The report for `rows` over `total` elapsed. The last top-level row is
-/// `unattributed`, or [`OVER_ATTRIBUTED`] with the excess when the rows
-/// exceed `total`: excess is surfaced, never clipped.
-fn reconcile(total: Duration, rows: &[Row]) -> PerfNode {
-    let mut children: Vec<PerfNode> = rows
-        .iter()
-        .map(|row| {
-            let nested = row.children.iter().map(|(name, elapsed)| PerfNode::leaf(*name, *elapsed)).collect();
-            PerfNode::branch(row.name, row.elapsed, nested)
-        })
-        .collect();
-
-    let attributed: Duration = rows.iter().map(|row| row.elapsed).sum();
-    children.push(match total.checked_sub(attributed) {
-        Some(rest) => PerfNode::leaf("unattributed", rest),
-        None => PerfNode::leaf(OVER_ATTRIBUTED, attributed - total),
-    });
-
-    PerfNode::branch("Performance", total, children)
+/// The `--perf=json` record: a newline, then one framed line.
+pub(crate) fn json_record(timings: &Timings) -> String {
+    format!("\n{JSON_PREFIX}{}\n", timings.to_json())
 }
 
-/// Records a stage timing into an optional collector, letting callers avoid
-/// branching on `Option<PerfCollector>` at every stage.
-pub(crate) fn record(
-    collector: &mut Option<PerfCollector>,
-    name: &'static str,
-    elapsed: Duration,
-) {
-    if let Some(c) = collector {
-        c.record(name, elapsed);
+/// The human report, sized to the terminal.
+pub(crate) fn human_report(timings: &Timings) -> String {
+    let term_width = Terminal::default().width();
+    let inner_width = term_width.saturating_sub(2);
+    let mut rendered = MetricsTree::new(report_tree(timings)).render_optimistic(Some(inner_width));
+    if let Some(workers) = worker_tree(timings) {
+        rendered.push('\n');
+        rendered.push_str(&MetricsTree::new(workers).render_optimistic(Some(inner_width)));
     }
-}
-
-/// [`PerfCollector::record_group`] into an optional collector.
-pub(crate) fn record_group(
-    collector: &mut Option<PerfCollector>,
-    name: &'static str,
-    elapsed: Duration,
-    children: Vec<(&'static str, Duration)>,
-) {
-    if let Some(c) = collector {
-        c.record_group(name, elapsed, children);
+    let mut block = BlockQuote::from(rendered)
+        .with_left_block_color(Color::Tailwind(Tailwind::Yellow400))
+        .with_border("▌ ")
+        .render_optimistic(Some(term_width));
+    if !block.ends_with('\n') {
+        block.push('\n');
     }
+    block
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct PerfNode {
-    pub label: String,
-    pub total: Duration,
-    pub children: Vec<PerfNode>,
+/// The foreground tree: `Performance`, then each top-level span and the
+/// root's remainder row.
+pub(crate) fn report_tree(timings: &Timings) -> MetricNode {
+    let total = timings.total();
+    let mut rows: Vec<MetricNode> = timings.spans().iter().map(|span| span_node(span, Some(total))).collect();
+    rows.extend(remainder_row(timings.unattributed(), timings.over_attributed(), total));
+    MetricNode::branch("Performance", MetricValue::Duration(total), MetricShare::Full, rows).emphasized()
 }
 
-impl PerfNode {
-    fn leaf(label: impl Into<String>, total: Duration) -> Self {
-        Self {
-            label: label.into(),
-            total,
-            children: Vec::new(),
-        }
-    }
-
-    fn branch(label: impl Into<String>, total: Duration, children: Vec<PerfNode>) -> Self {
-        Self {
-            label: label.into(),
-            total,
-            children,
-        }
-    }
-}
-
-/// Only top-level rows carry a share of `wall`; a group's children overlap
-/// each other, so a share would suggest they add up. The metrics tree has no
-/// blank share, so they show its not-applicable dash.
-fn to_metric_node(node: &PerfNode, wall: Duration, depth: usize) -> MetricNode {
-    let value = MetricValue::Duration(node.total);
-    let share = match depth {
-        0 => MetricShare::Full,
-        1 if !wall.is_zero() => MetricShare::Of(node.total.as_secs_f64() / wall.as_secs_f64()),
+/// `span`'s row; `parent` is the elapsed time of a sequential parent, `None`
+/// under a concurrent one.
+fn span_node(span: &Span, parent: Option<Duration>) -> MetricNode {
+    let share = match parent {
+        Some(parent) if !parent.is_zero() => MetricShare::Of(span.elapsed().as_secs_f64() / parent.as_secs_f64()),
         _ => MetricShare::Unknown,
     };
+    let own = (span.children_kind() == ChildrenKind::Sequential).then_some(span.elapsed());
+    let mut children: Vec<MetricNode> = span.children().iter().map(|child| span_node(child, own)).collect();
+    if own.is_some() && !span.children().is_empty() {
+        children.extend(remainder_row(span.unattributed(), span.over_attributed(), span.elapsed()));
+    }
+    MetricNode::branch(span_label(span), MetricValue::Duration(span.elapsed()), share, children)
+}
 
-    let children = node
-        .children
+/// The stage's label, with its `git` count when it is known.
+pub(crate) fn span_label(span: &Span) -> String {
+    match span.git_calls() {
+        Some(calls) => format!("{}  [{calls} git]", span.stage().label()),
+        None => span.stage().label().to_string(),
+    }
+}
+
+/// The generated row reconciling a sequential parent of `parent` elapsed.
+fn remainder_row(unattributed: Duration, over_attributed: Duration, parent: Duration) -> Option<MetricNode> {
+    let share = |part: Duration| {
+        if parent.is_zero() { MetricShare::Unknown } else { MetricShare::Of(part.as_secs_f64() / parent.as_secs_f64()) }
+    };
+    if !over_attributed.is_zero() {
+        return Some(MetricNode::leaf(OVER_ATTRIBUTED, MetricValue::Duration(over_attributed), share(over_attributed)));
+    }
+    (unattributed >= UNATTRIBUTED_FLOOR)
+        .then(|| MetricNode::leaf(UNATTRIBUTED, MetricValue::Duration(unattributed), share(unattributed)))
+}
+
+/// The worker section: one row per owned launch, with no shares; `None`
+/// when no worker was followed.
+pub(crate) fn worker_tree(timings: &Timings) -> Option<MetricNode> {
+    let status = timings.worker_report_status()?;
+    let launches = timings
+        .worker_reports()
         .iter()
-        .map(|c| to_metric_node(c, wall, depth + 1))
+        .map(|report| {
+            let label = format!("launch {} ({})", report.launch_index, status_text(report.status()));
+            match &report.report {
+                LaunchReport::Complete(worker) | LaunchReport::Partial(worker) => {
+                    let mut rows: Vec<MetricNode> = worker.spans().iter().map(unshared).collect();
+                    rows.extend(remainder_row(worker.unattributed(), worker.over_attributed(), Duration::ZERO));
+                    MetricNode::branch(label, MetricValue::Duration(worker.total()), MetricShare::Unknown, rows)
+                }
+                LaunchReport::Missing | LaunchReport::Invalid => {
+                    MetricNode::leaf(label, MetricValue::Placeholder, MetricShare::Unknown)
+                }
+            }
+        })
         .collect();
+    Some(MetricNode::branch(
+        format!("{WORKER_HEADING}: {}", status_text(status)),
+        MetricValue::Placeholder,
+        MetricShare::Unknown,
+        launches,
+    ))
+}
 
-    let mut metric = MetricNode::branch(node.label.clone(), value, share, children);
-    metric.emphasize = depth == 0;
-    metric
+/// A worker span and its children, all without shares.
+fn unshared(span: &Span) -> MetricNode {
+    let children = span.children().iter().map(unshared).collect();
+    MetricNode::branch(span_label(span), MetricValue::Duration(span.elapsed()), MetricShare::Unknown, children)
+}
+
+fn status_text(status: WorkerReportStatus) -> &'static str {
+    match status {
+        WorkerReportStatus::Complete => "complete",
+        WorkerReportStatus::Partial => "partial",
+        WorkerReportStatus::Missing => "missing",
+        WorkerReportStatus::Invalid => "invalid",
+        WorkerReportStatus::Adopted => "adopted",
+        WorkerReportStatus::OriginChanged => "origin changed",
+    }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::thread;
-    use std::time::Duration;
-
-    fn ms(value: u64) -> Duration {
-        Duration::from_millis(value)
-    }
-
-    fn row(name: &'static str, elapsed: Duration, children: Vec<(&'static str, Duration)>) -> Row {
-        Row { name, elapsed, children }
-    }
-
-    fn top_level_sum(tree: &PerfNode) -> Duration {
-        tree.children.iter().map(|c| c.total).sum()
-    }
-
-    #[test]
-    fn build_perf_tree_reconciles_children_to_root_total() {
-        let start = Instant::now();
-        thread::sleep(Duration::from_millis(20));
-        let mut collector = PerfCollector::new(start);
-        collector.record("stage-a", Duration::from_millis(5));
-        collector.record("stage-b", Duration::from_millis(3));
-
-        let tree = collector.build_perf_tree();
-
-        assert_eq!(tree.label, "Performance");
-        assert!(!tree.total.is_zero());
-        assert_eq!(tree.total, top_level_sum(&tree), "children plus unattributed must equal the root total");
-    }
-
-    #[test]
-    fn overlapping_group_children_are_excluded_from_the_top_level_sum() {
-        let rows = [
-            row("pre-dispatch", ms(10), vec![]),
-            row(
-                "remote wait ‖ local gather",
-                ms(300),
-                vec![("remote wait", ms(300)), ("list gather", ms(150)), ("graph gather", ms(175))],
-            ),
-            row("table render", ms(5), vec![]),
-        ];
-
-        let tree = reconcile(ms(330), &rows);
-
-        let labels: Vec<_> = tree.children.iter().map(|c| (c.label.as_str(), c.total)).collect();
-        assert_eq!(
-            labels,
-            [("pre-dispatch", ms(10)), ("remote wait ‖ local gather", ms(300)), ("table render", ms(5)), ("unattributed", ms(15))]
-        );
-        assert_eq!(top_level_sum(&tree), tree.total, "top-level rows reconcile exactly");
-        let group = &tree.children[1];
-        let nested: Vec<_> = group.children.iter().map(|c| (c.label.as_str(), c.total)).collect();
-        assert_eq!(nested, [("remote wait", ms(300)), ("list gather", ms(150)), ("graph gather", ms(175))]);
-        let nested_sum: Duration = group.children.iter().map(|c| c.total).sum();
-        assert!(nested_sum > group.total, "the children overlap, so adding them would double count");
-    }
-
-    #[test]
-    fn groups_keep_their_measured_span_and_sit_beside_sequential_rows() {
-        let mut collector = PerfCollector::new(Instant::now());
-        collector.record("pr gather", ms(2));
-        collector.record_group("local gather", ms(40), vec![("list gather", ms(40)), ("verbose gather", ms(12))]);
-        collector.record_group("regather", ms(25), vec![("list regather", ms(20)), ("verbose regather", ms(9))]);
-        collector.record("checkout status refresh", ms(3));
-
-        let tree = reconcile(ms(100), &collector.rows);
-
-        let shape: Vec<_> = tree
-            .children
-            .iter()
-            .map(|c| (c.label.as_str(), c.total, c.children.iter().map(|n| n.label.as_str()).collect::<Vec<_>>()))
-            .collect();
-        assert_eq!(
-            shape,
-            [
-                ("pr gather", ms(2), vec![]),
-                ("local gather", ms(40), vec!["list gather", "verbose gather"]),
-                ("regather", ms(25), vec!["list regather", "verbose regather"]),
-                ("checkout status refresh", ms(3), vec![]),
-                ("unattributed", ms(30), vec![]),
-            ]
-        );
-        assert_eq!(
-            collector.recorded_stages(),
-            [
-                ("pr gather", ms(2)),
-                ("local gather", ms(40)),
-                ("list gather", ms(40)),
-                ("verbose gather", ms(12)),
-                ("regather", ms(25)),
-                ("list regather", ms(20)),
-                ("verbose regather", ms(9)),
-                ("checkout status refresh", ms(3)),
-            ],
-            "recorded_stages flattens a group into its name then its children"
-        );
-    }
-
-    #[test]
-    fn rows_beyond_the_elapsed_time_are_surfaced_not_clipped() {
-        let rows = [row("list gather", ms(30), vec![]), row("graph gather", ms(25), vec![])];
-
-        let tree = reconcile(ms(40), &rows);
-
-        let last = tree.children.last().expect("a reconciling row");
-        assert_eq!((last.label.as_str(), last.total), (OVER_ATTRIBUTED, ms(15)));
-        assert!(tree.children.iter().all(|c| c.label != "unattributed"), "no zero `unattributed` hides the excess");
-    }
-
-    #[test]
-    fn only_top_level_rows_carry_a_share() {
-        let rows = [row("local gather", ms(50), vec![("list gather", ms(50)), ("graph gather", ms(30))])];
-
-        let metric = to_metric_node(&reconcile(ms(100), &rows), ms(100), 0);
-
-        assert_eq!(metric.share, MetricShare::Full);
-        let group = &metric.children[0];
-        assert_eq!(group.share, MetricShare::Of(0.5));
-        assert!(group.children.iter().all(|child| child.share == MetricShare::Unknown));
-        assert_eq!(metric.children[1].share, MetricShare::Of(0.5), "unattributed");
-    }
-
-    #[test]
-    fn record_appends_stages_in_order() {
-        let mut collector = PerfCollector::new(Instant::now());
-        collector.record("first", Duration::from_nanos(100));
-        collector.record("second", Duration::from_nanos(200));
-
-        let tree = collector.build_perf_tree();
-        let labels: Vec<&str> = tree.children.iter().map(|c| c.label.as_str()).collect();
-        assert_eq!(labels, vec!["first", "second", "unattributed"]);
-    }
-
-    #[test]
-    fn empty_collector_tree_has_only_unattributed() {
-        let start = Instant::now();
-        thread::sleep(Duration::from_millis(1));
-        let collector = PerfCollector::new(start);
-
-        let tree = collector.build_perf_tree();
-        assert_eq!(tree.children.len(), 1);
-        assert_eq!(tree.children[0].label, "unattributed");
-        assert!(!tree.children[0].total.is_zero());
-    }
-}
+mod tests;

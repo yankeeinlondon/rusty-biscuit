@@ -184,9 +184,17 @@ pub enum PrEnd {
 /// a result retained from a replaced launch, plus a finished head can end the
 /// wait before the last worker writes its receipt. An adopted attempt's
 /// receipt belongs to its own run.
-pub fn wait(request: WaitRequest<'_>, env: &dyn WaitEnv, launch: WorkerLaunch, on_phase: &mut dyn FnMut(Phase)) -> WaitEnd {
+///
+/// `launch` is a [`WorkerLaunch`], or a closure around one (a caller timing
+/// each launch).
+pub fn wait(
+    request: WaitRequest<'_>,
+    env: &dyn WaitEnv,
+    mut launch: impl FnMut(&Path, &LaunchArgs) -> std::io::Result<WorkerHandle>,
+    on_phase: &mut dyn FnMut(Phase),
+) -> WaitEnd {
     let mut launched = Vec::new();
-    let end = launch_and_follow(request, env, launch, on_phase, &mut launched);
+    let end = launch_and_follow(request, env, &mut launch, on_phase, &mut launched);
     for attempt_id in &launched {
         env.discard_receipt(attempt_id);
     }
@@ -197,7 +205,7 @@ pub fn wait(request: WaitRequest<'_>, env: &dyn WaitEnv, launch: WorkerLaunch, o
 fn launch_and_follow(
     request: WaitRequest<'_>,
     env: &dyn WaitEnv,
-    launch: WorkerLaunch,
+    launch: &mut dyn FnMut(&Path, &LaunchArgs) -> std::io::Result<WorkerHandle>,
     on_phase: &mut dyn FnMut(Phase),
     launched: &mut Vec<String>,
 ) -> WaitEnd {

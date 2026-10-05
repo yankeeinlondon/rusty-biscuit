@@ -14,10 +14,10 @@
 //! A directly spawned `wt` belongs in a [`KillOnDrop`].
 //!
 //! Both `cache_warm_path.rs` and `cache_cold_path.rs` build the same mixed
-//! multi-worktree repo and assert on the `list gather` stage timing parsed
-//! from `wt list --perf` — the stage the spec targets (it dominates a cold
+//! multi-worktree repo and assert on the `local_gather` stage read from
+//! `wt list --perf=json` — the stage the spec targets (it dominates a cold
 //! `wt list`). Asserting full-command wall-clock alone could pass while
-//! `list gather` regresses, so these helpers measure the stage directly.
+//! `local_gather` regresses, so these helpers measure the stage directly.
 //!
 //! The fixture is *mixed* on purpose: several divergent branches (the warm
 //! cache collapses their `rev-list` + `merge-tree` cost) plus fast-forward and
@@ -42,6 +42,7 @@ use worktree::pull_requests::{
     FetchedPrs, OpenPrSource, PrRequestError, RefreshOutcome, SniffOpenPrSource, pr_lock_path, refresh, unix_now,
 };
 use worktree::remote_head::{PrFailure, refresh_lock_held, remote_head_lock_path, remote_head_store_path};
+use worktree::timing::{Stage, Timings};
 
 pub mod graph;
 
@@ -136,7 +137,7 @@ impl MixedFixture {
     }
 
     /// Prime git's untracked-files cache in every checkout so the live dirty
-    /// walk is steady-state and does not skew the `list gather` measurement.
+    /// walk is steady-state and does not skew the `local_gather` measurement.
     pub fn warm_untracked_cache(&self) {
         let args = &["-c", "core.untrackedCache=true", "status", "--porcelain"];
         run_git(&self.main, args);
@@ -444,11 +445,11 @@ impl MixedFixture {
         let _ = fs::remove_dir_all(self.xdg_cache.path().join("worktree"));
     }
 
-    /// Run `wt list --perf` and return the parsed `list gather` stage duration.
+    /// Run `wt list --perf=json` and return its `local_gather` stage.
     pub fn list_gather_duration(&self) -> Duration {
         let output = self
             .wt_command()
-            .args(["list", "--perf"])
+            .args(["list", "--perf=json"])
             .env_remove("TERM_PROGRAM")
             .env_remove("KITTY_WINDOW_ID")
             .output()
@@ -459,9 +460,8 @@ impl MixedFixture {
             output.status
         );
         let stderr = String::from_utf8_lossy(&output.stderr);
-        list_gather_from_perf(&stderr).unwrap_or_else(|| {
-            panic!("could not find `list gather` stage in --perf output:\n{stderr}")
-        })
+        local_gather(&perf_timings(&stderr))
+            .unwrap_or_else(|| panic!("no `local_gather` stage in --perf=json output:\n{stderr}"))
     }
 }
 
@@ -786,6 +786,36 @@ fn run_git(repo: &Path, args: &[&str]) {
         .status()
         .expect("git should be installed");
     assert!(status.success(), "git {args:?} failed in {repo:?}");
+}
+
+/// The `wt list --perf=json` record in `output`: its final nonempty line,
+/// split on LF or CRLF (a pseudo-terminal's), without the `WT_PERF_JSON `
+/// prefix. Earlier output is never searched, so listing text that resembles
+/// the prefix cannot be taken for the record.
+///
+/// Panics when the final line is not a record or does not decode.
+pub fn perf_timings(output: &str) -> Timings {
+    let last = output
+        .split('\n')
+        .map(|line| line.strip_suffix('\r').unwrap_or(line))
+        .rfind(|line| !line.trim().is_empty())
+        .unwrap_or_else(|| panic!("no output, so no --perf=json record"));
+    let document = last
+        .strip_prefix("WT_PERF_JSON ")
+        .unwrap_or_else(|| panic!("the final line is not a --perf=json record: {last:?}\n{output}"));
+    Timings::from_json(document).unwrap_or_else(|e| panic!("malformed --perf=json record ({e}): {document}"))
+}
+
+/// The elapsed time of the span at `path` of stage ids.
+pub fn stage_at(timings: &Timings, path: &[Stage]) -> Option<Duration> {
+    timings.span(path).map(|span| span.elapsed())
+}
+
+/// The `local_gather` stage, under whichever region ran: the one beside the
+/// refresh worker, or the local-only one.
+pub fn local_gather(timings: &Timings) -> Option<Duration> {
+    stage_at(timings, &[Stage::RemoteAndLocal, Stage::LocalGather])
+        .or_else(|| stage_at(timings, &[Stage::LocalReads, Stage::LocalGather]))
 }
 
 /// Extract the `list gather` stage duration from rendered `--perf` output.

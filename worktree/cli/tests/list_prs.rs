@@ -39,11 +39,12 @@ use std::time::{Duration, Instant};
 
 use perf_support::{
     FakeGitea, GiteaReply, HoldingOrigin, KillOnDrop, MANUFACTURED_FAILURE, MixedFixture, ProxyStub, WorkerReaper,
-    assert_manufactured_failure, process_running, refresh_workers, stage_from_perf, wait_for_refresh_workers,
+    assert_manufactured_failure, perf_timings, process_running, refresh_workers, stage_at, wait_for_refresh_workers,
 };
 use serial_test::serial;
 use worktree::pull_requests::{CachedPrs, RefreshOutcome, pr_lock_path, select_cached, unix_now};
 use worktree::remote_head::{AnswerSource, CheckFailure, Outcome, Phase, read_store, remote_head_lock_path};
+use worktree::timing::Stage;
 
 /// How long a test waits for the detached worker to act before failing.
 const WORKER_WAIT: Duration = Duration::from_secs(20);
@@ -54,7 +55,7 @@ fn list(fixture: &MixedFixture, proxy: &ProxyStub) -> (Output, String) {
 
 fn list_with(mut command: Command) -> (Output, String) {
     let output = command
-        .args(["list", "--perf"])
+        .args(["list", "--perf=json"])
         .env("NO_COLOR", "1")
         .output()
         .expect("wt list should run");
@@ -525,7 +526,8 @@ fn a_held_live_head_check_holds_the_listing_only_until_its_deadline() {
     // request proves `wt list` did not join it. The budget limits only the
     // wait, not the local gather overlapping it, so the bound reads the wait.
     let (_, stderr) = list_with(fixture.wt_command_direct());
-    let waited = stage_from_perf(&stderr, "remote wait").expect("remote wait stage");
+    let waited = stage_at(&perf_timings(&stderr), &[Stage::RemoteAndLocal, Stage::RefreshWorker])
+        .expect("refresh_worker stage");
 
     assert!(waited < Duration::from_secs(5), "{waited:?}");
     assert!(origin.wait_for_requests(1, WORKER_WAIT), "the worker never asked origin");
@@ -604,7 +606,8 @@ fn a_held_pr_request_with_nothing_stored_ends_at_the_budget_with_only_the_hint()
 
     let (_, stderr) = list_with(fixture.wt_command_via_gitea(&gitea));
     // The budget limits only the wait, not the local gather overlapping it.
-    let waited = stage_from_perf(&stderr, "remote wait").expect("remote wait stage");
+    let waited = stage_at(&perf_timings(&stderr), &[Stage::RemoteAndLocal, Stage::RefreshWorker])
+        .expect("refresh_worker stage");
 
     assert!(gitea.wait_for_waiting(1, Duration::ZERO), "the PR request is still held");
     assert!(waited >= Duration::from_secs(3) && waited < Duration::from_secs(5), "{waited:?}");

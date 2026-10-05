@@ -361,6 +361,46 @@ impl SpanList {
     }
 }
 
+/// Runs `work` as `stage`: its elapsed time, and the `git` processes it
+/// starts on this thread and in every task that carries the count scope
+/// ([`crate::git::calls::TaskHandle`]).
+pub(crate) fn measure<T>(stage: Stage, work: impl FnOnce() -> T) -> (T, Span) {
+    let scope = crate::git::calls::CallScope::enter();
+    let started = Instant::now();
+    let output = work();
+    let elapsed = started.elapsed();
+    (output, Span::new(stage, elapsed).with_git_calls(scope.finish()))
+}
+
+/// [`measure`] into `steps`; with no list, only runs `work`, reading no
+/// clock and opening no count scope.
+pub(crate) fn record<T>(steps: Option<&mut SpanList>, stage: Stage, work: impl FnOnce() -> T) -> T {
+    let Some(steps) = steps else {
+        return work();
+    };
+    let (output, span) = measure(stage, work);
+    steps.push(span);
+    output
+}
+
+/// [`record`] for a parent: `work` gets the list its children go into (of
+/// `kind`), or `None` when `steps` is `None`. Concurrent tasks push their
+/// spans after joining.
+pub(crate) fn record_parent<T>(
+    steps: Option<&mut SpanList>,
+    stage: Stage,
+    kind: ChildrenKind,
+    work: impl FnOnce(Option<&mut SpanList>) -> T,
+) -> T {
+    let Some(steps) = steps else {
+        return work(None);
+    };
+    let mut children = SpanList { kind, spans: Vec::new() };
+    let (output, span) = measure(stage, || work(Some(&mut children)));
+    steps.push(span.with_children(children));
+    output
+}
+
 fn push_unique(spans: &mut Vec<Span>, span: Span) {
     match spans.iter_mut().find(|existing| existing.stage == span.stage) {
         Some(existing) => existing.absorb(span),

@@ -1,5 +1,4 @@
 use std::io::IsTerminal as _;
-use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use biscuit_terminal::components::list::UnorderedList;
@@ -10,28 +9,29 @@ use biscuit_terminal::discovery::detection::ImageSupport;
 use biscuit_terminal::terminal::Terminal;
 use sniff::remote::blocking::credential_env;
 use worktree::WorktreeError;
-use worktree::api_preference::{self, RepoIdentity};
-use worktree::fast_forward::{FfRefusal, FfResult, fast_forward_default};
-use worktree::listing::{CaptionState, RefSnapshot};
+use worktree::fast_forward::{FfRefusal, FfResult};
+use worktree::list::{ListOptions, Listing, Observed, RemoteAnswers, WaitProgress};
+use worktree::listing::CaptionState;
 use worktree::live_remote::tracking_ref_changed_at;
-use worktree::pull_requests::{CachedPrs, PrListing, origin_digest, origin_url, pr_store_path, select_cached, unix_now};
+use worktree::pull_requests::unix_now;
 use worktree::remote_head::{
     ApiCondition, ApiNote, Attempt, CachedRemoteHead, CheckFailure, CredentialEvidence, Outcome, Phase, PrFailure,
-    remote_head_store_path, select_cached_head,
+    select_cached_head,
 };
-use worktree::worktree::{WorktreeList, parse_worktree_state};
+use worktree::timing::{Scope, Span, SpanList, Stage, Timings};
 
 use super::git_graph;
 use super::list_table::{
     self, CredentialCondition, CredentialLine, FfNotice, FfSuggestion, GraphOmissions, LastKnown, PrOutcome, RemoteFacts,
     RemoteStatus, Sections, TableFacts,
 };
+use crate::args::PerfFormat;
 use crate::perf;
 
 mod progress;
 
 use progress::Progress;
-use worktree::list::wait::{self, HeadEnd, PrEnd, StoreEnv, WaitEnd, WaitRequest};
+use worktree::list::wait::{HeadEnd, PrEnd};
 pub use worktree::list::wait::{FORCED_BUDGET, LaunchArgs, ORDINARY_BUDGET, WorkerHandle, WorkerLaunch};
 
 /// The flags that apply only to listing (spec §7–§9).
@@ -44,12 +44,6 @@ pub struct ListFlags {
     /// `--ff`/`--fast-forward`: wait like `--refresh`, then fast-forward the
     /// local default branch.
     pub fast_forward: bool,
-}
-
-impl ListFlags {
-    fn forced(self) -> bool {
-        self.refresh || self.fast_forward
-    }
 }
 
 /// How listing reaches the network: only through the worker it launches and
@@ -68,130 +62,6 @@ const PRODUCTION_SEAMS: ListSeams = ListSeams {
     wait_budget: ORDINARY_BUDGET,
     forced_budget: FORCED_BUDGET,
 };
-
-/// Where the two stored answers live for one main checkout.
-#[derive(Clone, Copy)]
-struct Stores<'a> {
-    prs: &'a Path,
-    head: &'a Path,
-}
-
-/// What the remote stage hands the rest of the listing.
-#[derive(Default)]
-struct RemoteAnswers {
-    /// The stored PR answer as of the end of the wait.
-    prs: PrListing,
-    origin: Option<String>,
-    /// The repository is in `~/.wt.json`: no provider request, no badges.
-    ignored: bool,
-    /// `origin` changed or disappeared during the wait: the PR answer and
-    /// both halves' results belong to the old one and are not shown
-    /// ([`RemoteAnswers::observed`]).
-    origin_changed: bool,
-    /// `None` without an `origin`: nothing was launched.
-    waited: Option<WaitEnd>,
-    /// The `pr reread` perf child: the origin recheck and stored PR answer
-    /// read after the wait.
-    pr_reread: Duration,
-    /// The `remote wait` perf child: the launch and the wait.
-    remote_wait: Duration,
-}
-
-/// What the remote stage settled before any speculative local work.
-struct RemotePlan {
-    /// `None`: nothing is launched and stored answers are ignored.
-    origin: Option<String>,
-    /// The repository is in `~/.wt.json`.
-    ignored: bool,
-    /// The origin lookup, `--ignore-api` record, and preference read: the
-    /// `pr gather` perf stage.
-    pr_gather: Duration,
-}
-
-/// The remote stage's first step, run before any local gather: looks up
-/// `origin` and, for `--ignore-api`, records the repository, so a failed
-/// preference write exits with no listing and no worker launched.
-fn prepare_remote(main: &Path, flags: ListFlags) -> Result<RemotePlan, WorktreeError> {
-    let t0 = Instant::now();
-    let origin = origin_url(main);
-    if flags.ignore_api {
-        record_ignore_api(origin.as_deref())?;
-    }
-    let ignored = origin.as_deref().is_some_and(|origin| {
-        api_preference::preference_path().is_some_and(|path| api_preference::load(&path).ignores_origin(origin))
-    });
-    Ok(RemotePlan { origin, ignored, pr_gather: t0.elapsed() })
-}
-
-/// The remote stage for the repository whose main checkout is `main`: one
-/// worker launched and waited for (both halves, or the head attempt it
-/// adopts), then the stored PR answer as the wait left it.
-///
-/// The worker is the only PR writer; nothing here asks the network. Without
-/// an `origin` nothing is launched, and stored answers are ignored. The
-/// spinner is cleared before this returns.
-fn follow_remote(
-    plan: RemotePlan,
-    stores: Stores<'_>,
-    main: &Path,
-    default_branch: &str,
-    flags: ListFlags,
-    seams: ListSeams,
-) -> RemoteAnswers {
-    let RemotePlan { origin, ignored, .. } = plan;
-    let Some(origin) = origin else {
-        return RemoteAnswers::default();
-    };
-
-    let t0 = Instant::now();
-    let digest = origin_digest(&origin);
-    let request = WaitRequest {
-        main,
-        origin_digest: &digest,
-        branch: default_branch,
-        force: flags.forced(),
-        budget: if flags.forced() { seams.forced_budget } else { seams.wait_budget },
-    };
-    let env = StoreEnv::new(stores.head.to_path_buf(), stores.prs.to_path_buf(), origin.clone());
-    let progress = Progress::on_stderr();
-    let waited = wait::wait(request, &env, seams.launch, &mut |phase| progress.show(phase));
-    progress.finish();
-    let remote_wait = t0.elapsed();
-
-    // Read on every exit path: the worker may have published while we
-    // waited, and an answer for an `origin` replaced meanwhile is not shown.
-    let t0 = Instant::now();
-    let origin_changed = origin_url(main).as_deref() != Some(origin.as_str());
-    let prs = match select_cached(stores.prs, Some(&origin), unix_now()) {
-        CachedPrs::Fresh(listing) | CachedPrs::Stale(listing) if !ignored && !origin_changed => listing,
-        _ => PrListing::default(),
-    };
-    let pr_reread = t0.elapsed();
-    RemoteAnswers { prs, origin: Some(origin), ignored, origin_changed, waited: Some(waited), pr_reread, remote_wait }
-}
-
-/// [`prepare_remote`] then [`follow_remote`], with nothing in between.
-#[cfg(test)]
-fn gather_remote(
-    stores: Stores<'_>,
-    main: &Path,
-    default_branch: &str,
-    flags: ListFlags,
-    seams: ListSeams,
-) -> Result<RemoteAnswers, WorktreeError> {
-    let plan = prepare_remote(main, flags)?;
-    Ok(follow_remote(plan, stores, main, default_branch, flags, seams))
-}
-
-/// `--ignore-api`: adds `origin`'s repository to `~/.wt.json`.
-fn record_ignore_api(origin: Option<&str>) -> Result<(), WorktreeError> {
-    let origin = origin.ok_or_else(|| WorktreeError::NoRepositoryIdentity("this repository has no origin".into()))?;
-    let identity = RepoIdentity::from_origin(origin)
-        .ok_or_else(|| WorktreeError::NoRepositoryIdentity("origin is a local path".into()))?;
-    let path = api_preference::preference_path()
-        .ok_or_else(|| WorktreeError::NoRepositoryIdentity("the home directory is unknown".into()))?;
-    api_preference::add(&path, &identity)
-}
 
 /// The followed head attempt as the wait left it, and what the caption says
 /// of it; the PR half never changes it.
@@ -218,31 +88,6 @@ fn followed_attempt(head: &HeadEnd) -> Option<&Attempt> {
         HeadEnd::Finished(attempt) => Some(attempt),
         HeadEnd::Running { last } => last.as_ref(),
         HeadEnd::Unavailable => None,
-    }
-}
-
-/// This listing's own results from both halves, for the repository `origin`
-/// still names.
-///
-/// Only [`RemoteAnswers::observed`] makes one, and every projection of
-/// request evidence reads through it: the caption's head status
-/// ([`caption_status`]) and the PR item, credentials line, keyless notice,
-/// and closing fallback notice ([`request_notices`]). So none of them can
-/// describe an `origin` that was replaced or removed during the wait.
-struct Observed<'a> {
-    origin: &'a str,
-    waited: &'a WaitEnd,
-    ignored: bool,
-}
-
-impl RemoteAnswers {
-    /// The repository-identity guard: `None` without a wait, and when
-    /// `origin` changed or disappeared during it.
-    fn observed(&self) -> Option<Observed<'_>> {
-        if self.origin_changed {
-            return None;
-        }
-        Some(Observed { origin: self.origin.as_deref()?, waited: self.waited.as_ref()?, ignored: self.ignored })
     }
 }
 
@@ -414,7 +259,7 @@ fn ff_notice(result: &FfResult) -> Option<FfNotice> {
 pub fn run(
     width_spec: Option<&str>,
     verbose: bool,
-    perf: bool,
+    perf: Option<PerfFormat>,
     flags: ListFlags,
     process_start: Instant,
 ) -> Result<(), WorktreeError> {
@@ -425,185 +270,31 @@ pub fn run(
         ImageSupport::None
     };
     let terminal = Terminal::default();
-    let collector = run_pipeline(
+    let timings = run_pipeline(
         width_spec,
         verbose,
-        perf,
+        perf.is_some(),
         flags,
         process_start,
         image_support,
         &terminal,
         PRODUCTION_SEAMS,
     )?;
-    if let Some(c) = collector {
-        c.emit();
+    match (perf, timings) {
+        (Some(PerfFormat::Human), Some(timings)) => eprint!("{}", perf::human_report(&timings)),
+        (Some(PerfFormat::Json), Some(timings)) => eprint!("{}", perf::json_record(&timings)),
+        _ => {}
     }
     Ok(())
 }
 
-/// The accepted results of one listing, ready to render once.
-struct Listing {
-    /// Committed: dirtiness, caption, target, tree, and comparisons all
-    /// describe the accepted ref snapshot ([`WorktreeList::ref_snapshot`]).
-    list: WorktreeList,
-    remote: RemoteAnswers,
-    ff: Option<FfResult>,
-    /// Gathered from the same accepted snapshot as `list`.
-    graph: Option<worktree::graph::GraphFacts>,
-    verbose: Option<worktree::graph::VerboseData>,
-    main_checkout: Option<PathBuf>,
-    head_store: Option<PathBuf>,
-}
-
-/// Graph and verbose data from one snapshot, with how long the gather took.
-type History = ((Option<worktree::graph::GraphFacts>, Option<worktree::graph::VerboseData>), Duration);
-
-/// Everything `wt list` shows, gathered while the refresh worker runs.
+/// Gathers the listing through [`worktree::list::gather`] from the current
+/// directory, renders it, and writes it to stderr.
 ///
-/// After the cheap parse step (which captures the initial ref snapshot), the
-/// remote wait runs on this thread while scoped threads gather dirtiness,
-/// the ref-dependent facts, and graph and verbose history from that
-/// snapshot. They are joined before `--ff` runs. When remote work was
-/// followed or a fast-forward attempted, refs are read again: the first
-/// gather is accepted only when both reads succeeded with equal tips;
-/// otherwise the ref-dependent facts, graph, and verbose data are gathered
-/// once more from the final read. Dirtiness is kept, except that a checkout
-/// `--ff` moved is measured again. The gathers' persistent effects (cache
-/// save, fork-record and copy-record pruning) happen once, in
-/// [`WorktreeList::commit`] of the accepted results.
-///
-/// Scoped tasks never write to the terminal; only the wait's spinner, on this
-/// thread, does, and it is cleared before the wait returns.
-///
-/// `--perf` shows the concurrent region as one measured group
-/// (`remote wait ‖ local gather`, or `local gather` without remote work) and a
-/// regather as another (`regather`); their children overlap and are not
-/// added to the total.
-fn gather_listing(
-    verbose: bool,
-    flags: ListFlags,
-    image_support: ImageSupport,
-    seams: ListSeams,
-    collector: &mut Option<perf::PerfCollector>,
-) -> Result<Listing, WorktreeError> {
-    let mut list = parse_worktree_state()?;
-    let main_checkout = list.entries().first().map(|main| main.path.clone());
-    let pr_store = main_checkout.as_deref().and_then(|main| pr_store_path(main).ok());
-    let head_store = main_checkout.as_deref().and_then(|main| remote_head_store_path(main).ok());
-    let default_branch = list.default_branch.clone();
-    let plan = match (&pr_store, &head_store, &main_checkout) {
-        (Some(_), Some(_), Some(main)) => Some(prepare_remote(main, flags)?),
-        _ => None,
-    };
-    perf::record(collector, "pr gather", plan.as_ref().map(|plan| plan.pr_gather).unwrap_or_default());
-
-    let needs_graph = image_support != ImageSupport::None;
-    let initial = list.ref_snapshot().clone();
-    let cache = list.load_comparison_cache();
-    let first_input = worktree::graph::GatherInput::from_list(&list, initial.tips());
-    let needs_verbose = verbose && first_input.has_verbose();
-    let needs_history = needs_graph || needs_verbose;
-
-    let history_stage = if needs_graph { "graph gather" } else { "verbose gather" };
-
-    // The group's span runs from before the first spawn until the wait, the
-    // PR reread, and every local task have finished.
-    let group_start = Instant::now();
-    let (remote, (dirty, first_facts, list_elapsed), first_history) = std::thread::scope(|scope| {
-        let history = needs_history.then(|| {
-            scope.spawn(|| {
-                #[cfg(test)]
-                tests::overlap::arrive(tests::overlap::Gather::Graph);
-                let t0 = Instant::now();
-                let data = worktree::graph::gather(&first_input, needs_graph, needs_verbose);
-                #[cfg(test)]
-                tests::overlap::finished(tests::overlap::Gather::Graph);
-                (data, t0.elapsed())
-            })
-        });
-        let local = scope.spawn(|| {
-            #[cfg(test)]
-            tests::overlap::arrive(tests::overlap::Gather::List);
-            let t0 = Instant::now();
-            let (dirty, facts) = list.gather_local(initial.tips(), &cache);
-            #[cfg(test)]
-            tests::overlap::finished(tests::overlap::Gather::List);
-            (dirty, facts, t0.elapsed())
-        });
-
-        let remote = match (plan, &pr_store, &head_store, &main_checkout) {
-            (Some(plan), Some(prs), Some(head), Some(main)) => {
-                follow_remote(plan, Stores { prs, head }, main, &default_branch, flags, seams)
-            }
-            _ => RemoteAnswers::default(),
-        };
-        #[cfg(test)]
-        tests::overlap::remote_finished();
-        // A timeout limits only the wait: a longer local gather is waited for.
-        let local = local.join().expect("list gather thread panicked");
-        let history: Option<History> = history.map(|handle| handle.join().expect("graph gather thread panicked"));
-        (remote, local, history)
-    });
-    let group_elapsed = group_start.elapsed();
-    let mut children = Vec::new();
-    if remote.waited.is_some() {
-        children.extend([("remote wait", remote.remote_wait), ("pr reread", remote.pr_reread)]);
-    }
-    children.push(("list gather", list_elapsed));
-    if let Some((_, elapsed)) = &first_history {
-        children.push((history_stage, *elapsed));
-    }
-    let group = if remote.waited.is_some() { "remote wait ‖ local gather" } else { "local gather" };
-    perf::record_group(collector, group, group_elapsed, children);
-
-    let ff = match (&main_checkout, flags.fast_forward) {
-        (Some(main), true) => {
-            let t0 = Instant::now();
-            let result = fast_forward_default(main, &default_branch);
-            perf::record(collector, "fast-forward", t0.elapsed());
-            Some(result)
-        }
-        _ => None,
-    };
-
-    // The fetch and the fast-forward move refs; everything shown describes
-    // the state they left. Without either, the initial read is the final one.
-    let reread = remote.waited.is_some() || ff.is_some();
-    let accepted_refs = if reread { RefSnapshot::read() } else { initial.clone() };
-    let (facts, history) = if !reread || initial.matches(&accepted_refs) {
-        (first_facts, first_history.map(|(data, _)| data))
-    } else {
-        let t0 = Instant::now();
-        let final_input = worktree::graph::GatherInput::from_list(&list, accepted_refs.tips());
-        let ((facts, facts_elapsed), history) = std::thread::scope(|scope| {
-            let history = needs_history.then(|| {
-                scope.spawn(|| {
-                    let t0 = Instant::now();
-                    (worktree::graph::gather(&final_input, needs_graph, needs_verbose), t0.elapsed())
-                })
-            });
-            let t0 = Instant::now();
-            let facts = list.gather_ref_facts(accepted_refs.tips(), &cache);
-            ((facts, t0.elapsed()), history.map(|handle| handle.join().expect("graph regather thread panicked")))
-        });
-        let mut children = vec![("list regather", facts_elapsed)];
-        if let Some((_, elapsed)) = &history {
-            children.push((if needs_graph { "graph regather" } else { "verbose regather" }, *elapsed));
-        }
-        perf::record_group(collector, "regather", t0.elapsed(), children);
-        (facts, history.map(|(data, _)| data))
-    };
-    list.commit(accepted_refs, dirty, facts, cache);
-    if let Some(FfResult::Moved { checkout: Some(checkout), .. }) = &ff {
-        let t0 = Instant::now();
-        list.refresh_dirty_status(checkout);
-        perf::record(collector, "checkout status refresh", t0.elapsed());
-    }
-
-    let (graph, verbose) = history.unwrap_or((None, None));
-    Ok(Listing { list, remote, ff, graph, verbose, main_checkout, head_store })
-}
-
+/// With `perf`, returns the [`Scope::Command`] timings: from `process_start`
+/// to the listing's write, with the library's spans in place between
+/// `startup` and the render stages. Reporting them is the caller's, so the
+/// report never times itself.
 #[allow(clippy::too_many_arguments)]
 fn run_pipeline(
     width_spec: Option<&str>,
@@ -614,24 +305,55 @@ fn run_pipeline(
     image_support: ImageSupport,
     terminal: &Terminal,
     seams: ListSeams,
-) -> Result<Option<perf::PerfCollector>, WorktreeError> {
-    let mut collector = perf.then(|| perf::PerfCollector::new(process_start));
-    perf::record(&mut collector, "pre-dispatch", process_start.elapsed());
+) -> Result<Option<Timings>, WorktreeError> {
+    let mut steps = perf.then(SpanList::sequential);
+    if let Some(steps) = steps.as_mut() {
+        steps.push(Span::new(Stage::Startup, process_start.elapsed()));
+    }
 
     let parsed_width = width_spec.and_then(|s| parse_width_spec(s).ok());
-    let Listing { list, remote, ff, graph: graph_facts, verbose: verbose_data, main_checkout, head_store } =
-        gather_listing(verbose, flags, image_support, seams, &mut collector)?;
+    let options = ListOptions {
+        refresh: flags.refresh,
+        ignore_api: flags.ignore_api,
+        fast_forward: flags.fast_forward,
+        worker: Some(seams.launch),
+        wait_budget: seams.wait_budget,
+        forced_budget: seams.forced_budget,
+        graph: image_support != ImageSupport::None,
+        verbose,
+        timings: perf,
+    };
+    let repo = std::env::current_dir()?;
+    let mut progress = None;
+    let listing = worktree::list::gather(&repo, &options, &mut |event| match event {
+        WaitProgress::Started => progress = Some(Progress::on_stderr()),
+        WaitProgress::Phase(phase) => {
+            if let Some(progress) = &progress {
+                progress.show(phase);
+            }
+        }
+        WaitProgress::Finished => {
+            if let Some(progress) = progress.take() {
+                progress.finish();
+            }
+        }
+    });
+    if let Some(progress) = progress {
+        progress.finish();
+    }
+    let Listing { list, remote, ff, graph: graph_facts, verbose: verbose_data, main_checkout, head_store, timings, .. } =
+        listing?;
+    if let (Some(steps), Some(library)) = (steps.as_mut(), timings) {
+        // The library's top-level spans are sequential parts of this command
+        // too; its own total is not a span of its own.
+        for span in library.spans() {
+            steps.push(span.clone());
+        }
+    }
     let default_branch = list.default_branch.clone();
 
-    let t0 = perf.then(Instant::now);
     let now = unix_now();
-    let tracking_ref = format!("origin/{}", list.default_branch);
-    let tracking_tip = list
-        .caption
-        .as_ref()
-        .map(|caption| caption.tracking_sha.clone())
-        .or_else(|| list.refs().remote(&tracking_ref).map(str::to_string));
-    let status = match (&remote.origin, &head_store, &main_checkout) {
+    let status = perf::time(steps.as_mut(), Stage::CaptionStatus, || match (&remote.origin, &head_store, &main_checkout) {
         (Some(origin), Some(head_store), Some(main)) => caption_status(&remote, || {
             // The stored answer is bound to the `origin` this listing
             // launched for; after it changed, only the reflog still dates
@@ -653,83 +375,90 @@ fn run_pipeline(
             }
         }),
         _ => None,
-    };
-    let remote_facts = status.map(|status| RemoteFacts {
-        default_branch: &list.default_branch,
-        tracking_tip: tracking_tip.as_deref(),
-        status,
     });
-    let mut facts = TableFacts::from_list(&list, &remote.prs, remote_facts);
-    let notices = request_notices(&remote);
-    facts.pr_outcome = notices.pr_outcome;
-    facts.credential_line = notices.credential_line;
-    facts.fallback_notice = notices.fallback_notice;
-    facts.timed_out = remote.waited.as_ref().is_some_and(|waited| waited.timed_out);
-    facts.ff_notice = ff.as_ref().and_then(ff_notice);
-    // §9: a failed check or fetch still leaves `--ff` a local tracking ref to
-    // move to, and the caption keeps the reason. Only a render while the
-    // worker may yet fetch (still checking or still pulling) is excluded,
-    // since the comparison is about to change.
-    facts.ff_suggestion = match (status, facts.caption.map(|caption| caption.state())) {
-        (Some(RemoteStatus::StillChecking { .. } | RemoteStatus::StillPulling), _) => None,
-        (Some(_), Some(CaptionState::Behind(behind))) if !flags.fast_forward => Some(FfSuggestion { behind }),
-        _ => None,
-    };
-    let table = list_table::render(&facts, terminal, now);
-    if let Some(start) = t0 {
-        perf::record(&mut collector, "table render", start.elapsed());
-    }
-
-    let verbose_text = verbose_data.map(|data| {
-        let t0 = perf.then(Instant::now);
-        let text = render_verbose(&data, terminal);
-        if let Some(start) = t0 {
-            perf::record(&mut collector, "verbose render", start.elapsed());
-        }
-        text
+    // Outside the timed step only because the facts borrow it.
+    let tracking_ref = format!("origin/{}", list.default_branch);
+    let tracking_tip = list
+        .caption
+        .as_ref()
+        .map(|caption| caption.tracking_sha.clone())
+        .or_else(|| list.refs().remote(&tracking_ref).map(str::to_string));
+    let mut facts = perf::time(steps.as_mut(), Stage::DisplayFacts, || {
+        let remote_facts = status.map(|status| RemoteFacts {
+            default_branch: &list.default_branch,
+            tracking_tip: tracking_tip.as_deref(),
+            status,
+        });
+        let mut facts = TableFacts::from_list(&list, &remote.prs, remote_facts);
+        let notices = request_notices(&remote);
+        facts.pr_outcome = notices.pr_outcome;
+        facts.credential_line = notices.credential_line;
+        facts.fallback_notice = notices.fallback_notice;
+        facts.timed_out = remote.waited.as_ref().is_some_and(|waited| waited.timed_out);
+        facts.ff_notice = ff.as_ref().and_then(ff_notice);
+        // §9: a failed check or fetch still leaves `--ff` a local tracking ref
+        // to move to, and the caption keeps the reason. Only a render while
+        // the worker may yet fetch (still checking or still pulling) is
+        // excluded, since the comparison is about to change.
+        facts.ff_suggestion = match (status, facts.caption.map(|caption| caption.state())) {
+            (Some(RemoteStatus::StillChecking { .. } | RemoteStatus::StillPulling), _) => None,
+            (Some(_), Some(CaptionState::Behind(behind))) if !flags.fast_forward => Some(FfSuggestion { behind }),
+            _ => None,
+        };
+        facts
     });
-    let status = list_table::render_status(&facts, terminal, now);
+    let table = perf::time(steps.as_mut(), Stage::TableRender, || list_table::render(&facts, terminal, now));
+    let verbose_text =
+        verbose_data.map(|data| perf::time(steps.as_mut(), Stage::VerboseRender, || render_verbose(&data, terminal)));
+    let (status, preliminary_notes) = perf::time(steps.as_mut(), Stage::NotesRender, || {
+        (list_table::render_status(&facts, terminal, now), list_table::render_notes(&facts, terminal))
+    });
     // Everything but the graph is known now, so the graph gets the rows the
     // rest of the listing leaves (the notes before the graph adds its own).
-    let max_graph_rows = list_table::graph_row_budget(
-        terminal.height(),
-        &[Some(table.as_str()), status.as_deref(), verbose_text.as_deref(), list_table::render_notes(&facts, terminal).as_deref()],
-    );
-    let badges = facts.badges();
+    let (max_graph_rows, badges) = perf::time(steps.as_mut(), Stage::GraphBudget, || {
+        let rows = list_table::graph_row_budget(
+            terminal.height(),
+            &[Some(table.as_str()), status.as_deref(), verbose_text.as_deref(), preliminary_notes.as_deref()],
+        );
+        (rows, facts.badges())
+    });
     let graph = graph_facts.and_then(|graph_facts| {
-        let t0 = perf.then(Instant::now);
-        let graph = git_graph::to_git_graph(&graph_facts, badges, parsed_width.clone())
-            .with_max_rows(max_graph_rows)
-            .render_without_notes(&image_terminal(terminal));
-        if let Some(start) = t0 {
-            perf::record(&mut collector, "graph image render (biscuit-terminal)", start.elapsed());
-        }
+        let graph = perf::time(steps.as_mut(), Stage::GraphRender, || {
+            git_graph::to_git_graph(&graph_facts, badges, parsed_width.clone())
+                .with_max_rows(max_graph_rows)
+                .render_without_notes(&image_terminal(terminal))
+        });
         graph.map(|graph| (graph, graph_facts))
     });
-    let graph = graph.map(|((image, plan), graph_facts)| {
-        facts.graph_omissions = GraphOmissions {
-            hidden_lanes: plan.hidden_lanes,
-            omissions: plan.omissions,
-            history_gap: graph_facts.incomplete,
-            shallow: graph_facts.shallow,
-            merged_elsewhere: graph_facts.merged_elsewhere,
-            forked_off_line: graph_facts.forked_off_line,
-        };
-        image
+    let notes = perf::time(steps.as_mut(), Stage::FinalNotesRender, || {
+        let graph = graph.map(|((image, plan), graph_facts)| {
+            facts.graph_omissions = GraphOmissions {
+                hidden_lanes: plan.hidden_lanes,
+                omissions: plan.omissions,
+                history_gap: graph_facts.incomplete,
+                shallow: graph_facts.shallow,
+                merged_elsewhere: graph_facts.merged_elsewhere,
+                forked_off_line: graph_facts.forked_off_line,
+            };
+            image
+        });
+        (graph, list_table::render_notes(&facts, terminal))
     });
-    let notes = list_table::render_notes(&facts, terminal);
-    eprint!(
-        "{}",
-        list_table::assemble(Sections {
-            table: &table,
-            graph: graph.as_deref(),
-            status: status.as_deref(),
-            verbose: verbose_text.as_deref(),
-            notes: notes.as_deref(),
-        })
-    );
+    let (graph, notes) = notes;
+    perf::time(steps.as_mut(), Stage::WriteOutput, || {
+        eprint!(
+            "{}",
+            list_table::assemble(Sections {
+                table: &table,
+                graph: graph.as_deref(),
+                status: status.as_deref(),
+                verbose: verbose_text.as_deref(),
+                notes: notes.as_deref(),
+            })
+        );
+    });
 
-    Ok(collector)
+    Ok(steps.map(|steps| Timings::new(Scope::Command, process_start.elapsed(), steps)))
 }
 
 fn render_verbose(data: &worktree::graph::VerboseData, terminal: &Terminal) -> String {

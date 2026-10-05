@@ -23,9 +23,17 @@ pub struct Cli {
     #[arg(long, short = 'v', global = true)]
     pub verbose: bool,
 
-    /// Emit a performance report to stderr after command completion.
-    #[arg(long, global = true)]
-    pub perf: bool,
+    /// Emit a performance report to stderr after the listing (`json`: one `WT_PERF_JSON` line)
+    #[arg(
+        long,
+        global = true,
+        value_name = "FORMAT",
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = "human",
+        value_enum
+    )]
+    pub perf: Option<PerfFormat>,
 
     /// Wait for a full update from origin, up to 75 s instead of 3 s (listing only)
     #[arg(long, short = 'r', global = true)]
@@ -43,6 +51,16 @@ pub struct Cli {
     /// Print the shell integration (cd wrapper + completions) for a shell
     #[arg(long, value_name = "SHELL", hide = true, value_parser = parse_shell)]
     pub completions: Option<Shell>,
+}
+
+/// The form of the `--perf` report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum PerfFormat {
+    // A metrics tree for people. (Plain comments: a documented variant
+    // would give `--perf` a long help of its own.)
+    Human,
+    // One framed line holding the version-1 timings document.
+    Json,
 }
 
 #[derive(Subcommand, Clone)]

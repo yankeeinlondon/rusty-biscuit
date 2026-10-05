@@ -8,8 +8,9 @@ use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 
-use perf_support::{FakeGitea, GiteaReply, MixedFixture, PerfRow, WorkerReaper, perf_rows, stage_from_perf};
+use perf_support::{FakeGitea, GiteaReply, MixedFixture, WorkerReaper, perf_rows, perf_timings, stage_at, stage_from_perf};
 use serial_test::serial;
+use worktree::timing::{Scope, Span, Stage, Timings};
 
 fn temp_repo() -> tempfile::TempDir {
     let dir = tempfile::tempdir().expect("create temp dir");
@@ -47,9 +48,10 @@ fn list_perf_emits_report_on_stderr_and_empty_stdout() {
         .success()
         .stdout(predicate::str::is_empty())
         .stderr(predicate::str::contains("Performance"))
-        .stderr(predicate::str::contains("pre-dispatch"))
-        .stderr(predicate::str::contains("list gather"))
-        .stderr(predicate::str::contains("table render"));
+        .stderr(predicate::str::contains("startup"))
+        .stderr(predicate::str::contains("local listing facts"))
+        .stderr(predicate::str::contains("table render"))
+        .stderr(predicate::str::contains("WT_PERF_JSON").not());
 }
 
 #[test]
@@ -63,8 +65,39 @@ fn list_without_perf_emits_no_report() {
         .success()
         .stdout(predicate::str::is_empty())
         .stderr(predicate::str::contains("Performance").not())
-        .stderr(predicate::str::contains("pre-dispatch").not())
-        .stderr(predicate::str::contains("list gather").not());
+        .stderr(predicate::str::contains("local listing facts").not())
+        .stderr(predicate::str::contains("WT_PERF_JSON").not());
+}
+
+/// `wt list --perf=json` from `dir` without image support: its stdout must
+/// be empty, and its stderr's final line is the record.
+fn json_report(dir: &Path, args: &[&str]) -> (Timings, String) {
+    let output = assert_cmd::Command::cargo_bin("wt")
+        .unwrap()
+        .current_dir(dir)
+        .env_remove("TERM_PROGRAM")
+        .env_remove("KITTY_WINDOW_ID")
+        .args(["list", "--perf=json"])
+        .args(args)
+        .output()
+        .expect("wt list --perf=json runs");
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    assert!(output.status.success(), "{stderr}");
+    assert!(output.stdout.is_empty(), "stdout stays empty: {:?}", String::from_utf8_lossy(&output.stdout));
+    (perf_timings(&stderr), stderr)
+}
+
+/// Every stage anywhere in `timings`.
+fn all_stages(timings: &Timings) -> Vec<Stage> {
+    fn walk(spans: &[Span], out: &mut Vec<Stage>) {
+        for span in spans {
+            out.push(span.stage());
+            walk(span.children(), out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(timings.spans(), &mut out);
+    out
 }
 
 fn temp_repo_with_feature_branch() -> tempfile::TempDir {
@@ -88,19 +121,15 @@ fn temp_repo_with_feature_branch() -> tempfile::TempDir {
 fn list_perf_non_image_terminal_omits_graph_stages() {
     let repo = temp_repo();
 
-    assert_cmd::Command::cargo_bin("wt").unwrap()
-        .current_dir(repo.path())
-        .env_remove("TERM_PROGRAM")
-        .env_remove("KITTY_WINDOW_ID")
-        .args(["list", "--perf"])
-        .assert()
-        .success()
-        .stdout(predicate::str::is_empty())
-        .stderr(predicate::str::contains("pre-dispatch"))
-        .stderr(predicate::str::contains("list gather"))
-        .stderr(predicate::str::contains("table render"))
-        .stderr(predicate::str::contains("graph gather").not())
-        .stderr(predicate::str::contains("graph image render").not());
+    let (timings, _) = json_report(repo.path(), &[]);
+
+    let stages = all_stages(&timings);
+    for present in [Stage::Startup, Stage::LocalGather, Stage::TableRender, Stage::WriteOutput] {
+        assert!(stages.contains(&present), "{present} missing: {stages:?}");
+    }
+    for absent in [Stage::GraphHistory, Stage::GraphRender] {
+        assert!(!stages.contains(&absent), "{absent} without image support: {stages:?}");
+    }
 }
 
 #[test]
@@ -116,34 +145,63 @@ fn list_perf_non_image_verbose_includes_verbose_gather() {
         ));
     run_git(repo_path, &["worktree", "add", feature_path.to_str().unwrap(), "feature-a"]);
 
-    assert_cmd::Command::cargo_bin("wt").unwrap()
-        .current_dir(&feature_path)
-        .env_remove("TERM_PROGRAM")
-        .env_remove("KITTY_WINDOW_ID")
-        .args(["list", "-v", "--perf"])
-        .assert()
-        .success()
-        .stdout(predicate::str::is_empty())
-        .stderr(predicate::str::contains("pre-dispatch"))
-        .stderr(predicate::str::contains("list gather"))
-        .stderr(predicate::str::contains("table render"))
-        .stderr(predicate::str::contains("verbose gather"))
-        .stderr(predicate::str::contains("verbose render"))
-        .stderr(predicate::str::contains("graph gather").not())
-        .stderr(predicate::str::contains("graph image render").not());
+    let (timings, _) = json_report(&feature_path, &["-v"]);
+
+    assert!(timings.span(&[Stage::LocalReads, Stage::VerboseHistory]).is_some(), "{timings:#?}");
+    assert!(timings.span(&[Stage::VerboseRender]).is_some(), "{timings:#?}");
+    let stages = all_stages(&timings);
+    assert!(!stages.contains(&Stage::GraphHistory) && !stages.contains(&Stage::GraphRender), "{stages:?}");
 }
 
 #[test]
 fn list_perf_error_path_emits_no_report() {
     let dir = tempfile::tempdir().expect("create temp dir");
 
-    assert_cmd::Command::cargo_bin("wt").unwrap()
-        .current_dir(dir.path())
-        .args(["list", "--perf"])
-        .assert()
-        .failure()
-        .stdout(predicate::str::is_empty())
-        .stderr(predicate::str::contains("Performance").not());
+    for flag in ["--perf", "--perf=json"] {
+        assert_cmd::Command::cargo_bin("wt").unwrap()
+            .current_dir(dir.path())
+            .args(["list", flag])
+            .assert()
+            .failure()
+            .stdout(predicate::str::is_empty())
+            .stderr(predicate::str::contains("Performance").not())
+            .stderr(predicate::str::contains("WT_PERF_JSON").not());
+    }
+}
+
+/// `--perf` takes its value only with `=`: bare `--perf` is the human report,
+/// `--perf json` leaves `json` to be read as a subcommand, and an unknown
+/// value is a usage error.
+#[test]
+fn the_perf_value_needs_an_equals_sign_and_a_known_format() {
+    let repo = temp_repo();
+    let wt = || {
+        let mut command = assert_cmd::Command::cargo_bin("wt").unwrap();
+        command.current_dir(repo.path()).env_remove("TERM_PROGRAM").env_remove("KITTY_WINDOW_ID");
+        command
+    };
+
+    wt().args(["--perf", "list"]).assert().success().stderr(predicate::str::contains("Performance"));
+    wt().args(["--perf=human", "list"]).assert().success().stderr(predicate::str::contains("Performance"));
+    wt().args(["--perf", "json"]).assert().code(2).stderr(predicate::str::contains("json"));
+    wt().args(["list", "--perf=yaml"]).assert().code(2).stderr(predicate::str::contains("yaml"));
+}
+
+/// The record follows the listing: a newline, then one line that is the
+/// whole report, and nothing after it.
+#[test]
+fn the_json_record_is_the_final_line_after_the_listing() {
+    let repo = temp_repo();
+
+    let (timings, stderr) = json_report(repo.path(), &[]);
+
+    assert_eq!(timings.scope(), Scope::Command);
+    let (listing, record) = stderr.trim_end_matches('\n').rsplit_once('\n').expect("a listing, then the record");
+    assert!(listing.ends_with('\n'), "a newline separates the listing from the record: {stderr:?}");
+    assert!(listing.contains("main"), "the listing comes first: {listing}");
+    assert!(record.starts_with("WT_PERF_JSON {"), "{record:?}");
+    assert!(stderr.ends_with("}\n"), "{stderr:?}");
+    assert!(!record.contains('\u{1b}') && !record.contains('\r'), "{record:?}");
 }
 
 /// The shape `wt list --perf` renders for a listing with remote work: the
@@ -185,53 +243,24 @@ fn report_rows_carry_their_depth() {
     assert_eq!(shape, expected.map(|(depth, label)| (depth, label.to_string())));
 }
 
-/// A real local-only report: one `local gather` group whose children are the
-/// overlapping gathers, no `remote wait` row, and top-level rows that add up
-/// to the total (within the report's display rounding).
 #[test]
 fn list_perf_reports_a_local_only_group_that_reconciles() {
     let repo = temp_repo();
 
-    let output = assert_cmd::Command::cargo_bin("wt")
-        .unwrap()
-        .current_dir(repo.path())
-        .args(["list", "--perf"])
-        .output()
-        .expect("wt list --perf runs");
-    assert!(output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let (timings, _) = json_report(repo.path(), &[]);
 
-    let rows = perf_rows(&stderr);
-    assert_eq!(group_children(&rows, "local gather"), ["list gather"], "{rows:#?}");
-    assert!(rows.iter().all(|row| row.label != "remote wait"), "no remote work, no remote wait row: {rows:#?}");
-    assert!(stage_from_perf(&stderr, "list gather").is_some());
-    assert_top_level_reconciles(&rows);
+    let region = timings.span(&[Stage::LocalReads]).expect("a local-only region");
+    assert_eq!(region.children().iter().map(Span::stage).collect::<Vec<_>>(), [Stage::LocalGather]);
+    assert!(timings.span(&[Stage::RemoteAndLocal]).is_none(), "no wait ran: {timings:#?}");
+    // The record decoded, so every level reconciled exactly.
+    assert_eq!(timings.spans().first().map(Span::stage), Some(Stage::Startup));
+    assert_eq!(timings.spans().last().map(Span::stage), Some(Stage::WriteOutput));
 }
 
-/// Asserts that the report's top-level rows add up to its total, within the
-/// report's display rounding (each value is rounded to a tenth of its unit).
-fn assert_top_level_reconciles(rows: &[PerfRow]) {
-    let root = rows.iter().find(|row| row.depth == 0).expect("root row").duration;
-    let top_level: Vec<&PerfRow> = rows.iter().filter(|row| row.depth == 1).collect();
-    assert_eq!(top_level.last().map(|row| row.label.as_str()), Some("unattributed"), "{rows:#?}");
-    let sum: Duration = top_level.iter().map(|row| row.duration).sum();
-    let rounding = |d: Duration| if d >= Duration::from_secs(1) { Duration::from_millis(50) } else { Duration::from_micros(50) };
-    let slack: Duration = top_level.iter().map(|row| rounding(row.duration)).sum::<Duration>() + rounding(root);
-    assert!(sum.abs_diff(root) <= slack, "top-level rows {sum:?} vs total {root:?}: {rows:#?}");
-}
-
-/// The children of the top-level group labeled `group`, in report order.
-fn group_children<'a>(rows: &'a [PerfRow], group: &str) -> Vec<&'a str> {
-    let at = rows.iter().position(|row| row.label == group).unwrap_or_else(|| panic!("no `{group}` row: {rows:#?}"));
-    assert_eq!(rows[at].depth, 1, "{rows:#?}");
-    rows[at + 1..].iter().take_while(|row| row.depth == 2).map(|row| row.label.as_str()).collect()
-}
-
-/// A real report with remote work, from the shipped renderer: the wait and
-/// the local gather sit under one `remote wait ‖ local gather` group, the
-/// post-wait PR read is its `pr reread` child, `pr gather` stays a top-level
-/// row, nothing is regathered when no ref moved, and the stage reader finds
-/// each child by its own name rather than the group containing it.
+/// A real report with remote work, from the shipped command: the wait, the
+/// post-wait PR read, and the local gather sit in one concurrent
+/// `remote_and_local` region, `origin_lookup` stays a top-level step, and
+/// nothing is regathered when no ref moved.
 #[test]
 #[serial]
 fn list_perf_reports_the_remote_group_from_the_real_renderer() {
@@ -239,19 +268,22 @@ fn list_perf_reports_the_remote_group_from_the_real_renderer() {
     let gitea = FakeGitea::new(GiteaReply::Open(vec![]));
     let _reaper = WorkerReaper::new(&fixture, &gitea);
 
-    let output = fixture.wt_command_via_gitea(&gitea).args(["list", "--perf"]).output().expect("wt list --perf runs");
+    let output =
+        fixture.wt_command_via_gitea(&gitea).args(["list", "--perf=json"]).output().expect("wt list --perf=json runs");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(output.status.success(), "{stderr}");
+    let timings = perf_timings(&stderr);
 
-    let rows = perf_rows(&stderr);
-    assert_eq!(group_children(&rows, "remote wait ‖ local gather"), ["remote wait", "pr reread", "list gather"]);
-    let top_level: Vec<&str> = rows.iter().filter(|row| row.depth == 1).map(|row| row.label.as_str()).collect();
-    assert!(top_level.contains(&"pr gather"), "{rows:#?}");
-    for absent in ["local gather", "regather", "fast-forward", "checkout status refresh"] {
-        assert!(!top_level.contains(&absent), "`{absent}` without its cause: {rows:#?}");
+    let region = timings.span(&[Stage::RemoteAndLocal]).expect("the wait's region");
+    assert_eq!(
+        region.children().iter().map(Span::stage).collect::<Vec<_>>(),
+        [Stage::RefreshWorker, Stage::PrCacheRead, Stage::LocalGather]
+    );
+    let top_level: Vec<Stage> = timings.spans().iter().map(Span::stage).collect();
+    assert!(top_level.contains(&Stage::OriginLookup), "{top_level:?}");
+    for absent in [Stage::LocalReads, Stage::Regather, Stage::FastForward, Stage::CheckoutRefresh] {
+        assert!(!top_level.contains(&absent), "`{absent}` without its cause: {top_level:?}");
     }
-    let group = stage_from_perf(&stderr, "remote wait ‖ local gather").expect("group row");
-    let wait = stage_from_perf(&stderr, "remote wait").expect("remote wait child");
-    assert!(wait <= group, "the group spans its wait: {wait:?} > {group:?}");
-    assert_top_level_reconciles(&rows);
+    let wait = stage_at(&timings, &[Stage::RemoteAndLocal, Stage::RefreshWorker]).expect("refresh worker");
+    assert!(wait <= region.elapsed(), "the region spans its wait: {wait:?} > {:?}", region.elapsed());
 }

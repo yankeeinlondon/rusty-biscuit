@@ -5,4 +5,4 @@ pub mod exit;
 mod perf;
 pub mod shell_integration;
 
-pub use args::{Cli, Commands};
+pub use args::{Cli, Commands, PerfFormat};

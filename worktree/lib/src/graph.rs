@@ -27,6 +27,7 @@ use crate::fork_origin::ForkOriginStore;
 use crate::git::calls;
 use crate::git::git_command_in;
 use crate::listing::RefTips;
+use crate::timing::{self, Span, SpanList, Stage};
 use crate::worktree::WorktreeList;
 
 mod topology;
@@ -336,6 +337,27 @@ impl DefaultTips {
 /// Graph and verbose data, gathered in one pass so both share one
 /// `merge-base` for the current branch.
 pub fn gather(input: &GatherInput, needs_graph: bool, needs_verbose: bool) -> (Option<GraphFacts>, Option<VerboseData>) {
+    gather_steps(input, needs_graph, needs_verbose, None)
+}
+
+/// [`gather`], measured: the span is [`Stage::GraphHistory`] when the graph
+/// is needed and [`Stage::VerboseHistory`] otherwise, with one sequential
+/// child per step that ran and `git` counts throughout. Lane placement, its
+/// repeats, and the fork-holder searches are one step,
+/// [`Stage::LaneAssembly`], since they interleave.
+pub fn gather_timed(input: &GatherInput, needs_graph: bool, needs_verbose: bool) -> ((Option<GraphFacts>, Option<VerboseData>), Span) {
+    let stage = if needs_graph { Stage::GraphHistory } else { Stage::VerboseHistory };
+    let mut steps = SpanList::sequential();
+    let (data, span) = timing::measure(stage, || gather_steps(input, needs_graph, needs_verbose, Some(&mut steps)));
+    (data, span.with_children(steps))
+}
+
+fn gather_steps(
+    input: &GatherInput,
+    needs_graph: bool,
+    needs_verbose: bool,
+    mut steps: Option<&mut SpanList>,
+) -> (Option<GraphFacts>, Option<VerboseData>) {
     let Some(current) = input.current_branch.as_deref() else {
         return (None, None);
     };
@@ -345,36 +367,50 @@ pub fn gather(input: &GatherInput, needs_graph: bool, needs_verbose: bool) -> (O
     // Verbose details alone never tell a shallow "no" from a real one, so
     // only the graph pays for the check.
     let (history, history_gap) = if needs_graph {
-        let (history, read) = History::read(&input.repo);
+        let (history, read) = timing::record(steps.as_deref_mut(), Stage::ShallowCheck, || History::read(&input.repo));
         (history, read.is_err())
     } else {
         (History::complete(&input.repo), false)
     };
-    let Some((tips, tips_gap)) = DefaultTips::read(input, &history) else {
+    let Some((tips, tips_gap)) =
+        timing::record(steps.as_deref_mut(), Stage::DefaultTips, || DefaultTips::read(input, &history))
+    else {
         return (None, None);
     };
     let gap = history_gap || tips_gap;
     let shallow = history.is_shallow() && !history_gap;
 
     if input.is_base_view() {
-        let graph = needs_graph.then(|| GraphFacts { shallow, ..base_view(input, &history, &tips, gap) });
+        let graph = needs_graph.then(|| {
+            timing::record(steps.as_deref_mut(), Stage::LaneAssembly, || GraphFacts {
+                shallow,
+                ..base_view(input, &history, &tips, gap)
+            })
+        });
         return (graph, None);
     }
 
     let Some(current_tip) = input.refs.local(current) else {
         return (None, None);
     };
-    let base = history.merge_base(&tips.lane_tip, current_tip);
+    let base = timing::record(steps.as_deref_mut(), Stage::FocusedMergeBase, || {
+        history.merge_base(&tips.lane_tip, current_tip)
+    });
     let verbose = match (&base, needs_verbose) {
-        (Ok(Some(fork)), true) => Some(VerboseData {
+        (Ok(Some(fork)), true) => Some(timing::record(steps.as_deref_mut(), Stage::VerboseDetails, || VerboseData {
             default_branch: input.default_branch.clone(),
             branch: current.to_string(),
             merge_base: commit_details(input, fork, 1).into_iter().next(),
             branch_commits: commit_details_since(input, current_tip, &tips.exclusions()),
-        }),
+        })),
         _ => None,
     };
-    let graph = needs_graph.then(|| GraphFacts { shallow, ..focused_view(input, &history, &tips, gap, current, current_tip, base) });
+    let graph = needs_graph.then(|| {
+        timing::record(steps, Stage::LaneAssembly, || GraphFacts {
+            shallow,
+            ..focused_view(input, &history, &tips, gap, current, current_tip, base)
+        })
+    });
     (graph, verbose)
 }
 
