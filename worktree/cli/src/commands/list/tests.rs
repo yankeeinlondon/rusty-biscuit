@@ -460,6 +460,7 @@ mod gather {
             finished_at: unix_now(),
             head: HeadStatus::Ok,
             prs: worker.prs,
+            durations: worktree::timing::LaunchReport::Missing,
         };
         write_receipt(&receipt_path_beside(&worker.head_store, &args.attempt).expect("path"), &receipt).expect("receipt");
         Ok(WorkerHandle::new(|| true))
@@ -1098,7 +1099,7 @@ mod observations {
         fn answers(head: HeadEnd, prs: PrEnd, pr_credentials: CredentialEvidence) -> RemoteAnswers {
             RemoteAnswers {
                 origin: Some(GITHUB.into()),
-                waited: Some(WaitEnd { head, prs, pr_credentials, timed_out: false }),
+                waited: Some(WaitEnd { head, prs, pr_credentials, timed_out: false, worker_reports: Vec::new() }),
                 ..RemoteAnswers::default()
             }
         }

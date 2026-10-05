@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use perf_support::{FakeGitea, GiteaReply, MixedFixture, WorkerReaper, perf_rows, perf_timings, stage_at, stage_from_perf};
 use serial_test::serial;
-use worktree::timing::{Scope, Span, Stage, Timings};
+use worktree::timing::{Scope, Span, Stage, Timings, WorkerReportStatus};
 
 fn temp_repo() -> tempfile::TempDir {
     let dir = tempfile::tempdir().expect("create temp dir");
@@ -286,4 +286,37 @@ fn list_perf_reports_the_remote_group_from_the_real_renderer() {
     }
     let wait = stage_at(&timings, &[Stage::RemoteAndLocal, Stage::RefreshWorker]).expect("refresh worker");
     assert!(wait <= region.elapsed(), "the region spans its wait: {wait:?} > {:?}", region.elapsed());
+}
+
+/// The worker's own report, end to end: `--perf=json` launches the real
+/// `wt internal-refresh` with `--timings`, the wait reads its report from
+/// the receipt, and the record carries it beside the foreground spans. The
+/// provider fails at once, so the PR half's result reaches the wait only
+/// through the receipt and the report is always read.
+#[test]
+#[serial]
+fn a_perf_listing_carries_its_workers_own_report() {
+    let fixture = MixedFixture::new().with_gitea_origin();
+    let gitea = FakeGitea::new(GiteaReply::Status(500));
+    let _reaper = WorkerReaper::new(&fixture, &gitea);
+
+    let output =
+        fixture.wt_command_via_gitea(&gitea).args(["list", "--perf=json"]).output().expect("wt list --perf=json runs");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
+    let timings = perf_timings(&stderr);
+
+    assert_eq!(timings.worker_report_status(), Some(WorkerReportStatus::Complete), "{timings:#?}");
+    let [report] = timings.worker_reports() else {
+        panic!("one launch: {:#?}", timings.worker_reports());
+    };
+    assert_eq!(report.launch_index, 0);
+    let worker = report.timings().expect("a usable report");
+    let halves = worker.span(&[Stage::WorkerHalves]).expect("the halves group");
+    assert_eq!(halves.children().iter().map(Span::stage).collect::<Vec<_>>(), [Stage::PrRefresh, Stage::HeadRefresh]);
+    assert!(worker.span(&[Stage::WorkerHalves, Stage::PrRefresh, Stage::PrRequest]).is_some(), "the request was made");
+    assert!(worker.span(&[Stage::WorkerHalves, Stage::HeadRefresh, Stage::HeadCheck]).is_some(), "the check ran");
+    // Diagnostics only: no foreground stage is a worker stage.
+    let foreground = timings.span(&[Stage::RemoteAndLocal, Stage::RefreshWorker]).expect("the wait");
+    assert!(foreground.find(&[Stage::WorkerHalves]).is_none());
 }

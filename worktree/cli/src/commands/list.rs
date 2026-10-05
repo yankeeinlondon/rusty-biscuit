@@ -343,12 +343,15 @@ fn run_pipeline(
     }
     let Listing { list, remote, ff, graph: graph_facts, verbose: verbose_data, main_checkout, head_store, timings, .. } =
         listing?;
+    // The worker's reports stay diagnostics beside the command's spans.
+    let mut worker_reports = None;
     if let (Some(steps), Some(library)) = (steps.as_mut(), timings) {
         // The library's top-level spans are sequential parts of this command
         // too; its own total is not a span of its own.
         for span in library.spans() {
             steps.push(span.clone());
         }
+        worker_reports = library.worker_report_status().map(|status| (library.worker_reports().to_vec(), status));
     }
     let default_branch = list.default_branch.clone();
 
@@ -458,7 +461,13 @@ fn run_pipeline(
         );
     });
 
-    Ok(steps.map(|steps| Timings::new(Scope::Command, process_start.elapsed(), steps)))
+    Ok(steps.map(|steps| {
+        let timings = Timings::new(Scope::Command, process_start.elapsed(), steps);
+        match worker_reports {
+            Some((reports, status)) => timings.with_worker_reports(reports, status),
+            None => timings,
+        }
+    }))
 }
 
 fn render_verbose(data: &worktree::graph::VerboseData, terminal: &Terminal) -> String {
