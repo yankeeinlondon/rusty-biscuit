@@ -301,8 +301,13 @@ example a Rust `impl` for a type declared in another file:
 identifies the owner by record ID: the smallest same-named declaration
 around the member, else the same-named record of `container_kind` whose
 qualified name qualifies the member's (`right::Boxed` for
-`right::Boxed::work`), else the only such record; with several and none
-qualifying, the member has no parent.
+`right::Boxed::work`), else the only such record whose qualified name ends
+with the member's owner path (the member's qualified name without its last
+segment); with several and none qualifying, the member has no parent. A
+lone same-named record never overrides a qualification that names another
+owner: beside a local `W`, the method of `impl other::W` is
+`other::W::probe` with no parent, and `container_kind` is likewise read
+only from same-named records that agree with that owner path.
 
 `keyword` is the grammar token that introduces the declaration, such as `fn`,
 `struct`, `def`, `func`, `const`, `let`, `var`, `class`, `protocol`, `sub`,

@@ -745,3 +745,50 @@ fn entry_from_extractor_revision_nine_is_not_served_after_the_repairs() {
         },
     });
 }
+
+const FOREIGN_OWNER_RUST: &str =
+    "\npub struct ForeignProbeOwner;\nimpl foreign::ForeignProbeOwner { pub fn foreign_probe(&self) {} }\n";
+
+/// The in-file qualified name of `foreign_probe`'s parent in a
+/// `hug --json-full` report, `null` without one.
+fn foreign_probe_parent(output: &Value) -> Value {
+    let records: Vec<&Value> = output["indexes"]
+        .as_array()
+        .expect("indexes")
+        .iter()
+        .flat_map(|index| index["symbols"].as_array().expect("index symbols"))
+        .filter(|record| record["identity"]["name"] == "foreign_probe")
+        .collect();
+    assert_eq!(records.len(), 1, "expected one `foreign_probe` record");
+    records[0]["relations"]["parent"]["qualified_name"].clone()
+}
+
+/// Revision 10 made the sole local `ForeignProbeOwner` the owner of a method
+/// of `impl foreign::ForeignProbeOwner`; revision 11 links no same-file owner
+/// that disagrees with the method's explicit qualification.
+#[test]
+fn entry_from_extractor_revision_ten_is_not_served_after_the_repairs() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "10",
+        key: OldKey::Computed,
+        file: "rust.rs",
+        language: "rust",
+        source: format!("{RUST_FIXTURE}{FOREIGN_OWNER_RUST}"),
+        sentinel: "public_function",
+        probe: foreign_probe_parent,
+        repaired: Value::Null,
+        stale: Value::from("ForeignProbeOwner"),
+        revert: |snapshot| {
+            let owner = record_named(snapshot, "ForeignProbeOwner");
+            let owner_ref = serde_json::json!({
+                "id": owner["id"].clone(),
+                "name": "ForeignProbeOwner",
+                "qualified_name": "ForeignProbeOwner",
+            });
+            let probe = record_named(snapshot, "foreign_probe");
+            probe["identity"]["container_kind"] = Value::from("Type");
+            probe["relations"]["parent"] = owner_ref.clone();
+            probe["relations"]["container"] = owner_ref;
+        },
+    });
+}

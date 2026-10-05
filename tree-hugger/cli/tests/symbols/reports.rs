@@ -502,6 +502,39 @@ fn tree_nests_methods_under_their_own_same_named_type() {
     );
 }
 
+/// A method of `other::W` stays out of the sole local `W`, under a
+/// contextual heading that names its qualified owner.
+#[test]
+fn tree_keeps_an_impl_of_another_files_type_out_of_a_same_named_local_type() {
+    let scratch = Scratch::new(&[("main.rs", crate::classes::EXTERNAL_OWNER), ("other.rs", "pub struct W;\n")]);
+    let tree = scratch.stdout(&["symbols", "--file", "main.rs", "--tree", "--format", "plain", "--no-cache"]);
+    let rows: Vec<&str> = tree.trim_end().lines().collect();
+    assert_eq!(
+        rows,
+        [
+            "main.rs",
+            "  public struct W [1:1]",
+            "  private module other [2:1]",
+            "  [in other::W]",
+            "    public method probe(self) [3:17]",
+        ],
+        "{tree}"
+    );
+}
+
+/// Members of two different external `W`s get one heading each.
+#[test]
+fn tree_heads_each_external_owner_separately() {
+    let scratch = Scratch::new(&[("ext.rs", "impl x::W { fn p(&self) {} }\nimpl y::W { fn q(&self) {} }\n")]);
+    let tree = scratch.stdout(&["symbols", "--file", "ext.rs", "--tree", "--format", "plain", "--no-cache"]);
+    let rows: Vec<&str> = tree.trim_end().lines().collect();
+    assert_eq!(
+        rows,
+        ["ext.rs", "  [in x::W]", "    private method p(self) [1:13]", "  [in y::W]", "    private method q(self) [2:13]"],
+        "{tree}"
+    );
+}
+
 #[test]
 fn tree_combines_with_sort_grouping_and_formats() {
     let scratch = scratch();

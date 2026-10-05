@@ -5,7 +5,9 @@
 //! `relations.parent` is that owner's record by ID, also when the member is
 //! declared outside the owner's body (Rust `impl`, Swift extension, Lua
 //! table function). Same-language controls with repeated nested names pin the
-//! paths that were already right.
+//! paths that were already right. A sole same-named record never becomes the
+//! owner of a member whose explicit qualification names another owner
+//! (`ABSENT_OWNER_MATRIX`).
 
 use tree_hugger::{SymbolRecord, TreeFile};
 
@@ -55,6 +57,22 @@ const OWNER_MATRIX: &[OwnerRow] = &[
             ("right::Repeated::generic", "right::Repeated"),
             ("outer::Inner::up", "outer::Inner"),
             ("left::Repeated::rooted", "left::Repeated"),
+        ],
+    },
+    OwnerRow {
+        label: "Rust sole type with an unqualified, rooted or imported impl",
+        extension: "rs",
+        source: "pub struct W;\n\
+                 impl W { pub fn direct(&self) {} }\n\
+                 mod inner { impl crate::W { pub fn rooted(&self) {} } }\n\
+                 mod a { pub struct V; }\n\
+                 use a::V;\n\
+                 impl V { pub fn imported(&self) {} }\n",
+        cases: &[
+            ("W::direct", "W"),
+            ("W::rooted", "W"),
+            ("W::rooted::self", "W"),
+            ("V::imported", "a::V"),
         ],
     },
     OwnerRow {
@@ -129,6 +147,51 @@ const OWNER_MATRIX: &[OwnerRow] = &[
     },
 ];
 
+/// A member whose explicit qualification names an owner declared in another
+/// file, beside a sole same-named local record that is not its owner.
+struct AbsentOwnerRow {
+    label: &'static str,
+    extension: &'static str,
+    source: &'static str,
+    /// In-file qualified names of the members that must have no container.
+    members: &'static [&'static str],
+    /// In-file qualified name of the unrelated local record.
+    local: &'static str,
+}
+
+const ABSENT_OWNER_MATRIX: &[AbsentOwnerRow] = &[
+    AbsentOwnerRow {
+        label: "Rust impl of a type in an out-of-line module",
+        extension: "rs",
+        source: "pub struct W;\nmod other;\nimpl other::W { pub fn probe(&self) {} }\n",
+        members: &["other::W::probe", "other::W::probe::self"],
+        local: "W",
+    },
+    AbsentOwnerRow {
+        label: "Rust impl of an external crate's type beside a local enum",
+        extension: "rs",
+        source: "pub enum UniqueOwner { A }\nimpl external::UniqueOwner { fn probe(&self) {} }\n",
+        members: &["external::UniqueOwner::probe"],
+        local: "UniqueOwner",
+    },
+    AbsentOwnerRow {
+        label: "Swift extension of an external qualified type",
+        extension: "swift",
+        source: "class UniqueOwner {}\nextension External.UniqueOwner { func probe() {} }\n",
+        members: &["External.UniqueOwner.probe"],
+        local: "UniqueOwner",
+    },
+    AbsentOwnerRow {
+        label: "Lua member of an external qualified table",
+        extension: "lua",
+        source: "local UniqueOwner = {}\n\
+                 function External.UniqueOwner.review_probe() end\n\
+                 return UniqueOwner\n",
+        members: &["External.UniqueOwner.review_probe"],
+        local: "UniqueOwner",
+    },
+];
+
 fn records_of(source: &str, extension: &str) -> Vec<SymbolRecord> {
     let directory = tempfile::tempdir().expect("temp dir");
     let path = directory.path().join(format!("owners.{extension}"));
@@ -173,6 +236,37 @@ fn members_attach_to_their_own_same_named_owner() {
         let records = records_of(row.source, row.extension);
         for (member, owner) in row.cases {
             assert_owned(&records, row.label, member, owner);
+        }
+    }
+}
+
+#[test]
+fn a_sole_same_named_record_never_overrides_an_explicit_owner() {
+    for row in ABSENT_OWNER_MATRIX {
+        let records = records_of(row.source, row.extension);
+        let local = named(&records, row.label, row.local);
+        for member in row.members {
+            let child = named(&records, row.label, member);
+            assert!(child.relations.parent.is_none(), "{}: `{member}` parent {:?}", row.label, child.relations.parent);
+            assert!(
+                child.relations.container.is_none(),
+                "{}: `{member}` container {:?}",
+                row.label,
+                child.relations.container
+            );
+            assert!(
+                child.identity.container_kind.is_none() || row.extension == "swift",
+                "{}: `{member}` takes the kind of the local `{}`: {:?}",
+                row.label,
+                row.local,
+                child.identity.container_kind
+            );
+            assert!(
+                !local.relations.members.iter().any(|reference| reference.id.as_ref() == Some(&child.id)),
+                "{}: local `{}` lists `{member}`",
+                row.label,
+                row.local
+            );
         }
     }
 }

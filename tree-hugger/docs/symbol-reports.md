@@ -419,7 +419,10 @@ lib.rs
 When a declaration's container is not listed (the command does not select
 its kind, a filter dropped it, or it is declared in another file), the
 declaration sits under a marked heading such as `[in type Widget]` or
-`[in Elsewhere]`. The heading is context only: it is never a listed
+`[in Elsewhere]`. A member with no container in the file is headed by its
+qualified owner as far as the source names it, so the methods of
+`impl other::W` sit under `[in other::W]`, apart from a local `W` and from
+the methods of `impl another::W`. The heading is context only: it is never a listed
 declaration and `--count` or `--stats` never counts it. Overloads stay
 separate rows in source order. Containment covers declarations the library
 links; a parameter is placed under the container its record names, which

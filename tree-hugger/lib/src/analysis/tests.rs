@@ -5,9 +5,9 @@ use tempfile::TempDir;
 
 use crate::TreeFile;
 use crate::analysis::{
-    NameIndex, OwnerSymbolIndex, RefSet, analyze_file, ends_with_segments, export_record,
-    find_container_symbol, last_name_segment, nearest_qualifying_owner, qualifies,
-    find_export_target,
+    NameIndex, OwnerSymbolIndex, RefSet, agrees_with_owner_path, analyze_file, ends_with_segments,
+    export_record, find_container_symbol, find_export_target, last_name_segment,
+    nearest_qualifying_owner, owner_path, qualifies,
 };
 use crate::shared::{
     AnalysisPass, DocsFacet, ExportRecord, IdentityFacet, ProgrammingLanguage, ProvenanceFacet,
@@ -183,8 +183,9 @@ fn scan_container_symbol(
             let named: Vec<usize> = of_kind
                 .into_iter()
                 .filter(|&idx| {
-                    bare == container_name
-                        || ends_with_segments(&symbols[idx].identity.qualified_name, container_name)
+                    let owner = &symbols[idx].identity.qualified_name;
+                    (bare == container_name || ends_with_segments(owner, container_name))
+                        && agrees_with_owner_path(owner, &child.identity.qualified_name)
                 })
                 .collect();
             (named.len() == 1).then(|| named[0])
@@ -294,13 +295,23 @@ fn name_index_keeps_the_first_of_equal_candidates() {
     assert_eq!(find_container_symbol(&symbols, &names, 3, "Owner"), None);
     assert_eq!(scan_container_symbol(&symbols, 3, "Owner"), None);
 
-    // The only candidate of the kind is the container even unqualified.
+    // The only candidate of the kind is the container only when its
+    // qualified name agrees with the child's owner path: a sole `left::Owner`
+    // never owns `elsewhere::Owner::child`.
     symbols[3].identity.container_kind = Some(SymbolKindV2::Class);
     symbols[0].kind = SymbolKindV2::Class;
     let names = NameIndex::new(&symbols);
+    assert_eq!(find_container_symbol(&symbols, &names, 3, "Owner"), None);
+    assert_eq!(scan_container_symbol(&symbols, 3, "Owner"), None);
+    symbols[3].identity.qualified_name = "Owner::child".to_string();
+    assert_eq!(find_container_symbol(&symbols, &names, 3, "Owner"), Some(0));
+    assert_eq!(scan_container_symbol(&symbols, 3, "Owner"), Some(0));
+    symbols[3].identity.qualified_name = "child".to_string();
     assert_eq!(find_container_symbol(&symbols, &names, 3, "Owner"), Some(0));
 
     // A qualified container name is matched by its tail segments.
+    symbols[3].identity.qualified_name = "left::Owner::child".to_string();
+    symbols[0].identity.qualified_name = "outer::left::Owner".to_string();
     assert_eq!(find_container_symbol(&symbols, &names, 3, "left::Owner"), Some(0));
     assert_eq!(find_container_symbol(&symbols, &names, 3, "right::Owner"), None);
     symbols[3].identity.container_kind = Some(SymbolKindV2::Enum);
@@ -322,6 +333,17 @@ fn qualified_name_segments_match_whole_segments_only() {
     assert_eq!(last_name_segment("Left.Repeated"), "Repeated");
     assert_eq!(last_name_segment("a::b::C"), "C");
     assert_eq!(last_name_segment("C"), "C");
+    assert_eq!(owner_path("other::W::probe"), Some("other::W"));
+    assert_eq!(owner_path("Outer.Left.f"), Some("Outer.Left"));
+    assert_eq!(owner_path("M:m"), Some("M"));
+    assert_eq!(owner_path("Ns\\f"), Some("Ns"));
+    assert_eq!(owner_path("probe"), None);
+    assert!(agrees_with_owner_path("W", "W::probe"));
+    assert!(agrees_with_owner_path("a::W", "W::probe"));
+    assert!(agrees_with_owner_path("right::W", "right::W::m::self"));
+    assert!(agrees_with_owner_path("W", "probe"));
+    assert!(!agrees_with_owner_path("W", "other::W::probe"));
+    assert!(!agrees_with_owner_path("left::W", "right::W::m"));
 }
 
 fn reference(id: Option<&str>, name: &str, qualified_name: Option<&str>) -> SymbolRef {

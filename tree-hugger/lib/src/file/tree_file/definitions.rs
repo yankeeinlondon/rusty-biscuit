@@ -8,6 +8,7 @@ use tree_sitter::{QueryCursor, StreamingIterator};
 
 use super::TreeFile;
 use crate::analysis::counters::count_definition_capture;
+use crate::analysis::agrees_with_owner_path;
 use crate::error::TreeHuggerError;
 use crate::file::extract::*;
 use crate::queries::{QueryKind, query_for};
@@ -247,7 +248,12 @@ impl TreeFile {
         let container_kinds: Vec<Option<SymbolKind>> = pending
             .iter()
             .map(|entry| {
-                resolve_container_kind(entry.container.as_ref(), &kinds_by_node, &pending)
+                resolve_container_kind(
+                    entry.container.as_ref(),
+                    &entry.extracted.symbol.qualified_name,
+                    &kinds_by_node,
+                    &pending,
+                )
             })
             .collect();
 
@@ -509,12 +515,20 @@ fn align_field_metadata(pending: &mut [PendingSymbol<'_>], selection: &MetadataS
 
 /// The container's kind is the kind extracted for the container's own
 /// declaration, so a container and its standalone symbol never disagree.
+///
+/// A container found by name (`SameFileType`, `SameFileTable`) takes its
+/// kind only from same-named declarations whose qualified name agrees with
+/// the member's explicit qualification (`agrees_with_owner_path`): the
+/// members of `impl other::W` take no kind from an unrelated local `W`.
 fn resolve_container_kind(
     container: Option<&ContainerRef<'_>>,
+    qualified_name: &str,
     kinds_by_node: &HashMap<usize, SymbolKind>,
     symbols: &[PendingSymbol<'_>],
 ) -> Option<SymbolKind> {
     let container = container?;
+    let agrees =
+        |candidate: &SymbolInfo| agrees_with_owner_path(&candidate.qualified_name, qualified_name);
     match container.lookup {
         ContainerLookup::Node { node, fallback } => {
             Some(kinds_by_node.get(&node.id()).copied().unwrap_or(fallback))
@@ -525,7 +539,11 @@ fn resolve_container_kind(
             let mut kinds = symbols
                 .iter()
                 .map(|entry| &entry.extracted.symbol)
-                .filter(|symbol| symbol.scope == SymbolScope::Item && symbol.name == container.name)
+                .filter(|symbol| {
+                    symbol.scope == SymbolScope::Item
+                        && symbol.name == container.name
+                        && agrees(symbol)
+                })
                 .map(|symbol| symbol.kind);
             let first = kinds.next()?;
             kinds.all(|kind| kind == first).then_some(first)
@@ -536,7 +554,9 @@ fn resolve_container_kind(
             let mut kinds = symbols
                 .iter()
                 .map(|entry| &entry.extracted.symbol)
-                .filter(|symbol| symbol.kind.is_type() && symbol.name == container.name)
+                .filter(|symbol| {
+                    symbol.kind.is_type() && symbol.name == container.name && agrees(symbol)
+                })
                 .map(|symbol| symbol.kind);
             let first = kinds.next()?;
             kinds.all(|kind| kind == first).then_some(first)

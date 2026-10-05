@@ -327,6 +327,8 @@ impl Foreign { fn f(&self) {} }                  // container Foreign, no kind
   arguments.
 - The container kind is that type's own kind when it is declared in the same
   file (Type for a struct or union, Enum for an enum), and absent otherwise.
+  A same-named type whose path disagrees with the `impl`'s is not that
+  type: `impl other::W` beside a local `enum W` has no container kind.
 - Two same-named types in different `mod`s of one file share a container
   name, but each member is linked (`relations.parent`, the owner's
   `relations.members`, `hug classes`, `--tree`) to the type its qualified
@@ -341,9 +343,15 @@ impl Foreign { fn f(&self) {} }                  // container Foreign, no kind
   ```
 
   A member whose qualified name names none of several same-named types (the
-  last line) has no owner; with only one type of that name in the file, that
-  type is the owner. If the same-named declarations disagree on kind, the
-  container kind is left absent.
+  last line) has no owner. With only one type of that name in the file, that
+  type is the owner only when the `impl` path agrees with it: `impl W`,
+  `impl crate::W` from a nested module, and `impl V` after `use a::V` all
+  link, but `impl other::W` (a `W` declared in another file) never joins a
+  local `W`; it keeps the qualified name `other::W::probe` and has no
+  owner. The same rule holds for a Swift `extension External.Owner` and a
+  Lua `function External.Owner.f()` beside a local `Owner`. If the
+  same-named declarations disagree on kind, the container kind is left
+  absent.
 - The trait of a trait impl is not part of the container. Each member of
   `impl Trait for Type` records it in `relations.implements`: one entry named
   after the trait's last path segment (`Display` above), whose `id` is the

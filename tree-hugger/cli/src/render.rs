@@ -344,20 +344,24 @@ impl Renderer {
     /// out-of-body Rust `impl` and Go receiver methods join their type, and
     /// repeated `impl` blocks share it). A member whose container was not
     /// selected or is in another file is listed under a marked contextual
-    /// heading, which is not itself a listed declaration. Siblings are
-    /// ordered by `sort`. Returns whether anything was written.
+    /// heading, which is not itself a listed declaration; a member with no
+    /// same-file container is headed by its in-file owner path
+    /// (`[in other::W]` for `impl other::W`, never the local `W`).
+    /// `name_prefix` is the prefix the records' qualified names carry.
+    /// Siblings are ordered by `sort`. Returns whether anything was written.
     pub(crate) fn outline(
         &self,
         out: &mut dyn Write,
         file: &Path,
         records: &[SymbolRecord],
+        name_prefix: &str,
         sort: SortOrder,
     ) -> io::Result<bool> {
         if records.is_empty() {
             return Ok(false);
         }
         let display = self.display(file);
-        let outline = Outline::new(records, &display, sort);
+        let outline = Outline::new(records, name_prefix, &display, sort);
         let header = self.link(file, 1, &literal(&display));
         self.line(out, 0, &format!("<b>{header}</b>"))?;
         let mut written = vec![false; records.len()];
@@ -783,7 +787,7 @@ enum Root<'a> {
 }
 
 impl<'a> Outline<'a> {
-    fn new(records: &'a [SymbolRecord], display: &str, sort: SortOrder) -> Self {
+    fn new(records: &'a [SymbolRecord], name_prefix: &str, display: &str, sort: SortOrder) -> Self {
         let index: HashMap<&SymbolId, usize> = records
             .iter()
             .enumerate()
@@ -803,7 +807,11 @@ impl<'a> Outline<'a> {
             // still names its container.
             let context = match container {
                 Some(container) => Some((container.id.as_ref(), container.name.as_str())),
-                None => record.identity.container_name.as_deref().map(|name| (None, name)),
+                None => record
+                    .identity
+                    .container_name
+                    .as_deref()
+                    .map(|name| (None, unresolved_owner(record, name_prefix, name))),
             };
             match (parent, context) {
                 (Some(parent), _) => children[parent].push(position),
@@ -884,6 +892,29 @@ impl<'a> Outline<'a> {
             roots,
         }
     }
+}
+
+/// The heading of a member with no same-file container: its in-file owner
+/// path (the qualified name without the prefix and the member's own name)
+/// when that qualifies `container_name` further, else `container_name`.
+/// Two members of `impl a::W` and `impl b::W` are distinct owners and never
+/// share one `[in W]` heading.
+fn unresolved_owner<'a>(record: &'a SymbolRecord, name_prefix: &str, container_name: &'a str) -> &'a str {
+    const SEPARATORS: [char; 3] = ['.', ':', '\\'];
+    if record.identity.is_namespace_rooted {
+        return container_name;
+    }
+    record
+        .identity
+        .qualified_name
+        .strip_prefix(name_prefix)
+        .and_then(|in_file| in_file.strip_suffix(record.identity.name.as_str()))
+        .map(|path| path.trim_end_matches(SEPARATORS))
+        .filter(|path| {
+            path.strip_suffix(container_name)
+                .is_some_and(|qualifier| qualifier.ends_with(SEPARATORS))
+        })
+        .unwrap_or(container_name)
 }
 
 /// Splits sorted items into groups by `key`, keeping each group's order and

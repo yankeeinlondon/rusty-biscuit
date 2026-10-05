@@ -517,9 +517,12 @@ impl OwnerSymbolNode {
 /// its type (a Rust `impl` member, a Swift extension member) is matched by
 /// identity instead: among the records of the recorded container kind, the
 /// one whose in-file qualified name qualifies the child's (longest first),
-/// else the only one. Same-named owners in different modules or types are
-/// never confused: when several candidates remain and none qualifies the
-/// child, there is no container.
+/// else the only one whose qualified name ends with the child's owner path
+/// (the child's qualified name minus its last segment). Same-named owners in
+/// different modules or types are never confused: when several candidates
+/// remain and none qualifies the child, there is no container, and a sole
+/// candidate never overrides an explicit qualification that names another
+/// owner (`impl other::W` beside a local `W` has no same-file container).
 ///
 /// A qualified `container_name` (Swift `extension Left.Repeated`) that no
 /// record is called is looked up by its last segment and, without a
@@ -563,13 +566,38 @@ fn find_container_symbol(
             let named: Vec<usize> = of_kind
                 .into_iter()
                 .filter(|&idx| {
-                    bare == container_name
-                        || ends_with_segments(&symbols[idx].identity.qualified_name, container_name)
+                    let owner = &symbols[idx].identity.qualified_name;
+                    (bare == container_name || ends_with_segments(owner, container_name))
+                        && agrees_with_owner_path(owner, &child.identity.qualified_name)
                 })
                 .collect();
             (named.len() == 1).then(|| named[0])
         })
     })
+}
+
+/// Whether an owner called `owner` (in-file qualified name) is consistent
+/// with the explicit qualification of a member called `member`: it qualifies
+/// the member, or it ends with the member's owner path, or the member's name
+/// records no owner path. `W` agrees with `W::probe`, `a::W` with `W::probe`
+/// (a `use a::W; impl W`), and `right::W` with `right::W::m::self`; `W` never
+/// agrees with `other::W::probe`.
+pub(crate) fn agrees_with_owner_path(owner: &str, member: &str) -> bool {
+    qualifies(owner, member) || owner_path(member).is_none_or(|path| ends_with_segments(owner, path))
+}
+
+/// The owner path a qualified name records: the name minus its last segment
+/// (`other::W` for `other::W::probe`, `M` for Lua `M:m`), `None` when the
+/// name is a single segment.
+fn owner_path(qualified_name: &str) -> Option<&str> {
+    let last = qualified_name.rfind(['.', ':', '\\'])?;
+    let head = &qualified_name[..last];
+    let head = if qualified_name[last..].starts_with(':') {
+        head.strip_suffix(':').unwrap_or(head)
+    } else {
+        head
+    };
+    Some(head).filter(|path| !path.is_empty())
 }
 
 /// Of `candidates`, the owner whose qualified name qualifies the child's:

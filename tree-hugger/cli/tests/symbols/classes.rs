@@ -164,5 +164,33 @@ fn same_named_types_in_two_modules_keep_their_own_methods() {
     }
 }
 
+/// `impl other::W` beside a sole local `W`: the method belongs to the `W` in
+/// `other.rs`, so no class projection lists it under the local `W`.
+#[test]
+fn an_impl_of_another_files_type_never_joins_a_sole_same_named_local_type() {
+    let scratch = Scratch::new(&[("main.rs", EXTERNAL_OWNER), ("other.rs", "pub struct W;\n")]);
+
+    let json = json_of(&scratch.stdout(&["classes", "--file", "main.rs", "--name", "W!", "--json", "--no-cache"]));
+    let file = &json["files"][0];
+    let containers = file["symbols"].as_array().expect("symbols");
+    assert_eq!(containers.len(), 1, "{json}");
+    assert_eq!(containers[0]["identity"]["qualified_name"], "main.rs#W");
+    let members = file["members"][containers[0]["id"].as_str().expect("id")].as_array().expect("members of W");
+    assert!(members.is_empty(), "local `W` lists {members:?}");
+
+    let lines = scratch.stdout(&["classes", "--file", "main.rs", "--name", "W!", "--jsonl", "--no-cache"]);
+    let envelopes: Vec<Value> = lines.lines().map(json_of).collect();
+    assert_eq!(envelopes.len(), 1, "{lines}");
+    assert_eq!(envelopes[0]["record"]["identity"]["qualified_name"], "main.rs#W");
+    assert_eq!(envelopes[0]["members"], Value::Array(Vec::new()), "{lines}");
+
+    let terminal = scratch.stdout(&["--plain", "classes", "--file", "main.rs", "--name", "W!", "--no-cache"]);
+    assert!(terminal.contains("type W [1:1]"), "{terminal}");
+    assert!(!terminal.contains("probe"), "{terminal}");
+}
+
+/// A sole local `W` and an `impl` of the `W` declared in `other.rs`.
+pub const EXTERNAL_OWNER: &str = "pub struct W;\nmod other;\nimpl other::W { pub fn probe(&self) {} }\n";
+
 pub const REPEATED_OWNERS: &str = "mod left { pub struct Boxed; impl Boxed { pub fn work(&self) {} } }\n\
                                    mod right { pub struct Boxed; impl Boxed { pub fn work(&self) {} } }\n";

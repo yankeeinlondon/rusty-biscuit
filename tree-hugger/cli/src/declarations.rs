@@ -610,6 +610,7 @@ fn write_tree(
         delivered += 1;
         let mut written = Ok(());
         if let Some((_, prepared)) = sink.settle(outcome, scan.verbose) {
+            let name_prefix = prepared.result.name_prefix().to_string();
             let records = prepared.result.index.symbols;
             if scan.listing.group_by_module && !records.is_empty() {
                 let directory = renderer.module_of(file);
@@ -619,7 +620,13 @@ fn write_tree(
                 }
             }
             written = written.and_then(|()| {
-                let wrote = renderer.outline(&mut *sink.out, file, &records, scan.listing.sort)?;
+                let wrote = renderer.outline(
+                    &mut *sink.out,
+                    file,
+                    &records,
+                    &name_prefix,
+                    scan.listing.sort,
+                )?;
                 wrote_any |= wrote;
                 Ok(())
             });
