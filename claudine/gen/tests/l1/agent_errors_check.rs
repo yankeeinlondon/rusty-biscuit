@@ -87,6 +87,8 @@ fn outcome_error_scope(path: &Path) -> Option<String> {
 
 fn run_checker(area: &Path, slug: &str, findings: &Path) -> std::process::Output {
     Command::new(bin_exe!("claudine-gen"))
+        // Not the monorepo the test runs in: its snapshot would walk every package.
+        .current_dir(area)
         .arg("--area")
         .arg(area)
         .arg("agent-errors")
