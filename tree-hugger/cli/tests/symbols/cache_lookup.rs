@@ -211,7 +211,8 @@ fn complete_warm_hits_parse_nothing() {
 /// The entry and the IDs do not depend on the directory `hug` runs from: a
 /// run from a subdirectory hits the entry a run from the repository root
 /// wrote, with the same IDs and in-file qualified names; only the
-/// scan-root-relative `file_path` differs.
+/// scan-root-relative `file_path` and the qualified-name prefix built from it
+/// differ.
 #[test]
 fn a_run_from_another_scan_root_hits_the_same_entry_with_the_same_ids() {
     let scratch = Scratch::new(&[("sub/python.py", PYTHON_FIXTURE)]);
@@ -243,7 +244,8 @@ fn a_run_from_another_scan_root_hits_the_same_entry_with_the_same_ids() {
     assert_eq!(root_facts.len(), sub_facts.len());
     for ((root_id, root_name, root_path), (sub_id, sub_name, sub_path)) in root_facts.iter().zip(&sub_facts) {
         assert_eq!(root_id, sub_id, "ID of {root_name}");
-        assert_eq!(root_name, sub_name);
+        let in_file = root_name.as_str().and_then(|name| name.strip_prefix("sub/python.py#")).expect("root prefix");
+        assert_eq!(sub_name.as_str().and_then(|name| name.strip_prefix("python.py#")), Some(in_file));
         assert_eq!(root_path, "sub/python.py");
         assert_eq!(sub_path, "python.py");
     }

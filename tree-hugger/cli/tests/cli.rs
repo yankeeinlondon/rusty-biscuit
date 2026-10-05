@@ -93,7 +93,8 @@ fn test_filter_help_describes_path_wildcard_and_exact_matching() {
         .stdout(predicate::str::contains(
             "Remaining filters are symbol-name filters",
         ))
-        .stdout(predicate::str::contains("fuzzy"))
+        .stdout(predicate::str::contains("all-lowercase ignores case"))
+        .stdout(predicate::str::contains("makes the match case-sensitive"))
         .stdout(predicate::str::contains("contains match"))
         .stdout(predicate::str::contains("wildcard match"))
         .stdout(predicate::str::contains("exact symbol name match"));

@@ -1,5 +1,11 @@
 /// Stateless tree-sitter node extraction helpers used by `tree_file`.
 pub(crate) mod extract;
+/// The one record filter behind `SymbolQuery`'s predicates.
+pub(crate) mod filter;
+/// Qualified-name prefixes (`NamingContext`, `portable_relative`).
+pub mod naming;
+/// Name and type-text patterns (`NamePattern`, `glob_match`).
+pub mod pattern;
 /// Selective symbol queries (`SymbolQuery`, `Capability`).
 pub mod query;
 /// A source file read but not yet parsed (`SourceFile`).
@@ -15,4 +21,4 @@ pub mod tree_file;
 /// earlier commit would otherwise keep serving the old records). The cache
 /// key already digests the grammar and the effective query text, so this
 /// constant is what moves for a change in Rust extraction code.
-pub const EXTRACTOR_REVISION: &str = "8";
+pub const EXTRACTOR_REVISION: &str = "9";

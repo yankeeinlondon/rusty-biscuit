@@ -127,6 +127,8 @@ pub const VISIBILITY_MATRIX: &[VisibilityRow] = &[
     (L::TypeScript, "instanceMethod", Some("ModuleWidget"), PUBLIC),
     (L::TypeScript, "localValue", None, UNKNOWN),
     (L::TypeScript, "parameterValue", None, UNKNOWN),
+    // A function bound to a top-level `const` has the declaration's access.
+    (L::TypeScript, "asyncArrow", None, PUBLIC),
     // JavaScript (a module file)
     (L::JavaScript, "exportedFunction", None, PUBLIC),
     (L::JavaScript, "moduleFunction", None, MODULE_PRIVATE),
@@ -139,6 +141,8 @@ pub const VISIBILITY_MATRIX: &[VisibilityRow] = &[
     (L::JavaScript, "unmarkedMethod", Some("ExportedWidget"), PUBLIC),
     (L::JavaScript, "#hashPrivateMethod", Some("ExportedWidget"), PRIVATE),
     (L::JavaScript, "localValue", None, UNKNOWN),
+    (L::JavaScript, "asyncArrow", None, PUBLIC),
+    (L::JavaScript, "documentedArrow", None, MODULE_PRIVATE),
     // Go
     (L::Go, "ExportedFunction", None, PUBLIC),
     (L::Go, "packageFunction", None, PACKAGE),

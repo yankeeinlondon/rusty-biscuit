@@ -74,10 +74,10 @@ fn plain_symbols_print_known_visibility_for_every_kind() {
     assert_lines(
         &rust,
         &[
-            ("Rust", "crate_function", "visibility (crate)", "crate function crate_function() -> ()"),
+            ("Rust", "crate_function", "visibility (crate)", "crate function crate_function()"),
             ("Rust", "PublicAlias", "kind (type alias)", "public type alias PublicAlias"),
             ("Rust", "UnitVariant", "kind and container (enum variant)", "public enum variant UnitVariant [in enum PublicEnum]"),
-            ("Rust", "crate_associated_function", "container (inherent impl member)", "crate method crate_associated_function() -> () [in type PublicStruct]"),
+            ("Rust", "crate_associated_function", "container (inherent impl member)", "crate method crate_associated_function() [in type PublicStruct]"),
             ("Rust", "INHERENT_ASSOCIATED_CONSTANT", "container (associated const)", "public const INHERENT_ASSOCIATED_CONSTANT [in type PublicStruct]"),
         ],
     );
@@ -127,7 +127,8 @@ fn plain_symbols_omit_the_visibility_prefix_for_unknown_access() {
         );
     }
 
-    let typescript = scratch.stdout(&["--plain", "symbols", "typescript.ts"]);
+    // `localValue` is a local, which `symbols` lists only with `--all-scopes`.
+    let typescript = scratch.stdout(&["--plain", "symbols", "--all-scopes", "typescript.ts"]);
     assert_lines(
         &typescript,
         &[("TypeScript", "localValue", "visibility (Unknown local)", "const localValue")],
@@ -739,7 +740,8 @@ fn is_static(record: &Value) -> bool {
 #[test]
 fn json_symbols_carry_visibility_and_schema_4_0() {
     let scratch = Scratch::new(&[("typescript.ts", TYPESCRIPT_FIXTURE)]);
-    let json = json_of(&scratch.stdout(&["--json", "symbols", "typescript.ts"]));
+    // `--all-scopes`: the local `localValue` is asserted below.
+    let json = json_of(&scratch.stdout(&["--json", "symbols", "--all-scopes", "typescript.ts"]));
 
     let schema = serde_json::json!({ "major": 4, "minor": 0 });
     assert_eq!(json["report_schema_version"], 1, "TypeScript: report_schema_version");
@@ -859,7 +861,7 @@ fn json_records_match_the_complete_index() {
     let scratch = Scratch::new(&files.map(|(_, name, contents)| (name, contents)));
 
     for (language, file, _) in files {
-        let json = json_of(&scratch.stdout(&["--json", "symbols", file]));
+        let json = json_of(&scratch.stdout(&["--json", "symbols", "--all-scopes", file]));
         let full = json_of(&scratch.stdout(&["--json-full", "symbols", file]));
         let records = report_records(&json);
         let indexed = index_records(&full);

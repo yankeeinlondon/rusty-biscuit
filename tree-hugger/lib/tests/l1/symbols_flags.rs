@@ -14,6 +14,7 @@ use tree_hugger::{
 };
 
 use crate::symbols_fixtures::{
+    in_file_name,
     TEST_FILE_FIXTURES, display_name, primary_fixture, test_file_fixture_dir,
 };
 
@@ -205,7 +206,7 @@ fn names_where(records: &[SymbolRecord], flag: impl Fn(&SymbolRecord) -> bool) -
     records
         .iter()
         .filter(|record| flag(record))
-        .map(|record| record.identity.qualified_name.clone())
+        .map(|record| in_file_name(record).to_string())
         .collect()
 }
 
@@ -234,7 +235,7 @@ fn flags_are_set_exactly_by_each_languages_markers() {
         for decoy in row.decoys {
             let record = records
                 .iter()
-                .find(|record| record.identity.qualified_name == *decoy)
+                .find(|record| in_file_name(record) == *decoy)
                 .unwrap_or_else(|| panic!("{label}: no decoy `{decoy}`"));
             assert!(
                 !record.visibility.is_deprecated && !record.visibility.is_test,

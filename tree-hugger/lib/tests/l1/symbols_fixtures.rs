@@ -10,6 +10,20 @@ use std::path::{Path, PathBuf};
 use biscuit_test_harness::manifest_dir;
 use tree_hugger::{ProgrammingLanguage, SymbolInfo, SymbolKind, SymbolKindV2, SymbolRecord, TreeFile};
 
+/// `record`'s in-file qualified name: its displayed `qualified_name` without
+/// the default prefix (the file name plus `#`) that a query with no scan
+/// root or naming context gives every name not rooted at a namespace.
+pub fn in_file_name(record: &SymbolRecord) -> &str {
+    let qualified = &record.identity.qualified_name;
+    if record.identity.is_namespace_rooted {
+        return qualified;
+    }
+    let file_name = record.source.file_path.file_name().expect("file name").to_string_lossy();
+    qualified
+        .strip_prefix(&format!("{file_name}#"))
+        .unwrap_or_else(|| panic!("`{qualified}` lacks the `{file_name}#` prefix"))
+}
+
 /// The directory holding every symbol fixture.
 pub fn symbols_fixture_dir() -> PathBuf {
     manifest_dir!().join("tests/fixtures/symbols")

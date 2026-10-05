@@ -77,7 +77,8 @@ fn listed_locations(stdout: &str) -> Vec<String> {
 #[test]
 fn each_sort_order_lists_declarations_by_its_keys_and_tie_breakers() {
     let scratch = scratch();
-    let records = all_records(&json_of(&scratch.stdout(&["--json", "symbols"])));
+    // Every scope: locals (parameters) carry the tie-breaker cases.
+    let records = all_records(&json_of(&scratch.stdout(&["--json", "symbols", "--all-scopes"])));
     assert!(records.len() > 100, "multi/ has many records ({})", records.len());
 
     for order in ["file", "name", "kind"] {
@@ -85,10 +86,10 @@ fn each_sort_order_lists_declarations_by_its_keys_and_tie_breakers() {
         expected.sort_by(|left, right| compare(order, left, right));
         let expected: Vec<String> = expected.iter().map(location).collect();
 
-        let explicit = scratch.stdout(&["--plain", "symbols", "--sort", order]);
+        let explicit = scratch.stdout(&["--plain", "symbols", "--all-scopes", "--sort", order]);
         assert_eq!(listed_locations(&explicit), expected, "--sort {order}");
         if order == "file" {
-            let default = scratch.stdout(&["--plain", "symbols"]);
+            let default = scratch.stdout(&["--plain", "symbols", "--all-scopes"]);
             assert_eq!(default, explicit, "`--sort file` is the default");
         }
     }
@@ -404,12 +405,12 @@ fn packages_are_sectioned_whenever_the_scan_spans_two() {
     let single = Scratch::new(&[("p2/Cargo.toml", two.as_str()), ("p2/a.rs", ""), ("p2/b.rs", "pub fn two() {}\n")]);
     assert_eq!(
         single.stdout(&["--plain", "functions"]),
-        "  - public function two() -> () p2/b.rs:1:1\n"
+        "  - public function two() p2/b.rs:1:1\n"
     );
     let root_only = Scratch::new(&[("a.rs", ""), ("top.rs", "fn root() {}\n")]);
     assert_eq!(
         root_only.stdout(&["--plain", "functions"]),
-        "  - private function root() -> () top.rs:1:1\n"
+        "  - private function root() top.rs:1:1\n"
     );
     let nothing = Scratch::new(&[("p1/Cargo.toml", one.as_str()), ("p1/a.rs", "")]);
     assert_eq!(nothing.stdout(&["--plain", "functions"]), "(no symbols)\n");
@@ -431,7 +432,7 @@ fn packages_are_sectioned_whenever_the_scan_spans_two() {
         assert_eq!(
             one_declares.stdout(&args),
             "\np1\n\n(no symbols)\n\n\
-             \np2\n\n  - public function two() -> () p2/b.rs:1:1\n\n\
+             \np2\n\n  - public function two() p2/b.rs:1:1\n\n\
              \np3\n\n(no symbols)\n\n",
             "hug {args:?}"
         );
@@ -439,7 +440,7 @@ fn packages_are_sectioned_whenever_the_scan_spans_two() {
     assert_eq!(
         one_declares.stdout(&["--plain", "functions", "--group-by-file"]),
         "\np1\n\n(no symbols)\n\n\
-         \np2\n\np2/b.rs\n  - public function two() -> () [1:1]\n\n\n\
+         \np2\n\np2/b.rs\n  - public function two() [1:1]\n\n\n\
          \np3\n\n(no symbols)\n\n"
     );
     let none_declares = Scratch::new(&[
@@ -463,10 +464,10 @@ fn packages_are_sectioned_whenever_the_scan_spans_two() {
     let sectioned = Scratch::new(&files);
     assert_eq!(
         sectioned.stdout(&["--plain", "functions"]),
-        "\n\n\n  - private function root() -> () top.rs:1:1\n\n\
+        "\n\n\n  - private function root() top.rs:1:1\n\n\
          \np1\n\n(no symbols)\n\n\
-         \np2\n\n  - public function two() -> () p2/b.rs:1:1\n\n\
+         \np2\n\n  - public function two() p2/b.rs:1:1\n\n\
          \np3\n\n(no symbols)\n\n\
-         \np4\n\n  - public function four() -> () p4/d.rs:1:1\n\n"
+         \np4\n\n  - public function four() p4/d.rs:1:1\n\n"
     );
 }

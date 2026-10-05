@@ -1,7 +1,9 @@
 //! The declaration commands (`functions`, `types`, `symbols`, `classes`):
-//! each asks the library for its fixed kind set and only the capabilities it
-//! shows, analyzes the files in parallel, filters and orders the records,
-//! and writes the JSON report or the terminal listing.
+//! each asks the library for its fixed kind set narrowed by the record
+//! selectors and only the capabilities it shows and filters on, analyzes the
+//! files in parallel (the library applies the selectors once, after the
+//! cache), orders the records, and writes the JSON report or the terminal
+//! listing.
 
 use std::collections::{BTreeMap, HashMap};
 use std::io::{self, BufWriter, Write};
@@ -9,11 +11,11 @@ use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 
 use tree_hugger::{
-    Capability, SymbolKindV2, SymbolQuery, SymbolQueryResult, SymbolRecord,
+    Capability, SymbolKindV2, SymbolQuery, SymbolQueryResult, SymbolRecord, SymbolScope,
     TreeHuggerError,
 };
 
-use crate::classes::{self, ClassSummary, MemberFilter};
+use crate::classes::{self, ClassSelection, ClassSummary};
 use crate::order::{compare, portable_path_cmp, sort_file_records};
 use crate::prelude::{PreludeFilter, resolve_prelude_symbols};
 use crate::render::{FileListing, ListingOptions, ListingStream, Renderer, listing_order};
@@ -21,7 +23,7 @@ use crate::report::{
     Entries, FileEntry, JsonReport, ReportError, portable_relative, relativize_index, trim_record,
 };
 use crate::scan::{Analyzed, Analyzer, CacheStats, CacheUse, chunk_size, flush_at_chunk_end, in_file_order};
-use crate::scanner::matches_symbol_filters;
+use crate::selection::Selection;
 
 /// Kinds `functions` lists.
 pub(crate) const FUNCTION_KINDS: [SymbolKindV2; 3] = [
@@ -40,39 +42,48 @@ pub(crate) const TYPE_KINDS: [SymbolKindV2; 6] = [
     SymbolKindV2::TypeAlias,
 ];
 
+/// The scopes `symbols` lists unless `--scope` or `--all-scopes` says
+/// otherwise; the other commands list every scope.
+pub(crate) const SYMBOLS_DEFAULT_SCOPES: [SymbolScope; 2] = [SymbolScope::Item, SymbolScope::Member];
+
 /// Which declaration command runs.
 #[derive(Debug, Clone)]
 pub(crate) enum Declarations {
     Functions,
     Types,
     Symbols,
-    Classes {
-        /// `--name`: keep containers whose name contains this.
-        name_filter: Option<String>,
-        members: MemberFilter,
-    },
+    Classes(Box<ClassSelection>),
 }
 
 impl Declarations {
-    /// The command's fixed kind set and the capabilities `format` shows:
-    /// only `classes` needs containment, machine-readable output always
-    /// computes the test and deprecation flags, and no listing runs
-    /// references, semantics, structured docs or diagnostics.
-    pub(crate) fn query(&self, format: ReportFormat) -> SymbolQuery {
-        let (query, mut capabilities) = match self {
-            Self::Functions => (SymbolQuery::new().kinds(FUNCTION_KINDS), vec![]),
-            Self::Types => (SymbolQuery::new().kinds(TYPE_KINDS), vec![]),
-            Self::Symbols => (SymbolQuery::new(), vec![]),
-            Self::Classes { .. } => (
-                SymbolQuery::new()
-                    .kinds(classes::CONTAINER_KINDS.into_iter().chain(classes::MEMBER_KINDS)),
-                vec![Capability::Containment],
-            ),
+    /// The command's fixed kind set narrowed by `selection`, the selection's
+    /// predicates, and the capabilities `format` shows: only `classes` needs
+    /// containment, machine-readable output always computes the test and
+    /// deprecation flags, and no listing runs references, semantics,
+    /// structured docs or diagnostics. `classes` applies its predicates
+    /// itself ([`ClassSelection`]), so its query carries none.
+    pub(crate) fn query(&self, format: ReportFormat, selection: &Selection) -> SymbolQuery {
+        let flags = format
+            .always_computes_flags()
+            .then_some(Capability::Flags);
+        let (command_kinds, default_scopes): (Option<&[SymbolKindV2]>, Option<&[SymbolScope]>) = match self {
+            Self::Functions => (Some(&FUNCTION_KINDS), None),
+            Self::Types => (Some(&TYPE_KINDS), None),
+            Self::Symbols => (None, Some(&SYMBOLS_DEFAULT_SCOPES)),
+            Self::Classes(classes) => return classes.query(flags),
         };
-        if format.always_computes_flags() {
-            capabilities.push(Capability::Flags);
+        let mut query = SymbolQuery::new();
+        if let Some(kinds) = selection.kinds_within(command_kinds) {
+            query = query.kinds(kinds);
         }
-        query.capabilities(capabilities)
+        if let Some(scopes) = selection.scopes_within(default_scopes) {
+            query = query.scopes(scopes);
+        }
+        query = selection.shape_predicates(selection.identity_predicates(query));
+        for pattern in &selection.containers {
+            query = query.in_container(pattern.clone());
+        }
+        query.capabilities(flags)
     }
 }
 
@@ -98,16 +109,6 @@ impl ReportFormat {
     }
 }
 
-/// Which declarations a run keeps, decided before the name filters.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Membership {
-    All,
-    /// `--exported`.
-    Exported,
-    /// `--prelude`.
-    Prelude,
-}
-
 /// One run of a declaration command.
 pub(crate) struct DeclarationScan {
     pub(crate) command: Declarations,
@@ -117,9 +118,10 @@ pub(crate) struct DeclarationScan {
     pub(crate) scan_root: PathBuf,
     /// Anchor of terminal paths and of package grouping.
     pub(crate) git_root: PathBuf,
-    pub(crate) membership: Membership,
-    pub(crate) include_globs: Vec<String>,
-    pub(crate) exclude_globs: Vec<String>,
+    /// The record selectors, `--exported` included.
+    pub(crate) selection: Selection,
+    /// `--prelude`: keep only what the prelude module exports.
+    pub(crate) prelude: bool,
     pub(crate) listing: ListingOptions,
     pub(crate) format: ReportFormat,
     pub(crate) verbose: bool,
@@ -144,10 +146,13 @@ struct FileOutcome {
 /// failed or stdout could not be written. A closed stdout (broken pipe) ends
 /// the run quietly with `0`.
 pub(crate) fn run(scan: DeclarationScan, analyzer: &Analyzer) -> Result<i32, TreeHuggerError> {
+    // The scan root prefixes each displayed qualified name after the cache
+    // lookup; it never enters an entry or an ID.
     let query = match scan.format {
         ReportFormat::JsonFull => SymbolQuery::complete_index(),
-        format => scan.command.query(format),
-    };
+        format => scan.command.query(format, &scan.selection),
+    }
+    .scan_root(&scan.scan_root);
     let mut files = scan.files.clone();
     let mut stats = CacheStats::new(analyzer.uses_cache());
     let mut stderr = io::stderr();
@@ -156,7 +161,7 @@ pub(crate) fn run(scan: DeclarationScan, analyzer: &Analyzer) -> Result<i32, Tre
     // (every-kind) analyses, kept for the scan to narrow instead of parsing
     // again.
     let mut reusable: HashMap<PathBuf, Analyzed> = HashMap::new();
-    let prelude = if scan.membership == Membership::Prelude {
+    let prelude = if scan.prelude {
         let wide = SymbolQuery::new().capabilities(query.required_capabilities());
         let filter = resolve_prelude_symbols(&scan.scan_root, analyzer, &wide, &mut reusable)?;
         for analyzed in reusable.values() {
@@ -203,7 +208,7 @@ pub(crate) fn run(scan: DeclarationScan, analyzer: &Analyzer) -> Result<i32, Tre
             Ok(analyzed) => FileOutcome {
                 display,
                 cache: Some(analyzed.cache),
-                prepared: Ok(prepare(&scan, prelude.as_ref(), analyzed.result)),
+                prepared: Ok(prepare(&scan, prelude.as_ref(), &query, analyzed.result)),
             },
             Err(error) => FileOutcome {
                 display,
@@ -378,7 +383,7 @@ fn write_terminal(
     // can differ from the scan order, so each unit is complete on arrival.
     let (ordered, packages) = listing_order(renderer, files, &scan.git_root, scan.listing);
     let (package_roots, ordered): (Vec<PathBuf>, Vec<PathBuf>) = ordered.into_iter().unzip();
-    let per_package = scan.membership == Membership::Prelude;
+    let per_package = scan.prelude;
     let mut stream = ListingStream::new(renderer, scan.listing, packages, per_package);
     let flow = in_file_order(&ordered, work, |_, outcome| {
         let package_root = &package_roots[delivered];
@@ -430,9 +435,14 @@ fn write_classes(
     renderer.classes(out, file, prepared.result.index.language, &summaries)
 }
 
-/// Applies membership (`--exported`, `--prelude`), then the name filters,
-/// to one file's result. `classes` summarizes first and filters containers.
-fn prepare(scan: &DeclarationScan, prelude: Option<&PreludeFilter>, mut result: SymbolQueryResult) -> Prepared {
+/// Applies `--prelude` to one file's result, whose records already passed
+/// the query's selectors. `classes` summarizes the selected containers.
+fn prepare(
+    scan: &DeclarationScan,
+    prelude: Option<&PreludeFilter>,
+    query: &SymbolQuery,
+    mut result: SymbolQueryResult,
+) -> Prepared {
     if matches!(scan.format, ReportFormat::JsonFull) {
         // Symbol selectors are rejected with `--json-full`: the index is
         // complete.
@@ -441,61 +451,54 @@ fn prepare(scan: &DeclarationScan, prelude: Option<&PreludeFilter>, mut result: 
             classes: None,
         };
     }
-    let keep_name = |name: &str| {
-        (scan.include_globs.is_empty() || matches_symbol_filters(name, &scan.include_globs))
-            && (scan.exclude_globs.is_empty() || !matches_symbol_filters(name, &scan.exclude_globs))
-    };
 
-    if let Declarations::Classes {
-        name_filter,
-        members,
-    } = &scan.command
-    {
-        let mut summaries = classes::summarize(&result.index.symbols, *members);
-        summaries.retain(|summary| {
-            let container = &summary.container;
-            let name = container.identity.name.as_str();
-            name_filter.as_deref().is_none_or(|filter| name.contains(filter))
-                && is_member(scan.membership, prelude, container)
-                && keep_name(name)
-        });
+    if let Declarations::Classes(selection) = &scan.command {
+        let mut summaries = classes::summarize(&result.index.symbols, selection);
+        summaries.retain(|summary| in_prelude(prelude, &summary.container));
         return Prepared {
             result,
             classes: Some(summaries),
         };
     }
 
+    let Some(filter) = prelude else {
+        return Prepared {
+            result,
+            classes: None,
+        };
+    };
+    let name_prefix = result.name_prefix().to_string();
     let index = &mut result.index;
-    match (scan.membership, prelude) {
-        (Membership::Prelude, Some(filter)) if matches!(scan.command, Declarations::Symbols) => {
-            match filter.exports_by_file.get(&index.file) {
-                // A prelude file lists its re-exports, not its own records.
-                Some(exports) => index.symbols = exports.clone(),
-                None => {
-                    let names = if filter.exports_by_file.is_empty() {
-                        &filter.names
-                    } else {
-                        &filter.env_only_names
-                    };
-                    index.symbols.retain(|record| names.contains(&record.identity.name));
-                }
+    match filter.exports_by_file.get(&index.file) {
+        // A prelude file lists its re-exports, not its own records, named
+        // like the file's own records. They are synthetic, so the selectors
+        // the library applied to the file's records apply to them here.
+        Some(exports) if matches!(scan.command, Declarations::Symbols) => {
+            index.symbols = exports.clone();
+            for export in &mut index.symbols {
+                export.identity.qualified_name.insert_str(0, &name_prefix);
             }
+            index
+                .symbols
+                .retain(|export| query.selects(export.kind) && query.matches(export));
         }
-        (membership, prelude) => index
-            .symbols
-            .retain(|record| is_member(membership, prelude, record)),
+        _ if matches!(scan.command, Declarations::Symbols) => {
+            let names = if filter.exports_by_file.is_empty() {
+                &filter.names
+            } else {
+                &filter.env_only_names
+            };
+            index.symbols.retain(|record| names.contains(&record.identity.name));
+        }
+        _ => index.symbols.retain(|record| in_prelude(prelude, record)),
     }
-    index.symbols.retain(|record| keep_name(&record.identity.name));
     Prepared {
         result,
         classes: None,
     }
 }
 
-fn is_member(membership: Membership, prelude: Option<&PreludeFilter>, record: &SymbolRecord) -> bool {
-    match membership {
-        Membership::All => true,
-        Membership::Exported => record.visibility.is_exported,
-        Membership::Prelude => prelude.is_some_and(|filter| filter.names.contains(&record.identity.name)),
-    }
+/// Whether `record` is kept under `--prelude` (always, without it).
+fn in_prelude(prelude: Option<&PreludeFilter>, record: &SymbolRecord) -> bool {
+    prelude.is_none_or(|filter| filter.names.contains(&record.identity.name))
 }

@@ -17,12 +17,13 @@ use crate::shared::{
 pub mod counters;
 pub(crate) mod coverage;
 
-/// Runs the requested passes, after their prerequisites, over every kind.
+/// Runs the requested passes, after their prerequisites, over every kind, as
+/// [`TreeFile::query`] does.
 pub fn analyze_file(
     tree_file: &TreeFile,
     requested_passes: &[AnalysisPass],
 ) -> Result<FileSymbolIndex, TreeHuggerError> {
-    Ok(run_query(tree_file, &SymbolQuery::for_passes(requested_passes))?.index)
+    Ok(tree_file.query(&SymbolQuery::for_passes(requested_passes))?.index)
 }
 
 /// The work a query needs, in execution order.
@@ -64,7 +65,9 @@ impl PassPlan {
 }
 
 /// Runs `query` over `tree_file`: the definition query runs once and its
-/// result feeds the records, the references and the diagnostics.
+/// result feeds the records, the references and the diagnostics. The result
+/// is unfinished (in-file qualified names, no predicate applied), as the
+/// cache stores it.
 pub(crate) fn run_query(
     tree_file: &TreeFile,
     query: &SymbolQuery,
@@ -126,11 +129,11 @@ pub(crate) fn run_query(
         docs_pass(&mut index);
     }
 
-    Ok(SymbolQueryResult {
+    Ok(SymbolQueryResult::unfinished(
         index,
-        completed_capabilities: query.required_capabilities(),
-        selected_kinds: query.selected_kinds(),
-    })
+        query.required_capabilities(),
+        query.selected_kinds(),
+    ))
 }
 
 fn text_span(range: &crate::shared::CodeRange) -> crate::shared::TextSpan {

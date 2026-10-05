@@ -57,8 +57,9 @@ fn top_level_visibility(declaration: Node<'_>, is_module: bool) -> Option<Visibi
                     .is_some_and(|grandparent| grandparent.kind() == "program")
                     .then_some(Visibility::Public);
             }
-            // `const a = 1, b = 2;` declares each name in a declarator.
-            "lexical_declaration" | "variable_declaration" => current = parent,
+            // `const a = 1, b = 2;` declares each name in a declarator, and
+            // `const f = () => …` declares a function as a declarator's value.
+            "variable_declarator" | "lexical_declaration" | "variable_declaration" => current = parent,
             _ => return None,
         }
     }

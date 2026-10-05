@@ -879,8 +879,15 @@ pub(crate) fn is_exported_definition(symbol: &SymbolInfo, node: Node<'_>, root: 
         return false;
     }
 
-    let parent = node.parent();
-    parent.is_some_and(|parent| is_export_node(parent.kind()))
+    // `export const a = 1, f = () => …;` exports each declarator, and a
+    // function bound to one is anchored at the declarator's value.
+    let mut declaration = node;
+    while let Some(parent) = declaration.parent()
+        && matches!(parent.kind(), "variable_declarator" | "lexical_declaration" | "variable_declaration")
+    {
+        declaration = parent;
+    }
+    declaration.parent().is_some_and(|parent| is_export_node(parent.kind()))
 }
 
 pub(crate) fn is_rust_public_definition(node: Node<'_>) -> bool {

@@ -69,7 +69,8 @@ pub(crate) fn add_record_passes(
 }
 
 /// Narrows `index`, a result of at least `query`'s kinds and capabilities, to
-/// what [`run_query`](super::run_query) returns for `query`.
+/// what [`run_query`](super::run_query) returns for `query`: in-file
+/// qualified names, no predicate applied.
 pub(crate) fn project(mut index: FileSymbolIndex, query: &SymbolQuery) -> SymbolQueryResult {
     index.symbols.retain(|symbol| query.selects(symbol.kind));
     let containment = query.requires(Capability::Containment);
@@ -111,11 +112,7 @@ pub(crate) fn project(mut index: FileSymbolIndex, query: &SymbolQuery) -> Symbol
     }
     index.completed_passes = PassPlan::for_query(query).passes();
     stamp_parse_pass(&mut index, query);
-    SymbolQueryResult {
-        index,
-        completed_capabilities: query.required_capabilities(),
-        selected_kinds: query.selected_kinds(),
-    }
+    SymbolQueryResult::unfinished(index, query.required_capabilities(), query.selected_kinds())
 }
 
 /// Sets each record's `provenance.parse_pass` to the last pass of `query`

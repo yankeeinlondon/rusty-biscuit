@@ -49,6 +49,14 @@ fn export_follows_export_syntax_not_access() {
         false,
     );
     assert_exported(ProgrammingLanguage::Java, "PublicWidget", None, false);
+    // Exported `const` declarations, a function bound to one included.
+    for language in [ProgrammingLanguage::TypeScript, ProgrammingLanguage::JavaScript] {
+        assert_exported(language, "EXPORTED_CONSTANT", None, true);
+        assert_exported(language, "MODULE_CONSTANT", None, false);
+        assert_exported(language, "asyncArrow", None, true);
+    }
+    assert_exported(ProgrammingLanguage::JavaScript, "boundaryArrow", None, true);
+    assert_exported(ProgrammingLanguage::JavaScript, "documentedArrow", None, false);
 }
 
 /// Constructors, properties and enum variants are members, excluded as

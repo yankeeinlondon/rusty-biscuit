@@ -34,14 +34,16 @@ mod render;
 mod report;
 mod scan;
 mod scanner;
+mod selection;
 
-use classes::MemberFilter;
-use declarations::{DeclarationScan, Declarations, Membership, ReportFormat};
+use classes::{ClassSelection, MemberFilter};
+use declarations::{DeclarationScan, Declarations, ReportFormat};
 use import_format::*;
 use order::SortOrder;
 use render::{ListingOptions, color_tag_for_kind};
 use scan::{Analyzer, CacheStats, in_file_order};
 use scanner::*;
+use selection::{ImportSelection, Selection, SelectionArgs, TargetArgs, resolve_file_selectors};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -86,8 +88,9 @@ struct ScanOptions {
     )]
     exclude_files: Vec<String>,
 
-    /// Glob patterns for symbol names to exclude from output
-    #[arg(long, value_name = "GLOB", display_order = 11)]
+    /// Name patterns of symbols to exclude from output (the `--name` rules;
+    /// a trailing `!` is exact). An exclusion wins over every inclusion
+    #[arg(long, value_name = "PATTERN", display_order = 11)]
     exclude_symbols: Vec<String>,
 
     /// Force a specific language. Explicitly named files are parsed with this
@@ -156,13 +159,16 @@ struct CommonArgs {
     /// File path or symbol-name filters
     ///
     /// File-like filters (paths such as `src/lib.rs`, globs such as `src/**/*.rs`,
-    /// or extensions such as `rs` / `*.rs`) limit which files are scanned.
+    /// or names with a source extension such as `lib.rs` / `*.rs`) limit which
+    /// files are scanned.
     ///
-    /// Remaining filters are symbol-name filters.
+    /// Remaining filters are symbol-name filters (as `--name`).
     ///
-    /// `parse_width` => fuzzy contains match.
+    /// `parse` => contains match; all-lowercase ignores case.
     ///
-    /// `*width*` => wildcard match.
+    /// `Parse` => any uppercase letter makes the match case-sensitive.
+    ///
+    /// `*width*` => wildcard match of the whole name.
     ///
     /// `parse_width_spec!` => exact symbol name match.
     #[arg(
@@ -173,13 +179,35 @@ struct CommonArgs {
     )]
     filters: Vec<String>,
 
-    /// Show only exported (public) symbols
+    /// Show only exported symbols (`is_exported`, re-exports included)
     #[arg(long, conflicts_with = "prelude", display_order = 30)]
     exported: bool,
 
     /// Show only symbols explicitly exported by the prelude module
     #[arg(long, conflicts_with = "exported", display_order = 31)]
     prelude: bool,
+
+    #[clap(flatten)]
+    selection: SelectionArgs,
+
+    #[clap(flatten)]
+    scan: ScanOptions,
+}
+
+/// Arguments for the imports command
+#[derive(clap::Args, Debug, Clone)]
+struct ImportArgs {
+    /// File path or glob filters (never import names; use `--name`)
+    #[arg(
+        value_name = "FILTER",
+        num_args = 0..,
+        value_hint = ValueHint::AnyPath,
+        add = ArgValueCompleter::new(complete_source_path),
+    )]
+    filters: Vec<String>,
+
+    #[clap(flatten)]
+    targets: TargetArgs,
 
     #[clap(flatten)]
     scan: ScanOptions,
@@ -190,13 +218,14 @@ struct CommonArgs {
 struct ClassArgs {
     /// File path or class-name filters
     ///
-    /// File-like filters (paths, globs, or extensions) limit scanned files.
+    /// File-like filters (paths, globs, or names with a source extension)
+    /// limit scanned files.
     ///
-    /// Remaining filters are class-name filters.
+    /// Remaining filters are class-name filters (as `--name`).
     ///
-    /// `Widget` => fuzzy contains match.
+    /// `widget` => contains match; all-lowercase ignores case.
     ///
-    /// `*Widget*` => wildcard match.
+    /// `*Widget*` => wildcard match of the whole name.
     ///
     /// `Widget!` => exact class name match.
     #[arg(
@@ -207,25 +236,24 @@ struct ClassArgs {
     )]
     filters: Vec<String>,
 
-    /// Filter by class name
-    #[arg(long, short = 'n')]
-    name: Option<String>,
-
     /// Show only static members
-    #[arg(long)]
+    #[arg(long, conflicts_with = "instance_only")]
     static_only: bool,
 
     /// Show only instance members
     #[arg(long)]
     instance_only: bool,
 
-    /// Show only exported (public) classes
+    /// Show only exported classes (`is_exported`, re-exports included)
     #[arg(long, conflicts_with = "prelude")]
     exported: bool,
 
     /// Show only classes explicitly exported by the prelude module
     #[arg(long, conflicts_with = "exported")]
     prelude: bool,
+
+    #[clap(flatten)]
+    selection: SelectionArgs,
 
     #[clap(flatten)]
     scan: ScanOptions,
@@ -322,7 +350,7 @@ enum Command {
     /// List all symbols in the file(s)
     Symbols(DeclarationArgs),
     /// List imported symbols in the file(s)
-    Imports(CommonArgs),
+    Imports(ImportArgs),
     /// List classes and their members
     Classes(ClassArgs),
     /// Run lint diagnostics on the file(s)
@@ -403,6 +431,23 @@ impl Command {
         }
     }
 
+    /// The record selectors of a symbol command.
+    fn selection_args(&self) -> Option<&SelectionArgs> {
+        match self {
+            Self::Functions(args) | Self::Types(args) | Self::Symbols(args) => Some(&args.common.selection),
+            Self::Classes(args) => Some(&args.selection),
+            Self::Imports(_) | Self::Lint(_) | Self::Completions(_) | Self::GodFiles(_) => None,
+        }
+    }
+
+    /// `--file`, `--name` and `--exact`.
+    fn targets(&self) -> Option<&TargetArgs> {
+        match self {
+            Self::Imports(args) => Some(&args.targets),
+            _ => self.selection_args().map(|selection| &selection.targets),
+        }
+    }
+
     /// The flags given that narrow records rather than files, which
     /// `--json-full` rejects; positional symbol-name filters are checked by
     /// the caller, which classifies them.
@@ -417,10 +462,10 @@ impl Command {
         if self.scan_options().is_some_and(|scan| !scan.exclude_symbols.is_empty()) {
             flags.push("--exclude-symbols");
         }
+        if let Some(selection) = self.selection_args() {
+            flags.extend(selection.given_flags());
+        }
         if let Self::Classes(args) = self {
-            if args.name.is_some() {
-                flags.push("--name");
-            }
             if args.static_only {
                 flags.push("--static-only");
             }
@@ -449,7 +494,6 @@ impl Command {
                 list_rules: args.list_rules,
             }),
             Self::Classes(args) => Some(CommandKind::Classes {
-                name_filter: args.name.clone(),
                 static_only: args.static_only,
                 instance_only: args.instance_only,
             }),
@@ -481,7 +525,6 @@ pub(crate) enum CommandKind {
         list_rules: bool,
     },
     Classes {
-        name_filter: Option<String>,
         static_only: bool,
         instance_only: bool,
     },
@@ -756,18 +799,26 @@ fn main() -> Result<(), TreeHuggerError> {
     let output_config = OutputConfig::new(output_format);
 
     let scan_filters = classify_filters(cli.command.filters(), &command_kind, language);
-    let excluded_symbol_globs = scan
-        .exclude_symbols
-        .iter()
-        .filter_map(|glob| normalize_excluded_symbol_glob(glob))
-        .collect::<Vec<_>>();
     if cli.json_full {
         reject_json_full_misuse(&cli.command, &scan_filters);
     }
 
-    let files = collect_files(
+    // `--file` values join the positional file filters as alternatives; a
+    // value naming an existing file is scanned whatever the ignore rules say.
+    let targets = cli.command.targets();
+    let (file_inputs, explicit_files) = match targets {
+        Some(targets) => resolve_file_selectors(&targets.files, &root_dir).unwrap_or_else(|message| {
+            Cli::command()
+                .error(clap::error::ErrorKind::InvalidValue, message)
+                .exit()
+        }),
+        None => (Vec::new(), Vec::new()),
+    };
+    let file_filters: Vec<String> = scan_filters.file_filters.iter().cloned().chain(file_inputs).collect();
+    let files = collect_selected_files(
         &pkg_root,
-        &scan_filters.file_filters,
+        &file_filters,
+        &explicit_files,
         &scan.exclude_files,
         language,
     )?;
@@ -778,14 +829,13 @@ fn main() -> Result<(), TreeHuggerError> {
         .then(|| SymbolCache::new(PersistentCache::default_cache(CACHE_PROJECT_ID, true)));
     let analyzer = Analyzer::new(symbol_cache, language, analysis_options.experimental_semantics);
 
-    if let Some(command) = declarations_command(&command_kind) {
-        let membership = if cli.command.exported() {
-            Membership::Exported
-        } else if cli.command.prelude() {
-            Membership::Prelude
-        } else {
-            Membership::All
-        };
+    let selection = cli.command.selection_args().map(|args| {
+        Selection::new(args, &scan_filters.symbol_names, &scan.exclude_symbols, cli.command.exported())
+    });
+    if let Some(command) = selection
+        .as_ref()
+        .and_then(|selection| declarations_command(&command_kind, selection))
+    {
         let format = if cli.json_full {
             ReportFormat::JsonFull
         } else if matches!(output_format, OutputFormat::Json) {
@@ -802,9 +852,8 @@ fn main() -> Result<(), TreeHuggerError> {
                 files,
                 scan_root: pkg_root,
                 git_root,
-                membership,
-                include_globs: scan_filters.symbol_globs,
-                exclude_globs: excluded_symbol_globs,
+                selection: selection.unwrap_or_default(),
+                prelude: cli.command.prelude(),
                 listing: ListingOptions {
                     group_by_file: scan.group_by_file,
                     group_by_module: scan.group_by_module,
@@ -827,6 +876,10 @@ fn main() -> Result<(), TreeHuggerError> {
     let query = match command_kind {
         CommandKind::Lint { .. } => SymbolQuery::new().capabilities([Capability::Diagnostics]),
         _ => SymbolQuery::new(),
+    };
+    let import_selection = match &cli.command {
+        Command::Imports(args) => ImportSelection::new(&args.targets, &scan.exclude_symbols),
+        _ => ImportSelection::default(),
     };
     let mut stats = CacheStats::new(analyzer.uses_cache());
     let mut stderr = std::io::stderr();
@@ -852,7 +905,11 @@ fn main() -> Result<(), TreeHuggerError> {
                 cli.verbose,
                 &mut stderr,
             );
-            let index = analyzed.result.index;
+            let mut index = analyzed.result.index;
+            if !import_selection.is_empty() {
+                let language = index.language;
+                index.imports.retain(|import| import_selection.matches(import, language));
+            }
             let mut summary = summarize_file(&index, &command_kind);
             if let Err(error) = add_external_lint_diagnostics(
                 &mut summary,
@@ -949,23 +1006,22 @@ fn main() -> Result<(), TreeHuggerError> {
     Ok(())
 }
 
-/// The declaration command `command` runs, if it is one.
-fn declarations_command(command: &CommandKind) -> Option<Declarations> {
+/// The declaration command `command` runs with `selection`, if it is one.
+fn declarations_command(command: &CommandKind, selection: &Selection) -> Option<Declarations> {
     match command {
         CommandKind::Functions => Some(Declarations::Functions),
         CommandKind::Types => Some(Declarations::Types),
         CommandKind::Symbols => Some(Declarations::Symbols),
         CommandKind::Classes {
-            name_filter,
             static_only,
             instance_only,
-        } => Some(Declarations::Classes {
-            name_filter: name_filter.clone(),
-            members: MemberFilter {
+        } => Some(Declarations::Classes(Box::new(ClassSelection::new(
+            selection,
+            MemberFilter {
                 static_only: *static_only,
                 instance_only: *instance_only,
             },
-        }),
+        )))),
         CommandKind::Imports | CommandKind::Lint { .. } => None,
     }
 }
@@ -974,11 +1030,11 @@ fn declarations_command(command: &CommandKind) -> Option<Declarations> {
 /// without declaration indexes or combined with a symbol selector: a
 /// complete index is never filtered.
 fn reject_json_full_misuse(command: &Command, scan_filters: &ScanFilters) {
-    let message = if declarations_command(&command.kind().expect("scanning command")).is_none() {
+    let message = if command.selection_args().is_none() {
         Some("`--json-full` applies only to `functions`, `types`, `symbols` and `classes`".to_string())
     } else {
         let mut selectors = command.record_selector_flags();
-        if !scan_filters.symbol_globs.is_empty() {
+        if !scan_filters.symbol_names.is_empty() {
             selectors.push("a symbol-name FILTER");
         }
         (!selectors.is_empty()).then(|| {

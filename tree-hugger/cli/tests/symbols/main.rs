@@ -5,7 +5,8 @@
 //! concurrent `hug` processes sharing one entry and `--verbose` cache
 //! reporting, plus the declaration reports: the `hug symbols` goldens over
 //! the 16-language `multi/` fixture tree, the JSON envelope and its errors,
-//! `--sort` and grouping, `classes`, `--prelude`, and equivalent spellings
+//! `--sort` and grouping, `classes`, the record selectors (`filters`),
+//! `--prelude`, and equivalent spellings
 //! of one file sharing its cache entry and listing; and the marker-scoped
 //! report reader the `level2_*` terminal tests share.
 
@@ -13,6 +14,7 @@ mod cache_lookup;
 mod cache_robustness;
 mod cache_upgrade;
 mod classes;
+mod filters;
 mod golden;
 mod order;
 mod prelude;

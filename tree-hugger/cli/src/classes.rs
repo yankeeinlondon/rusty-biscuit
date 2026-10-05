@@ -3,9 +3,12 @@
 
 use std::collections::HashMap;
 
-use tree_hugger::{FieldData, Modifier, SymbolKindData, SymbolKindV2, SymbolRecord};
+use tree_hugger::{
+    Capability, FieldData, Modifier, SymbolKindData, SymbolKindV2, SymbolQuery, SymbolRecord,
+};
 
 use crate::order::{SortOrder, sort_file_records};
+use crate::selection::Selection;
 
 /// The kinds `classes` summarizes.
 pub(crate) const CONTAINER_KINDS: [SymbolKindV2; 4] = [
@@ -24,6 +27,74 @@ pub(crate) const MEMBER_KINDS: [SymbolKindV2; 2] =
 pub(crate) struct MemberFilter {
     pub(crate) static_only: bool,
     pub(crate) instance_only: bool,
+}
+
+/// How a `classes` run applies the shared record predicates: kind, scope,
+/// name, visibility, export, test, docs and deprecation predicates select
+/// containers, `--in` matches a container's own name, and the
+/// signature-shape predicates and `--static-only`/`--instance-only` select
+/// the displayed members. A selected container may have no member left.
+#[derive(Debug, Clone)]
+pub(crate) struct ClassSelection {
+    /// The container kinds kept and the container predicates.
+    containers: SymbolQuery,
+    /// `--in`, as names of the container itself.
+    within: SymbolQuery,
+    /// The signature-shape predicates.
+    members: SymbolQuery,
+    /// Whether a shape predicate is given: fields, which have no signature,
+    /// are then never displayed.
+    shaped: bool,
+    member_filter: MemberFilter,
+}
+
+impl ClassSelection {
+    pub(crate) fn new(selection: &Selection, member_filter: MemberFilter) -> Self {
+        let kinds = selection
+            .kinds_within(Some(&CONTAINER_KINDS))
+            .unwrap_or_else(|| CONTAINER_KINDS.to_vec());
+        let mut containers = selection.identity_predicates(SymbolQuery::new().kinds(kinds));
+        if let Some(scopes) = selection.scopes_within(None) {
+            containers = containers.scopes(scopes);
+        }
+        let within = selection
+            .containers
+            .iter()
+            .fold(SymbolQuery::new(), |query, pattern| query.name(pattern.clone()));
+        Self {
+            containers,
+            within,
+            members: selection.shape_predicates(SymbolQuery::new().kinds(MEMBER_KINDS)),
+            shaped: selection.has_shape(),
+            member_filter,
+        }
+    }
+
+    /// The analysis query: the selected container kinds and every member
+    /// kind, with containment and what the predicates read.
+    pub(crate) fn query(&self, capabilities: impl IntoIterator<Item = Capability>) -> SymbolQuery {
+        let kinds: Vec<SymbolKindV2> = self
+            .containers
+            .selected_kinds()
+            .unwrap_or_default()
+            .into_iter()
+            .chain(MEMBER_KINDS)
+            .collect();
+        let capabilities: Vec<Capability> = capabilities
+            .into_iter()
+            .chain([Capability::Containment])
+            .chain(self.containers.required_capabilities())
+            .chain(self.members.required_capabilities())
+            .collect();
+        SymbolQuery::new().kinds(kinds).capabilities(capabilities)
+    }
+
+    /// Whether `container` is selected.
+    pub(crate) fn selects(&self, container: &SymbolRecord) -> bool {
+        self.containers.selects(container.kind)
+            && self.containers.matches(container)
+            && self.within.matches(container)
+    }
 }
 
 /// A container and the members `classes` displays for it.
@@ -54,23 +125,27 @@ impl ClassSummary {
 }
 
 /// Summarizes the containers among `records` (one file's result of the
-/// `classes` query, containment included). `--static-only` empties the
-/// instance sections and `--instance-only` the static ones; passing both
-/// leaves containers with no members.
-pub(crate) fn summarize(records: &[SymbolRecord], filter: MemberFilter) -> Vec<ClassSummary> {
+/// `classes` query, containment included) that `selection` selects, with the
+/// members it displays. `--static-only` empties the instance sections and
+/// `--instance-only` the static ones.
+pub(crate) fn summarize(records: &[SymbolRecord], selection: &ClassSelection) -> Vec<ClassSummary> {
     let by_id: HashMap<_, _> = records.iter().map(|record| (&record.id, record)).collect();
+    let filter = selection.member_filter;
     let mut summaries = Vec::new();
 
     // Interfaces and traits own static members too: a Java interface constant
     // is implicitly `static`, and a Rust trait declares associated functions.
-    for container in records.iter().filter(|record| CONTAINER_KINDS.contains(&record.kind)) {
+    for container in records
+        .iter()
+        .filter(|record| CONTAINER_KINDS.contains(&record.kind) && selection.selects(record))
+    {
         let mut static_methods = Vec::new();
         let mut instance_methods = Vec::new();
         for member in &container.relations.members {
             let Some(record) = member.id.as_ref().and_then(|id| by_id.get(id)) else {
                 continue;
             };
-            if !MEMBER_KINDS.contains(&record.kind) {
+            if !MEMBER_KINDS.contains(&record.kind) || !selection.members.matches(record) {
                 continue;
             }
             if is_static(record) {
@@ -93,6 +168,10 @@ pub(crate) fn summarize(records: &[SymbolRecord], filter: MemberFilter) -> Vec<C
         sort_file_records(&mut static_methods, "", SortOrder::File);
         sort_file_records(&mut instance_methods, "", SortOrder::File);
 
+        if selection.shaped {
+            static_fields.clear();
+            instance_fields.clear();
+        }
         if filter.static_only {
             instance_methods.clear();
             instance_fields.clear();
@@ -149,7 +228,8 @@ mod tests {
         assert_eq!(container.relations.members.len(), 4, "four linked members");
         container.relations.members.reverse();
 
-        let summaries = summarize(&records, MemberFilter::default());
+        let selection = ClassSelection::new(&Selection::default(), MemberFilter::default());
+        let summaries = summarize(&records, &selection);
         let names = |members: &[SymbolRecord]| -> Vec<String> {
             members.iter().map(|member| member.identity.name.clone()).collect()
         };

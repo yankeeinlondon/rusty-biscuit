@@ -1,7 +1,9 @@
 //! Every supported language is covered by a primary symbol fixture and by
 //! rows in the kind, visibility, keyword and signature-text matrices (and the
 //! static matrix, where it has static members), and in each report matrix
-//! (`symbols_report_matrices`), and every symbol fixture is valid input.
+//! of the symbol filters and reports (scope, qualified names, containment,
+//! async, flags, metrics, kind coverage, selection filters), and every
+//! symbol fixture is valid input.
 
 use tree_hugger::{ProgrammingLanguage, SymbolKind, TreeFile};
 
@@ -17,8 +19,8 @@ use crate::symbols_flags::flags_matrix_languages;
 use crate::symbols_kind_coverage::kind_coverage_matrix_languages;
 use crate::symbols_metrics::metrics_matrix_languages;
 use crate::symbols_qualified_names::qualified_name_matrix_languages;
-use crate::symbols_report_matrices::PENDING_MATRICES;
 use crate::symbols_scope::scope_matrix_languages;
+use crate::symbols_selection_filters::selection_filter_matrix_languages;
 use crate::symbols_static::{STATIC_LANGUAGES, STATIC_MATRIX};
 use crate::symbols_visibility::VISIBILITY_MATRIX;
 
@@ -146,7 +148,7 @@ fn every_language_has_matrix_rows() {
 /// closed, and a repeated one would let a later phase fill the wrong row.
 #[test]
 fn every_language_has_one_row_in_each_report_matrix() {
-    let filled: [(&str, Vec<ProgrammingLanguage>); 7] = [
+    let matrices: [(&str, Vec<ProgrammingLanguage>); 8] = [
         ("SCOPE_MATRIX", scope_matrix_languages()),
         ("QUALIFIED_NAME_MATRIX", qualified_name_matrix_languages()),
         ("CONTAINMENT_MATRIX", containment_matrix_languages()),
@@ -154,30 +156,12 @@ fn every_language_has_one_row_in_each_report_matrix() {
         ("FLAGS_MATRIX", flags_matrix_languages()),
         ("METRICS_MATRIX", metrics_matrix_languages()),
         ("KIND_COVERAGE_MATRIX", kind_coverage_matrix_languages()),
+        ("SELECTION_FILTER_MATRIX", selection_filter_matrix_languages()),
     ];
-    let pending = PENDING_MATRICES
-        .iter()
-        .map(|(name, rows)| (*name, rows.iter().map(|row| row.0).collect::<Vec<_>>()));
-    let matrices: Vec<(&str, Vec<ProgrammingLanguage>)> = filled.into_iter().chain(pending).collect();
-    // Non-vacuity: scope, qualified names, containment, async, flags,
-    // metrics and kind coverage (filled); selection filters (pending).
-    assert_eq!(matrices.len(), 8, "report matrices: {:?}", matrices.iter().map(|(name, _)| name).collect::<Vec<_>>());
     for (matrix, rows) in &matrices {
         for language in ProgrammingLanguage::all() {
             let count = rows.iter().filter(|row| **row == language).count();
             assert_eq!(count, 1, "{matrix} has {count} row(s) for {}", language.name());
-        }
-    }
-    // The one pending matrix is filled by the last library phase (4); a row
-    // naming any other phase points at work no phase will do.
-    for (matrix, rows) in PENDING_MATRICES {
-        for (language, pending) in *rows {
-            assert!(
-                pending.phase == 4,
-                "{matrix} row for {} names phase {}",
-                language.name(),
-                pending.phase
-            );
         }
     }
 }

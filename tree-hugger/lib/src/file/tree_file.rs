@@ -1878,11 +1878,12 @@ impl TreeFile {
     }
 
     /// Runs `query`: plans the passes its capabilities need and returns the
-    /// selected records with what was computed.
+    /// selected records that pass its predicates, with what was computed and
+    /// qualified names prefixed per its naming inputs.
     ///
     /// ## Errors
     /// Returns an error if any planned pass fails.
     pub fn query(&self, query: &SymbolQuery) -> Result<SymbolQueryResult, TreeHuggerError> {
-        crate::analysis::run_query(self, query)
+        Ok(crate::analysis::run_query(self, query)?.finish(query))
     }
 }

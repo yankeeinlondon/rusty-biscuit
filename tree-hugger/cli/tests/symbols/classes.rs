@@ -60,8 +60,8 @@ fn classes_summarize_classes_types_interfaces_and_traits() {
 }
 
 /// The terminal sections keep their split: `--static-only` and
-/// `--instance-only` empty the other sections, and both together leave
-/// containers with no members.
+/// `--instance-only` empty the other sections, and together they are an
+/// argument error.
 #[test]
 fn static_and_instance_sections_follow_the_member_flags() {
     let scratch = Scratch::new(&[("java.java", JAVA_FIXTURE)]);
@@ -75,9 +75,14 @@ fn static_and_instance_sections_follow_the_member_flags() {
     let instance_only = scratch.stdout(&["--plain", "classes", "java.java", "--instance-only"]);
     assert!(instance_only.contains("Instance Methods") && instance_only.contains("Instance Fields"));
     assert!(!instance_only.contains("Static Methods") && !instance_only.contains("Static Fields"));
-    let neither = scratch.stdout(&["--plain", "classes", "java.java", "--static-only", "--instance-only"]);
-    assert!(!neither.contains("Methods") && !neither.contains("Fields"), "{neither}");
-    assert!(neither.contains("class "), "containers are still listed:\n{neither}");
+    let both = scratch.hug(&["--plain", "classes", "java.java", "--static-only", "--instance-only"]);
+    assert_eq!(both.status.code(), Some(2), "an argument error");
+    assert!(
+        String::from_utf8_lossy(&both.stderr).contains("cannot be used with"),
+        "{}",
+        String::from_utf8_lossy(&both.stderr)
+    );
+    assert!(both.stdout.is_empty());
 }
 
 /// A container's field list keeps each field's access and `static` flag

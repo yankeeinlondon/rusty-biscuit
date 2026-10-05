@@ -426,64 +426,12 @@ pub(crate) fn extract_return_type(
     }
 }
 
-/// Extracts return type from Rust function_item.
-///
-/// Rust AST structure has the return type as a direct child after `->`:
-/// ```text
-/// function_item
-///   parameters (...)
-///   ->
-///   type_identifier  <-- this is the return type
-///   block { ... }
-/// ```
-///
-/// If no explicit return type is present, returns `()` (unit type) since
-/// Rust functions without a return annotation implicitly return unit.
+/// The declared return type (the `return_type` field after `->`); `None`
+/// when the function declares none, never an inferred `()`.
 pub(crate) fn extract_rust_return_type(node: Node<'_>, source: &str) -> Option<String> {
-    let mut cursor = node.walk();
-    let mut found_arrow = false;
-
-    for child in node.children(&mut cursor) {
-        if child.kind() == "->" {
-            found_arrow = true;
-            continue;
-        }
-
-        // Once we find the arrow, the next type-like node is the return type
-        if found_arrow {
-            let kind = child.kind();
-            // Skip the block - that's the function body, not the return type
-            if kind == "block" {
-                return None;
-            }
-            // These are all valid return type node kinds in Rust
-            if matches!(
-                kind,
-                "type_identifier"
-                    | "primitive_type"
-                    | "reference_type"
-                    | "generic_type"
-                    | "scoped_type_identifier"
-                    | "tuple_type"
-                    | "array_type"
-                    | "pointer_type"
-                    | "function_type"
-                    | "unit_type"
-                    | "never_type"
-                    | "bounded_type"
-                    | "dynamic_type"
-                    | "abstract_type"
-            ) {
-                return child
-                    .utf8_text(source.as_bytes())
-                    .ok()
-                    .map(|s| s.to_string());
-            }
-        }
-    }
-
-    // No explicit return type means the function returns () (unit type)
-    Some("()".to_string())
+    node.child_by_field_name("return_type")
+        .and_then(|return_type| return_type.utf8_text(source.as_bytes()).ok())
+        .map(str::to_string)
 }
 
 /// Extracts return type from Python function_definition.
@@ -526,41 +474,13 @@ pub(crate) fn extract_python_return_type(node: Node<'_>, source: &str) -> Option
     None
 }
 
-/// Extracts return type from Go function_declaration.
+/// The declared result of a Go function or method (the `result` field: a
+/// type or a parenthesized list); `None` when it declares none. A method's
+/// receiver and parameter lists are never its result.
 pub(crate) fn extract_go_return_type(node: Node<'_>, source: &str) -> Option<String> {
-    // Go return type is in result field or simple_type
     node.child_by_field_name("result")
-        .or_else(|| {
-            // Find the second parameter_list (return types)
-            let mut count = 0;
-            let mut cursor = node.walk();
-            for child in node.children(&mut cursor) {
-                if child.kind() == "parameter_list" {
-                    count += 1;
-                    if count == 2 {
-                        return Some(child);
-                    }
-                }
-            }
-            None
-        })
-        .or_else(|| {
-            // Look for type identifier after parameters
-            let mut found_params = false;
-            let mut cursor = node.walk();
-            for child in node.children(&mut cursor) {
-                if child.kind() == "parameter_list" {
-                    found_params = true;
-                    continue;
-                }
-                if found_params && child.kind() != "block" {
-                    return Some(child);
-                }
-            }
-            None
-        })
-        .and_then(|n| n.utf8_text(source.as_bytes()).ok())
-        .map(|s| s.to_string())
+        .and_then(|result| result.utf8_text(source.as_bytes()).ok())
+        .map(str::to_string)
 }
 
 /// Extracts return type from TypeScript function_declaration.

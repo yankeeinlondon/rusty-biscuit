@@ -10,7 +10,7 @@ use tree_hugger::{
     SymbolRecord,
 };
 
-use crate::symbols_fixtures::{display_name, primary_fixture};
+use crate::symbols_fixtures::{display_name, in_file_name, primary_fixture};
 
 use ProgrammingLanguage as L;
 
@@ -234,7 +234,7 @@ fn metrics_match_each_fixture_function() {
         for (name, parameters, has_docs) in row.cases {
             let matching: Vec<&SymbolRecord> = records
                 .iter()
-                .filter(|record| record.identity.qualified_name == *name && is_function(record.kind))
+                .filter(|record| in_file_name(record) == *name && is_function(record.kind))
                 .collect();
             assert_eq!(matching.len(), 1, "{label}: one function `{name}`");
             assert_eq!(

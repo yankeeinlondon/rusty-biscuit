@@ -15,7 +15,7 @@ use tempfile::TempDir;
 use tree_hugger::cache::{FingerprintInputs, canonical_digest};
 use tree_hugger::{EXTRACTOR_REVISION, ProgrammingLanguage, SourceFile};
 
-use crate::{PYTHON_FIXTURE, Scratch, TYPESCRIPT_FIXTURE, cache_entries, json_of, stdout_of};
+use crate::{PYTHON_FIXTURE, RUST_FIXTURE, Scratch, TYPESCRIPT_FIXTURE, cache_entries, json_of, stdout_of};
 
 const FILE: &str = "typescript.ts";
 const ARGS: [&str; 3] = ["--json-full", "symbols", FILE];
@@ -607,7 +607,7 @@ fn instance_method_qualified_name(json: &Value) -> Value {
 /// Revision 6 spelled every qualified name `container::name`, whatever the
 /// language; revision 7 builds the in-file name with the language's own
 /// separators (`PlainWidget.instance_method` in Python) and derives IDs from
-/// it.
+/// it. The report shows either behind the scan-root prefix `python.py#`.
 #[test]
 fn entry_from_extractor_revision_six_is_not_served_after_the_repairs() {
     assert_stale_revision_is_not_served(&StaleRevision {
@@ -618,8 +618,8 @@ fn entry_from_extractor_revision_six_is_not_served_after_the_repairs() {
         source: PYTHON_FIXTURE.to_string(),
         sentinel: "MODULE_CONSTANT",
         probe: instance_method_qualified_name,
-        repaired: Value::from("PlainWidget.instance_method"),
-        stale: Value::from("PlainWidget::instance_method"),
+        repaired: Value::from("python.py#PlainWidget.instance_method"),
+        stale: Value::from("python.py#PlainWidget::instance_method"),
         revert: |snapshot| {
             record_named(snapshot, "instance_method")["identity"]["qualified_name"] =
                 Value::from("PlainWidget::instance_method");
@@ -661,6 +661,46 @@ fn entry_from_extractor_revision_seven_is_not_served_after_the_repairs() {
                 .as_object_mut()
                 .expect("docs object")
                 .remove("raw_doc");
+        },
+    });
+}
+
+/// `documented_pair`'s declared return type in a `hug --json-full` report
+/// (`null` when it declares none).
+fn documented_pair_return_type(output: &Value) -> Value {
+    let records: Vec<&Value> = output["indexes"]
+        .as_array()
+        .expect("indexes")
+        .iter()
+        .flat_map(|index| index["symbols"].as_array().expect("index symbols"))
+        .filter(|record| record["identity"]["name"] == "documented_pair")
+        .collect();
+    assert_eq!(records.len(), 1, "expected one `documented_pair` record");
+    records[0]["kind_data"]["data"]["return_info"]
+        .get("type_text")
+        .cloned()
+        .unwrap_or(Value::Null)
+}
+
+/// Revision 8 gave a Rust function without `->` the inferred return type
+/// `()` (and a Go method its parameter list); revision 9 reports only a
+/// declared return type, so `--returns` never matches a type the source does
+/// not state.
+#[test]
+fn entry_from_extractor_revision_eight_is_not_served_after_the_repairs() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "8",
+        key: OldKey::Computed,
+        file: "rust.rs",
+        language: "rust",
+        source: RUST_FIXTURE.to_string(),
+        sentinel: "public_function",
+        probe: documented_pair_return_type,
+        repaired: Value::Null,
+        stale: Value::from("()"),
+        revert: |snapshot| {
+            record_named(snapshot, "documented_pair")["kind_data"]["data"]["return_info"]["type_text"] =
+                Value::from("()");
         },
     });
 }

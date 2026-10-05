@@ -11,16 +11,13 @@
 //!  "root_dir":"/repo","files":[{"file":"src/lib.rs", ...}],"errors":[]}
 //! ```
 
-use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::io::{self, Write};
 use std::ops::Range;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
-use biscuit_file::{
-    PathIdentity, RelativeRoute, canonicalize_simplified, to_portable_string, try_portable_string,
-};
 use serde::Serialize;
+pub(crate) use tree_hugger::portable_relative;
 use tree_hugger::{
     AnalysisPass, Capability, FileSymbolIndex, ProgrammingLanguage, SchemaVersion, SymbolKindV2,
     SymbolRecord, TreeHuggerError,
@@ -96,61 +93,6 @@ pub(crate) fn error_kind(error: &TreeHuggerError) -> &'static str {
         TreeHuggerError::NoSourceFiles { .. } => "no_source_files",
         TreeHuggerError::Ignore(_) => "ignore",
     }
-}
-
-/// `path` as a portable path relative to the scan root `root`: `src/lib.rs`
-/// beneath it, `../vendor/lib.rs` beside it. A relative `path` is taken from
-/// the working directory.
-///
-/// A path that does not lexically lie beneath `root` is compared again with
-/// both sides resolved through symlinks (the file's directory, not the file),
-/// so `/var/...` and `/private/var/...` spellings of one location agree. When
-/// no relative route exists (another Windows drive or share), the result is
-/// the file's absolute path in portable form, such as `D:/vendor/lib.rs`.
-pub(crate) fn portable_relative(path: &Path, root: &Path) -> String {
-    let absolute = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .map(|cwd| cwd.join(path))
-            .unwrap_or_else(|_| path.to_path_buf())
-    };
-    // A `..` is only collapsed after resolution: lexically it would step out
-    // of a symlinked directory the wrong way.
-    let has_parent_hop = absolute.components().any(|part| part == Component::ParentDir);
-    if !has_parent_hop
-        && let Some(route) = PathIdentity::new(&absolute).relative_from(&PathIdentity::new(root))
-        && route.parent_hops() == 0
-    {
-        return route_text(&route);
-    }
-    let resolved_root = canonicalize_simplified(root).unwrap_or_else(|_| root.to_path_buf());
-    let resolved = resolve_directory(&absolute);
-    match PathIdentity::new(&resolved).relative_from(&PathIdentity::new(&resolved_root)) {
-        Some(route) => route_text(&route),
-        // Resolution turns a share into a verbatim `\\?\UNC\...` path; keep
-        // the spelling the file was named by instead.
-        None => try_portable_string(&resolved).unwrap_or_else(|| to_portable_string(&absolute)),
-    }
-}
-
-/// `path` with its directory resolved through symlinks; the final name is
-/// kept as spelled. Unchanged when the directory cannot be resolved.
-fn resolve_directory(path: &Path) -> PathBuf {
-    match (path.parent(), path.file_name()) {
-        (Some(parent), Some(name)) => canonicalize_simplified(parent)
-            .map(|parent| parent.join(name))
-            .unwrap_or_else(|_| path.to_path_buf()),
-        _ => path.to_path_buf(),
-    }
-}
-
-/// `route` `/`-separated. A literal `..` name, possible only under a Windows
-/// `\\?\` prefix, would read as a hop; canonical paths never contain one.
-fn route_text(route: &RelativeRoute) -> String {
-    let hops = std::iter::repeat_n(Cow::Borrowed(".."), route.parent_hops());
-    let names = route.forward().iter().map(|name| name.to_string_lossy());
-    hops.chain(names).collect::<Vec<_>>().join("/")
 }
 
 /// Prepares a record for a default `--json` report: its paths made portable
@@ -245,6 +187,7 @@ impl<W: Write> JsonReport<W> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use biscuit_file::canonicalize_simplified;
     use tree_hugger::{
         CodeRange, SymbolInfo, SymbolKind, SymbolScope, stable_symbol_key, symbol_id_from_stable_key,
     };
@@ -294,60 +237,6 @@ mod tests {
         );
         record.id = symbol_id_from_stable_key(&record.identity.stable_key);
         record
-    }
-
-    #[test]
-    fn a_path_beneath_the_root_is_relative_to_it() {
-        let (_dir, base) = layout();
-        let root = base.join("repo");
-        assert_eq!(portable_relative(&root.join("src").join("lib.rs"), &root), "src/lib.rs");
-        assert_eq!(
-            portable_relative(&root.join("src").join("..").join("src").join("lib.rs"), &root),
-            "src/lib.rs",
-            "a `..` is resolved, not kept"
-        );
-    }
-
-    #[test]
-    fn a_path_beside_the_root_climbs_out_of_it() {
-        let (_dir, base) = layout();
-        let root = base.join("repo");
-        assert_eq!(portable_relative(&base.join("vendor").join("x.rs"), &root), "../vendor/x.rs");
-        assert_eq!(portable_relative(&base.join("x.rs"), &root), "../x.rs");
-        assert_eq!(
-            portable_relative(&root.join("..").join("vendor").join("x.rs"), &root),
-            "../vendor/x.rs"
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn symlinked_spellings_of_one_location_agree() {
-        let (_dir, base) = layout();
-        let root = base.join("repo");
-        std::os::unix::fs::symlink(&base, base.join("alias")).expect("symlink");
-        let alias = base.join("alias");
-        assert_eq!(portable_relative(&alias.join("repo/src/lib.rs"), &root), "src/lib.rs");
-        assert_eq!(portable_relative(&alias.join("vendor/x.rs"), &root), "../vendor/x.rs");
-        assert_eq!(
-            portable_relative(&base.join("vendor/x.rs"), &alias.join("repo")),
-            "../vendor/x.rs",
-            "a symlinked root resolves too"
-        );
-    }
-
-    /// With no relative route between them the file keeps its absolute path,
-    /// `/`-separated.
-    #[cfg(windows)]
-    #[test]
-    fn another_drive_keeps_its_absolute_path() {
-        let root = Path::new(r"C:\no-such-repo");
-        assert_eq!(portable_relative(Path::new(r"D:\no-such-vendor\x.rs"), root), "D:/no-such-vendor/x.rs");
-        assert_eq!(
-            portable_relative(Path::new(r"c:\no-such-repo\src\lib.rs"), root),
-            "src/lib.rs",
-            "drive letters compare without case"
-        );
     }
 
     #[test]

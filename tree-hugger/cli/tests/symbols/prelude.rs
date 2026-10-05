@@ -182,3 +182,29 @@ fn prelude_reuse_holds_for_every_spelling_of_an_explicit_file() {
         }
     }
 }
+
+/// The record selectors apply to the prelude's synthetic export records as
+/// to any other record.
+#[test]
+fn selectors_apply_to_prelude_exports() {
+    let scratch = package();
+    let names = |args: &[&str]| -> Vec<String> {
+        let json = json_of(&stdout_of(scratch.hug_with_env(args, &[("PRELUDE", "env_named")]), args));
+        let mut names: Vec<String> = entry(&json, "src/prelude.rs")
+            .map(|entry| {
+                entry["symbols"]
+                    .as_array()
+                    .expect("symbols")
+                    .iter()
+                    .map(|record| record["identity"]["name"].as_str().expect("name").to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+        names.sort();
+        names
+    };
+    assert_eq!(names(&["--json", "symbols", "--prelude"]), ["ElevatedEnum", "Ghost", "VerboseType"]);
+    assert_eq!(names(&["--json", "symbols", "--prelude", "--name", "elevated"]), ["ElevatedEnum"]);
+    assert_eq!(names(&["--json", "symbols", "--prelude", "--exclude-symbols", "Ghost"]), ["ElevatedEnum", "VerboseType"]);
+    assert_eq!(names(&["--json", "symbols", "--prelude", "--kind", "function"]), Vec::<String>::new());
+}

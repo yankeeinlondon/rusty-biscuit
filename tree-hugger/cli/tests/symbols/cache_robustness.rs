@@ -228,7 +228,7 @@ fn columns() -> Vec<Column> {
             outcomes: [S(json!("Member")), R, R, R, R, R, R, R, R],
         },
         // The in-file name is never empty; only the current-run value is
-        // servable.
+        // servable. The report shows it behind the scan-root prefix.
         Column {
             name: "identity.qualified_name",
             target: Target::Record(METHOD),
@@ -236,7 +236,7 @@ fn columns() -> Vec<Column> {
             control: None,
             empty: None,
             public: |out| record(out, METHOD)["identity"]["qualified_name"].clone(),
-            outcomes: [S(json!("PlainWidget.instance_method")), R, R, R, R, R, R, R, R],
+            outcomes: [S(json!("python.py#PlainWidget.instance_method")), R, R, R, R, R, R, R, R],
         },
         Column {
             name: "identity.is_namespace_rooted",

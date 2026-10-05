@@ -176,4 +176,10 @@ impl SourceFile {
     pub fn query(self, query: &SymbolQuery) -> Result<SymbolQueryResult, TreeHuggerError> {
         self.parse()?.query(query)
     }
+
+    /// As [`query`](Self::query), but unfinished: in-file qualified names and
+    /// no predicate applied, as the cache stores it.
+    pub(crate) fn analyze(self, query: &SymbolQuery) -> Result<SymbolQueryResult, TreeHuggerError> {
+        crate::analysis::run_query(&self.parse()?, query)
+    }
 }

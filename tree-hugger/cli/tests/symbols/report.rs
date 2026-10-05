@@ -97,12 +97,12 @@ fn the_json_envelope_holds_only_selected_records_and_ends_with_errors() {
     assert_eq!(language_of("rust.rs"), "Rust");
 }
 
-/// `functions` and `types` select exactly their kind sets; `symbols`
-/// selects every kind and lists each record of both.
+/// `functions` and `types` select exactly their kind sets in every scope;
+/// `symbols --all-scopes` selects every kind and lists each record of both.
 #[test]
 fn functions_and_types_select_exactly_their_kind_sets() {
     let scratch = Scratch::new(MULTI_FIXTURES);
-    let all = json_of(&scratch.stdout(&["--json", "symbols"]));
+    let all = json_of(&scratch.stdout(&["--json", "symbols", "--all-scopes"]));
     let ids_of = |json: &Value, kinds: &[&str]| -> Vec<Value> {
         let mut ids: Vec<Value> = records(json)
             .into_iter()

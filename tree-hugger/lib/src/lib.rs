@@ -28,6 +28,8 @@ pub use dead_code::{find_dead_code_after, is_terminal_statement};
 pub use error::TreeHuggerError;
 pub use analysis::counters::{WorkCounters, work_counters};
 pub use file::EXTRACTOR_REVISION;
+pub use file::naming::{NamingContext, portable_relative};
+pub use file::pattern::{NamePattern, glob_match};
 pub use file::query::{Capability, SymbolQuery, SymbolQueryResult};
 pub use file::source_file::{SourceFile, file_identity};
 pub use file::tree_file::TreeFile;

@@ -2,14 +2,16 @@
 //! every language's in-file qualified names use the language's own
 //! separators, start at an explicit namespace or package where the source
 //! declares one, and derive the symbol ID, which therefore does not depend on
-//! how the file's path was spelled.
+//! how the file's path was spelled. A query's result shows each name not
+//! rooted at a namespace behind its file prefix (by default the file name
+//! plus `#`).
 
 use std::collections::HashSet;
 use std::path::Path;
 
 use tree_hugger::{ProgrammingLanguage, SourceFile, SymbolQuery, SymbolRecord, file_identity};
 
-use crate::symbols_fixtures::{Extracted, extract_inline, extract_primary, primary_fixture};
+use crate::symbols_fixtures::{Extracted, extract_inline, extract_primary, in_file_name, primary_fixture};
 
 use ProgrammingLanguage as L;
 
@@ -247,7 +249,8 @@ fn assert_qualified(extracted: &Extracted, case: &QualifiedCase) {
     assert_eq!(symbol.qualified_name, qualified, "{label}: `{name}` in symbols()");
     assert_eq!(symbol.is_namespace_rooted, rooted, "{label}: `{name}` rooted in symbols()");
     let record = extracted.record(name, container);
-    assert_eq!(record.identity.qualified_name, qualified, "{label}: `{name}` in symbol_index_v2()");
+    let displayed = if rooted { qualified.to_string() } else { format!("{label}#{qualified}") };
+    assert_eq!(record.identity.qualified_name, displayed, "{label}: `{name}` in symbol_index_v2()");
     assert_eq!(record.identity.is_namespace_rooted, rooted, "{label}: `{name}` rooted in symbol_index_v2()");
 }
 
@@ -321,7 +324,7 @@ fn same_qualified_names_get_distinct_ids() {
     let extracted = extract_inline("fn f() {\n    let x = 1;\n    let x = 2;\n}\n", "rs");
     let xs: Vec<&SymbolRecord> = extracted.records.iter().filter(|record| record.identity.name == "x").collect();
     assert_eq!(xs.len(), 2);
-    assert!(xs.iter().all(|record| record.identity.qualified_name == "f::x"));
+    assert!(xs.iter().all(|record| in_file_name(record) == "f::x"));
     assert_ne!(xs[0].id, xs[1].id);
 }
 

@@ -226,12 +226,12 @@ fn check_declarations<H: TerminalHarness>(harness: &mut H, pane: &Pane<H>) {
     report.assert_styled(SIZED, "geometry.ts:4:8", &["2"], "a dim location");
 
     // symbols --group-by-file: package and file headings, then `[line:col]`
-    // locations.
+    // locations; `--all-scopes` lists the parameters, which are locals.
     let report = run_hug(
         harness,
         pane,
         &fixture,
-        "symbols --group-by-file 'tools/*.py' 'widgets/*.js'",
+        "symbols --all-scopes --group-by-file 'tools/*.py' 'widgets/*.js'",
     );
     const REGIONAL: &str = "- parameter regional_breakdown [5:44]";
     report.assert_rows_in_order(&[

@@ -11,7 +11,8 @@ use crate::CommandKind;
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ScanFilters {
     pub(crate) file_filters: Vec<String>,
-    pub(crate) symbol_globs: Vec<String>,
+    /// Name filter tokens as given (see `selection::Selection`).
+    pub(crate) symbol_names: Vec<String>,
 }
 
 pub(crate) fn classify_filters(
@@ -25,7 +26,7 @@ pub(crate) fn classify_filters(
         | CommandKind::Symbols
         | CommandKind::Classes { .. } => {
             let mut file_filters = Vec::new();
-            let mut symbol_globs = Vec::new();
+            let mut symbol_names = Vec::new();
             for filter in filters {
                 // With a forced `--language`, a positional token that names an
                 // existing file is a file filter even when it lacks a recognized
@@ -37,17 +38,17 @@ pub(crate) fn classify_filters(
                 if is_file_filter_token(filter) || forced_explicit_file {
                     file_filters.push(filter.clone());
                 } else {
-                    symbol_globs.push(normalize_symbol_glob(filter));
+                    symbol_names.push(filter.clone());
                 }
             }
             ScanFilters {
                 file_filters,
-                symbol_globs,
+                symbol_names,
             }
         }
         CommandKind::Imports | CommandKind::Lint { .. } => ScanFilters {
             file_filters: filters.to_vec(),
-            symbol_globs: Vec::new(),
+            symbol_names: Vec::new(),
         },
     }
 }
@@ -63,87 +64,6 @@ pub(crate) fn is_file_filter_token(token: &str) -> bool {
         .is_some()
 }
 
-pub(crate) fn normalize_symbol_glob(token: &str) -> String {
-    if let Some(strict_name) = token.strip_suffix('!')
-        && !strict_name.is_empty()
-    {
-        // Trailing `!` switches from fuzzy auto-wrapped matching to strict exact matching.
-        // Example: `parse_width_spec!` matches only `parse_width_spec`.
-        return strict_name.to_string();
-    }
-
-    if token.contains('*') {
-        token.to_string()
-    } else {
-        format!("*{token}*")
-    }
-}
-
-pub(crate) fn normalize_excluded_symbol_glob(token: &str) -> Option<String> {
-    if token.is_empty() {
-        return None;
-    }
-
-    if let Some(strict_name) = token.strip_suffix('!')
-        && !strict_name.is_empty()
-    {
-        // Keep parity with positional filters: trailing `!` means strict name.
-        return Some(strict_name.to_string());
-    }
-
-    Some(token.to_string())
-}
-
-pub(crate) fn matches_symbol_filters(name: &str, patterns: &[String]) -> bool {
-    if patterns.is_empty() {
-        return true;
-    }
-
-    patterns
-        .iter()
-        .any(|pattern| wildcard_match(pattern.as_str(), name))
-}
-
-pub(crate) fn wildcard_match(pattern: &str, value: &str) -> bool {
-    if pattern == "*" {
-        return true;
-    }
-
-    let starts_with_wildcard = pattern.starts_with('*');
-    let ends_with_wildcard = pattern.ends_with('*');
-    let segments: Vec<&str> = pattern
-        .split('*')
-        .filter(|segment| !segment.is_empty())
-        .collect();
-    if segments.is_empty() {
-        return true;
-    }
-
-    let mut index = 0usize;
-    for (position, segment) in segments.iter().enumerate() {
-        if position == 0 && !starts_with_wildcard {
-            if !value[index..].starts_with(segment) {
-                return false;
-            }
-            index += segment.len();
-            continue;
-        }
-
-        match value[index..].find(segment) {
-            Some(found) => {
-                index += found + segment.len();
-            }
-            None => return false,
-        }
-    }
-
-    if ends_with_wildcard {
-        true
-    } else {
-        value.ends_with(segments.last().unwrap_or(&""))
-    }
-}
-
-// Re-export `collect_files` from the library so the CLI and lib share one
+// Re-export the library's discovery so the CLI and lib share one
 // implementation.
-pub(crate) use tree_hugger::scanner::collect_files;
+pub(crate) use tree_hugger::scanner::collect_selected_files;

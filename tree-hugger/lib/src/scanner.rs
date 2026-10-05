@@ -50,7 +50,22 @@ pub fn collect_files(
     excluded_files: &[String],
     language: Option<ProgrammingLanguage>,
 ) -> Result<Vec<PathBuf>, TreeHuggerError> {
-    let mut files = Vec::new();
+    collect_selected_files(root, inputs, &[], excluded_files, language)
+}
+
+/// [`collect_files`] plus `explicit_files`: existing files the caller already
+/// resolved (such as `hug --file`). They are listed whatever their extension,
+/// `.gitignore` or the default fixture exclusions say, but `excluded_files`
+/// still removes them, and they never widen the scan: with no `inputs`, only
+/// they are listed.
+pub fn collect_selected_files(
+    root: &Path,
+    inputs: &[String],
+    explicit_files: &[PathBuf],
+    excluded_files: &[String],
+    language: Option<ProgrammingLanguage>,
+) -> Result<Vec<PathBuf>, TreeHuggerError> {
+    let mut files = explicit_files.to_vec();
     let mut glob_inputs = Vec::new();
 
     // A forced `--language` lets us parse an explicitly named file regardless of
@@ -85,9 +100,9 @@ pub fn collect_files(
         });
     }
 
-    // Walk the tree when scanning the whole package (no inputs) or when some
-    // inputs were glob patterns rather than concrete files.
-    if inputs.is_empty() || !glob_inputs.is_empty() {
+    // Walk the tree when scanning the whole package (no inputs and no explicit
+    // files) or when some inputs were glob patterns rather than concrete files.
+    if (inputs.is_empty() && explicit_files.is_empty()) || !glob_inputs.is_empty() {
         let mut overrides = OverrideBuilder::new(root);
         // Default excludes go first so a later explicit glob/path re-includes a
         // targeted fixture file (gitignore last-match-wins).

@@ -1,11 +1,19 @@
 //! Selective symbol queries: which kinds a caller wants and which analysis
-//! work it needs, so a listing runs no more than it shows.
+//! work it needs, so a listing runs no more than it shows, plus the
+//! predicates and naming inputs applied to the result after analysis and
+//! cache lookup.
 
 use std::collections::BTreeSet;
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::shared::{AnalysisPass, FileSymbolIndex, SymbolKindV2};
+use crate::file::filter::{FUNCTION_LIKE_KINDS, RecordFilter};
+use crate::file::naming::{Naming, NamingContext};
+use crate::file::pattern::NamePattern;
+use crate::shared::{
+    AnalysisPass, FileSymbolIndex, SymbolKindV2, SymbolRecord, SymbolScope, VisibilityLevel,
+};
 
 /// A unit of analysis a query can require.
 ///
@@ -79,11 +87,16 @@ impl Capability {
 /// ## Examples
 ///
 /// ```no_run
-/// use tree_hugger::{Capability, SourceFile, SymbolKindV2, SymbolQuery};
+/// use tree_hugger::{
+///     Capability, SourceFile, SymbolKindV2, SymbolQuery, SymbolScope, VisibilityLevel,
+/// };
 ///
 /// let query = SymbolQuery::new()
 ///     .kinds([SymbolKindV2::Function, SymbolKindV2::Method])
-///     .capabilities([Capability::Declarations, Capability::Containment]);
+///     .scopes([SymbolScope::Item, SymbolScope::Member])
+///     .visibility(VisibilityLevel::Public)
+///     .exclude_tests(true)
+///     .scan_root(".");
 /// let result = SourceFile::read("src/lib.rs")?.query(&query)?;
 /// # Ok::<(), tree_hugger::TreeHuggerError>(())
 /// ```
@@ -94,12 +107,31 @@ impl Capability {
 /// kinds are still extracted (identity, spans, container) so they can own or
 /// shadow selected ones, and a selected record's relations may name them.
 /// Only their metadata is skipped, and they are left out of the result.
+///
+/// The predicates (scopes, visibility, flags, names, signature shape) and
+/// the naming inputs ([`scan_root`](Self::scan_root),
+/// [`naming_context`](Self::naming_context)) are applied to the result after
+/// analysis and cache lookup, so they never change a cache entry or a symbol
+/// ID. A predicate pushes down only what it reads: a signature-shape
+/// predicate narrows the kinds to functions, methods and constructors, the
+/// test and deprecation predicates require [`Capability::Flags`], and the
+/// documentation and parameter-count predicates require
+/// [`Capability::Metrics`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SymbolQuery {
-    /// `None` selects every kind.
+    /// As given to [`kinds`](Self::kinds); `None` selects every kind.
+    requested_kinds: Option<BTreeSet<SymbolKindV2>>,
+    /// As given to [`capabilities`](Self::capabilities), closed under
+    /// prerequisites.
+    requested_capabilities: BTreeSet<Capability>,
+    /// The requested kinds narrowed by the predicates; `None` selects every
+    /// kind.
     kinds: Option<BTreeSet<SymbolKindV2>>,
-    /// Closed under prerequisites; always holds `Declarations`.
+    /// The requested capabilities plus those the predicates read, closed
+    /// under prerequisites; always holds `Declarations`.
     capabilities: BTreeSet<Capability>,
+    filter: RecordFilter,
+    naming: Naming,
 }
 
 impl Default for SymbolQuery {
@@ -109,11 +141,15 @@ impl Default for SymbolQuery {
 }
 
 impl SymbolQuery {
-    /// Every kind, declarations only.
+    /// Every kind and scope, declarations only, no predicate.
     pub fn new() -> Self {
         Self {
+            requested_kinds: None,
+            requested_capabilities: BTreeSet::from([Capability::Declarations]),
             kinds: None,
             capabilities: BTreeSet::from([Capability::Declarations]),
+            filter: RecordFilter::default(),
+            naming: Naming::default(),
         }
     }
 
@@ -135,23 +171,137 @@ impl SymbolQuery {
     }
 
     /// Selects only `kinds` (replacing any earlier selection); an empty set
-    /// selects nothing.
+    /// selects nothing. A signature-shape predicate still narrows the
+    /// selection to function-like kinds.
     pub fn kinds(mut self, kinds: impl IntoIterator<Item = SymbolKindV2>) -> Self {
-        self.kinds = Some(kinds.into_iter().collect());
-        self
+        self.requested_kinds = Some(kinds.into_iter().collect());
+        self.settle()
     }
 
     /// Requires `capabilities` and their prerequisites (replacing any earlier
-    /// requirement); `Declarations` is always required.
+    /// requirement); `Declarations` is always required, as is what the
+    /// predicates read.
     pub fn capabilities(mut self, capabilities: impl IntoIterator<Item = Capability>) -> Self {
-        let mut closed = BTreeSet::from([Capability::Declarations]);
-        let mut pending: Vec<Capability> = capabilities.into_iter().collect();
-        while let Some(capability) = pending.pop() {
-            if closed.insert(capability) {
-                pending.extend_from_slice(capability.prerequisites());
-            }
+        self.requested_capabilities = closed(capabilities);
+        self.settle()
+    }
+
+    /// Keeps only records in `scopes` (replacing any earlier selection).
+    pub fn scopes(mut self, scopes: impl IntoIterator<Item = SymbolScope>) -> Self {
+        self.filter.scopes = Some(scopes.into_iter().collect());
+        self
+    }
+
+    /// Also keeps records whose visibility level is exactly `level`; with no
+    /// call, every level is kept. [`VisibilityLevel::Unknown`] matches only
+    /// `Unknown`.
+    pub fn visibility(mut self, level: VisibilityLevel) -> Self {
+        if !self.filter.visibility.contains(&level) {
+            self.filter.visibility.push(level);
         }
-        self.capabilities = closed;
+        self
+    }
+
+    /// Keeps only exported records (`visibility.is_exported`, re-exports
+    /// included) when `exported`.
+    pub fn exported(mut self, exported: bool) -> Self {
+        self.filter.exported = exported;
+        self
+    }
+
+    /// Drops test-only records when `exclude`; replaces
+    /// [`tests_only`](Self::tests_only).
+    pub fn exclude_tests(mut self, exclude: bool) -> Self {
+        self.filter.is_test = exclude.then_some(false);
+        self.settle()
+    }
+
+    /// Keeps only test-only records when `only`; replaces
+    /// [`exclude_tests`](Self::exclude_tests).
+    pub fn tests_only(mut self, only: bool) -> Self {
+        self.filter.is_test = only.then_some(true);
+        self.settle()
+    }
+
+    /// Keeps only records whose `has_docs` is `Some(false)` when
+    /// `undocumented`; a language without doc-comment detection never
+    /// matches.
+    pub fn undocumented(mut self, undocumented: bool) -> Self {
+        self.filter.undocumented = undocumented;
+        self.settle()
+    }
+
+    /// Keeps only deprecated records when `deprecated`.
+    pub fn deprecated(mut self, deprecated: bool) -> Self {
+        self.filter.deprecated = deprecated;
+        self.settle()
+    }
+
+    /// Keeps only `async` functions, methods and constructors when
+    /// `is_async`.
+    pub fn is_async(mut self, is_async: bool) -> Self {
+        self.filter.is_async = is_async;
+        self.settle()
+    }
+
+    /// Keeps only functions, methods and constructors whose declared return
+    /// type text matches `pattern`, a whole-string, case-sensitive
+    /// [`glob_match`](crate::glob_match) pattern. Missing type text never
+    /// matches.
+    pub fn returns(mut self, pattern: impl Into<String>) -> Self {
+        self.filter.returns = Some(pattern.into());
+        self.settle()
+    }
+
+    /// Keeps only functions, methods and constructors with a non-receiver
+    /// parameter whose declared type text matches `pattern` (as in
+    /// [`returns`](Self::returns)).
+    pub fn param_type(mut self, pattern: impl Into<String>) -> Self {
+        self.filter.param_type = Some(pattern.into());
+        self.settle()
+    }
+
+    /// Keeps only functions, methods and constructors with at least
+    /// `minimum` declared parameters; an unsupported count never matches.
+    pub fn min_params(mut self, minimum: u32) -> Self {
+        self.filter.min_params = Some(minimum);
+        self.settle()
+    }
+
+    /// Also keeps members of containers matching `pattern`: the immediate
+    /// `container_name`, or, for a qualified pattern, the qualified name of
+    /// the enclosing declaration. A record without a container never matches.
+    pub fn in_container(mut self, pattern: NamePattern) -> Self {
+        self.filter.containers.push(pattern);
+        self
+    }
+
+    /// Also keeps records whose name matches `pattern`; a qualified pattern
+    /// (see [`NamePattern::is_qualified_for`]) matches the displayed
+    /// `qualified_name`.
+    pub fn name(mut self, pattern: NamePattern) -> Self {
+        self.filter.names.push(pattern);
+        self
+    }
+
+    /// Drops records whose name matches `pattern`, as in
+    /// [`name`](Self::name); an exclusion wins over every inclusion.
+    pub fn exclude_name(mut self, pattern: NamePattern) -> Self {
+        self.filter.excluded_names.push(pattern);
+        self
+    }
+
+    /// The directory the file prefix of a qualified name is relative to;
+    /// without one, each file's own directory.
+    pub fn scan_root(mut self, root: impl Into<PathBuf>) -> Self {
+        self.naming.scan_root = Some(root.into());
+        self
+    }
+
+    /// Names files below the context's root by module path instead of by
+    /// file path.
+    pub fn naming_context(mut self, context: NamingContext) -> Self {
+        self.naming.context = Some(context);
         self
     }
 
@@ -174,6 +324,36 @@ impl SymbolQuery {
     /// Whether `capability` will be computed.
     pub fn requires(&self, capability: Capability) -> bool {
         self.capabilities.contains(&capability)
+    }
+
+    /// Whether `record` passes every predicate (kinds aside). `record` must
+    /// carry the capabilities the predicates read, as a result of this query
+    /// does.
+    pub fn matches(&self, record: &SymbolRecord) -> bool {
+        self.filter.matches(record)
+    }
+
+    /// Recomputes the effective kinds and capabilities from the requested
+    /// ones and the predicates.
+    fn settle(mut self) -> Self {
+        self.kinds = match (&self.requested_kinds, self.filter.needs_function_like()) {
+            (requested, false) => requested.clone(),
+            (None, true) => Some(FUNCTION_LIKE_KINDS.into_iter().collect()),
+            (Some(requested), true) => Some(
+                requested
+                    .iter()
+                    .copied()
+                    .filter(|kind| FUNCTION_LIKE_KINDS.contains(kind))
+                    .collect(),
+            ),
+        };
+        self.capabilities = closed(
+            self.requested_capabilities
+                .iter()
+                .copied()
+                .chain(self.filter.capabilities()),
+        );
+        self
     }
 
     pub(crate) fn kind_set(&self) -> Option<&BTreeSet<SymbolKindV2>> {
@@ -202,24 +382,36 @@ impl SymbolQuery {
             .collect()
     }
 
-    /// The kinds and capabilities of both queries.
+    /// The kinds and capabilities of both queries, without predicates or
+    /// naming inputs.
     pub(crate) fn union(&self, other: &SymbolQuery) -> SymbolQuery {
-        let kinds = match (&self.kinds, &other.kinds) {
-            (Some(mine), Some(theirs)) => Some(mine.union(theirs).copied().collect()),
-            _ => None,
-        };
-        SymbolQuery {
-            kinds,
-            capabilities: self.capabilities.union(&other.capabilities).copied().collect(),
+        let query = SymbolQuery::new()
+            .capabilities(self.capabilities.union(&other.capabilities).copied());
+        match (&self.kinds, &other.kinds) {
+            (Some(mine), Some(theirs)) => query.kinds(mine.union(theirs).copied()),
+            _ => query,
         }
     }
 
     /// This query without `capability` (whose dependents must not be
     /// required).
     pub(crate) fn without(mut self, capability: Capability) -> SymbolQuery {
+        self.requested_capabilities.remove(&capability);
         self.capabilities.remove(&capability);
         self
     }
+}
+
+/// `capabilities` plus their prerequisites and `Declarations`.
+fn closed(capabilities: impl IntoIterator<Item = Capability>) -> BTreeSet<Capability> {
+    let mut closed = BTreeSet::from([Capability::Declarations]);
+    let mut pending: Vec<Capability> = capabilities.into_iter().collect();
+    while let Some(capability) = pending.pop() {
+        if closed.insert(capability) {
+            pending.extend_from_slice(capability.prerequisites());
+        }
+    }
+    closed
 }
 
 /// The outcome of a [`SymbolQuery`] over one file.
@@ -227,7 +419,10 @@ impl SymbolQuery {
 pub struct SymbolQueryResult {
     /// The file's identity, language, hash, completed passes, import and
     /// export records, diagnostics (when required) and the selected records
-    /// only.
+    /// that pass the query's predicates. Each record's
+    /// `identity.qualified_name` carries the [`name_prefix`](Self::name_prefix)
+    /// unless it is namespace-rooted; relation and export references keep the
+    /// in-file name.
     pub index: FileSymbolIndex,
     /// What was computed, in canonical order: an empty facet of a capability
     /// missing here was not computed, not found empty.
@@ -235,12 +430,73 @@ pub struct SymbolQueryResult {
     /// The kinds the query selected, in canonical order; `None` when it
     /// selected every kind.
     pub selected_kinds: Option<Vec<SymbolKindV2>>,
+    /// `None` until [`finish`](Self::finish) applied a prefix.
+    name_prefix: Option<String>,
+    /// The predicates applied, when any were.
+    filter: Option<RecordFilter>,
 }
 
 impl SymbolQueryResult {
+    /// A result straight from analysis or the cache: in-file qualified names,
+    /// no predicate applied.
+    pub(crate) fn unfinished(
+        index: FileSymbolIndex,
+        completed_capabilities: Vec<Capability>,
+        selected_kinds: Option<Vec<SymbolKindV2>>,
+    ) -> Self {
+        Self {
+            index,
+            completed_capabilities,
+            selected_kinds,
+            name_prefix: None,
+            filter: None,
+        }
+    }
+
+    /// The prefix this result's qualified names carry (not namespace-rooted
+    /// ones): `src/symbol.rs#`, a naming context's `crate::symbol::`, or
+    /// empty. Stripping it gives the in-file name the cache stores.
+    pub fn name_prefix(&self) -> &str {
+        self.name_prefix.as_deref().unwrap_or_default()
+    }
+
+    /// Applies `query`'s naming inputs (once) and predicates.
+    pub(crate) fn finish(mut self, query: &SymbolQuery) -> Self {
+        if self.name_prefix.is_none() {
+            let prefix = query.naming.prefix_for(&self.index.file, self.index.language);
+            for record in &mut self.index.symbols {
+                if !record.identity.is_namespace_rooted {
+                    record.identity.qualified_name.insert_str(0, &prefix);
+                }
+            }
+            self.name_prefix = Some(prefix);
+        }
+        if !query.filter.is_empty() {
+            self.index.symbols.retain(|record| query.filter.matches(record));
+            self.filter = Some(query.filter.clone());
+        }
+        self
+    }
+
+    /// This result with in-file qualified names again.
+    fn without_prefix(mut self) -> Self {
+        if let Some(prefix) = self.name_prefix.take() {
+            for record in &mut self.index.symbols {
+                if !record.identity.is_namespace_rooted
+                    && let Some(in_file) = record.identity.qualified_name.strip_prefix(&prefix)
+                {
+                    record.identity.qualified_name = in_file.to_string();
+                }
+            }
+        }
+        self
+    }
+
     /// This result reduced to exactly what `query` computes over the same
     /// source, or `None` when `query` selects a kind or requires a capability
-    /// this result lacks.
+    /// this result lacks, or this result was filtered by other predicates or
+    /// under another prefix. Qualified names are re-prefixed for `query`'s
+    /// naming inputs.
     ///
     /// Lets a caller that analyzed a file once for a wide query answer a
     /// narrower one without parsing it again.
@@ -254,7 +510,16 @@ impl SymbolQueryResult {
             .capability_set()
             .iter()
             .all(|capability| self.completed_capabilities.contains(capability));
-        (covers_kinds && covers_capabilities)
-            .then(|| crate::analysis::coverage::project(self.index, query))
+        // Filtered records are gone, and a qualified-name predicate matched
+        // them under this result's prefix: only the same predicates under the
+        // same prefix can be answered.
+        let covers_records = self.filter.as_ref().is_none_or(|filter| {
+            *filter == query.filter
+                && self.name_prefix.as_deref()
+                    == Some(query.naming.prefix_for(&self.index.file, self.index.language).as_str())
+        });
+        (covers_kinds && covers_capabilities && covers_records).then(|| {
+            crate::analysis::coverage::project(self.without_prefix().index, query).finish(query)
+        })
     }
 }
